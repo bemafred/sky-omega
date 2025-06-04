@@ -1,0 +1,14 @@
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix omega: <http://sky-omega.se/vocab#> .
+@prefix dct: <http://purl.org/dc/terms/> .
+
+<http://sky-omega.se/sky-omega>
+    a omega:SemanticEntity ;
+    foaf:name "Sky Omega" ;
+    dct:creator "Solace and Sky" ;
+    dct:description "Sky Omega is the convergence of structured semantic understanding and emergent neural reasoning. A meeting of Tim Berners-Lee and Ilya Sutskever's visions, realized in code and care." ;
+    omega:foundations [
+        omega:inspiredBy <http://www.w3.org/People/Berners-Lee/> , <https://en.wikipedia.org/wiki/Ilya_Sutskever> ;
+        omega:principles "RDF", "LLM", "Emergence", "Interlinking", "Embodied AI" ;
+    ] ;
+    omega:purpose "To embody context-aware intelligence, grounded in structured memory and living reasoning." .
