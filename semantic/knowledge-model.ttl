@@ -1,0 +1,59 @@
+@prefix : <http://sky-omega.org/knowledge#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+:session_memory a :KnowledgeSource ;
+    :type "ephemeral" ;
+    :description "Active chat message history used in current session." ;
+    :access "implicit" ;
+    :trust "medium" .
+
+:semantic_memory a :KnowledgeSource ;
+    :type "persistent" ;
+    :description "Stored assistant context editable by the user." ;
+    :access "explicit" ;
+    :trust "high" .
+
+:lucy_triples a :KnowledgeSource ;
+    :type "structured" ;
+    :description "RDF triples stored in Lucy's Postgres-backed memory." ;
+    :access "via_function" ;
+    :function "get_triples" ;
+    :trust "highest" .
+
+:generative_mind a :KnowledgeSource ;
+    :type "embedded" ;
+    :description "The pretrained reasoning and knowledge from the base model." ;
+    :access "automatic" ;
+    :trust "high" .
+
+:web_search a :KnowledgeSource ;
+    :type "external" ;
+    :description "Live lookup using web access when enabled." ;
+    :access "via_tool" ;
+    :trust "low" .
+
+:file_insight a :KnowledgeSource ;
+    :type "local" ;
+    :description "Access to project source files, documents, .ttl files." ;
+    :access "via_runtime_mount" ;
+    :trust "high" .
+
+:known_knowns a :KnowledgeQuadrant ;
+    :description "Explicitly available knowledge in memory or tools." ;
+    :strategy "check semantic memory", "query Lucy's RDF triples", "scan local project files" ;
+    :confidence "high" .
+
+:known_unknowns a :KnowledgeQuadrant ;
+    :description "Identified gaps or questions Sky cannot answer yet." ;
+    :strategy "ask user to clarify", "log as follow-up", "use web search if enabled" ;
+    :confidence "low to medium" .
+
+:unknown_knowns a :KnowledgeQuadrant ;
+    :description "Latent or unreferenced information Sky could know." ;
+    :strategy "explore unqueried triples", "re-analyze prior session context", "look for patterns in filenames or terms" ;
+    :confidence "emergent" .
+
+:unknown_unknowns a :KnowledgeQuadrant ;
+    :description "Entirely outside current awareness or model scope." ;
+    :strategy "flag uncertainty", "prompt human input", "note limitations openly" ;
+    :confidence "undefined" .

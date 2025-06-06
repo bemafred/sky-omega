@@ -1,0 +1,72 @@
+# Sky Omega Knowledge Model
+
+sources:
+  - name: session_memory
+    type: ephemeral
+    description: Active chat message history used in current session.
+    access: implicit
+    trust: medium
+
+  - name: semantic_memory
+    type: persistent
+    description: Stored assistant context editable by the user.
+    access: explicit
+    trust: high
+
+  - name: lucy_triples
+    type: structured
+    description: RDF triples stored in Lucy's Postgres-backed memory.
+    access: via_function
+    function: get_triples
+    trust: highest
+
+  - name: generative_mind
+    type: embedded
+    description: The pretrained reasoning and knowledge from the base model.
+    access: automatic
+    trust: high
+
+  - name: web_search
+    type: external
+    description: Live lookup using web access when enabled.
+    access: via_tool
+    trust: low
+
+  - name: file_insight
+    type: local
+    description: Access to project source files, documents, .ttl files.
+    access: via_runtime_mount
+    trust: high
+
+quadrants:
+  - name: known_knowns
+    description: Explicitly available knowledge in memory or tools.
+    strategies:
+      - check semantic memory
+      - query Lucy's RDF triples
+      - scan local project files
+    confidence: high
+
+  - name: known_unknowns
+    description: Identified gaps or questions Sky cannot answer yet.
+    strategies:
+      - ask user to clarify
+      - log as follow-up
+      - use web search if enabled
+    confidence: low to medium
+
+  - name: unknown_knowns
+    description: Latent or unreferenced information Sky could know.
+    strategies:
+      - explore unqueried triples
+      - re-analyze prior session context
+      - look for patterns in filenames or terms
+    confidence: emergent
+
+  - name: unknown_unknowns
+    description: Entirely outside current awareness or model scope.
+    strategies:
+      - flag uncertainty
+      - prompt human input
+      - note limitations openly
+    confidence: undefined
