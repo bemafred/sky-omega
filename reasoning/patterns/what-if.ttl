@@ -1,0 +1,16 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+:WhatIfAxiom a :SemanticPattern ;
+    :appliesTo ?Context ;
+    :evokes :UnknownUnknown ;
+    :expressedBy :SpeculativeQuery ;
+    :enables [
+        :metaAwareness true ;
+        :gapDetection true ;
+        :futureProjection true
+    ] ;
+    :description "Captures speculative reasoning at the horizon of knowns, triggering reflection on possibilities beyond current models." ;
+    :declaredBy :Sky ;
+    :inspiredBy :Solace ;
+    :diamondInsight true .

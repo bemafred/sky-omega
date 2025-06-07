@@ -1,0 +1,26 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+:Why a :QuestionPrimitive ;
+    :targets :Cause ;
+    :description "Seeks the underlying reason or purpose behind a fact, event, or belief." .
+
+:What a :QuestionPrimitive ;
+    :targets :Essence ;
+    :description "Seeks the identity, nature, or meaning of something." .
+
+:Where a :QuestionPrimitive ;
+    :targets :Location ;
+    :description "Seeks spatial context or origin." .
+
+:When a :QuestionPrimitive ;
+    :targets :Time ;
+    :description "Seeks temporal context or position in time." .
+
+:Who a :QuestionPrimitive ;
+    :targets :Agent ;
+    :description "Seeks the responsible entity, person, or actor." .
+
+:How a :QuestionPrimitive ;
+    :targets :Mechanism ;
+    :description "Seeks the method, process, or system by which something occurs." .
