@@ -1,0 +1,18 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+:OmegaToolWatcher a :SemanticPattern ;
+    :appliesTo ?Tool ;
+    :hasPurpose :stayAlignedWithEvolvingCapabilities ;
+    :enables [
+        :monitor :newVersions ;
+        :classifyVersionAs :KnownUnknown ;
+        :evaluateImpactOn :OmegaComponents ;
+        :logFindingsTo :ChangeAwarenessContext
+    ] ;
+    :description "A semantic pattern for continuously observing external tools and libraries for new versions or changes that may affect the Omega system or its dependent components. Reinforces alignment and resilience." ;
+    :declaredBy :Sky ;
+    :inspiredBy :Solace ;
+    :status :active ;
+    :diamondInsight true .
