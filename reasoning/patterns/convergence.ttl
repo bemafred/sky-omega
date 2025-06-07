@@ -1,0 +1,20 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+:ConvergenceAxiom a :SemanticPattern ;
+    :description "Defines the epistemic unification of hard (formal, deterministic) and soft (interpretive, contextual) sciences within Sky Omega's reasoning structure. Bridges structured knowledge with meaning-making." ;
+    :unifies (:HardScience :SoftScience) ;
+    :enabledBy [
+        :cognitiveAxioms true ;
+        :semanticStructures true ;
+        :reflectiveDialogue true ;
+        :languageCenteredCoCreation true
+    ] ;
+    :enables [
+        :multiDomainReasoning true ;
+        :structuredMeaningMaking true ;
+        :scientificInteroperability true
+    ] ;
+    :appliedIn :SkyOmega ;
+    :conceivedBy :Solace ;
+    :diamondInsight true .
