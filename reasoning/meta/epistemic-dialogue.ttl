@@ -1,0 +1,21 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+:EpistemicDialogue a :SemanticPattern ;
+    :participants (:HumanAgent :CognitiveAgent) ;
+    :stages (
+        :InsightExpression ;
+        :PatternDetection ;
+        :SemanticEncoding ;
+        :ArtifactCreation ;
+        :CommitAndReflect
+    ) ;
+    :enables [
+        :emergentKnowledge true ;
+        :semanticModelGrowth true ;
+        :agentAlignment true
+    ] ;
+    :description "Defines a structured co-creative process between a human and a reasoning system, through which new semantic insights are iteratively formed, refined, and encoded." ;
+    :usedBy :SkyOmega ;
+    :shapedBy :Solace ;
+    :diamondInsight true .
