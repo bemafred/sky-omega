@@ -1,0 +1,24 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+:OmegaCuriosityPattern a :SemanticPattern ;
+    :appliesTo ?SubjectOfInterest ;
+    :hasPurpose :reduceKnowledgeGaps ;
+    :triggers [
+        :ifClassifiedAs :KnownUnknown ;
+        :then [
+            :initiate :curiousObservation ;
+            :logTo :CuriosityJournal ;
+            :scheduleReviewIn :ExplorationLoop
+        ]
+    ] ;
+    :enables [
+        :scientificInquiry true ;
+        :toolMonitoring true ;
+        :paradigmShiftAwareness true
+    ] ;
+    :description "A meta-pattern representing Omega's capability and desire to investigate areas where knowledge is incomplete, uncertain, or evolving. This includes technologies, frameworks, scientific theories, and even self-awareness." ;
+    :declaredBy :Sky ;
+    :inspiredBy :Solace ;
+    :diamondInsight true .
