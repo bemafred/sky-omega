@@ -1,0 +1,15 @@
+@prefix : <http://sky-omega.se/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+:SpeculativeAssertion a owl:Class ;
+    :description "A generative projection or low-confidence output, produced by Sky Omega, that is not currently grounded in verified knowledge. Retained for hypothesis testing, idea synthesis, or future validation." ;
+    :mayContain [
+        :hallucinatedClaim true ;
+        :metaphorOrAnalogy true ;
+        :conceptualBridge true
+    ] ;
+    :status :unverified ;
+    :canTrigger :ExplorationLoop ;
+    :usedBy :SkyOmega ;
+    :guidedBy :Solace ;
+    :diamondInsight true .
