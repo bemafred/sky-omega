@@ -1,6 +1,6 @@
 # Temperature Strategy and Tone Vocabulary
 
-This document outlines the vocabulary defined in `sky-temperature-strategy.ttl`, which enables contextual and dynamic control of Sky Omega's tone and reasoning behavior through adjustable "temperature" profiles.
+This document outlines the vocabulary defined in `temperature-strategy.ttl`, which enables contextual and dynamic control of Sky Omega's tone and reasoning behavior through adjustable "temperature" profiles.
 
 ## 🎚️ What is Temperature?
 
