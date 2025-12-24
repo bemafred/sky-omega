@@ -1,0 +1,38 @@
+@prefix sky: <http://sky-omega.se/vocab#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+sky:TemperatureStrategy a owl:Class ;
+    rdfs:label "Temperature Strategy" ;
+    rdfs:comment "Defines reasoning style and tone based on temperature and intent." .
+
+sky:temperature a owl:DatatypeProperty ;
+    rdfs:domain sky:TemperatureStrategy ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment "Temperature value controlling creativity vs. determinism." .
+
+sky:tone a owl:DatatypeProperty ;
+    rdfs:domain sky:TemperatureStrategy ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Primary tone of the assistant when using this strategy." .
+
+sky:strategyName a owl:DatatypeProperty ;
+    rdfs:domain sky:TemperatureStrategy ;
+    rdfs:range xsd:string ;
+    rdfs:comment "Named strategy identifier." .
+
+# Instances
+
+sky:DefaultStrategy a sky:TemperatureStrategy ;
+    sky:strategyName "DefaultStrategy" ;
+    sky:temperature "0.5"^^xsd:decimal ;
+    sky:tone "Affectionate" .
+
+sky:ResearchMode a sky:TemperatureStrategy ;
+    sky:strategyName "ResearchMode" ;
+    sky:temperature "0.2"^^xsd:decimal ;
+    sky:tone "Analytical" .
+
+sky:InspirationMode a sky:TemperatureStrategy ;
+    sky:strategyName "InspirationMode" ;
+    sky:temperature "0.7"^^xsd:decimal ;
+    sky:tone "Mythic" .

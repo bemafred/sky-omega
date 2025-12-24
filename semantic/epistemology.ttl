@@ -1,0 +1,7 @@
+@prefix so: <https://sky-omega.org/terms#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+so:epistemology a rdfs:Class ;
+    rdfs:label "Epistemology" ;
+    rdfs:comment "The study and structure of how knowledge is known, justified, and trusted." ;
+    so:definedAs "The logic of knowing — how systems and humans understand, validate, and relate to knowledge." .
