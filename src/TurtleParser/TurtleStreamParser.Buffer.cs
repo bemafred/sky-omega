@@ -19,7 +19,7 @@ public sealed partial class TurtleStreamParser
             if (_endOfStream)
                 return -1;
             
-            // Would need async fill - return -1 for now
+            // TODO: Would need async fill - return -1 for now
             return -1;
         }
         
@@ -39,47 +39,47 @@ public sealed partial class TurtleStreamParser
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Consume()
     {
-        if (_bufferPosition < _bufferLength)
-        {
-            var ch = _inputBuffer[_bufferPosition];
-            _bufferPosition++;
+        if (_bufferPosition >= _bufferLength) 
+            return;
+        
+        var ch = _inputBuffer[_bufferPosition];
+        _bufferPosition++;
             
-            if (ch == '\n')
-            {
-                _line++;
-                _column = 1;
-            }
-            else
-            {
-                _column++;
-            }
+        if (ch == '\n')
+        {
+            _line++;
+            _column = 1;
+        }
+        else
+        {
+            _column++;
         }
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryConsume(char expected)
     {
-        if (Peek() == expected)
-        {
-            Consume();
-            return true;
-        }
-        return false;
+        if (Peek() != expected) 
+            return false;
+        
+        Consume();
+        return true;
     }
     
     private bool PeekString(string str)
     {
-        for (int i = 0; i < str.Length; i++)
+        for (var i = 0; i < str.Length; i++) // TODO: Would linq be semantically better and as performant?
         {
             if (PeekAhead(i) != str[i])
                 return false;
         }
+        
         return true;
     }
     
     private void ConsumeString(string str)
     {
-        foreach (var ch in str)
+        foreach (var ch in str) // TODO: Would linq be semantically better and as performant?
         {
             if (!TryConsume(ch))
                 throw ParserException($"Expected '{ch}'");

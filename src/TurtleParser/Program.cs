@@ -2,14 +2,14 @@
 // Example usage of zero-GC streaming Turtle parser
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using SkyOmega.Rdf.Turtle;
 
-namespace TurtleParserExample;
+namespace SkyOmega.Rdf.Turtle;
 
-class Program
+internal static class Program
 {
     static async Task Main(string[] args)
     {

@@ -62,7 +62,7 @@ public class Program
         Console.WriteLine("Example 1: Basic SPARQL Query Parsing");
         Console.WriteLine("--------------------------------------");
 
-        var query = "SELECT * WHERE { ?s ?p ?o }";
+        const string query = "SELECT * WHERE { ?s ?p ?o }";
         var parser = new SparqlParser(query.AsSpan());
         
         try

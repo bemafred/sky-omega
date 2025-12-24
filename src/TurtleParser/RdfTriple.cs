@@ -15,11 +15,11 @@ public readonly record struct RdfTriple
     public string Predicate { get; init; }
     public string Object { get; init; }
     
-    public RdfTriple(string subject, string predicate, string obj)
+    public RdfTriple(string subject, string predicate, string @object)
     {
         Subject = subject ?? throw new ArgumentNullException(nameof(subject));
         Predicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
-        Object = obj ?? throw new ArgumentNullException(nameof(obj));
+        Object = @object ?? throw new ArgumentNullException(nameof(@object));
     }
     
     public override string ToString()
@@ -41,7 +41,7 @@ public readonly record struct RdfTriple
         if (term.StartsWith("_:"))
             return term; // Blank node
         
-        if (term.StartsWith("\""))
+        if (term.StartsWith('"'))
             return term; // Literal (already formatted)
         
         if (term.StartsWith("<<(") && term.EndsWith(")>>"))
@@ -107,7 +107,7 @@ public readonly record struct RdfLiteral
 /// </summary>
 public readonly record struct ParserStatistics
 {
-    public long TriplesParised { get; init; }
+    public long TriplesParsed { get; init; }
     public long BytesProcessed { get; init; }
     public long LinesProcessed { get; init; }
     public TimeSpan ParseTime { get; init; }
@@ -115,7 +115,7 @@ public readonly record struct ParserStatistics
     
     public double TriplesPerSecond => 
         ParseTime.TotalSeconds > 0 
-            ? TriplesParised / ParseTime.TotalSeconds 
+            ? TriplesParsed / ParseTime.TotalSeconds 
             : 0;
     
     public double MegabytesPerSecond =>

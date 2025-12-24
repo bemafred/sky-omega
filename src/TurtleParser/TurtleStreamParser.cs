@@ -19,7 +19,7 @@ namespace SkyOmega.Rdf.Turtle;
 /// Zero-allocation streaming parser for RDF Turtle format.
 /// Implements W3C RDF 1.2 Turtle EBNF grammar.
 /// </summary>
-public sealed class TurtleStreamParser : IDisposable
+public sealed partial class TurtleStreamParser : IDisposable
 {
     private readonly Stream _stream;
     private readonly ArrayPool<byte> _bufferPool;
@@ -31,6 +31,7 @@ public sealed class TurtleStreamParser : IDisposable
     private int _bufferPosition;
     private int _bufferLength;
     private bool _endOfStream;
+    private bool _isDisposed;
     
     // Parser state (stack-allocated or pooled)
     private string _baseUri;
@@ -321,16 +322,12 @@ public sealed class TurtleStreamParser : IDisposable
     
     public void Dispose()
     {
-        if (_inputBuffer != null)
-        {
-            _bufferPool.Return(_inputBuffer);
-            _inputBuffer = null!;
-        }
+        if (_isDisposed == true)
+            return;
         
-        if (_charBuffer != null)
-        {
-            _charPool.Return(_charBuffer);
-            _charBuffer = null!;
-        }
+        _bufferPool.Return(_inputBuffer);
+        _charPool.Return(_charBuffer);
+        
+        _isDisposed = true; 
     }
 }
