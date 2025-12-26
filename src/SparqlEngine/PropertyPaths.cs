@@ -170,12 +170,44 @@ public ref struct PropertyPathResultEnumerator
     {
         // Initialize based on path type
         ref readonly var root = ref RootNode;
-        if (root.Type == PropertyPathType.Predicate)
+
+        // Determine which node contains the predicate URI
+        int predicateNodeIndex;
+        ReadOnlySpan<char> queryEndNode;
+
+        switch (root.Type)
+        {
+            case PropertyPathType.Predicate:
+                predicateNodeIndex = _path.RootIndex;
+                queryEndNode = _endNode;
+                break;
+
+            case PropertyPathType.OneOrMore:
+            case PropertyPathType.ZeroOrMore:
+            case PropertyPathType.ZeroOrOne:
+                // For quantified paths, the predicate is in the left child
+                predicateNodeIndex = root.LeftPathIndex;
+                // For transitive queries, don't constrain end node initially
+                queryEndNode = ReadOnlySpan<char>.Empty;
+                break;
+
+            case PropertyPathType.Inverse:
+                predicateNodeIndex = root.LeftPathIndex;
+                queryEndNode = _startNode;
+                // Swap start/end for inverse - handled in EvaluateInverse
+                return;
+
+            default:
+                // Other types not yet fully implemented
+                return;
+        }
+
+        if (predicateNodeIndex >= 0)
         {
             _currentEnumerator = _store.Query(
                 _startNode,
-                _path.GetPredicateUri(_path.RootIndex),
-                _endNode
+                _path.GetPredicateUri(predicateNodeIndex),
+                queryEndNode
             );
         }
     }

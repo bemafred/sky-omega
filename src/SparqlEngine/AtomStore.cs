@@ -67,13 +67,23 @@ public sealed unsafe class AtomStore : IDisposable
             bufferSize: 4096,
             FileOptions.RandomAccess
         );
-        
+
         var indexSize = HashTableSize * sizeof(HashBucket);
-        if (_indexFile.Length == 0)
+        var isNewIndexFile = _indexFile.Length == 0;
+        if (isNewIndexFile)
         {
             _indexFile.SetLength(indexSize);
+            // Write zeros to ensure clean hash table (SetLength may not zero-fill)
+            _indexFile.Position = 0;
+            var zeros = new byte[4096];
+            for (long written = 0; written < indexSize; written += zeros.Length)
+            {
+                var toWrite = (int)Math.Min(zeros.Length, indexSize - written);
+                _indexFile.Write(zeros, 0, toWrite);
+            }
+            _indexFile.Flush();
         }
-        
+
         // Memory-map files
         _dataMap = MemoryMappedFile.CreateFromFile(
             _dataFile,
@@ -83,7 +93,7 @@ public sealed unsafe class AtomStore : IDisposable
             HandleInheritability.None,
             leaveOpen: false
         );
-        
+
         _indexMap = MemoryMappedFile.CreateFromFile(
             _indexFile,
             mapName: null,
@@ -92,15 +102,15 @@ public sealed unsafe class AtomStore : IDisposable
             HandleInheritability.None,
             leaveOpen: false
         );
-        
+
         _dataAccessor = _dataMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
         _indexAccessor = _indexMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-        
+
         // Get pointer to hash table
         byte* indexPtr = null;
         _indexAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref indexPtr);
         _hashTable = (HashBucket*)indexPtr;
-        
+
         // Load metadata
         LoadMetadata();
     }
@@ -125,13 +135,13 @@ public sealed unsafe class AtomStore : IDisposable
         {
             var currentBucket = (bucket + probe) & (HashTableSize - 1);
             ref var entry = ref _hashTable[currentBucket];
-            
+
             if (entry.AtomId == 0)
             {
                 // Empty slot - need to insert
                 break;
             }
-            
+
             if (entry.Hash == hash && entry.Length == value.Length)
             {
                 // Potential match - verify
@@ -142,7 +152,7 @@ public sealed unsafe class AtomStore : IDisposable
                 }
             }
         }
-        
+
         // Not found - insert new atom
         return InsertAtom(value, hash, bucket);
     }
@@ -187,16 +197,16 @@ public sealed unsafe class AtomStore : IDisposable
     {
         if (atomId <= 0 || atomId > _nextAtomId)
             return ReadOnlySpan<char>.Empty;
-        
+
         // Read atom header
         var offset = GetAtomOffset(atomId);
-        
+
         _dataAccessor.Read(offset, out int length);
-        
+
         // Get pointer to string data
         byte* dataPtr = null;
         _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref dataPtr);
-        
+
         var charPtr = (char*)(dataPtr + offset + sizeof(int));
         return new ReadOnlySpan<char>(charPtr, length);
     }
@@ -266,7 +276,7 @@ public sealed unsafe class AtomStore : IDisposable
         {
             var currentBucket = (bucket + probe) & (HashTableSize - 1);
             ref var entry = ref _hashTable[currentBucket];
-            
+
             if (entry.AtomId == 0)
             {
                 // Use interlocked to ensure atomicity
@@ -276,22 +286,22 @@ public sealed unsafe class AtomStore : IDisposable
                     atomId,
                     expected
                 ) == expected;
-                
+
                 if (success)
                 {
                     entry.Hash = hash;
                     entry.Length = (short)value.Length;
                     entry.Offset = offset;
-                    
+
                     // Update statistics
                     System.Threading.Interlocked.Increment(ref _atomCount);
                     System.Threading.Interlocked.Add(ref _totalBytes, byteLength);
-                    
+
                     return atomId;
                 }
             }
         }
-        
+
         // Hash table full in this bucket - should extend or use overflow
         throw new InvalidOperationException("Hash table bucket full");
     }
@@ -301,30 +311,36 @@ public sealed unsafe class AtomStore : IDisposable
     {
         // For now, linear scan - could use separate offset index
         // In production, would maintain offset index for O(1) lookup
-        
+
         // Simplified: assume atoms written sequentially
         // Full implementation would have offset index
-        long offset = 0;
-        
-        for (int i = 1; i < atomId; i++)
+        // Note: atoms start at offset 1024 (first 1KB reserved for metadata)
+        // AtomIds start at 2 (_nextAtomId initialized to 1, first Increment gives 2)
+        long offset = 1024;
+
+        for (int i = 2; i < atomId; i++)
         {
             _dataAccessor.Read(offset, out int length);
             offset += sizeof(int) + length * sizeof(char);
         }
-        
+
         return offset;
     }
 
+    private const long MagicNumber = 0x41544F4D53544F52; // "ATOMSTOR" as long
+
     private void LoadMetadata()
     {
-        // Metadata at start of data file
-        if (_dataFile.Length > 0)
+        // Check for valid metadata using magic number
+        _dataAccessor.Read(32, out long magic);
+
+        if (magic == MagicNumber)
         {
             _dataAccessor.Read(0, out _dataPosition);
             _dataAccessor.Read(8, out _nextAtomId);
             _dataAccessor.Read(16, out _atomCount);
             _dataAccessor.Read(24, out _totalBytes);
-            
+
             // Skip metadata
             if (_dataPosition < 1024)
                 _dataPosition = 1024;
@@ -345,6 +361,7 @@ public sealed unsafe class AtomStore : IDisposable
         _dataAccessor.Write(8, _nextAtomId);
         _dataAccessor.Write(16, _atomCount);
         _dataAccessor.Write(24, _totalBytes);
+        _dataAccessor.Write(32, MagicNumber);
         _dataAccessor.Flush();
     }
 

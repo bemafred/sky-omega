@@ -495,11 +495,16 @@ public sealed unsafe class BPlusTreeStore : IDisposable
         _accessor.Flush();
     }
 
+    private const long MagicNumber = 0x4250545245455F31; // "BPTREE_1" as long
+
     private void LoadMetadata()
     {
-        // Metadata stored in first page
-        if (_fileStream.Length >= PageSize)
+        // Check for valid metadata using magic number
+        _accessor.Read(24, out long magic);
+
+        if (magic == MagicNumber)
         {
+            // Existing database - load metadata
             _accessor.Read(0, out _rootPageId);
             _accessor.Read(8, out _nextPageId);
             _accessor.Read(16, out _tripleCount);
@@ -510,7 +515,7 @@ public sealed unsafe class BPlusTreeStore : IDisposable
             _rootPageId = 1;
             _nextPageId = 2;
             _tripleCount = 0;
-            
+
             // Initialize root page
             var root = GetPage(_rootPageId);
             root->PageId = _rootPageId;
@@ -518,7 +523,7 @@ public sealed unsafe class BPlusTreeStore : IDisposable
             root->EntryCount = 0;
             root->ParentPageId = 0;
             root->NextLeaf = 0;
-            
+
             SaveMetadata();
         }
     }
@@ -528,6 +533,7 @@ public sealed unsafe class BPlusTreeStore : IDisposable
         _accessor.Write(0, _rootPageId);
         _accessor.Write(8, _nextPageId);
         _accessor.Write(16, _tripleCount);
+        _accessor.Write(24, MagicNumber);
         _accessor.Flush();
     }
 

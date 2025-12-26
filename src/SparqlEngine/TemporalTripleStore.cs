@@ -633,9 +633,14 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         _accessor.Flush();
     }
 
+    private const long MagicNumber = 0x54454D504F52414C; // "TEMPORAL" as long
+
     private void LoadMetadata()
     {
-        if (_fileStream.Length >= PageSize)
+        // Check for valid metadata using magic number
+        _accessor.Read(24, out long magic);
+
+        if (magic == MagicNumber)
         {
             _accessor.Read(0, out _rootPageId);
             _accessor.Read(8, out _nextPageId);
@@ -646,14 +651,14 @@ public sealed unsafe class TemporalTripleStore : IDisposable
             _rootPageId = 1;
             _nextPageId = 2;
             _tripleCount = 0;
-            
+
             var root = GetPage(_rootPageId);
             root->PageId = _rootPageId;
             root->IsLeaf = true;
             root->EntryCount = 0;
             root->ParentPageId = 0;
             root->NextLeaf = 0;
-            
+
             SaveMetadata();
         }
     }
@@ -663,6 +668,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         _accessor.Write(0, _rootPageId);
         _accessor.Write(8, _nextPageId);
         _accessor.Write(16, _tripleCount);
+        _accessor.Write(24, MagicNumber);
         _accessor.Flush();
     }
 
