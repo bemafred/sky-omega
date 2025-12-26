@@ -59,7 +59,6 @@ public ref struct ConstructResultEnumerator
     private readonly StreamingTripleStore _store;
     private readonly ConstructTemplate _template;
     private StreamingTripleStore.TripleEnumerator _whereEnumerator;
-    private int _currentPatternIndex;
     private TripleRef _currentConstructed;
 
     internal ConstructResultEnumerator(
@@ -69,8 +68,7 @@ public ref struct ConstructResultEnumerator
     {
         _store = store;
         _template = template;
-        _currentPatternIndex = 0;
-        
+
         // Start WHERE clause evaluation
         _whereEnumerator = store.Query(
             ReadOnlySpan<char>.Empty,
@@ -205,7 +203,6 @@ public ref struct OptionalMatcher
 {
     private readonly StreamingTripleStore _store;
     private StreamingTripleStore.TripleEnumerator _requiredEnumerator;
-    private StreamingTripleStore.TripleEnumerator _optionalEnumerator;
     private readonly TriplePattern _optionalPattern;
     private bool _hasOptionalMatch;
 

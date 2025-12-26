@@ -447,10 +447,11 @@ public static class FileStorageExamples
         Console.WriteLine("Theoretical Capacity:");
         
         // B+Tree capacity calculation
-        var entriesPerPage = 341;
-        var pageSize = 16384;
+        const int entriesPerPage = 341;
+        const int pageSize = 16384;
         var heightFor1T = Math.Ceiling(Math.Log(1_000_000_000_000.0, entriesPerPage));
-        
+
+        Console.WriteLine($"  • Page size: {pageSize:N0} bytes");
         Console.WriteLine($"  • Entries per page: {entriesPerPage:N0}");
         Console.WriteLine($"  • Tree height for 1T triples: ~{heightFor1T:F0} levels");
         Console.WriteLine($"  • Disk seeks for lookup: {heightFor1T:F0}");

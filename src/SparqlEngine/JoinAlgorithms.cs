@@ -90,7 +90,6 @@ public ref struct JoinResultEnumerator
     private TripleRef _currentLeft;
     private TripleRef _currentRight;
     private bool _hasLeft;
-    private bool _rightExhausted;
 
     internal JoinResultEnumerator(
         StreamingTripleStore.TripleEnumerator left,
@@ -104,7 +103,6 @@ public ref struct JoinResultEnumerator
         _joinType = joinType;
         _hashCount = 0;
         _hasLeft = false;
-        _rightExhausted = false;
     }
 
     public bool MoveNext()
@@ -129,7 +127,6 @@ public ref struct JoinResultEnumerator
                 
                 _currentLeft = _left.Current;
                 _hasLeft = true;
-                _rightExhausted = false;
             }
             
             if (!_right.MoveNext())
