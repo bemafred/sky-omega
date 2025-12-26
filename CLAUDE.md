@@ -55,14 +55,10 @@ API: `IAsyncEnumerable<RdfTriple>` streaming interface.
 `SparqlParser` is a `ref struct` that parses SPARQL queries from `ReadOnlySpan<char>`.
 
 Key components:
-- `StreamingTripleStore` - In-memory triple store with SPO/POS/OSP indexes
-- `BPlusTreeStore` - Memory-mapped B+Tree for TB-scale persistence
-- `MultiIndexStore` - Multi-index wrapper for file-based storage
-- `AtomStore` - String deduplication with memory-mapped storage
-- `QueryExecutor` - Streaming query execution
-- `JoinAlgorithms` - Hash joins, sort-merge joins, nested loop joins
-- `PropertyPaths` - SPARQL 1.1 property path evaluation
-- `TemporalTripleStore` / `MultiTemporalStore` - Bitemporal RDF support
+- `AtomStore` - String deduplication with memory-mapped storage, O(1) lookup, 64-bit blob support
+- `TemporalTripleStore` - Memory-mapped B+Tree for TB-scale bitemporal triple storage
+- `MultiTemporalStore` - Multi-index wrapper (SPOT/POST/OSPT/TSPO) with shared AtomStore
+- `PageCache` - LRU page cache for B+Tree pages using clock algorithm
 
 ### Component Layers
 
