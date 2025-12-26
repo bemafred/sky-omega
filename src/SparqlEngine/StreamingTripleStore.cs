@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Rdf;
 
 namespace SparqlEngine;
 
@@ -159,16 +160,16 @@ public sealed class StreamingTripleStore : IDisposable
     public ref struct TripleEnumerator
     {
         private readonly StreamingTripleStore _store;
-        private readonly int _subjectFilter;
-        private readonly int _predicateFilter;
-        private readonly int _objectFilter;
+        private readonly long _subjectFilter;
+        private readonly long _predicateFilter;
+        private readonly long _objectFilter;
         private int _currentIndex;
 
         internal TripleEnumerator(
             StreamingTripleStore store,
-            int subjectFilter,
-            int predicateFilter,
-            int objectFilter)
+            long subjectFilter,
+            long predicateFilter,
+            long objectFilter)
         {
             _store = store;
             _subjectFilter = subjectFilter;
@@ -222,10 +223,10 @@ public sealed class StreamingTripleStore : IDisposable
 [StructLayout(LayoutKind.Sequential)]
 public struct Triple
 {
-    public int SubjectId;
-    public int PredicateId;
-    public int ObjectId;
-    public int Index;
+    public long SubjectId;
+    public long PredicateId;
+    public long ObjectId;
+    public long Index;
 }
 
 /// <summary>
@@ -258,7 +259,7 @@ public sealed class StringPool : IDisposable
     private int _currentChunkPosition;
     
     private Entry[] _entries;
-    private int _entryCount;
+    private long _entryCount;
 
     public StringPool()
     {
@@ -271,7 +272,7 @@ public sealed class StringPool : IDisposable
         _entryCount = 0;
     }
 
-    public int Intern(ReadOnlySpan<char> value)
+    public long Intern(ReadOnlySpan<char> value)
     {
         // Check if already interned
         var hash = GetHashCode(value);
@@ -291,7 +292,7 @@ public sealed class StringPool : IDisposable
         return StoreString(value, hash);
     }
 
-    public int GetId(ReadOnlySpan<char> value)
+    public long GetId(ReadOnlySpan<char> value)
     {
         var hash = GetHashCode(value);
         
@@ -309,7 +310,7 @@ public sealed class StringPool : IDisposable
         return -1;
     }
 
-    public ReadOnlySpan<char> GetString(int id)
+    public ReadOnlySpan<char> GetString(long id)
     {
         if (id < 0 || id >= _entryCount)
             return ReadOnlySpan<char>.Empty;
@@ -318,7 +319,7 @@ public sealed class StringPool : IDisposable
         return GetSpan(entry.ChunkIndex, entry.Offset, entry.Length);
     }
 
-    private int StoreString(ReadOnlySpan<char> value, int hash)
+    private long StoreString(ReadOnlySpan<char> value, int hash)
     {
         // Ensure space in current chunk
         if (_currentChunkPosition + value.Length > ChunkSize)

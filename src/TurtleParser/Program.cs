@@ -14,18 +14,23 @@ internal static class Program
     static async Task Main(string[] args)
     {
         Console.WriteLine("=== Sky Omega Zero-GC Turtle Parser ===\n");
-        
+
         // Example 1: Parse from string
         await ParseFromStringExample();
-        
+
         Console.WriteLine();
-        
-        // Example 2: Parse from file (streaming)
+
+        // Example 2: Object lists and blank node property lists
+        await ParseObjectListsExample();
+
+        Console.WriteLine();
+
+        // Example 3: Parse from file (streaming)
         await ParseFromFileExample();
-        
+
         Console.WriteLine();
-        
-        // Example 3: Performance test
+
+        // Example 4: Performance test
         await PerformanceTest();
     }
     
@@ -58,10 +63,49 @@ internal static class Program
         
         Console.WriteLine($"\nParsed {count} triples");
     }
-    
+
+    static async Task ParseObjectListsExample()
+    {
+        Console.WriteLine("Example 2: Object lists and blank node property lists\n");
+
+        // Test: Object lists (comma-separated objects) should yield multiple triples
+        var turtle = """
+            @prefix ex: <http://example.org/> .
+            @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+            # Object list: should produce 3 triples
+            ex:alice foaf:knows ex:bob, ex:charlie, ex:david .
+
+            # Multiple predicate-object pairs with object lists
+            ex:bob foaf:name "Bob" ;
+                   foaf:knows ex:alice, ex:charlie .
+            """;
+
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(turtle));
+        using var parser = new TurtleStreamParser(stream);
+
+        var count = 0;
+        await foreach (var triple in parser.ParseAsync())
+        {
+            count++;
+            Console.WriteLine($"  Triple #{count}: {triple}");
+        }
+
+        // Expected: 6 triples total
+        // 1. alice knows bob
+        // 2. alice knows charlie
+        // 3. alice knows david
+        // 4. bob name "Bob"
+        // 5. bob knows alice
+        // 6. bob knows charlie
+        var expected = 6;
+        var status = count == expected ? "PASS" : "FAIL";
+        Console.WriteLine($"\nParsed {count} triples (expected {expected}): {status}");
+    }
+
     static async Task ParseFromFileExample()
     {
-        Console.WriteLine("Example 2: Parse Turtle from file (streaming)\n");
+        Console.WriteLine("Example 3: Parse Turtle from file (streaming)\n");
         
         // Create a sample Turtle file
         var filename = "sample.ttl";
@@ -101,7 +145,7 @@ internal static class Program
     
     static async Task PerformanceTest()
     {
-        Console.WriteLine("Example 3: Performance Test (Zero-GC)\n");
+        Console.WriteLine("Example 4: Performance Test (Zero-GC)\n");
         
         // Generate large Turtle document
         var triplesCount = 10000;

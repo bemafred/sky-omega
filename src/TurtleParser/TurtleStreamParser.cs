@@ -42,7 +42,8 @@ public sealed partial class TurtleStreamParser : IDisposable
     // Current parse state
     private int _line;
     private int _column;
-    
+    private int _statementStartPos; // Track where current statement started for rewind
+
     private const int DefaultBufferSize = 8192;
     
     public TurtleStreamParser(Stream stream, int bufferSize = DefaultBufferSize)
@@ -82,26 +83,41 @@ public sealed partial class TurtleStreamParser : IDisposable
     {
         // [1] turtleDoc ::= statement*
         await FillBufferAsync(cancellationToken);
-        
+
         while (!_endOfStream || _bufferPosition < _bufferLength)
         {
             SkipWhitespaceAndComments();
-            
+
+            // Refill buffer if running low (keep at least 25% capacity for partial statements)
+            var remainingBytes = _bufferLength - _bufferPosition;
+            if (remainingBytes < _inputBuffer.Length / 4 && !_endOfStream)
+            {
+                await FillBufferAsync(cancellationToken);
+                SkipWhitespaceAndComments();
+            }
+
             if (IsEndOfInput())
                 break;
-            
+
+            // Mark start of statement for potential rewind on buffer exhaustion
+            _statementStartPos = _bufferPosition;
+
             // [2] statement ::= directive | (triples '.')
             if (await TryParseDirectiveAsync(cancellationToken))
             {
                 continue;
             }
-            
-            // Try parse triples
-            var triple = await ParseTriplesAsync(cancellationToken);
-            if (triple.HasValue)
+
+            // Try parse triples - collects all triples from predicate-object lists
+            var triples = ParseTriplesSync();
+
+            if (triples.Count > 0)
             {
-                yield return triple.Value;
-                
+                foreach (var triple in triples)
+                {
+                    yield return triple;
+                }
+
                 // Expect '.'
                 SkipWhitespaceAndComments();
                 if (!TryConsume('.'))
@@ -109,90 +125,109 @@ public sealed partial class TurtleStreamParser : IDisposable
                     throw ParserException("Expected '.' after triple");
                 }
             }
+            else if (_bufferPosition == _statementStartPos && !IsEndOfInput())
+            {
+                // Parsing failed without consuming anything - try buffer refill
+                if (!_endOfStream)
+                {
+                    await FillBufferAsync(cancellationToken);
+                    continue;
+                }
+
+                // Still can't parse - there's invalid content at this position
+                var ch = Peek();
+                throw ParserException($"Unexpected character '{(char)ch}' (0x{ch:X2}) - cannot parse as directive or triple");
+            }
+            else if (triples.Count == 0 && _bufferPosition > _statementStartPos)
+            {
+                // Partial consumption but no triples - likely buffer boundary issue
+                // Rewind to statement start and refill buffer
+                if (!_endOfStream)
+                {
+                    _bufferPosition = _statementStartPos;
+                    await FillBufferAsync(cancellationToken);
+                    continue;
+                }
+
+                throw ParserException("Incomplete statement at end of input");
+            }
         }
     }
     
     /// <summary>
-    /// Parse triples and return the first one (others are stored in state for annotation/collections)
-    /// [11] triples ::= (subject predicateObjectList) | 
-    ///                  (blankNodePropertyList predicateObjectList?) | 
+    /// Parse triples and return all triples from predicate-object lists.
+    /// [11] triples ::= (subject predicateObjectList) |
+    ///                  (blankNodePropertyList predicateObjectList?) |
     ///                  (reifiedTriple predicateObjectList?)
     /// </summary>
-    private async ValueTask<RdfTriple?> ParseTriplesAsync(CancellationToken cancellationToken)
+    private List<RdfTriple> ParseTriplesSync()
     {
         SkipWhitespaceAndComments();
-        
+
+        string? subject = null;
+
         // Try blank node property list
         if (Peek() == '[')
         {
-            var subject = ParseBlankNodePropertyList();
-            if (!string.IsNullOrEmpty(subject))
-            {
-                return await ParsePredicateObjectListAsync(subject, cancellationToken);
-            }
+            subject = ParseBlankNodePropertyList();
         }
-        
         // Try reified triple (RDF 1.2)
-        if (PeekString("<<"))
+        else if (PeekString("<<"))
         {
-            var reifiedSubject = ParseReifiedTriple();
-            if (!string.IsNullOrEmpty(reifiedSubject))
-            {
-                return await ParsePredicateObjectListAsync(reifiedSubject, cancellationToken);
-            }
+            subject = ParseReifiedTriple();
         }
-        
         // Regular subject
-        var subj = ParseSubject();
-        if (string.IsNullOrEmpty(subj))
-            return null;
-        
-        return await ParsePredicateObjectListAsync(subj, cancellationToken);
+        else
+        {
+            subject = ParseSubject();
+        }
+
+        if (string.IsNullOrEmpty(subject))
+            return new List<RdfTriple>();
+
+        return ParsePredicateObjectListSync(subject);
     }
-    
+
     /// <summary>
     /// [12] predicateObjectList ::= verb objectList (';' (verb objectList)?)*
+    /// Returns all triples from all predicate-object pairs.
     /// </summary>
-    private async ValueTask<RdfTriple?> ParsePredicateObjectListAsync(
-        string subject, 
-        CancellationToken cancellationToken)
+    private List<RdfTriple> ParsePredicateObjectListSync(string subject)
     {
-        RdfTriple? firstTriple = null;
-        
+        var result = new List<RdfTriple>();
+
         while (true)
         {
             SkipWhitespaceAndComments();
-            
+
             // Parse verb (predicate or 'a')
             var predicate = ParseVerb();
             if (string.IsNullOrEmpty(predicate))
                 break;
-            
+
             // [13] objectList ::= object annotation (',' object annotation)*
             var objects = ParseObjectList();
-            
+
+            // Add a triple for each object in the list
             foreach (var obj in objects)
             {
-                var triple = new RdfTriple(subject, predicate, obj);
-                
-                if (!firstTriple.HasValue)
-                    firstTriple = triple;
+                result.Add(new RdfTriple(subject, predicate, obj));
             }
-            
+
             SkipWhitespaceAndComments();
-            
+
             // Check for continuation with ';'
             if (!TryConsume(';'))
                 break;
-            
+
             SkipWhitespaceAndComments();
-            
+
             // Optional trailing semicolon
             if (Peek() == '.' || Peek() == ']' || Peek() == '}')
                 break;
         }
-        
-        return firstTriple;
+
+        return result;
     }
     
     /// <summary>

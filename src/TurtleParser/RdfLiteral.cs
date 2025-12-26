@@ -9,13 +9,14 @@ namespace SkyOmega.Rdf.Turtle;
 /// Represents an RDF triple (subject, predicate, object).
 /// Immutable record type for zero-allocation streaming.
 /// </summary>
+/* TODO: Remove tthi class, it's obsolete
 public readonly record struct RdfTriple
 {
     public string Subject { get; init; }
     public string Predicate { get; init; }
     public string Object { get; init; }
     
-    public RdfTriple(string subject, string predicate, string @object)
+    public RdfLiteral(string subject, string predicate, string @object)
     {
         Subject = subject ?? throw new ArgumentNullException(nameof(subject));
         Predicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
@@ -51,7 +52,7 @@ public readonly record struct RdfTriple
         return $"<{term}>";
     }
 }
-
+*/
 /// <summary>
 /// Term type enumeration for RDF terms
 /// </summary>

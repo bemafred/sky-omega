@@ -27,4 +27,8 @@
     <CompilerVisibleProperty Include="LangVersion" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\RdfCore\RdfCore.csproj" />
+  </ItemGroup>
+
 </Project>
