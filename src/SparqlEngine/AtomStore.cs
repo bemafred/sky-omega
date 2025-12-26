@@ -9,40 +9,59 @@ using System.Text;
 namespace SparqlEngine.Storage;
 
 /// <summary>
-/// Atom store for efficient string storage and retrieval using memory-mapped files
-/// Atoms are immutable strings with integer IDs
-/// Supports TB-scale storage with zero-copy access
+/// Atom store for efficient string storage and retrieval using memory-mapped files.
+/// Stores strings as UTF-8 for optimal space efficiency.
+/// Uses 64-bit atom IDs for TB-scale capacity.
+/// Supports zero-copy access via memory-mapped files.
 /// </summary>
+/// <remarks>
+/// Storage format supports 64-bit blob lengths (exabyte-scale).
+/// Single-span retrieval is limited to 2GB by .NET Span&lt;T&gt; constraint.
+/// For larger blobs, implement chunked access pattern (see GetAtomSpan remarks).
+/// </remarks>
 public sealed unsafe class AtomStore : IDisposable
 {
     private const int PageSize = 4096; // 4KB pages
-    private const int HashTableSize = 1 << 20; // 1M buckets
+    private const long HashTableSize = 1L << 24; // 16M buckets for TB-scale
     private const long InitialDataSize = 1L << 30; // 1GB initial
-    
+    private const long InitialOffsetCapacity = 1L << 20; // 1M atoms initial
+    private const int MaxProbeDistance = 64; // Extended probing for better fill
+
     // Memory-mapped files
     private readonly FileStream _dataFile;
     private readonly FileStream _indexFile;
-    private readonly MemoryMappedFile _dataMap;
+    private readonly FileStream _offsetFile;
+    private MemoryMappedFile _dataMap;
     private readonly MemoryMappedFile _indexMap;
-    private readonly MemoryMappedViewAccessor _dataAccessor;
+    private MemoryMappedFile _offsetMap;
+    private MemoryMappedViewAccessor _dataAccessor;
     private readonly MemoryMappedViewAccessor _indexAccessor;
-    
+    private MemoryMappedViewAccessor _offsetAccessor;
+
     // Current write position in data file
     private long _dataPosition;
-    private int _nextAtomId;
-    
+    private long _nextAtomId;
+    private long _offsetCapacity;
+
     // Hash table for lookups (memory-mapped)
     private HashBucket* _hashTable;
-    
+
+    // Offset index for O(1) atomId→offset lookup (memory-mapped)
+    private long* _offsetIndex;
+
     // Statistics
     private long _totalBytes;
-    private int _atomCount;
+    private long _atomCount;
+
+    // UTF-8 encoder for efficient conversion
+    private static readonly Encoding Utf8 = Encoding.UTF8;
 
     public AtomStore(string baseFilePath)
     {
-        var dataPath = baseFilePath + ".data";
-        var indexPath = baseFilePath + ".index";
-        
+        var dataPath = baseFilePath + ".atoms";
+        var indexPath = baseFilePath + ".atomidx";
+        var offsetPath = baseFilePath + ".offsets";
+
         // Open/create data file
         _dataFile = new FileStream(
             dataPath,
@@ -52,12 +71,12 @@ public sealed unsafe class AtomStore : IDisposable
             bufferSize: 4096,
             FileOptions.RandomAccess
         );
-        
+
         if (_dataFile.Length == 0)
         {
             _dataFile.SetLength(InitialDataSize);
         }
-        
+
         // Open/create index file (hash table)
         _indexFile = new FileStream(
             indexPath,
@@ -69,218 +88,329 @@ public sealed unsafe class AtomStore : IDisposable
         );
 
         var indexSize = HashTableSize * sizeof(HashBucket);
-        var isNewIndexFile = _indexFile.Length == 0;
-        if (isNewIndexFile)
+        if (_indexFile.Length == 0)
         {
             _indexFile.SetLength(indexSize);
-            // Write zeros to ensure clean hash table (SetLength may not zero-fill)
-            _indexFile.Position = 0;
-            var zeros = new byte[4096];
-            for (long written = 0; written < indexSize; written += zeros.Length)
-            {
-                var toWrite = (int)Math.Min(zeros.Length, indexSize - written);
-                _indexFile.Write(zeros, 0, toWrite);
-            }
-            _indexFile.Flush();
+        }
+
+        // Open/create offset index file (atomId → offset mapping)
+        _offsetFile = new FileStream(
+            offsetPath,
+            FileMode.OpenOrCreate,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            bufferSize: 4096,
+            FileOptions.RandomAccess
+        );
+
+        _offsetCapacity = InitialOffsetCapacity;
+        if (_offsetFile.Length == 0)
+        {
+            _offsetFile.SetLength(_offsetCapacity * sizeof(long));
+        }
+        else
+        {
+            _offsetCapacity = _offsetFile.Length / sizeof(long);
         }
 
         // Memory-map files
         _dataMap = MemoryMappedFile.CreateFromFile(
             _dataFile,
             mapName: null,
-            capacity: 0,
+            capacity: _dataFile.Length,
             MemoryMappedFileAccess.ReadWrite,
             HandleInheritability.None,
-            leaveOpen: false
+            leaveOpen: true
         );
 
         _indexMap = MemoryMappedFile.CreateFromFile(
             _indexFile,
             mapName: null,
-            capacity: 0,
+            capacity: indexSize,
             MemoryMappedFileAccess.ReadWrite,
             HandleInheritability.None,
-            leaveOpen: false
+            leaveOpen: true
+        );
+
+        _offsetMap = MemoryMappedFile.CreateFromFile(
+            _offsetFile,
+            mapName: null,
+            capacity: _offsetFile.Length,
+            MemoryMappedFileAccess.ReadWrite,
+            HandleInheritability.None,
+            leaveOpen: true
         );
 
         _dataAccessor = _dataMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
         _indexAccessor = _indexMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+        _offsetAccessor = _offsetMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
 
         // Get pointer to hash table
         byte* indexPtr = null;
         _indexAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref indexPtr);
         _hashTable = (HashBucket*)indexPtr;
 
+        // Get pointer to offset index
+        byte* offsetPtr = null;
+        _offsetAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref offsetPtr);
+        _offsetIndex = (long*)offsetPtr;
+
         // Load metadata
         LoadMetadata();
     }
 
     /// <summary>
-    /// Intern a string and return its atom ID
-    /// Thread-safe through lock-free hash table with CAS
+    /// Intern a string and return its atom ID (64-bit).
+    /// Thread-safe through lock-free hash table with CAS.
     /// </summary>
-    public int Intern(ReadOnlySpan<char> value)
+    public long Intern(ReadOnlySpan<char> value)
     {
         if (value.IsEmpty)
             return 0;
-        
-        var hash = ComputeHash(value);
-        var bucket = hash & (HashTableSize - 1);
-        
-        // Check if already interned
-        ref var hashBucket = ref _hashTable[bucket];
-        
-        // Linear probing for collision resolution
-        for (int probe = 0; probe < 16; probe++)
+
+        // Convert to UTF-8 once upfront
+        var byteCount = Utf8.GetByteCount(value);
+        Span<byte> utf8Bytes = byteCount <= 512
+            ? stackalloc byte[byteCount]
+            : new byte[byteCount];
+        Utf8.GetBytes(value, utf8Bytes);
+
+        return InternUtf8(utf8Bytes);
+    }
+
+    /// <summary>
+    /// Intern a UTF-8 byte span directly (more efficient for pre-encoded data)
+    /// </summary>
+    public long InternUtf8(ReadOnlySpan<byte> utf8Value)
+    {
+        if (utf8Value.IsEmpty)
+            return 0;
+
+        var hash = ComputeHashUtf8(utf8Value);
+        var bucket = (long)((ulong)hash % (ulong)HashTableSize);
+
+        for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
-            var currentBucket = (bucket + probe) & (HashTableSize - 1);
+            var currentBucket = (bucket + probe) % HashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
-            {
-                // Empty slot - need to insert
                 break;
-            }
 
-            if (entry.Hash == hash && entry.Length == value.Length)
+            // Quick rejection: check hash and length before byte comparison
+            if (entry.Hash == hash && entry.Length == utf8Value.Length)
             {
-                // Potential match - verify
-                var stored = GetAtomString(entry.AtomId);
-                if (stored.SequenceEqual(value))
+                var stored = GetAtomSpan(entry.AtomId);
+                if (stored.SequenceEqual(utf8Value))
                 {
                     return entry.AtomId;
                 }
             }
         }
 
-        // Not found - insert new atom
-        return InsertAtom(value, hash, bucket);
+        return InsertAtomUtf8(utf8Value, hash, bucket);
     }
 
     /// <summary>
-    /// Get atom ID for a string without interning (returns -1 if not found)
+    /// Get atom ID for a string without interning (returns 0 if not found)
     /// </summary>
-    public int GetAtomId(ReadOnlySpan<char> value)
+    public long GetAtomId(ReadOnlySpan<char> value)
     {
         if (value.IsEmpty)
             return 0;
-        
-        var hash = ComputeHash(value);
-        var bucket = hash & (HashTableSize - 1);
-        
-        for (int probe = 0; probe < 16; probe++)
+
+        // Convert to UTF-8 once upfront
+        var byteCount = Utf8.GetByteCount(value);
+        Span<byte> utf8Bytes = byteCount <= 512
+            ? stackalloc byte[byteCount]
+            : new byte[byteCount];
+        Utf8.GetBytes(value, utf8Bytes);
+
+        return GetAtomIdUtf8(utf8Bytes);
+    }
+
+    /// <summary>
+    /// Get atom ID for a UTF-8 string without interning (returns 0 if not found)
+    /// </summary>
+    public long GetAtomIdUtf8(ReadOnlySpan<byte> utf8Value)
+    {
+        if (utf8Value.IsEmpty)
+            return 0;
+
+        var hash = ComputeHashUtf8(utf8Value);
+        var bucket = (long)((ulong)hash % (ulong)HashTableSize);
+
+        for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
-            var currentBucket = (bucket + probe) & (HashTableSize - 1);
+            var currentBucket = (bucket + probe) % HashTableSize;
             ref var entry = ref _hashTable[currentBucket];
-            
+
             if (entry.AtomId == 0)
-                return -1;
-            
-            if (entry.Hash == hash && entry.Length == value.Length)
+                return 0;
+
+            // Quick rejection: check hash and length before byte comparison
+            if (entry.Hash == hash && entry.Length == utf8Value.Length)
             {
-                var stored = GetAtomString(entry.AtomId);
-                if (stored.SequenceEqual(value))
+                var stored = GetAtomSpan(entry.AtomId);
+                if (stored.SequenceEqual(utf8Value))
                 {
                     return entry.AtomId;
                 }
             }
         }
-        
-        return -1;
+
+        return 0;
     }
 
     /// <summary>
-    /// Get string for an atom ID (zero-copy over memory-mapped data)
+    /// Get raw UTF-8 bytes for an atom ID (zero-copy over memory-mapped data).
+    /// Limited to 2GB due to Span&lt;T&gt; runtime constraint.
+    /// For blobs &gt; 2GB, use GetAtomChunked (not yet implemented).
     /// </summary>
+    /// <remarks>
+    /// CHUNKED ACCESS: Storage format supports 64-bit lengths (exabytes).
+    /// To read blobs larger than int.MaxValue bytes:
+    /// <code>
+    /// public IEnumerable&lt;ReadOnlyMemory&lt;byte&gt;&gt; GetAtomChunked(long atomId, int chunkSize = 1 &lt;&lt; 30)
+    /// {
+    ///     var offset = GetAtomOffset(atomId);
+    ///     _dataAccessor.Read(offset, out long totalLength);
+    ///     var dataOffset = offset + sizeof(long);
+    ///
+    ///     for (long pos = 0; pos &lt; totalLength; pos += chunkSize)
+    ///     {
+    ///         var remaining = totalLength - pos;
+    ///         var size = (int)Math.Min(remaining, chunkSize);
+    ///         // yield chunk at dataOffset + pos, size bytes
+    ///     }
+    /// }
+    /// </code>
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ReadOnlySpan<char> GetAtomString(int atomId)
+    public ReadOnlySpan<byte> GetAtomSpan(long atomId)
     {
         if (atomId <= 0 || atomId > _nextAtomId)
-            return ReadOnlySpan<char>.Empty;
+            return ReadOnlySpan<byte>.Empty;
 
-        // Read atom header
+        // Read atom header (offset stored in hash table or computed)
         var offset = GetAtomOffset(atomId);
+        if (offset < 0)
+            return ReadOnlySpan<byte>.Empty;
 
-        _dataAccessor.Read(offset, out int length);
+        // Read length (64-bit for huge blobs)
+        _dataAccessor.Read(offset, out long length);
 
-        // Get pointer to string data
+        // Get pointer to UTF-8 data
         byte* dataPtr = null;
         _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref dataPtr);
 
-        var charPtr = (char*)(dataPtr + offset + sizeof(int));
-        return new ReadOnlySpan<char>(charPtr, length);
+        return new ReadOnlySpan<byte>(dataPtr + offset + sizeof(long), (int)length);
+    }
+
+    /// <summary>
+    /// Get string for an atom ID (allocates - use GetAtomSpan for zero-copy)
+    /// </summary>
+    public string GetAtomString(long atomId)
+    {
+        var span = GetAtomSpan(atomId);
+        if (span.IsEmpty)
+            return string.Empty;
+
+        return Utf8.GetString(span);
     }
 
     /// <summary>
     /// Get atom statistics
     /// </summary>
-    public (int AtomCount, long TotalBytes, float AvgLength) GetStatistics()
+    public (long AtomCount, long TotalBytes, double AvgLength) GetStatistics()
     {
-        var avgLength = _atomCount > 0 ? (float)_totalBytes / _atomCount : 0;
+        var avgLength = _atomCount > 0 ? (double)_totalBytes / _atomCount : 0;
         return (_atomCount, _totalBytes, avgLength);
     }
 
+    /// <summary>
+    /// Current number of atoms
+    /// </summary>
+    public long AtomCount => _atomCount;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ComputeHash(ReadOnlySpan<char> value)
+    private static long ComputeHash(ReadOnlySpan<char> value)
     {
-        // xxHash-inspired fast hash
-        uint hash = 2166136261u;
-        
+        // xxHash-inspired fast hash (64-bit)
+        ulong hash = 14695981039346656037ul;
+
         foreach (var ch in value)
         {
-            hash = (hash ^ ch) * 16777619u;
+            hash = (hash ^ ch) * 1099511628211ul;
         }
-        
-        return (int)hash;
+
+        return (long)hash;
     }
 
-    private int InsertAtom(ReadOnlySpan<char> value, int hash, int bucket)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long ComputeHashUtf8(ReadOnlySpan<byte> value)
+    {
+        ulong hash = 14695981039346656037ul;
+
+        foreach (var b in value)
+        {
+            hash = (hash ^ b) * 1099511628211ul;
+        }
+
+        return (long)hash;
+    }
+
+    private long InsertAtom(ReadOnlySpan<char> value, long hash, long bucket)
+    {
+        // Convert to UTF-8
+        var byteCount = Utf8.GetByteCount(value);
+        Span<byte> utf8Bytes = stackalloc byte[Math.Min(byteCount, 1024)];
+        if (byteCount > 1024)
+        {
+            utf8Bytes = new byte[byteCount];
+        }
+        Utf8.GetBytes(value, utf8Bytes);
+
+        return InsertAtomUtf8(utf8Bytes.Slice(0, byteCount), hash, bucket);
+    }
+
+    private long InsertAtomUtf8(ReadOnlySpan<byte> utf8Value, long hash, long bucket)
     {
         // Allocate atom ID
         var atomId = System.Threading.Interlocked.Increment(ref _nextAtomId);
-        
-        // Calculate storage size
-        var byteLength = value.Length * sizeof(char);
-        var totalSize = sizeof(int) + byteLength; // length prefix + data
-        
+
+        // Ensure offset index has capacity
+        EnsureOffsetCapacity(atomId + 1);
+
+        // Calculate storage size: 8-byte length prefix + UTF-8 data
+        var totalSize = sizeof(long) + utf8Value.Length;
+
         // Allocate space in data file
         var offset = System.Threading.Interlocked.Add(ref _dataPosition, totalSize) - totalSize;
-        
-        // Extend file if needed
-        if (offset + totalSize > _dataFile.Length)
-        {
-            lock (_dataFile)
-            {
-                if (offset + totalSize > _dataFile.Length)
-                {
-                    var newSize = Math.Max(_dataFile.Length * 2, offset + totalSize);
-                    _dataFile.SetLength(newSize);
-                }
-            }
-        }
-        
-        // Write atom data
-        _dataAccessor.Write(offset, value.Length);
-        
+
+        // Extend data file if needed
+        EnsureDataCapacity(offset + totalSize);
+
+        // Write atom data: [length:8][utf8data:N]
+        _dataAccessor.Write(offset, (long)utf8Value.Length);
+
         byte* dataPtr = null;
         _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref dataPtr);
-        var charPtr = (char*)(dataPtr + offset + sizeof(int));
-        
-        for (int i = 0; i < value.Length; i++)
-        {
-            charPtr[i] = value[i];
-        }
-        
+
+        utf8Value.CopyTo(new Span<byte>(dataPtr + offset + sizeof(long), utf8Value.Length));
+
+        // Write to offset index for O(1) atomId→offset lookup
+        _offsetIndex[atomId] = offset;
+
         // Update hash table
-        for (int probe = 0; probe < 16; probe++)
+        for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
-            var currentBucket = (bucket + probe) & (HashTableSize - 1);
+            var currentBucket = (bucket + probe) % HashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
             {
-                // Use interlocked to ensure atomicity
-                var expected = 0;
+                var expected = 0L;
                 var success = System.Threading.Interlocked.CompareExchange(
                     ref entry.AtomId,
                     atomId,
@@ -290,48 +420,108 @@ public sealed unsafe class AtomStore : IDisposable
                 if (success)
                 {
                     entry.Hash = hash;
-                    entry.Length = (short)value.Length;
+                    entry.Length = utf8Value.Length;
                     entry.Offset = offset;
 
-                    // Update statistics
                     System.Threading.Interlocked.Increment(ref _atomCount);
-                    System.Threading.Interlocked.Add(ref _totalBytes, byteLength);
+                    System.Threading.Interlocked.Add(ref _totalBytes, utf8Value.Length);
 
                     return atomId;
                 }
             }
         }
 
-        // Hash table full in this bucket - should extend or use overflow
-        throw new InvalidOperationException("Hash table bucket full");
+        // Hash table full in this region - need to handle overflow
+        throw new InvalidOperationException($"Hash table region full at bucket {bucket}");
+    }
+
+    private void EnsureDataCapacity(long requiredSize)
+    {
+        if (requiredSize <= _dataFile.Length)
+            return;
+
+        lock (_dataFile)
+        {
+            if (requiredSize <= _dataFile.Length)
+                return;
+
+            var newSize = Math.Max(_dataFile.Length * 2, requiredSize + InitialDataSize);
+
+            // Dispose old accessor and map
+            _dataAccessor.Dispose();
+            _dataMap.Dispose();
+
+            // Extend file
+            _dataFile.SetLength(newSize);
+
+            // Recreate memory map
+            _dataMap = MemoryMappedFile.CreateFromFile(
+                _dataFile,
+                mapName: null,
+                capacity: newSize,
+                MemoryMappedFileAccess.ReadWrite,
+                HandleInheritability.None,
+                leaveOpen: true
+            );
+
+            _dataAccessor = _dataMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+        }
+    }
+
+    private void EnsureOffsetCapacity(long requiredCapacity)
+    {
+        if (requiredCapacity <= _offsetCapacity)
+            return;
+
+        lock (_offsetFile)
+        {
+            if (requiredCapacity <= _offsetCapacity)
+                return;
+
+            var newCapacity = Math.Max(_offsetCapacity * 2, requiredCapacity + InitialOffsetCapacity);
+
+            // Dispose old accessor and map
+            _offsetAccessor.Dispose();
+            _offsetMap.Dispose();
+
+            // Extend file
+            _offsetFile.SetLength(newCapacity * sizeof(long));
+
+            // Recreate memory map
+            _offsetMap = MemoryMappedFile.CreateFromFile(
+                _offsetFile,
+                mapName: null,
+                capacity: _offsetFile.Length,
+                MemoryMappedFileAccess.ReadWrite,
+                HandleInheritability.None,
+                leaveOpen: true
+            );
+
+            _offsetAccessor = _offsetMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+
+            // Update pointer
+            byte* offsetPtr = null;
+            _offsetAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref offsetPtr);
+            _offsetIndex = (long*)offsetPtr;
+
+            _offsetCapacity = newCapacity;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long GetAtomOffset(int atomId)
+    private long GetAtomOffset(long atomId)
     {
-        // For now, linear scan - could use separate offset index
-        // In production, would maintain offset index for O(1) lookup
+        // O(1) direct lookup via offset index
+        if (atomId <= 0 || atomId > _nextAtomId)
+            return -1;
 
-        // Simplified: assume atoms written sequentially
-        // Full implementation would have offset index
-        // Note: atoms start at offset 1024 (first 1KB reserved for metadata)
-        // AtomIds start at 2 (_nextAtomId initialized to 1, first Increment gives 2)
-        long offset = 1024;
-
-        for (int i = 2; i < atomId; i++)
-        {
-            _dataAccessor.Read(offset, out int length);
-            offset += sizeof(int) + length * sizeof(char);
-        }
-
-        return offset;
+        return _offsetIndex[atomId];
     }
 
-    private const long MagicNumber = 0x41544F4D53544F52; // "ATOMSTOR" as long
+    private const long MagicNumber = 0x55544638_41544F4DL; // "UTF8ATOM" as long
 
     private void LoadMetadata()
     {
-        // Check for valid metadata using magic number
         _dataAccessor.Read(32, out long magic);
 
         if (magic == MagicNumber)
@@ -341,14 +531,13 @@ public sealed unsafe class AtomStore : IDisposable
             _dataAccessor.Read(16, out _atomCount);
             _dataAccessor.Read(24, out _totalBytes);
 
-            // Skip metadata
             if (_dataPosition < 1024)
                 _dataPosition = 1024;
         }
         else
         {
             _dataPosition = 1024; // Reserve first 1KB for metadata
-            _nextAtomId = 1;
+            _nextAtomId = 0;
             _atomCount = 0;
             _totalBytes = 0;
             SaveMetadata();
@@ -365,109 +554,42 @@ public sealed unsafe class AtomStore : IDisposable
         _dataAccessor.Flush();
     }
 
+    public void Flush()
+    {
+        SaveMetadata();
+        _dataAccessor.Flush();
+        _indexAccessor.Flush();
+        _offsetAccessor.Flush();
+    }
+
     public void Dispose()
     {
         SaveMetadata();
-        
+
         _dataAccessor?.Dispose();
         _indexAccessor?.Dispose();
+        _offsetAccessor?.Dispose();
         _dataMap?.Dispose();
         _indexMap?.Dispose();
+        _offsetMap?.Dispose();
         _dataFile?.Dispose();
         _indexFile?.Dispose();
+        _offsetFile?.Dispose();
     }
 
     /// <summary>
-    /// Hash bucket entry (16 bytes)
+    /// Hash bucket entry (40 bytes for 64-bit IDs, offsets, and lengths)
     /// </summary>
+    /// <remarks>
+    /// 64-bit Length field supports exabyte-scale blobs in storage format.
+    /// Retrieval via Span is limited to 2GB; chunked access needed for larger.
+    /// </remarks>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct HashBucket
     {
-        public int AtomId;      // 0 means empty
-        public int Hash;        // Full hash for quick comparison
-        public short Length;    // String length
-        public short Reserved;  // Padding
-        public long Offset;     // Offset in data file
-    }
-}
-
-/// <summary>
-/// Optimized atom cache for frequently accessed atoms
-/// Uses fixed-size cache with LRU eviction
-/// </summary>
-public sealed unsafe class AtomCache : IDisposable
-{
-    private const int CacheSize = 10_000;
-    
-    private readonly CacheEntry[] _entries;
-    private readonly char[] _stringBuffer;
-    private int _bufferPosition;
-    
-    public AtomCache()
-    {
-        _entries = new CacheEntry[CacheSize];
-        _stringBuffer = new char[1024 * 1024]; // 1M chars = 2MB
-        _bufferPosition = 0;
-    }
-
-    public bool TryGet(int atomId, out ReadOnlySpan<char> value)
-    {
-        var index = atomId & (CacheSize - 1);
-        ref var entry = ref _entries[index];
-        
-        if (entry.AtomId == atomId)
-        {
-            value = _stringBuffer.AsSpan(entry.BufferOffset, entry.Length);
-            entry.AccessCount++;
-            return true;
-        }
-        
-        value = default;
-        return false;
-    }
-
-    public void Add(int atomId, ReadOnlySpan<char> value)
-    {
-        var index = atomId & (CacheSize - 1);
-        ref var entry = ref _entries[index];
-        
-        // Check if buffer has space
-        if (_bufferPosition + value.Length > _stringBuffer.Length)
-        {
-            // Evict least recently used entries
-            EvictEntries();
-        }
-        
-        // Copy string to buffer
-        var offset = _bufferPosition;
-        value.CopyTo(_stringBuffer.AsSpan(offset));
-        _bufferPosition += value.Length;
-        
-        // Update entry
-        entry.AtomId = atomId;
-        entry.BufferOffset = offset;
-        entry.Length = (short)value.Length;
-        entry.AccessCount = 1;
-    }
-
-    private void EvictEntries()
-    {
-        // Simple strategy: clear all and reset
-        // More sophisticated: evict least accessed
-        Array.Clear(_entries, 0, _entries.Length);
-        _bufferPosition = 0;
-    }
-
-    public void Dispose()
-    {
-        // Nothing to dispose
-    }
-
-    private struct CacheEntry
-    {
-        public int AtomId;
-        public int BufferOffset;
-        public short Length;
-        public short AccessCount;
+        public long AtomId;     // 0 means empty (64-bit for TB-scale)
+        public long Hash;       // Full 64-bit hash for quick comparison
+        public long Offset;     // Offset in data file (64-bit for TB-scale)
+        public long Length;     // UTF-8 byte length (64-bit for huge blobs)
     }
 }

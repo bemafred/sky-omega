@@ -544,7 +544,57 @@ public struct WhereClause
 {
 }
 
-// SolutionModifier is defined in SolutionModifiers.cs
+public struct ConstructTemplate
+{
+}
+
+public struct SolutionModifier
+{
+    public OrderByClause OrderBy;
+    public int Limit;
+    public int Offset;
+}
+
+public struct OrderByClause
+{
+    public int Count;
+
+    public void AddCondition(int variableOffset, OrderDirection direction)
+    {
+        Count++;
+    }
+}
+
+public enum OrderDirection
+{
+    Ascending,
+    Descending
+}
+
+/// <summary>
+/// Binding table for variable bindings during query execution
+/// </summary>
+public ref struct BindingTable
+{
+    private Span<Binding> _bindings;
+    private int _count;
+
+    public BindingTable(Span<Binding> storage)
+    {
+        _bindings = storage;
+        _count = 0;
+    }
+}
+
+/// <summary>
+/// Single variable binding (unmanaged for stackalloc)
+/// </summary>
+public struct Binding
+{
+    // Using fixed-size buffers for zero-allocation
+    public int VariableHash;
+    public int ValueHash;
+}
 
 public class SparqlParseException : Exception
 {

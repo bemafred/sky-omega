@@ -22,24 +22,20 @@ dotnet run -c Release
 ## Known Limitations
 
 ### 1. B+Tree Page Splitting
-**Status**: Simplified implementation
+**Status**: ✅ Fixed
 
-The page split logic handles basic splits but doesn't properly:
-- Recursively split parent nodes
-- Handle root splitting (creating new root)
-- Update all child pointers correctly
+The B+Tree now properly handles:
+- Leaf page splits with key promotion to parent
+- Internal node splits with recursive propagation
+- Root splitting (creating new root when root is full)
+- Correct child pointer maintenance via `NextLeaf` (repurposed for internal nodes)
 
-**Impact**: Works for small datasets (<10K triples per index). Will fail on larger inserts.
-
-**Fix needed**:
-```csharp
-private void SplitInternalNode(BTreePage* page, Key key, long rightChild)
-{
-    // Promote middle key to parent
-    // Recursively split if parent is full
-    // Update child pointers
-}
-```
+Implementation:
+- `SplitResult` struct propagates split info up the tree
+- `InsertRecursive` handles bottom-up split propagation
+- `CreateNewRoot` handles root splits
+- `InsertIntoInternal` / `SplitInternalPage` handle internal nodes
+- Thread-safe page allocation via `Interlocked.Increment`
 
 ### 2. Thread Safety
 **Status**: Not thread-safe
@@ -78,16 +74,14 @@ ValidFrom < RangeEnd && ValidTo > RangeStart
 **Fix needed**: Comprehensive temporal algebra tests.
 
 ### 5. AtomStore Offset Index
-**Status**: Linear scan fallback
+**Status**: ✅ Fixed
 
-`GetAtomOffset()` uses linear scan instead of O(1) index:
-```csharp
-for (int i = 1; i < atomId; i++) {
-    // Scan through all atoms - O(n)!
-}
-```
+`GetAtomOffset()` now uses O(1) direct lookup via memory-mapped offset index file.
 
-**Fix needed**: Maintain separate offset index.
+Blob storage limits:
+- Storage format: 64-bit length prefix (unlimited blob size)
+- Retrieval: Limited to 2GB per span (.NET Span<T> limit)
+- For larger blobs: Chunked access required
 
 ### 6. No Write-Ahead Log
 **Status**: Not crash-safe
@@ -187,13 +181,14 @@ private void DumpTree(long pageId, int level) {
 
 ## Production Readiness Checklist
 
-- [ ] Fix B+Tree page splitting recursion
+- [x] Fix B+Tree page splitting recursion
 - [ ] Add proper locking or lock-free atomics
 - [ ] Implement WAL for crash recovery
 - [ ] Add comprehensive error handling
 - [ ] Memory-mapped handle lifecycle
 - [ ] Temporal query edge case tests
-- [ ] AtomStore offset index (O(1) lookup)
+- [x] AtomStore offset index (O(1) lookup)
+- [x] 64-bit blob size support
 - [ ] Compaction/defragmentation
 - [ ] Backup/restore utilities
 - [ ] Monitoring and metrics
@@ -203,23 +198,23 @@ private void DumpTree(long pageId, int level) {
 
 ## What's Production-Ready Now
 
-✅ Memory-mapped I/O architecture  
-✅ Zero-GC allocation patterns  
-✅ Atom storage and deduplication  
-✅ Basic B+Tree operations  
-✅ SPARQL 1.1 parsing  
-✅ Query execution framework  
-✅ Temporal data model  
-✅ Multi-index architecture  
+✅ Memory-mapped I/O architecture
+✅ Zero-GC allocation patterns
+✅ Atom storage and deduplication (O(1) lookup)
+✅ Complete B+Tree operations (including splits)
+✅ SPARQL 1.1 parsing
+✅ Query execution framework
+✅ Temporal data model
+✅ Multi-index architecture
+✅ 64-bit blob storage support
 
 ## What Needs Work
 
-⚠️ B+Tree internal node splits  
-⚠️ Thread safety  
-⚠️ Crash recovery  
-⚠️ Large dataset stability (>100K triples)  
-⚠️ Production error handling  
-⚠️ Comprehensive test coverage  
+⚠️ Thread safety (partial - some Interlocked ops added)
+⚠️ Crash recovery (no WAL)
+⚠️ Production error handling
+⚠️ Comprehensive test coverage
+⚠️ Memory-mapped handle lifecycle  
 
 ## Contributing
 

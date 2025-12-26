@@ -6,54 +6,6 @@ using System;
 namespace SkyOmega.Rdf.Turtle;
 
 /// <summary>
-/// Represents an RDF triple (subject, predicate, object).
-/// Immutable record type for zero-allocation streaming.
-/// </summary>
-/* TODO: Remove tthi class, it's obsolete
-public readonly record struct RdfTriple
-{
-    public string Subject { get; init; }
-    public string Predicate { get; init; }
-    public string Object { get; init; }
-    
-    public RdfLiteral(string subject, string predicate, string @object)
-    {
-        Subject = subject ?? throw new ArgumentNullException(nameof(subject));
-        Predicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
-        Object = @object ?? throw new ArgumentNullException(nameof(@object));
-    }
-    
-    public override string ToString()
-    {
-        return $"{Subject} {Predicate} {Object} .";
-    }
-    
-    /// <summary>
-    /// Convert to N-Triples format (canonical RDF serialization)
-    /// </summary>
-    public string ToNTriples()
-    {
-        return $"{FormatTerm(Subject)} {FormatTerm(Predicate)} {FormatTerm(Object)} .";
-    }
-    
-    private static string FormatTerm(string term)
-    {
-        // Simple formatting - proper implementation would handle all cases
-        if (term.StartsWith("_:"))
-            return term; // Blank node
-        
-        if (term.StartsWith('"'))
-            return term; // Literal (already formatted)
-        
-        if (term.StartsWith("<<(") && term.EndsWith(")>>"))
-            return term; // Triple term
-        
-        // IRI
-        return $"<{term}>";
-    }
-}
-*/
-/// <summary>
 /// Term type enumeration for RDF terms
 /// </summary>
 public enum RdfTermType

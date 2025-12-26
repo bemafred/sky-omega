@@ -20,25 +20,28 @@ public sealed class MultiTemporalStore : IDisposable
     private readonly TemporalTripleStore _postIndex; // Predicate-first
     private readonly TemporalTripleStore _osptIndex; // Object-first
     private readonly TemporalTripleStore _tspoIndex; // Time-first
-    
+
     private readonly AtomStore _atoms;
 
     public MultiTemporalStore(string baseDirectory)
     {
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
-        
+
         var spotPath = Path.Combine(baseDirectory, "spot.tdb");
         var postPath = Path.Combine(baseDirectory, "post.tdb");
         var osptPath = Path.Combine(baseDirectory, "ospt.tdb");
         var tspoPath = Path.Combine(baseDirectory, "tspo.tdb");
         var atomPath = Path.Combine(baseDirectory, "atoms");
-        
-        _spotIndex = new TemporalTripleStore(spotPath);
-        _postIndex = new TemporalTripleStore(postPath);
-        _osptIndex = new TemporalTripleStore(osptPath);
-        _tspoIndex = new TemporalTripleStore(tspoPath);
+
+        // Create shared atom store for all indexes
         _atoms = new AtomStore(atomPath);
+
+        // Create temporal stores with shared atom store
+        _spotIndex = new TemporalTripleStore(spotPath, _atoms);
+        _postIndex = new TemporalTripleStore(postPath, _atoms);
+        _osptIndex = new TemporalTripleStore(osptPath, _atoms);
+        _tspoIndex = new TemporalTripleStore(tspoPath, _atoms);
     }
 
     /// <summary>
@@ -219,7 +222,7 @@ public sealed class MultiTemporalStore : IDisposable
     /// <summary>
     /// Get storage statistics
     /// </summary>
-    public (long TripleCount, int AtomCount, long TotalBytes) GetStatistics()
+    public (long TripleCount, long AtomCount, long TotalBytes) GetStatistics()
     {
         var tripleCount = _spotIndex.TripleCount;
         var (atomCount, totalBytes, _) = _atoms.GetStatistics();
@@ -253,10 +256,10 @@ public ref struct TemporalResultEnumerator
         get
         {
             var triple = _baseEnumerator.Current;
-            
+
             // Remap based on index type
-            int s, p, o;
-            
+            long s, p, o;
+
             switch (_indexType)
             {
                 case TemporalIndexType.SPOT:
@@ -264,37 +267,40 @@ public ref struct TemporalResultEnumerator
                     p = triple.PredicateAtom;
                     o = triple.ObjectAtom;
                     break;
-                
+
                 case TemporalIndexType.POST:
                     p = triple.SubjectAtom;
                     o = triple.PredicateAtom;
                     s = triple.ObjectAtom;
                     break;
-                
+
                 case TemporalIndexType.OSPT:
                     o = triple.SubjectAtom;
                     s = triple.PredicateAtom;
                     p = triple.ObjectAtom;
                     break;
-                
+
                 case TemporalIndexType.TSPO:
                     s = triple.SubjectAtom;
                     p = triple.PredicateAtom;
                     o = triple.ObjectAtom;
                     break;
-                
+
                 default:
                     s = p = o = 0;
                     break;
             }
             
+            // Clamp milliseconds to valid DateTimeOffset range
+            const long MaxValidMs = 253402300799999L; // Dec 31, 9999
+
             return new ResolvedTemporalTriple(
                 _atoms.GetAtomString(s),
                 _atoms.GetAtomString(p),
                 _atoms.GetAtomString(o),
-                DateTimeOffset.FromUnixTimeMilliseconds(triple.ValidFrom),
-                DateTimeOffset.FromUnixTimeMilliseconds(triple.ValidTo),
-                DateTimeOffset.FromUnixTimeMilliseconds(triple.TransactionTime)
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidFrom, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidTo, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.TransactionTime, MaxValidMs))
             );
         }
     }

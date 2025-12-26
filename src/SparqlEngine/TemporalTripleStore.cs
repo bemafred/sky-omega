@@ -19,19 +19,31 @@ public sealed unsafe class TemporalTripleStore : IDisposable
 {
     private const int PageSize = 16384;
     private const int NodeDegree = 204; // (16384 - 32) / 80 bytes per temporal entry
-    
+
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmapFile;
     private readonly MemoryMappedViewAccessor _accessor;
     private readonly AtomStore _atoms;
+    private readonly bool _ownsAtomStore;
     private readonly PageCache _pageCache;
-    
+
     private long _rootPageId;
     private long _nextPageId;
     private long _tripleCount;
     private long _currentTransactionTime;
 
+    /// <summary>
+    /// Create a temporal triple store with its own atom store
+    /// </summary>
     public TemporalTripleStore(string filePath, long initialSizeBytes = 1L << 30)
+        : this(filePath, null, initialSizeBytes)
+    {
+    }
+
+    /// <summary>
+    /// Create a temporal triple store with a shared atom store
+    /// </summary>
+    public TemporalTripleStore(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
     {
         _fileStream = new FileStream(
             filePath,
@@ -41,12 +53,12 @@ public sealed unsafe class TemporalTripleStore : IDisposable
             bufferSize: 4096,
             FileOptions.RandomAccess | FileOptions.WriteThrough
         );
-        
+
         if (_fileStream.Length == 0)
         {
             _fileStream.SetLength(initialSizeBytes);
         }
-        
+
         _mmapFile = MemoryMappedFile.CreateFromFile(
             _fileStream,
             mapName: null,
@@ -55,16 +67,31 @@ public sealed unsafe class TemporalTripleStore : IDisposable
             HandleInheritability.None,
             leaveOpen: false
         );
-        
+
         _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-        
-        var atomFilePath = filePath + ".atoms";
-        _atoms = new AtomStore(atomFilePath);
+
+        if (sharedAtoms != null)
+        {
+            _atoms = sharedAtoms;
+            _ownsAtomStore = false;
+        }
+        else
+        {
+            var atomFilePath = filePath + ".atoms";
+            _atoms = new AtomStore(atomFilePath);
+            _ownsAtomStore = true;
+        }
+
         _pageCache = new PageCache(capacity: 10_000);
-        
+
         LoadMetadata();
         _currentTransactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     }
+
+    /// <summary>
+    /// Get the atom store (for shared access)
+    /// </summary>
+    public AtomStore Atoms => _atoms;
 
     /// <summary>
     /// Add a temporal triple with explicit time bounds
@@ -127,9 +154,9 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     /// Query triples with temporal constraints
     /// </summary>
     public TemporalTripleEnumerator Query(
-        int subjectAtom,
-        int predicateAtom,
-        int objectAtom,
+        long subjectAtom,
+        long predicateAtom,
+        long objectAtom,
         TemporalQuery temporalQuery)
     {
         var minKey = CreateSearchKey(subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: true);
@@ -227,17 +254,27 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     }
 
     /// <summary>
+    /// Result of an insert operation that may have caused a page split
+    /// </summary>
+    private struct SplitResult
+    {
+        public bool DidSplit;
+        public TemporalKey PromotedKey;
+        public long NewRightPageId;
+    }
+
+    /// <summary>
     /// Temporal key: SPO + ValidTime + TransactionTime (32 bytes)
     /// Sorted lexicographically for temporal range queries
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct TemporalKey : IComparable<TemporalKey>
     {
-        public int SubjectAtom;
-        public int PredicateAtom;
-        public int ObjectAtom;
-        public long ValidFrom;      // Valid-time start (milliseconds since epoch)
-        public long ValidTo;        // Valid-time end (milliseconds since epoch)
+        public long SubjectAtom;     // 64-bit for TB-scale
+        public long PredicateAtom;   // 64-bit for TB-scale
+        public long ObjectAtom;      // 64-bit for TB-scale
+        public long ValidFrom;       // Valid-time start (milliseconds since epoch)
+        public long ValidTo;         // Valid-time end (milliseconds since epoch)
         public long TransactionTime; // Transaction-time (when recorded)
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -428,20 +465,79 @@ public sealed unsafe class TemporalTripleStore : IDisposable
 
     private void InsertIntoTree(TemporalKey key, long pageId)
     {
+        var result = InsertRecursive(key, pageId);
+
+        // If root split, create new root
+        if (result.DidSplit && pageId == _rootPageId)
+        {
+            CreateNewRoot(pageId, result.PromotedKey, result.NewRightPageId);
+        }
+    }
+
+    private SplitResult InsertRecursive(TemporalKey key, long pageId)
+    {
         var page = GetPage(pageId);
-        
+
         if (page->IsLeaf)
         {
-            InsertIntoLeaf(page, key);
+            return InsertIntoLeaf(page, key);
         }
         else
         {
             var childPageId = FindChildPage(page, key);
-            InsertIntoTree(key, childPageId);
+            var childResult = InsertRecursive(key, childPageId);
+
+            // If child split, insert promoted key into this internal node
+            if (childResult.DidSplit)
+            {
+                return InsertIntoInternal(page, childResult.PromotedKey, childResult.NewRightPageId);
+            }
+
+            return default; // No split
         }
     }
 
-    private void InsertIntoLeaf(TemporalBTreePage* page, TemporalKey key)
+    private void CreateNewRoot(long oldRootPageId, TemporalKey promotedKey, long newRightPageId)
+    {
+        var newRootId = AllocatePage();
+        var newRoot = GetPage(newRootId);
+
+        newRoot->PageId = newRootId;
+        newRoot->IsLeaf = false;
+        newRoot->EntryCount = 1;
+        newRoot->ParentPageId = 0;
+        newRoot->NextLeaf = 0;
+
+        // First entry points to old root (left child), key is the promoted key
+        ref var entry = ref newRoot->GetEntry(0);
+        entry.Key = promotedKey;
+        entry.ChildOrValue = newRightPageId; // Right child after this key
+
+        // Store left child pointer in a special location (entry -1 concept)
+        // For B+Tree, we use entry[0].ChildOrValue for right child of key[0]
+        // We need a separate left-most child pointer - store in first entry's metadata
+        // Alternative: use entry count + 1 slots where slot 0 is leftmost child
+
+        // Simpler approach: first entry holds (key, rightChild), leftmost child stored separately
+        // We'll encode leftmost child in the page header's NextLeaf field (repurposed for internal nodes)
+        newRoot->NextLeaf = oldRootPageId; // Leftmost child pointer (reusing NextLeaf for internal nodes)
+
+        // Update parent pointers
+        var oldRoot = GetPage(oldRootPageId);
+        oldRoot->ParentPageId = newRootId;
+
+        var rightPage = GetPage(newRightPageId);
+        rightPage->ParentPageId = newRootId;
+
+        _rootPageId = newRootId;
+
+        FlushPage(newRoot);
+        FlushPage(oldRoot);
+        FlushPage(rightPage);
+        SaveMetadata();
+    }
+
+    private SplitResult InsertIntoLeaf(TemporalBTreePage* page, TemporalKey key)
     {
         // Find insertion point
         int insertPos = 0;
@@ -452,7 +548,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
                 break;
             insertPos++;
         }
-        
+
         // Check for updates (same SPO, overlapping time)
         if (insertPos > 0)
         {
@@ -461,23 +557,22 @@ public sealed unsafe class TemporalTripleStore : IDisposable
             {
                 // Handle temporal update
                 HandleTemporalUpdate(page, insertPos - 1, key);
-                return;
+                return default; // No split for updates
             }
         }
-        
-        // Check if page is full
+
+        // Check if page is full - need to split
         if (page->EntryCount >= NodeDegree)
         {
-            SplitLeafPage(page, key);
-            return;
+            return SplitLeafPage(page, key);
         }
-        
+
         // Shift and insert
         for (int i = page->EntryCount; i > insertPos; i--)
         {
             page->GetEntry(i) = page->GetEntry(i - 1);
         }
-        
+
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = 0;
@@ -485,10 +580,12 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         newEntry.ModifiedAt = _currentTransactionTime;
         newEntry.Version = 1;
         newEntry.IsDeleted = false;
-        
+
         page->EntryCount++;
-        _tripleCount++;
+        System.Threading.Interlocked.Increment(ref _tripleCount);
         FlushPage(page);
+
+        return default; // No split
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -513,32 +610,36 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         }
     }
 
-    private void SplitLeafPage(TemporalBTreePage* page, TemporalKey key)
+    private SplitResult SplitLeafPage(TemporalBTreePage* page, TemporalKey key)
     {
-        // Allocate new page
+        // Allocate new page for right half
         var newPageId = AllocatePage();
         var newPage = GetPage(newPageId);
-        
+
+        newPage->PageId = newPageId;
         newPage->IsLeaf = true;
         newPage->EntryCount = 0;
         newPage->ParentPageId = page->ParentPageId;
         newPage->NextLeaf = page->NextLeaf;
         page->NextLeaf = newPageId;
-        
+
         // Split entries at midpoint
         var midPoint = NodeDegree / 2;
-        
+
         for (int i = midPoint; i < page->EntryCount; i++)
         {
             newPage->GetEntry(i - midPoint) = page->GetEntry(i);
         }
-        
+
         newPage->EntryCount = (short)(page->EntryCount - midPoint);
         page->EntryCount = (short)midPoint;
-        
-        // Determine which page gets the new key
-        ref var midEntry = ref page->GetEntry(midPoint - 1);
-        if (key.CompareTo(midEntry.Key) < 0)
+
+        // The key to promote is the first key of the new (right) page
+        var promotedKey = newPage->GetEntry(0).Key;
+
+        // Insert the new key into the appropriate page
+        // (recursive call is safe - pages now have room after split)
+        if (key.CompareTo(promotedKey) < 0)
         {
             InsertIntoLeaf(page, key);
         }
@@ -546,16 +647,134 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         {
             InsertIntoLeaf(newPage, key);
         }
-        
-        // Promote middle key to parent (simplified - would handle root splits properly)
+
         FlushPage(page);
         FlushPage(newPage);
+
+        // Return split result for parent to handle
+        return new SplitResult
+        {
+            DidSplit = true,
+            PromotedKey = promotedKey,
+            NewRightPageId = newPageId
+        };
+    }
+
+    private SplitResult InsertIntoInternal(TemporalBTreePage* page, TemporalKey key, long rightChildPageId)
+    {
+        // Find insertion point
+        int insertPos = 0;
+        while (insertPos < page->EntryCount)
+        {
+            ref var entry = ref page->GetEntry(insertPos);
+            if (key.CompareTo(entry.Key) < 0)
+                break;
+            insertPos++;
+        }
+
+        // Check if page is full - need to split
+        if (page->EntryCount >= NodeDegree)
+        {
+            return SplitInternalPage(page, key, rightChildPageId);
+        }
+
+        // Shift and insert
+        for (int i = page->EntryCount; i > insertPos; i--)
+        {
+            page->GetEntry(i) = page->GetEntry(i - 1);
+        }
+
+        ref var newEntry = ref page->GetEntry(insertPos);
+        newEntry.Key = key;
+        newEntry.ChildOrValue = rightChildPageId;
+        newEntry.CreatedAt = _currentTransactionTime;
+        newEntry.ModifiedAt = _currentTransactionTime;
+        newEntry.Version = 1;
+        newEntry.IsDeleted = false;
+
+        page->EntryCount++;
+
+        // Update parent pointer of the new child
+        var childPage = GetPage(rightChildPageId);
+        childPage->ParentPageId = page->PageId;
+        FlushPage(childPage);
+
+        FlushPage(page);
+
+        return default; // No split
+    }
+
+    private SplitResult SplitInternalPage(TemporalBTreePage* page, TemporalKey key, long rightChildPageId)
+    {
+        // Allocate new page for right half
+        var newPageId = AllocatePage();
+        var newPage = GetPage(newPageId);
+
+        newPage->PageId = newPageId;
+        newPage->IsLeaf = false;
+        newPage->EntryCount = 0;
+        newPage->ParentPageId = page->ParentPageId;
+        newPage->NextLeaf = 0; // Will be set to leftmost child of right page
+
+        // Split entries at midpoint
+        var midPoint = NodeDegree / 2;
+
+        // The middle key will be promoted, not copied to right page
+        var promotedKey = page->GetEntry(midPoint).Key;
+
+        // Copy entries after midpoint to new page
+        // Note: for internal nodes, the child pointer of entry[midPoint] becomes
+        // the leftmost child of the new page
+        newPage->NextLeaf = page->GetEntry(midPoint).ChildOrValue; // Leftmost child of right page
+
+        for (int i = midPoint + 1; i < page->EntryCount; i++)
+        {
+            newPage->GetEntry(i - midPoint - 1) = page->GetEntry(i);
+        }
+
+        newPage->EntryCount = (short)(page->EntryCount - midPoint - 1);
+        page->EntryCount = (short)midPoint;
+
+        // Update parent pointers for moved children
+        // Update leftmost child of new page
+        var leftmostChild = GetPage(newPage->NextLeaf);
+        leftmostChild->ParentPageId = newPageId;
+        FlushPage(leftmostChild);
+
+        for (int i = 0; i < newPage->EntryCount; i++)
+        {
+            var childId = newPage->GetEntry(i).ChildOrValue;
+            var child = GetPage(childId);
+            child->ParentPageId = newPageId;
+            FlushPage(child);
+        }
+
+        // Insert the new key into the appropriate page
+        if (key.CompareTo(promotedKey) < 0)
+        {
+            InsertIntoInternal(page, key, rightChildPageId);
+        }
+        else
+        {
+            InsertIntoInternal(newPage, key, rightChildPageId);
+        }
+
+        FlushPage(page);
+        FlushPage(newPage);
+
+        // Return split result for parent to handle
+        return new SplitResult
+        {
+            DidSplit = true,
+            PromotedKey = promotedKey,
+            NewRightPageId = newPageId
+        };
     }
 
     private long AllocatePage()
     {
-        var pageId = _nextPageId++;
-        
+        var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
+
         // Extend file if needed
         var requiredSize = (pageId + 1) * PageSize;
         if (requiredSize > _fileStream.Length)
@@ -587,33 +806,41 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long FindChildPage(TemporalBTreePage* page, TemporalKey key)
     {
+        // Binary search to find the correct child pointer
+        // Internal node layout:
+        //   NextLeaf = leftmost child (for keys < entry[0].Key)
+        //   entry[i].Key = separator key
+        //   entry[i].ChildOrValue = right child of separator key
+
         int left = 0;
         int right = page->EntryCount - 1;
-        
+
         while (left <= right)
         {
             int mid = left + (right - left) / 2;
             ref var entry = ref page->GetEntry(mid);
-            
+
             var cmp = key.CompareTo(entry.Key);
             if (cmp < 0)
                 right = mid - 1;
             else
                 left = mid + 1;
         }
-        
+
+        // If key < all separator keys, use leftmost child (stored in NextLeaf)
         if (right < 0)
-            return page->GetEntry(0).ChildOrValue;
-        
+            return page->NextLeaf;
+
+        // Otherwise use the child pointer of the found separator
         return page->GetEntry(right).ChildOrValue;
     }
 
     private static TemporalKey CreateSearchKey(
-        int subject, int predicate, int obj,
+        long subject, long predicate, long obj,
         TemporalQuery query,
         bool isMin)
     {
-        var unboundValue = isMin ? 0 : int.MaxValue;
+        var unboundValue = isMin ? 0L : long.MaxValue;
         var unboundTime = isMin ? 0L : long.MaxValue;
         
         return new TemporalKey
@@ -678,7 +905,8 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         _accessor?.Dispose();
         _mmapFile?.Dispose();
         _fileStream?.Dispose();
-        _atoms?.Dispose();
+        if (_ownsAtomStore)
+            _atoms?.Dispose();
         _pageCache?.Dispose();
     }
 
@@ -708,9 +936,9 @@ public enum TemporalQueryType
 /// </summary>
 public struct TemporalTriple
 {
-    public int SubjectAtom;
-    public int PredicateAtom;
-    public int ObjectAtom;
+    public long SubjectAtom;    // 64-bit for TB-scale
+    public long PredicateAtom;  // 64-bit for TB-scale
+    public long ObjectAtom;     // 64-bit for TB-scale
     public long ValidFrom;
     public long ValidTo;
     public long TransactionTime;

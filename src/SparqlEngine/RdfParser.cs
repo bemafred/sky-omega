@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
+using SparqlEngine.Temporal;
 
 namespace SparqlEngine;
 
@@ -22,7 +23,7 @@ public ref struct NTriplesParser
     /// <summary>
     /// Parse N-Triples format and add to store without intermediate allocations
     /// </summary>
-    public void Parse(StreamingTripleStore store)
+    public void Parse(MultiTemporalStore store)
     {
         while (!IsAtEnd())
         {
@@ -35,18 +36,18 @@ public ref struct NTriplesParser
 
             var subject = ParseSubject();
             SkipWhitespace();
-            
+
             var predicate = ParsePredicate();
             SkipWhitespace();
-            
+
             var obj = ParseObject();
             SkipWhitespace();
-            
+
             if (Peek() != '.')
                 throw new ParseException("Expected '.' at end of triple");
             Advance();
-            
-            store.Add(subject, predicate, obj);
+
+            store.AddCurrent(subject, predicate, obj);
             SkipWhitespace();
         }
     }
@@ -58,7 +59,7 @@ public ref struct NTriplesParser
             return ParseIriRef();
         if (ch == '_')
             return ParseBlankNode();
-        
+
         throw new ParseException("Expected IRI or blank node for subject");
     }
 
@@ -66,7 +67,7 @@ public ref struct NTriplesParser
     {
         if (Peek() != '<')
             throw new ParseException("Expected IRI for predicate");
-        
+
         return ParseIriRef();
     }
 
@@ -79,7 +80,7 @@ public ref struct NTriplesParser
             return ParseBlankNode();
         if (ch == '"')
             return ParseLiteral();
-        
+
         throw new ParseException("Expected IRI, blank node, or literal for object");
     }
 
@@ -87,10 +88,10 @@ public ref struct NTriplesParser
     {
         if (Peek() != '<')
             throw new ParseException("Expected '<'");
-        
+
         var start = _position;
         Advance(); // Skip '<'
-        
+
         while (!IsAtEnd() && Peek() != '>')
         {
             if (Peek() == '\\')
@@ -104,10 +105,10 @@ public ref struct NTriplesParser
                 Advance();
             }
         }
-        
+
         if (IsAtEnd())
             throw new ParseException("Unterminated IRI reference");
-        
+
         Advance(); // Skip '>'
         return _source[start.._position];
     }
@@ -116,14 +117,14 @@ public ref struct NTriplesParser
     {
         if (Peek() != '_' || PeekNext() != ':')
             throw new ParseException("Expected blank node '_:'");
-        
+
         var start = _position;
         Advance(); // '_'
         Advance(); // ':'
-        
+
         while (!IsAtEnd() && !IsWhitespace(Peek()) && Peek() != '.')
             Advance();
-        
+
         return _source[start.._position];
     }
 
@@ -131,10 +132,10 @@ public ref struct NTriplesParser
     {
         if (Peek() != '"')
             throw new ParseException("Expected '\"'");
-        
+
         var start = _position;
         Advance(); // Skip opening '"'
-        
+
         while (!IsAtEnd())
         {
             var ch = Peek();
@@ -154,7 +155,7 @@ public ref struct NTriplesParser
                 Advance();
             }
         }
-        
+
         // Handle optional language tag or datatype
         if (!IsAtEnd())
         {
@@ -180,7 +181,7 @@ public ref struct NTriplesParser
                 }
             }
         }
-        
+
         return _source[start.._position];
     }
 
@@ -219,7 +220,7 @@ public ref struct NTriplesParser
 /// <summary>
 /// Streaming file parser that processes RDF data in chunks
 /// </summary>
-public sealed class StreamingRdfLoader
+public sealed class StreamingRdfLoader : IDisposable
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private readonly char[] _buffer;
@@ -234,20 +235,20 @@ public sealed class StreamingRdfLoader
     /// <summary>
     /// Load N-Triples file without loading entire file into memory
     /// </summary>
-    public void LoadNTriples(string filePath, StreamingTripleStore store)
+    public void LoadNTriples(string filePath, MultiTemporalStore store)
     {
         using var reader = new StreamReader(filePath);
         var lineBuffer = _pool.Rent(8192);
-        
+
         try
         {
             int lineLength = 0;
             bool inLiteral = false;
-            
+
             while (!reader.EndOfStream)
             {
                 var ch = (char)reader.Read();
-                
+
                 if (lineLength >= lineBuffer.Length)
                 {
                     // Resize buffer
@@ -256,15 +257,15 @@ public sealed class StreamingRdfLoader
                     _pool.Return(lineBuffer);
                     lineBuffer = newBuffer;
                 }
-                
+
                 lineBuffer[lineLength++] = ch;
-                
+
                 // Track if we're inside a literal
                 if (ch == '"' && (lineLength < 2 || lineBuffer[lineLength - 2] != '\\'))
                 {
                     inLiteral = !inLiteral;
                 }
-                
+
                 // End of triple (not inside literal)
                 if (ch == '.' && !inLiteral)
                 {
@@ -275,24 +276,21 @@ public sealed class StreamingRdfLoader
                     try
                     {
                         // Parse subject
-                        SkipWhitespace(ref line, ref parser);
                         var subject = parser.ParseSubject();
 
                         // Parse predicate
-                        SkipWhitespace(ref line, ref parser);
                         var predicate = parser.ParsePredicate();
 
                         // Parse object
-                        SkipWhitespace(ref line, ref parser);
                         var obj = parser.ParseObject();
 
-                        store.Add(subject, predicate, obj);
+                        store.AddCurrent(subject, predicate, obj);
                     }
                     catch
                     {
                         // Skip malformed triples
                     }
-                    
+
                     lineLength = 0;
                 }
             }
@@ -301,11 +299,6 @@ public sealed class StreamingRdfLoader
         {
             _pool.Return(lineBuffer);
         }
-    }
-
-    private static void SkipWhitespace(ref ReadOnlySpan<char> span, ref NTriplesParser parser)
-    {
-        // Helper for whitespace skipping
     }
 
     public void Dispose()
