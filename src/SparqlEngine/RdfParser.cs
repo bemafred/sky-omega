@@ -51,7 +51,7 @@ public ref struct NTriplesParser
         }
     }
 
-    private ReadOnlySpan<char> ParseSubject()
+    public ReadOnlySpan<char> ParseSubject()
     {
         var ch = Peek();
         if (ch == '<')
@@ -62,7 +62,7 @@ public ref struct NTriplesParser
         throw new ParseException("Expected IRI or blank node for subject");
     }
 
-    private ReadOnlySpan<char> ParsePredicate()
+    public ReadOnlySpan<char> ParsePredicate()
     {
         if (Peek() != '<')
             throw new ParseException("Expected IRI for predicate");
@@ -70,7 +70,7 @@ public ref struct NTriplesParser
         return ParseIriRef();
     }
 
-    private ReadOnlySpan<char> ParseObject()
+    public ReadOnlySpan<char> ParseObject()
     {
         var ch = Peek();
         if (ch == '<')
@@ -269,23 +269,23 @@ public sealed class StreamingRdfLoader
                 if (ch == '.' && !inLiteral)
                 {
                     // Parse the complete triple
-                    var line = lineBuffer.AsSpan(0, lineLength);
+                    ReadOnlySpan<char> line = lineBuffer.AsSpan(0, lineLength);
                     var parser = new NTriplesParser(line);
-                    
+
                     try
                     {
                         // Parse subject
                         SkipWhitespace(ref line, ref parser);
                         var subject = parser.ParseSubject();
-                        
+
                         // Parse predicate
                         SkipWhitespace(ref line, ref parser);
                         var predicate = parser.ParsePredicate();
-                        
+
                         // Parse object
                         SkipWhitespace(ref line, ref parser);
                         var obj = parser.ParseObject();
-                        
+
                         store.Add(subject, predicate, obj);
                     }
                     catch

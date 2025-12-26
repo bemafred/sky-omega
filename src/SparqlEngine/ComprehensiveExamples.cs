@@ -82,15 +82,17 @@ public static class ComprehensiveExamples
         
         Console.WriteLine($"Query Type: {query.Type}");
         
-        // Execute
+        // Execute - zero-GC using stackalloc
+        ReadOnlySpan<char> resourceSource = "<http://ex.org/alice>";
         Span<ResourceDescriptor> resources = stackalloc ResourceDescriptor[1];
         resources[0] = new ResourceDescriptor
         {
             IsVariable = false,
-            ResourceUri = "<http://ex.org/alice>"
+            ResourceUriStart = 0,
+            ResourceUriLength = resourceSource.Length
         };
-        
-        var executor = new DescribeQueryExecutor(store, resources);
+
+        var executor = new DescribeQueryExecutor(store, resources, resourceSource);
         var results = executor.Execute();
         
         Console.WriteLine("\nDescription of resource:");
@@ -278,10 +280,12 @@ public static class ComprehensiveExamples
         store.Add("<http://ex.org/bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://ex.org/charlie>");
         store.Add("<http://ex.org/charlie>", "<http://xmlns.com/foaf/0.1/knows>", "<http://ex.org/diana>");
 
-        // Build property path: knows+
-        var pathBuilder = PropertyPathBuilder.Create();
+        // Build property path: knows+ (zero-GC using stackalloc)
+        ReadOnlySpan<char> pathSource = "<http://xmlns.com/foaf/0.1/knows>";
+        Span<PropertyPathNode> nodePool = stackalloc PropertyPathNode[16];
+        var pathBuilder = PropertyPathBuilder.Create(nodePool, pathSource);
         var path = pathBuilder
-            .Predicate("<http://xmlns.com/foaf/0.1/knows>")
+            .Predicate(0, pathSource.Length)
             .OneOrMore()
             .Build();
         

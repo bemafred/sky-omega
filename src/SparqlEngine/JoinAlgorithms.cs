@@ -252,7 +252,7 @@ public readonly ref struct JoinResult
     public readonly TripleRef Left;
     public readonly TripleRef Right;
 
-    public JoinResult(in TripleRef left, in TripleRef right)
+    public JoinResult(TripleRef left, TripleRef right)
     {
         Left = left;
         Right = right;

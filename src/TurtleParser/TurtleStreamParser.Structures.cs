@@ -12,7 +12,7 @@ public sealed partial class TurtleStreamParser
     /// <summary>
     /// [3] directive ::= prefixID | base | version | sparqlPrefix | sparqlBase | sparqlVersion
     /// </summary>
-    private async ValueTask<bool> TryParseDirectiveAsync(CancellationToken cancellationToken)
+    private async ValueTask<bool> TryParseDirectiveAsync(CancellationToken cancellationToken) // TODO: Async? Why?
     {
         SkipWhitespaceAndComments();
         
@@ -147,13 +147,14 @@ public sealed partial class TurtleStreamParser
         
         // Currently we just note the version but don't enforce behavior
         // A real implementation might validate features based on version
+
+        if (!requireDot) 
+            return;
         
-        if (requireDot)
-        {
-            SkipWhitespaceAndComments();
-            if (!TryConsume('.'))
-                throw ParserException("Expected '.' after @version directive");
-        }
+        SkipWhitespaceAndComments();
+
+        if (!TryConsume('.'))
+            throw ParserException("Expected '.' after @version directive");
     }
     
     /// <summary>
@@ -184,14 +185,19 @@ public sealed partial class TurtleStreamParser
         while (depth > 0)
         {
             var ch = Peek();
-            if (ch == -1)
-                throw ParserException("Unexpected end of input in blank node property list");
-            
-            if (ch == '[')
-                depth++;
-            else if (ch == ']')
-                depth--;
-            
+
+            switch (ch)
+            {
+                case -1:
+                    throw ParserException("Unexpected end of input in blank node property list");
+                case '[':
+                    depth++;
+                    break;
+                case ']':
+                    depth--;
+                    break;
+            }
+
             Consume();
         }
         
@@ -277,6 +283,7 @@ public sealed partial class TurtleStreamParser
         
         // Optional reifier: ~ iri/blankNode
         string? reifier = null;
+
         if (TryConsume('~'))
         {
             SkipWhitespaceAndComments();

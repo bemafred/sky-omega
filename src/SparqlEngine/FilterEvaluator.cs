@@ -21,32 +21,32 @@ public ref struct FilterEvaluator
     /// <summary>
     /// Evaluate FILTER expression against current bindings
     /// </summary>
-    public bool Evaluate(in BindingTable bindings)
+    public bool Evaluate(scoped BindingTable bindings)
     {
         _position = 0;
         return EvaluateExpression(bindings);
     }
 
-    private bool EvaluateExpression(in BindingTable bindings)
+    private bool EvaluateExpression(scoped BindingTable bindings)
     {
         SkipWhitespace();
-        
+
         // Parse relational expression
-        var left = ParseTerm(bindings);
+        scoped var left = ParseTerm(bindings);
         SkipWhitespace();
-        
+
         if (IsAtEnd())
             return CoerceToBool(left);
-        
+
         var op = ParseOperator();
         SkipWhitespace();
-        
-        var right = ParseTerm(bindings);
-        
+
+        scoped var right = ParseTerm(bindings);
+
         return EvaluateComparison(left, op, right);
     }
 
-    private Value ParseTerm(in BindingTable bindings)
+    private Value ParseTerm(scoped BindingTable bindings)
     {
         SkipWhitespace();
         
@@ -79,7 +79,7 @@ public ref struct FilterEvaluator
         return new Value { Type = ValueType.Unbound };
     }
 
-    private Value ParseVariable(in BindingTable bindings)
+    private Value ParseVariable(scoped BindingTable bindings)
     {
         Advance(); // Skip '?'
         var start = _position;
@@ -151,7 +151,7 @@ public ref struct FilterEvaluator
         return new Value { Type = ValueType.Unbound };
     }
 
-    private Value ParseFunctionCall(in BindingTable bindings)
+    private Value ParseFunctionCall(scoped BindingTable bindings)
     {
         var start = _position;
         
@@ -262,7 +262,7 @@ public ref struct FilterEvaluator
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool EvaluateComparison(in Value left, ComparisonOperator op, in Value right)
+    private bool EvaluateComparison(scoped Value left, ComparisonOperator op, scoped Value right)
     {
         // Type coercion for comparisons
         if (left.Type == ValueType.Unbound || right.Type == ValueType.Unbound)

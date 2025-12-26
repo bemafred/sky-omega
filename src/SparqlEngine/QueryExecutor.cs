@@ -98,15 +98,11 @@ public ref struct ResultStream
         {
             if (_isAsk)
             {
-                return new Solution { IsAskResult = true, AskResult = _hasResults };
+                return new Solution(true, _hasResults);
             }
-            
+
             var triple = _enumerator.Current;
-            return new Solution
-            {
-                IsAskResult = false,
-                Triple = triple
-            };
+            return new Solution(false, false, triple);
         }
     }
 
@@ -121,6 +117,13 @@ public readonly ref struct Solution
     public readonly bool IsAskResult;
     public readonly bool AskResult;
     public readonly TripleRef Triple;
+
+    public Solution(bool isAskResult, bool askResult, TripleRef triple = default)
+    {
+        IsAskResult = isAskResult;
+        AskResult = askResult;
+        Triple = triple;
+    }
 }
 
 /// <summary>
@@ -183,9 +186,12 @@ public ref struct BindingTable
     }
 
     public readonly int Count => _count;
-    
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public readonly ref Binding this[int index] => ref _bindings[index];
+
+    public readonly ref Binding this[int index]
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ref _bindings[index];
+    }
 }
 
 /// <summary>

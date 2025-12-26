@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -296,12 +298,11 @@ public ref struct MultiIndexEnumerator
                     break;
             }
             
-            return new ResolvedTriple
-            {
-                Subject = _atoms.GetAtomString(s),
-                Predicate = _atoms.GetAtomString(p),
-                Object = _atoms.GetAtomString(o)
-            };
+            return new ResolvedTriple(
+                _atoms.GetAtomString(s),
+                _atoms.GetAtomString(p),
+                _atoms.GetAtomString(o)
+            );
         }
     }
 
@@ -320,4 +321,11 @@ public readonly ref struct ResolvedTriple
     public readonly ReadOnlySpan<char> Subject;
     public readonly ReadOnlySpan<char> Predicate;
     public readonly ReadOnlySpan<char> Object;
+
+    public ResolvedTriple(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+    {
+        Subject = subject;
+        Predicate = predicate;
+        Object = obj;
+    }
 }

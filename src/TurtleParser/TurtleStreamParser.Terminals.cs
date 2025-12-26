@@ -18,13 +18,11 @@ public sealed partial class TurtleStreamParser
         SkipWhitespaceAndComments();
         
         var ch = Peek();
-        
+
         // IRIREF: <...>
-        if (ch == '<')
-            return ParseIriRef();
-        
-        // PrefixedName
-        return ParsePrefixedName();
+        return ch == '<' ? ParseIriRef() :
+            // PrefixedName
+            ParsePrefixedName();
     }
     
     /// <summary>

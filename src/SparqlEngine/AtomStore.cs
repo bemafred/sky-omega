@@ -17,7 +17,7 @@ public sealed unsafe class AtomStore : IDisposable
 {
     private const int PageSize = 4096; // 4KB pages
     private const int HashTableSize = 1 << 20; // 1M buckets
-    private const int InitialDataSize = 1L << 30; // 1GB initial
+    private const long InitialDataSize = 1L << 30; // 1GB initial
     
     // Memory-mapped files
     private readonly FileStream _dataFile;

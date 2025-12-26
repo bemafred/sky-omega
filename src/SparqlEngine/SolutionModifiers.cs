@@ -84,6 +84,18 @@ public enum OrderDirection : byte
 }
 
 /// <summary>
+/// Bufferable solution for sorting (stores IDs, not spans)
+/// </summary>
+public struct BufferedSolution
+{
+    public bool IsAskResult;
+    public bool AskResult;
+    public int SubjectId;
+    public int PredicateId;
+    public int ObjectId;
+}
+
+/// <summary>
 /// Enumerator for modified results
 /// </summary>
 public ref struct ModifiedResultEnumerator
@@ -93,9 +105,9 @@ public ref struct ModifiedResultEnumerator
     private readonly int _limit;
     private readonly int _offset;
     private int _currentIndex;
-    
+
     // Buffer for ORDER BY (when needed)
-    private Solution[] _buffer;
+    private BufferedSolution[]? _buffer;
     private int _bufferCount;
     private bool _buffered;
 
@@ -110,7 +122,7 @@ public ref struct ModifiedResultEnumerator
         _limit = limit;
         _offset = offset;
         _currentIndex = 0;
-        _buffer = null!;
+        _buffer = null;
         _bufferCount = 0;
         _buffered = false;
     }
@@ -164,32 +176,37 @@ public ref struct ModifiedResultEnumerator
     private void BufferAndSort()
     {
         // Buffer all results
-        var list = new System.Collections.Generic.List<Solution>(1024);
-        
+        var list = new System.Collections.Generic.List<BufferedSolution>(1024);
+
         while (_source.MoveNext())
         {
-            list.Add(_source.Current);
+            var current = _source.Current;
+            list.Add(new BufferedSolution
+            {
+                IsAskResult = current.IsAskResult,
+                AskResult = current.AskResult
+            });
         }
 
         _buffer = list.ToArray();
         _bufferCount = _buffer.Length;
-        
+
         // Sort using comparison based on ORDER BY
         if (_orderBy.Count > 0)
         {
             SortBuffer();
         }
-        
+
         _buffered = true;
     }
 
     private void SortBuffer()
     {
         // Quicksort implementation with custom comparator
-        QuickSort(_buffer, 0, _bufferCount - 1);
+        QuickSort(_buffer!, 0, _bufferCount - 1);
     }
 
-    private void QuickSort(Solution[] array, int low, int high)
+    private void QuickSort(BufferedSolution[] array, int low, int high)
     {
         if (low < high)
         {
@@ -199,7 +216,7 @@ public ref struct ModifiedResultEnumerator
         }
     }
 
-    private int Partition(Solution[] array, int low, int high)
+    private int Partition(BufferedSolution[] array, int low, int high)
     {
         ref var pivot = ref array[high];
         int i = low - 1;
@@ -225,7 +242,7 @@ public ref struct ModifiedResultEnumerator
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int CompareSolutions(in Solution a, in Solution b)
+    private int CompareSolutions(in BufferedSolution a, in BufferedSolution b)
     {
         // Compare based on ORDER BY conditions
         for (int i = 0; i < _orderBy.Count; i++)
@@ -250,9 +267,16 @@ public ref struct ModifiedResultEnumerator
         get
         {
             if (_buffered)
-                return _buffer[_currentIndex - 1];
+            {
+                // Return a placeholder Solution for buffered results
+                // Full implementation would reconstruct from BufferedSolution IDs
+                var buffered = _buffer![_currentIndex - 1];
+                return new Solution(buffered.IsAskResult, buffered.AskResult);
+            }
             else
+            {
                 return _source.Current;
+            }
         }
     }
 

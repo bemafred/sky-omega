@@ -64,8 +64,8 @@ public ref struct ConstructResultEnumerator
 
     internal ConstructResultEnumerator(
         StreamingTripleStore store,
-        in ConstructTemplate template,
-        in WhereClause whereClause)
+        ConstructTemplate template,
+        WhereClause whereClause)
     {
         _store = store;
         _template = template;
@@ -106,13 +106,16 @@ public ref struct DescribeQueryExecutor
 {
     private readonly StreamingTripleStore _store;
     private readonly Span<ResourceDescriptor> _resources;
+    private readonly ReadOnlySpan<char> _source;  // Source for resolving URI offsets
 
     public DescribeQueryExecutor(
         StreamingTripleStore store,
-        Span<ResourceDescriptor> resources)
+        Span<ResourceDescriptor> resources,
+        ReadOnlySpan<char> source = default)
     {
         _store = store;
         _resources = resources;
+        _source = source;
     }
 
     /// <summary>
@@ -120,18 +123,19 @@ public ref struct DescribeQueryExecutor
     /// </summary>
     public DescribeResultEnumerator Execute()
     {
-        return new DescribeResultEnumerator(_store, _resources);
+        return new DescribeResultEnumerator(_store, _resources, _source);
     }
 }
 
 /// <summary>
-/// Resource descriptor for DESCRIBE queries
+/// Resource descriptor for DESCRIBE queries - zero-GC using offsets
 /// </summary>
 public struct ResourceDescriptor
 {
     public bool IsVariable;
     public int ResourceId;
-    public ReadOnlySpan<char> ResourceUri;
+    public int ResourceUriStart;   // Start offset in source span
+    public int ResourceUriLength;  // Length in source span
 }
 
 /// <summary>
@@ -141,16 +145,19 @@ public ref struct DescribeResultEnumerator
 {
     private readonly StreamingTripleStore _store;
     private readonly Span<ResourceDescriptor> _resources;
+    private readonly ReadOnlySpan<char> _source;  // Source for resolving URI offsets
     private int _currentResourceIndex;
     private StreamingTripleStore.TripleEnumerator _currentEnumerator;
     private bool _initialized;
 
     internal DescribeResultEnumerator(
         StreamingTripleStore store,
-        Span<ResourceDescriptor> resources)
+        Span<ResourceDescriptor> resources,
+        ReadOnlySpan<char> source)
     {
         _store = store;
         _resources = resources;
+        _source = source;
         _currentResourceIndex = 0;
         _initialized = false;
     }
@@ -166,8 +173,9 @@ public ref struct DescribeResultEnumerator
                 
                 // Query triples where resource is subject
                 ref readonly var resource = ref _resources[_currentResourceIndex];
+                var resourceUri = _source.Slice(resource.ResourceUriStart, resource.ResourceUriLength);
                 _currentEnumerator = _store.Query(
-                    resource.ResourceUri,
+                    resourceUri,
                     ReadOnlySpan<char>.Empty,
                     ReadOnlySpan<char>.Empty
                 );
@@ -228,12 +236,11 @@ public ref struct OptionalMatcher
         get
         {
             var required = _requiredEnumerator.Current;
-            return new OptionalResult
-            {
-                Required = required,
-                HasOptional = _hasOptionalMatch,
-                Optional = _hasOptionalMatch ? required : default
-            };
+            return new OptionalResult(
+                required,
+                _hasOptionalMatch,
+                _hasOptionalMatch ? required : default
+            );
         }
     }
 }
@@ -246,6 +253,13 @@ public readonly ref struct OptionalResult
     public readonly TripleRef Required;
     public readonly bool HasOptional;
     public readonly TripleRef Optional;
+
+    public OptionalResult(TripleRef required, bool hasOptional, TripleRef optional = default)
+    {
+        Required = required;
+        HasOptional = hasOptional;
+        Optional = optional;
+    }
 }
 
 /// <summary>

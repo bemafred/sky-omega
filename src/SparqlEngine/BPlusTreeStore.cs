@@ -241,7 +241,7 @@ public sealed unsafe class BPlusTreeStore : IDisposable
     /// SPO order: Subject-Predicate-Object
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private struct CompositeKey : IComparable<CompositeKey>
+    internal struct CompositeKey : IComparable<CompositeKey>
     {
         public int SubjectAtom;
         public int PredicateAtom;
@@ -296,7 +296,7 @@ public sealed unsafe class BPlusTreeStore : IDisposable
     {
         // Check cache first
         if (_pageCache.TryGet(pageId, out var cachedPtr))
-            return cachedPtr;
+            return (BTreePage*)cachedPtr;
         
         // Memory-map page directly
         byte* ptr = null;

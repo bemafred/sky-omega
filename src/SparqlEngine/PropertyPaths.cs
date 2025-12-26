@@ -36,20 +36,52 @@ public ref struct PropertyPathEvaluator
 }
 
 /// <summary>
-/// Property path specification
+/// Property path node - stored in a flat array pool
+/// Uses indices instead of references to avoid cycles and heap allocation
 /// </summary>
-public struct PropertyPath
+public struct PropertyPathNode
 {
     public PropertyPathType Type;
-    public ReadOnlySpan<char> PredicateUri;
-    
-    // For composite paths
-    public PropertyPath LeftPath;
-    public PropertyPath RightPath;
-    
-    // For quantified paths
+    public int PredicateUriStart;   // Start offset in source span
+    public int PredicateUriLength;  // Length in source span
+    public int LeftPathIndex;       // -1 if none
+    public int RightPathIndex;      // -1 if none
     public int MinOccurrences;
-    public int MaxOccurrences; // -1 for unbounded
+    public int MaxOccurrences;      // -1 for unbounded
+}
+
+/// <summary>
+/// Property path specification - zero-GC using indices into node pool
+/// </summary>
+public ref struct PropertyPath
+{
+    public int RootIndex;
+    public Span<PropertyPathNode> Nodes;
+    public ReadOnlySpan<char> Source;  // Original source for URI slices
+    public int NodeCount;
+
+    public PropertyPath(Span<PropertyPathNode> nodes, ReadOnlySpan<char> source)
+    {
+        Nodes = nodes;
+        Source = source;
+        RootIndex = 0;
+        NodeCount = 0;
+    }
+
+    public readonly ref PropertyPathNode Root => ref Nodes[RootIndex];
+
+    public readonly ReadOnlySpan<char> GetPredicateUri(int nodeIndex)
+    {
+        ref readonly var node = ref Nodes[nodeIndex];
+        return Source.Slice(node.PredicateUriStart, node.PredicateUriLength);
+    }
+
+    public int AddNode(PropertyPathNode node)
+    {
+        var index = NodeCount++;
+        Nodes[index] = node;
+        return index;
+    }
 }
 
 public enum PropertyPathType
@@ -79,18 +111,18 @@ public enum PropertyPathType
 public ref struct PropertyPathResultEnumerator
 {
     private readonly StreamingTripleStore _store;
-    private readonly PropertyPath _path;
+    private PropertyPath _path;
     private readonly ReadOnlySpan<char> _startNode;
     private readonly ReadOnlySpan<char> _endNode;
-    
+
     // Current state
     private StreamingTripleStore.TripleEnumerator _currentEnumerator;
     private bool _initialized;
-    
+
     // For recursive evaluation (*, +)
     private unsafe fixed byte _visitedNodes[4096]; // Bitset for visited nodes
     private int _visitedCount;
-    
+
     // Stack for path exploration (max depth 32)
     private unsafe fixed long _pathStack[64]; // Node pairs
     private int _stackDepth;
@@ -110,6 +142,8 @@ public ref struct PropertyPathResultEnumerator
         _stackDepth = 0;
     }
 
+    private readonly ref PropertyPathNode RootNode => ref _path.Nodes[_path.RootIndex];
+
     public bool MoveNext()
     {
         if (!_initialized)
@@ -118,7 +152,7 @@ public ref struct PropertyPathResultEnumerator
             _initialized = true;
         }
 
-        return _path.Type switch
+        return RootNode.Type switch
         {
             PropertyPathType.Predicate => EvaluatePredicate(),
             PropertyPathType.Inverse => EvaluateInverse(),
@@ -135,11 +169,12 @@ public ref struct PropertyPathResultEnumerator
     private void InitializeEvaluation()
     {
         // Initialize based on path type
-        if (_path.Type == PropertyPathType.Predicate)
+        ref readonly var root = ref RootNode;
+        if (root.Type == PropertyPathType.Predicate)
         {
             _currentEnumerator = _store.Query(
                 _startNode,
-                _path.PredicateUri,
+                _path.GetPredicateUri(_path.RootIndex),
                 _endNode
             );
         }
@@ -156,14 +191,16 @@ public ref struct PropertyPathResultEnumerator
         // Query with subject/object swapped
         if (!_initialized)
         {
+            ref readonly var root = ref RootNode;
+            var predicateIndex = root.LeftPathIndex >= 0 ? root.LeftPathIndex : _path.RootIndex;
             _currentEnumerator = _store.Query(
                 _endNode,
-                _path.PredicateUri,
+                _path.GetPredicateUri(predicateIndex),
                 _startNode
             );
             _initialized = true;
         }
-        
+
         return _currentEnumerator.MoveNext();
     }
 
@@ -272,12 +309,7 @@ public ref struct PropertyPathResultEnumerator
         get
         {
             var triple = _currentEnumerator.Current;
-            return new PathResult
-            {
-                StartNode = triple.Subject,
-                EndNode = triple.Object,
-                PathLength = 1
-            };
+            return new PathResult(triple.Subject, triple.Object, 1);
         }
     }
 
@@ -292,92 +324,137 @@ public readonly ref struct PathResult
     public readonly ReadOnlySpan<char> StartNode;
     public readonly ReadOnlySpan<char> EndNode;
     public readonly int PathLength;
+
+    public PathResult(ReadOnlySpan<char> startNode, ReadOnlySpan<char> endNode, int pathLength)
+    {
+        StartNode = startNode;
+        EndNode = endNode;
+        PathLength = pathLength;
+    }
 }
 
 /// <summary>
-/// Property path builder for fluent API
+/// Property path builder for fluent API - zero-GC using stack-allocated node pool
 /// </summary>
 public ref struct PropertyPathBuilder
 {
     private PropertyPath _path;
+    private int _currentNodeIndex;
 
-    public static PropertyPathBuilder Create()
+    public static PropertyPathBuilder Create(Span<PropertyPathNode> nodePool, ReadOnlySpan<char> source)
     {
-        return new PropertyPathBuilder();
+        return new PropertyPathBuilder
+        {
+            _path = new PropertyPath(nodePool, source),
+            _currentNodeIndex = -1
+        };
     }
 
-    public PropertyPathBuilder Predicate(ReadOnlySpan<char> uri)
+    public PropertyPathBuilder Predicate(int uriStart, int uriLength)
     {
-        _path = new PropertyPath
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.Predicate,
-            PredicateUri = uri
-        };
+            PredicateUriStart = uriStart,
+            PredicateUriLength = uriLength,
+            LeftPathIndex = -1,
+            RightPathIndex = -1,
+            MaxOccurrences = 1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
-    public PropertyPathBuilder Inverse(ReadOnlySpan<char> uri)
+    public PropertyPathBuilder Inverse(int uriStart, int uriLength)
     {
-        _path = new PropertyPath
+        var baseIndex = _path.AddNode(new PropertyPathNode
+        {
+            Type = PropertyPathType.Predicate,
+            PredicateUriStart = uriStart,
+            PredicateUriLength = uriLength,
+            LeftPathIndex = -1,
+            RightPathIndex = -1,
+            MaxOccurrences = 1
+        });
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.Inverse,
-            PredicateUri = uri
-        };
+            LeftPathIndex = baseIndex,
+            RightPathIndex = -1,
+            MaxOccurrences = 1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
-    public PropertyPathBuilder Sequence(PropertyPath left, PropertyPath right)
+    public PropertyPathBuilder Sequence(int leftIndex, int rightIndex)
     {
-        _path = new PropertyPath
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.Sequence,
-            LeftPath = left,
-            RightPath = right
-        };
+            LeftPathIndex = leftIndex,
+            RightPathIndex = rightIndex,
+            MaxOccurrences = 1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
-    public PropertyPathBuilder Alternative(PropertyPath left, PropertyPath right)
+    public PropertyPathBuilder Alternative(int leftIndex, int rightIndex)
     {
-        _path = new PropertyPath
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.Alternative,
-            LeftPath = left,
-            RightPath = right
-        };
+            LeftPathIndex = leftIndex,
+            RightPathIndex = rightIndex,
+            MaxOccurrences = 1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
     public PropertyPathBuilder ZeroOrMore()
     {
-        var basePath = _path;
-        _path = new PropertyPath
+        var baseIndex = _currentNodeIndex;
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.ZeroOrMore,
-            LeftPath = basePath
-        };
+            LeftPathIndex = baseIndex,
+            RightPathIndex = -1,
+            MinOccurrences = 0,
+            MaxOccurrences = -1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
     public PropertyPathBuilder OneOrMore()
     {
-        var basePath = _path;
-        _path = new PropertyPath
+        var baseIndex = _currentNodeIndex;
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.OneOrMore,
-            LeftPath = basePath
-        };
+            LeftPathIndex = baseIndex,
+            RightPathIndex = -1,
+            MinOccurrences = 1,
+            MaxOccurrences = -1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
     public PropertyPathBuilder ZeroOrOne()
     {
-        var basePath = _path;
-        _path = new PropertyPath
+        var baseIndex = _currentNodeIndex;
+        _currentNodeIndex = _path.AddNode(new PropertyPathNode
         {
             Type = PropertyPathType.ZeroOrOne,
-            LeftPath = basePath
-        };
+            LeftPathIndex = baseIndex,
+            RightPathIndex = -1,
+            MinOccurrences = 0,
+            MaxOccurrences = 1
+        });
+        _path.RootIndex = _currentNodeIndex;
         return this;
     }
 
@@ -385,130 +462,154 @@ public ref struct PropertyPathBuilder
 }
 
 /// <summary>
-/// Property path parser for SPARQL syntax
+/// Property path parser for SPARQL syntax - zero-GC using stack-allocated node pool
 /// </summary>
 public ref struct PropertyPathParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;
+    private PropertyPath _path;
 
-    public PropertyPathParser(ReadOnlySpan<char> source)
+    public PropertyPathParser(ReadOnlySpan<char> source, Span<PropertyPathNode> nodePool)
     {
         _source = source;
         _position = 0;
+        _path = new PropertyPath(nodePool, source);
     }
 
     public PropertyPath Parse()
     {
-        return ParseAlternative();
+        _path.RootIndex = ParseAlternative();
+        return _path;
     }
 
-    private PropertyPath ParseAlternative()
+    private int ParseAlternative()
     {
-        var left = ParseSequence();
-        
+        var leftIndex = ParseSequence();
+
         SkipWhitespace();
         if (Peek() == '|')
         {
             Advance(); // Skip '|'
-            var right = ParseAlternative();
-            
-            return new PropertyPath
+            var rightIndex = ParseAlternative();
+
+            return _path.AddNode(new PropertyPathNode
             {
                 Type = PropertyPathType.Alternative,
-                LeftPath = left,
-                RightPath = right
-            };
+                LeftPathIndex = leftIndex,
+                RightPathIndex = rightIndex,
+                MaxOccurrences = 1
+            });
         }
-        
-        return left;
+
+        return leftIndex;
     }
 
-    private PropertyPath ParseSequence()
+    private int ParseSequence()
     {
-        var left = ParsePrimary();
-        
+        var leftIndex = ParsePrimary();
+
         SkipWhitespace();
         if (Peek() == '/')
         {
             Advance(); // Skip '/'
-            var right = ParseSequence();
-            
-            return new PropertyPath
+            var rightIndex = ParseSequence();
+
+            return _path.AddNode(new PropertyPathNode
             {
                 Type = PropertyPathType.Sequence,
-                LeftPath = left,
-                RightPath = right
-            };
+                LeftPathIndex = leftIndex,
+                RightPathIndex = rightIndex,
+                MaxOccurrences = 1
+            });
         }
-        
-        return left;
+
+        return leftIndex;
     }
 
-    private PropertyPath ParsePrimary()
+    private int ParsePrimary()
     {
         SkipWhitespace();
-        
+
         var ch = Peek();
-        
+
         // Inverse path
         if (ch == '^')
         {
             Advance();
-            var basePath = ParsePrimary();
-            return new PropertyPath
+            var baseIndex = ParsePrimary();
+            return _path.AddNode(new PropertyPathNode
             {
                 Type = PropertyPathType.Inverse,
-                LeftPath = basePath
-            };
+                LeftPathIndex = baseIndex,
+                RightPathIndex = -1,
+                MaxOccurrences = 1
+            });
         }
-        
+
         // IRI
         if (ch == '<')
         {
-            var uri = ParseIri();
-            var path = new PropertyPath
+            var uriStart = _position;
+            ParseIri();
+            var uriLength = _position - uriStart;
+
+            var pathIndex = _path.AddNode(new PropertyPathNode
             {
                 Type = PropertyPathType.Predicate,
-                PredicateUri = uri
-            };
-            
+                PredicateUriStart = uriStart,
+                PredicateUriLength = uriLength,
+                LeftPathIndex = -1,
+                RightPathIndex = -1,
+                MaxOccurrences = 1
+            });
+
             // Check for quantifiers
             SkipWhitespace();
             ch = Peek();
-            
+
             if (ch == '*')
             {
                 Advance();
-                return new PropertyPath
+                return _path.AddNode(new PropertyPathNode
                 {
                     Type = PropertyPathType.ZeroOrMore,
-                    LeftPath = path
-                };
+                    LeftPathIndex = pathIndex,
+                    RightPathIndex = -1,
+                    MinOccurrences = 0,
+                    MaxOccurrences = -1
+                });
             }
             else if (ch == '+')
             {
                 Advance();
-                return new PropertyPath
+                return _path.AddNode(new PropertyPathNode
                 {
                     Type = PropertyPathType.OneOrMore,
-                    LeftPath = path
-                };
+                    LeftPathIndex = pathIndex,
+                    RightPathIndex = -1,
+                    MinOccurrences = 1,
+                    MaxOccurrences = -1
+                });
             }
             else if (ch == '?')
             {
                 Advance();
-                return new PropertyPath
+                return _path.AddNode(new PropertyPathNode
                 {
                     Type = PropertyPathType.ZeroOrOne,
-                    LeftPath = path
-                };
+                    LeftPathIndex = pathIndex,
+                    RightPathIndex = -1,
+                    MinOccurrences = 0,
+                    MaxOccurrences = 1
+                });
             }
-            
-            return path;
+
+            return pathIndex;
         }
-        
-        return default;
+
+        // Return -1 for invalid/empty
+        return -1;
     }
 
     private ReadOnlySpan<char> ParseIri()

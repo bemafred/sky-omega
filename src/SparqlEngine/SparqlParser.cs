@@ -13,8 +13,7 @@ public ref struct SparqlParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;
-    private readonly ref struct TokenStream _tokens;
-
+    
     public SparqlParser(ReadOnlySpan<char> source)
     {
         _source = source;
@@ -135,7 +134,10 @@ public ref struct SparqlParser
     {
         ConsumeKeyword("BASE");
         SkipWhitespace();
-        prologue.BaseUri = ParseIriRef();
+        var start = _position;
+        ParseIriRef();
+        prologue.BaseUriStart = start;
+        prologue.BaseUriLength = _position - start;
     }
 
     private void ParsePrefixDecl(ref Prologue prologue)
@@ -516,8 +518,9 @@ public struct Prologue
     private const int MaxPrefixes = 32;
     private int _prefixCount;
     private unsafe fixed byte _prefixData[2048]; // Inline storage
-    
-    public ReadOnlySpan<char> BaseUri;
+
+    public int BaseUriStart;   // Start offset in source span
+    public int BaseUriLength;  // Length in source span
 
     public void AddPrefix(ReadOnlySpan<char> prefix, ReadOnlySpan<char> iri)
     {
@@ -541,9 +544,7 @@ public struct WhereClause
 {
 }
 
-public struct SolutionModifier
-{
-}
+// SolutionModifier is defined in SolutionModifiers.cs
 
 public class SparqlParseException : Exception
 {

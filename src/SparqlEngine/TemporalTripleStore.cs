@@ -28,6 +28,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     
     private long _rootPageId;
     private long _nextPageId;
+    private long _tripleCount;
     private long _currentTransactionTime;
 
     public TemporalTripleStore(string filePath, long initialSizeBytes = 1L << 30)
@@ -230,7 +231,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     /// Sorted lexicographically for temporal range queries
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private struct TemporalKey : IComparable<TemporalKey>
+    internal struct TemporalKey : IComparable<TemporalKey>
     {
         public int SubjectAtom;
         public int PredicateAtom;

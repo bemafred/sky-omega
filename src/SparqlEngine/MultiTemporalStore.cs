@@ -121,6 +121,18 @@ public sealed class MultiTemporalStore : IDisposable
     }
 
     /// <summary>
+    /// Query as of a specific point in time (time-travel query)
+    /// </summary>
+    public TemporalResultEnumerator QueryAsOf(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset asOfTime)
+    {
+        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: asOfTime);
+    }
+
+    /// <summary>
     /// Query all versions (evolution over time)
     /// </summary>
     public TemporalResultEnumerator QueryEvolution(
@@ -276,15 +288,14 @@ public ref struct TemporalResultEnumerator
                     break;
             }
             
-            return new ResolvedTemporalTriple
-            {
-                Subject = _atoms.GetAtomString(s),
-                Predicate = _atoms.GetAtomString(p),
-                Object = _atoms.GetAtomString(o),
-                ValidFrom = DateTimeOffset.FromUnixTimeMilliseconds(triple.ValidFrom),
-                ValidTo = DateTimeOffset.FromUnixTimeMilliseconds(triple.ValidTo),
-                TransactionTime = DateTimeOffset.FromUnixTimeMilliseconds(triple.TransactionTime)
-            };
+            return new ResolvedTemporalTriple(
+                _atoms.GetAtomString(s),
+                _atoms.GetAtomString(p),
+                _atoms.GetAtomString(o),
+                DateTimeOffset.FromUnixTimeMilliseconds(triple.ValidFrom),
+                DateTimeOffset.FromUnixTimeMilliseconds(triple.ValidTo),
+                DateTimeOffset.FromUnixTimeMilliseconds(triple.TransactionTime)
+            );
         }
     }
 
@@ -310,4 +321,20 @@ public readonly ref struct ResolvedTemporalTriple
     public readonly DateTimeOffset ValidFrom;
     public readonly DateTimeOffset ValidTo;
     public readonly DateTimeOffset TransactionTime;
+
+    public ResolvedTemporalTriple(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo,
+        DateTimeOffset transactionTime)
+    {
+        Subject = subject;
+        Predicate = predicate;
+        Object = obj;
+        ValidFrom = validFrom;
+        ValidTo = validTo;
+        TransactionTime = transactionTime;
+    }
 }
