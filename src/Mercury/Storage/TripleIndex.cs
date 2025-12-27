@@ -314,11 +314,8 @@ public sealed unsafe class TripleIndex : IDisposable
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public readonly ref TemporalBTreeEntry GetEntry(int index)
         {
-            fixed (TemporalBTreePage* page = &this)
-            {
-                var entriesPtr = (TemporalBTreeEntry*)((byte*)page + 32);
-                return ref entriesPtr[index];
-            }
+            var ptr = (byte*)Unsafe.AsPointer(ref Unsafe.AsRef(in this));
+            return ref ((TemporalBTreeEntry*)(ptr + 32))[index];
         }
     }
 
