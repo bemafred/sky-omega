@@ -27,6 +27,7 @@ public sealed class WriteAheadLog : IDisposable
     private long _currentTxId;
     private long _lastCheckpointTxId;
     private long _lastCheckpointTime;
+    private long _lastCheckpointPosition; // Cached position after last checkpoint for O(1) lookup
     private readonly long _checkpointSizeThreshold;
     private readonly int _checkpointTimeSeconds;
     private bool _disposed;
@@ -63,6 +64,7 @@ public sealed class WriteAheadLog : IDisposable
             _currentTxId = 0;
             _lastCheckpointTxId = 0;
             _lastCheckpointTime = Environment.TickCount64;
+            _lastCheckpointPosition = 0; // No checkpoint yet
         }
     }
 
@@ -169,6 +171,7 @@ public sealed class WriteAheadLog : IDisposable
         // Truncate the file to just the checkpoint record
         _logFile.SetLength(RecordSize);
         _logFile.Position = RecordSize; // Ready for new appends
+        _lastCheckpointPosition = RecordSize; // Cache position for O(1) lookup
     }
 
     /// <summary>
@@ -196,29 +199,12 @@ public sealed class WriteAheadLog : IDisposable
 
     /// <summary>
     /// Get the file position of the last checkpoint.
+    /// Returns the position immediately after the checkpoint record (where new records start).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long GetCheckpointPosition()
     {
-        // Scan backwards to find checkpoint record
-        // For efficiency, we could cache this
-        var buffer = new byte[RecordSize];
-        var position = _logFile.Length - RecordSize;
-
-        while (position >= 0)
-        {
-            _logFile.Position = position;
-            if (_logFile.Read(buffer) == RecordSize)
-            {
-                var record = LogRecord.ReadFrom(buffer);
-                if (record.Operation == LogOperation.Checkpoint && record.IsValid())
-                {
-                    return position + RecordSize;
-                }
-            }
-            position -= RecordSize;
-        }
-
-        return 0; // No checkpoint found
+        return _lastCheckpointPosition;
     }
 
     private void RecoverState()
@@ -227,6 +213,7 @@ public sealed class WriteAheadLog : IDisposable
         _logFile.Position = 0;
         _currentTxId = 0;
         _lastCheckpointTxId = 0;
+        _lastCheckpointPosition = 0;
 
         while (_logFile.Read(buffer) == RecordSize)
         {
@@ -242,6 +229,7 @@ public sealed class WriteAheadLog : IDisposable
             if (record.Operation == LogOperation.Checkpoint)
             {
                 _lastCheckpointTxId = record.TxId;
+                _lastCheckpointPosition = _logFile.Position; // Position after checkpoint record
             }
         }
 
