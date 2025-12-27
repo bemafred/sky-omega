@@ -12,7 +12,8 @@ public sealed partial class TurtleStreamParser
     /// <summary>
     /// [3] directive ::= prefixID | base | version | sparqlPrefix | sparqlBase | sparqlVersion
     /// </summary>
-    private async ValueTask<bool> TryParseDirectiveAsync(CancellationToken cancellationToken) // TODO: Async? Why?
+    /// Async because FillBufferAsync may be needed if directive spans buffer boundary
+    private async ValueTask<bool> TryParseDirectiveAsync(CancellationToken cancellationToken)
     {
         SkipWhitespaceAndComments();
         

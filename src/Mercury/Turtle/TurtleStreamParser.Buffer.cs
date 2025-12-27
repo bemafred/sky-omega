@@ -19,7 +19,7 @@ public sealed partial class TurtleStreamParser
             if (_endOfStream)
                 return -1;
             
-            // TODO: Would need async fill - return -1 for now
+            // Buffer exhausted during sync parsing - main loop handles refills at statement boundaries
             return -1;
         }
         
@@ -66,20 +66,22 @@ public sealed partial class TurtleStreamParser
         return true;
     }
     
+    // Manual loop instead of LINQ - LINQ would allocate enumerator/closure
     private bool PeekString(string str)
     {
-        for (var i = 0; i < str.Length; i++) // TODO: Would linq be semantically better and as performant?
+        for (var i = 0; i < str.Length; i++)
         {
             if (PeekAhead(i) != str[i])
                 return false;
         }
-        
+
         return true;
     }
-    
+
+    // Manual loop instead of LINQ - zero-GC requirement
     private void ConsumeString(string str)
     {
-        foreach (var ch in str) // TODO: Would linq be semantically better and as performant?
+        foreach (var ch in str)
         {
             if (!TryConsume(ch))
                 throw ParserException($"Expected '{ch}'");
