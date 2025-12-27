@@ -75,6 +75,37 @@ Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 - **Batch-first design**: TxId in WAL records enables batching. Single writes are batch-of-one. Amortizing fsync across N triples is critical for performance.
 - **Hybrid checkpoint trigger**: Size-based (16MB) adapts to bursts; time-based (60s) bounds recovery during idle.
 
+### Concurrency Design
+
+TripleStore uses `ReaderWriterLockSlim` for thread-safety:
+
+1. **Single writer, multiple readers**: Write operations (`Add`, `Checkpoint`) acquire exclusive write lock
+2. **Explicit read locking**: Callers use `AcquireReadLock()`/`ReleaseReadLock()` around query enumeration
+3. **ref struct constraint**: `TemporalResultEnumerator` cannot hold locks internally (stack-only lifetime)
+
+**Usage pattern for concurrent reads:**
+```csharp
+store.AcquireReadLock();
+try
+{
+    var results = store.QueryCurrent(subject, predicate, obj);
+    while (results.MoveNext())
+    {
+        var triple = results.Current;
+        // Process triple...
+    }
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
+**Design decisions:**
+- **ReaderWriterLockSlim over lock**: Enables concurrent read throughput for query-heavy workloads
+- **NoRecursion policy**: Prevents accidental deadlocks, forces explicit lock management
+- **AtomStore relies on TripleStore lock**: Append-only with `Interlocked` for allocation; no separate lock needed
+
 ### Zero-GC Design Principles
 
 All parsers use aggressive zero-allocation techniques:
