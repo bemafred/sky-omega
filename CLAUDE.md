@@ -14,29 +14,50 @@ dotnet build src/Mercury/Mercury.csproj
 # Release build (enables optimizations)
 dotnet build -c Release
 
-# Run tests and examples
-dotnet run --project src/Mercury.Tests/Mercury.Tests.csproj
-dotnet run --project src/Mercury.Tests/Mercury.Tests.csproj -- tests
-dotnet run --project src/Mercury.Tests/Mercury.Tests.csproj -- storage
-dotnet run --project src/Mercury.Tests/Mercury.Tests.csproj -- temporal
+# Run tests (xUnit)
+dotnet test
+
+# Run specific test
+dotnet test --filter "FullyQualifiedName~BasicSelect"
+
+# Run benchmarks (BenchmarkDotNet)
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release
+
+# Run specific benchmark class
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter "*Storage*"
+
+# List available benchmarks
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --list
+
+# Run examples
+dotnet run --project examples/Mercury.Examples
+dotnet run --project examples/Mercury.Examples -- storage
+dotnet run --project examples/Mercury.Examples -- temporal
+dotnet run --project examples/Mercury.Examples -- demo
 ```
 
 ## Project Overview
 
-Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14 and has **no external dependencies** (BCL only).
+Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only).
 
 ### Solution Structure
 
 ```
 SkyOmega.sln
-├── Mercury              # Core library - storage and query engine
-│   ├── Rdf/             # Triple data structures
-│   ├── Sparql/          # SPARQL parser and query execution
-│   ├── Storage/         # B+Tree indexes, atom storage, WAL
-│   └── Turtle/          # Streaming RDF Turtle parser
-├── Mercury.Cli.Turtle   # Turtle parser CLI demo
-├── Mercury.Cli.Sparql   # SPARQL engine CLI demo
-└── Mercury.Tests        # Tests and benchmarks
+├── src/
+│   ├── Mercury/             # Core library - storage and query engine (BCL only)
+│   │   ├── Rdf/             # Triple data structures
+│   │   ├── Sparql/          # SPARQL parser and query execution
+│   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
+│   │   └── Turtle/          # Streaming RDF Turtle parser
+│   ├── Mercury.Cli.Turtle/  # Turtle parser CLI demo
+│   └── Mercury.Cli.Sparql/  # SPARQL engine CLI demo
+├── tests/
+│   └── Mercury.Tests/       # xUnit tests
+├── benchmarks/
+│   └── Mercury.Benchmarks/  # BenchmarkDotNet performance tests
+└── examples/
+    └── Mercury.Examples/    # Usage examples and demos
 ```
 
 ## Architecture
@@ -147,5 +168,5 @@ Key components:
 Sky Omega values:
 - **Simplicity over flexibility** - fewer moving parts, less to break
 - **Append-only where possible** - naturally crash-safe, simpler recovery
-- **Zero external dependencies** - BCL only, no surprises
+- **Zero external dependencies for core library** - Mercury is BCL only; dev tooling (tests, benchmarks) can use standard packages
 - **Zero-GC on hot paths** - predictable latency for cognitive operations

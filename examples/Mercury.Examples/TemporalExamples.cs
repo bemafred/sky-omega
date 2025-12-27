@@ -1,14 +1,11 @@
-using System;
-using System.IO;
 using SkyOmega.Mercury.Storage;
 
-namespace SkyOmega.Mercury.Tests;
+namespace SkyOmega.Mercury.Examples;
 
 /// <summary>
-/// Sky Omega temporal RDF examples
-/// Demonstrates bitemporal querying capabilities
+/// Examples demonstrating bitemporal querying capabilities
 /// </summary>
-public static class SkyOmegaExamples
+public static class TemporalExamples
 {
     public static void RunAll()
     {
@@ -25,12 +22,12 @@ public static class SkyOmegaExamples
         Example_TemporalPersistence();
     }
 
-    private static void Example_BasicTemporal()
+    public static void Example_BasicTemporal()
     {
         Console.WriteLine("Example: Basic Temporal Triples");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_basic");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_temporal_basic");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -69,15 +66,15 @@ public static class SkyOmegaExamples
             Console.WriteLine($"    Valid: {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
         }
 
-        Console.WriteLine($"✓ Temporal triples working\n");
+        Console.WriteLine();
     }
 
-    private static void Example_TimeTravelQuery()
+    public static void Example_TimeTravelQuery()
     {
         Console.WriteLine("Example: Time-Travel Queries");
         Console.WriteLine("----------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_timetravel");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_timetravel");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -128,15 +125,15 @@ public static class SkyOmegaExamples
             }
         }
 
-        Console.WriteLine($"\n✓ Time-travel queries working\n");
+        Console.WriteLine();
     }
 
-    private static void Example_VersionTracking()
+    public static void Example_VersionTracking()
     {
         Console.WriteLine("Example: Version Tracking");
         Console.WriteLine("-------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_versions");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_versions");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -179,15 +176,15 @@ public static class SkyOmegaExamples
             version++;
         }
 
-        Console.WriteLine($"✓ Version tracking working\n");
+        Console.WriteLine();
     }
 
-    private static void Example_TemporalRangeQuery()
+    public static void Example_TemporalRangeQuery()
     {
         Console.WriteLine("Example: Temporal Range Queries");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_range");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_range");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -230,22 +227,21 @@ public static class SkyOmegaExamples
             Console.WriteLine($"    Duration: {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
         }
 
-        Console.WriteLine($"✓ Temporal range queries working\n");
+        Console.WriteLine();
     }
 
-    private static void Example_BiTemporalCorrections()
+    public static void Example_BiTemporalCorrections()
     {
         Console.WriteLine("Example: Bitemporal Corrections");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_bitemporal");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_bitemporal");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
         using var store = new TripleStore(dbPath);
 
         // Initially recorded: Eve worked at Acme from 2020-2023
-        // (Recorded on 2023-01-01)
         store.Add(
             "<http://ex.org/eve>",
             "<http://ex.org/worksFor>",
@@ -255,7 +251,6 @@ public static class SkyOmegaExamples
         );
 
         // Later discovered: Actually left in 2022
-        // (Correction recorded on 2023-06-01)
         store.Add(
             "<http://ex.org/eve>",
             "<http://ex.org/worksFor>",
@@ -264,23 +259,22 @@ public static class SkyOmegaExamples
             new DateTimeOffset(2022, 12, 31, 0, 0, 0, TimeSpan.Zero)
         );
 
-        Console.WriteLine("Bitemporal example:");
+        Console.WriteLine("Bitemporal model explained:");
         Console.WriteLine("  Valid-time: When fact was true in reality");
         Console.WriteLine("  Transaction-time: When fact was recorded in DB");
-        Console.WriteLine("\n  Can query:");
+        Console.WriteLine("\n  This enables:");
         Console.WriteLine("    - What we KNOW now about the past");
         Console.WriteLine("    - What we KNEW then about the past");
         Console.WriteLine("    - When our knowledge changed");
-
-        Console.WriteLine($"\n✓ Bitemporal model demonstrated\n");
+        Console.WriteLine();
     }
 
-    private static void Example_EvolutionTracking()
+    public static void Example_EvolutionTracking()
     {
         Console.WriteLine("Example: Entity Evolution Tracking");
         Console.WriteLine("-----------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_evolution");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_evolution");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -327,7 +321,7 @@ public static class SkyOmegaExamples
         }
 
         // Query evolution
-        Console.WriteLine("\nCompany evolution:");
+        Console.WriteLine("\nCompany evolution (first 5 entries):");
         var evolution = store.QueryEvolution(
             "<http://ex.org/company1>",
             ReadOnlySpan<char>.Empty,
@@ -343,22 +337,21 @@ public static class SkyOmegaExamples
             count++;
         }
 
-        Console.WriteLine($"✓ Evolution tracking working\n");
+        Console.WriteLine();
     }
 
-    private static void Example_SnapshotReconstruction()
+    public static void Example_SnapshotReconstruction()
     {
         Console.WriteLine("Example: Historical Snapshot Reconstruction");
         Console.WriteLine("-------------------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_snapshot");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_snapshot");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
         using var store = new TripleStore(dbPath);
 
         // Build knowledge base about a country over time
-        // Population changes
         store.Add("<http://ex.org/Country1>", "<http://ex.org/population>", "\"10M\"",
             new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2010, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -371,7 +364,6 @@ public static class SkyOmegaExamples
             new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero),
             DateTimeOffset.MaxValue);
 
-        // Capital changes
         store.Add("<http://ex.org/Country1>", "<http://ex.org/capital>", "<http://ex.org/CityA>",
             new DateTimeOffset(1950, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2015, 1, 1, 0, 0, 0, TimeSpan.Zero));
@@ -395,15 +387,15 @@ public static class SkyOmegaExamples
             Console.WriteLine($"  {triple.Predicate.ToString()}: {triple.Object.ToString()}");
         }
 
-        Console.WriteLine($"\n✓ Snapshot reconstruction working\n");
+        Console.WriteLine();
     }
 
-    private static void Example_TemporalPersistence()
+    public static void Example_TemporalPersistence()
     {
         Console.WriteLine("Example: Temporal Database Persistence");
         Console.WriteLine("---------------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_persist");
+        var dbPath = Path.Combine(Path.GetTempPath(), "example_temporal_persist");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -425,11 +417,9 @@ public static class SkyOmegaExamples
 
             var stats = store.GetStatistics();
             Console.WriteLine($"  Temporal triples: {stats.TripleCount:N0}");
-            Console.WriteLine($"  Atoms: {stats.AtomCount:N0}");
-            Console.WriteLine($"  Storage: {stats.TotalBytes / 1024.0:F2} KB");
         }
 
-        Console.WriteLine("  Database closed (persisted to disk)");
+        Console.WriteLine("  Database closed");
 
         // Phase 2: Reopen and verify
         Console.WriteLine("\nPhase 2: Reopening temporal database...");
@@ -439,7 +429,6 @@ public static class SkyOmegaExamples
             var stats = store.GetStatistics();
             Console.WriteLine($"  Temporal triples recovered: {stats.TripleCount:N0}");
 
-            // Verify with time-travel query
             var results = store.QueryAsOf(
                 "<http://ex.org/metric>",
                 "<http://ex.org/value>",
@@ -450,194 +439,44 @@ public static class SkyOmegaExamples
             if (results.MoveNext())
             {
                 var triple = results.Current;
-                Console.WriteLine($"  Sample query: Value in 2022 = {triple.Object.ToString()}");
-                Console.WriteLine($"    Valid period: {triple.ValidFrom:yyyy-MM-dd} to {triple.ValidTo:yyyy-MM-dd}");
+                Console.WriteLine($"  Value in 2022: {triple.Object.ToString()}");
             }
         }
 
-        // Check actual file size
-        var files = Directory.GetFiles(dbPath, "*.*", SearchOption.AllDirectories);
-        long totalSize = 0;
-        foreach (var file in files)
-        {
-            totalSize += new FileInfo(file).Length;
-        }
-
-        Console.WriteLine($"\n  Disk usage: {totalSize / 1024.0:F2} KB");
-        Console.WriteLine($"  Files: {files.Length}");
-        Console.WriteLine($"✓ Temporal persistence verified\n");
+        Console.WriteLine("  Persistence verified\n");
     }
 
-    public static void DemoSkyOmegaCapabilities()
+    public static void DemoCapabilities()
     {
         Console.WriteLine("=== Sky Omega Temporal Capabilities ===");
         Console.WriteLine();
 
         Console.WriteLine("Bitemporal Model:");
-        Console.WriteLine("  • Valid Time (VT): When fact is true in reality");
-        Console.WriteLine("  • Transaction Time (TT): When fact recorded in DB");
+        Console.WriteLine("  - Valid Time (VT): When fact is true in reality");
+        Console.WriteLine("  - Transaction Time (TT): When fact recorded in DB");
         Console.WriteLine();
 
         Console.WriteLine("Query Types:");
-        Console.WriteLine("  • Point-in-time: What was true at time T?");
-        Console.WriteLine("  • Range: What changed between T1 and T2?");
-        Console.WriteLine("  • Evolution: Show all versions");
-        Console.WriteLine("  • Current: What is true now?");
+        Console.WriteLine("  - Point-in-time: What was true at time T?");
+        Console.WriteLine("  - Range: What changed between T1 and T2?");
+        Console.WriteLine("  - Evolution: Show all versions");
+        Console.WriteLine("  - Current: What is true now?");
         Console.WriteLine();
 
         Console.WriteLine("Use Cases:");
-        Console.WriteLine("  • Audit trails: Who changed what and when?");
-        Console.WriteLine("  • Historical analysis: Reconstruct past states");
-        Console.WriteLine("  • Data corrections: Fix errors without losing history");
-        Console.WriteLine("  • Trend analysis: Track changes over time");
-        Console.WriteLine("  • Compliance: Prove what was known when");
+        Console.WriteLine("  - Audit trails: Who changed what and when?");
+        Console.WriteLine("  - Historical analysis: Reconstruct past states");
+        Console.WriteLine("  - Data corrections: Fix errors without losing history");
+        Console.WriteLine("  - Trend analysis: Track changes over time");
+        Console.WriteLine("  - Compliance: Prove what was known when");
         Console.WriteLine();
 
         Console.WriteLine("Storage:");
-        Console.WriteLine("  • 4 indexes: SPOT, POST, OSPT, TSPO");
-        Console.WriteLine("  • 80-byte temporal entries (32B key + 48B metadata)");
-        Console.WriteLine("  • 204 entries per 16KB page");
-        Console.WriteLine("  • Memory-mapped B+Trees (persistent)");
-        Console.WriteLine("  • Scales to billions of temporal triples");
+        Console.WriteLine("  - 4 indexes: SPOT, POST, OSPT, TSPO");
+        Console.WriteLine("  - 80-byte temporal entries");
+        Console.WriteLine("  - 204 entries per 16KB page");
+        Console.WriteLine("  - Memory-mapped B+Trees (persistent)");
+        Console.WriteLine("  - Scales to billions of temporal triples");
         Console.WriteLine();
-    }
-
-    public static void BenchmarkTemporalStorage()
-    {
-        Console.WriteLine("=== Temporal Storage Performance Benchmark ===");
-        Console.WriteLine();
-
-        var dbPath = Path.Combine(Path.GetTempPath(), "sky_omega_bench");
-        if (Directory.Exists(dbPath))
-            Directory.Delete(dbPath, true);
-
-        using var store = new TripleStore(dbPath);
-
-        // Benchmark 1: Write performance
-        Console.WriteLine("Benchmark 1: Temporal Write Performance");
-        Console.WriteLine("---------------------------------------");
-
-        const int writeCount = 10_000;
-        var baseTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-
-        for (int i = 0; i < writeCount; i++)
-        {
-            var validFrom = baseTime.AddDays(i);
-            var validTo = baseTime.AddDays(i + 365);
-
-            store.Add(
-                $"<http://ex.org/entity{i % 100}>",
-                $"<http://ex.org/property{i % 10}>",
-                $"\"value{i}\"",
-                validFrom,
-                validTo
-            );
-        }
-
-        sw.Stop();
-
-        var stats = store.GetStatistics();
-
-        Console.WriteLine($"  Temporal triples: {writeCount:N0}");
-        Console.WriteLine($"  Time: {sw.ElapsedMilliseconds:N0} ms");
-        Console.WriteLine($"  Rate: {writeCount / sw.Elapsed.TotalSeconds:N0} writes/sec");
-        Console.WriteLine($"  Storage: {stats.TotalBytes / (1024.0 * 1024.0):F2} MB");
-        Console.WriteLine($"  Unique atoms: {stats.AtomCount:N0}");
-
-        // Benchmark 2: Point-in-time query
-        Console.WriteLine("\nBenchmark 2: Point-in-Time Queries");
-        Console.WriteLine("-----------------------------------");
-
-        const int queryCount = 1_000;
-        sw.Restart();
-        long totalResults = 0;
-
-        for (int i = 0; i < queryCount; i++)
-        {
-            var queryTime = baseTime.AddDays(i % 365);
-            var results = store.QueryAsOf(
-                $"<http://ex.org/entity{i % 100}>",
-                ReadOnlySpan<char>.Empty,
-                ReadOnlySpan<char>.Empty,
-                queryTime
-            );
-
-            while (results.MoveNext())
-            {
-                totalResults++;
-                var triple = results.Current;
-                _ = triple.Object.Length; // Ensure not optimized away
-            }
-        }
-
-        sw.Stop();
-
-        Console.WriteLine($"  Queries: {queryCount:N0}");
-        Console.WriteLine($"  Results: {totalResults:N0}");
-        Console.WriteLine($"  Time: {sw.ElapsedMilliseconds:N0} ms");
-        Console.WriteLine($"  Rate: {queryCount / sw.Elapsed.TotalSeconds:N0} queries/sec");
-
-        // Benchmark 3: Temporal range query
-        Console.WriteLine("\nBenchmark 3: Temporal Range Queries");
-        Console.WriteLine("------------------------------------");
-
-        sw.Restart();
-        totalResults = 0;
-
-        for (int i = 0; i < 100; i++)
-        {
-            var rangeStart = baseTime.AddDays(i * 10);
-            var rangeEnd = rangeStart.AddDays(90);
-
-            var results = store.QueryChanges(
-                rangeStart,
-                rangeEnd,
-                ReadOnlySpan<char>.Empty,
-                ReadOnlySpan<char>.Empty,
-                ReadOnlySpan<char>.Empty
-            );
-
-            while (results.MoveNext())
-            {
-                totalResults++;
-            }
-        }
-
-        sw.Stop();
-
-        Console.WriteLine($"  Range queries: 100");
-        Console.WriteLine($"  Results: {totalResults:N0}");
-        Console.WriteLine($"  Time: {sw.ElapsedMilliseconds:N0} ms");
-        Console.WriteLine($"  Throughput: {totalResults / sw.Elapsed.TotalSeconds:N0} triples/sec");
-
-        // Benchmark 4: Evolution query
-        Console.WriteLine("\nBenchmark 4: Evolution Queries");
-        Console.WriteLine("-------------------------------");
-
-        sw.Restart();
-        totalResults = 0;
-
-        for (int i = 0; i < 100; i++)
-        {
-            var results = store.QueryEvolution(
-                $"<http://ex.org/entity{i}>",
-                ReadOnlySpan<char>.Empty,
-                ReadOnlySpan<char>.Empty
-            );
-
-            while (results.MoveNext())
-            {
-                totalResults++;
-            }
-        }
-
-        sw.Stop();
-
-        Console.WriteLine($"  Evolution queries: 100");
-        Console.WriteLine($"  Versions returned: {totalResults:N0}");
-        Console.WriteLine($"  Time: {sw.ElapsedMilliseconds:N0} ms");
-        Console.WriteLine($"✓ Temporal benchmarks complete\n");
     }
 }
