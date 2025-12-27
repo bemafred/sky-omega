@@ -4,25 +4,24 @@ using System.IO;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// Multi-index temporal triple store for Sky Omega
-/// Supports multiple temporal query patterns with optimal index selection
-/// 
+/// RDF triple store with multiple indexes for optimal query patterns.
+///
 /// Indexes:
 /// 1. SPOT: Subject-Predicate-Object-Time (primary)
 /// 2. POST: Predicate-Object-Subject-Time (predicate queries)
 /// 3. OSPT: Object-Subject-Predicate-Time (object queries)
 /// 4. TSPO: Time-Subject-Predicate-Object (temporal range scans)
 /// </summary>
-public sealed class MultiTemporalStore : IDisposable
+public sealed class TripleStore : IDisposable
 {
-    private readonly TemporalTripleStore _spotIndex; // Primary index
-    private readonly TemporalTripleStore _postIndex; // Predicate-first
-    private readonly TemporalTripleStore _osptIndex; // Object-first
-    private readonly TemporalTripleStore _tspoIndex; // Time-first
+    private readonly TripleIndex _spotIndex; // Primary index
+    private readonly TripleIndex _postIndex; // Predicate-first
+    private readonly TripleIndex _osptIndex; // Object-first
+    private readonly TripleIndex _tspoIndex; // Time-first
 
     private readonly AtomStore _atoms;
 
-    public MultiTemporalStore(string baseDirectory)
+    public TripleStore(string baseDirectory)
     {
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
@@ -37,10 +36,10 @@ public sealed class MultiTemporalStore : IDisposable
         _atoms = new AtomStore(atomPath);
 
         // Create temporal stores with shared atom store
-        _spotIndex = new TemporalTripleStore(spotPath, _atoms);
-        _postIndex = new TemporalTripleStore(postPath, _atoms);
-        _osptIndex = new TemporalTripleStore(osptPath, _atoms);
-        _tspoIndex = new TemporalTripleStore(tspoPath, _atoms);
+        _spotIndex = new TripleIndex(spotPath, _atoms);
+        _postIndex = new TripleIndex(postPath, _atoms);
+        _osptIndex = new TripleIndex(osptPath, _atoms);
+        _tspoIndex = new TripleIndex(tspoPath, _atoms);
     }
 
     /// <summary>
@@ -88,7 +87,7 @@ public sealed class MultiTemporalStore : IDisposable
         // Select optimal index
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, obj, queryType);
         
-        TemporalTripleStore.TemporalTripleEnumerator enumerator;
+        TripleIndex.TemporalTripleEnumerator enumerator;
         
         if (queryType == TemporalQueryType.AsOf)
         {
@@ -174,7 +173,7 @@ public sealed class MultiTemporalStore : IDisposable
             rangeEnd: periodEnd);
     }
 
-    private (TemporalTripleStore Index, TemporalIndexType Type) SelectOptimalIndex(
+    private (TripleIndex Index, TemporalIndexType Type) SelectOptimalIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -234,12 +233,12 @@ public sealed class MultiTemporalStore : IDisposable
 /// </summary>
 public ref struct TemporalResultEnumerator
 {
-    private TemporalTripleStore.TemporalTripleEnumerator _baseEnumerator;
+    private TripleIndex.TemporalTripleEnumerator _baseEnumerator;
     private readonly TemporalIndexType _indexType;
     private readonly AtomStore _atoms;
 
     internal TemporalResultEnumerator(
-        TemporalTripleStore.TemporalTripleEnumerator baseEnumerator,
+        TripleIndex.TemporalTripleEnumerator baseEnumerator,
         TemporalIndexType indexType,
         AtomStore atoms)
     {

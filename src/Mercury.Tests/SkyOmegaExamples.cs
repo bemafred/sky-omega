@@ -34,7 +34,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Alice worked at Anthropic from 2020 to 2023
         store.Add(
@@ -81,7 +81,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Create employment history
         var periods = new[]
@@ -140,7 +140,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Track salary changes over time
         var salaryHistory = new[]
@@ -191,7 +191,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Track project assignments
         var projects = new[]
@@ -242,7 +242,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Initially recorded: Eve worked at Acme from 2020-2023
         // (Recorded on 2023-01-01)
@@ -284,7 +284,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Track organization name changes
         var names = new[]
@@ -355,7 +355,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Build knowledge base about a country over time
         // Population changes
@@ -410,7 +410,7 @@ public static class SkyOmegaExamples
         // Phase 1: Create and populate
         Console.WriteLine("Phase 1: Creating temporal database...");
 
-        using (var store = new MultiTemporalStore(dbPath))
+        using (var store = new TripleStore(dbPath))
         {
             for (int year = 2020; year <= 2024; year++)
             {
@@ -434,7 +434,7 @@ public static class SkyOmegaExamples
         // Phase 2: Reopen and verify
         Console.WriteLine("\nPhase 2: Reopening temporal database...");
 
-        using (var store = new MultiTemporalStore(dbPath))
+        using (var store = new TripleStore(dbPath))
         {
             var stats = store.GetStatistics();
             Console.WriteLine($"  Temporal triples recovered: {stats.TripleCount:N0}");
@@ -511,7 +511,7 @@ public static class SkyOmegaExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Benchmark 1: Write performance
         Console.WriteLine("Benchmark 1: Temporal Write Performance");

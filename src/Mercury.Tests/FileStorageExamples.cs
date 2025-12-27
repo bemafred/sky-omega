@@ -33,7 +33,7 @@ public static class FileStorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Add triples
         Console.WriteLine("Inserting triples...");
@@ -78,7 +78,7 @@ public static class FileStorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Add diverse data
         Console.WriteLine("Loading data with multiple patterns...");
@@ -145,7 +145,7 @@ public static class FileStorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         const int tripleCount = 100_000;
 
@@ -190,7 +190,7 @@ public static class FileStorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Phase 1: Write performance
         Console.WriteLine("Phase 1: Write Performance");
@@ -269,7 +269,7 @@ public static class FileStorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Load data
         Console.WriteLine("Loading test data...");
@@ -322,7 +322,7 @@ public static class FileStorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new MultiTemporalStore(dbPath);
+        using var store = new TripleStore(dbPath);
 
         // Create skewed data (many triples with same subject)
         Console.WriteLine("Creating skewed dataset...");
@@ -390,7 +390,7 @@ public static class FileStorageExamples
         // Phase 1: Create and populate database
         Console.WriteLine("Phase 1: Creating database...");
 
-        using (var store = new MultiTemporalStore(dbPath))
+        using (var store = new TripleStore(dbPath))
         {
             for (int i = 0; i < 1000; i++)
             {
@@ -410,7 +410,7 @@ public static class FileStorageExamples
         // Phase 2: Reopen and verify
         Console.WriteLine("\nPhase 2: Reopening database...");
 
-        using (var store = new MultiTemporalStore(dbPath))
+        using (var store = new TripleStore(dbPath))
         {
             var stats = store.GetStatistics();
             Console.WriteLine($"  Triples recovered: {stats.TripleCount:N0}");

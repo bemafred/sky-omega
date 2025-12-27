@@ -7,13 +7,12 @@ using System.Runtime.InteropServices;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// Temporal triple store supporting valid-time and transaction-time semantics
-/// Implements bitemporal data model for Sky Omega
-/// 
+/// B+Tree index for RDF triples with bitemporal semantics.
+///
 /// Valid Time (VT): When the fact is true in the real world
 /// Transaction Time (TT): When the fact was recorded in the database
 /// </summary>
-public sealed unsafe class TemporalTripleStore : IDisposable
+public sealed unsafe class TripleIndex : IDisposable
 {
     private const int PageSize = 16384;
     private const int NodeDegree = 204; // (16384 - 32) / 80 bytes per temporal entry
@@ -33,7 +32,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     /// <summary>
     /// Create a temporal triple store with its own atom store
     /// </summary>
-    public TemporalTripleStore(string filePath, long initialSizeBytes = 1L << 30)
+    public TripleIndex(string filePath, long initialSizeBytes = 1L << 30)
         : this(filePath, null, initialSizeBytes)
     {
     }
@@ -41,7 +40,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     /// <summary>
     /// Create a temporal triple store with a shared atom store
     /// </summary>
-    public TemporalTripleStore(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
+    public TripleIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
     {
         _fileStream = new FileStream(
             filePath,
@@ -347,7 +346,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
     /// </summary>
     public ref struct TemporalTripleEnumerator
     {
-        private readonly TemporalTripleStore _store;
+        private readonly TripleIndex _store;
         private long _currentPageId;
         private int _currentSlot;
         private readonly TemporalKey _minKey;
@@ -356,7 +355,7 @@ public sealed unsafe class TemporalTripleStore : IDisposable
         private TemporalKey _currentKey;
 
         internal TemporalTripleEnumerator(
-            TemporalTripleStore store,
+            TripleIndex store,
             long startPageId,
             TemporalKey minKey,
             TemporalKey maxKey,
