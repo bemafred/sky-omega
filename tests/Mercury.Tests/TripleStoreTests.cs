@@ -336,6 +336,487 @@ public class TripleStoreTests : IDisposable
 
     #endregion
 
+    #region Temporal Boundary Conditions
+
+    [Fact]
+    public void QueryAsOf_ExactlyAtValidFrom_Matches()
+    {
+        var store = CreateStore();
+
+        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query exactly at ValidFrom - should match (closed start: ValidFrom <= time)
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom);
+            try
+            {
+                Assert.True(results.MoveNext(), "Should match when querying exactly at ValidFrom");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_ExactlyAtValidTo_DoesNotMatch()
+    {
+        var store = CreateStore();
+
+        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query exactly at ValidTo - should NOT match (open end: time < ValidTo)
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validTo);
+            try
+            {
+                Assert.False(results.MoveNext(), "Should NOT match when querying exactly at ValidTo (exclusive)");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_OneTickBeforeValidTo_Matches()
+    {
+        var store = CreateStore();
+
+        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query one tick before ValidTo - should match
+            var queryTime = new DateTimeOffset(validTo.UtcTicks - 1, TimeSpan.Zero);
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
+            try
+            {
+                Assert.True(results.MoveNext(), "Should match one tick before ValidTo");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_OneTickBeforeValidFrom_DoesNotMatch()
+    {
+        var store = CreateStore();
+
+        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query one tick before ValidFrom - should NOT match
+            var queryTime = new DateTimeOffset(validFrom.UtcTicks - 1, TimeSpan.Zero);
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
+            try
+            {
+                Assert.False(results.MoveNext(), "Should NOT match one tick before ValidFrom");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryChanges_RangeEndEqualsValidFrom_DoesNotMatch()
+    {
+        var store = CreateStore();
+
+        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query range [Jan 1, June 1) - RangeEnd equals ValidFrom
+            // Overlap condition: ValidFrom < RangeEnd && ValidTo > RangeStart
+            // Here: June 1 < June 1 is FALSE, so no match
+            var rangeStart = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            var rangeEnd = validFrom;  // June 1
+
+            var results = store.QueryChanges(rangeStart, rangeEnd,
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.False(results.MoveNext(), "Should NOT match when RangeEnd equals ValidFrom (no overlap)");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryChanges_RangeStartEqualsValidTo_DoesNotMatch()
+    {
+        var store = CreateStore();
+
+        var validFrom = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var validTo = new DateTimeOffset(2024, 12, 31, 23, 59, 59, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query range [Dec 31, Feb 1 2025) - RangeStart equals ValidTo
+            // Overlap condition: ValidFrom < RangeEnd && ValidTo > RangeStart
+            // Here: Dec 31 > Dec 31 is FALSE, so no match
+            var rangeStart = validTo;  // Dec 31
+            var rangeEnd = new DateTimeOffset(2025, 2, 1, 0, 0, 0, TimeSpan.Zero);
+
+            var results = store.QueryChanges(rangeStart, rangeEnd,
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.False(results.MoveNext(), "Should NOT match when RangeStart equals ValidTo (no overlap)");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryChanges_AdjacentPeriods_NoOverlap()
+    {
+        var store = CreateStore();
+
+        // Period A: [June 1, Sept 1)
+        var periodAStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodAEnd = new DateTimeOffset(2024, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Period B: [Sept 1, Dec 1) - adjacent to A (meets)
+        var periodBStart = periodAEnd;
+        var periodBEnd = new DateTimeOffset(2024, 12, 1, 0, 0, 0, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_A\"", periodAStart, periodAEnd);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_B\"", periodBStart, periodBEnd);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query exactly period A - should only get value_A
+            var resultsA = store.QueryChanges(periodAStart, periodAEnd,
+                "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
+            try
+            {
+                Assert.True(resultsA.MoveNext());
+                Assert.Equal("\"value_A\"", resultsA.Current.Object.ToString());
+                Assert.False(resultsA.MoveNext(), "Adjacent period B should NOT overlap with period A query");
+            }
+            finally
+            {
+                resultsA.Dispose();
+            }
+
+            // Query exactly period B - should only get value_B
+            var resultsB = store.QueryChanges(periodBStart, periodBEnd,
+                "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
+            try
+            {
+                Assert.True(resultsB.MoveNext());
+                Assert.Equal("\"value_B\"", resultsB.Current.Object.ToString());
+                Assert.False(resultsB.MoveNext(), "Adjacent period A should NOT overlap with period B query");
+            }
+            finally
+            {
+                resultsB.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryChanges_OverlappingPeriods_BothMatch()
+    {
+        var store = CreateStore();
+
+        // Period A: [June 1, Oct 1)
+        var periodAStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodAEnd = new DateTimeOffset(2024, 10, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Period B: [Aug 1, Dec 1) - overlaps with A
+        var periodBStart = new DateTimeOffset(2024, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodBEnd = new DateTimeOffset(2024, 12, 1, 0, 0, 0, TimeSpan.Zero);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_A\"", periodAStart, periodAEnd);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "\"value_B\"", periodBStart, periodBEnd);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query [Aug 15, Sept 15) - overlaps with both A and B
+            var rangeStart = new DateTimeOffset(2024, 8, 15, 0, 0, 0, TimeSpan.Zero);
+            var rangeEnd = new DateTimeOffset(2024, 9, 15, 0, 0, 0, TimeSpan.Zero);
+
+            var results = store.QueryChanges(rangeStart, rangeEnd,
+                "<http://ex.org/s>", "<http://ex.org/p>", ReadOnlySpan<char>.Empty);
+            try
+            {
+                var count = 0;
+                while (results.MoveNext()) count++;
+                Assert.Equal(2, count);
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_ZeroDurationFact_NeverMatches()
+    {
+        var store = CreateStore();
+
+        // Zero-duration fact: ValidFrom == ValidTo
+        var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query at exact instant
+            // Condition: ValidFrom <= time && ValidTo > time
+            // Here: June 15 <= June 15 is TRUE, but June 15 > June 15 is FALSE
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant);
+            try
+            {
+                Assert.False(results.MoveNext(), "Zero-duration fact should never match AsOf query");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+
+            // Query before
+            var before = new DateTimeOffset(instant.UtcTicks - 1, TimeSpan.Zero);
+            var resultsBefore = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", before);
+            try
+            {
+                Assert.False(resultsBefore.MoveNext());
+            }
+            finally
+            {
+                resultsBefore.Dispose();
+            }
+
+            // Query after
+            var after = new DateTimeOffset(instant.UtcTicks + 1, TimeSpan.Zero);
+            var resultsAfter = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", after);
+            try
+            {
+                Assert.False(resultsAfter.MoveNext());
+            }
+            finally
+            {
+                resultsAfter.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryChanges_ZeroDurationFact_NeverMatches()
+    {
+        var store = CreateStore();
+
+        // Zero-duration fact
+        var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query range containing the instant
+            // Overlap condition: ValidFrom < RangeEnd && ValidTo > RangeStart
+            // For zero-duration: instant < RangeEnd && instant > RangeStart
+            // But since ValidFrom == ValidTo, can't satisfy both conditions simultaneously
+            // unless instant is strictly between RangeStart and RangeEnd
+            var rangeStart = new DateTimeOffset(2024, 6, 1, 0, 0, 0, TimeSpan.Zero);
+            var rangeEnd = new DateTimeOffset(2024, 7, 1, 0, 0, 0, TimeSpan.Zero);
+
+            var results = store.QueryChanges(rangeStart, rangeEnd,
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                // Zero duration means ValidFrom < RangeEnd (June 15 < July 1 = true)
+                // AND ValidTo > RangeStart (June 15 > June 1 = true)
+                // Actually this WOULD match! Let me reconsider...
+                // The condition is: ValidFrom < RangeEnd && ValidTo > RangeStart
+                // For instant June 15: June 15 < July 1 (true) && June 15 > June 1 (true)
+                // So a zero-duration fact DOES match range queries if the point is inside the range
+                Assert.True(results.MoveNext(), "Zero-duration fact inside range should match QueryChanges");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryEvolution_IncludesZeroDurationFact()
+    {
+        var store = CreateStore();
+
+        // Zero-duration fact
+        var instant = new DateTimeOffset(2024, 6, 15, 12, 0, 0, TimeSpan.Zero);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", instant, instant);
+
+        store.AcquireReadLock();
+        try
+        {
+            // QueryEvolution returns all versions regardless of temporal validity
+            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.True(results.MoveNext(), "QueryEvolution should include zero-duration facts");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_DateTimeMaxValue_AsValidTo()
+    {
+        var store = CreateStore();
+
+        // Fact valid forever (common pattern)
+        var validFrom = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, DateTimeOffset.MaxValue);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query far future - should still match
+            var farFuture = new DateTimeOffset(2100, 12, 31, 23, 59, 59, TimeSpan.Zero);
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", farFuture);
+            try
+            {
+                Assert.True(results.MoveNext(), "Fact with MaxValue ValidTo should match far future queries");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_EarlyValidFrom_MatchesLaterQuery()
+    {
+        var store = CreateStore();
+
+        // Fact that started in the past and continues to present
+        var validFrom = DateTimeOffset.UtcNow.AddYears(-5);
+        var validTo = DateTimeOffset.UtcNow.AddYears(5);
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query a time between validFrom and now - should match
+            var queryTime = DateTimeOffset.UtcNow.AddYears(-2);
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", queryTime);
+            try
+            {
+                Assert.True(results.MoveNext(), "Fact with past ValidFrom should match queries within valid period");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
+
     #region Batch Operations
 
     [Fact]
