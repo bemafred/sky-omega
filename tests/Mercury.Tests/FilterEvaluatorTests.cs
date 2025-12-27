@@ -399,4 +399,250 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region Logical AND Operator
+
+    [Fact]
+    public void And_BothTrue_ReturnsTrue()
+    {
+        Assert.True(Evaluate("1 == 1 && 2 == 2"));
+    }
+
+    [Fact]
+    public void And_LeftFalse_ReturnsFalse()
+    {
+        Assert.False(Evaluate("1 == 2 && 2 == 2"));
+    }
+
+    [Fact]
+    public void And_RightFalse_ReturnsFalse()
+    {
+        Assert.False(Evaluate("1 == 1 && 2 == 3"));
+    }
+
+    [Fact]
+    public void And_BothFalse_ReturnsFalse()
+    {
+        Assert.False(Evaluate("1 == 2 && 2 == 3"));
+    }
+
+    [Fact]
+    public void And_Keyword_Works()
+    {
+        Assert.True(Evaluate("1 == 1 AND 2 == 2"));
+    }
+
+    [Fact]
+    public void And_KeywordLowercase_Works()
+    {
+        Assert.True(Evaluate("1 == 1 and 2 == 2"));
+    }
+
+    [Fact]
+    public void And_MultipleChained_Works()
+    {
+        Assert.True(Evaluate("1 == 1 && 2 == 2 && 3 == 3"));
+    }
+
+    [Fact]
+    public void And_MultipleChained_OneFails_ReturnsFalse()
+    {
+        Assert.False(Evaluate("1 == 1 && 2 == 2 && 3 == 4"));
+    }
+
+    #endregion
+
+    #region Logical OR Operator
+
+    [Fact]
+    public void Or_BothTrue_ReturnsTrue()
+    {
+        Assert.True(Evaluate("1 == 1 || 2 == 2"));
+    }
+
+    [Fact]
+    public void Or_LeftTrue_ReturnsTrue()
+    {
+        Assert.True(Evaluate("1 == 1 || 2 == 3"));
+    }
+
+    [Fact]
+    public void Or_RightTrue_ReturnsTrue()
+    {
+        Assert.True(Evaluate("1 == 2 || 2 == 2"));
+    }
+
+    [Fact]
+    public void Or_BothFalse_ReturnsFalse()
+    {
+        Assert.False(Evaluate("1 == 2 || 2 == 3"));
+    }
+
+    [Fact]
+    public void Or_Keyword_Works()
+    {
+        Assert.True(Evaluate("1 == 1 OR 2 == 3"));
+    }
+
+    [Fact]
+    public void Or_KeywordLowercase_Works()
+    {
+        Assert.True(Evaluate("1 == 2 or 2 == 2"));
+    }
+
+    [Fact]
+    public void Or_MultipleChained_Works()
+    {
+        Assert.True(Evaluate("1 == 2 || 2 == 3 || 3 == 3"));
+    }
+
+    [Fact]
+    public void Or_MultipleChained_AllFail_ReturnsFalse()
+    {
+        Assert.False(Evaluate("1 == 2 || 2 == 3 || 3 == 4"));
+    }
+
+    #endregion
+
+    #region Logical NOT Operator
+
+    [Fact]
+    public void Not_True_ReturnsFalse()
+    {
+        Assert.False(Evaluate("!1"));
+    }
+
+    [Fact]
+    public void Not_False_ReturnsTrue()
+    {
+        Assert.True(Evaluate("!0"));
+    }
+
+    [Fact]
+    public void Not_Comparison_Works()
+    {
+        Assert.True(Evaluate("!(1 == 2)"));
+    }
+
+    [Fact]
+    public void Not_TrueComparison_ReturnsFalse()
+    {
+        Assert.False(Evaluate("!(1 == 1)"));
+    }
+
+    [Fact]
+    public void Not_Keyword_Works()
+    {
+        Assert.True(Evaluate("NOT 0"));
+    }
+
+    [Fact]
+    public void Not_KeywordLowercase_Works()
+    {
+        Assert.True(Evaluate("not 0"));
+    }
+
+    [Fact]
+    public void Not_DoubleNegation_ReturnsOriginal()
+    {
+        Assert.True(Evaluate("!!1"));
+    }
+
+    [Fact]
+    public void Not_TripleNegation_ReturnsNegated()
+    {
+        Assert.False(Evaluate("!!!1"));
+    }
+
+    #endregion
+
+    #region Operator Precedence
+
+    [Fact]
+    public void Precedence_AndBeforeOr_LeftGrouping()
+    {
+        // 1 == 1 || 1 == 2 && 2 == 2 => 1 == 1 || (1 == 2 && 2 == 2) => true || false => true
+        Assert.True(Evaluate("1 == 1 || 1 == 2 && 2 == 2"));
+    }
+
+    [Fact]
+    public void Precedence_AndBeforeOr_RightGrouping()
+    {
+        // 1 == 2 && 2 == 2 || 3 == 3 => (1 == 2 && 2 == 2) || 3 == 3 => false || true => true
+        Assert.True(Evaluate("1 == 2 && 2 == 2 || 3 == 3"));
+    }
+
+    [Fact]
+    public void Precedence_NotBeforeAnd()
+    {
+        // !0 && 1 => true && true => true
+        Assert.True(Evaluate("!0 && 1"));
+    }
+
+    [Fact]
+    public void Precedence_NotBeforeOr()
+    {
+        // !1 || 1 => false || true => true
+        Assert.True(Evaluate("!1 || 1"));
+    }
+
+    [Fact]
+    public void Precedence_ParenthesesOverride()
+    {
+        // (1 == 1 || 1 == 2) && 2 == 3 => true && false => false
+        Assert.False(Evaluate("(1 == 1 || 1 == 2) && 2 == 3"));
+    }
+
+    [Fact]
+    public void Precedence_NestedParentheses()
+    {
+        // ((1 == 1 && 2 == 2) || 3 == 4) && 5 == 5 => (true || false) && true => true && true => true
+        Assert.True(Evaluate("((1 == 1 && 2 == 2) || 3 == 4) && 5 == 5"));
+    }
+
+    #endregion
+
+    #region Complex Expressions
+
+    [Fact]
+    public void Complex_MixedOperators()
+    {
+        // 5 > 3 && 10 < 20 || 1 == 2 => (true && true) || false => true
+        Assert.True(Evaluate("5 > 3 && 10 < 20 || 1 == 2"));
+    }
+
+    [Fact]
+    public void Complex_NotWithAnd()
+    {
+        // !(1 == 2) && 3 == 3 => true && true => true
+        Assert.True(Evaluate("!(1 == 2) && 3 == 3"));
+    }
+
+    [Fact]
+    public void Complex_NotWithOr()
+    {
+        // 1 == 2 || !(3 == 4) => false || true => true
+        Assert.True(Evaluate("1 == 2 || !(3 == 4)"));
+    }
+
+    [Fact]
+    public void Complex_StringsAndLogical()
+    {
+        Assert.True(Evaluate("\"abc\" == \"abc\" && \"xyz\" != \"abc\""));
+    }
+
+    [Fact]
+    public void Complex_KeywordsAndSymbols()
+    {
+        // Mix AND keyword with || symbol
+        Assert.True(Evaluate("1 == 1 AND 2 == 2 || 3 == 4"));
+    }
+
+    [Fact]
+    public void Complex_AllKeywords()
+    {
+        Assert.True(Evaluate("NOT 0 AND 1 OR 0"));
+    }
+
+    #endregion
 }

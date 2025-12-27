@@ -24,26 +24,202 @@ public ref struct FilterEvaluator
     public bool Evaluate(scoped BindingTable bindings)
     {
         _position = 0;
-        return EvaluateExpression(bindings);
+        return EvaluateOrExpression(bindings);
     }
 
-    private bool EvaluateExpression(scoped BindingTable bindings)
+    /// <summary>
+    /// OrExpr := AndExpr (('||' | 'OR') AndExpr)*
+    /// </summary>
+    private bool EvaluateOrExpression(scoped BindingTable bindings)
+    {
+        var result = EvaluateAndExpression(bindings);
+
+        while (true)
+        {
+            SkipWhitespace();
+            if (IsAtEnd())
+                break;
+
+            if (MatchOperator("||") || MatchKeyword("OR"))
+            {
+                var right = EvaluateAndExpression(bindings);
+                result = result || right;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// AndExpr := UnaryExpr (('&&' | 'AND') UnaryExpr)*
+    /// </summary>
+    private bool EvaluateAndExpression(scoped BindingTable bindings)
+    {
+        var result = EvaluateUnaryExpression(bindings);
+
+        while (true)
+        {
+            SkipWhitespace();
+            if (IsAtEnd())
+                break;
+
+            if (MatchOperator("&&") || MatchKeyword("AND"))
+            {
+                var right = EvaluateUnaryExpression(bindings);
+                result = result && right;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// UnaryExpr := ('!' | 'NOT')? PrimaryExpr
+    /// </summary>
+    private bool EvaluateUnaryExpression(scoped BindingTable bindings)
     {
         SkipWhitespace();
 
-        // Parse relational expression
+        if (MatchOperator("!") || MatchKeyword("NOT"))
+        {
+            return !EvaluateUnaryExpression(bindings);
+        }
+
+        return EvaluatePrimaryExpression(bindings);
+    }
+
+    /// <summary>
+    /// PrimaryExpr := '(' Expression ')' | Comparison
+    /// </summary>
+    private bool EvaluatePrimaryExpression(scoped BindingTable bindings)
+    {
+        SkipWhitespace();
+
+        // Parenthesized expression
+        if (Peek() == '(')
+        {
+            Advance(); // Skip '('
+            var result = EvaluateOrExpression(bindings);
+            SkipWhitespace();
+            if (Peek() == ')')
+                Advance(); // Skip ')'
+            return result;
+        }
+
+        // Comparison expression
+        return EvaluateComparison(bindings);
+    }
+
+    /// <summary>
+    /// Comparison := Term (ComparisonOp Term)?
+    /// </summary>
+    private bool EvaluateComparison(scoped BindingTable bindings)
+    {
+        SkipWhitespace();
+
         scoped var left = ParseTerm(bindings);
         SkipWhitespace();
 
-        if (IsAtEnd())
+        if (IsAtEnd() || IsLogicalOperator())
             return CoerceToBool(left);
 
-        var op = ParseOperator();
+        // Check for closing paren - means we're done with this comparison
+        if (Peek() == ')')
+            return CoerceToBool(left);
+
+        var op = ParseComparisonOperator();
+        if (op == ComparisonOperator.Unknown)
+            return CoerceToBool(left);
+
         SkipWhitespace();
 
         scoped var right = ParseTerm(bindings);
 
-        return EvaluateComparison(left, op, right);
+        return EvaluateComparisonOp(left, op, right);
+    }
+
+    /// <summary>
+    /// Check if current position is at a logical operator
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsLogicalOperator()
+    {
+        if (IsAtEnd()) return false;
+
+        var remaining = _expression.Length - _position;
+        if (remaining >= 2)
+        {
+            var span = _expression.Slice(_position, 2);
+            if (span[0] == '|' && span[1] == '|') return true;
+            if (span[0] == '&' && span[1] == '&') return true;
+        }
+
+        if (remaining >= 3)
+        {
+            var span = _expression.Slice(_position, 3);
+            if (span.Equals("AND", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        if (remaining >= 2)
+        {
+            var span = _expression.Slice(_position, 2);
+            if (span.Equals("OR", StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Try to match a two-character operator
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool MatchOperator(string op)
+    {
+        SkipWhitespace();
+        var remaining = _expression.Length - _position;
+        if (remaining < op.Length) return false;
+
+        var span = _expression.Slice(_position, op.Length);
+        if (span.SequenceEqual(op.AsSpan()))
+        {
+            _position += op.Length;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Try to match a keyword (case-insensitive, must be followed by non-letter)
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool MatchKeyword(string keyword)
+    {
+        SkipWhitespace();
+        var remaining = _expression.Length - _position;
+        if (remaining < keyword.Length) return false;
+
+        var span = _expression.Slice(_position, keyword.Length);
+        if (!span.Equals(keyword.AsSpan(), StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Must be followed by non-letter (or end) to be a keyword
+        if (_position + keyword.Length < _expression.Length)
+        {
+            var nextChar = _expression[_position + keyword.Length];
+            if (IsLetterOrDigit(nextChar))
+                return false;
+        }
+
+        _position += keyword.Length;
+        return true;
     }
 
     private Value ParseTerm(scoped BindingTable bindings)
@@ -211,7 +387,7 @@ public ref struct FilterEvaluator
         return new Value { Type = ValueType.Unbound };
     }
 
-    private ComparisonOperator ParseOperator()
+    private ComparisonOperator ParseComparisonOperator()
     {
         var span = _expression.Slice(_position, Math.Min(2, _expression.Length - _position));
         
@@ -262,7 +438,7 @@ public ref struct FilterEvaluator
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool EvaluateComparison(scoped Value left, ComparisonOperator op, scoped Value right)
+    private bool EvaluateComparisonOp(scoped Value left, ComparisonOperator op, scoped Value right)
     {
         // Type coercion for comparisons
         if (left.Type == ValueType.Unbound || right.Type == ValueType.Unbound)
