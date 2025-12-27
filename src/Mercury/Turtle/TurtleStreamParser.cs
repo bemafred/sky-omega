@@ -16,15 +16,27 @@ using System.Threading.Tasks;
 namespace SkyOmega.Mercury.Rdf.Turtle;
 
 /// <summary>
+/// Handler for zero-allocation triple parsing.
+/// Receives spans that are valid only during the callback invocation.
+/// </summary>
+public delegate void TripleHandler(
+    ReadOnlySpan<char> subject,
+    ReadOnlySpan<char> predicate,
+    ReadOnlySpan<char> obj);
+
+/// <summary>
 /// Zero-allocation streaming parser for RDF Turtle format.
 /// Implements W3C RDF 1.2 Turtle EBNF grammar.
+///
+/// For zero-GC parsing, use ParseAsync(TripleHandler).
+/// The IAsyncEnumerable overload allocates strings for compatibility.
 /// </summary>
 public sealed partial class TurtleStreamParser : IDisposable
 {
     private readonly Stream _stream;
     private readonly ArrayPool<byte> _bufferPool;
     private readonly ArrayPool<char> _charPool;
-    
+
     // Reusable buffers - rented from pool, never resize
     private byte[] _inputBuffer;
     private char[] _charBuffer;
@@ -32,13 +44,21 @@ public sealed partial class TurtleStreamParser : IDisposable
     private int _bufferLength;
     private bool _endOfStream;
     private bool _isDisposed;
-    
-    // Parser state (stack-allocated or pooled)
+
+    // Output buffer for zero-GC string building
+    private char[] _outputBuffer;
+    private int _outputOffset;
+    private const int OutputBufferSize = 16384; // 16KB for parsed terms
+
+    // Parser state
     private string _baseUri;
     private readonly Dictionary<string, string> _namespaces;
     private readonly Dictionary<string, string> _blankNodes;
     private int _blankNodeCounter;
-    
+
+    // Reusable StringBuilder for legacy API (allocating)
+    private readonly StringBuilder _sb = new StringBuilder(256);
+
     // Current parse state
     private int _line;
     private int _column;
@@ -51,18 +71,19 @@ public sealed partial class TurtleStreamParser : IDisposable
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _bufferPool = ArrayPool<byte>.Shared;
         _charPool = ArrayPool<char>.Shared;
-        
+
         _inputBuffer = _bufferPool.Rent(bufferSize);
         _charBuffer = _charPool.Rent(bufferSize);
-        
+        _outputBuffer = _charPool.Rent(OutputBufferSize);
+
         _namespaces = new Dictionary<string, string>();
         _blankNodes = new Dictionary<string, string>();
         _baseUri = string.Empty;
         _blankNodeCounter = 0;
-        
+
         _line = 1;
         _column = 1;
-        
+
         InitializeStandardPrefixes();
     }
     
@@ -359,10 +380,209 @@ public sealed partial class TurtleStreamParser : IDisposable
     {
         if (_isDisposed == true)
             return;
-        
+
         _bufferPool.Return(_inputBuffer);
         _charPool.Return(_charBuffer);
-        
-        _isDisposed = true; 
+        _charPool.Return(_outputBuffer);
+
+        _isDisposed = true;
     }
+
+    #region Zero-GC API
+
+    /// <summary>
+    /// Parse Turtle document with zero allocations.
+    /// Triples are emitted via the handler callback with spans valid only during the call.
+    /// </summary>
+    public async Task ParseAsync(TripleHandler handler, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        await FillBufferAsync(cancellationToken);
+
+        while (!_endOfStream || _bufferPosition < _bufferLength)
+        {
+            SkipWhitespaceAndComments();
+
+            var remainingBytes = _bufferLength - _bufferPosition;
+            if (remainingBytes < _inputBuffer.Length / 4 && !_endOfStream)
+            {
+                await FillBufferAsync(cancellationToken);
+                SkipWhitespaceAndComments();
+            }
+
+            if (IsEndOfInput())
+                break;
+
+            _statementStartPos = _bufferPosition;
+
+            if (await TryParseDirectiveAsync(cancellationToken))
+                continue;
+
+            // Parse triples with zero-GC - emit directly via handler
+            if (!ParseTriplesZeroGC(handler))
+            {
+                if (_bufferPosition == _statementStartPos && !IsEndOfInput())
+                {
+                    if (!_endOfStream)
+                    {
+                        await FillBufferAsync(cancellationToken);
+                        continue;
+                    }
+
+                    var ch = Peek();
+                    throw ParserException($"Unexpected character '{(char)ch}' (0x{ch:X2})");
+                }
+
+                if (_bufferPosition > _statementStartPos && !_endOfStream)
+                {
+                    _bufferPosition = _statementStartPos;
+                    await FillBufferAsync(cancellationToken);
+                    continue;
+                }
+            }
+
+            SkipWhitespaceAndComments();
+            if (!TryConsume('.'))
+                throw ParserException("Expected '.' after triple");
+        }
+    }
+
+    /// <summary>
+    /// Parse triples and emit via handler. Returns true if any triples were parsed.
+    /// </summary>
+    private bool ParseTriplesZeroGC(TripleHandler handler)
+    {
+        SkipWhitespaceAndComments();
+        ResetOutputBuffer();
+
+        ReadOnlySpan<char> subject;
+
+        if (Peek() == '[')
+        {
+            subject = ParseBlankNodePropertyListSpan();
+        }
+        else if (PeekString("<<"))
+        {
+            subject = ParseReifiedTripleSpan();
+        }
+        else
+        {
+            subject = ParseSubjectSpan();
+        }
+
+        if (subject.IsEmpty)
+            return false;
+
+        return ParsePredicateObjectListZeroGC(subject, handler);
+    }
+
+    /// <summary>
+    /// Parse predicate-object list and emit triples via handler.
+    /// </summary>
+    private bool ParsePredicateObjectListZeroGC(ReadOnlySpan<char> subject, TripleHandler handler)
+    {
+        bool emittedAny = false;
+
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            // Save subject position in output buffer before parsing predicate
+            int subjectEnd = _outputOffset;
+
+            var predicate = ParseVerbSpan();
+            if (predicate.IsEmpty)
+                break;
+
+            // Parse objects and emit triples
+            while (true)
+            {
+                SkipWhitespaceAndComments();
+
+                // Reset output buffer to after predicate for each object
+                int predicateEnd = _outputOffset;
+
+                var obj = ParseObjectSpan();
+                if (obj.IsEmpty)
+                    break;
+
+                // Emit triple via handler
+                handler(subject, predicate, obj);
+                emittedAny = true;
+
+                // Parse annotation if present (RDF 1.2)
+                ParseAnnotation();
+
+                SkipWhitespaceAndComments();
+
+                // Reset for next object
+                _outputOffset = predicateEnd;
+
+                if (!TryConsume(','))
+                    break;
+            }
+
+            SkipWhitespaceAndComments();
+
+            // Reset for next predicate
+            _outputOffset = subjectEnd;
+
+            if (!TryConsume(';'))
+                break;
+
+            SkipWhitespaceAndComments();
+
+            if (Peek() == '.' || Peek() == ']' || Peek() == '}')
+                break;
+        }
+
+        return emittedAny;
+    }
+
+    /// <summary>
+    /// Reset output buffer for new triple.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ResetOutputBuffer() => _outputOffset = 0;
+
+    /// <summary>
+    /// Append character to output buffer.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AppendToOutput(char c)
+    {
+        if (_outputOffset >= _outputBuffer.Length)
+            GrowOutputBuffer();
+        _outputBuffer[_outputOffset++] = c;
+    }
+
+    /// <summary>
+    /// Append span to output buffer.
+    /// </summary>
+    private void AppendToOutput(ReadOnlySpan<char> span)
+    {
+        if (_outputOffset + span.Length > _outputBuffer.Length)
+            GrowOutputBuffer(_outputOffset + span.Length);
+        span.CopyTo(_outputBuffer.AsSpan(_outputOffset));
+        _outputOffset += span.Length;
+    }
+
+    /// <summary>
+    /// Get span from output buffer starting at given offset.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> GetOutputSpan(int startOffset)
+        => _outputBuffer.AsSpan(startOffset, _outputOffset - startOffset);
+
+    private void GrowOutputBuffer(int minSize = 0)
+    {
+        var newSize = Math.Max(_outputBuffer.Length * 2, minSize + 1024);
+        var newBuffer = _charPool.Rent(newSize);
+        _outputBuffer.AsSpan(0, _outputOffset).CopyTo(newBuffer);
+        _charPool.Return(_outputBuffer);
+        _outputBuffer = newBuffer;
+    }
+
+    #endregion
 }

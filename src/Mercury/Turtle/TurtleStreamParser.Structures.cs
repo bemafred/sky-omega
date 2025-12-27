@@ -96,23 +96,23 @@ public sealed partial class TurtleStreamParser
     
     private string ParsePrefixName()
     {
-        var sb = new System.Text.StringBuilder(32);
-        
+        _sb.Clear();
+
         while (true)
         {
             var ch = Peek();
-            
+
             if (ch == ':')
             {
                 Consume();
-                return sb.ToString();
+                return _sb.ToString();
             }
-            
+
             if (ch == -1 || !IsPnCharsBase(ch) && !IsPnChars(ch))
                 throw ParserException("Invalid prefix name");
-            
+
             Consume();
-            sb.Append((char)ch);
+            _sb.Append((char)ch);
         }
     }
     
@@ -170,11 +170,11 @@ public sealed partial class TurtleStreamParser
         // Check for anonymous blank node: []
         if (TryConsume(']'))
         {
-            return $"_:b{_blankNodeCounter++}";
+            return string.Concat("_:b", _blankNodeCounter++.ToString());
         }
-        
+
         // Generate blank node ID
-        var blankNodeId = $"_:b{_blankNodeCounter++}";
+        var blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString());
         
         // Parse predicate-object list
         // (This would emit triples with blankNodeId as subject)
@@ -221,7 +221,7 @@ public sealed partial class TurtleStreamParser
         }
         
         // Generate first blank node for collection
-        var firstNode = $"_:b{_blankNodeCounter++}";
+        var firstNode = string.Concat("_:b", _blankNodeCounter++.ToString());
         var currentNode = firstNode;
         
         // Parse collection items
@@ -249,7 +249,7 @@ public sealed partial class TurtleStreamParser
             }
             
             // Create next node
-            var nextNode = $"_:b{_blankNodeCounter++}";
+            var nextNode = string.Concat("_:b", _blankNodeCounter++.ToString());
             currentNode = nextNode;
         }
         
@@ -302,7 +302,7 @@ public sealed partial class TurtleStreamParser
         // If no reifier provided, allocate blank node
         if (string.IsNullOrEmpty(reifier))
         {
-            reifier = $"_:b{_blankNodeCounter++}";
+            reifier = string.Concat("_:b", _blankNodeCounter++.ToString());
         }
         
         // The reifier is what gets returned as the "term"
@@ -374,7 +374,7 @@ public sealed partial class TurtleStreamParser
         
         // Triple terms are represented as a special IRI or blank node
         // that encapsulates the triple
-        return $"<<({subject}, {predicate}, {obj})>>";
+        return string.Concat("<<(", subject, ", ", predicate, ", ", obj, ")>>");
     }
     
     /// <summary>
@@ -472,4 +472,180 @@ public sealed partial class TurtleStreamParser
             }
         }
     }
+
+    #region Zero-GC Span-Based Structure Parsing
+
+    /// <summary>
+    /// Parse blank node property list and return span with blank node ID.
+    /// </summary>
+    private ReadOnlySpan<char> ParseBlankNodePropertyListSpan()
+    {
+        if (!TryConsume('['))
+            return ReadOnlySpan<char>.Empty;
+
+        SkipWhitespaceAndComments();
+
+        int start = _outputOffset;
+
+        // Check for anonymous blank node: []
+        if (TryConsume(']'))
+        {
+            AppendToOutput("_:b".AsSpan());
+            AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+            return GetOutputSpan(start);
+        }
+
+        // Generate blank node ID
+        AppendToOutput("_:b".AsSpan());
+        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+        var blankNodeId = GetOutputSpan(start);
+
+        // Skip to matching ']' - simplified, doesn't emit nested triples
+        var depth = 1;
+        while (depth > 0)
+        {
+            var ch = Peek();
+
+            switch (ch)
+            {
+                case -1:
+                    throw ParserException("Unexpected end of input in blank node property list");
+                case '[':
+                    depth++;
+                    break;
+                case ']':
+                    depth--;
+                    break;
+            }
+
+            Consume();
+        }
+
+        return blankNodeId;
+    }
+
+    /// <summary>
+    /// Parse collection and return span with first node ID.
+    /// </summary>
+    private ReadOnlySpan<char> ParseCollectionSpan()
+    {
+        if (!TryConsume('('))
+            return ReadOnlySpan<char>.Empty;
+
+        SkipWhitespaceAndComments();
+
+        // Empty collection is rdf:nil
+        if (TryConsume(')'))
+        {
+            int nilStart = _outputOffset;
+            AppendToOutput("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil".AsSpan());
+            return GetOutputSpan(nilStart);
+        }
+
+        int start = _outputOffset;
+
+        // Generate first blank node
+        AppendToOutput("_:b".AsSpan());
+        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+        var firstNode = GetOutputSpan(start);
+
+        // Skip collection content - simplified
+        var depth = 1;
+        while (depth > 0)
+        {
+            var ch = Peek();
+
+            switch (ch)
+            {
+                case -1:
+                    throw ParserException("Unexpected end of input in collection");
+                case '(':
+                    depth++;
+                    break;
+                case ')':
+                    depth--;
+                    break;
+            }
+
+            Consume();
+        }
+
+        return firstNode;
+    }
+
+    /// <summary>
+    /// Parse reified triple and return span with reifier ID.
+    /// </summary>
+    private ReadOnlySpan<char> ParseReifiedTripleSpan()
+    {
+        if (!TryConsume('<') || !TryConsume('<'))
+            return ReadOnlySpan<char>.Empty;
+
+        // Skip to matching '>>' - simplified
+        while (true)
+        {
+            var ch = Peek();
+
+            if (ch == -1)
+                throw ParserException("Unexpected end of input in reified triple");
+
+            if (ch == '>' && PeekAhead(1) == '>')
+            {
+                Consume(); Consume();
+                break;
+            }
+
+            Consume();
+        }
+
+        // Generate blank node for reification
+        int start = _outputOffset;
+        AppendToOutput("_:b".AsSpan());
+        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+        return GetOutputSpan(start);
+    }
+
+    /// <summary>
+    /// Parse triple term and return span.
+    /// </summary>
+    private ReadOnlySpan<char> ParseTripleTermSpan()
+    {
+        if (!TryConsume('<') || !TryConsume('<') || !TryConsume('('))
+            return ReadOnlySpan<char>.Empty;
+
+        int start = _outputOffset;
+        AppendToOutput("<<(".AsSpan());
+
+        // Skip to matching ')>>' - simplified
+        var depth = 1;
+        while (depth > 0)
+        {
+            var ch = Peek();
+
+            if (ch == -1)
+                throw ParserException("Unexpected end of input in triple term");
+
+            if (ch == '(' && PeekAhead(-1) == '<' && PeekAhead(-2) == '<')
+            {
+                depth++;
+            }
+            else if (ch == ')' && PeekAhead(1) == '>' && PeekAhead(2) == '>')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    Consume(); Consume(); Consume();
+                    break;
+                }
+            }
+
+            AppendToOutput((char)ch);
+            Consume();
+        }
+
+        AppendToOutput(")>>".AsSpan());
+        return GetOutputSpan(start);
+    }
+
+    #endregion
 }

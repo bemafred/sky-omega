@@ -1,5 +1,7 @@
 using System;
+using System.Buffers;
 using System.IO;
+using System.Text;
 using System.Threading;
 
 namespace SkyOmega.Mercury.Storage;
@@ -519,13 +521,25 @@ public sealed class TripleStore : IDisposable
 }
 
 /// <summary>
-/// Enumerator that remaps results from different temporal indexes
+/// Enumerator that remaps results from different temporal indexes.
+/// Uses pooled buffers to avoid allocations when decoding atom strings.
+///
+/// IMPORTANT: The spans returned by Current are only valid until the next
+/// MoveNext() call. Do not store references to Subject/Predicate/Object
+/// across iterations.
+///
+/// Call Dispose() when done to return the pooled buffer.
 /// </summary>
 public ref struct TemporalResultEnumerator
 {
     private TripleIndex.TemporalTripleEnumerator _baseEnumerator;
     private readonly TemporalIndexType _indexType;
     private readonly AtomStore _atoms;
+
+    // Pooled buffer for zero-allocation string decoding
+    private char[]? _buffer;
+    private int _bufferOffset;
+    private const int InitialBufferSize = 4096; // 4KB - typical for 3 URIs
 
     internal TemporalResultEnumerator(
         TripleIndex.TemporalTripleEnumerator baseEnumerator,
@@ -535,11 +549,18 @@ public ref struct TemporalResultEnumerator
         _baseEnumerator = baseEnumerator;
         _indexType = indexType;
         _atoms = atoms;
+        _buffer = null;
+        _bufferOffset = 0;
     }
 
-    public bool MoveNext() => _baseEnumerator.MoveNext();
+    public bool MoveNext()
+    {
+        // Reset buffer offset for new result - reuse same buffer
+        _bufferOffset = 0;
+        return _baseEnumerator.MoveNext();
+    }
 
-    public readonly ResolvedTemporalTriple Current
+    public ResolvedTemporalTriple Current
     {
         get
         {
@@ -578,18 +599,63 @@ public ref struct TemporalResultEnumerator
                     s = p = o = 0;
                     break;
             }
-            
+
             // Clamp milliseconds to valid DateTimeOffset range
             const long MaxValidMs = 253402300799999L; // Dec 31, 9999
 
             return new ResolvedTemporalTriple(
-                _atoms.GetAtomString(s),
-                _atoms.GetAtomString(p),
-                _atoms.GetAtomString(o),
+                DecodeAtomToBuffer(s),
+                DecodeAtomToBuffer(p),
+                DecodeAtomToBuffer(o),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidFrom, MaxValidMs)),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidTo, MaxValidMs)),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.TransactionTime, MaxValidMs))
             );
+        }
+    }
+
+    /// <summary>
+    /// Decode a UTF-8 atom into the pooled buffer and return a span to it.
+    /// </summary>
+    private ReadOnlySpan<char> DecodeAtomToBuffer(long atomId)
+    {
+        var utf8Span = _atoms.GetAtomSpan(atomId);
+        if (utf8Span.IsEmpty)
+            return ReadOnlySpan<char>.Empty;
+
+        // Ensure buffer is allocated
+        _buffer ??= ArrayPool<char>.Shared.Rent(InitialBufferSize);
+
+        // Calculate char count needed
+        int charCount = Encoding.UTF8.GetCharCount(utf8Span);
+
+        // Grow buffer if needed
+        if (_bufferOffset + charCount > _buffer.Length)
+        {
+            var newSize = Math.Max(_buffer.Length * 2, _bufferOffset + charCount + 256);
+            var newBuffer = ArrayPool<char>.Shared.Rent(newSize);
+            _buffer.AsSpan(0, _bufferOffset).CopyTo(newBuffer);
+            ArrayPool<char>.Shared.Return(_buffer);
+            _buffer = newBuffer;
+        }
+
+        // Decode UTF-8 to UTF-16 in the buffer
+        var destination = _buffer.AsSpan(_bufferOffset, charCount);
+        Encoding.UTF8.GetChars(utf8Span, destination);
+
+        _bufferOffset += charCount;
+        return destination;
+    }
+
+    /// <summary>
+    /// Return the pooled buffer. Call this when done iterating.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_buffer != null)
+        {
+            ArrayPool<char>.Shared.Return(_buffer);
+            _buffer = null;
         }
     }
 

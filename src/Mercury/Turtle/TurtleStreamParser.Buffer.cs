@@ -272,21 +272,21 @@ public sealed partial class TurtleStreamParser
     {
         if (!TryConsume('%'))
             throw ParserException("Expected '%'");
-        
-        var sb = new StringBuilder(3);
-        sb.Append('%');
-        
+
+        _sb.Clear();
+        _sb.Append('%');
+
         for (int i = 0; i < 2; i++)
         {
             var ch = Peek();
             if (ch == -1 || !IsHexDigit(ch))
                 throw ParserException("Invalid percent encoding");
-            
+
             Consume();
-            sb.Append((char)ch);
+            _sb.Append((char)ch);
         }
-        
-        return sb.ToString();
+
+        return _sb.ToString();
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
