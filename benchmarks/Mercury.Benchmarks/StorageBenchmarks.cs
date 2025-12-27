@@ -4,46 +4,68 @@ using SkyOmega.Mercury.Storage;
 namespace SkyOmega.Mercury.Benchmarks;
 
 /// <summary>
-/// Benchmarks for TB-scale file-based triple storage
+/// Benchmarks comparing single writes vs batch writes.
+/// Each iteration creates a fresh store to measure true write performance.
 /// </summary>
 [MemoryDiagnoser]
-[SimpleJob(warmupCount: 3, iterationCount: 5)]
-public class StorageBenchmarks
+[SimpleJob(warmupCount: 1, iterationCount: 3)]
+public class BatchWriteBenchmarks
 {
     private string _dbPath = null!;
-    private TripleStore _store = null!;
 
-    [Params(1_000, 10_000, 50_000)]
+    [Params(1_000, 10_000)]
     public int TripleCount { get; set; }
 
-    [GlobalSetup]
-    public void Setup()
+    [IterationSetup]
+    public void IterationSetup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_storage_{Guid.NewGuid():N}");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
-
-        _store = new TripleStore(_dbPath);
-    }
-
-    [GlobalCleanup]
-    public void Cleanup()
-    {
-        _store.Dispose();
+        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_batch_{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
     }
 
-    [Benchmark]
-    public void WriteTriples()
+    [IterationCleanup]
+    public void IterationCleanup()
     {
+        if (Directory.Exists(_dbPath))
+            Directory.Delete(_dbPath, true);
+    }
+
+    [Benchmark(Baseline = true, Description = "Single writes (fsync each)")]
+    public void SingleWrites()
+    {
+        using var store = new TripleStore(_dbPath);
         for (int i = 0; i < TripleCount; i++)
         {
-            _store.AddCurrent(
+            store.AddCurrent(
                 $"<http://ex.org/s{i}>",
                 $"<http://ex.org/p{i % 10}>",
                 $"<http://ex.org/o{i % 100}>"
             );
+        }
+    }
+
+    [Benchmark(Description = "Batch writes (single fsync)")]
+    public void BatchWrites()
+    {
+        using var store = new TripleStore(_dbPath + "_batch");
+        store.BeginBatch();
+        try
+        {
+            for (int i = 0; i < TripleCount; i++)
+            {
+                store.AddCurrentBatched(
+                    $"<http://ex.org/s{i}>",
+                    $"<http://ex.org/p{i % 10}>",
+                    $"<http://ex.org/o{i % 100}>"
+                );
+            }
+            store.CommitBatch();
+        }
+        catch
+        {
+            store.RollbackBatch();
+            throw;
         }
     }
 }

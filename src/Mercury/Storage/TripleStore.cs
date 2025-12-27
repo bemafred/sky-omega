@@ -26,6 +26,7 @@ public sealed class TripleStore : IDisposable
     private readonly WriteAheadLog _wal;
     private readonly string _baseDirectory;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
+    private long _activeBatchTxId = -1;
     private bool _disposed;
 
     public TripleStore(string baseDirectory)
@@ -105,6 +106,120 @@ public sealed class TripleStore : IDisposable
     {
         Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
     }
+
+    #region Batch API
+
+    /// <summary>
+    /// Begin a batch write transaction for high-throughput bulk loading.
+    /// Acquires exclusive write lock until CommitBatch() or RollbackBatch() is called.
+    ///
+    /// Usage:
+    ///   store.BeginBatch();
+    ///   try {
+    ///       foreach (var triple in triples)
+    ///           store.AddBatched(...);
+    ///       store.CommitBatch();
+    ///   } catch {
+    ///       store.RollbackBatch();
+    ///       throw;
+    ///   }
+    /// </summary>
+    public void BeginBatch()
+    {
+        ThrowIfDisposed();
+        _lock.EnterWriteLock();
+        try
+        {
+            if (_activeBatchTxId >= 0)
+                throw new InvalidOperationException("A batch is already active.");
+
+            _activeBatchTxId = _wal.BeginBatch();
+        }
+        catch
+        {
+            _lock.ExitWriteLock();
+            throw;
+        }
+        // Lock held until CommitBatch/RollbackBatch
+    }
+
+    /// <summary>
+    /// Add a temporal triple to the current batch (no fsync until CommitBatch).
+    /// Must be called between BeginBatch() and CommitBatch()/RollbackBatch().
+    /// </summary>
+    public void AddBatched(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo)
+    {
+        if (_activeBatchTxId < 0)
+            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
+
+        // 1. Intern atoms (AtomStore is append-only)
+        var subjectId = _atoms.Intern(subject);
+        var predicateId = _atoms.Intern(predicate);
+        var objectId = _atoms.Intern(obj);
+
+        // 2. Write to WAL without fsync
+        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo);
+        _wal.AppendBatch(record, _activeBatchTxId);
+
+        // 3. Apply to indexes immediately (in-memory, fast)
+        ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+    }
+
+    /// <summary>
+    /// Add a current fact to the batch (valid from now onwards).
+    /// </summary>
+    public void AddCurrentBatched(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj)
+    {
+        AddBatched(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+    }
+
+    /// <summary>
+    /// Commit the current batch transaction with a single fsync.
+    /// Releases the write lock acquired by BeginBatch().
+    /// </summary>
+    public void CommitBatch()
+    {
+        try
+        {
+            if (_activeBatchTxId < 0)
+                throw new InvalidOperationException("No active batch.");
+
+            _wal.CommitBatch(_activeBatchTxId);
+            _activeBatchTxId = -1;
+
+            CheckpointIfNeeded();
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Rollback the current batch (releases lock without committing).
+    /// In-memory index changes remain but WAL records are uncommitted.
+    /// Recovery will not replay these records.
+    /// </summary>
+    public void RollbackBatch()
+    {
+        _activeBatchTxId = -1;
+        _lock.ExitWriteLock();
+    }
+
+    /// <summary>
+    /// Returns true if a batch is currently active.
+    /// </summary>
+    public bool IsBatchActive => _activeBatchTxId >= 0;
+
+    #endregion
 
     private void ThrowIfDisposed()
     {

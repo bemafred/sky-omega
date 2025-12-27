@@ -96,6 +96,38 @@ Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 - **Batch-first design**: TxId in WAL records enables batching. Single writes are batch-of-one. Amortizing fsync across N triples is critical for performance.
 - **Hybrid checkpoint trigger**: Size-based (16MB) adapts to bursts; time-based (60s) bounds recovery during idle.
 
+### Batch Write API
+
+For high-throughput bulk loading, use the batch API to amortize fsync across many writes:
+
+```csharp
+store.BeginBatch();
+try
+{
+    foreach (var triple in triples)
+    {
+        store.AddCurrentBatched(triple.Subject, triple.Predicate, triple.Object);
+    }
+    store.CommitBatch();  // Single fsync for entire batch
+}
+catch
+{
+    store.RollbackBatch();
+    throw;
+}
+```
+
+**Performance characteristics:**
+- Single writes: ~250-300/sec (fsync per write)
+- Batch of 1,000: ~25,000+/sec (1 fsync per batch)
+- Batch of 10,000: ~100,000+/sec
+
+**Design notes:**
+- `BeginBatch()` acquires exclusive write lock (held until commit/rollback)
+- `AddBatched()`/`AddCurrentBatched()` write to WAL without fsync
+- `CommitBatch()` performs single fsync, releases lock
+- `RollbackBatch()` releases lock without committing (in-memory changes persist but WAL uncommitted)
+
 ### Concurrency Design
 
 TripleStore uses `ReaderWriterLockSlim` for thread-safety:
