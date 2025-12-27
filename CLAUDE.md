@@ -168,15 +168,69 @@ All parsers use aggressive zero-allocation techniques:
 - String interning via AtomStore to avoid duplicate allocations
 - Streaming enumerators that yield results without materializing collections
 
+**Zero-GC compliance by component:**
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| SPARQL Parser | ✓ Zero-GC | ref struct, no allocations |
+| TripleStore Query | ✓ Zero-GC | Pooled buffer, call Dispose() |
+| Turtle Parser (Handler) | ✓ Zero-GC | Use TripleHandler callback |
+| Turtle Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+
+### TripleStore Query (Zero-GC)
+
+Query results use pooled buffers. Call `Dispose()` to return buffers:
+
+```csharp
+store.AcquireReadLock();
+try
+{
+    var results = store.QueryCurrent(subject, predicate, obj);
+    try
+    {
+        while (results.MoveNext())
+        {
+            var triple = results.Current;
+            // Spans valid until next MoveNext()
+            ProcessTriple(triple.Subject, triple.Predicate, triple.Object);
+        }
+    }
+    finally
+    {
+        results.Dispose();  // Return pooled buffer
+    }
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
 ### Turtle Parser (`SkyOmega.Mercury.Turtle`)
 
 `TurtleStreamParser` is a `partial class` split across files:
-- `TurtleStreamParser.cs` - Main parser logic and `ParseAsync()` entry point
+- `TurtleStreamParser.cs` - Main parser logic and `ParseAsync()` entry points
 - `TurtleStreamParser.Buffer.cs` - Buffer management
 - `TurtleStreamParser.Structures.cs` - RDF structure parsing (blank nodes, collections)
 - `TurtleStreamParser.Terminals.cs` - Terminal parsing (IRIs, literals, prefixed names)
 
-API: `IAsyncEnumerable<RdfTriple>` streaming interface.
+**Zero-GC API (recommended):**
+```csharp
+await using var parser = new TurtleStreamParser(stream);
+await parser.ParseAsync((subject, predicate, obj) =>
+{
+    // Spans valid only during callback
+    store.AddCurrent(subject, predicate, obj);
+});
+```
+
+**Legacy API (allocates strings):**
+```csharp
+await foreach (var triple in parser.ParseAsync())
+{
+    // triple.Subject, Predicate, Object are strings
+}
+```
 
 ### SPARQL Engine (`SkyOmega.Mercury.Sparql`)
 
