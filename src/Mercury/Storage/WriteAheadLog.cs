@@ -155,24 +155,31 @@ public sealed class WriteAheadLog : IDisposable
         if (checkpointPosition < 0)
             return;
 
-        _logFile.Position = checkpointPosition;
-        var buffer = new byte[RecordSize];
-        if (_logFile.Read(buffer) != RecordSize)
-            return;
+        var buffer = ArrayPool<byte>.Shared.Rent(RecordSize);
+        try
+        {
+            _logFile.Position = checkpointPosition;
+            if (_logFile.Read(buffer, 0, RecordSize) != RecordSize)
+                return;
 
-        var checkpointRecord = LogRecord.ReadFrom(buffer);
-        if (checkpointRecord.Operation != LogOperation.Checkpoint || !checkpointRecord.IsValid())
-            return;
+            var checkpointRecord = LogRecord.ReadFrom(buffer);
+            if (checkpointRecord.Operation != LogOperation.Checkpoint || !checkpointRecord.IsValid())
+                return;
 
-        // Write checkpoint record at the beginning of the file
-        _logFile.Position = 0;
-        _logFile.Write(buffer);
-        _logFile.Flush(flushToDisk: true);
+            // Write checkpoint record at the beginning of the file
+            _logFile.Position = 0;
+            _logFile.Write(buffer, 0, RecordSize);
+            _logFile.Flush(flushToDisk: true);
 
-        // Truncate the file to just the checkpoint record
-        _logFile.SetLength(RecordSize);
-        _logFile.Position = RecordSize; // Ready for new appends
-        _lastCheckpointPosition = RecordSize; // Cache position for O(1) lookup
+            // Truncate the file to just the checkpoint record
+            _logFile.SetLength(RecordSize);
+            _logFile.Position = RecordSize; // Ready for new appends
+            _lastCheckpointPosition = RecordSize; // Cache position for O(1) lookup
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>
@@ -210,32 +217,39 @@ public sealed class WriteAheadLog : IDisposable
 
     private void RecoverState()
     {
-        var buffer = new byte[RecordSize];
-        _logFile.Position = 0;
-        _currentTxId = 0;
-        _lastCheckpointTxId = 0;
-        _lastCheckpointPosition = 0;
-
-        while (_logFile.Read(buffer) == RecordSize)
+        var buffer = ArrayPool<byte>.Shared.Rent(RecordSize);
+        try
         {
-            var record = LogRecord.ReadFrom(buffer);
-            if (!record.IsValid())
+            _logFile.Position = 0;
+            _currentTxId = 0;
+            _lastCheckpointTxId = 0;
+            _lastCheckpointPosition = 0;
+
+            while (_logFile.Read(buffer, 0, RecordSize) == RecordSize)
             {
-                // Corrupted record - truncate log here
-                _logFile.SetLength(_logFile.Position - RecordSize);
-                break;
+                var record = LogRecord.ReadFrom(buffer);
+                if (!record.IsValid())
+                {
+                    // Corrupted record - truncate log here
+                    _logFile.SetLength(_logFile.Position - RecordSize);
+                    break;
+                }
+
+                _currentTxId = record.TxId;
+                if (record.Operation == LogOperation.Checkpoint)
+                {
+                    _lastCheckpointTxId = record.TxId;
+                    _lastCheckpointPosition = _logFile.Position; // Position after checkpoint record
+                }
             }
 
-            _currentTxId = record.TxId;
-            if (record.Operation == LogOperation.Checkpoint)
-            {
-                _lastCheckpointTxId = record.TxId;
-                _lastCheckpointPosition = _logFile.Position; // Position after checkpoint record
-            }
+            _lastCheckpointTime = Environment.TickCount64;
+            _logFile.Position = _logFile.Length; // Ready for appends
         }
-
-        _lastCheckpointTime = Environment.TickCount64;
-        _logFile.Position = _logFile.Length; // Ready for appends
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     public void Dispose()
