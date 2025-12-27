@@ -418,6 +418,96 @@ public class AtomStoreTests : IDisposable
 
     #endregion
 
+    #region Quadratic Probing and High-Collision Scenarios
+
+    [Fact]
+    public void Intern_HighCollisionLoad_HandlesGracefully()
+    {
+        var store = CreateStore();
+        var ids = new Dictionary<string, long>();
+
+        // Intern 10,000 strings with similar patterns to stress collision handling
+        for (int i = 0; i < 10_000; i++)
+        {
+            var str = $"collision_test_{i}";
+            ids[str] = store.Intern(str);
+        }
+
+        // Verify all can be retrieved
+        foreach (var (str, id) in ids)
+        {
+            Assert.Equal(str, store.GetAtomString(id));
+        }
+
+        // Verify deduplication still works
+        foreach (var (str, expectedId) in ids)
+        {
+            var lookupId = store.Intern(str);
+            Assert.Equal(expectedId, lookupId);
+        }
+    }
+
+    [Fact]
+    public void Intern_SameLength_DifferentContent_AllUnique()
+    {
+        var store = CreateStore();
+        var ids = new HashSet<long>();
+
+        // Same-length strings may have similar hash patterns
+        for (int i = 0; i < 1000; i++)
+        {
+            // All strings are exactly 20 chars
+            var str = $"test{i:D16}";
+            var id = store.Intern(str);
+            Assert.True(ids.Add(id), $"Duplicate ID for {str}");
+        }
+
+        Assert.Equal(1000, ids.Count);
+    }
+
+    [Fact]
+    public void GetAtomId_AfterManyInserts_StillFindsEntries()
+    {
+        var store = CreateStore();
+        var testStrings = new List<(string str, long id)>();
+
+        // Insert many strings
+        for (int i = 0; i < 5000; i++)
+        {
+            var str = $"search_test_{i}";
+            var id = store.Intern(str);
+            testStrings.Add((str, id));
+        }
+
+        // Verify lookup still works for all entries
+        foreach (var (str, expectedId) in testStrings)
+        {
+            var foundId = store.GetAtomId(str);
+            Assert.Equal(expectedId, foundId);
+        }
+    }
+
+    [Fact]
+    public void Intern_VeryLongStrings_MultipleInserts_Works()
+    {
+        var store = CreateStore();
+        var ids = new Dictionary<string, long>();
+
+        // Long strings with small variations
+        for (int i = 0; i < 100; i++)
+        {
+            var str = new string('x', 5000) + i.ToString();
+            ids[str] = store.Intern(str);
+        }
+
+        foreach (var (str, id) in ids)
+        {
+            Assert.Equal(str, store.GetAtomString(id));
+        }
+    }
+
+    #endregion
+
     #region Edge Cases
 
     [Fact]

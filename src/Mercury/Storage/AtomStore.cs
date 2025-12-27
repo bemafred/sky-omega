@@ -29,7 +29,8 @@ public sealed unsafe class AtomStore : IDisposable
     private const long HashTableSize = 1L << 24; // 16M buckets for TB-scale
     private const long InitialDataSize = 1L << 30; // 1GB initial
     private const long InitialOffsetCapacity = 1L << 20; // 1M atoms initial
-    private const int MaxProbeDistance = 64; // Extended probing for better fill
+    private const int QuadraticProbeLimit = 64; // Quadratic probing reduces clustering
+    private const int MaxProbeDistance = 4096; // Extended fallback for high-load scenarios
 
     // Memory-mapped files
     private readonly FileStream _dataFile;
@@ -193,9 +194,11 @@ public sealed unsafe class AtomStore : IDisposable
         var hash = ComputeHashUtf8(utf8Value);
         var bucket = (long)((ulong)hash % (ulong)HashTableSize);
 
+        // Use quadratic probing to reduce clustering
         for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
-            var currentBucket = (bucket + probe) % HashTableSize;
+            var probeOffset = ComputeProbeOffset(probe);
+            var currentBucket = (bucket + probeOffset) % HashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
@@ -244,9 +247,11 @@ public sealed unsafe class AtomStore : IDisposable
         var hash = ComputeHashUtf8(utf8Value);
         var bucket = (long)((ulong)hash % (ulong)HashTableSize);
 
+        // Use quadratic probing to match insertion pattern
         for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
-            var currentBucket = (bucket + probe) % HashTableSize;
+            var probeOffset = ComputeProbeOffset(probe);
+            var currentBucket = (bucket + probeOffset) % HashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
@@ -337,6 +342,21 @@ public sealed unsafe class AtomStore : IDisposable
     /// </summary>
     public long AtomCount => _atomCount;
 
+    /// <summary>
+    /// Compute probe offset using quadratic probing for first QuadraticProbeLimit,
+    /// then linear probing for extended search.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long ComputeProbeOffset(int probe)
+    {
+        // Quadratic probing: 0, 1, 4, 9, 16, 25, ... reduces primary clustering
+        if (probe < QuadraticProbeLimit)
+            return (long)probe * probe;
+
+        // Linear fallback for extended search (offset from last quadratic position)
+        return (long)(QuadraticProbeLimit - 1) * (QuadraticProbeLimit - 1) + (probe - QuadraticProbeLimit + 1);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long ComputeHash(ReadOnlySpan<char> value)
     {
@@ -406,10 +426,11 @@ public sealed unsafe class AtomStore : IDisposable
         // Write to offset index for O(1) atomId→offset lookup
         _offsetIndex[atomId] = offset;
 
-        // Update hash table
+        // Update hash table with quadratic probing
         for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
-            var currentBucket = (bucket + probe) % HashTableSize;
+            var probeOffset = ComputeProbeOffset(probe);
+            var currentBucket = (bucket + probeOffset) % HashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
@@ -435,8 +456,11 @@ public sealed unsafe class AtomStore : IDisposable
             }
         }
 
-        // Hash table full in this region - need to handle overflow
-        throw new InvalidOperationException($"Hash table region full at bucket {bucket}");
+        // Hash table truly full - should not happen with 16M buckets and 4096 probes
+        var loadFactor = (double)_atomCount / HashTableSize * 100;
+        throw new InvalidOperationException(
+            $"Hash table overflow at bucket {bucket} after {MaxProbeDistance} probes. " +
+            $"Load factor: {loadFactor:F2}%. Consider increasing hash table size.");
     }
 
     private void EnsureDataCapacity(long requiredSize)
