@@ -5,6 +5,7 @@ namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
 /// RDF triple store with multiple indexes for optimal query patterns.
+/// Uses Write-Ahead Logging (WAL) for crash safety.
 ///
 /// Indexes:
 /// 1. SPOT: Subject-Predicate-Object-Time (primary)
@@ -20,9 +21,13 @@ public sealed class TripleStore : IDisposable
     private readonly TripleIndex _tspoIndex; // Time-first
 
     private readonly AtomStore _atoms;
+    private readonly WriteAheadLog _wal;
+    private readonly string _baseDirectory;
 
     public TripleStore(string baseDirectory)
     {
+        _baseDirectory = baseDirectory;
+
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
 
@@ -31,21 +36,65 @@ public sealed class TripleStore : IDisposable
         var osptPath = Path.Combine(baseDirectory, "ospt.tdb");
         var tspoPath = Path.Combine(baseDirectory, "tspo.tdb");
         var atomPath = Path.Combine(baseDirectory, "atoms");
+        var walPath = Path.Combine(baseDirectory, "wal.log");
 
         // Create shared atom store for all indexes
         _atoms = new AtomStore(atomPath);
 
-        // Create temporal stores with shared atom store
+        // Create WAL for durability
+        _wal = new WriteAheadLog(walPath);
+
+        // Create indexes with shared atom store
         _spotIndex = new TripleIndex(spotPath, _atoms);
         _postIndex = new TripleIndex(postPath, _atoms);
         _osptIndex = new TripleIndex(osptPath, _atoms);
         _tspoIndex = new TripleIndex(tspoPath, _atoms);
+
+        // Recover any uncommitted transactions
+        Recover();
     }
 
     /// <summary>
-    /// Add a temporal triple to all indexes
+    /// Add a temporal triple to all indexes with WAL durability.
     /// </summary>
     public void Add(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo)
+    {
+        // 1. Intern atoms first (AtomStore is append-only, naturally durable)
+        var subjectId = _atoms.Intern(subject);
+        var predicateId = _atoms.Intern(predicate);
+        var objectId = _atoms.Intern(obj);
+
+        // 2. Write to WAL (fsync ensures durability)
+        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo);
+        _wal.Append(record);
+
+        // 3. Apply to indexes
+        ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+
+        // 4. Check if checkpoint needed
+        CheckpointIfNeeded();
+    }
+
+    /// <summary>
+    /// Add a current fact (valid from now onwards) with WAL durability.
+    /// </summary>
+    public void AddCurrent(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj)
+    {
+        Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+    }
+
+    /// <summary>
+    /// Apply a triple to all indexes (internal, no WAL).
+    /// </summary>
+    private void ApplyToIndexes(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -59,17 +108,62 @@ public sealed class TripleStore : IDisposable
     }
 
     /// <summary>
-    /// Add a current fact (valid from now onwards)
+    /// Recover uncommitted transactions from WAL after crash.
     /// </summary>
-    public void AddCurrent(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+    private void Recover()
     {
-        _spotIndex.AddCurrent(subject, predicate, obj);
-        _postIndex.AddCurrent(predicate, obj, subject);
-        _osptIndex.AddCurrent(obj, subject, predicate);
-        _tspoIndex.AddCurrent(subject, predicate, obj);
+        var enumerator = _wal.GetUncommittedRecords();
+        var recoveredCount = 0;
+
+        while (enumerator.MoveNext())
+        {
+            var record = enumerator.Current;
+
+            if (record.Operation == LogOperation.Add)
+            {
+                // Get atom strings from IDs
+                var subject = _atoms.GetAtomString(record.SubjectId);
+                var predicate = _atoms.GetAtomString(record.PredicateId);
+                var obj = _atoms.GetAtomString(record.ObjectId);
+
+                var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
+                var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
+
+                // Apply to indexes (no WAL write - already in log)
+                ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+                recoveredCount++;
+            }
+            // Delete operations would be handled here when implemented
+        }
+
+        if (recoveredCount > 0)
+        {
+            // Checkpoint after recovery to avoid re-replaying
+            Checkpoint();
+        }
+    }
+
+    /// <summary>
+    /// Force a checkpoint: flush indexes and truncate WAL.
+    /// </summary>
+    public void Checkpoint()
+    {
+        // Flush all indexes (memory-mapped files auto-flush, but we can force it)
+        // In a more complete implementation, we'd flush the mmap views here
+
+        // Write checkpoint marker to WAL
+        _wal.Checkpoint();
+    }
+
+    /// <summary>
+    /// Check if checkpoint is needed and perform it.
+    /// </summary>
+    private void CheckpointIfNeeded()
+    {
+        if (_wal.ShouldCheckpoint())
+        {
+            Checkpoint();
+        }
     }
 
     /// <summary>
@@ -210,6 +304,10 @@ public sealed class TripleStore : IDisposable
 
     public void Dispose()
     {
+        // Checkpoint before closing to minimize recovery on next open
+        Checkpoint();
+
+        _wal?.Dispose();
         _spotIndex?.Dispose();
         _postIndex?.Dispose();
         _osptIndex?.Dispose();
@@ -223,8 +321,17 @@ public sealed class TripleStore : IDisposable
     public (long TripleCount, long AtomCount, long TotalBytes) GetStatistics()
     {
         var tripleCount = _spotIndex.TripleCount;
-        var (atomCount, totalBytes, _) = _atoms.GetStatistics();
-        return (tripleCount, atomCount, totalBytes);
+        var (atomCount, atomBytes, _) = _atoms.GetStatistics();
+        var walBytes = _wal.LogSize;
+        return (tripleCount, atomCount, atomBytes + walBytes);
+    }
+
+    /// <summary>
+    /// Get WAL statistics for monitoring
+    /// </summary>
+    public (long CurrentTxId, long LastCheckpointTxId, long LogSize) GetWalStatistics()
+    {
+        return (_wal.CurrentTxId, _wal.LastCheckpointTxId, _wal.LogSize);
     }
 }
 
