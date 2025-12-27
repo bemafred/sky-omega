@@ -10,7 +10,6 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentation & Architecture", "Documentation & Architecture", "{7FA0A47B-7556-4F7D-869D-744000F071D0}"
 	ProjectSection(SolutionItems) = preProject
 		CLAUDE.md = CLAUDE.md
-		README.md = README.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{6A048219-87B6-4063-9E6B-D76490244A39}"
