@@ -432,6 +432,7 @@ public sealed unsafe class TripleIndex : IDisposable
         private readonly TemporalKey _maxKey;
         private readonly TemporalQuery _query;
         private TemporalKey _currentKey;
+        private bool _currentIsDeleted;
 
         internal TemporalTripleEnumerator(
             TripleIndex store,
@@ -447,6 +448,7 @@ public sealed unsafe class TripleIndex : IDisposable
             _maxKey = maxKey;
             _query = query;
             _currentKey = default;
+            _currentIsDeleted = false;
         }
 
         public bool MoveNext()
@@ -454,16 +456,17 @@ public sealed unsafe class TripleIndex : IDisposable
             while (_currentPageId != 0)
             {
                 var page = _store.GetPage(_currentPageId);
-                
+
                 while (_currentSlot < page->EntryCount)
                 {
                     ref var entry = ref page->GetEntry(_currentSlot);
                     _currentKey = entry.Key;
-                    
+                    _currentIsDeleted = entry.IsDeleted;
+
                     // Check spatial bounds
                     if (_currentKey.CompareTo(_maxKey) > 0)
                         return false;
-                    
+
                     if (_currentKey.CompareTo(_minKey) >= 0)
                     {
                         // Check temporal bounds
@@ -473,37 +476,38 @@ public sealed unsafe class TripleIndex : IDisposable
                             return true;
                         }
                     }
-                    
+
                     _currentSlot++;
                 }
-                
+
                 _currentPageId = page->NextLeaf;
                 _currentSlot = 0;
             }
-            
+
             return false;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private readonly bool MatchesTemporalQuery(in TemporalBTreeEntry entry)
         {
-            if (entry.IsDeleted)
-                return false;
-            
             var key = entry.Key;
-            
+
             return _query.Type switch
             {
-                TemporalQueryType.AsOf => 
-                    key.ValidFrom <= _query.AsOfTime && 
+                // AsOf and Range queries exclude deleted entries
+                TemporalQueryType.AsOf =>
+                    !entry.IsDeleted &&
+                    key.ValidFrom <= _query.AsOfTime &&
                     key.ValidTo > _query.AsOfTime,
-                
+
                 TemporalQueryType.Range =>
+                    !entry.IsDeleted &&
                     key.ValidFrom < _query.RangeEnd &&
                     key.ValidTo > _query.RangeStart,
-                
+
+                // AllTime (history/audit) includes deleted entries
                 TemporalQueryType.AllTime => true,
-                
+
                 _ => false
             };
         }
@@ -517,7 +521,8 @@ public sealed unsafe class TripleIndex : IDisposable
                 ObjectAtom = _currentKey.ObjectAtom,
                 ValidFrom = _currentKey.ValidFrom,
                 ValidTo = _currentKey.ValidTo,
-                TransactionTime = _currentKey.TransactionTime
+                TransactionTime = _currentKey.TransactionTime,
+                IsDeleted = _currentIsDeleted
             };
         }
 
@@ -1018,4 +1023,5 @@ public struct TemporalTriple
     public long ValidFrom;
     public long ValidTo;
     public long TransactionTime;
+    public bool IsDeleted;      // Soft-delete flag (visible in AllTime queries)
 }

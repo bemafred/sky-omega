@@ -748,7 +748,8 @@ public ref struct TemporalResultEnumerator
                 DecodeAtomToBuffer(o),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidFrom, MaxValidMs)),
                 DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidTo, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.TransactionTime, MaxValidMs))
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.TransactionTime, MaxValidMs)),
+                triple.IsDeleted
             );
         }
     }
@@ -820,6 +821,7 @@ public readonly ref struct ResolvedTemporalTriple
     public readonly DateTimeOffset ValidFrom;
     public readonly DateTimeOffset ValidTo;
     public readonly DateTimeOffset TransactionTime;
+    public readonly bool IsDeleted;
 
     public ResolvedTemporalTriple(
         ReadOnlySpan<char> subject,
@@ -827,7 +829,8 @@ public readonly ref struct ResolvedTemporalTriple
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
-        DateTimeOffset transactionTime)
+        DateTimeOffset transactionTime,
+        bool isDeleted = false)
     {
         Subject = subject;
         Predicate = predicate;
@@ -835,5 +838,6 @@ public readonly ref struct ResolvedTemporalTriple
         ValidFrom = validFrom;
         ValidTo = validTo;
         TransactionTime = transactionTime;
+        IsDeleted = isDeleted;
     }
 }

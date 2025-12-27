@@ -1351,4 +1351,157 @@ public class TripleStoreTests : IDisposable
     }
 
     #endregion
+
+    #region QueryHistory / Audit Trail
+
+    [Fact]
+    public void QueryEvolution_DeletedTriple_IsVisible()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.True(results.MoveNext(), "Deleted triple should be visible in QueryEvolution");
+                Assert.True(results.Current.IsDeleted, "Triple should be marked as deleted");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryEvolution_MixedDeletedAndActive_ShowsAll()
+    {
+        var store = CreateStore();
+
+        // Add three triples, delete one
+        store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.AddCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.AddCurrent("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.DeleteCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query all with predicate p
+            var results = store.QueryEvolution(default, "<http://ex.org/p>", default);
+            try
+            {
+                var count = 0;
+                var deletedCount = 0;
+                while (results.MoveNext())
+                {
+                    count++;
+                    if (results.Current.IsDeleted)
+                        deletedCount++;
+                }
+
+                Assert.Equal(3, count); // All three visible in evolution
+                Assert.Equal(1, deletedCount); // One is deleted
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryCurrent_DeletedTriple_NotVisible()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.False(results.MoveNext(), "Deleted triple should not be visible in QueryCurrent");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryAsOf_DeletedTriple_NotVisible()
+    {
+        var store = CreateStore();
+        var addTime = DateTimeOffset.UtcNow;
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query as of slightly after add time
+            var results = store.QueryAsOf("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                addTime.AddSeconds(1));
+            try
+            {
+                Assert.False(results.MoveNext(), "Deleted triple should not be visible in QueryAsOf");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void QueryEvolution_ActiveTriple_IsDeletedFalse()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryEvolution("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.True(results.MoveNext());
+                Assert.False(results.Current.IsDeleted, "Active triple should have IsDeleted=false");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
