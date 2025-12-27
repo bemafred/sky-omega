@@ -321,16 +321,414 @@ public ref struct SparqlParser
     private WhereClause ParseWhereClause()
     {
         SkipWhitespace();
-        
+
         var span = PeekSpan(5);
         if (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("WHERE");
         }
-        
+
         SkipWhitespace();
-        return new WhereClause();
+        var pattern = ParseGroupGraphPattern();
+
+        return new WhereClause { Pattern = pattern };
     }
+
+    /// <summary>
+    /// [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
+    /// </summary>
+    private GraphPattern ParseGroupGraphPattern()
+    {
+        var pattern = new GraphPattern();
+
+        SkipWhitespace();
+        if (Peek() != '{')
+            return pattern;
+
+        Advance(); // Skip '{'
+        ParseGroupGraphPatternSub(ref pattern);
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        return pattern;
+    }
+
+    /// <summary>
+    /// [54] GroupGraphPatternSub ::= TriplesBlock? ( GraphPatternNotTriples '.'? TriplesBlock? )*
+    /// </summary>
+    private void ParseGroupGraphPatternSub(ref GraphPattern pattern)
+    {
+        SkipWhitespace();
+
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseFilter(ref pattern);
+                continue;
+            }
+
+            // Check for OPTIONAL, UNION, MINUS, etc. (not yet implemented)
+            if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                SkipUntilClosingBrace();
+                continue;
+            }
+
+            // Try to parse a triple pattern
+            if (!TryParseTriplePattern(ref pattern))
+                break;
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+    }
+
+    /// <summary>
+    /// Parse FILTER constraint
+    /// </summary>
+    private void ParseFilter(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("FILTER");
+        SkipWhitespace();
+
+        var start = _position;
+
+        // FILTER can be: FILTER(expr) or FILTER expr
+        if (Peek() == '(')
+        {
+            Advance(); // Skip '('
+            start = _position;
+            var depth = 1;
+            while (!IsAtEnd() && depth > 0)
+            {
+                var ch = Advance();
+                if (ch == '(') depth++;
+                else if (ch == ')') depth--;
+            }
+            var length = _position - start - 1; // Exclude closing ')'
+            pattern.AddFilter(new FilterExpr { Start = start, Length = length });
+        }
+    }
+
+    /// <summary>
+    /// Try to parse a triple pattern (subject predicate object)
+    /// </summary>
+    private bool TryParseTriplePattern(ref GraphPattern pattern)
+    {
+        SkipWhitespace();
+
+        // Check if we're at end of pattern
+        if (IsAtEnd() || Peek() == '}')
+            return false;
+
+        var subject = ParseTerm();
+        if (subject.Type == TermType.Variable && subject.Length == 0)
+            return false;
+
+        SkipWhitespace();
+        var predicate = ParseTerm();
+
+        SkipWhitespace();
+        var obj = ParseTerm();
+
+        pattern.AddPattern(new TriplePattern
+        {
+            Subject = subject,
+            Predicate = predicate,
+            Object = obj
+        });
+
+        return true;
+    }
+
+    /// <summary>
+    /// Parse a term (variable, IRI, or literal)
+    /// </summary>
+    private Term ParseTerm()
+    {
+        SkipWhitespace();
+        var ch = Peek();
+
+        // Variable: ?name or $name
+        if (ch == '?' || ch == '$')
+        {
+            return ParseVariable();
+        }
+
+        // IRI: <uri>
+        if (ch == '<')
+        {
+            return ParseTermIriRef();
+        }
+
+        // Prefixed name: prefix:local
+        if (IsLetter(ch))
+        {
+            return ParsePrefixedNameOrKeyword();
+        }
+
+        // Literal: "string" or 'string'
+        if (ch == '"' || ch == '\'')
+        {
+            return ParseLiteral();
+        }
+
+        // Numeric literal
+        if (IsDigit(ch) || ch == '-' || ch == '+')
+        {
+            return ParseNumericLiteral();
+        }
+
+        // Blank node: _:name
+        if (ch == '_')
+        {
+            return ParseBlankNode();
+        }
+
+        // 'a' as shorthand for rdf:type
+        if (ch == 'a' && !IsLetterOrDigit(PeekAt(1)))
+        {
+            Advance();
+            return Term.Iri(_position - 1, 1); // 'a' shorthand
+        }
+
+        return default;
+    }
+
+    /// <summary>
+    /// Parse a variable: ?name or $name
+    /// </summary>
+    private Term ParseVariable()
+    {
+        var start = _position;
+        Advance(); // Skip ? or $
+
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+            Advance();
+
+        return Term.Variable(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse an IRI reference: &lt;uri&gt; (returns Term)
+    /// </summary>
+    private Term ParseTermIriRef()
+    {
+        Advance(); // Skip '<'
+        var start = _position;
+
+        while (!IsAtEnd() && Peek() != '>')
+            Advance();
+
+        var length = _position - start;
+
+        if (Peek() == '>')
+            Advance(); // Skip '>'
+
+        return Term.Iri(start, length);
+    }
+
+    /// <summary>
+    /// Parse a prefixed name or check for keyword
+    /// </summary>
+    private Term ParsePrefixedNameOrKeyword()
+    {
+        var start = _position;
+
+        // Read prefix part
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+            Advance();
+
+        // Check for colon (prefixed name)
+        if (Peek() == ':')
+        {
+            Advance(); // Skip ':'
+
+            // Read local part
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+            {
+                // Don't include trailing dot
+                if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)))
+                    break;
+                Advance();
+            }
+
+            return Term.Iri(start, _position - start);
+        }
+
+        // Not a prefixed name - might be a keyword, reset
+        // Check if this looks like a keyword we should skip
+        var word = _source.Slice(start, _position - start);
+        if (word.Equals("FILTER", StringComparison.OrdinalIgnoreCase) ||
+            word.Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase) ||
+            word.Equals("UNION", StringComparison.OrdinalIgnoreCase))
+        {
+            _position = start; // Reset
+            return default;
+        }
+
+        // Treat as bare word (error in strict parsing, but we'll be lenient)
+        return Term.Iri(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse a string literal
+    /// </summary>
+    private Term ParseLiteral()
+    {
+        var quote = Peek();
+        var start = _position;
+
+        Advance(); // Skip opening quote
+
+        // Check for long string (""" or ''')
+        if (Peek() == quote && PeekAt(1) == quote)
+        {
+            Advance();
+            Advance();
+            // Long string - read until closing """
+            while (!IsAtEnd())
+            {
+                if (Peek() == quote && PeekAt(1) == quote && PeekAt(2) == quote)
+                {
+                    Advance();
+                    Advance();
+                    Advance();
+                    break;
+                }
+                Advance();
+            }
+        }
+        else
+        {
+            // Short string - read until closing quote
+            while (!IsAtEnd() && Peek() != quote)
+            {
+                if (Peek() == '\\')
+                    Advance(); // Skip escape
+                Advance();
+            }
+
+            if (Peek() == quote)
+                Advance(); // Skip closing quote
+        }
+
+        // Check for language tag @en or datatype ^^<type>
+        if (Peek() == '@')
+        {
+            Advance();
+            while (!IsAtEnd() && (IsLetter(Peek()) || Peek() == '-'))
+                Advance();
+        }
+        else if (Peek() == '^' && PeekAt(1) == '^')
+        {
+            Advance();
+            Advance();
+            ParseTerm(); // Parse datatype IRI
+        }
+
+        return Term.Literal(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse a numeric literal
+    /// </summary>
+    private Term ParseNumericLiteral()
+    {
+        var start = _position;
+
+        if (Peek() == '-' || Peek() == '+')
+            Advance();
+
+        while (!IsAtEnd() && IsDigit(Peek()))
+            Advance();
+
+        // Decimal or double
+        if (Peek() == '.')
+        {
+            Advance();
+            while (!IsAtEnd() && IsDigit(Peek()))
+                Advance();
+        }
+
+        // Exponent
+        if (Peek() == 'e' || Peek() == 'E')
+        {
+            Advance();
+            if (Peek() == '-' || Peek() == '+')
+                Advance();
+            while (!IsAtEnd() && IsDigit(Peek()))
+                Advance();
+        }
+
+        return Term.Literal(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse a blank node: _:name
+    /// </summary>
+    private Term ParseBlankNode()
+    {
+        var start = _position;
+        Advance(); // Skip '_'
+
+        if (Peek() == ':')
+        {
+            Advance(); // Skip ':'
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+            {
+                if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)))
+                    break;
+                Advance();
+            }
+        }
+
+        return Term.BlankNode(start, _position - start);
+    }
+
+    /// <summary>
+    /// Skip until closing brace (for unsupported constructs)
+    /// </summary>
+    private void SkipUntilClosingBrace()
+    {
+        var depth = 0;
+        while (!IsAtEnd())
+        {
+            var ch = Advance();
+            if (ch == '{') depth++;
+            else if (ch == '}')
+            {
+                if (depth == 0) break;
+                depth--;
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private char PeekAt(int offset)
+    {
+        var pos = _position + offset;
+        return pos >= _source.Length ? '\0' : _source[pos];
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLetter(char ch) => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsDigit(char ch) => ch >= '0' && ch <= '9';
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLetterOrDigit(char ch) => IsLetter(ch) || IsDigit(ch);
 
     private SolutionModifier ParseSolutionModifier()
     {
@@ -542,6 +940,169 @@ public struct DatasetClause
 
 public struct WhereClause
 {
+    public GraphPattern Pattern;
+}
+
+/// <summary>
+/// A graph pattern containing triple patterns and filters.
+/// Uses inline storage for zero-allocation parsing.
+/// </summary>
+public struct GraphPattern
+{
+    public const int MaxTriplePatterns = 32;
+    public const int MaxFilters = 16;
+
+    private int _patternCount;
+    private int _filterCount;
+
+    // Inline storage for triple patterns (32 * 24 bytes = 768 bytes)
+    private TriplePattern _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7;
+    private TriplePattern _p8, _p9, _p10, _p11, _p12, _p13, _p14, _p15;
+    private TriplePattern _p16, _p17, _p18, _p19, _p20, _p21, _p22, _p23;
+    private TriplePattern _p24, _p25, _p26, _p27, _p28, _p29, _p30, _p31;
+
+    // Inline storage for filter expression offsets (16 * 8 bytes = 128 bytes)
+    private FilterExpr _f0, _f1, _f2, _f3, _f4, _f5, _f6, _f7;
+    private FilterExpr _f8, _f9, _f10, _f11, _f12, _f13, _f14, _f15;
+
+    public readonly int PatternCount => _patternCount;
+    public readonly int FilterCount => _filterCount;
+
+    public void AddPattern(TriplePattern pattern)
+    {
+        if (_patternCount >= MaxTriplePatterns) return;
+        SetPattern(_patternCount++, pattern);
+    }
+
+    public void AddFilter(FilterExpr filter)
+    {
+        if (_filterCount >= MaxFilters) return;
+        SetFilter(_filterCount++, filter);
+    }
+
+    public readonly TriplePattern GetPattern(int index)
+    {
+        return index switch
+        {
+            0 => _p0, 1 => _p1, 2 => _p2, 3 => _p3,
+            4 => _p4, 5 => _p5, 6 => _p6, 7 => _p7,
+            8 => _p8, 9 => _p9, 10 => _p10, 11 => _p11,
+            12 => _p12, 13 => _p13, 14 => _p14, 15 => _p15,
+            16 => _p16, 17 => _p17, 18 => _p18, 19 => _p19,
+            20 => _p20, 21 => _p21, 22 => _p22, 23 => _p23,
+            24 => _p24, 25 => _p25, 26 => _p26, 27 => _p27,
+            28 => _p28, 29 => _p29, 30 => _p30, 31 => _p31,
+            _ => default
+        };
+    }
+
+    private void SetPattern(int index, TriplePattern pattern)
+    {
+        switch (index)
+        {
+            case 0: _p0 = pattern; break; case 1: _p1 = pattern; break;
+            case 2: _p2 = pattern; break; case 3: _p3 = pattern; break;
+            case 4: _p4 = pattern; break; case 5: _p5 = pattern; break;
+            case 6: _p6 = pattern; break; case 7: _p7 = pattern; break;
+            case 8: _p8 = pattern; break; case 9: _p9 = pattern; break;
+            case 10: _p10 = pattern; break; case 11: _p11 = pattern; break;
+            case 12: _p12 = pattern; break; case 13: _p13 = pattern; break;
+            case 14: _p14 = pattern; break; case 15: _p15 = pattern; break;
+            case 16: _p16 = pattern; break; case 17: _p17 = pattern; break;
+            case 18: _p18 = pattern; break; case 19: _p19 = pattern; break;
+            case 20: _p20 = pattern; break; case 21: _p21 = pattern; break;
+            case 22: _p22 = pattern; break; case 23: _p23 = pattern; break;
+            case 24: _p24 = pattern; break; case 25: _p25 = pattern; break;
+            case 26: _p26 = pattern; break; case 27: _p27 = pattern; break;
+            case 28: _p28 = pattern; break; case 29: _p29 = pattern; break;
+            case 30: _p30 = pattern; break; case 31: _p31 = pattern; break;
+        }
+    }
+
+    public readonly FilterExpr GetFilter(int index)
+    {
+        return index switch
+        {
+            0 => _f0, 1 => _f1, 2 => _f2, 3 => _f3,
+            4 => _f4, 5 => _f5, 6 => _f6, 7 => _f7,
+            8 => _f8, 9 => _f9, 10 => _f10, 11 => _f11,
+            12 => _f12, 13 => _f13, 14 => _f14, 15 => _f15,
+            _ => default
+        };
+    }
+
+    private void SetFilter(int index, FilterExpr filter)
+    {
+        switch (index)
+        {
+            case 0: _f0 = filter; break; case 1: _f1 = filter; break;
+            case 2: _f2 = filter; break; case 3: _f3 = filter; break;
+            case 4: _f4 = filter; break; case 5: _f5 = filter; break;
+            case 6: _f6 = filter; break; case 7: _f7 = filter; break;
+            case 8: _f8 = filter; break; case 9: _f9 = filter; break;
+            case 10: _f10 = filter; break; case 11: _f11 = filter; break;
+            case 12: _f12 = filter; break; case 13: _f13 = filter; break;
+            case 14: _f14 = filter; break; case 15: _f15 = filter; break;
+        }
+    }
+}
+
+/// <summary>
+/// A triple pattern with subject, predicate, and object terms.
+/// </summary>
+public struct TriplePattern
+{
+    public Term Subject;
+    public Term Predicate;
+    public Term Object;
+}
+
+/// <summary>
+/// A term in a triple pattern - can be a variable, IRI, literal, or blank node.
+/// Uses offsets into the source string for zero-allocation.
+/// </summary>
+public struct Term
+{
+    public TermType Type;
+    public int Start;   // Offset into source
+    public int Length;  // Length in source
+
+    public static Term Variable(int start, int length) =>
+        new() { Type = TermType.Variable, Start = start, Length = length };
+
+    public static Term Iri(int start, int length) =>
+        new() { Type = TermType.Iri, Start = start, Length = length };
+
+    public static Term Literal(int start, int length) =>
+        new() { Type = TermType.Literal, Start = start, Length = length };
+
+    public static Term BlankNode(int start, int length) =>
+        new() { Type = TermType.BlankNode, Start = start, Length = length };
+
+    public readonly bool IsVariable => Type == TermType.Variable;
+    public readonly bool IsIri => Type == TermType.Iri;
+    public readonly bool IsLiteral => Type == TermType.Literal;
+    public readonly bool IsBlankNode => Type == TermType.BlankNode;
+}
+
+/// <summary>
+/// Type of term in a triple pattern.
+/// </summary>
+public enum TermType : byte
+{
+    Variable,
+    Iri,
+    Literal,
+    BlankNode
+}
+
+/// <summary>
+/// A FILTER expression reference (offset into source).
+/// </summary>
+public struct FilterExpr
+{
+    public int Start;   // Offset into source (after "FILTER")
+    public int Length;  // Length of expression
 }
 
 public struct ConstructTemplate

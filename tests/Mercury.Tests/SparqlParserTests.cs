@@ -60,4 +60,164 @@ public class SparqlParserTests
 
         Assert.Equal(QueryType.Ask, result.Type);
     }
+
+    #region WHERE Clause Parsing
+
+    [Fact]
+    public void WhereClause_ParsesSingleTriplePattern()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(1, result.WhereClause.Pattern.PatternCount);
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Subject.IsVariable);
+        Assert.True(pattern.Predicate.IsVariable);
+        Assert.True(pattern.Object.IsVariable);
+    }
+
+    [Fact]
+    public void WhereClause_ParsesMultipleTriplePatterns()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o . ?x ?y ?z }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(2, result.WhereClause.Pattern.PatternCount);
+    }
+
+    [Fact]
+    public void WhereClause_ParsesIriSubject()
+    {
+        var query = "SELECT * WHERE { <http://example.org/Alice> ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Subject.IsIri);
+        Assert.Equal("http://example.org/Alice", query.AsSpan().Slice(pattern.Subject.Start, pattern.Subject.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesPrefixedName()
+    {
+        var query = "SELECT * WHERE { ?s foaf:name ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Predicate.IsIri);
+        Assert.Equal("foaf:name", query.AsSpan().Slice(pattern.Predicate.Start, pattern.Predicate.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesStringLiteral()
+    {
+        var query = "SELECT * WHERE { ?s ?p \"hello\" }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Object.IsLiteral);
+        Assert.Equal("\"hello\"", query.AsSpan().Slice(pattern.Object.Start, pattern.Object.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesNumericLiteral()
+    {
+        var query = "SELECT * WHERE { ?s ?p 42 }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Object.IsLiteral);
+        Assert.Equal("42", query.AsSpan().Slice(pattern.Object.Start, pattern.Object.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesFilter()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o FILTER(?o > 10) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(1, result.WhereClause.Pattern.PatternCount);
+        Assert.Equal(1, result.WhereClause.Pattern.FilterCount);
+
+        var filter = result.WhereClause.Pattern.GetFilter(0);
+        Assert.Equal("?o > 10", query.AsSpan().Slice(filter.Start, filter.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesMultipleFilters()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o FILTER(?o > 10) FILTER(?o < 100) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(2, result.WhereClause.Pattern.FilterCount);
+    }
+
+    [Fact]
+    public void WhereClause_ParsesTypeShorthand()
+    {
+        var query = "SELECT * WHERE { ?s a ?type }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Predicate.IsIri);
+        Assert.Equal("a", query.AsSpan().Slice(pattern.Predicate.Start, pattern.Predicate.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesBlankNode()
+    {
+        var query = "SELECT * WHERE { _:b1 ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Subject.IsBlankNode);
+    }
+
+    [Fact]
+    public void WhereClause_ParsesLangTag()
+    {
+        var query = "SELECT * WHERE { ?s ?p \"hello\"@en }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Object.IsLiteral);
+        Assert.Equal("\"hello\"@en", query.AsSpan().Slice(pattern.Object.Start, pattern.Object.Length).ToString());
+    }
+
+    [Fact]
+    public void WhereClause_ParsesDatatype()
+    {
+        var query = "SELECT * WHERE { ?s ?p \"42\"^^<http://www.w3.org/2001/XMLSchema#integer> }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.Object.IsLiteral);
+    }
+
+    [Fact]
+    public void WhereClause_ParsesComplexQuery()
+    {
+        // Test without prefix to simplify
+        var query = "SELECT * WHERE { ?person <http://foaf/name> ?name . ?person <http://foaf/age> ?age . FILTER(?age > 18) } LIMIT 10";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Select, result.Type);
+        Assert.Equal(2, result.WhereClause.Pattern.PatternCount);
+        Assert.Equal(1, result.WhereClause.Pattern.FilterCount);
+        Assert.Equal(10, result.SolutionModifier.Limit);
+    }
+
+    #endregion
 }
