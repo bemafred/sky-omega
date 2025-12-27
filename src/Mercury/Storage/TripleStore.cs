@@ -372,38 +372,45 @@ public sealed class TripleStore : IDisposable
         var enumerator = _wal.GetUncommittedRecords();
         var recoveredCount = 0;
 
-        while (enumerator.MoveNext())
+        try
         {
-            var record = enumerator.Current;
-
-            if (record.Operation == LogOperation.Add)
+            while (enumerator.MoveNext())
             {
-                // Get atom strings from IDs
-                var subject = _atoms.GetAtomString(record.SubjectId);
-                var predicate = _atoms.GetAtomString(record.PredicateId);
-                var obj = _atoms.GetAtomString(record.ObjectId);
+                var record = enumerator.Current;
 
-                var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
-                var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
+                if (record.Operation == LogOperation.Add)
+                {
+                    // Get atom strings from IDs
+                    var subject = _atoms.GetAtomString(record.SubjectId);
+                    var predicate = _atoms.GetAtomString(record.PredicateId);
+                    var obj = _atoms.GetAtomString(record.ObjectId);
 
-                // Apply to indexes (no WAL write - already in log)
-                ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
-                recoveredCount++;
+                    var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
+                    var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
+
+                    // Apply to indexes (no WAL write - already in log)
+                    ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+                    recoveredCount++;
+                }
+                else if (record.Operation == LogOperation.Delete)
+                {
+                    // Get atom strings from IDs
+                    var subject = _atoms.GetAtomString(record.SubjectId);
+                    var predicate = _atoms.GetAtomString(record.PredicateId);
+                    var obj = _atoms.GetAtomString(record.ObjectId);
+
+                    var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
+                    var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
+
+                    // Apply delete to indexes (no WAL write - already in log)
+                    ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+                    recoveredCount++;
+                }
             }
-            else if (record.Operation == LogOperation.Delete)
-            {
-                // Get atom strings from IDs
-                var subject = _atoms.GetAtomString(record.SubjectId);
-                var predicate = _atoms.GetAtomString(record.PredicateId);
-                var obj = _atoms.GetAtomString(record.ObjectId);
-
-                var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
-                var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
-
-                // Apply delete to indexes (no WAL write - already in log)
-                ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
-                recoveredCount++;
-            }
+        }
+        finally
+        {
+            enumerator.Dispose(); // Return pooled buffer
         }
 
         if (recoveredCount > 0)

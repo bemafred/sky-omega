@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -384,19 +385,21 @@ public struct LogRecord
 
 /// <summary>
 /// Enumerator for replaying uncommitted WAL records.
+/// Uses pooled buffer to avoid allocations.
+/// Call Dispose() when done to return buffer to pool.
 /// </summary>
 public ref struct LogRecordEnumerator
 {
     private readonly FileStream _logFile;
     private readonly long _afterTxId;
-    private readonly byte[] _buffer;
+    private byte[]? _buffer;
     private LogRecord _current;
 
     public LogRecordEnumerator(FileStream logFile, long afterTxId)
     {
         _logFile = logFile;
         _afterTxId = afterTxId;
-        _buffer = new byte[WriteAheadLog.RecordSize];
+        _buffer = ArrayPool<byte>.Shared.Rent(WriteAheadLog.RecordSize);
         _current = default;
 
         // Position at start
@@ -407,7 +410,10 @@ public ref struct LogRecordEnumerator
 
     public bool MoveNext()
     {
-        while (_logFile.Read(_buffer) == WriteAheadLog.RecordSize)
+        if (_buffer == null)
+            return false;
+
+        while (_logFile.Read(_buffer, 0, WriteAheadLog.RecordSize) == WriteAheadLog.RecordSize)
         {
             _current = LogRecord.ReadFrom(_buffer);
 
@@ -426,5 +432,17 @@ public ref struct LogRecordEnumerator
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Return the pooled buffer. Call this when done iterating.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_buffer != null)
+        {
+            ArrayPool<byte>.Shared.Return(_buffer);
+            _buffer = null;
+        }
     }
 }
