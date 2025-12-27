@@ -1,11 +1,12 @@
 using System;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql.Tests;
+namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
 /// Tests for SPARQL parser and filter evaluator
 /// </summary>
-public static class Tests
+public static class ParserTests
 {
     public static void RunAllTests()
     {

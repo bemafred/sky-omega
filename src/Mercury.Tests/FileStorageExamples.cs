@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using SkyOmega.Mercury.Sparql.Temporal;
 
-namespace SkyOmega.Mercury.Sparql.Examples;
+namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
 /// Examples and benchmarks for TB-scale temporal triple storage

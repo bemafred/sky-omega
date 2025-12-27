@@ -1,8 +1,6 @@
 using System;
 using System.Runtime;
 using SkyOmega.Mercury.Sparql;
-using SkyOmega.Mercury.Sparql.Tests;
-using SkyOmega.Mercury.Sparql.Examples;
 
 namespace SkyOmega.Mercury.Cli.Sparql;
 
@@ -18,21 +16,6 @@ public class Program
 
         // Configure for zero-GC operation
         GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-
-        // Run parser and filter tests
-        Tests.RunAllTests();
-        Console.WriteLine();
-
-        // Run file storage examples and benchmarks
-        FileStorageExamples.RunAll();
-        FileStorageExamples.DemoTBScaleCapability();
-        Console.WriteLine();
-
-        // Run Sky Omega temporal examples
-        SkyOmegaExamples.RunAll();
-        SkyOmegaExamples.DemoSkyOmegaCapabilities();
-        SkyOmegaExamples.BenchmarkTemporalStorage();
-        Console.WriteLine();
 
         // Run basic SPARQL parser example
         RunParserExample();
