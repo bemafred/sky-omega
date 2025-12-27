@@ -173,6 +173,7 @@ All parsers use aggressive zero-allocation techniques:
 | Component | Status | Notes |
 |-----------|--------|-------|
 | SPARQL Parser | ✓ Zero-GC | ref struct, no allocations |
+| Query Executor | ✓ Zero-GC | ref struct operators, call Dispose() |
 | TripleStore Query | ✓ Zero-GC | Pooled buffer, call Dispose() |
 | Turtle Parser (Handler) | ✓ Zero-GC | Use TripleHandler callback |
 | Turtle Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
@@ -237,9 +238,50 @@ await foreach (var triple in parser.ParseAsync())
 `SparqlParser` is a `ref struct` that parses SPARQL queries from `ReadOnlySpan<char>`.
 
 Key components:
-- `SparqlParser` - Zero-GC query parser
-- `FilterEvaluator` - SPARQL FILTER expression evaluation
+- `SparqlParser` - Zero-GC query parser (SELECT, CONSTRUCT, ASK with WHERE clauses)
+- `QueryExecutor` - Zero-GC query execution with specialized operators
+- `FilterEvaluator` - SPARQL FILTER expression evaluation (comparisons, AND/OR/NOT)
 - `RdfParser` - N-Triples parsing utilities
+
+**Query execution model:**
+1. Parse query → `Query` struct with triple patterns + filters
+2. Build execution plan → Stack of operators (TriplePatternScan, MultiPatternScan)
+3. Execute → Pull-based iteration through operator pipeline
+
+**Usage example:**
+```csharp
+var query = "SELECT * WHERE { ?person <http://foaf/name> ?name . ?person <http://foaf/age> ?age FILTER(?age > 25) }";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.Execute();
+
+    while (results.MoveNext())
+    {
+        var bindings = results.Current;
+        var nameIdx = bindings.FindBinding("?name".AsSpan());
+        if (nameIdx >= 0)
+        {
+            var name = bindings.GetString(nameIdx);
+            // Process name...
+        }
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
+**Operator pipeline:**
+- `TriplePatternScan` - Scans single pattern, binds variables from matching triples
+- `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
+- Filter evaluation integrated into result iteration
 
 ## Code Conventions
 
