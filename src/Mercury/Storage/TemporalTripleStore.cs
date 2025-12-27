@@ -4,9 +4,7 @@ using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using SkyOmega.Mercury.Sparql.Storage;
-
-namespace SkyOmega.Mercury.Sparql.Temporal;
+namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
 /// Temporal triple store supporting valid-time and transaction-time semantics

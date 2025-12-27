@@ -2,7 +2,7 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
-using SkyOmega.Mercury.Sparql.Temporal;
+using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql;
 

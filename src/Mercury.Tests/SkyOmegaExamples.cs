@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using SkyOmega.Mercury.Sparql.Temporal;
+using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Tests;
 
