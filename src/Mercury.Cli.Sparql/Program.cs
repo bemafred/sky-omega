@@ -4,7 +4,7 @@ using SkyOmega.Mercury.Sparql;
 
 namespace SkyOmega.Mercury.Cli.Sparql;
 
-public class Program
+internal static class Program
 {
     public static void Main(string[] args)
     {
