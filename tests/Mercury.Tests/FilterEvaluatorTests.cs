@@ -17,9 +17,7 @@ public class FilterEvaluatorTests
     private static bool Evaluate(string filter)
     {
         var evaluator = new FilterEvaluator(filter.AsSpan());
-        Span<Binding> bindingStorage = stackalloc Binding[16];
-        var bindings = new BindingTable(bindingStorage);
-        return evaluator.Evaluate(bindings);
+        return evaluator.Evaluate();
     }
 
     #region Comparison Operators - Equality
@@ -642,6 +640,179 @@ public class FilterEvaluatorTests
     public void Complex_AllKeywords()
     {
         Assert.True(Evaluate("NOT 0 AND 1 OR 0"));
+    }
+
+    #endregion
+
+    #region Variable Bindings
+
+    // Test helper that sets up bindings and evaluates a filter expression
+    // Uses heap allocation for test simplicity - production code uses stackalloc
+    private static bool EvaluateWithIntBinding(string filter, string varName, long value)
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.Bind(varName, value);
+        var evaluator = new FilterEvaluator(filter.AsSpan());
+        return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
+    }
+
+    private static bool EvaluateWithDoubleBinding(string filter, string varName, double value)
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.Bind(varName, value);
+        var evaluator = new FilterEvaluator(filter.AsSpan());
+        return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
+    }
+
+    private static bool EvaluateWithBoolBinding(string filter, string varName, bool value)
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.Bind(varName, value);
+        var evaluator = new FilterEvaluator(filter.AsSpan());
+        return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
+    }
+
+    private static bool EvaluateWithStringBinding(string filter, string varName, string value)
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.Bind(varName, value.AsSpan());
+        var evaluator = new FilterEvaluator(filter.AsSpan());
+        return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
+    }
+
+    private static bool EvaluateWithMultipleBindings(string filter, params (string name, object value)[] vars)
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        foreach (var (name, value) in vars)
+        {
+            switch (value)
+            {
+                case long l: bindings.Bind(name, l); break;
+                case int i: bindings.Bind(name, (long)i); break;
+                case double d: bindings.Bind(name, d); break;
+                case bool b: bindings.Bind(name, b); break;
+                case string s: bindings.Bind(name, s.AsSpan()); break;
+            }
+        }
+        var evaluator = new FilterEvaluator(filter.AsSpan());
+        return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
+    }
+
+    private static bool EvaluateWithEmptyBindings(string filter)
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        var evaluator = new FilterEvaluator(filter.AsSpan());
+        return evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer());
+    }
+
+    [Fact]
+    public void Variable_IntegerComparison_True()
+    {
+        Assert.True(EvaluateWithIntBinding("?age > 18", "?age", 25L));
+    }
+
+    [Fact]
+    public void Variable_IntegerComparison_False()
+    {
+        Assert.False(EvaluateWithIntBinding("?age > 18", "?age", 15L));
+    }
+
+    [Fact]
+    public void Variable_IntegerEquality()
+    {
+        Assert.True(EvaluateWithIntBinding("?x == 42", "?x", 42L));
+    }
+
+    [Fact]
+    public void Variable_DoubleComparison()
+    {
+        Assert.True(EvaluateWithDoubleBinding("?price < 100.0", "?price", 49.99));
+    }
+
+    [Fact]
+    public void Variable_BooleanTrue()
+    {
+        Assert.True(EvaluateWithBoolBinding("?active", "?active", true));
+    }
+
+    [Fact]
+    public void Variable_BooleanFalse()
+    {
+        Assert.False(EvaluateWithBoolBinding("?active", "?active", false));
+    }
+
+    [Fact]
+    public void Variable_StringEquality()
+    {
+        Assert.True(EvaluateWithStringBinding("?name == \"Alice\"", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Variable_StringInequality()
+    {
+        Assert.True(EvaluateWithStringBinding("?name != \"Bob\"", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Variable_TwoVariables()
+    {
+        Assert.True(EvaluateWithMultipleBindings("?x < ?y", ("?x", 10L), ("?y", 20L)));
+    }
+
+    [Fact]
+    public void Variable_UnboundVariable_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithEmptyBindings("?unknown > 0"));
+    }
+
+    [Fact]
+    public void Variable_WithLogicalOperators()
+    {
+        Assert.True(EvaluateWithMultipleBindings("?age >= 18 && ?active", ("?age", 21L), ("?active", true)));
+    }
+
+    [Fact]
+    public void Variable_MixedWithLiterals()
+    {
+        Assert.True(EvaluateWithIntBinding("?count > 5 && 10 < 20", "?count", 8L));
+    }
+
+    [Fact]
+    public void Variable_BoundFunction_BoundVariable()
+    {
+        Assert.True(EvaluateWithIntBinding("bound(?x)", "?x", 42L));
+    }
+
+    [Fact]
+    public void Variable_BoundFunction_UnboundVariable()
+    {
+        Assert.False(EvaluateWithEmptyBindings("bound(?x)"));
+    }
+
+    [Fact]
+    public void Variable_NotBound()
+    {
+        Assert.True(EvaluateWithIntBinding("!bound(?missing)", "?other", 1L));
+    }
+
+    [Fact]
+    public void Variable_ComplexExpression()
+    {
+        // under 18 but is VIP, so first clause is true; also active
+        Assert.True(EvaluateWithMultipleBindings("(?age > 18 || ?vip) && ?active",
+            ("?age", 16L), ("?vip", true), ("?active", true)));
     }
 
     #endregion

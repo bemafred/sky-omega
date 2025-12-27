@@ -572,16 +572,202 @@ public enum OrderDirection
 }
 
 /// <summary>
-/// Binding table for variable bindings during query execution
+/// Binding table for variable bindings during query execution.
+/// Zero-allocation design using stackalloc buffers.
 /// </summary>
 public ref struct BindingTable
 {
     private Span<Binding> _bindings;
+    private int _count;
+    private Span<char> _stringBuffer;
+    private int _stringOffset;
 
     public BindingTable(Span<Binding> storage)
     {
         _bindings = storage;
+        _count = 0;
+        _stringBuffer = Span<char>.Empty;
+        _stringOffset = 0;
     }
+
+    public BindingTable(Span<Binding> storage, Span<char> stringBuffer)
+    {
+        _bindings = storage;
+        _count = 0;
+        _stringBuffer = stringBuffer;
+        _stringOffset = 0;
+    }
+
+    /// <summary>
+    /// Bind an integer value to a variable.
+    /// </summary>
+    public void Bind(ReadOnlySpan<char> variableName, long value)
+    {
+        if (_count >= _bindings.Length) return;
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = ComputeHash(variableName);
+        binding.Type = BindingValueType.Integer;
+        binding.IntegerValue = value;
+    }
+
+    /// <summary>
+    /// Bind a double value to a variable.
+    /// </summary>
+    public void Bind(ReadOnlySpan<char> variableName, double value)
+    {
+        if (_count >= _bindings.Length) return;
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = ComputeHash(variableName);
+        binding.Type = BindingValueType.Double;
+        binding.DoubleValue = value;
+    }
+
+    /// <summary>
+    /// Bind a boolean value to a variable.
+    /// </summary>
+    public void Bind(ReadOnlySpan<char> variableName, bool value)
+    {
+        if (_count >= _bindings.Length) return;
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = ComputeHash(variableName);
+        binding.Type = BindingValueType.Boolean;
+        binding.BooleanValue = value;
+    }
+
+    /// <summary>
+    /// Bind a string value to a variable.
+    /// Copies the string into the internal buffer.
+    /// </summary>
+    public void Bind(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
+    {
+        if (_count >= _bindings.Length) return;
+        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+
+        // Copy string to buffer
+        value.CopyTo(_stringBuffer.Slice(_stringOffset));
+
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = ComputeHash(variableName);
+        binding.Type = BindingValueType.String;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = value.Length;
+
+        _stringOffset += value.Length;
+    }
+
+    /// <summary>
+    /// Bind a URI value to a variable.
+    /// Copies the URI into the internal buffer.
+    /// </summary>
+    public void BindUri(ReadOnlySpan<char> variableName, ReadOnlySpan<char> value)
+    {
+        if (_count >= _bindings.Length) return;
+        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+
+        // Copy string to buffer
+        value.CopyTo(_stringBuffer.Slice(_stringOffset));
+
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = ComputeHash(variableName);
+        binding.Type = BindingValueType.Uri;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = value.Length;
+
+        _stringOffset += value.Length;
+    }
+
+    /// <summary>
+    /// Try to get the binding for a variable.
+    /// Returns the index if found, -1 otherwise.
+    /// </summary>
+    public readonly int FindBinding(ReadOnlySpan<char> variableName)
+    {
+        var hash = ComputeHash(variableName);
+        for (int i = 0; i < _count; i++)
+        {
+            if (_bindings[i].VariableNameHash == hash)
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Get the type of the binding at the given index.
+    /// </summary>
+    public readonly BindingValueType GetType(int index) => _bindings[index].Type;
+
+    /// <summary>
+    /// Get the integer value at the given index.
+    /// </summary>
+    public readonly long GetInteger(int index) => _bindings[index].IntegerValue;
+
+    /// <summary>
+    /// Get the double value at the given index.
+    /// </summary>
+    public readonly double GetDouble(int index) => _bindings[index].DoubleValue;
+
+    /// <summary>
+    /// Get the boolean value at the given index.
+    /// </summary>
+    public readonly bool GetBoolean(int index) => _bindings[index].BooleanValue;
+
+    /// <summary>
+    /// Get the string value at the given index.
+    /// </summary>
+    public readonly ReadOnlySpan<char> GetString(int index)
+    {
+        ref readonly var binding = ref _bindings[index];
+        return _stringBuffer.Slice(binding.StringOffset, binding.StringLength);
+    }
+
+    /// <summary>
+    /// Clear all bindings for reuse with next row.
+    /// </summary>
+    public void Clear()
+    {
+        _count = 0;
+        _stringOffset = 0;
+    }
+
+    /// <summary>
+    /// Number of bound variables.
+    /// </summary>
+    public readonly int Count => _count;
+
+    /// <summary>
+    /// Get the raw binding data for direct access.
+    /// </summary>
+    public readonly ReadOnlySpan<Binding> GetBindings() => _bindings.Slice(0, _count);
+
+    /// <summary>
+    /// Get the string buffer for direct access.
+    /// </summary>
+    public readonly ReadOnlySpan<char> GetStringBuffer() => _stringBuffer.Slice(0, _stringOffset);
+
+    private static int ComputeHash(ReadOnlySpan<char> value)
+    {
+        // FNV-1a hash
+        uint hash = 2166136261;
+        foreach (var ch in value)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
+    }
+}
+
+/// <summary>
+/// Type of value in a binding.
+/// </summary>
+public enum BindingValueType : byte
+{
+    Unbound = 0,
+    Uri = 1,
+    String = 2,
+    Integer = 3,
+    Double = 4,
+    Boolean = 5
 }
 
 /// <summary>
@@ -589,9 +775,13 @@ public ref struct BindingTable
 /// </summary>
 public struct Binding
 {
-    // Using fixed-size buffers for zero-allocation
-    public int VariableHash;
-    public int ValueHash;
+    public int VariableNameHash;
+    public BindingValueType Type;
+    public long IntegerValue;
+    public double DoubleValue;
+    public bool BooleanValue;
+    public int StringOffset;
+    public int StringLength;
 }
 
 public class SparqlParseException : Exception

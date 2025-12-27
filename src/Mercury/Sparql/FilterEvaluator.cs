@@ -11,28 +11,50 @@ public ref struct FilterEvaluator
 {
     private ReadOnlySpan<char> _expression;
     private int _position;
+    // Binding data stored as fields to avoid scope issues with spans
+    private ReadOnlySpan<Binding> _bindingData;
+    private ReadOnlySpan<char> _bindingStrings;
+    private int _bindingCount;
 
     public FilterEvaluator(ReadOnlySpan<char> expression)
     {
         _expression = expression;
         _position = 0;
+        _bindingData = ReadOnlySpan<Binding>.Empty;
+        _bindingStrings = ReadOnlySpan<char>.Empty;
+        _bindingCount = 0;
     }
 
     /// <summary>
-    /// Evaluate FILTER expression against current bindings
+    /// Evaluate FILTER expression against current bindings.
     /// </summary>
-    public bool Evaluate(scoped BindingTable bindings)
+    public bool Evaluate(ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer)
     {
         _position = 0;
-        return EvaluateOrExpression(bindings);
+        _bindingData = bindings;
+        _bindingCount = bindingCount;
+        _bindingStrings = stringBuffer;
+        return EvaluateOrExpression();
+    }
+
+    /// <summary>
+    /// Evaluate FILTER expression with empty bindings.
+    /// </summary>
+    public bool Evaluate()
+    {
+        _position = 0;
+        _bindingData = ReadOnlySpan<Binding>.Empty;
+        _bindingStrings = ReadOnlySpan<char>.Empty;
+        _bindingCount = 0;
+        return EvaluateOrExpression();
     }
 
     /// <summary>
     /// OrExpr := AndExpr (('||' | 'OR') AndExpr)*
     /// </summary>
-    private bool EvaluateOrExpression(scoped BindingTable bindings)
+    private bool EvaluateOrExpression()
     {
-        var result = EvaluateAndExpression(bindings);
+        var result = EvaluateAndExpression();
 
         while (true)
         {
@@ -42,7 +64,7 @@ public ref struct FilterEvaluator
 
             if (MatchOperator("||") || MatchKeyword("OR"))
             {
-                var right = EvaluateAndExpression(bindings);
+                var right = EvaluateAndExpression();
                 result = result || right;
             }
             else
@@ -57,9 +79,9 @@ public ref struct FilterEvaluator
     /// <summary>
     /// AndExpr := UnaryExpr (('&&' | 'AND') UnaryExpr)*
     /// </summary>
-    private bool EvaluateAndExpression(scoped BindingTable bindings)
+    private bool EvaluateAndExpression()
     {
-        var result = EvaluateUnaryExpression(bindings);
+        var result = EvaluateUnaryExpression();
 
         while (true)
         {
@@ -69,7 +91,7 @@ public ref struct FilterEvaluator
 
             if (MatchOperator("&&") || MatchKeyword("AND"))
             {
-                var right = EvaluateUnaryExpression(bindings);
+                var right = EvaluateUnaryExpression();
                 result = result && right;
             }
             else
@@ -84,22 +106,22 @@ public ref struct FilterEvaluator
     /// <summary>
     /// UnaryExpr := ('!' | 'NOT')? PrimaryExpr
     /// </summary>
-    private bool EvaluateUnaryExpression(scoped BindingTable bindings)
+    private bool EvaluateUnaryExpression()
     {
         SkipWhitespace();
 
         if (MatchOperator("!") || MatchKeyword("NOT"))
         {
-            return !EvaluateUnaryExpression(bindings);
+            return !EvaluateUnaryExpression();
         }
 
-        return EvaluatePrimaryExpression(bindings);
+        return EvaluatePrimaryExpression();
     }
 
     /// <summary>
     /// PrimaryExpr := '(' Expression ')' | Comparison
     /// </summary>
-    private bool EvaluatePrimaryExpression(scoped BindingTable bindings)
+    private bool EvaluatePrimaryExpression()
     {
         SkipWhitespace();
 
@@ -107,7 +129,7 @@ public ref struct FilterEvaluator
         if (Peek() == '(')
         {
             Advance(); // Skip '('
-            var result = EvaluateOrExpression(bindings);
+            var result = EvaluateOrExpression();
             SkipWhitespace();
             if (Peek() == ')')
                 Advance(); // Skip ')'
@@ -115,17 +137,17 @@ public ref struct FilterEvaluator
         }
 
         // Comparison expression
-        return EvaluateComparison(bindings);
+        return EvaluateComparison();
     }
 
     /// <summary>
     /// Comparison := Term (ComparisonOp Term)?
     /// </summary>
-    private bool EvaluateComparison(scoped BindingTable bindings)
+    private bool EvaluateComparison()
     {
         SkipWhitespace();
 
-        scoped var left = ParseTerm(bindings);
+        scoped var left = ParseTerm();
         SkipWhitespace();
 
         if (IsAtEnd() || IsLogicalOperator())
@@ -141,7 +163,7 @@ public ref struct FilterEvaluator
 
         SkipWhitespace();
 
-        scoped var right = ParseTerm(bindings);
+        scoped var right = ParseTerm();
 
         return EvaluateComparisonOp(left, op, right);
     }
@@ -222,51 +244,87 @@ public ref struct FilterEvaluator
         return true;
     }
 
-    private Value ParseTerm(scoped BindingTable bindings)
+    private Value ParseTerm()
     {
         SkipWhitespace();
-        
+
         var ch = Peek();
-        
+
         // Function call
         if (IsLetter(ch))
         {
-            return ParseFunctionCall(bindings);
+            return ParseFunctionCall();
         }
-        
+
         // Variable reference
         if (ch == '?')
         {
-            return ParseVariable(bindings);
+            return ParseVariable();
         }
-        
+
         // Literal value
         if (ch == '"')
         {
             return ParseStringLiteral();
         }
-        
+
         // Numeric literal
         if (IsDigit(ch) || ch == '-')
         {
             return ParseNumericLiteral();
         }
-        
+
         return new Value { Type = ValueType.Unbound };
     }
 
-    private Value ParseVariable(scoped BindingTable bindings)
+    private Value ParseVariable()
     {
-        Advance(); // Skip '?'
         var start = _position;
-        
+        Advance(); // Skip '?'
+
         while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
             Advance();
-        
-        var varName = _expression.Slice(start - 1, _position - start + 1);
-        
-        // For simplicity, return unbound - full implementation would lookup in bindings
-        return new Value { Type = ValueType.Unbound };
+
+        var varName = _expression.Slice(start, _position - start);
+
+        // Look up variable in bindings
+        var index = FindBinding(varName);
+        if (index < 0)
+            return new Value { Type = ValueType.Unbound };
+
+        ref readonly var binding = ref _bindingData[index];
+        return binding.Type switch
+        {
+            BindingValueType.Integer => new Value { Type = ValueType.Integer, IntegerValue = binding.IntegerValue },
+            BindingValueType.Double => new Value { Type = ValueType.Double, DoubleValue = binding.DoubleValue },
+            BindingValueType.Boolean => new Value { Type = ValueType.Boolean, BooleanValue = binding.BooleanValue },
+            BindingValueType.String => new Value { Type = ValueType.String, StringValue = _bindingStrings.Slice(binding.StringOffset, binding.StringLength) },
+            BindingValueType.Uri => new Value { Type = ValueType.Uri, StringValue = _bindingStrings.Slice(binding.StringOffset, binding.StringLength) },
+            _ => new Value { Type = ValueType.Unbound }
+        };
+    }
+
+    private int FindBinding(ReadOnlySpan<char> variableName)
+    {
+        var hash = ComputeVariableHash(variableName);
+        for (int i = 0; i < _bindingCount; i++)
+        {
+            if (_bindingData[i].VariableNameHash == hash)
+                return i;
+        }
+        return -1;
+    }
+
+    private static int ComputeVariableHash(ReadOnlySpan<char> value)
+    {
+        // FNV-1a hash (same as BindingTable)
+        uint hash = 2166136261;
+        foreach (var ch in value)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
     }
 
     private Value ParseStringLiteral()
@@ -327,35 +385,35 @@ public ref struct FilterEvaluator
         return new Value { Type = ValueType.Unbound };
     }
 
-    private Value ParseFunctionCall(scoped BindingTable bindings)
+    private Value ParseFunctionCall()
     {
         var start = _position;
-        
+
         while (!IsAtEnd() && IsLetterOrDigit(Peek()))
             Advance();
-        
+
         var funcName = _expression.Slice(start, _position - start);
-        
+
         SkipWhitespace();
         if (Peek() != '(')
             return new Value { Type = ValueType.Unbound };
-        
+
         Advance(); // Skip '('
-        
+
         // Parse arguments
-        var arg1 = ParseTerm(bindings);
-        
+        var arg1 = ParseTerm();
+
         SkipWhitespace();
         if (Peek() == ',')
         {
             Advance();
-            var arg2 = ParseTerm(bindings);
+            var arg2 = ParseTerm();
         }
-        
+
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
-        
+
         // Evaluate built-in functions
         if (funcName.Equals("bound", StringComparison.OrdinalIgnoreCase))
         {
@@ -365,7 +423,7 @@ public ref struct FilterEvaluator
                 BooleanValue = arg1.Type != ValueType.Unbound
             };
         }
-        
+
         if (funcName.Equals("isIRI", StringComparison.OrdinalIgnoreCase))
         {
             return new Value
@@ -374,7 +432,7 @@ public ref struct FilterEvaluator
                 BooleanValue = arg1.Type == ValueType.Uri
             };
         }
-        
+
         if (funcName.Equals("str", StringComparison.OrdinalIgnoreCase))
         {
             return new Value
@@ -383,7 +441,7 @@ public ref struct FilterEvaluator
                 StringValue = arg1.StringValue
             };
         }
-        
+
         return new Value { Type = ValueType.Unbound };
     }
 
