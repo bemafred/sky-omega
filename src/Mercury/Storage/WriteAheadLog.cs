@@ -136,8 +136,39 @@ public sealed class WriteAheadLog : IDisposable
         _lastCheckpointTxId = _currentTxId;
         _lastCheckpointTime = Environment.TickCount64;
 
-        // Truncate log after checkpoint (optional optimization)
-        // For now, we keep the log for debugging; can truncate in production
+        // Truncate log: keep only the checkpoint record
+        // This reclaims disk space while preserving TxId for recovery
+        TruncateLog();
+    }
+
+    /// <summary>
+    /// Truncate the log file, keeping only the last checkpoint record.
+    /// This reclaims disk space after all records have been applied to indexes.
+    /// </summary>
+    private void TruncateLog()
+    {
+        // Read the checkpoint record we just wrote (it's at the end)
+        var checkpointPosition = _logFile.Length - RecordSize;
+        if (checkpointPosition < 0)
+            return;
+
+        _logFile.Position = checkpointPosition;
+        var buffer = new byte[RecordSize];
+        if (_logFile.Read(buffer) != RecordSize)
+            return;
+
+        var checkpointRecord = LogRecord.ReadFrom(buffer);
+        if (checkpointRecord.Operation != LogOperation.Checkpoint || !checkpointRecord.IsValid())
+            return;
+
+        // Write checkpoint record at the beginning of the file
+        _logFile.Position = 0;
+        _logFile.Write(buffer);
+        _logFile.Flush(flushToDisk: true);
+
+        // Truncate the file to just the checkpoint record
+        _logFile.SetLength(RecordSize);
+        _logFile.Position = RecordSize; // Ready for new appends
     }
 
     /// <summary>

@@ -225,16 +225,41 @@ public class WriteAheadLogTests : IDisposable
     }
 
     [Fact]
-    public void Checkpoint_WritesCheckpointRecord()
+    public void Checkpoint_TruncatesLogToSingleRecord()
     {
         var wal = CreateWal();
-        var record = LogRecord.CreateAdd(1, 2, 3, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
-        wal.Append(record);
 
-        var sizeBeforeCheckpoint = wal.LogSize;
+        // Add several records
+        for (int i = 0; i < 10; i++)
+        {
+            var record = LogRecord.CreateAdd(i, i, i, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+            wal.Append(record);
+        }
+
+        Assert.Equal(10 * WriteAheadLog.RecordSize, wal.LogSize);
+
         wal.Checkpoint();
 
-        Assert.Equal(sizeBeforeCheckpoint + WriteAheadLog.RecordSize, wal.LogSize);
+        // After checkpoint, log should be truncated to just the checkpoint record
+        Assert.Equal(WriteAheadLog.RecordSize, wal.LogSize);
+    }
+
+    [Fact]
+    public void Checkpoint_PreservesTxIdAfterTruncation()
+    {
+        var wal = CreateWal();
+
+        for (int i = 0; i < 5; i++)
+        {
+            var record = LogRecord.CreateAdd(i, i, i, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+            wal.Append(record);
+        }
+
+        wal.Checkpoint();
+
+        // TxId should be preserved
+        Assert.Equal(5, wal.CurrentTxId);
+        Assert.Equal(5, wal.LastCheckpointTxId);
     }
 
     [Fact]
