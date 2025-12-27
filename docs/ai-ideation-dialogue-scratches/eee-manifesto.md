@@ -1,4 +1,4 @@
-# Explorative Epistemic Engineering – A Manifesto
+# Emergence Epistemic Engineering – A Manifesto
 
 ## ✨ Vision
 

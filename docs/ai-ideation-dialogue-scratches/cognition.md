@@ -57,7 +57,7 @@ This is the *awe of cognition*—when the system discovers what neither human no
 
 ---
 
-### 🌌 4. Unknown Knowns *(Extension by Martin Fredriksson)*
+### 🌌 4. Unknown Knowns
 > *What we do not know that we know.*
 
 This is:

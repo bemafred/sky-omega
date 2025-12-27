@@ -577,12 +577,10 @@ public enum OrderDirection
 public ref struct BindingTable
 {
     private Span<Binding> _bindings;
-    private int _count;
 
     public BindingTable(Span<Binding> storage)
     {
         _bindings = storage;
-        _count = 0;
     }
 }
 

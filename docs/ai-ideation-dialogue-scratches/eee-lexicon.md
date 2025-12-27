@@ -2,7 +2,7 @@
 
 ## 💡 Key Terms
 
-### Explorative Epistemic Engineering (EEE)
+### Emergence Epistemic Engineering (EEE)
 > The discipline of designing systems that represent, monitor, and evolve their knowledge structures via explicit reasoning patterns.
 
 ### Curiosity Axiom
