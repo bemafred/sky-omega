@@ -453,4 +453,74 @@ public class TripleIndexTests : IDisposable
     }
 
     #endregion
+
+    #region Delete Operations
+
+    [Fact]
+    public void Delete_ExistingTriple_ReturnsTrue()
+    {
+        var index = CreateIndex();
+        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
+        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+
+        index.AddHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        var deleted = index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        Assert.True(deleted);
+    }
+
+    [Fact]
+    public void Delete_NonExistentTriple_ReturnsFalse()
+    {
+        var index = CreateIndex();
+        index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        var deleted = index.DeleteHistorical("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/o>",
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+
+        Assert.False(deleted);
+    }
+
+    [Fact]
+    public void Delete_AfterDelete_NotInQueryCurrent()
+    {
+        var index = CreateIndex();
+        index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+
+        var results = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Assert.False(results.MoveNext(), "Deleted triple should not appear in QueryCurrent");
+    }
+
+    [Fact]
+    public void Delete_NonExistentAtom_ReturnsFalse()
+    {
+        var index = CreateIndex();
+
+        // Try to delete something that was never added
+        var deleted = index.DeleteHistorical("<http://ex.org/never-added>", "<http://ex.org/p>", "<http://ex.org/o>",
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+
+        Assert.False(deleted);
+    }
+
+    [Fact]
+    public void Delete_AlreadyDeleted_ReturnsFalse()
+    {
+        var index = CreateIndex();
+        index.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        var deleted1 = index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        var deleted2 = index.DeleteHistorical("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+
+        Assert.True(deleted1);
+        Assert.False(deleted2, "Deleting already-deleted should return false");
+    }
+
+    #endregion
 }

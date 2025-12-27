@@ -148,6 +148,88 @@ public sealed unsafe class TripleIndex : IDisposable
     }
 
     /// <summary>
+    /// Soft-delete a triple with explicit time bounds.
+    /// Returns true if the triple was found and deleted, false otherwise.
+    /// </summary>
+    public bool Delete(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        long validFrom,
+        long validTo)
+    {
+        // Look up atom IDs - if any don't exist, the triple doesn't exist
+        var s = _atoms.GetAtomId(subject);
+        var p = _atoms.GetAtomId(predicate);
+        var o = _atoms.GetAtomId(obj);
+
+        if (s == 0 || p == 0 || o == 0)
+            return false;
+
+        var key = new TemporalKey
+        {
+            SubjectAtom = s,
+            PredicateAtom = p,
+            ObjectAtom = o,
+            ValidFrom = validFrom,
+            ValidTo = validTo,
+            TransactionTime = _currentTransactionTime
+        };
+
+        return DeleteFromTree(key);
+    }
+
+    /// <summary>
+    /// Soft-delete a historical triple (valid for specific time period).
+    /// Returns true if the triple was found and deleted, false otherwise.
+    /// </summary>
+    public bool DeleteHistorical(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo)
+    {
+        return Delete(subject, predicate, obj,
+            validFrom.ToUnixTimeMilliseconds(),
+            validTo.ToUnixTimeMilliseconds());
+    }
+
+    /// <summary>
+    /// Find and mark a triple as deleted in the B+Tree.
+    /// </summary>
+    private bool DeleteFromTree(TemporalKey key)
+    {
+        var leafPageId = FindLeafPage(_rootPageId, key);
+        var page = GetPage(leafPageId);
+
+        // Scan leaf page for matching entry
+        for (int i = 0; i < page->EntryCount; i++)
+        {
+            ref var entry = ref page->GetEntry(i);
+
+            // Check if this is the exact entry (same SPO and overlapping time)
+            if (IsSameSPO(entry.Key, key) && !entry.IsDeleted)
+            {
+                // Check for time overlap
+                if (entry.Key.ValidFrom <= key.ValidTo && entry.Key.ValidTo >= key.ValidFrom)
+                {
+                    entry.IsDeleted = true;
+                    entry.ModifiedAt = _currentTransactionTime;
+                    FlushPage(page);
+                    return true;
+                }
+            }
+
+            // If we've passed the key range, stop searching
+            if (entry.Key.CompareTo(key) > 0)
+                break;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Query triples with temporal constraints
     /// </summary>
     public TemporalTripleEnumerator Query(

@@ -109,6 +109,62 @@ public sealed class TripleStore : IDisposable
         Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
     }
 
+    /// <summary>
+    /// Soft-delete a temporal triple from all indexes with WAL durability.
+    /// Thread-safe: acquires write lock.
+    /// Returns true if the triple was found and deleted, false otherwise.
+    /// </summary>
+    public bool Delete(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo)
+    {
+        ThrowIfDisposed();
+        _lock.EnterWriteLock();
+        try
+        {
+            // 1. Look up atoms (don't intern - if they don't exist, triple doesn't exist)
+            var subjectId = _atoms.GetAtomId(subject);
+            var predicateId = _atoms.GetAtomId(predicate);
+            var objectId = _atoms.GetAtomId(obj);
+
+            if (subjectId == 0 || predicateId == 0 || objectId == 0)
+                return false;
+
+            // 2. Write to WAL (fsync ensures durability)
+            var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo);
+            _wal.Append(record);
+
+            // 3. Apply to indexes
+            var deleted = ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+
+            // 4. Check if checkpoint needed
+            CheckpointIfNeeded();
+
+            return deleted;
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Soft-delete a current fact with WAL durability.
+    /// Thread-safe: acquires write lock.
+    /// Returns true if the triple was found and deleted, false otherwise.
+    /// </summary>
+    public bool DeleteCurrent(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj)
+    {
+        // Use a wide time range to match any current fact
+        return Delete(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+    }
+
     #region Batch API
 
     /// <summary>
@@ -184,6 +240,49 @@ public sealed class TripleStore : IDisposable
     }
 
     /// <summary>
+    /// Soft-delete a temporal triple in the current batch (no fsync until CommitBatch).
+    /// Must be called between BeginBatch() and CommitBatch()/RollbackBatch().
+    /// Returns true if the triple was found and deleted, false otherwise.
+    /// </summary>
+    public bool DeleteBatched(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo)
+    {
+        if (_activeBatchTxId < 0)
+            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
+
+        // 1. Look up atoms (don't intern)
+        var subjectId = _atoms.GetAtomId(subject);
+        var predicateId = _atoms.GetAtomId(predicate);
+        var objectId = _atoms.GetAtomId(obj);
+
+        if (subjectId == 0 || predicateId == 0 || objectId == 0)
+            return false;
+
+        // 2. Write to WAL without fsync
+        var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo);
+        _wal.AppendBatch(record, _activeBatchTxId);
+
+        // 3. Apply to indexes immediately (in-memory, fast)
+        return ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+    }
+
+    /// <summary>
+    /// Soft-delete a current fact in the batch.
+    /// Returns true if the triple was found and deleted, false otherwise.
+    /// </summary>
+    public bool DeleteCurrentBatched(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj)
+    {
+        return DeleteBatched(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+    }
+
+    /// <summary>
     /// Commit the current batch transaction with a single fsync.
     /// Releases the write lock acquired by BeginBatch().
     /// </summary>
@@ -246,6 +345,26 @@ public sealed class TripleStore : IDisposable
     }
 
     /// <summary>
+    /// Apply a delete to all indexes (internal, no WAL).
+    /// Returns true if deleted from at least one index.
+    /// </summary>
+    private bool ApplyDeleteToIndexes(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj,
+        DateTimeOffset validFrom,
+        DateTimeOffset validTo)
+    {
+        // Delete from all 4 indexes - use the appropriate argument order for each
+        var d1 = _spotIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo);
+        var d2 = _postIndex.DeleteHistorical(predicate, obj, subject, validFrom, validTo);
+        var d3 = _osptIndex.DeleteHistorical(obj, subject, predicate, validFrom, validTo);
+        var d4 = _tspoIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo);
+
+        return d1 || d2 || d3 || d4;
+    }
+
+    /// <summary>
     /// Recover uncommitted transactions from WAL after crash.
     /// </summary>
     private void Recover()
@@ -271,7 +390,20 @@ public sealed class TripleStore : IDisposable
                 ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
                 recoveredCount++;
             }
-            // Delete operations would be handled here when implemented
+            else if (record.Operation == LogOperation.Delete)
+            {
+                // Get atom strings from IDs
+                var subject = _atoms.GetAtomString(record.SubjectId);
+                var predicate = _atoms.GetAtomString(record.PredicateId);
+                var obj = _atoms.GetAtomString(record.ObjectId);
+
+                var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
+                var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
+
+                // Apply delete to indexes (no WAL write - already in log)
+                ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+                recoveredCount++;
+            }
         }
 
         if (recoveredCount > 0)

@@ -676,4 +676,198 @@ public class TripleStoreTests : IDisposable
     }
 
     #endregion
+
+    #region Delete Operations
+
+    [Fact]
+    public void DeleteCurrent_ExistingTriple_ReturnsTrue()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        var deleted = store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        Assert.True(deleted);
+    }
+
+    [Fact]
+    public void DeleteCurrent_NonExistentTriple_ReturnsFalse()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        var deleted = store.DeleteCurrent("<http://ex.org/other>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        Assert.False(deleted);
+    }
+
+    [Fact]
+    public void DeleteCurrent_AfterDelete_NotQueryable()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.False(results.MoveNext(), "Deleted triple should not be queryable");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Delete_WithTemporalBounds_DeletesCorrectVersion()
+    {
+        var store = CreateStore();
+
+        var validFrom = DateTimeOffset.UtcNow.AddDays(-10);
+        var validTo = DateTimeOffset.UtcNow.AddDays(10);
+
+        store.Add("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        var deleted = store.Delete("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", validFrom, validTo);
+
+        Assert.True(deleted);
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.False(results.MoveNext());
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void DeleteBatched_InBatch_Works()
+    {
+        var store = CreateStore();
+
+        // First add some triples
+        store.BeginBatch();
+        store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.CommitBatch();
+
+        // Now delete in a batch
+        store.BeginBatch();
+        var deleted = store.DeleteCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.CommitBatch();
+
+        Assert.True(deleted);
+
+        // Verify s1 and s3 remain, s2 is deleted
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent(ReadOnlySpan<char>.Empty, "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                var count = 0;
+                while (results.MoveNext()) count++;
+                Assert.Equal(2, count);
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void DeleteBatched_WithoutBatch_Throws()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            store.DeleteCurrentBatched("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>"));
+    }
+
+    [Fact]
+    public void Delete_Recovery_DeletedStatePreserved()
+    {
+        // First session: add and delete
+        using (var store1 = new TripleStore(_testPath))
+        {
+            store1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            store1.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        }
+
+        // Second session: verify still deleted
+        using (var store2 = new TripleStore(_testPath))
+        {
+            store2.AcquireReadLock();
+            try
+            {
+                var results = store2.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+                try
+                {
+                    Assert.False(results.MoveNext(), "Deleted triple should not survive recovery");
+                }
+                finally
+                {
+                    results.Dispose();
+                }
+            }
+            finally
+            {
+                store2.ReleaseReadLock();
+            }
+        }
+    }
+
+    [Fact]
+    public void Delete_NonExistentAtom_ReturnsFalse()
+    {
+        var store = CreateStore();
+
+        // Try to delete something that was never added (atoms don't exist)
+        var deleted = store.DeleteCurrent("<http://ex.org/never-added>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        Assert.False(deleted);
+    }
+
+    [Fact]
+    public void Delete_AlreadyDeleted_ReturnsFalse()
+    {
+        var store = CreateStore();
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        var deleted1 = store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        var deleted2 = store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        Assert.True(deleted1);
+        Assert.False(deleted2, "Deleting already-deleted triple should return false");
+    }
+
+    #endregion
 }
