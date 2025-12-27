@@ -96,7 +96,8 @@ public class SparqlParserTests
 
         var pattern = result.WhereClause.Pattern.GetPattern(0);
         Assert.True(pattern.Subject.IsIri);
-        Assert.Equal("http://example.org/Alice", query.AsSpan().Slice(pattern.Subject.Start, pattern.Subject.Length).ToString());
+        // IRI includes angle brackets for matching against stored IRIs
+        Assert.Equal("<http://example.org/Alice>", query.AsSpan().Slice(pattern.Subject.Start, pattern.Subject.Length).ToString());
     }
 
     [Fact]

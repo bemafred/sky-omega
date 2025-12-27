@@ -481,27 +481,52 @@ public sealed class TripleStore : IDisposable
     {
         // Select optimal index
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, obj, queryType);
-        
+
+        // Reorder parameters based on index type (indexes store data in different orders)
+        // SPOT: (subject, predicate, object) - no change
+        // POST: (predicate, object, subject)
+        // OSPT: (object, subject, predicate)
+        // TSPO: (subject, predicate, object) - no change
+        ReadOnlySpan<char> arg1, arg2, arg3;
+        switch (indexType)
+        {
+            case TemporalIndexType.POST:
+                arg1 = predicate;
+                arg2 = obj;
+                arg3 = subject;
+                break;
+            case TemporalIndexType.OSPT:
+                arg1 = obj;
+                arg2 = subject;
+                arg3 = predicate;
+                break;
+            default: // SPOT, TSPO
+                arg1 = subject;
+                arg2 = predicate;
+                arg3 = obj;
+                break;
+        }
+
         TripleIndex.TemporalTripleEnumerator enumerator;
-        
+
         if (queryType == TemporalQueryType.AsOf)
         {
             enumerator = selectedIndex.QueryAsOf(
-                subject, predicate, obj,
+                arg1, arg2, arg3,
                 asOfTime ?? DateTimeOffset.UtcNow);
         }
         else if (queryType == TemporalQueryType.Range)
         {
             enumerator = selectedIndex.QueryRange(
-                subject, predicate, obj,
+                arg1, arg2, arg3,
                 rangeStart ?? DateTimeOffset.MinValue,
                 rangeEnd ?? DateTimeOffset.MaxValue);
         }
         else
         {
-            enumerator = selectedIndex.QueryHistory(subject, predicate, obj);
+            enumerator = selectedIndex.QueryHistory(arg1, arg2, arg3);
         }
-        
+
         return new TemporalResultEnumerator(enumerator, indexType, _atoms);
     }
 

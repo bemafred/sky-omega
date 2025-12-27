@@ -521,20 +521,21 @@ public ref struct SparqlParser
 
     /// <summary>
     /// Parse an IRI reference: &lt;uri&gt; (returns Term)
+    /// Includes angle brackets in the term for matching against stored IRIs.
     /// </summary>
     private Term ParseTermIriRef()
     {
-        Advance(); // Skip '<'
+        // Include angle brackets in the term for matching against stored IRIs
         var start = _position;
+        Advance(); // Skip '<'
 
         while (!IsAtEnd() && Peek() != '>')
             Advance();
 
-        var length = _position - start;
-
         if (Peek() == '>')
-            Advance(); // Skip '>'
+            Advance(); // Include '>'
 
+        var length = _position - start;
         return Term.Iri(start, length);
     }
 
@@ -1288,6 +1289,21 @@ public ref struct BindingTable
     {
         _count = 0;
         _stringOffset = 0;
+    }
+
+    /// <summary>
+    /// Truncate bindings to a previous count.
+    /// Used for backtracking in multi-pattern joins.
+    /// Note: String buffer space is not reclaimed (acceptable for fixed buffer).
+    /// </summary>
+    public void TruncateTo(int count)
+    {
+        if (count < _count)
+        {
+            _count = count;
+            // String buffer is not truncated - we leave gaps, which is fine for fixed buffer
+            // In a more sophisticated implementation, we'd track string offset per binding
+        }
     }
 
     /// <summary>

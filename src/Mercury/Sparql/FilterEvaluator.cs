@@ -533,16 +533,73 @@ public ref struct FilterEvaluator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool CompareLess(in Value left, in Value right)
     {
-        if (left.Type != right.Type)
-            return false;
-        
-        return left.Type switch
+        // Same type - direct comparison
+        if (left.Type == right.Type)
         {
-            ValueType.Integer => left.IntegerValue < right.IntegerValue,
-            ValueType.Double => left.DoubleValue < right.DoubleValue,
-            ValueType.String => left.StringValue.SequenceCompareTo(right.StringValue) < 0,
-            _ => false
+            return left.Type switch
+            {
+                ValueType.Integer => left.IntegerValue < right.IntegerValue,
+                ValueType.Double => left.DoubleValue < right.DoubleValue,
+                ValueType.String => left.StringValue.SequenceCompareTo(right.StringValue) < 0,
+                _ => false
+            };
+        }
+
+        // Type coercion for numeric comparisons
+        // Try to coerce string to number for comparison with numeric types
+        if ((left.Type == ValueType.String && (right.Type == ValueType.Integer || right.Type == ValueType.Double)) ||
+            (right.Type == ValueType.String && (left.Type == ValueType.Integer || left.Type == ValueType.Double)))
+        {
+            var (leftNum, rightNum) = CoerceToNumbers(left, right);
+            if (double.IsNaN(leftNum) || double.IsNaN(rightNum))
+                return false;
+            return leftNum < rightNum;
+        }
+
+        // Integer vs Double coercion
+        if (left.Type == ValueType.Integer && right.Type == ValueType.Double)
+            return left.IntegerValue < right.DoubleValue;
+        if (left.Type == ValueType.Double && right.Type == ValueType.Integer)
+            return left.DoubleValue < right.IntegerValue;
+
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static (double Left, double Right) CoerceToNumbers(in Value left, in Value right)
+    {
+        double leftNum = left.Type switch
+        {
+            ValueType.Integer => left.IntegerValue,
+            ValueType.Double => left.DoubleValue,
+            ValueType.String => TryParseStringAsNumber(left.StringValue),
+            _ => double.NaN
         };
+
+        double rightNum = right.Type switch
+        {
+            ValueType.Integer => right.IntegerValue,
+            ValueType.Double => right.DoubleValue,
+            ValueType.String => TryParseStringAsNumber(right.StringValue),
+            _ => double.NaN
+        };
+
+        return (leftNum, rightNum);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double TryParseStringAsNumber(ReadOnlySpan<char> str)
+    {
+        // Handle RDF string literals with quotes: "30" -> 30
+        if (str.Length >= 2 && str[0] == '"' && str[^1] == '"')
+        {
+            str = str[1..^1];
+        }
+
+        if (double.TryParse(str, out var result))
+            return result;
+
+        return double.NaN;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
