@@ -15,9 +15,13 @@ namespace SkyOmega.Mercury.Storage;
 /// Supports zero-copy access via memory-mapped files.
 /// </summary>
 /// <remarks>
-/// Storage format supports 64-bit blob lengths (exabyte-scale).
+/// <para>Storage format supports 64-bit blob lengths (exabyte-scale).
 /// Single-span retrieval is limited to 2GB by .NET Span&lt;T&gt; constraint.
-/// For larger blobs, implement chunked access pattern (see GetAtomSpan remarks).
+/// For larger blobs, implement chunked access pattern (see GetAtomSpan remarks).</para>
+///
+/// <para>Thread safety: AtomStore uses append-only semantics with atomic operations
+/// for allocation (Interlocked). Thread safety is ensured by TripleStore's
+/// ReaderWriterLockSlim - writes occur under write lock, reads under read lock.</para>
 /// </remarks>
 public sealed unsafe class AtomStore : IDisposable
 {

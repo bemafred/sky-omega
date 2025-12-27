@@ -1,11 +1,13 @@
 using System;
 using System.IO;
+using System.Threading;
 
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
 /// RDF triple store with multiple indexes for optimal query patterns.
 /// Uses Write-Ahead Logging (WAL) for crash safety.
+/// Thread-safe: multiple concurrent readers, single writer.
 ///
 /// Indexes:
 /// 1. SPOT: Subject-Predicate-Object-Time (primary)
@@ -23,6 +25,8 @@ public sealed class TripleStore : IDisposable
     private readonly AtomStore _atoms;
     private readonly WriteAheadLog _wal;
     private readonly string _baseDirectory;
+    private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
+    private bool _disposed;
 
     public TripleStore(string baseDirectory)
     {
@@ -56,6 +60,7 @@ public sealed class TripleStore : IDisposable
 
     /// <summary>
     /// Add a temporal triple to all indexes with WAL durability.
+    /// Thread-safe: acquires write lock.
     /// </summary>
     public void Add(
         ReadOnlySpan<char> subject,
@@ -64,24 +69,34 @@ public sealed class TripleStore : IDisposable
         DateTimeOffset validFrom,
         DateTimeOffset validTo)
     {
-        // 1. Intern atoms first (AtomStore is append-only, naturally durable)
-        var subjectId = _atoms.Intern(subject);
-        var predicateId = _atoms.Intern(predicate);
-        var objectId = _atoms.Intern(obj);
+        ThrowIfDisposed();
+        _lock.EnterWriteLock();
+        try
+        {
+            // 1. Intern atoms first (AtomStore is append-only, naturally durable)
+            var subjectId = _atoms.Intern(subject);
+            var predicateId = _atoms.Intern(predicate);
+            var objectId = _atoms.Intern(obj);
 
-        // 2. Write to WAL (fsync ensures durability)
-        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo);
-        _wal.Append(record);
+            // 2. Write to WAL (fsync ensures durability)
+            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo);
+            _wal.Append(record);
 
-        // 3. Apply to indexes
-        ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+            // 3. Apply to indexes
+            ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
 
-        // 4. Check if checkpoint needed
-        CheckpointIfNeeded();
+            // 4. Check if checkpoint needed
+            CheckpointIfNeeded();
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
     }
 
     /// <summary>
     /// Add a current fact (valid from now onwards) with WAL durability.
+    /// Thread-safe: acquires write lock.
     /// </summary>
     public void AddCurrent(
         ReadOnlySpan<char> subject,
@@ -89,6 +104,12 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> obj)
     {
         Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(TripleStore));
     }
 
     /// <summary>
@@ -139,14 +160,33 @@ public sealed class TripleStore : IDisposable
         if (recoveredCount > 0)
         {
             // Checkpoint after recovery to avoid re-replaying
-            Checkpoint();
+            // Note: No lock needed here - called from constructor before any concurrent access
+            CheckpointInternal();
         }
     }
 
     /// <summary>
     /// Force a checkpoint: flush indexes and truncate WAL.
+    /// Thread-safe: acquires write lock.
     /// </summary>
     public void Checkpoint()
+    {
+        ThrowIfDisposed();
+        _lock.EnterWriteLock();
+        try
+        {
+            CheckpointInternal();
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Internal checkpoint without locking (called from within write lock).
+    /// </summary>
+    private void CheckpointInternal()
     {
         // Flush all indexes (memory-mapped files auto-flush, but we can force it)
         // In a more complete implementation, we'd flush the mmap views here
@@ -157,17 +197,22 @@ public sealed class TripleStore : IDisposable
 
     /// <summary>
     /// Check if checkpoint is needed and perform it.
+    /// Must be called within write lock.
     /// </summary>
     private void CheckpointIfNeeded()
     {
         if (_wal.ShouldCheckpoint())
         {
-            Checkpoint();
+            CheckpointInternal();
         }
     }
 
     /// <summary>
-    /// Query with optimal index selection
+    /// Query with optimal index selection.
+    ///
+    /// Note: For thread-safety with concurrent writes, either:
+    /// 1. Use AcquireReadLock/ReleaseReadLock around the query and enumeration, or
+    /// 2. Ensure no writes occur during enumeration
     /// </summary>
     public TemporalResultEnumerator Query(
         ReadOnlySpan<char> subject,
@@ -302,10 +347,32 @@ public sealed class TripleStore : IDisposable
         }
     }
 
+    /// <summary>
+    /// Acquire read lock for thread-safe enumeration.
+    /// Must be paired with ReleaseReadLock after enumeration completes.
+    /// </summary>
+    public void AcquireReadLock()
+    {
+        ThrowIfDisposed();
+        _lock.EnterReadLock();
+    }
+
+    /// <summary>
+    /// Release read lock after enumeration.
+    /// </summary>
+    public void ReleaseReadLock()
+    {
+        _lock.ExitReadLock();
+    }
+
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
         // Checkpoint before closing to minimize recovery on next open
-        Checkpoint();
+        // Note: Skip locking here - we're disposing, no concurrent access expected
+        CheckpointInternal();
 
         _wal?.Dispose();
         _spotIndex?.Dispose();
@@ -313,6 +380,7 @@ public sealed class TripleStore : IDisposable
         _osptIndex?.Dispose();
         _tspoIndex?.Dispose();
         _atoms?.Dispose();
+        _lock?.Dispose();
     }
 
     /// <summary>
