@@ -5,7 +5,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SkyOmega.Rdf.Turtle;
+namespace SkyOmega.Mercury.RdfCore.Turtle;
 
 public sealed partial class TurtleStreamParser
 {

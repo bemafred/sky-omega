@@ -13,7 +13,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace SkyOmega.Rdf.Turtle;
+namespace SkyOmega.Mercury.RdfCore.Turtle;
 
 /// <summary>
 /// Zero-allocation streaming parser for RDF Turtle format.

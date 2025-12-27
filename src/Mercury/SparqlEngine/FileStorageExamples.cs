@@ -1,9 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using SparqlEngine.Temporal;
+using SkyOmega.Mercury.SparqlEngine.Temporal;
 
-namespace SparqlEngine.Examples;
+namespace SkyOmega.Mercury.SparqlEngine.Examples;
 
 /// <summary>
 /// Examples and benchmarks for TB-scale temporal triple storage

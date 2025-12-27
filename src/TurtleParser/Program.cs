@@ -7,7 +7,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 
-namespace SkyOmega.Rdf.Turtle;
+namespace SkyOmega.Mercury.RdfCore.Turtle;
 
 internal static class Program
 {

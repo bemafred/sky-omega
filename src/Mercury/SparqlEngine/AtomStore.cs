@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace SparqlEngine.Storage;
+namespace SkyOmega.Mercury.SparqlEngine.Storage;
 
 /// <summary>
 /// Atom store for efficient string storage and retrieval using memory-mapped files.

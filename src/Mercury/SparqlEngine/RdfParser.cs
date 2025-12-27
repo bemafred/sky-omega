@@ -2,9 +2,9 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
-using SparqlEngine.Temporal;
+using SkyOmega.Mercury.SparqlEngine.Temporal;
 
-namespace SparqlEngine;
+namespace SkyOmega.Mercury.SparqlEngine;
 
 /// <summary>
 /// Zero-allocation N-Triples parser using streaming and Span&lt;T&gt;

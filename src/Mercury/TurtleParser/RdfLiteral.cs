@@ -3,7 +3,7 @@
 
 using System;
 
-namespace SkyOmega.Rdf.Turtle;
+namespace SkyOmega.Mercury.RdfCore.Turtle;
 
 /// <summary>
 /// Term type enumeration for RDF terms

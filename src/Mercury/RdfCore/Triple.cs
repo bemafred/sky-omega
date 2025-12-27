@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace SkyOmega.Rdf;
+namespace SkyOmega.Mercury.RdfCore;
 
 /// <summary>
 /// A transient, zero-allocation reference to an RDF triple using spans.

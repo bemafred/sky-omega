@@ -1,8 +1,8 @@
 using System;
 using System.IO;
-using SparqlEngine.Storage;
+using SkyOmega.Mercury.SparqlEngine.Storage;
 
-namespace SparqlEngine.Temporal;
+namespace SkyOmega.Mercury.SparqlEngine.Temporal;
 
 /// <summary>
 /// Multi-index temporal triple store for Sky Omega

@@ -2,7 +2,7 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace SparqlEngine;
+namespace SkyOmega.Mercury.SparqlEngine;
 
 /// <summary>
 /// Zero-allocation FILTER expression evaluator using stack-based evaluation

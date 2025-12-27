@@ -33,7 +33,7 @@
 
   <ItemGroup><!-- No external dependencies - BCL only -->
   
-    <ProjectReference Include="..\RdfCore\RdfCore.csproj" />
+    <ProjectReference Include="..\Mercury\Mercury.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,8 +1,8 @@
 using System;
 using System.IO;
-using SparqlEngine.Temporal;
+using SkyOmega.Mercury.SparqlEngine.Temporal;
 
-namespace SparqlEngine.Examples;
+namespace SkyOmega.Mercury.SparqlEngine.Examples;
 
 /// <summary>
 /// Sky Omega temporal RDF examples

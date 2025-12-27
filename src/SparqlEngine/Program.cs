@@ -1,8 +1,8 @@
 using System;
 using System.Runtime;
-using SparqlEngine;
+using SkyOmega.Mercury.SparqlEngine;
 
-namespace SparqlEngine;
+namespace SkyOmega.Mercury.SparqlEngine;
 
 public class Program
 {
