@@ -6,8 +6,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Rdf;
+using SkyOmega.Mercury.Rdf.Turtle;
 
-namespace SkyOmega.Mercury.RdfCore.Turtle;
+namespace SkyOmega.Mercury.Cli.Turtle;
 
 internal static class Program
 {

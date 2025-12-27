@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace SkyOmega.Mercury.SparqlEngine.Storage;
+namespace SkyOmega.Mercury.Sparql.Storage;
 
 /// <summary>
 /// LRU page cache for B+Tree pages

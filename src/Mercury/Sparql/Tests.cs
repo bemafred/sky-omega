@@ -1,6 +1,6 @@
 using System;
 
-namespace SkyOmega.Mercury.SparqlEngine.Tests;
+namespace SkyOmega.Mercury.Sparql.Tests;
 
 /// <summary>
 /// Tests for SPARQL parser and filter evaluator

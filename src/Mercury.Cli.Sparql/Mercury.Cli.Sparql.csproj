@@ -12,6 +12,7 @@
     <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
     <PublishTrimmed>false</PublishTrimmed>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <RootNamespace>SkyOmega.Mercury.Cli.Sparql</RootNamespace>
   </PropertyGroup>
 
   <PropertyGroup>

@@ -6,7 +6,7 @@
     <LangVersion>14.0</LangVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-    <RootNamespace>SkyOmega.Rdf.Turtle</RootNamespace>
+    <RootNamespace>SkyOmega.Mercury.Cli.Turtle</RootNamespace>
     
     <!-- Zero-GC optimizations -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
