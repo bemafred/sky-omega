@@ -571,6 +571,20 @@ public ref struct FilterEvaluator
             };
         }
 
+        // NOW - return current datetime as xsd:dateTime
+        if (funcName.Equals("now", StringComparison.OrdinalIgnoreCase))
+        {
+            SkipWhitespace();
+            if (Peek() == ')')
+                Advance();
+            _datetimeResult = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+            return new Value
+            {
+                Type = ValueType.String,
+                StringValue = _datetimeResult.AsSpan()
+            };
+        }
+
         // Parse first argument for single-arg functions
         var arg1 = ParseTerm();
 
@@ -832,6 +846,79 @@ public ref struct FilterEvaluator
                     Type = ValueType.String,
                     StringValue = _hashResult.AsSpan()
                 };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // YEAR - extract year from xsd:dateTime
+        if (funcName.Equals("year", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            {
+                return new Value { Type = ValueType.Integer, IntegerValue = dt.Year };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // MONTH - extract month from xsd:dateTime (1-12)
+        if (funcName.Equals("month", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            {
+                return new Value { Type = ValueType.Integer, IntegerValue = dt.Month };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // DAY - extract day from xsd:dateTime (1-31)
+        if (funcName.Equals("day", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            {
+                return new Value { Type = ValueType.Integer, IntegerValue = dt.Day };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // HOURS - extract hours from xsd:dateTime (0-23)
+        if (funcName.Equals("hours", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            {
+                return new Value { Type = ValueType.Integer, IntegerValue = dt.Hour };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // MINUTES - extract minutes from xsd:dateTime (0-59)
+        if (funcName.Equals("minutes", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            {
+                return new Value { Type = ValueType.Integer, IntegerValue = dt.Minute };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // SECONDS - extract seconds from xsd:dateTime (0-59, with fractional part)
+        if (funcName.Equals("seconds", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            {
+                var seconds = dt.Second + dt.Millisecond / 1000.0;
+                return new Value { Type = ValueType.Double, DoubleValue = seconds };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // TZ - extract timezone string from xsd:dateTime
+        if (funcName.Equals("tz", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String)
+            {
+                var tzStr = ExtractTimezone(arg1.StringValue);
+                _datetimeResult = tzStr;
+                return new Value { Type = ValueType.String, StringValue = _datetimeResult.AsSpan() };
             }
             return new Value { Type = ValueType.Unbound };
         }
@@ -1621,6 +1708,9 @@ public ref struct FilterEvaluator
     // Storage for UUID/STRUUID results to keep span valid
     private string _uuidResult = string.Empty;
 
+    // Storage for datetime results to keep span valid
+    private string _datetimeResult = string.Empty;
+
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
     private const string RdfLangString = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
@@ -1652,6 +1742,52 @@ public ref struct FilterEvaluator
 
         // Plain literal defaults to xsd:string
         return XsdString.AsSpan();
+    }
+
+    /// <summary>
+    /// Try to parse an xsd:dateTime string
+    /// Supports formats: yyyy-MM-ddTHH:mm:ss, yyyy-MM-ddTHH:mm:ss.fff, with optional timezone
+    /// </summary>
+    private static bool TryParseDateTime(ReadOnlySpan<char> str, out DateTime result)
+    {
+        result = default;
+        if (str.IsEmpty)
+            return false;
+
+        // Try parsing with various formats
+        var strValue = str.ToString();
+        if (DateTime.TryParse(strValue, null, System.Globalization.DateTimeStyles.RoundtripKind, out result))
+            return true;
+
+        return false;
+    }
+
+    /// <summary>
+    /// Extract timezone string from xsd:dateTime
+    /// Returns "Z" for UTC, "+HH:MM" or "-HH:MM" for offsets, "" for no timezone
+    /// </summary>
+    private static string ExtractTimezone(ReadOnlySpan<char> str)
+    {
+        if (str.IsEmpty)
+            return "";
+
+        // Check for Z (UTC)
+        if (str[^1] == 'Z')
+            return "Z";
+
+        // Look for +/- timezone offset at end
+        // Format: +HH:MM or -HH:MM (6 chars)
+        if (str.Length >= 6)
+        {
+            var potentialTz = str.Slice(str.Length - 6);
+            if ((potentialTz[0] == '+' || potentialTz[0] == '-') && potentialTz[3] == ':')
+            {
+                return potentialTz.ToString();
+            }
+        }
+
+        // No timezone specified
+        return "";
     }
 
     /// <summary>

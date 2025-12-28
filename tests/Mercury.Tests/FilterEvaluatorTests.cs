@@ -1999,4 +1999,88 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region DateTime Functions
+
+    [Fact]
+    public void Now_ReturnsValidDateTimeFormat()
+    {
+        // NOW() returns xsd:dateTime format with T separator
+        Assert.True(Evaluate("CONTAINS(NOW(), \"T\")"));
+    }
+
+    [Fact]
+    public void Now_ReturnsUtc()
+    {
+        // NOW() returns UTC time ending with Z
+        Assert.True(Evaluate("STRSTARTS(STRAFTER(NOW(), \"T\"), \"0\") || STRSTARTS(STRAFTER(NOW(), \"T\"), \"1\") || STRSTARTS(STRAFTER(NOW(), \"T\"), \"2\")"));
+    }
+
+    [Fact]
+    public void Year_ExtractsYear()
+    {
+        Assert.True(EvaluateWithStringBinding("YEAR(?x) == 2024", "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Month_ExtractsMonth()
+    {
+        Assert.True(EvaluateWithStringBinding("MONTH(?x) == 12", "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Day_ExtractsDay()
+    {
+        Assert.True(EvaluateWithStringBinding("DAY(?x) == 25", "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Hours_ExtractsHours()
+    {
+        Assert.True(EvaluateWithStringBinding("HOURS(?x) == 10", "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Minutes_ExtractsMinutes()
+    {
+        Assert.True(EvaluateWithStringBinding("MINUTES(?x) == 30", "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Seconds_ExtractsSeconds()
+    {
+        Assert.True(EvaluateWithStringBinding("SECONDS(?x) == 45", "?x", "2024-12-25T10:30:45Z"));
+    }
+
+    [Fact]
+    public void Seconds_WithMilliseconds()
+    {
+        Assert.True(EvaluateWithStringBinding("SECONDS(?x) > 45.0 && SECONDS(?x) < 46.0", "?x", "2024-12-25T10:30:45.500Z"));
+    }
+
+    [Fact]
+    public void Tz_ExtractsUtc()
+    {
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"Z\"", "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Tz_ExtractsPositiveOffset()
+    {
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"+05:30\"", "?x", "2024-12-25T10:30:00+05:30"));
+    }
+
+    [Fact]
+    public void Tz_ExtractsNegativeOffset()
+    {
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"-08:00\"", "?x", "2024-12-25T10:30:00-08:00"));
+    }
+
+    [Fact]
+    public void Tz_NoTimezone_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("TZ(?x) == \"\"", "?x", "2024-12-25T10:30:00"));
+    }
+
+    #endregion
 }
