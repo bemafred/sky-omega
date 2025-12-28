@@ -325,7 +325,7 @@ Key components:
 | Federated query | SERVICE clause |
 | SPARQL Update | INSERT, DELETE, INSERT DATA, DELETE DATA, DELETE WHERE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD |
 
-*Note: This is a read-only query engine. Write operations use the TripleStore API directly (`AddCurrent`, `DeleteCurrent`, batch operations). SPARQL Update would require significant architectural changes.*
+*Note: SPARQL Update is planned for future implementation. Currently, write operations use the TripleStore API directly (`AddCurrent`, `DeleteCurrent`, batch operations).*
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
