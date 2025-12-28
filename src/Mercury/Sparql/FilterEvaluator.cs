@@ -481,16 +481,38 @@ public ref struct FilterEvaluator
             return ParseRegexFunction();
         }
 
-        // Parse first argument
-        var arg1 = ParseTerm();
-
-        SkipWhitespace();
-        if (Peek() == ',')
+        // Handle CONTAINS - two string arguments
+        if (funcName.Equals("contains", StringComparison.OrdinalIgnoreCase))
         {
-            Advance();
-            SkipWhitespace();
-            var arg2 = ParseTerm();
+            return ParseContainsFunction();
         }
+
+        // Handle STRSTARTS - two string arguments
+        if (funcName.Equals("strstarts", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStrStartsFunction();
+        }
+
+        // Handle STRENDS - two string arguments
+        if (funcName.Equals("strends", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStrEndsFunction();
+        }
+
+        // Handle SUBSTR - 2-3 arguments
+        if (funcName.Equals("substr", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseSubstrFunction();
+        }
+
+        // Handle CONCAT - variable arguments
+        if (funcName.Equals("concat", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseConcatFunction();
+        }
+
+        // Parse first argument for single-arg functions
+        var arg1 = ParseTerm();
 
         SkipWhitespace();
         if (Peek() == ')')
@@ -522,6 +544,20 @@ public ref struct FilterEvaluator
                 Type = ValueType.String,
                 StringValue = arg1.StringValue
             };
+        }
+
+        // STRLEN - returns string length
+        if (funcName.Equals("strlen", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                return new Value
+                {
+                    Type = ValueType.Integer,
+                    IntegerValue = arg1.StringValue.Length
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
         }
 
         return new Value { Type = ValueType.Unbound };
@@ -688,6 +724,234 @@ public ref struct FilterEvaluator
         {
             // Invalid regex pattern
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+    }
+
+    /// <summary>
+    /// Parse CONTAINS(string, substring) - returns true if string contains substring
+    /// </summary>
+    private Value ParseContainsFunction()
+    {
+        var arg1 = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var arg2 = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        if ((arg1.Type != ValueType.String && arg1.Type != ValueType.Uri) ||
+            (arg2.Type != ValueType.String && arg2.Type != ValueType.Uri))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        var contains = arg1.StringValue.Contains(arg2.StringValue, StringComparison.Ordinal);
+        return new Value { Type = ValueType.Boolean, BooleanValue = contains };
+    }
+
+    /// <summary>
+    /// Parse STRSTARTS(string, prefix) - returns true if string starts with prefix
+    /// </summary>
+    private Value ParseStrStartsFunction()
+    {
+        var arg1 = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var arg2 = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        if ((arg1.Type != ValueType.String && arg1.Type != ValueType.Uri) ||
+            (arg2.Type != ValueType.String && arg2.Type != ValueType.Uri))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        var startsWith = arg1.StringValue.StartsWith(arg2.StringValue, StringComparison.Ordinal);
+        return new Value { Type = ValueType.Boolean, BooleanValue = startsWith };
+    }
+
+    /// <summary>
+    /// Parse STRENDS(string, suffix) - returns true if string ends with suffix
+    /// </summary>
+    private Value ParseStrEndsFunction()
+    {
+        var arg1 = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var arg2 = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        if ((arg1.Type != ValueType.String && arg1.Type != ValueType.Uri) ||
+            (arg2.Type != ValueType.String && arg2.Type != ValueType.Uri))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        var endsWith = arg1.StringValue.EndsWith(arg2.StringValue, StringComparison.Ordinal);
+        return new Value { Type = ValueType.Boolean, BooleanValue = endsWith };
+    }
+
+    /// <summary>
+    /// Parse SUBSTR(string, start [, length]) - returns substring
+    /// Note: SPARQL uses 1-based indexing
+    /// </summary>
+    private Value ParseSubstrFunction()
+    {
+        var stringArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var startArg = ParseTerm();
+        SkipWhitespace();
+
+        // Optional length argument
+        Value lengthArg = new Value { Type = ValueType.Unbound };
+        if (Peek() == ',')
+        {
+            Advance();
+            SkipWhitespace();
+            lengthArg = ParseTerm();
+            SkipWhitespace();
+        }
+
+        if (Peek() == ')')
+            Advance();
+
+        if (stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri)
+            return new Value { Type = ValueType.Unbound };
+
+        if (startArg.Type != ValueType.Integer)
+            return new Value { Type = ValueType.Unbound };
+
+        var str = stringArg.StringValue;
+        var start = (int)startArg.IntegerValue - 1; // SPARQL is 1-based
+
+        if (start < 0) start = 0;
+        if (start >= str.Length)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        int length;
+        if (lengthArg.Type == ValueType.Integer)
+        {
+            length = (int)lengthArg.IntegerValue;
+            if (length < 0) length = 0;
+            if (start + length > str.Length)
+                length = str.Length - start;
+        }
+        else
+        {
+            length = str.Length - start;
+        }
+
+        return new Value
+        {
+            Type = ValueType.String,
+            StringValue = str.Slice(start, length)
+        };
+    }
+
+    /// <summary>
+    /// Parse CONCAT(string1, string2, ...) - concatenates strings
+    /// Note: Allocates a string (exception to zero-GC for this function)
+    /// </summary>
+    private Value ParseConcatFunction()
+    {
+        // Collect string parts - this function allocates
+        var parts = new System.Collections.Generic.List<string>();
+
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            var arg = ParseTerm();
+
+            if (arg.Type == ValueType.Unbound)
+            {
+                SkipToCloseParen();
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                parts.Add(arg.StringValue.ToString());
+            else if (arg.Type == ValueType.Integer)
+                parts.Add(arg.IntegerValue.ToString());
+            else if (arg.Type == ValueType.Double)
+                parts.Add(arg.DoubleValue.ToString());
+
+            SkipWhitespace();
+            if (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+        }
+
+        if (Peek() == ')')
+            Advance();
+
+        // Store concatenated result - allocates but keeps span valid
+        _concatResult = string.Concat(parts);
+        return new Value
+        {
+            Type = ValueType.String,
+            StringValue = _concatResult.AsSpan()
+        };
+    }
+
+    // Storage for CONCAT result to keep span valid
+    private string _concatResult = string.Empty;
+
+    /// <summary>
+    /// Skip to closing parenthesis
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SkipToCloseParen()
+    {
+        int depth = 1;
+        while (!IsAtEnd() && depth > 0)
+        {
+            var ch = Peek();
+            if (ch == '(') depth++;
+            else if (ch == ')') depth--;
+            Advance();
         }
     }
 

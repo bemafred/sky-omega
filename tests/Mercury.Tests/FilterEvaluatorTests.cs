@@ -1061,4 +1061,157 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region STRLEN Function
+
+    [Fact]
+    public void Strlen_ReturnsLength()
+    {
+        Assert.True(EvaluateWithStringBinding("STRLEN(?name) == 5", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Strlen_EmptyString_ReturnsZero()
+    {
+        Assert.True(EvaluateWithStringBinding("STRLEN(?name) == 0", "?name", ""));
+    }
+
+    [Fact]
+    public void Strlen_UnboundVariable_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithEmptyBindings("STRLEN(?name) == 0"));
+    }
+
+    #endregion
+
+    #region CONTAINS Function
+
+    [Fact]
+    public void Contains_Found_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("CONTAINS(?name, \"lic\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Contains_NotFound_ReturnsFalse()
+    {
+        Assert.True(EvaluateWithStringBinding("!CONTAINS(?name, \"xyz\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Contains_CaseSensitive()
+    {
+        Assert.True(EvaluateWithStringBinding("!CONTAINS(?name, \"LIC\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Contains_EmptyPattern_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("CONTAINS(?name, \"\")", "?name", "Alice"));
+    }
+
+    #endregion
+
+    #region STRSTARTS Function
+
+    [Fact]
+    public void StrStarts_Match_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("STRSTARTS(?name, \"Ali\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void StrStarts_NoMatch_ReturnsFalse()
+    {
+        Assert.True(EvaluateWithStringBinding("!STRSTARTS(?name, \"Bob\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void StrStarts_FullString_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("STRSTARTS(?name, \"Alice\")", "?name", "Alice"));
+    }
+
+    #endregion
+
+    #region STRENDS Function
+
+    [Fact]
+    public void StrEnds_Match_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("STRENDS(?name, \"ice\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void StrEnds_NoMatch_ReturnsFalse()
+    {
+        Assert.True(EvaluateWithStringBinding("!STRENDS(?name, \"xyz\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void StrEnds_FullString_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("STRENDS(?name, \"Alice\")", "?name", "Alice"));
+    }
+
+    #endregion
+
+    #region SUBSTR Function
+
+    [Fact]
+    public void Substr_FromStart_ReturnsSubstring()
+    {
+        Assert.True(EvaluateWithStringBinding("SUBSTR(?name, 1, 3) == \"Ali\"", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Substr_FromMiddle_ReturnsSubstring()
+    {
+        Assert.True(EvaluateWithStringBinding("SUBSTR(?name, 3, 2) == \"ic\"", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Substr_NoLength_ReturnsToEnd()
+    {
+        Assert.True(EvaluateWithStringBinding("SUBSTR(?name, 3) == \"ice\"", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Substr_StartBeyondLength_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("STRLEN(SUBSTR(?name, 100)) == 0", "?name", "Alice"));
+    }
+
+    #endregion
+
+    #region CONCAT Function
+
+    [Fact]
+    public void Concat_TwoStrings()
+    {
+        Assert.True(EvaluateWithMultipleBindings("CONCAT(?a, ?b) == \"HelloWorld\"",
+            ("?a", (object)"Hello"), ("?b", (object)"World")));
+    }
+
+    [Fact]
+    public void Concat_ThreeStrings()
+    {
+        Assert.True(EvaluateWithStringBinding("CONCAT(?name, \" \", \"!\") == \"Alice !\"", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Concat_WithInteger()
+    {
+        Assert.True(EvaluateWithMultipleBindings("CONCAT(?name, ?age) == \"Alice30\"",
+            ("?name", (object)"Alice"), ("?age", (object)30L)));
+    }
+
+    [Fact]
+    public void Concat_UnboundVariable_ReturnsUnbound()
+    {
+        // CONCAT with unbound variable should not match anything
+        Assert.False(EvaluateWithStringBinding("CONCAT(?a, ?b) == \"test\"", "?a", "test"));
+    }
+
+    #endregion
 }
