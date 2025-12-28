@@ -251,6 +251,7 @@ Key components:
 | Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
 | Filtering | FILTER (comparisons, AND/OR/NOT), VALUES |
 | Computed values | BIND (arithmetic expressions) |
+| Aggregation | GROUP BY, COUNT, SUM, AVG, MIN, MAX |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 
 **Query execution model:**
