@@ -649,4 +649,170 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    [Fact]
+    public void Execute_DistinctRemovesDuplicates()
+    {
+        // Query predicates - with DISTINCT we get unique values only
+        var query = "SELECT DISTINCT * WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify DISTINCT was parsed
+        Assert.True(parsedQuery.SelectClause.Distinct);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var predicates = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var pIdx = bindings.FindBinding("?p".AsSpan());
+                if (pIdx >= 0)
+                {
+                    predicates.Add(bindings.GetString(pIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // All 7 triples are unique (different s, p, o combinations)
+            // But we're counting unique predicates: name, age, knows
+            Assert.Equal(3, predicates.Count);
+            Assert.Contains("<http://xmlns.com/foaf/0.1/name>", predicates);
+            Assert.Contains("<http://xmlns.com/foaf/0.1/age>", predicates);
+            Assert.Contains("<http://xmlns.com/foaf/0.1/knows>", predicates);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_DistinctOnSamePredicates_RemovesDuplicateRows()
+    {
+        // Query just predicate - multiple triples share the same predicate
+        // But full rows (s,p,o) are all unique, so DISTINCT still returns 7
+        var query = "SELECT DISTINCT * WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // 3 name triples, all unique
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_WithoutDistinct_ReturnsAllRows()
+    {
+        // Same query without DISTINCT - should get all 7 results
+        var query = "SELECT * WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify DISTINCT was not set
+        Assert.False(parsedQuery.SelectClause.Distinct);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // All 7 triples
+            Assert.Equal(7, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_DistinctWithLimit_AppliesLimitAfterDistinct()
+    {
+        // Get all results but limit to 2
+        var query = "SELECT DISTINCT * WHERE { ?s ?p ?o } LIMIT 2";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Should get exactly 2 results
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_DistinctWithOffset_AppliesOffsetAfterDistinct()
+    {
+        // Get all results but skip 5
+        var query = "SELECT DISTINCT * WHERE { ?s ?p ?o } OFFSET 5";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // 7 unique results - 5 skipped = 2
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

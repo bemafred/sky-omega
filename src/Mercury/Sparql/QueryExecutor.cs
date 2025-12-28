@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Storage;
 
@@ -35,6 +36,7 @@ public ref struct QueryExecutor
         var pattern = _query.WhereClause.Pattern;
         var limit = _query.SolutionModifier.Limit;
         var offset = _query.SolutionModifier.Offset;
+        var distinct = _query.SelectClause.Distinct;
 
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
@@ -59,7 +61,7 @@ public ref struct QueryExecutor
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset);
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct);
         }
 
         // No required patterns but have optional - need special handling
@@ -71,11 +73,11 @@ public ref struct QueryExecutor
         }
 
         // Multiple required patterns - need join
-        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset);
+        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct);
     }
 
     private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset)
+        int limit, int offset, bool distinct)
     {
         // Use nested loop join for required patterns only
         return new QueryResults(
@@ -86,7 +88,8 @@ public ref struct QueryExecutor
             bindings,
             stringBuffer,
             limit,
-            offset);
+            offset,
+            distinct);
     }
 }
 
@@ -115,6 +118,10 @@ public ref struct QueryResults
     private int _skipped;
     private int _returned;
 
+    // DISTINCT support
+    private readonly bool _distinct;
+    private HashSet<int>? _seenHashes;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -123,7 +130,8 @@ public ref struct QueryResults
     }
 
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
+        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false)
     {
         _singleScan = scan;
         _pattern = pattern;
@@ -140,10 +148,13 @@ public ref struct QueryResults
         _offset = offset;
         _skipped = 0;
         _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
+        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false)
     {
         _multiScan = scan;
         _pattern = pattern;
@@ -160,6 +171,8 @@ public ref struct QueryResults
         _offset = offset;
         _skipped = 0;
         _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
     }
 
     /// <summary>
@@ -207,6 +220,17 @@ public ref struct QueryResults
             if (_hasOptional)
             {
                 TryMatchOptionalPatterns();
+            }
+
+            // Apply DISTINCT - skip duplicate rows
+            if (_distinct)
+            {
+                var hash = ComputeBindingsHash();
+                if (!_seenHashes!.Add(hash))
+                {
+                    _bindingTable.Clear();
+                    continue; // Duplicate, try next row
+                }
             }
 
             // Apply OFFSET - skip results until we've skipped enough
@@ -306,6 +330,31 @@ public ref struct QueryResults
         if (_bindingTable.FindBinding(varName) < 0)
         {
             _bindingTable.Bind(varName, value);
+        }
+    }
+
+    /// <summary>
+    /// Compute a hash of all current bindings for DISTINCT checking.
+    /// Uses FNV-1a hash combined across all binding values.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int ComputeBindingsHash()
+    {
+        unchecked
+        {
+            int hash = (int)2166136261; // FNV offset basis
+
+            for (int i = 0; i < _bindingTable.Count; i++)
+            {
+                var value = _bindingTable.GetString(i);
+                foreach (var ch in value)
+                {
+                    hash = (hash ^ ch) * 16777619; // FNV prime
+                }
+                hash = (hash ^ '|') * 16777619; // Separator between bindings
+            }
+
+            return hash;
         }
     }
 
