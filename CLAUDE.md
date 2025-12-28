@@ -149,11 +149,26 @@ var results = store.QueryCurrent(subject, predicate, obj, "<http://example.org/g
 
 // Query default graph (no graph parameter)
 var results = store.QueryCurrent(subject, predicate, obj);
+
+// Enumerate all named graphs
+store.AcquireReadLock();
+try
+{
+    foreach (var graphIri in store.GetNamedGraphs())
+    {
+        // graphIri is ReadOnlySpan<char> for each distinct named graph
+    }
+}
+finally
+{
+    store.ReleaseReadLock();
+}
 ```
 
 **Design notes:**
 - **GSPO ordering**: B+Tree keys are ordered by Graph first, enabling efficient graph-scoped queries
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
+- **Graph enumeration**: `GetNamedGraphs()` returns distinct graph IRIs (excludes default graph)
 - **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + ValidFrom + ValidTo + TransactionTime)
 - **WAL record**: 72 bytes (includes GraphId for crash recovery)
 - All Add/Delete/Query methods accept optional `graph` parameter
@@ -279,7 +294,7 @@ Key components:
 | Category | Features |
 |----------|----------|
 | Query types | SELECT, ASK, CONSTRUCT, DESCRIBE |
-| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
+| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable) |
 | Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
@@ -372,9 +387,44 @@ finally
 }
 ```
 
+**GRAPH query examples:**
+```csharp
+// Query a specific named graph
+var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
+
+// Query all named graphs with variable binding
+var query = "SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.Execute();
+
+    while (results.MoveNext())
+    {
+        var bindings = results.Current;
+        var gIdx = bindings.FindBinding("?g".AsSpan());
+        if (gIdx >= 0)
+        {
+            var graphIri = bindings.GetString(gIdx);
+            // graphIri contains the named graph IRI
+        }
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
 **Operator pipeline:**
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
+- `VariableGraphScan` - Iterates all named graphs, executes inner patterns per graph
 - Filter/BIND/MINUS/VALUES evaluation integrated into result iteration
 
 ## Code Conventions
