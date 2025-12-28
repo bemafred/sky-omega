@@ -1214,4 +1214,129 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region ABS Function
+
+    [Fact]
+    public void Abs_PositiveInteger_ReturnsSame()
+    {
+        Assert.True(EvaluateWithIntBinding("ABS(?x) == 42", "?x", 42L));
+    }
+
+    [Fact]
+    public void Abs_NegativeInteger_ReturnsPositive()
+    {
+        Assert.True(EvaluateWithIntBinding("ABS(?x) == 42", "?x", -42L));
+    }
+
+    [Fact]
+    public void Abs_PositiveDouble_ReturnsSame()
+    {
+        Assert.True(EvaluateWithDoubleBinding("ABS(?x) == 3.14", "?x", 3.14));
+    }
+
+    [Fact]
+    public void Abs_NegativeDouble_ReturnsPositive()
+    {
+        Assert.True(EvaluateWithDoubleBinding("ABS(?x) == 3.14", "?x", -3.14));
+    }
+
+    [Fact]
+    public void Abs_Zero_ReturnsZero()
+    {
+        Assert.True(EvaluateWithIntBinding("ABS(?x) == 0", "?x", 0L));
+    }
+
+    #endregion
+
+    #region ROUND Function
+
+    [Fact]
+    public void Round_Integer_ReturnsSame()
+    {
+        Assert.True(EvaluateWithIntBinding("ROUND(?x) == 42", "?x", 42L));
+    }
+
+    [Fact]
+    public void Round_DoubleUp_RoundsUp()
+    {
+        Assert.True(EvaluateWithDoubleBinding("ROUND(?x) == 4", "?x", 3.7));
+    }
+
+    [Fact]
+    public void Round_DoubleDown_RoundsDown()
+    {
+        Assert.True(EvaluateWithDoubleBinding("ROUND(?x) == 3", "?x", 3.2));
+    }
+
+    [Fact]
+    public void Round_DoubleHalf_RoundsToEven()
+    {
+        // .NET uses banker's rounding (round to even)
+        Assert.True(EvaluateWithDoubleBinding("ROUND(?x) == 4", "?x", 3.5));
+    }
+
+    [Fact]
+    public void Round_Negative_RoundsCorrectly()
+    {
+        Assert.True(EvaluateWithDoubleBinding("ROUND(?x) == -4", "?x", -3.7));
+    }
+
+    #endregion
+
+    #region CEIL Function
+
+    [Fact]
+    public void Ceil_Integer_ReturnsSame()
+    {
+        Assert.True(EvaluateWithIntBinding("CEIL(?x) == 42", "?x", 42L));
+    }
+
+    [Fact]
+    public void Ceil_PositiveDouble_RoundsUp()
+    {
+        Assert.True(EvaluateWithDoubleBinding("CEIL(?x) == 4", "?x", 3.1));
+    }
+
+    [Fact]
+    public void Ceil_NegativeDouble_RoundsTowardZero()
+    {
+        Assert.True(EvaluateWithDoubleBinding("CEIL(?x) == -3", "?x", -3.7));
+    }
+
+    [Fact]
+    public void Ceil_WholeDouble_ReturnsSame()
+    {
+        Assert.True(EvaluateWithDoubleBinding("CEIL(?x) == 5", "?x", 5.0));
+    }
+
+    #endregion
+
+    #region FLOOR Function
+
+    [Fact]
+    public void Floor_Integer_ReturnsSame()
+    {
+        Assert.True(EvaluateWithIntBinding("FLOOR(?x) == 42", "?x", 42L));
+    }
+
+    [Fact]
+    public void Floor_PositiveDouble_RoundsDown()
+    {
+        Assert.True(EvaluateWithDoubleBinding("FLOOR(?x) == 3", "?x", 3.9));
+    }
+
+    [Fact]
+    public void Floor_NegativeDouble_RoundsAwayFromZero()
+    {
+        Assert.True(EvaluateWithDoubleBinding("FLOOR(?x) == -4", "?x", -3.1));
+    }
+
+    [Fact]
+    public void Floor_WholeDouble_ReturnsSame()
+    {
+        Assert.True(EvaluateWithDoubleBinding("FLOOR(?x) == 5", "?x", 5.0));
+    }
+
+    #endregion
 }

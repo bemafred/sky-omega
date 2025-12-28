@@ -560,6 +560,82 @@ public ref struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
+        // ABS - absolute value
+        if (funcName.Equals("abs", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.Integer)
+            {
+                return new Value
+                {
+                    Type = ValueType.Integer,
+                    IntegerValue = Math.Abs(arg1.IntegerValue)
+                };
+            }
+            if (arg1.Type == ValueType.Double)
+            {
+                return new Value
+                {
+                    Type = ValueType.Double,
+                    DoubleValue = Math.Abs(arg1.DoubleValue)
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // ROUND - round to nearest integer
+        if (funcName.Equals("round", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.Integer)
+            {
+                return arg1; // Already an integer
+            }
+            if (arg1.Type == ValueType.Double)
+            {
+                return new Value
+                {
+                    Type = ValueType.Integer,
+                    IntegerValue = (long)Math.Round(arg1.DoubleValue)
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // CEIL - round up to nearest integer
+        if (funcName.Equals("ceil", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.Integer)
+            {
+                return arg1; // Already an integer
+            }
+            if (arg1.Type == ValueType.Double)
+            {
+                return new Value
+                {
+                    Type = ValueType.Integer,
+                    IntegerValue = (long)Math.Ceiling(arg1.DoubleValue)
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // FLOOR - round down to nearest integer
+        if (funcName.Equals("floor", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.Integer)
+            {
+                return arg1; // Already an integer
+            }
+            if (arg1.Type == ValueType.Double)
+            {
+                return new Value
+                {
+                    Type = ValueType.Integer,
+                    IntegerValue = (long)Math.Floor(arg1.DoubleValue)
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
         return new Value { Type = ValueType.Unbound };
     }
 
