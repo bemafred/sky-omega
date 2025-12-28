@@ -2938,4 +2938,70 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    [Fact]
+    public void Execute_FilterWithRegex_MatchesPattern()
+    {
+        // Match names starting with 'A' (stored as "Alice" with quotes, so pattern is ^.A)
+        var query = "SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER(REGEX(?name, \"^.A\")) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(idx >= 0);
+                names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice's name starts with A (stored as "Alice" with quotes)
+            Assert.Single(names);
+            Assert.Contains("Alice", names[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_FilterWithRegex_CaseInsensitive()
+    {
+        // Match names containing 'bob' case-insensitively
+        var query = "SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER(REGEX(?name, \"bob\", \"i\")) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(idx >= 0);
+                names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Bob matches
+            Assert.Single(names);
+            Assert.Contains("Bob", names[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

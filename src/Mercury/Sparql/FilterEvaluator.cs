@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 
 namespace SkyOmega.Mercury.Sparql;
 
@@ -474,6 +475,12 @@ public ref struct FilterEvaluator
             return ParseCoalesceFunction();
         }
 
+        // Handle REGEX - needs special parsing for 2-3 arguments
+        if (funcName.Equals("regex", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseRegexFunction();
+        }
+
         // Parse first argument
         var arg1 = ParseTerm();
 
@@ -598,6 +605,90 @@ public ref struct FilterEvaluator
             Advance();
 
         return result;
+    }
+
+    /// <summary>
+    /// Parse REGEX(string, pattern [, flags])
+    /// </summary>
+    private Value ParseRegexFunction()
+    {
+        // Parse string argument
+        var stringArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            // Skip to closing paren
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')')
+                Advance();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        // Parse pattern argument
+        var patternArg = ParseTerm();
+        SkipWhitespace();
+
+        // Check for optional flags argument
+        ReadOnlySpan<char> flags = ReadOnlySpan<char>.Empty;
+        if (Peek() == ',')
+        {
+            Advance(); // Skip ','
+            SkipWhitespace();
+            var flagsArg = ParseTerm();
+            if (flagsArg.Type == ValueType.String)
+                flags = flagsArg.StringValue;
+        }
+
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Get string value
+        ReadOnlySpan<char> stringValue;
+        if (stringArg.Type == ValueType.String || stringArg.Type == ValueType.Uri)
+            stringValue = stringArg.StringValue;
+        else if (stringArg.Type == ValueType.Unbound)
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        else
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+
+        // Get pattern value
+        ReadOnlySpan<char> pattern;
+        if (patternArg.Type == ValueType.String)
+            pattern = patternArg.StringValue;
+        else
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+
+        // Build regex options from flags
+        var options = RegexOptions.None;
+        foreach (var flag in flags)
+        {
+            switch (flag)
+            {
+                case 'i': options |= RegexOptions.IgnoreCase; break;
+                case 's': options |= RegexOptions.Singleline; break;
+                case 'm': options |= RegexOptions.Multiline; break;
+                case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
+            }
+        }
+
+        // Perform regex match
+        try
+        {
+            var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
+            var isMatch = regex.IsMatch(stringValue.ToString());
+            return new Value { Type = ValueType.Boolean, BooleanValue = isMatch };
+        }
+        catch
+        {
+            // Invalid regex pattern
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
     }
 
     private ComparisonOperator ParseComparisonOperator()

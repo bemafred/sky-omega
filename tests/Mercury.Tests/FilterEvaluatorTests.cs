@@ -984,4 +984,81 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region REGEX Function
+
+    [Fact]
+    public void Regex_SimpleMatch_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?name, \"Alice\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_NoMatch_ReturnsFalse()
+    {
+        Assert.True(EvaluateWithStringBinding("!REGEX(?name, \"Bob\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_PatternWithAnchor_MatchesStart()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?name, \"^Ali\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_PatternWithAnchor_NoMatchMiddle()
+    {
+        Assert.True(EvaluateWithStringBinding("!REGEX(?name, \"^ice\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_PatternWithEndAnchor()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?name, \"ice$\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_CaseInsensitiveFlag()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?name, \"ALICE\", \"i\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_CaseSensitiveNoFlag_NoMatch()
+    {
+        Assert.True(EvaluateWithStringBinding("!REGEX(?name, \"ALICE\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_CharacterClass()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?name, \"[A-Z][a-z]+\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_Wildcard()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?name, \"A.*e\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void Regex_UnboundVariable_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithEmptyBindings("REGEX(?name, \"test\")"));
+    }
+
+    [Fact]
+    public void Regex_InvalidPattern_ReturnsFalse()
+    {
+        // Invalid regex pattern (unclosed bracket) should return false
+        Assert.False(EvaluateWithStringBinding("REGEX(?name, \"[invalid\")", "?name", "test"));
+    }
+
+    [Fact]
+    public void Regex_NumericPattern()
+    {
+        Assert.True(EvaluateWithStringBinding("REGEX(?code, \"^[0-9]+$\")", "?code", "12345"));
+    }
+
+    #endregion
 }
