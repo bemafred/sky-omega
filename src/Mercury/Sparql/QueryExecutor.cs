@@ -140,6 +140,9 @@ public ref struct QueryResults
     // BIND support
     private readonly bool _hasBinds;
 
+    // MINUS support
+    private readonly bool _hasMinus;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -175,6 +178,7 @@ public ref struct QueryResults
         _sortedResults = null;
         _sortedIndex = -1;
         _hasBinds = pattern.HasBinds;
+        _hasMinus = pattern.HasMinus;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
@@ -205,6 +209,7 @@ public ref struct QueryResults
         _sortedResults = null;
         _sortedIndex = -1;
         _hasBinds = pattern.HasBinds;
+        _hasMinus = pattern.HasMinus;
     }
 
     /// <summary>
@@ -394,6 +399,16 @@ public ref struct QueryResults
                 continue;
             }
 
+            // Apply MINUS - exclude matching rows
+            if (_hasMinus)
+            {
+                if (MatchesMinusPattern())
+                {
+                    _bindingTable.Clear();
+                    continue;
+                }
+            }
+
             if (_distinct)
             {
                 var hash = ComputeBindingsHash();
@@ -470,6 +485,16 @@ public ref struct QueryResults
                 {
                     _bindingTable.Clear();
                     continue; // Try next row
+                }
+            }
+
+            // Apply MINUS - exclude matching rows
+            if (_hasMinus)
+            {
+                if (MatchesMinusPattern())
+                {
+                    _bindingTable.Clear();
+                    continue; // Matches MINUS, skip this row
                 }
             }
 
@@ -691,6 +716,83 @@ public ref struct QueryResults
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// Check if current bindings match all MINUS patterns.
+    /// Returns true if any MINUS pattern matches (solution should be excluded).
+    /// </summary>
+    private bool MatchesMinusPattern()
+    {
+        if (_store == null) return false;
+
+        // For MINUS semantics: exclude if ALL patterns in MINUS group match
+        // We need to check if there's a compatible solution in the MINUS pattern
+        for (int i = 0; i < _pattern.MinusPatternCount; i++)
+        {
+            var minusPattern = _pattern.GetMinusPattern(i);
+            if (!MatchesSingleMinusPattern(minusPattern))
+            {
+                // If any pattern doesn't match, the MINUS doesn't exclude this solution
+                return false;
+            }
+        }
+
+        // All patterns matched - this solution should be excluded
+        return _pattern.MinusPatternCount > 0;
+    }
+
+    /// <summary>
+    /// Check if a single MINUS pattern matches the current bindings.
+    /// SPARQL MINUS semantics: exclude if the pattern matches with compatible bindings.
+    /// Variables not in current bindings become wildcards.
+    /// </summary>
+    private bool MatchesSingleMinusPattern(TriplePattern pattern)
+    {
+        if (_store == null) return false;
+
+        // Resolve terms using current bindings
+        // Variables not in bindings become wildcards (empty span)
+        var subject = ResolveTermForMinus(pattern.Subject);
+        var predicate = ResolveTermForMinus(pattern.Predicate);
+        var obj = ResolveTermForMinus(pattern.Object);
+
+        // Query the store to see if this pattern matches
+        var results = _store.QueryCurrent(subject, predicate, obj);
+        try
+        {
+            return results.MoveNext(); // Match if at least one triple found
+        }
+        finally
+        {
+            results.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Resolve a term for MINUS pattern matching.
+    /// Variables use their bound value, constants use source text.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveTermForMinus(Term term)
+    {
+        if (!term.IsVariable)
+        {
+            // Constant - use source text
+            return _source.Slice(term.Start, term.Length);
+        }
+
+        // Check if variable is bound
+        var varName = _source.Slice(term.Start, term.Length);
+        var idx = _bindingTable.FindBinding(varName);
+        if (idx >= 0)
+        {
+            // Use bound value
+            return _bindingTable.GetString(idx);
+        }
+
+        // Unbound - use wildcard
+        return ReadOnlySpan<char>.Empty;
     }
 
     public void Dispose()

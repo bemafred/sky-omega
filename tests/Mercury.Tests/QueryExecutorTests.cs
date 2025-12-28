@@ -1456,4 +1456,174 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== MINUS Tests ==========
+
+    [Fact]
+    public void Execute_MinusBasic()
+    {
+        // Find people who have a name but don't have a "knows" relationship
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name MINUS { ?person <http://xmlns.com/foaf/0.1/knows> ?other } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(idx >= 0);
+                names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Alice knows Bob, so Alice is excluded
+            // Bob and Charlie don't know anyone, so they remain
+            Assert.Equal(2, names.Count);
+            Assert.Contains("\"Bob\"", names);
+            Assert.Contains("\"Charlie\"", names);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusNoMatch()
+    {
+        // MINUS pattern that matches nothing - all results should remain
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name MINUS { ?person <http://example.org/nonexistent> ?x } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(idx >= 0);
+                names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // No MINUS matches, so all 3 people remain
+            Assert.Equal(3, names.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusAllMatch()
+    {
+        // MINUS pattern that matches everything - no results
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name MINUS { ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Everyone has an age, so MINUS excludes all
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusWithConstant()
+    {
+        // MINUS with a constant value (data stores age as plain "30" not quoted)
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name MINUS { ?person <http://xmlns.com/foaf/0.1/age> 30 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(idx >= 0);
+                names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Alice has age=30, so she is excluded
+            // Bob (age=25) and Charlie (age=35) remain
+            Assert.Equal(2, names.Count);
+            Assert.Contains("\"Bob\"", names);
+            Assert.Contains("\"Charlie\"", names);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusWithFilter()
+    {
+        // MINUS combined with FILTER
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age > 20) MINUS { ?person <http://xmlns.com/foaf/0.1/knows> ?other } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // All ages > 20: Alice=30, Bob=25, Charlie=35
+            // Alice knows Bob, so Alice is excluded
+            // Remaining: Bob=25, Charlie=35
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("25", ages);
+            Assert.Contains("35", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

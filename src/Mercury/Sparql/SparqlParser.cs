@@ -390,10 +390,10 @@ public ref struct SparqlParser
                 continue;
             }
 
-            // Check for MINUS (not yet implemented)
+            // Check for MINUS
             if (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase))
             {
-                SkipUntilClosingBrace();
+                ParseMinus(ref pattern);
                 continue;
             }
 
@@ -546,6 +546,56 @@ public ref struct SparqlParser
             // Try to parse a triple pattern
             if (!TryParseOptionalTriplePattern(ref pattern))
                 break;
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse MINUS clause: MINUS { GroupGraphPattern }
+    /// Patterns inside MINUS are used to exclude matching solutions.
+    /// </summary>
+    private void ParseMinus(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("MINUS");
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside MINUS and add them as minus patterns
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Try to parse a triple pattern
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            pattern.AddMinusPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
 
             SkipWhitespace();
 
@@ -1230,10 +1280,12 @@ public struct GraphPattern
     public const int MaxTriplePatterns = 32;
     public const int MaxFilters = 16;
     public const int MaxBinds = 8;
+    public const int MaxMinusPatterns = 8;
 
     private int _patternCount;
     private int _filterCount;
     private int _bindCount;
+    private int _minusPatternCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
     private int _unionStartIndex; // If > 0, patterns from this index are the UNION branch
 
@@ -1250,10 +1302,15 @@ public struct GraphPattern
     // Inline storage for bind expressions (8 * 16 bytes = 128 bytes)
     private BindExpr _b0, _b1, _b2, _b3, _b4, _b5, _b6, _b7;
 
+    // Inline storage for MINUS patterns (8 * 24 bytes = 192 bytes)
+    private TriplePattern _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7;
+
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
     public readonly int BindCount => _bindCount;
+    public readonly int MinusPatternCount => _minusPatternCount;
     public readonly bool HasBinds => _bindCount > 0;
+    public readonly bool HasMinus => _minusPatternCount > 0;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
     public readonly bool HasUnion => _unionStartIndex > 0;
 
@@ -1415,6 +1472,33 @@ public struct GraphPattern
             case 2: _b2 = bind; break; case 3: _b3 = bind; break;
             case 4: _b4 = bind; break; case 5: _b5 = bind; break;
             case 6: _b6 = bind; break; case 7: _b7 = bind; break;
+        }
+    }
+
+    public void AddMinusPattern(TriplePattern pattern)
+    {
+        if (_minusPatternCount >= MaxMinusPatterns) return;
+        SetMinusPattern(_minusPatternCount++, pattern);
+    }
+
+    public readonly TriplePattern GetMinusPattern(int index)
+    {
+        return index switch
+        {
+            0 => _m0, 1 => _m1, 2 => _m2, 3 => _m3,
+            4 => _m4, 5 => _m5, 6 => _m6, 7 => _m7,
+            _ => default
+        };
+    }
+
+    private void SetMinusPattern(int index, TriplePattern pattern)
+    {
+        switch (index)
+        {
+            case 0: _m0 = pattern; break; case 1: _m1 = pattern; break;
+            case 2: _m2 = pattern; break; case 3: _m3 = pattern; break;
+            case 4: _m4 = pattern; break; case 5: _m5 = pattern; break;
+            case 6: _m6 = pattern; break; case 7: _m7 = pattern; break;
         }
     }
 }
