@@ -65,12 +65,17 @@ SkyOmega.sln
 ### Component Layers
 
 ```
-Sky (Agent Layer) → Lucy (Semantic Memory) → Mercury (Storage Substrate)
+Sky (Agent) → James (Orchestration) → Lucy (Semantic Memory) → Mercury (Storage)
+                                   ↘ Mira (Surfaces) ↙
 ```
 
 - **Sky** - Cognitive agent with reasoning and reflection
+- **James** - Orchestration layer with pedagogical guidance
 - **Lucy** - RDF triple store with SPARQL queries
+- **Mira** - Presentation surfaces (CLI, chat, IDE extensions)
 - **Mercury** - B+Tree indexes, append-only stores, memory-mapped files
+
+For the vision, methodology (EEE), and broader context, see [docs/sky-omega-convergence.md](docs/sky-omega-convergence.md).
 
 ### Storage Layer (`SkyOmega.Mercury.Storage`)
 
@@ -249,7 +254,12 @@ Key components:
 |----------|----------|
 | Query types | SELECT, ASK, CONSTRUCT |
 | Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
-| Filtering | FILTER (comparisons, AND/OR/NOT), VALUES |
+| Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
+| Filter functions | BOUND, IF, COALESCE, REGEX, sameTerm |
+| Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |
+| String functions | STR, STRLEN, SUBSTR, CONTAINS, STRSTARTS, STRENDS, STRBEFORE, STRAFTER, CONCAT, UCASE, LCASE |
+| Numeric functions | ABS, ROUND, CEIL, FLOOR |
+| RDF term functions | LANG, DATATYPE, LANGMATCHES |
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, COUNT, SUM, AVG, MIN, MAX |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
