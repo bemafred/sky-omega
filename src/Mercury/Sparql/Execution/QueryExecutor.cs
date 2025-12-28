@@ -271,21 +271,31 @@ public ref struct QueryExecutor
         int limit, int offset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having)
     {
-        // For now, handle single GRAPH clause with IRI (not variable)
+        // For now, handle single GRAPH clause
         if (pattern.GraphClauseCount != 1)
             return QueryResults.Empty(); // Multiple GRAPH clauses need join - not yet supported
 
         var graphClause = pattern.GetGraphClause(0);
-        if (graphClause.IsVariable)
-            return QueryResults.Empty(); // Variable graph needs graph enumeration - not yet supported
-
-        // Get the graph IRI
-        var graphIri = _source.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
 
         // Build binding storage
         var bindings = new Binding[16];
         var stringBuffer = new char[1024];
         var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // Variable graph - iterate all named graphs
+        if (graphClause.IsVariable)
+        {
+            if (graphClause.PatternCount == 0)
+                return QueryResults.Empty();
+
+            var scan = new VariableGraphScan(_store, _source, graphClause);
+
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+                limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        }
+
+        // Get the graph IRI
+        var graphIri = _source.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
 
         var patternCount = graphClause.PatternCount;
         if (patternCount == 0)

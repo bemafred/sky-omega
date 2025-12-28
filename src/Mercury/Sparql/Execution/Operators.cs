@@ -563,6 +563,90 @@ public ref struct MultiPatternScan
 }
 
 /// <summary>
-/// Evaluates BIND expressions and returns the computed value.
-/// Supports: variables, literals, arithmetic (+, -, *, /), parentheses.
+/// Scans triple patterns across all named graphs, binding a graph variable.
+/// For queries like: SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }
 /// </summary>
+public ref struct VariableGraphScan
+{
+    private readonly TripleStore _store;
+    private readonly ReadOnlySpan<char> _source;
+    private readonly GraphClause _graphClause;
+    private NamedGraphEnumerator _graphEnum;
+    private MultiPatternScan _currentScan;
+    private GraphPattern _innerPattern;
+    private ReadOnlySpan<char> _currentGraph;
+    private readonly int _graphVarHash;
+    private bool _initialized;
+    private bool _exhausted;
+
+    public VariableGraphScan(TripleStore store, ReadOnlySpan<char> source, GraphClause graphClause)
+    {
+        _store = store;
+        _source = source;
+        _graphClause = graphClause;
+        _graphEnum = store.GetNamedGraphs();
+        _currentScan = default;
+        _innerPattern = default;
+        _currentGraph = default;
+        _initialized = false;
+        _exhausted = false;
+
+        // Compute hash for graph variable name for binding
+        var graphVarName = source.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
+        _graphVarHash = ComputeHash(graphVarName);
+
+        // Build inner pattern from graph clause patterns
+        _innerPattern = new GraphPattern();
+        for (int i = 0; i < graphClause.PatternCount; i++)
+        {
+            _innerPattern.AddPattern(graphClause.GetPattern(i));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int ComputeHash(ReadOnlySpan<char> s)
+    {
+        unchecked
+        {
+            int hash = (int)2166136261;
+            foreach (var c in s)
+                hash = (hash ^ c) * 16777619;
+            return hash;
+        }
+    }
+
+    public bool MoveNext(ref BindingTable bindings)
+    {
+        if (_exhausted)
+            return false;
+
+        while (true)
+        {
+            // Try to get next result from current graph's scan
+            if (_initialized && _currentScan.MoveNext(ref bindings))
+            {
+                // Bind the graph variable
+                var graphVarName = _source.Slice(_graphClause.Graph.Start, _graphClause.Graph.Length);
+                bindings.Bind(graphVarName, _currentGraph);
+                return true;
+            }
+
+            // Move to next graph
+            if (!_graphEnum.MoveNext())
+            {
+                _exhausted = true;
+                return false;
+            }
+
+            // Initialize scan for new graph
+            _currentGraph = _graphEnum.Current;
+            _currentScan = new MultiPatternScan(_store, _source, _innerPattern, false, _currentGraph);
+            _initialized = true;
+        }
+    }
+
+    public void Dispose()
+    {
+        _currentScan.Dispose();
+    }
+}

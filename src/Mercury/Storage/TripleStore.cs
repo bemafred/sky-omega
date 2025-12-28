@@ -619,6 +619,16 @@ public sealed class TripleStore : IDisposable
             graph: graph);
     }
 
+    /// <summary>
+    /// Get all named graph IRIs in the store.
+    /// Returns graph IRIs as strings. Default graph (empty) is not included.
+    /// Caller must hold read lock.
+    /// </summary>
+    public NamedGraphEnumerator GetNamedGraphs()
+    {
+        return new NamedGraphEnumerator(_spotIndex, _atoms);
+    }
+
     private (TripleIndex Index, TemporalIndexType Type) SelectOptimalIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
@@ -895,4 +905,59 @@ public readonly ref struct ResolvedTemporalTriple
         TransactionTime = transactionTime;
         IsDeleted = isDeleted;
     }
+}
+
+/// <summary>
+/// Enumerator for distinct named graph IRIs.
+/// Scans the index and returns each unique graph IRI once.
+/// </summary>
+public ref struct NamedGraphEnumerator
+{
+    private TripleIndex.TemporalTripleEnumerator _enumerator;
+    private readonly AtomStore _atoms;
+    private long _lastGraphAtom;
+    private string? _current;
+
+    internal NamedGraphEnumerator(TripleIndex index, AtomStore atoms)
+    {
+        // Query all current triples across ALL graphs (default + named)
+        _enumerator = index.QueryCurrentAllGraphs();
+        _atoms = atoms;
+        _lastGraphAtom = -1; // -1 means "no graph seen yet"
+        _current = null;
+    }
+
+    /// <summary>
+    /// Current graph IRI.
+    /// </summary>
+    public readonly ReadOnlySpan<char> Current => _current.AsSpan();
+
+    /// <summary>
+    /// Move to the next distinct named graph.
+    /// </summary>
+    public bool MoveNext()
+    {
+        while (_enumerator.MoveNext())
+        {
+            var graphAtom = _enumerator.Current.GraphAtom;
+
+            // Skip default graph (atom 0)
+            if (graphAtom == 0)
+                continue;
+
+            // Skip if same as last graph (takes advantage of GSPO ordering)
+            if (graphAtom == _lastGraphAtom)
+                continue;
+
+            _lastGraphAtom = graphAtom;
+
+            // Resolve atom to string
+            _current = _atoms.GetAtomString(graphAtom);
+            return true;
+        }
+
+        return false;
+    }
+
+    public NamedGraphEnumerator GetEnumerator() => this;
 }

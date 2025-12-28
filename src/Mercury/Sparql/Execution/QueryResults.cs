@@ -10,6 +10,7 @@ public ref struct QueryResults
 {
     private TriplePatternScan _singleScan;
     private MultiPatternScan _multiScan;
+    private VariableGraphScan _variableGraphScan;
     private GraphPattern _pattern;
     private ReadOnlySpan<char> _source;
     private TripleStore? _store;
@@ -19,6 +20,7 @@ public ref struct QueryResults
     private readonly bool _hasFilters;
     private readonly bool _hasOptional;
     private readonly bool _isMultiPattern;
+    private readonly bool _isVariableGraph;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
@@ -91,6 +93,7 @@ public ref struct QueryResults
         _hasOptional = pattern.HasOptionalPatterns;
         _hasUnion = pattern.HasUnion;
         _isMultiPattern = false;
+        _isVariableGraph = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -132,6 +135,7 @@ public ref struct QueryResults
         _hasOptional = pattern.HasOptionalPatterns;
         _hasUnion = pattern.HasUnion;
         _isMultiPattern = true;
+        _isVariableGraph = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -148,6 +152,48 @@ public ref struct QueryResults
         _hasMinus = pattern.HasMinus;
         _hasValues = pattern.HasValues;
         _hasExists = pattern.HasExists;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
+    }
+
+    internal QueryResults(VariableGraphScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    {
+        _variableGraphScan = scan;
+        _pattern = pattern;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = pattern.FilterCount > 0;
+        _hasOptional = false; // Variable graph handles its own patterns
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isVariableGraph = true;
+        _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = orderBy.HasOrderBy;
+        _sortedResults = null;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
         _hasGroupBy = groupBy.HasGroupBy;
@@ -306,7 +352,11 @@ public ref struct QueryResults
         {
             bool hasNext;
 
-            if (_unionBranchActive)
+            if (_isVariableGraph)
+            {
+                hasNext = _variableGraphScan.MoveNext(ref _bindingTable);
+            }
+            else if (_unionBranchActive)
             {
                 if (_unionIsMultiPattern)
                     hasNext = _unionMultiScan.MoveNext(ref _bindingTable);
@@ -323,7 +373,7 @@ public ref struct QueryResults
 
             if (!hasNext)
             {
-                if (_hasUnion && !_unionBranchActive)
+                if (!_isVariableGraph && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())
@@ -527,7 +577,11 @@ public ref struct QueryResults
         {
             bool hasNext;
 
-            if (_unionBranchActive)
+            if (_isVariableGraph)
+            {
+                hasNext = _variableGraphScan.MoveNext(ref _bindingTable);
+            }
+            else if (_unionBranchActive)
             {
                 // Using UNION branch scans
                 if (_unionIsMultiPattern)
@@ -547,7 +601,7 @@ public ref struct QueryResults
             if (!hasNext)
             {
                 // Try switching to UNION branch
-                if (_hasUnion && !_unionBranchActive)
+                if (!_isVariableGraph && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())

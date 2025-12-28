@@ -3181,5 +3181,171 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Execute_VariableGraph_IteratesAllNamedGraphs()
+    {
+        // Add data to multiple named graphs
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Henry>", "<http://xmlns.com/foaf/0.1/name>", "\"Henry\"", "<http://example.org/graphA>");
+        _store.AddCurrentBatched("<http://example.org/Irene>", "<http://xmlns.com/foaf/0.1/name>", "\"Irene\"", "<http://example.org/graphB>");
+        _store.AddCurrentBatched("<http://example.org/Jack>", "<http://xmlns.com/foaf/0.1/name>", "\"Jack\"", "<http://example.org/graphC>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?g ?s ?name WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> ?name } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var foundGraphs = new HashSet<string>();
+            var foundNames = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var gIdx = results.Current.FindBinding("?g".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                if (gIdx >= 0)
+                    foundGraphs.Add(results.Current.GetString(gIdx).ToString());
+                if (nameIdx >= 0)
+                    foundNames.Add(results.Current.GetString(nameIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should find all 3 graphs
+            Assert.Equal(3, foundGraphs.Count);
+            Assert.Contains("<http://example.org/graphA>", foundGraphs);
+            Assert.Contains("<http://example.org/graphB>", foundGraphs);
+            Assert.Contains("<http://example.org/graphC>", foundGraphs);
+
+            // Should find all 3 names
+            Assert.Equal(3, foundNames.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_VariableGraph_BindsGraphVariable()
+    {
+        // Add data to a named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Kate>", "<http://xmlns.com/foaf/0.1/name>", "\"Kate\"", "<http://example.org/graphK>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?g WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> \"Kate\" } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var graphs = new List<string>();
+            while (results.MoveNext())
+            {
+                var gIdx = results.Current.FindBinding("?g".AsSpan());
+                if (gIdx >= 0)
+                    graphs.Add(results.Current.GetString(gIdx).ToString());
+            }
+            results.Dispose();
+
+            Assert.Single(graphs);
+            Assert.Equal("<http://example.org/graphK>", graphs[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_VariableGraph_ExcludesDefaultGraph()
+    {
+        // Add data to default graph and named graph
+        _store.BeginBatch();
+        // Default graph data is already there from constructor
+        _store.AddCurrentBatched("<http://example.org/Leo>", "<http://xmlns.com/foaf/0.1/name>", "\"Leo\"", "<http://example.org/graphL>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var foundGraphs = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var gIdx = results.Current.FindBinding("?g".AsSpan());
+                if (gIdx >= 0)
+                    foundGraphs.Add(results.Current.GetString(gIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should NOT find default graph (empty), only named graphs
+            Assert.DoesNotContain("", foundGraphs);
+            // Should find the named graph
+            Assert.Contains("<http://example.org/graphL>", foundGraphs);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_VariableGraph_MultiplePatterns()
+    {
+        // Add person with name and age to named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/name>", "\"Mary\"", "<http://example.org/graphM>");
+        _store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/age>", "32", "<http://example.org/graphM>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?g ?name ?age WHERE { GRAPH ?g { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                var gIdx = results.Current.FindBinding("?g".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(gIdx >= 0);
+                Assert.True(nameIdx >= 0);
+                Assert.True(ageIdx >= 0);
+                Assert.Equal("<http://example.org/graphM>", results.Current.GetString(gIdx).ToString());
+                Assert.Equal("\"Mary\"", results.Current.GetString(nameIdx).ToString());
+                Assert.Equal("32", results.Current.GetString(ageIdx).ToString());
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

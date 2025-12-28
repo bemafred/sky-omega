@@ -292,6 +292,22 @@ public sealed unsafe class TripleIndex : IDisposable
     }
 
     /// <summary>
+    /// Query current state across all graphs (default + named).
+    /// Internal method for named graph enumeration.
+    /// </summary>
+    internal TemporalTripleEnumerator QueryCurrentAllGraphs()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        // g = -1 means wildcard for graph (all graphs)
+        return Query(-1, -1, -1, -1, new TemporalQuery
+        {
+            Type = TemporalQueryType.AsOf,
+            AsOfTime = now
+        });
+    }
+
+    /// <summary>
     /// Query historical state (as of specific time)
     /// </summary>
     public TemporalTripleEnumerator QueryAsOf(
