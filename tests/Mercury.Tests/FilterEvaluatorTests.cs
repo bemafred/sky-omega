@@ -1955,4 +1955,48 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region UUID/STRUUID Functions
+
+    [Fact]
+    public void Uuid_ReturnsUriWithPrefix()
+    {
+        // UUID() returns IRI starting with urn:uuid:
+        Assert.True(Evaluate("STRSTARTS(str(UUID()), \"urn:uuid:\")"));
+    }
+
+    [Fact]
+    public void Uuid_ReturnsValidFormat()
+    {
+        // UUID format: urn:uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (45 chars total)
+        Assert.True(Evaluate("STRLEN(str(UUID())) == 45"));
+    }
+
+    [Fact]
+    public void Uuid_IsIri()
+    {
+        Assert.True(Evaluate("isIRI(UUID())"));
+    }
+
+    [Fact]
+    public void Struuid_ReturnsString()
+    {
+        // STRUUID() returns just the UUID string without prefix
+        Assert.True(Evaluate("STRLEN(STRUUID()) == 36"));
+    }
+
+    [Fact]
+    public void Struuid_IsNotIri()
+    {
+        Assert.False(Evaluate("isIRI(STRUUID())"));
+    }
+
+    [Fact]
+    public void Struuid_ContainsDashes()
+    {
+        // UUID format has dashes at positions 9, 14, 19, 24
+        Assert.True(Evaluate("CONTAINS(STRUUID(), \"-\")"));
+    }
+
+    #endregion
 }

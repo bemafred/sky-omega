@@ -543,6 +543,34 @@ public ref struct FilterEvaluator
             return ParseStrAfterFunction();
         }
 
+        // UUID - generate a fresh IRI with UUID v7
+        if (funcName.Equals("uuid", StringComparison.OrdinalIgnoreCase))
+        {
+            SkipWhitespace();
+            if (Peek() == ')')
+                Advance();
+            _uuidResult = $"urn:uuid:{Guid.CreateVersion7():D}";
+            return new Value
+            {
+                Type = ValueType.Uri,
+                StringValue = _uuidResult.AsSpan()
+            };
+        }
+
+        // STRUUID - generate a fresh UUID v7 string
+        if (funcName.Equals("struuid", StringComparison.OrdinalIgnoreCase))
+        {
+            SkipWhitespace();
+            if (Peek() == ')')
+                Advance();
+            _uuidResult = Guid.CreateVersion7().ToString("D");
+            return new Value
+            {
+                Type = ValueType.String,
+                StringValue = _uuidResult.AsSpan()
+            };
+        }
+
         // Parse first argument for single-arg functions
         var arg1 = ParseTerm();
 
@@ -1589,6 +1617,9 @@ public ref struct FilterEvaluator
 
     // Storage for hash function results to keep span valid
     private string _hashResult = string.Empty;
+
+    // Storage for UUID/STRUUID results to keep span valid
+    private string _uuidResult = string.Empty;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
