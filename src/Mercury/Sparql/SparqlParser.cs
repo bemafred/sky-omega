@@ -1091,6 +1091,7 @@ public ref struct SparqlParser
 
     /// <summary>
     /// Try to parse a triple pattern (subject predicate object)
+    /// Supports property paths in the predicate position.
     /// </summary>
     private bool TryParseTriplePattern(ref GraphPattern pattern)
     {
@@ -1105,7 +1106,9 @@ public ref struct SparqlParser
             return false;
 
         SkipWhitespace();
-        var predicate = ParseTerm();
+
+        // Parse predicate - may be a property path
+        var (predicate, path) = ParsePredicateOrPath();
 
         SkipWhitespace();
         var obj = ParseTerm();
@@ -1114,10 +1117,84 @@ public ref struct SparqlParser
         {
             Subject = subject,
             Predicate = predicate,
-            Object = obj
+            Object = obj,
+            Path = path
         });
 
         return true;
+    }
+
+    /// <summary>
+    /// Parse a predicate which may be a property path expression.
+    /// Returns both the simple Term (for backwards compatibility) and a PropertyPath.
+    /// </summary>
+    private (Term predicate, PropertyPath path) ParsePredicateOrPath()
+    {
+        SkipWhitespace();
+        var ch = Peek();
+
+        // Check for inverse path: ^predicate
+        if (ch == '^')
+        {
+            Advance(); // Skip '^'
+            SkipWhitespace();
+            var iri = ParseTerm();
+            return (iri, PropertyPath.Inverse(iri));
+        }
+
+        // Parse the base term
+        var term = ParseTerm();
+
+        // Check for path modifier after the term
+        SkipWhitespace();
+        ch = Peek();
+
+        if (ch == '*')
+        {
+            Advance();
+            return (term, PropertyPath.ZeroOrMore(term));
+        }
+
+        if (ch == '+')
+        {
+            Advance();
+            return (term, PropertyPath.OneOrMore(term));
+        }
+
+        if (ch == '?')
+        {
+            // Need to distinguish from variable - '?' followed by letter is variable
+            var next = PeekAt(1);
+            if (!IsLetter(next) && next != '_')
+            {
+                Advance();
+                return (term, PropertyPath.ZeroOrOne(term));
+            }
+        }
+
+        // Check for sequence or alternative (simple case: iri1/iri2 or iri1|iri2)
+        if (ch == '/')
+        {
+            var leftStart = term.Start;
+            var leftLength = term.Length;
+            Advance(); // Skip '/'
+            SkipWhitespace();
+            var right = ParseTerm();
+            return (term, PropertyPath.Sequence(leftStart, leftLength, right.Start, right.Length));
+        }
+
+        if (ch == '|')
+        {
+            var leftStart = term.Start;
+            var leftLength = term.Length;
+            Advance(); // Skip '|'
+            SkipWhitespace();
+            var right = ParseTerm();
+            return (term, PropertyPath.Alternative(leftStart, leftLength, right.Start, right.Length));
+        }
+
+        // Simple predicate - no path
+        return (term, default);
     }
 
     /// <summary>
@@ -2055,12 +2132,66 @@ public struct GraphPattern
 
 /// <summary>
 /// A triple pattern with subject, predicate, and object terms.
+/// Supports property paths in the predicate position.
 /// </summary>
 public struct TriplePattern
 {
     public Term Subject;
     public Term Predicate;
     public Term Object;
+    public PropertyPath Path;  // Used when HasPropertyPath is true
+
+    public readonly bool HasPropertyPath => Path.Type != PathType.None;
+}
+
+/// <summary>
+/// A property path expression for SPARQL 1.1 property paths.
+/// Supports: ^iri (inverse), iri+ (one or more), iri* (zero or more),
+/// iri? (zero or one), path1/path2 (sequence), path1|path2 (alternative)
+/// </summary>
+public struct PropertyPath
+{
+    public PathType Type;
+    public Term Iri;           // The IRI for simple paths
+    public int LeftStart;      // For sequence/alternative: offset of left operand
+    public int LeftLength;
+    public int RightStart;     // For sequence/alternative: offset of right operand
+    public int RightLength;
+
+    public static PropertyPath Simple(Term iri) =>
+        new() { Type = PathType.None, Iri = iri };
+
+    public static PropertyPath Inverse(Term iri) =>
+        new() { Type = PathType.Inverse, Iri = iri };
+
+    public static PropertyPath ZeroOrMore(Term iri) =>
+        new() { Type = PathType.ZeroOrMore, Iri = iri };
+
+    public static PropertyPath OneOrMore(Term iri) =>
+        new() { Type = PathType.OneOrMore, Iri = iri };
+
+    public static PropertyPath ZeroOrOne(Term iri) =>
+        new() { Type = PathType.ZeroOrOne, Iri = iri };
+
+    public static PropertyPath Sequence(int leftStart, int leftLength, int rightStart, int rightLength) =>
+        new() { Type = PathType.Sequence, LeftStart = leftStart, LeftLength = leftLength, RightStart = rightStart, RightLength = rightLength };
+
+    public static PropertyPath Alternative(int leftStart, int leftLength, int rightStart, int rightLength) =>
+        new() { Type = PathType.Alternative, LeftStart = leftStart, LeftLength = leftLength, RightStart = rightStart, RightLength = rightLength };
+}
+
+/// <summary>
+/// Type of property path expression.
+/// </summary>
+public enum PathType : byte
+{
+    None = 0,        // Simple IRI predicate (not a property path)
+    Inverse,         // ^iri - traverse in reverse direction
+    ZeroOrMore,      // iri* - zero or more hops
+    OneOrMore,       // iri+ - one or more hops
+    ZeroOrOne,       // iri? - zero or one hop
+    Sequence,        // path1/path2 - sequence of paths
+    Alternative      // path1|path2 - alternative paths
 }
 
 /// <summary>

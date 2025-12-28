@@ -1646,6 +1646,7 @@ public readonly ref struct ConstructedTriple
 /// <summary>
 /// Scans a single triple pattern against the store.
 /// Binds matching values to variables.
+/// Supports property paths: inverse (^), zero-or-more (*), one-or-more (+), zero-or-one (?).
 /// </summary>
 public ref struct TriplePatternScan
 {
@@ -1656,6 +1657,18 @@ public ref struct TriplePatternScan
     private bool _initialized;
     private readonly BindingTable _initialBindings;
 
+    // For property path traversal
+    private readonly bool _isInverse;
+    private readonly bool _isZeroOrMore;
+    private readonly bool _isOneOrMore;
+    private readonly bool _isZeroOrOne;
+
+    // State for transitive path traversal
+    private HashSet<string>? _visited;
+    private Queue<string>? _frontier;
+    private string? _currentNode;
+    private bool _emittedReflexive;
+
     public TriplePatternScan(TripleStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings)
     {
@@ -1665,6 +1678,17 @@ public ref struct TriplePatternScan
         _initialBindings = initialBindings;
         _initialized = false;
         _enumerator = default;
+
+        // Check property path type
+        _isInverse = pattern.Path.Type == PathType.Inverse;
+        _isZeroOrMore = pattern.Path.Type == PathType.ZeroOrMore;
+        _isOneOrMore = pattern.Path.Type == PathType.OneOrMore;
+        _isZeroOrOne = pattern.Path.Type == PathType.ZeroOrOne;
+
+        _visited = null;
+        _frontier = null;
+        _currentNode = null;
+        _emittedReflexive = false;
     }
 
     public bool MoveNext(ref BindingTable bindings)
@@ -1675,34 +1699,155 @@ public ref struct TriplePatternScan
             _initialized = true;
         }
 
+        // Handle transitive paths with BFS
+        if (_isZeroOrMore || _isOneOrMore)
+        {
+            return MoveNextTransitive(ref bindings);
+        }
+
         while (_enumerator.MoveNext())
         {
             var triple = _enumerator.Current;
 
             bindings.Clear();
 
-            // Bind variables to values from result
-            if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
-                continue;
-            if (!TryBindVariable(_pattern.Predicate, triple.Predicate, ref bindings))
-                continue;
-            if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
-                continue;
+            if (_isInverse)
+            {
+                // For inverse, swap subject and object bindings
+                if (!TryBindVariable(_pattern.Subject, triple.Object, ref bindings))
+                    continue;
+                if (!TryBindVariable(_pattern.Object, triple.Subject, ref bindings))
+                    continue;
+            }
+            else
+            {
+                // Normal binding
+                if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
+                    continue;
+                if (!TryBindVariable(_pattern.Predicate, triple.Predicate, ref bindings))
+                    continue;
+                if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                    continue;
+            }
 
             return true;
+        }
+
+        // For zero-or-one, also emit reflexive case if subject == object and not yet emitted
+        if (_isZeroOrOne && !_emittedReflexive)
+        {
+            _emittedReflexive = true;
+            bindings.Clear();
+
+            // Only emit reflexive if subject variable is bound or is concrete
+            var subjectSpan = ResolveTermForQuery(_pattern.Subject);
+            if (!subjectSpan.IsEmpty)
+            {
+                // Bind subject to both subject and object positions
+                if (TryBindVariable(_pattern.Subject, subjectSpan, ref bindings) &&
+                    TryBindVariable(_pattern.Object, subjectSpan, ref bindings))
+                {
+                    return true;
+                }
+            }
         }
 
         return false;
     }
 
+    private bool MoveNextTransitive(ref BindingTable bindings)
+    {
+        // BFS for transitive closure
+        while (true)
+        {
+            // Try to get next result from current frontier node
+            while (_enumerator.MoveNext())
+            {
+                var triple = _enumerator.Current;
+                var targetNode = triple.Object.ToString();
+
+                if (!_visited!.Contains(targetNode))
+                {
+                    _visited.Add(targetNode);
+                    _frontier!.Enqueue(targetNode);
+
+                    bindings.Clear();
+                    if (TryBindVariable(_pattern.Subject, _source.Slice(_pattern.Subject.Start, _pattern.Subject.Length), ref bindings) &&
+                        TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            // Move to next frontier node
+            _enumerator.Dispose();
+            if (_frontier!.Count == 0)
+                return false;
+
+            _currentNode = _frontier.Dequeue();
+            var predicate = _isInverse
+                ? ResolveTermForQuery(_pattern.Path.Iri)
+                : ResolveTermForQuery(_pattern.Predicate);
+
+            _enumerator = _store.QueryCurrent(
+                _currentNode.AsSpan(),
+                predicate,
+                ReadOnlySpan<char>.Empty);
+        }
+    }
+
     private void Initialize()
     {
+        if (_isZeroOrMore || _isOneOrMore)
+        {
+            InitializeTransitive();
+            return;
+        }
+
         // Resolve terms to spans for querying
         var subject = ResolveTermForQuery(_pattern.Subject);
-        var predicate = ResolveTermForQuery(_pattern.Predicate);
         var obj = ResolveTermForQuery(_pattern.Object);
 
-        _enumerator = _store.QueryCurrent(subject, predicate, obj);
+        ReadOnlySpan<char> predicate;
+        if (_isInverse)
+        {
+            // For inverse path, query with swapped subject/object
+            predicate = ResolveTermForQuery(_pattern.Path.Iri);
+            _enumerator = _store.QueryCurrent(obj, predicate, subject);
+        }
+        else
+        {
+            predicate = ResolveTermForQuery(_pattern.Predicate);
+            _enumerator = _store.QueryCurrent(subject, predicate, obj);
+        }
+    }
+
+    private void InitializeTransitive()
+    {
+        _visited = new HashSet<string>();
+        _frontier = new Queue<string>();
+
+        var subject = ResolveTermForQuery(_pattern.Subject);
+        var startNode = subject.ToString();
+
+        // For zero-or-more, emit reflexive first
+        if (_isZeroOrMore && !_emittedReflexive)
+        {
+            _emittedReflexive = true;
+        }
+
+        _visited.Add(startNode);
+        _currentNode = startNode;
+
+        var predicate = _pattern.HasPropertyPath
+            ? ResolveTermForQuery(_pattern.Path.Iri)
+            : ResolveTermForQuery(_pattern.Predicate);
+
+        _enumerator = _store.QueryCurrent(
+            startNode.AsSpan(),
+            predicate,
+            ReadOnlySpan<char>.Empty);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

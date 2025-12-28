@@ -221,4 +221,92 @@ public class SparqlParserTests
     }
 
     #endregion
+
+    #region Property Paths
+
+    [Fact]
+    public void PropertyPath_ParsesInversePath()
+    {
+        var query = "SELECT * WHERE { ?child ^<http://example/parent> ?parent }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.Inverse, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void PropertyPath_ParsesZeroOrMore()
+    {
+        var query = "SELECT * WHERE { ?s <http://example/knows>* ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.ZeroOrMore, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void PropertyPath_ParsesOneOrMore()
+    {
+        var query = "SELECT * WHERE { ?s <http://example/knows>+ ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.OneOrMore, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void PropertyPath_ParsesZeroOrOne()
+    {
+        var query = "SELECT * WHERE { ?s <http://example/knows>? ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.ZeroOrOne, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void PropertyPath_ParsesSequence()
+    {
+        var query = "SELECT * WHERE { ?s <http://example/a>/<http://example/b> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.Sequence, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void PropertyPath_ParsesAlternative()
+    {
+        var query = "SELECT * WHERE { ?s <http://example/a>|<http://example/b> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.Alternative, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void PropertyPath_SimplePredicateHasNoPath()
+    {
+        var query = "SELECT * WHERE { ?s <http://example/p> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        var pattern = result.WhereClause.Pattern.GetPattern(0);
+        Assert.False(pattern.HasPropertyPath);
+        Assert.Equal(PathType.None, pattern.Path.Type);
+    }
+
+    #endregion
 }
