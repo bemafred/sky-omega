@@ -517,6 +517,12 @@ public ref struct FilterEvaluator
             return ParseLangMatchesFunction();
         }
 
+        // Handle sameTerm - strict RDF term equality
+        if (funcName.Equals("sameterm", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseSameTermFunction();
+        }
+
         // Parse first argument for single-arg functions
         var arg1 = ParseTerm();
 
@@ -1085,6 +1091,55 @@ public ref struct FilterEvaluator
         // Otherwise, next char must be hyphen for subtag
         var matches = langTag[langRange.Length] == '-';
         return new Value { Type = ValueType.Boolean, BooleanValue = matches };
+    }
+
+    /// <summary>
+    /// Parse sameTerm(term1, term2) - strict RDF term equality
+    /// Unlike =, sameTerm requires exact type and value match with no coercion
+    /// </summary>
+    private Value ParseSameTermFunction()
+    {
+        var arg1 = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var arg2 = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Both must be bound
+        if (arg1.Type == ValueType.Unbound || arg2.Type == ValueType.Unbound)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        // Types must match exactly
+        if (arg1.Type != arg2.Type)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        // Values must match exactly based on type
+        bool same = arg1.Type switch
+        {
+            ValueType.Integer => arg1.IntegerValue == arg2.IntegerValue,
+            ValueType.Double => arg1.DoubleValue == arg2.DoubleValue, // Exact equality, not epsilon
+            ValueType.Boolean => arg1.BooleanValue == arg2.BooleanValue,
+            ValueType.String => arg1.StringValue.SequenceEqual(arg2.StringValue),
+            ValueType.Uri => arg1.StringValue.SequenceEqual(arg2.StringValue),
+            _ => false
+        };
+
+        return new Value { Type = ValueType.Boolean, BooleanValue = same };
     }
 
     /// <summary>

@@ -1647,4 +1647,78 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region sameTerm Function
+
+    [Fact]
+    public void SameTerm_SameIntegers_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)42L), ("?y", (object)42L)));
+    }
+
+    [Fact]
+    public void SameTerm_DifferentIntegers_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)42L), ("?y", (object)43L)));
+    }
+
+    [Fact]
+    public void SameTerm_SameStrings_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)"hello"), ("?y", (object)"hello")));
+    }
+
+    [Fact]
+    public void SameTerm_DifferentStrings_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)"hello"), ("?y", (object)"world")));
+    }
+
+    [Fact]
+    public void SameTerm_IntegerVsDouble_ReturnsFalse()
+    {
+        // Even if numerically equal, different types means not sameTerm
+        Assert.False(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)42L), ("?y", (object)42.0)));
+    }
+
+    [Fact]
+    public void SameTerm_IntegerVsString_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)42L), ("?y", (object)"42")));
+    }
+
+    [Fact]
+    public void SameTerm_SameBooleans_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)true), ("?y", (object)true)));
+    }
+
+    [Fact]
+    public void SameTerm_DifferentBooleans_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)true), ("?y", (object)false)));
+    }
+
+    [Fact]
+    public void SameTerm_UnboundVariable_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithIntBinding("sameTerm(?x, ?y)", "?x", 42L));
+    }
+
+    [Fact]
+    public void SameTerm_SameDoubles_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithMultipleBindings("sameTerm(?x, ?y)",
+            ("?x", (object)3.14), ("?y", (object)3.14)));
+    }
+
+    #endregion
 }
