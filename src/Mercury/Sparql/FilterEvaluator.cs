@@ -141,7 +141,7 @@ public ref struct FilterEvaluator
     }
 
     /// <summary>
-    /// Comparison := Term (ComparisonOp Term)?
+    /// Comparison := Term (ComparisonOp Term | [NOT] IN ValueList)?
     /// </summary>
     private bool EvaluateComparison()
     {
@@ -157,6 +157,24 @@ public ref struct FilterEvaluator
         if (Peek() == ')')
             return CoerceToBool(left);
 
+        // Check for NOT IN or IN
+        bool negated = false;
+        if (MatchKeyword("NOT"))
+        {
+            SkipWhitespace();
+            negated = true;
+        }
+
+        if (MatchKeyword("IN"))
+        {
+            SkipWhitespace();
+            return EvaluateInExpression(left, negated);
+        }
+
+        // If we matched NOT but not IN, this is an error - just return false
+        if (negated)
+            return false;
+
         var op = ParseComparisonOperator();
         if (op == ComparisonOperator.Unknown)
             return CoerceToBool(left);
@@ -166,6 +184,49 @@ public ref struct FilterEvaluator
         scoped var right = ParseTerm();
 
         return EvaluateComparisonOp(left, op, right);
+    }
+
+    /// <summary>
+    /// Evaluate IN or NOT IN expression: value [NOT] IN (v1, v2, ...)
+    /// </summary>
+    private bool EvaluateInExpression(scoped Value left, bool negated)
+    {
+        // Expect opening paren
+        if (Peek() != '(')
+            return false;
+
+        Advance(); // Skip '('
+        SkipWhitespace();
+
+        bool found = false;
+
+        // Parse value list
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            scoped var listValue = ParseTerm();
+            SkipWhitespace();
+
+            // Check if left matches this list value
+            if (!found && CompareEqual(left, listValue))
+            {
+                found = true;
+                // Continue parsing to consume the rest of the list
+            }
+
+            // Skip comma if present
+            if (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+        }
+
+        // Skip closing paren
+        if (Peek() == ')')
+            Advance();
+
+        // IN returns true if found, NOT IN returns true if not found
+        return negated ? !found : found;
     }
 
     /// <summary>

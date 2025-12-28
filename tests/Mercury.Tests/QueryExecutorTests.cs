@@ -2700,4 +2700,108 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== IN/NOT IN Tests ==========
+
+    [Fact]
+    public void Execute_FilterIn_MatchesValues()
+    {
+        // Filter ages IN list
+        var query = "SELECT ?person ?age WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age IN (25, 35)) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Bob is 25, Charlie is 35 - both match
+            // Alice is 30 - excluded
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("25", ages);
+            Assert.Contains("35", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_FilterNotIn_ExcludesValues()
+    {
+        // Filter ages NOT IN list
+        var query = "SELECT ?person ?age WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age NOT IN (25, 35)) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Alice is 30 - only one NOT in (25, 35)
+            Assert.Single(ages);
+            Assert.Contains("30", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_FilterInCombinedWithOtherFilter()
+    {
+        // IN combined with another condition
+        var query = "SELECT ?person ?age WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age IN (25, 30) && ?age >= 25) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Both 25 and 30 are in list and >= 25
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("25", ages);
+            Assert.Contains("30", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

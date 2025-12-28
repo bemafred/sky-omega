@@ -823,4 +823,89 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region IN/NOT IN Operators
+
+    [Fact]
+    public void In_IntegerInList_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("?x IN (1, 2, 3)", "?x", 2L));
+    }
+
+    [Fact]
+    public void In_IntegerNotInList_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithIntBinding("?x IN (1, 2, 3)", "?x", 5L));
+    }
+
+    [Fact]
+    public void NotIn_IntegerNotInList_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("?x NOT IN (1, 2, 3)", "?x", 5L));
+    }
+
+    [Fact]
+    public void NotIn_IntegerInList_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithIntBinding("?x NOT IN (1, 2, 3)", "?x", 2L));
+    }
+
+    [Fact]
+    public void In_StringInList_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("?name IN (\"Alice\", \"Bob\", \"Charlie\")", "?name", "Alice"));
+    }
+
+    [Fact]
+    public void In_StringNotInList_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithStringBinding("?name IN (\"Alice\", \"Bob\")", "?name", "Charlie"));
+    }
+
+    [Fact]
+    public void NotIn_StringNotInList_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("?name NOT IN (\"Alice\", \"Bob\")", "?name", "Charlie"));
+    }
+
+    [Fact]
+    public void In_EmptyList_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithIntBinding("?x IN ()", "?x", 1L));
+    }
+
+    [Fact]
+    public void NotIn_EmptyList_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("?x NOT IN ()", "?x", 1L));
+    }
+
+    [Fact]
+    public void In_SingleValue_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("?x IN (42)", "?x", 42L));
+    }
+
+    [Fact]
+    public void In_MixedTypes_WithCoercion()
+    {
+        // String "25" should match integer 25 with type coercion
+        Assert.True(EvaluateWithStringBinding("?age IN (20, 25, 30)", "?age", "25"));
+    }
+
+    [Fact]
+    public void In_CombinedWithAnd()
+    {
+        Assert.True(EvaluateWithMultipleBindings("?x IN (1, 2, 3) && ?y > 10",
+            ("?x", 2L), ("?y", 15L)));
+    }
+
+    [Fact]
+    public void In_CombinedWithOr()
+    {
+        Assert.True(EvaluateWithMultipleBindings("?x IN (1, 2, 3) || ?y > 100",
+            ("?x", 5L), ("?y", 150L)));
+    }
+
+    #endregion
 }
