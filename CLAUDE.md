@@ -254,6 +254,7 @@ Key components:
 |----------|----------|
 | Query types | SELECT, ASK, CONSTRUCT |
 | Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
+| Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
 | Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |
