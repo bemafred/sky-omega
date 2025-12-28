@@ -294,7 +294,7 @@ Key components:
 | Category | Features |
 |----------|----------|
 | Query types | SELECT, ASK, CONSTRUCT, DESCRIBE |
-| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable) |
+| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable), Subqueries |
 | Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
@@ -421,10 +421,45 @@ finally
 }
 ```
 
+**Subquery example:**
+```csharp
+// Subqueries can be combined with outer patterns
+// Find emails for people who have names
+var query = @"SELECT ?person ?email WHERE {
+    ?person <http://foaf/email> ?email .
+    { SELECT ?person WHERE { ?person <http://foaf/name> ?name } }
+}";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.Execute();
+
+    while (results.MoveNext())
+    {
+        var bindings = results.Current;
+        // Results contain joined bindings from subquery and outer pattern
+        var personIdx = bindings.FindBinding("?person".AsSpan());
+        var emailIdx = bindings.FindBinding("?email".AsSpan());
+        // ...
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
 **Operator pipeline:**
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
 - `VariableGraphScan` - Iterates all named graphs, executes inner patterns per graph
+- `SubQueryScan` - Executes nested SELECT subquery, projects selected variables
+- `SubQueryJoinScan` - Joins subquery results with outer patterns via nested loop
 - Filter/BIND/MINUS/VALUES evaluation integrated into result iteration
 
 ## Code Conventions
