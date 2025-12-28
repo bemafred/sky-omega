@@ -366,16 +366,30 @@ public ref struct SparqlParser
         {
             SkipWhitespace();
 
+            // Check for keywords - peek enough for longest keyword (OPTIONAL = 8)
+            var span = PeekSpan(8);
+
             // Check for FILTER
-            var span = PeekSpan(6);
             if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
             {
                 ParseFilter(ref pattern);
                 continue;
             }
 
-            // Check for OPTIONAL, UNION, MINUS, etc. (not yet implemented)
+            // Check for OPTIONAL
             if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseOptional(ref pattern);
+                continue;
+            }
+
+            // Check for UNION, MINUS, etc. (not yet implemented)
+            if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
+            {
+                SkipUntilClosingBrace();
+                continue;
+            }
+            if (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase))
             {
                 SkipUntilClosingBrace();
                 continue;
@@ -418,6 +432,80 @@ public ref struct SparqlParser
             var length = _position - start - 1; // Exclude closing ')'
             pattern.AddFilter(new FilterExpr { Start = start, Length = length });
         }
+    }
+
+    /// <summary>
+    /// Parse OPTIONAL clause: OPTIONAL { GroupGraphPattern }
+    /// Patterns inside OPTIONAL are marked as optional in the parent pattern.
+    /// </summary>
+    private void ParseOptional(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("OPTIONAL");
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside OPTIONAL and add them as optional
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for nested FILTER inside OPTIONAL
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseFilter(ref pattern);
+                continue;
+            }
+
+            // Try to parse a triple pattern
+            if (!TryParseOptionalTriplePattern(ref pattern))
+                break;
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse a triple pattern and add it as optional.
+    /// </summary>
+    private bool TryParseOptionalTriplePattern(ref GraphPattern pattern)
+    {
+        SkipWhitespace();
+
+        if (IsAtEnd() || Peek() == '}')
+            return false;
+
+        var subject = ParseTerm();
+        if (subject.Type == TermType.Variable && subject.Length == 0)
+            return false;
+
+        SkipWhitespace();
+        var predicate = ParseTerm();
+
+        SkipWhitespace();
+        var obj = ParseTerm();
+
+        pattern.AddOptionalPattern(new TriplePattern
+        {
+            Subject = subject,
+            Predicate = predicate,
+            Object = obj
+        });
+
+        return true;
     }
 
     /// <summary>
@@ -955,6 +1043,7 @@ public struct GraphPattern
 
     private int _patternCount;
     private int _filterCount;
+    private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
 
     // Inline storage for triple patterns (32 * 24 bytes = 768 bytes)
     private TriplePattern _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7;
@@ -968,12 +1057,44 @@ public struct GraphPattern
 
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
+    public readonly bool HasOptionalPatterns => _optionalFlags != 0;
+
+    /// <summary>
+    /// Count of required (non-optional) patterns.
+    /// </summary>
+    public readonly int RequiredPatternCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < _patternCount; i++)
+            {
+                if (!IsOptional(i)) count++;
+            }
+            return count;
+        }
+    }
 
     public void AddPattern(TriplePattern pattern)
     {
         if (_patternCount >= MaxTriplePatterns) return;
         SetPattern(_patternCount++, pattern);
     }
+
+    /// <summary>
+    /// Add a pattern from an OPTIONAL clause.
+    /// </summary>
+    public void AddOptionalPattern(TriplePattern pattern)
+    {
+        if (_patternCount >= MaxTriplePatterns) return;
+        _optionalFlags |= (1u << _patternCount);
+        SetPattern(_patternCount++, pattern);
+    }
+
+    /// <summary>
+    /// Check if a pattern at the given index is optional.
+    /// </summary>
+    public readonly bool IsOptional(int index) => (_optionalFlags & (1u << index)) != 0;
 
     public void AddFilter(FilterExpr filter)
     {

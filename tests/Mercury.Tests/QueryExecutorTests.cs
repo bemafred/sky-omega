@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
 using Xunit;
@@ -498,6 +499,150 @@ public class QueryExecutorTests : IDisposable
 
             // All 7 triples
             Assert.Equal(7, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OptionalMatches_ExtendsBindings()
+    {
+        // Alice has both name and age, so OPTIONAL should match
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name OPTIONAL { ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify OPTIONAL was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasOptionalPatterns);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            int withAge = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var bindings = results.Current;
+
+                // Should have name binding
+                var nameIdx = bindings.FindBinding("?name".AsSpan());
+                Assert.True(nameIdx >= 0);
+
+                // Should also have age binding (OPTIONAL matched)
+                var ageIdx = bindings.FindBinding("?age".AsSpan());
+                if (ageIdx >= 0) withAge++;
+            }
+            results.Dispose();
+
+            // All 3 people have names
+            Assert.Equal(3, count);
+            // All 3 have ages too
+            Assert.Equal(3, withAge);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OptionalNoMatch_KeepsExistingBindings()
+    {
+        // Query for people with optional "knows" relationship
+        // Only Alice knows someone
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name OPTIONAL { ?person <http://xmlns.com/foaf/0.1/knows> ?friend } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            int withFriend = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var bindings = results.Current;
+
+                // Should always have name binding
+                var nameIdx = bindings.FindBinding("?name".AsSpan());
+                Assert.True(nameIdx >= 0);
+
+                // Friend binding only for Alice
+                var friendIdx = bindings.FindBinding("?friend".AsSpan());
+                if (friendIdx >= 0) withFriend++;
+            }
+            results.Dispose();
+
+            // All 3 people have names
+            Assert.Equal(3, count);
+            // Only Alice knows someone
+            Assert.Equal(1, withFriend);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OptionalParsing_PatternMarkedOptional()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o OPTIONAL { ?s <http://ex.org/opt> ?v } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var pattern = parsedQuery.WhereClause.Pattern;
+
+        // Should have 2 patterns total
+        Assert.Equal(2, pattern.PatternCount);
+
+        // First pattern is required
+        Assert.False(pattern.IsOptional(0));
+
+        // Second pattern is optional
+        Assert.True(pattern.IsOptional(1));
+    }
+
+    [Fact]
+    public void Execute_OptionalWithFilter_AppliesCorrectly()
+    {
+        // Find people with optional age, filter on the optional binding
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name OPTIONAL { ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var foundPeople = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var nameIdx = bindings.FindBinding("?name".AsSpan());
+                if (nameIdx >= 0)
+                {
+                    foundPeople.Add(bindings.GetString(nameIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should find all 3 people
+            Assert.Contains("\"Alice\"", foundPeople);
+            Assert.Contains("\"Bob\"", foundPeople);
+            Assert.Contains("\"Charlie\"", foundPeople);
         }
         finally
         {

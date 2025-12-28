@@ -44,34 +44,45 @@ public ref struct QueryExecutor
         var stringBuffer = new char[1024];
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Single pattern - just scan
-        if (pattern.PatternCount == 1)
-        {
-            var tp = pattern.GetPattern(0);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+        var requiredCount = pattern.RequiredPatternCount;
 
-            // Apply filters if any
-            if (pattern.FilterCount > 0)
+        // Single required pattern - just scan
+        if (requiredCount == 1)
+        {
+            // Find the first required pattern
+            int requiredIdx = 0;
+            for (int i = 0; i < pattern.PatternCount; i++)
             {
-                return new QueryResults(scan, pattern, _source, bindings, stringBuffer, limit, offset);
+                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
             }
 
-            return new QueryResults(scan, bindings, stringBuffer, limit, offset);
+            var tp = pattern.GetPattern(requiredIdx);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset);
         }
 
-        // Multiple patterns - need join
+        // No required patterns but have optional - need special handling
+        if (requiredCount == 0)
+        {
+            // All patterns are optional - start with empty bindings and try to match optionals
+            // For now, just return empty (proper implementation would need different semantics)
+            return QueryResults.Empty();
+        }
+
+        // Multiple required patterns - need join
         return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset);
     }
 
     private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
         int limit, int offset)
     {
-        // For now, use nested loop join for all patterns
-        // Future: optimize join order based on selectivity
+        // Use nested loop join for required patterns only
         return new QueryResults(
             new MultiPatternScan(_store, _source, pattern),
             pattern,
             _source,
+            _store,
             bindings,
             stringBuffer,
             limit,
@@ -88,10 +99,12 @@ public ref struct QueryResults
     private MultiPatternScan _multiScan;
     private GraphPattern _pattern;
     private ReadOnlySpan<char> _source;
+    private TripleStore? _store;
     private Binding[]? _bindings;
     private char[]? _stringBuffer;
     private BindingTable _bindingTable;
     private readonly bool _hasFilters;
+    private readonly bool _hasOptional;
     private readonly bool _isMultiPattern;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
@@ -109,32 +122,18 @@ public ref struct QueryResults
         return result;
     }
 
-    internal QueryResults(TriplePatternScan scan, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0)
-    {
-        _singleScan = scan;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = false;
-        _isMultiPattern = false;
-        _isEmpty = false;
-        _limit = limit;
-        _offset = offset;
-        _skipped = 0;
-        _returned = 0;
-    }
-
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
+        TripleStore store, Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
     {
         _singleScan = scan;
         _pattern = pattern;
         _source = source;
+        _store = store;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = pattern.FilterCount > 0;
+        _hasOptional = pattern.HasOptionalPatterns;
         _isMultiPattern = false;
         _isEmpty = false;
         _limit = limit;
@@ -144,15 +143,17 @@ public ref struct QueryResults
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
+        TripleStore store, Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
     {
         _multiScan = scan;
         _pattern = pattern;
         _source = source;
+        _store = store;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = pattern.FilterCount > 0;
+        _hasOptional = pattern.HasOptionalPatterns;
         _isMultiPattern = true;
         _isEmpty = false;
         _limit = limit;
@@ -202,6 +203,12 @@ public ref struct QueryResults
                 }
             }
 
+            // Try to extend with optional patterns (left outer join semantics)
+            if (_hasOptional)
+            {
+                TryMatchOptionalPatterns();
+            }
+
             // Apply OFFSET - skip results until we've skipped enough
             if (_skipped < _offset)
             {
@@ -212,6 +219,93 @@ public ref struct QueryResults
 
             _returned++;
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Try to match optional patterns and extend bindings.
+    /// If a pattern doesn't match, we continue without it (left outer join).
+    /// </summary>
+    private void TryMatchOptionalPatterns()
+    {
+        if (_store == null) return;
+
+        for (int i = 0; i < _pattern.PatternCount; i++)
+        {
+            if (!_pattern.IsOptional(i)) continue;
+
+            var optPattern = _pattern.GetPattern(i);
+            TryMatchSingleOptionalPattern(optPattern);
+        }
+    }
+
+    /// <summary>
+    /// Try to match a single optional pattern and bind its variables.
+    /// </summary>
+    private void TryMatchSingleOptionalPattern(TriplePattern pattern)
+    {
+        if (_store == null) return;
+
+        // Resolve terms - variables that are already bound use their value,
+        // unbound variables become wildcards
+        var subject = ResolveTermForOptional(pattern.Subject);
+        var predicate = ResolveTermForOptional(pattern.Predicate);
+        var obj = ResolveTermForOptional(pattern.Object);
+
+        // Query the store
+        var results = _store.QueryCurrent(subject, predicate, obj);
+        try
+        {
+            if (results.MoveNext())
+            {
+                var triple = results.Current;
+
+                // Bind any unbound variables from the result
+                TryBindOptionalVariable(pattern.Subject, triple.Subject);
+                TryBindOptionalVariable(pattern.Predicate, triple.Predicate);
+                TryBindOptionalVariable(pattern.Object, triple.Object);
+            }
+            // If no match, we just don't add bindings (left outer join semantics)
+        }
+        finally
+        {
+            results.Dispose();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveTermForOptional(Term term)
+    {
+        if (!term.IsVariable)
+        {
+            // Constant - use source text
+            return _source.Slice(term.Start, term.Length);
+        }
+
+        // Check if variable is already bound
+        var varName = _source.Slice(term.Start, term.Length);
+        var idx = _bindingTable.FindBinding(varName);
+        if (idx >= 0)
+        {
+            // Use bound value
+            return _bindingTable.GetString(idx);
+        }
+
+        // Unbound - use wildcard
+        return ReadOnlySpan<char>.Empty;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void TryBindOptionalVariable(Term term, ReadOnlySpan<char> value)
+    {
+        if (!term.IsVariable) return;
+
+        var varName = _source.Slice(term.Start, term.Length);
+
+        // Only bind if not already bound
+        if (_bindingTable.FindBinding(varName) < 0)
+        {
+            _bindingTable.Bind(varName, value);
         }
     }
 
@@ -388,7 +482,8 @@ public ref struct MultiPatternScan
         if (_exhausted || _pattern.PatternCount == 0)
             return false;
 
-        var patternCount = Math.Min(_pattern.PatternCount, 4); // Support up to 4 patterns for now
+        // Only process required patterns - optional patterns are handled separately
+        var patternCount = Math.Min(_pattern.RequiredPatternCount, 4); // Support up to 4 required patterns
 
         while (true)
         {
