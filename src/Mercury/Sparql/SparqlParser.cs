@@ -263,8 +263,9 @@ public ref struct SparqlParser
         
         var datasets = ParseDatasetClauses();
         var whereClause = new WhereClause();
-        
+
         // Optional WHERE clause for DESCRIBE
+        SkipWhitespace();
         var span = PeekSpan(5);
         if (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
         {

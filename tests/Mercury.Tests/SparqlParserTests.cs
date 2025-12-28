@@ -309,4 +309,43 @@ public class SparqlParserTests
     }
 
     #endregion
+
+    #region DESCRIBE Queries
+
+    [Fact]
+    public void Describe_ParsesDescribeAll()
+    {
+        var query = "DESCRIBE * WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Describe, result.Type);
+        Assert.True(result.DescribeAll);
+        Assert.Equal(1, result.WhereClause.Pattern.PatternCount);
+    }
+
+    [Fact]
+    public void Describe_WithoutWhere()
+    {
+        var query = "DESCRIBE *";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Describe, result.Type);
+        Assert.True(result.DescribeAll);
+        Assert.Equal(0, result.WhereClause.Pattern.PatternCount);
+    }
+
+    [Fact]
+    public void Describe_WithWhereClause()
+    {
+        var query = "DESCRIBE * WHERE { ?person <http://foaf/name> \"Alice\" }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Describe, result.Type);
+        Assert.Equal(1, result.WhereClause.Pattern.PatternCount);
+    }
+
+    #endregion
 }
