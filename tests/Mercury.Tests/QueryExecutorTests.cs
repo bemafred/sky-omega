@@ -3348,4 +3348,333 @@ public class QueryExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region Subquery Tests
+
+    [Fact]
+    public void SubQuery_BasicParsing_ParsesCorrectly()
+    {
+        // Test that we can parse a simple subquery
+        var query = "SELECT ?person WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify we have a subquery
+        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries);
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.SubQueryCount);
+
+        // Verify the subquery has the correct pattern
+        var subSelect = parsedQuery.WhereClause.Pattern.GetSubQuery(0);
+        Assert.Equal(1, subSelect.PatternCount);
+
+        var tp = subSelect.GetPattern(0);
+
+        // Verify subject is a variable
+        Assert.Equal(TermType.Variable, tp.Subject.Type);
+        Assert.True(tp.Subject.Length > 0, "Subject variable should have non-zero length");
+        var subjectVar = query.AsSpan().Slice(tp.Subject.Start, tp.Subject.Length).ToString();
+        Assert.Equal("?person", subjectVar);
+
+        // Verify predicate is an IRI
+        Assert.Equal(TermType.Iri, tp.Predicate.Type);
+        Assert.True(tp.Predicate.Length > 0, $"Predicate IRI should have non-zero length, got Start={tp.Predicate.Start}, Len={tp.Predicate.Length}");
+        var predicateIri = query.AsSpan().Slice(tp.Predicate.Start, tp.Predicate.Length).ToString();
+        Assert.Equal("<http://xmlns.com/foaf/0.1/name>", predicateIri);
+
+        // Verify object is a variable
+        Assert.Equal(TermType.Variable, tp.Object.Type);
+        Assert.True(tp.Object.Length > 0, "Object variable should have non-zero length");
+        var objectVar = query.AsSpan().Slice(tp.Object.Start, tp.Object.Length).ToString();
+        Assert.Equal("?name", objectVar);
+    }
+
+    [Fact]
+    public void SubQuery_SimpleExecution_ReturnsResults()
+    {
+        // Test basic subquery execution
+        var query = "SELECT ?person WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                if (personIdx >= 0)
+                {
+                    persons.Add(results.Current.GetString(personIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should find Alice, Bob, Charlie (all have names)
+            Assert.Equal(3, persons.Count);
+            Assert.Contains("<http://example.org/Alice>", persons);
+            Assert.Contains("<http://example.org/Bob>", persons);
+            Assert.Contains("<http://example.org/Charlie>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_SelectAll_ReturnsAllInnerVariables()
+    {
+        // Test SELECT * in subquery
+        var query = "SELECT ?person ?name WHERE { { SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(personIdx >= 0, "Should have ?person binding");
+                Assert.True(nameIdx >= 0, "Should have ?name binding");
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(3, count); // Alice, Bob, Charlie
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_WithLimit_RespectsLimit()
+    {
+        // Test LIMIT in subquery
+        var query = "SELECT ?person WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } LIMIT 2 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(2, count); // Limited to 2
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_WithOffset_SkipsResults()
+    {
+        // Test OFFSET in subquery
+        var query = "SELECT ?person WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } OFFSET 1 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(2, count); // 3 total, minus 1 offset = 2
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_VariableProjection_OnlyProjectsSelectedVariables()
+    {
+        // Test that only SELECT-ed variables are projected to outer query
+        var query = "SELECT ?person ?name WHERE { { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(personIdx >= 0, "Should have ?person binding");
+                // ?name should NOT be visible - it was not projected from subquery
+                Assert.True(nameIdx < 0, "Should NOT have ?name binding (not projected from subquery)");
+            }
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_MultiplePatterns_JoinsCorrectly()
+    {
+        // Test subquery with multiple triple patterns
+        var query = @"SELECT ?person ?name WHERE {
+            {
+                SELECT ?person ?name WHERE {
+                    ?person <http://xmlns.com/foaf/0.1/name> ?name .
+                    ?person <http://xmlns.com/foaf/0.1/age> ?age
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                if (nameIdx >= 0)
+                {
+                    names.Add(results.Current.GetString(nameIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Alice, Bob, Charlie all have name AND age
+            Assert.Equal(3, names.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_WithFilter_FiltersInnerResults()
+    {
+        // Test FILTER in subquery
+        var query = @"SELECT ?person WHERE {
+            {
+                SELECT ?person WHERE {
+                    ?person <http://xmlns.com/foaf/0.1/age> ?age
+                    FILTER(?age > 28)
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                if (personIdx >= 0)
+                {
+                    persons.Add(results.Current.GetString(personIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Alice (30) and Charlie (35) have age > 28, Bob (25) does not
+            Assert.Equal(2, persons.Count);
+            Assert.Contains("<http://example.org/Alice>", persons);
+            Assert.Contains("<http://example.org/Charlie>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_WithDistinct_RemovesDuplicates()
+    {
+        // Add duplicate entries for this test
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
+        _store.CommitBatch();
+
+        // Test DISTINCT in subquery - Alice knows both Bob and Charlie
+        var query = @"SELECT ?knower WHERE {
+            {
+                SELECT DISTINCT ?knower WHERE {
+                    ?knower <http://xmlns.com/foaf/0.1/knows> ?known
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var knowers = new List<string>();
+            while (results.MoveNext())
+            {
+                var knowerIdx = results.Current.FindBinding("?knower".AsSpan());
+                if (knowerIdx >= 0)
+                {
+                    knowers.Add(results.Current.GetString(knowerIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Alice knows two people but DISTINCT should return her only once
+            Assert.Single(knowers);
+            Assert.Equal("<http://example.org/Alice>", knowers[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }

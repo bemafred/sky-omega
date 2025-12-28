@@ -11,6 +11,7 @@ public ref struct QueryResults
     private TriplePatternScan _singleScan;
     private MultiPatternScan _multiScan;
     private VariableGraphScan _variableGraphScan;
+    private SubQueryScan _subQueryScan;
     private GraphPattern _pattern;
     private ReadOnlySpan<char> _source;
     private TripleStore? _store;
@@ -21,6 +22,7 @@ public ref struct QueryResults
     private readonly bool _hasOptional;
     private readonly bool _isMultiPattern;
     private readonly bool _isVariableGraph;
+    private readonly bool _isSubQuery;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
@@ -94,6 +96,7 @@ public ref struct QueryResults
         _hasUnion = pattern.HasUnion;
         _isMultiPattern = false;
         _isVariableGraph = false;
+        _isSubQuery = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -136,6 +139,7 @@ public ref struct QueryResults
         _hasUnion = pattern.HasUnion;
         _isMultiPattern = true;
         _isVariableGraph = false;
+        _isSubQuery = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -178,6 +182,50 @@ public ref struct QueryResults
         _hasUnion = false;
         _isMultiPattern = false;
         _isVariableGraph = true;
+        _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = orderBy.HasOrderBy;
+        _sortedResults = null;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
+        _isSubQuery = false;
+    }
+
+    internal QueryResults(SubQueryScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    {
+        _subQueryScan = scan;
+        _pattern = pattern;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = pattern.FilterCount > 0;
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isVariableGraph = false;
+        _isSubQuery = true;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -352,7 +400,11 @@ public ref struct QueryResults
         {
             bool hasNext;
 
-            if (_isVariableGraph)
+            if (_isSubQuery)
+            {
+                hasNext = _subQueryScan.MoveNext(ref _bindingTable);
+            }
+            else if (_isVariableGraph)
             {
                 hasNext = _variableGraphScan.MoveNext(ref _bindingTable);
             }
@@ -373,7 +425,7 @@ public ref struct QueryResults
 
             if (!hasNext)
             {
-                if (!_isVariableGraph && _hasUnion && !_unionBranchActive)
+                if (!_isSubQuery && !_isVariableGraph && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())
@@ -577,7 +629,11 @@ public ref struct QueryResults
         {
             bool hasNext;
 
-            if (_isVariableGraph)
+            if (_isSubQuery)
+            {
+                hasNext = _subQueryScan.MoveNext(ref _bindingTable);
+            }
+            else if (_isVariableGraph)
             {
                 hasNext = _variableGraphScan.MoveNext(ref _bindingTable);
             }
@@ -601,7 +657,7 @@ public ref struct QueryResults
             if (!hasNext)
             {
                 // Try switching to UNION branch
-                if (!_isVariableGraph && _hasUnion && !_unionBranchActive)
+                if (!_isSubQuery && !_isVariableGraph && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())
@@ -1092,6 +1148,7 @@ public ref struct QueryResults
         _multiScan.Dispose();
         _unionSingleScan.Dispose();
         _unionMultiScan.Dispose();
+        _subQueryScan.Dispose();
     }
 }
 

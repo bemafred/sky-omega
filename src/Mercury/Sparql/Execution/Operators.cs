@@ -650,3 +650,223 @@ public ref struct VariableGraphScan
         _currentScan.Dispose();
     }
 }
+
+/// <summary>
+/// Executes a subquery and yields only projected variable bindings.
+/// Handles variable scoping: only SELECT-ed variables are visible to outer query.
+/// </summary>
+public ref struct SubQueryScan
+{
+    private readonly TripleStore _store;
+    private readonly ReadOnlySpan<char> _source;
+    private readonly SubSelect _subSelect;
+    private MultiPatternScan _innerScan;
+    private TriplePatternScan _singleScan;
+    private bool _isMultiPattern;
+    private Binding[] _innerBindingStorage;
+    private char[] _innerStringBuffer;
+    private BindingTable _innerBindings;
+    private GraphPattern _innerPattern;
+    private bool _initialized;
+    private bool _exhausted;
+    private int _skipped;
+    private int _returned;
+    private HashSet<int>? _seenHashes;
+
+    public SubQueryScan(TripleStore store, ReadOnlySpan<char> source, SubSelect subSelect)
+    {
+        _store = store;
+        _source = source;
+        _subSelect = subSelect;
+        _innerScan = default;
+        _singleScan = default;
+        _isMultiPattern = false;
+        _innerBindingStorage = new Binding[16];
+        _innerStringBuffer = new char[512];
+        _innerBindings = new BindingTable(_innerBindingStorage, _innerStringBuffer);
+        _innerPattern = default;
+        _initialized = false;
+        _exhausted = false;
+        _skipped = 0;
+        _returned = 0;
+        _seenHashes = subSelect.Distinct ? new HashSet<int>() : null;
+    }
+
+    public bool MoveNext(ref BindingTable outerBindings)
+    {
+        if (_exhausted)
+            return false;
+
+        if (!_initialized)
+        {
+            Initialize();
+            _initialized = true;
+        }
+
+        // Check LIMIT
+        if (_subSelect.Limit > 0 && _returned >= _subSelect.Limit)
+        {
+            _exhausted = true;
+            return false;
+        }
+
+        while (MoveNextInner())
+        {
+            // Apply filters if any
+            if (_subSelect.FilterCount > 0 && !EvaluateFilters())
+            {
+                _innerBindings.Clear();
+                continue;
+            }
+
+            // Apply OFFSET
+            if (_skipped < _subSelect.Offset)
+            {
+                _skipped++;
+                _innerBindings.Clear();
+                continue;
+            }
+
+            // Apply DISTINCT
+            if (_seenHashes != null)
+            {
+                var hash = ComputeProjectedBindingsHash();
+                if (!_seenHashes.Add(hash))
+                {
+                    _innerBindings.Clear();
+                    continue;
+                }
+            }
+
+            // Clear outer bindings before projecting new values
+            outerBindings.Clear();
+
+            // Project only selected variables to outer bindings
+            ProjectVariables(ref outerBindings);
+            _innerBindings.Clear();
+            _returned++;
+            return true;
+        }
+
+        _exhausted = true;
+        return false;
+    }
+
+    private bool MoveNextInner()
+    {
+        if (_isMultiPattern)
+            return _innerScan.MoveNext(ref _innerBindings);
+        else
+            return _singleScan.MoveNext(ref _innerBindings);
+    }
+
+    private bool EvaluateFilters()
+    {
+        for (int i = 0; i < _subSelect.FilterCount; i++)
+        {
+            var filter = _subSelect.GetFilter(i);
+            var filterExpr = _source.Slice(filter.Start, filter.Length);
+
+            var evaluator = new FilterEvaluator(filterExpr);
+            var result = evaluator.Evaluate(
+                _innerBindings.GetBindings(),
+                _innerBindings.Count,
+                _innerBindings.GetStringBuffer());
+
+            if (!result) return false;
+        }
+        return true;
+    }
+
+    private void Initialize()
+    {
+        // Build a GraphPattern from the SubSelect's patterns
+        _innerPattern = new GraphPattern();
+        for (int i = 0; i < _subSelect.PatternCount; i++)
+        {
+            _innerPattern.AddPattern(_subSelect.GetPattern(i));
+        }
+
+        // Use single scan for one pattern, multi scan for multiple
+        if (_subSelect.PatternCount == 1)
+        {
+            _isMultiPattern = false;
+            var tp = _subSelect.GetPattern(0);
+            _singleScan = new TriplePatternScan(_store, _source, tp, _innerBindings);
+        }
+        else
+        {
+            _isMultiPattern = true;
+            _innerScan = new MultiPatternScan(_store, _source, _innerPattern);
+        }
+    }
+
+    private void ProjectVariables(ref BindingTable outerBindings)
+    {
+        if (_subSelect.SelectAll)
+        {
+            // Project all variables from inner to outer using hash-based binding
+            for (int i = 0; i < _innerBindings.Count; i++)
+            {
+                var varHash = _innerBindings.GetVariableHash(i);
+                var value = _innerBindings.GetString(i);
+                outerBindings.BindWithHash(varHash, value);
+            }
+        }
+        else
+        {
+            // Project only explicitly selected variables
+            for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
+            {
+                var (start, len) = _subSelect.GetProjectedVariable(i);
+                var varName = _source.Slice(start, len);
+                var idx = _innerBindings.FindBinding(varName);
+                if (idx >= 0)
+                {
+                    outerBindings.Bind(varName, _innerBindings.GetString(idx));
+                }
+            }
+        }
+    }
+
+    private int ComputeProjectedBindingsHash()
+    {
+        unchecked
+        {
+            int hash = (int)2166136261;
+
+            if (_subSelect.SelectAll)
+            {
+                for (int i = 0; i < _innerBindings.Count; i++)
+                {
+                    var value = _innerBindings.GetString(i);
+                    foreach (var c in value)
+                        hash = (hash ^ c) * 16777619;
+                }
+            }
+            else
+            {
+                for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
+                {
+                    var (start, len) = _subSelect.GetProjectedVariable(i);
+                    var varName = _source.Slice(start, len);
+                    var idx = _innerBindings.FindBinding(varName);
+                    if (idx >= 0)
+                    {
+                        var value = _innerBindings.GetString(idx);
+                        foreach (var c in value)
+                            hash = (hash ^ c) * 16777619;
+                    }
+                }
+            }
+
+            return hash;
+        }
+    }
+
+    public void Dispose()
+    {
+        _innerScan.Dispose();
+        _singleScan.Dispose();
+    }
+}

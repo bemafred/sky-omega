@@ -520,13 +520,228 @@ public ref struct SparqlParser
             return pattern;
 
         Advance(); // Skip '{'
-        ParseGroupGraphPatternSub(ref pattern);
+        SkipWhitespace();
+
+        // Check for SubSelect: starts with "SELECT"
+        var span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+        {
+            var subSelect = ParseSubSelect();
+            pattern.AddSubQuery(subSelect);
+        }
+        else
+        {
+            ParseGroupGraphPatternSub(ref pattern);
+        }
 
         SkipWhitespace();
         if (Peek() == '}')
             Advance(); // Skip '}'
 
         return pattern;
+    }
+
+    /// <summary>
+    /// [8] SubSelect ::= SelectClause WhereClause SolutionModifier ValuesClause
+    /// Parses a nested SELECT query inside { }.
+    /// </summary>
+    private SubSelect ParseSubSelect()
+    {
+        var subSelect = new SubSelect();
+
+        // Parse SELECT keyword
+        ConsumeKeyword("SELECT");
+        SkipWhitespace();
+
+        // Check for DISTINCT
+        var span = PeekSpan(8);
+        if (span.Length >= 8 && span[..8].Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("DISTINCT");
+            SkipWhitespace();
+            subSelect.Distinct = true;
+        }
+
+        // Parse projected variables or *
+        if (Peek() == '*')
+        {
+            Advance();
+            subSelect.SelectAll = true;
+        }
+        else
+        {
+            // Parse variable list
+            while (Peek() == '?')
+            {
+                var varStart = _position;
+                Advance(); // Skip '?'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                var varLen = _position - varStart;
+                subSelect.AddProjectedVariable(varStart, varLen);
+                SkipWhitespace();
+            }
+        }
+
+        SkipWhitespace();
+
+        // Parse WHERE keyword (optional per SPARQL grammar)
+        span = PeekSpan(5);
+        if (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("WHERE");
+            SkipWhitespace();
+        }
+
+        // Parse the nested { } block
+        if (Peek() == '{')
+        {
+            Advance(); // Skip '{'
+            ParseSubSelectPatterns(ref subSelect);
+            SkipWhitespace();
+            if (Peek() == '}')
+                Advance(); // Skip '}'
+        }
+
+        SkipWhitespace();
+
+        // Parse solution modifiers (ORDER BY, LIMIT, OFFSET)
+        ParseSubSelectSolutionModifiers(ref subSelect);
+
+        return subSelect;
+    }
+
+    /// <summary>
+    /// Parse patterns inside a subquery's WHERE clause.
+    /// </summary>
+    private void ParseSubSelectPatterns(ref SubSelect subSelect)
+    {
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseSubSelectFilter(ref subSelect);
+                continue;
+            }
+
+            // Parse triple pattern
+            if (!TryParseSubSelectTriplePattern(ref subSelect))
+                break;
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+    }
+
+    /// <summary>
+    /// Parse a FILTER expression inside a subquery.
+    /// </summary>
+    private void ParseSubSelectFilter(ref SubSelect subSelect)
+    {
+        ConsumeKeyword("FILTER");
+        SkipWhitespace();
+
+        int exprStart;
+        int exprEnd;
+
+        if (Peek() == '(')
+        {
+            exprStart = _position;
+            Advance(); // Skip '('
+            int depth = 1;
+            while (!IsAtEnd() && depth > 0)
+            {
+                var c = Peek();
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                Advance();
+            }
+            exprEnd = _position;
+        }
+        else
+        {
+            exprStart = _position;
+            while (!IsAtEnd() && Peek() != '.' && Peek() != '}')
+                Advance();
+            exprEnd = _position;
+        }
+
+        subSelect.AddFilter(new FilterExpr { Start = exprStart, Length = exprEnd - exprStart });
+    }
+
+    /// <summary>
+    /// Try to parse a triple pattern inside a subquery.
+    /// </summary>
+    private bool TryParseSubSelectTriplePattern(ref SubSelect subSelect)
+    {
+        SkipWhitespace();
+
+        // Check if we're at end of pattern
+        if (IsAtEnd() || Peek() == '}')
+            return false;
+
+        // Parse subject
+        var subject = ParseTerm();
+        if (subject.Type == TermType.Variable && subject.Length == 0)
+            return false;
+
+        SkipWhitespace();
+
+        // Parse predicate
+        var predicate = ParseTerm();
+
+        SkipWhitespace();
+
+        // Parse object
+        var obj = ParseTerm();
+
+        subSelect.AddPattern(new TriplePattern { Subject = subject, Predicate = predicate, Object = obj });
+        return true;
+    }
+
+    /// <summary>
+    /// Parse solution modifiers for a subquery (ORDER BY, LIMIT, OFFSET).
+    /// </summary>
+    private void ParseSubSelectSolutionModifiers(ref SubSelect subSelect)
+    {
+        // Parse ORDER BY
+        var span = PeekSpan(8);
+        if (span.Length >= 5 && span[..5].Equals("ORDER", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("ORDER");
+            SkipWhitespace();
+            ConsumeKeyword("BY");
+            SkipWhitespace();
+            subSelect.OrderBy = ParseOrderByClause();
+            SkipWhitespace();
+        }
+
+        // Parse LIMIT
+        span = PeekSpan(5);
+        if (span.Length >= 5 && span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("LIMIT");
+            SkipWhitespace();
+            subSelect.Limit = ParseInteger();
+            SkipWhitespace();
+        }
+
+        // Parse OFFSET
+        span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("OFFSET");
+            SkipWhitespace();
+            subSelect.Offset = ParseInteger();
+            SkipWhitespace();
+        }
     }
 
     /// <summary>
@@ -632,6 +847,7 @@ public ref struct SparqlParser
 
     /// <summary>
     /// Parse a nested { ... } block and add its patterns to the parent pattern.
+    /// Also handles subqueries: { SELECT ... }
     /// </summary>
     private void ParseNestedGroupGraphPattern(ref GraphPattern pattern)
     {
@@ -641,6 +857,18 @@ public ref struct SparqlParser
 
         Advance(); // Skip '{'
         SkipWhitespace();
+
+        // Check for SubSelect: starts with "SELECT"
+        var checkSpan = PeekSpan(6);
+        if (checkSpan.Length >= 6 && checkSpan[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+        {
+            var subSelect = ParseSubSelect();
+            pattern.AddSubQuery(subSelect);
+            SkipWhitespace();
+            if (Peek() == '}')
+                Advance(); // Skip '}'
+            return;
+        }
 
         // Parse patterns inside the nested group
         while (!IsAtEnd() && Peek() != '}')
@@ -1944,6 +2172,7 @@ public struct GraphPattern
     public const int MaxMinusPatterns = 8;
     public const int MaxExistsFilters = 4;
     public const int MaxGraphClauses = 4;
+    public const int MaxSubQueries = 2;
 
     private int _patternCount;
     private int _filterCount;
@@ -1951,6 +2180,7 @@ public struct GraphPattern
     private int _minusPatternCount;
     private int _existsFilterCount;
     private int _graphClauseCount;
+    private int _subQueryCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
     private int _unionStartIndex; // If > 0, patterns from this index are the UNION branch
 
@@ -1976,6 +2206,9 @@ public struct GraphPattern
     // Inline storage for GRAPH clauses (4 * ~200 bytes)
     private GraphClause _g0, _g1, _g2, _g3;
 
+    // Inline storage for subqueries (2 * ~500 bytes)
+    private SubSelect _sq0, _sq1;
+
     // VALUES clause storage
     private ValuesClause _values;
 
@@ -1985,10 +2218,12 @@ public struct GraphPattern
     public readonly int MinusPatternCount => _minusPatternCount;
     public readonly int ExistsFilterCount => _existsFilterCount;
     public readonly int GraphClauseCount => _graphClauseCount;
+    public readonly int SubQueryCount => _subQueryCount;
     public readonly bool HasBinds => _bindCount > 0;
     public readonly bool HasMinus => _minusPatternCount > 0;
     public readonly bool HasExists => _existsFilterCount > 0;
     public readonly bool HasGraph => _graphClauseCount > 0;
+    public readonly bool HasSubQueries => _subQueryCount > 0;
     public readonly bool HasValues => _values.HasValues;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
     public readonly bool HasUnion => _unionStartIndex > 0;
@@ -2244,6 +2479,31 @@ public struct GraphPattern
     public void SetValues(ValuesClause values)
     {
         _values = values;
+    }
+
+    public void AddSubQuery(SubSelect subQuery)
+    {
+        if (_subQueryCount >= MaxSubQueries) return;
+        SetSubQuery(_subQueryCount++, subQuery);
+    }
+
+    public readonly SubSelect GetSubQuery(int index)
+    {
+        return index switch
+        {
+            0 => _sq0,
+            1 => _sq1,
+            _ => default
+        };
+    }
+
+    private void SetSubQuery(int index, SubSelect subQuery)
+    {
+        switch (index)
+        {
+            case 0: _sq0 = subQuery; break;
+            case 1: _sq1 = subQuery; break;
+        }
     }
 }
 
@@ -2514,6 +2774,140 @@ public struct ValuesClause
             case 5: _v5Start = start; _v5Len = length; break;
             case 6: _v6Start = start; _v6Len = length; break;
             case 7: _v7Start = start; _v7Len = length; break;
+        }
+    }
+}
+
+/// <summary>
+/// A subquery: { SELECT ... WHERE { ... } } inside an outer WHERE clause.
+/// Only projected variables from the subquery are visible to the outer query.
+/// </summary>
+public struct SubSelect
+{
+    public const int MaxProjectedVars = 8;
+    public const int MaxPatterns = 16;
+    public const int MaxFilters = 8;
+
+    // SELECT clause flags
+    public bool Distinct;
+    public bool SelectAll;  // SELECT * means project all
+
+    // Projected variables
+    private int _projectedVarCount;
+    private int _pv0Start, _pv0Len, _pv1Start, _pv1Len, _pv2Start, _pv2Len, _pv3Start, _pv3Len;
+    private int _pv4Start, _pv4Len, _pv5Start, _pv5Len, _pv6Start, _pv6Len, _pv7Start, _pv7Len;
+
+    // Triple patterns
+    private int _patternCount;
+    private TriplePattern _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7;
+    private TriplePattern _p8, _p9, _p10, _p11, _p12, _p13, _p14, _p15;
+
+    // Filters
+    private int _filterCount;
+    private FilterExpr _f0, _f1, _f2, _f3, _f4, _f5, _f6, _f7;
+
+    // Solution modifiers
+    public int Limit;
+    public int Offset;
+    public OrderByClause OrderBy;
+
+    public readonly int ProjectedVarCount => _projectedVarCount;
+    public readonly int PatternCount => _patternCount;
+    public readonly int FilterCount => _filterCount;
+    public readonly bool HasPatterns => _patternCount > 0;
+    public readonly bool HasFilters => _filterCount > 0;
+    public readonly bool HasOrderBy => OrderBy.HasOrderBy;
+
+    public void AddProjectedVariable(int start, int length)
+    {
+        if (_projectedVarCount >= MaxProjectedVars) return;
+        SetProjectedVariable(_projectedVarCount++, start, length);
+    }
+
+    public readonly (int Start, int Length) GetProjectedVariable(int index)
+    {
+        return index switch
+        {
+            0 => (_pv0Start, _pv0Len), 1 => (_pv1Start, _pv1Len),
+            2 => (_pv2Start, _pv2Len), 3 => (_pv3Start, _pv3Len),
+            4 => (_pv4Start, _pv4Len), 5 => (_pv5Start, _pv5Len),
+            6 => (_pv6Start, _pv6Len), 7 => (_pv7Start, _pv7Len),
+            _ => (0, 0)
+        };
+    }
+
+    private void SetProjectedVariable(int index, int start, int length)
+    {
+        switch (index)
+        {
+            case 0: _pv0Start = start; _pv0Len = length; break;
+            case 1: _pv1Start = start; _pv1Len = length; break;
+            case 2: _pv2Start = start; _pv2Len = length; break;
+            case 3: _pv3Start = start; _pv3Len = length; break;
+            case 4: _pv4Start = start; _pv4Len = length; break;
+            case 5: _pv5Start = start; _pv5Len = length; break;
+            case 6: _pv6Start = start; _pv6Len = length; break;
+            case 7: _pv7Start = start; _pv7Len = length; break;
+        }
+    }
+
+    public void AddPattern(TriplePattern pattern)
+    {
+        if (_patternCount >= MaxPatterns) return;
+        SetPattern(_patternCount++, pattern);
+    }
+
+    public readonly TriplePattern GetPattern(int index)
+    {
+        return index switch
+        {
+            0 => _p0, 1 => _p1, 2 => _p2, 3 => _p3,
+            4 => _p4, 5 => _p5, 6 => _p6, 7 => _p7,
+            8 => _p8, 9 => _p9, 10 => _p10, 11 => _p11,
+            12 => _p12, 13 => _p13, 14 => _p14, 15 => _p15,
+            _ => default
+        };
+    }
+
+    private void SetPattern(int index, TriplePattern pattern)
+    {
+        switch (index)
+        {
+            case 0: _p0 = pattern; break; case 1: _p1 = pattern; break;
+            case 2: _p2 = pattern; break; case 3: _p3 = pattern; break;
+            case 4: _p4 = pattern; break; case 5: _p5 = pattern; break;
+            case 6: _p6 = pattern; break; case 7: _p7 = pattern; break;
+            case 8: _p8 = pattern; break; case 9: _p9 = pattern; break;
+            case 10: _p10 = pattern; break; case 11: _p11 = pattern; break;
+            case 12: _p12 = pattern; break; case 13: _p13 = pattern; break;
+            case 14: _p14 = pattern; break; case 15: _p15 = pattern; break;
+        }
+    }
+
+    public void AddFilter(FilterExpr filter)
+    {
+        if (_filterCount >= MaxFilters) return;
+        SetFilter(_filterCount++, filter);
+    }
+
+    public readonly FilterExpr GetFilter(int index)
+    {
+        return index switch
+        {
+            0 => _f0, 1 => _f1, 2 => _f2, 3 => _f3,
+            4 => _f4, 5 => _f5, 6 => _f6, 7 => _f7,
+            _ => default
+        };
+    }
+
+    private void SetFilter(int index, FilterExpr filter)
+    {
+        switch (index)
+        {
+            case 0: _f0 = filter; break; case 1: _f1 = filter; break;
+            case 2: _f2 = filter; break; case 3: _f3 = filter; break;
+            case 4: _f4 = filter; break; case 5: _f5 = filter; break;
+            case 6: _f6 = filter; break; case 7: _f7 = filter; break;
         }
     }
 }
@@ -2922,6 +3316,11 @@ public ref struct BindingTable
         ref readonly var binding = ref _bindings[index];
         return _stringBuffer.Slice(binding.StringOffset, binding.StringLength);
     }
+
+    /// <summary>
+    /// Get the variable name hash at the given index.
+    /// </summary>
+    public readonly int GetVariableHash(int index) => _bindings[index].VariableNameHash;
 
     /// <summary>
     /// Clear all bindings for reuse with next row.

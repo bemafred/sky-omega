@@ -46,6 +46,12 @@ public ref struct QueryExecutor
             return ExecuteGraphClauses(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
         }
 
+        // Check for subqueries
+        if (pattern.HasSubQueries)
+        {
+            return ExecuteWithSubQueries(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        }
+
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
 
@@ -333,5 +339,38 @@ public ref struct QueryExecutor
             groupBy,
             selectClause,
             having);
+    }
+
+    /// <summary>
+    /// Execute a query that contains subqueries.
+    /// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
+    /// </summary>
+    private QueryResults ExecuteWithSubQueries(GraphPattern pattern,
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    {
+        // For now, handle single subquery case
+        if (pattern.SubQueryCount != 1)
+            return QueryResults.Empty(); // Multiple subqueries need join - not yet supported
+
+        var subSelect = pattern.GetSubQuery(0);
+
+        // Build binding storage
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+
+        // Create SubQueryScan operator
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect);
+
+        // If there are outer patterns, we'd need to join them
+        // For now, just execute the subquery directly
+        if (pattern.PatternCount > 0)
+        {
+            // TODO: Join outer patterns with subquery results
+            // For now, return just the subquery results
+        }
+
+        return new QueryResults(subQueryScan, pattern, _source, _store, bindings, stringBuffer,
+            limit, offset, distinct, orderBy, groupBy, selectClause, having);
     }
 }
