@@ -40,18 +40,18 @@ internal static class Program
     {
         Console.WriteLine("Example 1: Parse Turtle from string\n");
         
-        var turtle = """
-            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-            @prefix foaf: <http://xmlns.com/foaf/0.1/> .
-            @prefix ex: <http://example.org/> .
-            
-            ex:alice foaf:name "Alice" ;
-                     foaf:knows ex:bob ;
-                     foaf:age 30 .
-            
-            ex:bob foaf:name "Bob" ;
-                   foaf:knows ex:alice .
-            """;
+        const string turtle = """
+                              @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+                              @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+                              @prefix ex: <http://example.org/> .
+
+                              ex:alice foaf:name "Alice" ;
+                                       foaf:knows ex:bob ;
+                                       foaf:age 30 .
+
+                              ex:bob foaf:name "Bob" ;
+                                     foaf:knows ex:alice .
+                              """;
         
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(turtle));
         using var parser = new TurtleStreamParser(stream);
@@ -71,17 +71,17 @@ internal static class Program
         Console.WriteLine("Example 2: Object lists and blank node property lists\n");
 
         // Test: Object lists (comma-separated objects) should yield multiple triples
-        var turtle = """
-            @prefix ex: <http://example.org/> .
-            @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+        const string turtle = """
+                              @prefix ex: <http://example.org/> .
+                              @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 
-            # Object list: should produce 3 triples
-            ex:alice foaf:knows ex:bob, ex:charlie, ex:david .
+                              # Object list: should produce 3 triples
+                              ex:alice foaf:knows ex:bob, ex:charlie, ex:david .
 
-            # Multiple predicate-object pairs with object lists
-            ex:bob foaf:name "Bob" ;
-                   foaf:knows ex:alice, ex:charlie .
-            """;
+                              # Multiple predicate-object pairs with object lists
+                              ex:bob foaf:name "Bob" ;
+                                     foaf:knows ex:alice, ex:charlie .
+                              """;
 
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(turtle));
         using var parser = new TurtleStreamParser(stream);
@@ -126,7 +126,7 @@ internal static class Program
         
         try
         {
-            using var fileStream = File.OpenRead(filename);
+            await using var fileStream = File.OpenRead(filename);
             using var parser = new TurtleStreamParser(fileStream, bufferSize: 4096);
             
             var count = 0;
@@ -224,27 +224,20 @@ public interface ILucyRdfStore
 }
 
 // Example usage with Lucy
-public class LucyTurtleImporter
+public class LucyTurtleImporter(ILucyRdfStore store)
 {
-    private readonly ILucyRdfStore _store;
-    
-    public LucyTurtleImporter(ILucyRdfStore store)
-    {
-        _store = store;
-    }
-    
     public async Task<long> ImportTurtleFileAsync(
         string filePath, 
         int bufferSize = 32768)
     {
-        using var fileStream = File.OpenRead(filePath);
+        await using var fileStream = File.OpenRead(filePath);
         using var parser = new TurtleStreamParser(fileStream, bufferSize);
         
         var count = 0L;
         
         await foreach (var triple in parser.ParseAsync())
         {
-            await _store.StoreTripleAsync(triple);
+            await store.StoreTripleAsync(triple);
             count++;
             
             if (count % 10000 == 0)
