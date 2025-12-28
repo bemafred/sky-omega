@@ -39,6 +39,7 @@ public ref struct QueryExecutor
         var distinct = _query.SelectClause.Distinct;
         var orderBy = _query.SolutionModifier.OrderBy;
         var groupBy = _query.SolutionModifier.GroupBy;
+        var having = _query.SolutionModifier.Having;
         var selectClause = _query.SelectClause;
 
         if (pattern.PatternCount == 0)
@@ -64,7 +65,7 @@ public ref struct QueryExecutor
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause);
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
         }
 
         // No required patterns but have optional - need special handling
@@ -76,7 +77,7 @@ public ref struct QueryExecutor
         }
 
         // Multiple required patterns - need join
-        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause);
+        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
     }
 
     /// <summary>
@@ -191,7 +192,7 @@ public ref struct QueryExecutor
 
     private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy = default, SelectClause selectClause = default)
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         // Use nested loop join for required patterns only
         return new QueryResults(
@@ -206,7 +207,8 @@ public ref struct QueryExecutor
             distinct,
             orderBy,
             groupBy,
-            selectClause);
+            selectClause,
+            having);
     }
 }
 
@@ -268,6 +270,10 @@ public ref struct QueryResults
     private List<GroupedRow>? _groupedResults;
     private int _groupedIndex;
 
+    // HAVING support
+    private readonly bool _hasHaving;
+    private readonly HavingClause _having;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -278,7 +284,7 @@ public ref struct QueryResults
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default)
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         _singleScan = scan;
         _pattern = pattern;
@@ -311,12 +317,14 @@ public ref struct QueryResults
         _hasGroupBy = groupBy.HasGroupBy;
         _groupedResults = null;
         _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default)
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         _multiScan = scan;
         _pattern = pattern;
@@ -349,6 +357,8 @@ public ref struct QueryResults
         _hasGroupBy = groupBy.HasGroupBy;
         _groupedResults = null;
         _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
     }
 
     /// <summary>
@@ -665,11 +675,33 @@ public ref struct QueryResults
             _bindingTable.Clear();
         }
 
-        // Finalize aggregates (e.g., compute AVG from sum/count)
+        // Finalize aggregates (e.g., compute AVG from sum/count) and apply HAVING filter
         _groupedResults = new List<GroupedRow>(groups.Count);
         foreach (var group in groups.Values)
         {
             group.FinalizeAggregates();
+
+            // Apply HAVING filter if present
+            if (_hasHaving)
+            {
+                // Load group bindings into binding table for filter evaluation
+                _bindingTable.Clear();
+                for (int i = 0; i < group.KeyCount; i++)
+                {
+                    _bindingTable.BindWithHash(group.GetKeyHash(i), group.GetKeyValue(i));
+                }
+                for (int i = 0; i < group.AggregateCount; i++)
+                {
+                    _bindingTable.BindWithHash(group.GetAggregateHash(i), group.GetAggregateValue(i));
+                }
+
+                // Evaluate HAVING expression
+                var havingExpr = _source.Slice(_having.ExpressionStart, _having.ExpressionLength);
+                var evaluator = new FilterEvaluator(havingExpr);
+                if (!evaluator.Evaluate(_bindingTable.GetBindings(), _bindingTable.Count, _bindingTable.GetStringBuffer()))
+                    continue; // Skip this group - doesn't match HAVING
+            }
+
             _groupedResults.Add(group);
         }
 

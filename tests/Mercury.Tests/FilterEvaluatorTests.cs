@@ -286,10 +286,17 @@ public class FilterEvaluatorTests
     #region Type Mismatches
 
     [Fact]
-    public void TypeMismatch_IntegerAndString_ReturnsFalse()
+    public void TypeMismatch_IntegerAndNonNumericString_ReturnsFalse()
     {
-        // Comparing different types returns false
-        Assert.False(Evaluate("5 == \"5\""));
+        // Comparing integer to non-numeric string returns false (can't coerce)
+        Assert.False(Evaluate("5 == \"abc\""));
+    }
+
+    [Fact]
+    public void TypeCoercion_IntegerAndNumericString_ReturnsTrue()
+    {
+        // Comparing integer to numeric string coerces and compares
+        Assert.True(Evaluate("5 == \"5\""));
     }
 
     [Fact]

@@ -517,17 +517,37 @@ public ref struct FilterEvaluator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool CompareEqual(in Value left, in Value right)
     {
-        if (left.Type != right.Type)
-            return false;
-        
-        return left.Type switch
+        // Same type - direct comparison
+        if (left.Type == right.Type)
         {
-            ValueType.Integer => left.IntegerValue == right.IntegerValue,
-            ValueType.Double => Math.Abs(left.DoubleValue - right.DoubleValue) < 1e-10,
-            ValueType.Boolean => left.BooleanValue == right.BooleanValue,
-            ValueType.String => left.StringValue.SequenceEqual(right.StringValue),
-            _ => false
-        };
+            return left.Type switch
+            {
+                ValueType.Integer => left.IntegerValue == right.IntegerValue,
+                ValueType.Double => Math.Abs(left.DoubleValue - right.DoubleValue) < 1e-10,
+                ValueType.Boolean => left.BooleanValue == right.BooleanValue,
+                ValueType.String => left.StringValue.SequenceEqual(right.StringValue),
+                _ => false
+            };
+        }
+
+        // Type coercion for numeric comparisons
+        // Try to coerce string to number for comparison with numeric types
+        if ((left.Type == ValueType.String && (right.Type == ValueType.Integer || right.Type == ValueType.Double)) ||
+            (right.Type == ValueType.String && (left.Type == ValueType.Integer || left.Type == ValueType.Double)))
+        {
+            var (leftNum, rightNum) = CoerceToNumbers(left, right);
+            if (double.IsNaN(leftNum) || double.IsNaN(rightNum))
+                return false;
+            return Math.Abs(leftNum - rightNum) < 1e-10;
+        }
+
+        // Integer vs Double coercion
+        if (left.Type == ValueType.Integer && right.Type == ValueType.Double)
+            return Math.Abs(left.IntegerValue - right.DoubleValue) < 1e-10;
+        if (left.Type == ValueType.Double && right.Type == ValueType.Integer)
+            return Math.Abs(left.DoubleValue - right.IntegerValue) < 1e-10;
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -1330,6 +1330,38 @@ public ref struct SparqlParser
             modifier.GroupBy = ParseGroupByClause();
         }
 
+        // Parse HAVING (must come after GROUP BY, before ORDER BY)
+        SkipWhitespace();
+        span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("HAVING", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("HAVING");
+            SkipWhitespace();
+
+            // HAVING expression is in parentheses
+            if (Peek() == '(')
+            {
+                Advance(); // Skip '('
+                var start = _position;
+
+                // Find matching closing paren
+                int depth = 1;
+                while (!IsAtEnd() && depth > 0)
+                {
+                    var ch = Peek();
+                    if (ch == '(') depth++;
+                    else if (ch == ')') depth--;
+                    if (depth > 0) Advance();
+                }
+
+                var length = _position - start;
+                modifier.Having = new HavingClause { ExpressionStart = start, ExpressionLength = length };
+
+                if (Peek() == ')')
+                    Advance(); // Skip ')'
+            }
+        }
+
         // Parse ORDER BY
         SkipWhitespace();
         span = PeekSpan(8);
@@ -2087,9 +2119,18 @@ public struct ConstructTemplate
 public struct SolutionModifier
 {
     public GroupByClause GroupBy;
+    public HavingClause Having;
     public OrderByClause OrderBy;
     public int Limit;
     public int Offset;
+}
+
+public struct HavingClause
+{
+    public int ExpressionStart;   // Start offset of HAVING expression in source
+    public int ExpressionLength;  // Length of expression
+
+    public readonly bool HasHaving => ExpressionLength > 0;
 }
 
 public struct GroupByClause

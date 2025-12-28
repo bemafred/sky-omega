@@ -2376,4 +2376,152 @@ public class QueryExecutorTests : IDisposable
         var parsed3 = parser3.ParseQuery();
         Assert.Equal(AggregateFunction.Avg, parsed3.SelectClause.GetAggregate(0).Function);
     }
+
+    // ========== HAVING Tests ==========
+
+    [Fact]
+    public void Execute_HavingWithCount()
+    {
+        // Filter groups to only those with more than 2 triples
+        var query = "SELECT ?person (COUNT(?p) AS ?count) WHERE { ?person ?p ?o } GROUP BY ?person HAVING(?count > 2)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify HAVING was parsed
+        Assert.True(parsedQuery.SolutionModifier.Having.HasHaving);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var countIdx = results.Current.FindBinding("?count".AsSpan());
+                Assert.True(personIdx >= 0);
+                Assert.True(countIdx >= 0);
+
+                var person = results.Current.GetString(personIdx).ToString();
+                var count = results.Current.GetString(countIdx).ToString();
+                groups[person] = count;
+            }
+            results.Dispose();
+
+            // Alice has 3 triples (name, age, knows), Bob has 2, Charlie has 2
+            // Only Alice has count > 2
+            Assert.Single(groups);
+            Assert.Equal("3", groups["<http://example.org/Alice>"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_HavingWithSum()
+    {
+        // Filter by sum - count predicate groups with count >= 3
+        var query = "SELECT ?p (COUNT(?o) AS ?count) WHERE { ?s ?p ?o } GROUP BY ?p HAVING(?count >= 3)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var pIdx = results.Current.FindBinding("?p".AsSpan());
+                var countIdx = results.Current.FindBinding("?count".AsSpan());
+                Assert.True(pIdx >= 0);
+                Assert.True(countIdx >= 0);
+
+                var p = results.Current.GetString(pIdx).ToString();
+                var count = results.Current.GetString(countIdx).ToString();
+                groups[p] = count;
+            }
+            results.Dispose();
+
+            // 3 names, 3 ages, 1 knows
+            // Only name and age predicates have count >= 3
+            Assert.Equal(2, groups.Count);
+            Assert.Equal("3", groups["<http://xmlns.com/foaf/0.1/name>"]);
+            Assert.Equal("3", groups["<http://xmlns.com/foaf/0.1/age>"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_HavingExcludesAll()
+    {
+        // HAVING that excludes all groups
+        var query = "SELECT ?person (COUNT(?p) AS ?count) WHERE { ?person ?p ?o } GROUP BY ?person HAVING(?count > 100)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // No one has more than 100 triples
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_HavingWithEquality()
+    {
+        // HAVING with equality check
+        var query = "SELECT ?person (COUNT(?p) AS ?count) WHERE { ?person ?p ?o } GROUP BY ?person HAVING(?count = 2)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(personIdx >= 0);
+                persons.Add(results.Current.GetString(personIdx).ToString());
+            }
+            results.Dispose();
+
+            // Bob and Charlie each have exactly 2 triples
+            Assert.Equal(2, persons.Count);
+            Assert.Contains("<http://example.org/Bob>", persons);
+            Assert.Contains("<http://example.org/Charlie>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }
