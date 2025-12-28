@@ -555,6 +555,43 @@ public ref struct FilterEvaluator
             return ParseStrLangFunction();
         }
 
+        // BNODE - construct blank node (0 or 1 argument)
+        if (funcName.Equals("bnode", StringComparison.OrdinalIgnoreCase))
+        {
+            SkipWhitespace();
+            if (Peek() == ')')
+            {
+                // BNODE() - no argument, generate fresh blank node
+                Advance();
+                _bnodeCounter++;
+                _bnodeResult = $"_:b{_bnodeCounter}";
+                return new Value
+                {
+                    Type = ValueType.Uri,
+                    StringValue = _bnodeResult.AsSpan()
+                };
+            }
+            // BNODE(label) - with string argument
+            var labelArg = ParseTerm();
+            SkipWhitespace();
+            if (Peek() == ')')
+                Advance();
+
+            if (labelArg.Type != ValueType.String)
+                return new Value { Type = ValueType.Unbound };
+
+            var label = labelArg.StringValue;
+            if (label.IsEmpty)
+                return new Value { Type = ValueType.Unbound };
+
+            _bnodeResult = $"_:{label}";
+            return new Value
+            {
+                Type = ValueType.Uri,
+                StringValue = _bnodeResult.AsSpan()
+            };
+        }
+
         // UUID - generate a fresh IRI with UUID v7
         if (funcName.Equals("uuid", StringComparison.OrdinalIgnoreCase))
         {
@@ -1833,6 +1870,12 @@ public ref struct FilterEvaluator
 
     // Storage for STRLANG result to keep span valid
     private string _strlangResult = string.Empty;
+
+    // Storage for BNODE result to keep span valid
+    private string _bnodeResult = string.Empty;
+
+    // Counter for generating unique blank node identifiers
+    private int _bnodeCounter = 0;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";

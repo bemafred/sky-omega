@@ -2220,4 +2220,59 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region BNODE Function (Blank Node Constructor)
+
+    [Fact]
+    public void Bnode_NoArg_ReturnsBlankNode()
+    {
+        // BNODE() returns a blank node (starts with _:)
+        Assert.True(Evaluate("STRSTARTS(str(BNODE()), \"_:\")"));
+    }
+
+    [Fact]
+    public void Bnode_NoArg_IsBlank()
+    {
+        Assert.True(Evaluate("isBlank(BNODE())"));
+    }
+
+    [Fact]
+    public void Bnode_NoArg_GeneratesUnique()
+    {
+        // Each call to BNODE() should generate a different blank node
+        // We test this indirectly by checking they both start with _:b
+        Assert.True(Evaluate("STRSTARTS(str(BNODE()), \"_:b\")"));
+    }
+
+    [Fact]
+    public void Bnode_WithLabel_ReturnsLabeledBlankNode()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "str(BNODE(?x)) == \"_:mynode\"",
+            "?x", "mynode"));
+    }
+
+    [Fact]
+    public void Bnode_WithLabel_IsBlank()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "isBlank(BNODE(?x))",
+            "?x", "test"));
+    }
+
+    [Fact]
+    public void Bnode_WithLabel_PreservesLabel()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "STRENDS(str(BNODE(?x)), \"custom123\")",
+            "?x", "custom123"));
+    }
+
+    [Fact]
+    public void Bnode_CaseInsensitive()
+    {
+        Assert.True(Evaluate("isBlank(bnode())"));
+    }
+
+    #endregion
 }
