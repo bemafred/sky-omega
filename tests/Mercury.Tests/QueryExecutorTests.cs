@@ -1626,4 +1626,144 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== ASK Tests ==========
+
+    [Fact]
+    public void ExecuteAsk_ReturnsTrue_WhenMatchExists()
+    {
+        // ASK if Alice exists
+        var query = "ASK WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/name> ?name }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Ask, parsedQuery.Type);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var result = executor.ExecuteAsk();
+
+            Assert.True(result);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ExecuteAsk_ReturnsFalse_WhenNoMatch()
+    {
+        // ASK for non-existent person
+        var query = "ASK WHERE { <http://example.org/NonExistent> <http://xmlns.com/foaf/0.1/name> ?name }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var result = executor.ExecuteAsk();
+
+            Assert.False(result);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ExecuteAsk_WithMultiplePatterns()
+    {
+        // ASK with join - does Alice know someone?
+        var query = "ASK WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> ?other . ?other <http://xmlns.com/foaf/0.1/name> ?name }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var result = executor.ExecuteAsk();
+
+            // Alice knows Bob, and Bob has a name
+            Assert.True(result);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ExecuteAsk_WithFilter()
+    {
+        // ASK with FILTER - is there anyone older than 30?
+        var query = "ASK WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age > 30) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var result = executor.ExecuteAsk();
+
+            // Charlie is 35
+            Assert.True(result);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ExecuteAsk_WithFilter_NoMatch()
+    {
+        // ASK with FILTER that matches nothing
+        var query = "ASK WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age > 100) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var result = executor.ExecuteAsk();
+
+            // No one is older than 100
+            Assert.False(result);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ExecuteAsk_AllVariables()
+    {
+        // ASK if any triple exists
+        var query = "ASK WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var result = executor.ExecuteAsk();
+
+            // Store has triples
+            Assert.True(result);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

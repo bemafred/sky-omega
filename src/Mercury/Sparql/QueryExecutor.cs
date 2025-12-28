@@ -77,6 +77,68 @@ public ref struct QueryExecutor
         return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy);
     }
 
+    /// <summary>
+    /// Execute an ASK query and return true if any result exists.
+    /// Caller must hold read lock on store.
+    /// </summary>
+    public bool ExecuteAsk()
+    {
+        var pattern = _query.WhereClause.Pattern;
+
+        if (pattern.PatternCount == 0)
+            return false;
+
+        // Build binding storage
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        var requiredCount = pattern.RequiredPatternCount;
+
+        // Single required pattern - just scan
+        if (requiredCount == 1)
+        {
+            int requiredIdx = 0;
+            for (int i = 0; i < pattern.PatternCount; i++)
+            {
+                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
+            }
+
+            var tp = pattern.GetPattern(requiredIdx);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+
+            // For ASK, we just need to know if any result exists
+            // No need for LIMIT/OFFSET/DISTINCT/ORDER BY
+            var results = new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer);
+            try
+            {
+                return results.MoveNext();
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+
+        // No required patterns
+        if (requiredCount == 0)
+        {
+            return false;
+        }
+
+        // Multiple required patterns - need join
+        var multiScan = new MultiPatternScan(_store, _source, pattern);
+        var multiResults = new QueryResults(multiScan, pattern, _source, _store, bindings, stringBuffer);
+        try
+        {
+            return multiResults.MoveNext();
+        }
+        finally
+        {
+            multiResults.Dispose();
+        }
+    }
+
     private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy)
     {
