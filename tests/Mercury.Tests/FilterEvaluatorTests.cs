@@ -2120,4 +2120,104 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region STRDT Function (Typed Literal Constructor)
+
+    [Fact]
+    public void StrDt_ConstructsTypedLiteral()
+    {
+        // STRDT creates a typed literal with ^^<datatype> syntax
+        // Check that it contains both the quoted value and the datatype
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#integer\"), \"42\") && CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#integer\"), \"^^<http://www.w3.org/2001/XMLSchema#integer>\")",
+            "?x", "42"));
+    }
+
+    [Fact]
+    public void StrDt_WithXsdString()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#string\"), \"^^<http://www.w3.org/2001/XMLSchema#string>\")",
+            "?x", "hello"));
+    }
+
+    [Fact]
+    public void StrDt_WithCustomDatatype()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRDT(?x, \"http://example.org/mytype\"), \"^^<http://example.org/mytype>\")",
+            "?x", "value"));
+    }
+
+    [Fact]
+    public void StrDt_PreservesLexicalForm()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRDT(?x, \"http://example.org/type\"), \"hello world\")",
+            "?x", "hello world"));
+    }
+
+    [Fact]
+    public void StrDt_CaseInsensitive()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(strdt(?x, \"http://example.org/type\"), \"^^\")",
+            "?x", "test"));
+    }
+
+    #endregion
+
+    #region STRLANG Function (Language-Tagged Literal Constructor)
+
+    [Fact]
+    public void StrLang_ConstructsLanguageTaggedLiteral()
+    {
+        // STRLANG creates a language-tagged literal with @lang syntax
+        // Check that it contains both the value and the language tag
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRLANG(?x, \"en\"), \"hello\") && STRENDS(STRLANG(?x, \"en\"), \"@en\")",
+            "?x", "hello"));
+    }
+
+    [Fact]
+    public void StrLang_WithFullLanguageTag()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "STRENDS(STRLANG(?x, \"en-US\"), \"@en-US\")",
+            "?x", "hello"));
+    }
+
+    [Fact]
+    public void StrLang_WithGermanTag()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "STRENDS(STRLANG(?x, \"de\"), \"@de\")",
+            "?x", "hallo"));
+    }
+
+    [Fact]
+    public void StrLang_PreservesLexicalForm()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRLANG(?x, \"fr\"), \"bonjour\")",
+            "?x", "bonjour"));
+    }
+
+    [Fact]
+    public void StrLang_CaseInsensitive()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(strlang(?x, \"en\"), \"@en\")",
+            "?x", "test"));
+    }
+
+    [Fact]
+    public void StrLang_ContainsAtSymbol()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "CONTAINS(STRLANG(?x, \"es\"), \"@\")",
+            "?x", "hola"));
+    }
+
+    #endregion
 }

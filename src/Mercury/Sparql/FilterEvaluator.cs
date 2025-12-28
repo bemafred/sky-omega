@@ -543,6 +543,18 @@ public ref struct FilterEvaluator
             return ParseStrAfterFunction();
         }
 
+        // Handle STRDT - construct typed literal
+        if (funcName.Equals("strdt", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStrDtFunction();
+        }
+
+        // Handle STRLANG - construct language-tagged literal
+        if (funcName.Equals("strlang", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStrLangFunction();
+        }
+
         // UUID - generate a fresh IRI with UUID v7
         if (funcName.Equals("uuid", StringComparison.OrdinalIgnoreCase))
         {
@@ -1593,6 +1605,96 @@ public ref struct FilterEvaluator
     }
 
     /// <summary>
+    /// Parse STRDT(lexicalForm, datatypeIRI) - constructs a typed literal
+    /// Returns a literal with the specified datatype
+    /// </summary>
+    private Value ParseStrDtFunction()
+    {
+        var lexicalArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var datatypeArg = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Lexical form must be a simple literal (string without language tag)
+        if (lexicalArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        // Datatype must be an IRI
+        if (datatypeArg.Type != ValueType.Uri && datatypeArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        var lexical = lexicalArg.StringValue;
+        var datatype = datatypeArg.StringValue;
+
+        // Construct typed literal: "lexical"^^<datatype>
+        _strdtResult = $"\"{lexical}\"^^<{datatype}>";
+        return new Value
+        {
+            Type = ValueType.String,
+            StringValue = _strdtResult.AsSpan()
+        };
+    }
+
+    /// <summary>
+    /// Parse STRLANG(lexicalForm, langTag) - constructs a language-tagged literal
+    /// Returns a literal with the specified language tag
+    /// </summary>
+    private Value ParseStrLangFunction()
+    {
+        var lexicalArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var langArg = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Lexical form must be a simple literal (string without language tag)
+        if (lexicalArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        // Language tag must be a string
+        if (langArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        var lexical = lexicalArg.StringValue;
+        var lang = langArg.StringValue;
+
+        // Language tag must not be empty
+        if (lang.IsEmpty)
+            return new Value { Type = ValueType.Unbound };
+
+        // Construct language-tagged literal: "lexical"@lang
+        _strlangResult = $"\"{lexical}\"@{lang}";
+        return new Value
+        {
+            Type = ValueType.String,
+            StringValue = _strlangResult.AsSpan()
+        };
+    }
+
+    /// <summary>
     /// Parse SUBSTR(string, start [, length]) - returns substring
     /// Note: SPARQL uses 1-based indexing
     /// </summary>
@@ -1725,6 +1827,12 @@ public ref struct FilterEvaluator
 
     // Storage for datetime results to keep span valid
     private string _datetimeResult = string.Empty;
+
+    // Storage for STRDT result to keep span valid
+    private string _strdtResult = string.Empty;
+
+    // Storage for STRLANG result to keep span valid
+    private string _strlangResult = string.Empty;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
