@@ -122,6 +122,13 @@ public ref struct QueryResults
     private readonly bool _distinct;
     private HashSet<int>? _seenHashes;
 
+    // UNION support
+    private readonly bool _hasUnion;
+    private bool _unionBranchActive;
+    private TriplePatternScan _unionSingleScan;
+    private MultiPatternScan _unionMultiScan;
+    private bool _unionIsMultiPattern;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -142,6 +149,7 @@ public ref struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = pattern.FilterCount > 0;
         _hasOptional = pattern.HasOptionalPatterns;
+        _hasUnion = pattern.HasUnion;
         _isMultiPattern = false;
         _isEmpty = false;
         _limit = limit;
@@ -150,6 +158,7 @@ public ref struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
@@ -165,6 +174,7 @@ public ref struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = pattern.FilterCount > 0;
         _hasOptional = pattern.HasOptionalPatterns;
+        _hasUnion = pattern.HasUnion;
         _isMultiPattern = true;
         _isEmpty = false;
         _limit = limit;
@@ -173,6 +183,7 @@ public ref struct QueryResults
         _returned = 0;
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
     }
 
     /// <summary>
@@ -195,16 +206,35 @@ public ref struct QueryResults
         {
             bool hasNext;
 
-            if (_isMultiPattern)
+            if (_unionBranchActive)
             {
-                hasNext = _multiScan.MoveNext(ref _bindingTable);
+                // Using UNION branch scans
+                if (_unionIsMultiPattern)
+                    hasNext = _unionMultiScan.MoveNext(ref _bindingTable);
+                else
+                    hasNext = _unionSingleScan.MoveNext(ref _bindingTable);
             }
             else
             {
-                hasNext = _singleScan.MoveNext(ref _bindingTable);
+                // Using first branch scans
+                if (_isMultiPattern)
+                    hasNext = _multiScan.MoveNext(ref _bindingTable);
+                else
+                    hasNext = _singleScan.MoveNext(ref _bindingTable);
             }
 
-            if (!hasNext) return false;
+            if (!hasNext)
+            {
+                // Try switching to UNION branch
+                if (_hasUnion && !_unionBranchActive)
+                {
+                    _unionBranchActive = true;
+                    if (!InitializeUnionBranch())
+                        return false;
+                    continue; // Try again with union branch
+                }
+                return false;
+            }
 
             // Apply filters
             if (_hasFilters)
@@ -358,6 +388,34 @@ public ref struct QueryResults
         }
     }
 
+    /// <summary>
+    /// Initialize the UNION branch scan.
+    /// Returns false if the union branch is empty.
+    /// </summary>
+    private bool InitializeUnionBranch()
+    {
+        if (_store == null) return false;
+
+        var unionPatternCount = _pattern.UnionBranchPatternCount;
+        if (unionPatternCount == 0) return false;
+
+        if (unionPatternCount == 1)
+        {
+            // Single union pattern - use simple scan
+            var tp = _pattern.GetUnionPattern(0);
+            _unionSingleScan = new TriplePatternScan(_store, _source, tp, _bindingTable);
+            _unionIsMultiPattern = false;
+            return true;
+        }
+        else
+        {
+            // Multiple union patterns - use multi-pattern scan with union mode
+            _unionMultiScan = new MultiPatternScan(_store, _source, _pattern, unionMode: true);
+            _unionIsMultiPattern = true;
+            return true;
+        }
+    }
+
     private bool EvaluateFilters()
     {
         for (int i = 0; i < _pattern.FilterCount; i++)
@@ -380,6 +438,8 @@ public ref struct QueryResults
     {
         _singleScan.Dispose();
         _multiScan.Dispose();
+        _unionSingleScan.Dispose();
+        _unionMultiScan.Dispose();
     }
 }
 
@@ -497,6 +557,7 @@ public ref struct MultiPatternScan
     private readonly TripleStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly GraphPattern _pattern;
+    private readonly bool _unionMode;
 
     // Current state for each pattern level
     private TemporalResultEnumerator _enum0;
@@ -511,11 +572,12 @@ public ref struct MultiPatternScan
     // Track binding count at entry to each level for rollback
     private int _bindingCount0, _bindingCount1, _bindingCount2, _bindingCount3;
 
-    public MultiPatternScan(TripleStore store, ReadOnlySpan<char> source, GraphPattern pattern)
+    public MultiPatternScan(TripleStore store, ReadOnlySpan<char> source, GraphPattern pattern, bool unionMode = false)
     {
         _store = store;
         _source = source;
         _pattern = pattern;
+        _unionMode = unionMode;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _exhausted = false;
@@ -526,13 +588,33 @@ public ref struct MultiPatternScan
         _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
     }
 
+    /// <summary>
+    /// Get pattern at index, respecting union mode.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private TriplePattern GetPatternAt(int index)
+    {
+        return _unionMode ? _pattern.GetUnionPattern(index) : _pattern.GetPattern(index);
+    }
+
+    /// <summary>
+    /// Get the number of patterns to process.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int GetPatternCount()
+    {
+        return _unionMode ? _pattern.UnionBranchPatternCount : _pattern.RequiredPatternCount;
+    }
+
     public bool MoveNext(ref BindingTable bindings)
     {
-        if (_exhausted || _pattern.PatternCount == 0)
+        if (_exhausted)
             return false;
 
-        // Only process required patterns - optional patterns are handled separately
-        var patternCount = Math.Min(_pattern.RequiredPatternCount, 4); // Support up to 4 required patterns
+        // Get pattern count based on mode
+        var patternCount = Math.Min(GetPatternCount(), 4); // Support up to 4 patterns
+        if (patternCount == 0)
+            return false;
 
         while (true)
         {
@@ -588,7 +670,7 @@ public ref struct MultiPatternScan
 
     private bool TryAdvanceLevel0(scoped ref BindingTable bindings)
     {
-        var pattern = _pattern.GetPattern(0);
+        var pattern = GetPatternAt(0);
 
         if (!_init0)
         {
@@ -607,7 +689,7 @@ public ref struct MultiPatternScan
 
     private bool TryAdvanceLevel1(scoped ref BindingTable bindings)
     {
-        var pattern = _pattern.GetPattern(1);
+        var pattern = GetPatternAt(1);
 
         if (!_init1)
         {
@@ -626,7 +708,7 @@ public ref struct MultiPatternScan
 
     private bool TryAdvanceLevel2(scoped ref BindingTable bindings)
     {
-        var pattern = _pattern.GetPattern(2);
+        var pattern = GetPatternAt(2);
 
         if (!_init2)
         {
@@ -645,7 +727,7 @@ public ref struct MultiPatternScan
 
     private bool TryAdvanceLevel3(scoped ref BindingTable bindings)
     {
-        var pattern = _pattern.GetPattern(3);
+        var pattern = GetPatternAt(3);
 
         if (!_init3)
         {

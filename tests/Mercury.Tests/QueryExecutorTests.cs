@@ -815,4 +815,197 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    [Fact]
+    public void Execute_UnionCombinesBranches()
+    {
+        // Find people who have name OR age
+        // First branch: names, Second branch: ages
+        var query = "SELECT * WHERE { { ?person <http://xmlns.com/foaf/0.1/name> ?value } UNION { ?person <http://xmlns.com/foaf/0.1/age> ?value } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify UNION was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            var values = new List<string>();
+            while (results.MoveNext())
+            {
+                count++;
+                var bindings = results.Current;
+                var valueIdx = bindings.FindBinding("?value".AsSpan());
+                if (valueIdx >= 0)
+                {
+                    values.Add(bindings.GetString(valueIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // 3 names + 3 ages = 6 results
+            Assert.Equal(6, count);
+            // Should have both name and age values
+            Assert.Contains("\"Alice\"", values);
+            Assert.Contains("30", values);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionSinglePatterns()
+    {
+        // Simple UNION of two single-pattern branches
+        var query = "SELECT * WHERE { { ?s <http://xmlns.com/foaf/0.1/name> ?o } UNION { ?s <http://xmlns.com/foaf/0.1/knows> ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // 3 names + 1 knows = 4 results
+            Assert.Equal(4, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionWithDistinct()
+    {
+        // UNION with DISTINCT to remove duplicates
+        var query = "SELECT DISTINCT * WHERE { { ?s <http://xmlns.com/foaf/0.1/name> ?o } UNION { ?s <http://xmlns.com/foaf/0.1/name> ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Same pattern twice, but DISTINCT removes duplicates - should get 3
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionWithLimit()
+    {
+        // UNION with LIMIT
+        var query = "SELECT * WHERE { { ?s <http://xmlns.com/foaf/0.1/name> ?o } UNION { ?s <http://xmlns.com/foaf/0.1/age> ?o } } LIMIT 4";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // 6 total (3 names + 3 ages), but limited to 4
+            Assert.Equal(4, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionEmptyBranch()
+    {
+        // UNION where one branch has no matches
+        var query = "SELECT * WHERE { { ?s <http://xmlns.com/foaf/0.1/name> ?o } UNION { ?s <http://example.org/nonexistent> ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Only first branch matches (3 names)
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionBothBranchesEmpty()
+    {
+        // UNION where both branches have no matches
+        var query = "SELECT * WHERE { { ?s <http://example.org/x> ?o } UNION { ?s <http://example.org/y> ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

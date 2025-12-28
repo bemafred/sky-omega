@@ -362,6 +362,13 @@ public ref struct SparqlParser
     {
         SkipWhitespace();
 
+        // Check for nested group that might be part of UNION: { { ... } UNION { ... } }
+        if (Peek() == '{')
+        {
+            ParseGroupOrUnionGraphPattern(ref pattern);
+            return;
+        }
+
         while (!IsAtEnd() && Peek() != '}')
         {
             SkipWhitespace();
@@ -383,12 +390,7 @@ public ref struct SparqlParser
                 continue;
             }
 
-            // Check for UNION, MINUS, etc. (not yet implemented)
-            if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
-            {
-                SkipUntilClosingBrace();
-                continue;
-            }
+            // Check for MINUS (not yet implemented)
             if (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase))
             {
                 SkipUntilClosingBrace();
@@ -405,6 +407,78 @@ public ref struct SparqlParser
             if (Peek() == '.')
                 Advance();
         }
+    }
+
+    /// <summary>
+    /// [57] GroupOrUnionGraphPattern ::= GroupGraphPattern ( 'UNION' GroupGraphPattern )*
+    /// Parses { pattern } UNION { pattern } structure.
+    /// </summary>
+    private void ParseGroupOrUnionGraphPattern(ref GraphPattern pattern)
+    {
+        // Parse first nested group
+        ParseNestedGroupGraphPattern(ref pattern);
+
+        SkipWhitespace();
+
+        // Check for UNION
+        var span = PeekSpan(5);
+        if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("UNION");
+            SkipWhitespace();
+
+            // Mark where UNION patterns start
+            pattern.StartUnionBranch();
+
+            // Parse second nested group
+            ParseNestedGroupGraphPattern(ref pattern);
+        }
+    }
+
+    /// <summary>
+    /// Parse a nested { ... } block and add its patterns to the parent pattern.
+    /// </summary>
+    private void ParseNestedGroupGraphPattern(ref GraphPattern pattern)
+    {
+        SkipWhitespace();
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside the nested group
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER inside nested group
+            var span = PeekSpan(8);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseFilter(ref pattern);
+                continue;
+            }
+
+            // Check for OPTIONAL inside nested group
+            if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseOptional(ref pattern);
+                continue;
+            }
+
+            // Parse triple pattern
+            if (!TryParseTriplePattern(ref pattern))
+                break;
+
+            SkipWhitespace();
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
     }
 
     /// <summary>
@@ -1044,6 +1118,7 @@ public struct GraphPattern
     private int _patternCount;
     private int _filterCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
+    private int _unionStartIndex; // If > 0, patterns from this index are the UNION branch
 
     // Inline storage for triple patterns (32 * 24 bytes = 768 bytes)
     private TriplePattern _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7;
@@ -1058,6 +1133,22 @@ public struct GraphPattern
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
+    public readonly bool HasUnion => _unionStartIndex > 0;
+
+    /// <summary>
+    /// Count of patterns in the first branch (before UNION).
+    /// </summary>
+    public readonly int FirstBranchPatternCount => HasUnion ? _unionStartIndex : _patternCount;
+
+    /// <summary>
+    /// Count of patterns in the UNION branch.
+    /// </summary>
+    public readonly int UnionBranchPatternCount => HasUnion ? _patternCount - _unionStartIndex : 0;
+
+    /// <summary>
+    /// Get a pattern from the UNION branch.
+    /// </summary>
+    public readonly TriplePattern GetUnionPattern(int index) => GetPattern(_unionStartIndex + index);
 
     /// <summary>
     /// Count of required (non-optional) patterns.
@@ -1067,12 +1158,22 @@ public struct GraphPattern
         get
         {
             int count = 0;
-            for (int i = 0; i < _patternCount; i++)
+            // Only count patterns in first branch (before UNION)
+            int limit = HasUnion ? _unionStartIndex : _patternCount;
+            for (int i = 0; i < limit; i++)
             {
                 if (!IsOptional(i)) count++;
             }
             return count;
         }
+    }
+
+    /// <summary>
+    /// Mark the start of UNION patterns.
+    /// </summary>
+    public void StartUnionBranch()
+    {
+        _unionStartIndex = _patternCount;
     }
 
     public void AddPattern(TriplePattern pattern)
