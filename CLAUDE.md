@@ -238,19 +238,29 @@ await foreach (var triple in parser.ParseAsync())
 `SparqlParser` is a `ref struct` that parses SPARQL queries from `ReadOnlySpan<char>`.
 
 Key components:
-- `SparqlParser` - Zero-GC query parser (SELECT, CONSTRUCT, ASK with WHERE clauses)
+- `SparqlParser` - Zero-GC query parser
 - `QueryExecutor` - Zero-GC query execution with specialized operators
-- `FilterEvaluator` - SPARQL FILTER expression evaluation (comparisons, AND/OR/NOT)
+- `FilterEvaluator` - SPARQL FILTER expression evaluation
 - `RdfParser` - N-Triples parsing utilities
 
+**Supported SPARQL features:**
+
+| Category | Features |
+|----------|----------|
+| Query types | SELECT, ASK, CONSTRUCT |
+| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
+| Filtering | FILTER (comparisons, AND/OR/NOT), VALUES |
+| Computed values | BIND (arithmetic expressions) |
+| Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
+
 **Query execution model:**
-1. Parse query → `Query` struct with triple patterns + filters
+1. Parse query → `Query` struct with patterns, filters, modifiers
 2. Build execution plan → Stack of operators (TriplePatternScan, MultiPatternScan)
 3. Execute → Pull-based iteration through operator pipeline
 
-**Usage example:**
+**SELECT query example:**
 ```csharp
-var query = "SELECT * WHERE { ?person <http://foaf/name> ?name . ?person <http://foaf/age> ?age FILTER(?age > 25) }";
+var query = "SELECT * WHERE { ?person <http://foaf/name> ?name . ?person <http://foaf/age> ?age FILTER(?age > 25) } ORDER BY ?name LIMIT 10";
 var parser = new SparqlParser(query.AsSpan());
 var parsedQuery = parser.ParseQuery();
 
@@ -278,10 +288,53 @@ finally
 }
 ```
 
+**ASK query example:**
+```csharp
+var query = "ASK WHERE { <http://example.org/Alice> <http://foaf/knows> ?someone }";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    bool exists = executor.ExecuteAsk();  // Returns true/false
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
+**CONSTRUCT query example:**
+```csharp
+var query = "CONSTRUCT { ?person <http://example.org/hasName> ?name } WHERE { ?person <http://foaf/name> ?name }";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.ExecuteConstruct();
+
+    while (results.MoveNext())
+    {
+        var triple = results.Current;
+        // triple.Subject, triple.Predicate, triple.Object are ReadOnlySpan<char>
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
 **Operator pipeline:**
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
-- Filter evaluation integrated into result iteration
+- Filter/BIND/MINUS/VALUES evaluation integrated into result iteration
 
 ## Code Conventions
 
