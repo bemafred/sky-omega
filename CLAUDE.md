@@ -306,8 +306,27 @@ Key components:
 | UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |
 | DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ, TIMEZONE |
 | Computed values | BIND (arithmetic expressions) |
-| Aggregation | GROUP BY, COUNT, SUM, AVG, MIN, MAX |
+| Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
+
+**Partially implemented SPARQL features:**
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Multiple GRAPH clauses | Single only | Multiple GRAPH patterns need join support |
+| Multiple subqueries | Single only | Multiple subqueries need join support |
+| REDUCED | Parsed only | Flag set but not applied in execution |
+| FROM/FROM NAMED | Parsed only | Dataset clauses not executed |
+
+**Not implemented SPARQL 1.1 features:**
+
+| Category | Features |
+|----------|----------|
+| Aggregation | GROUP_CONCAT, SAMPLE |
+| Federated query | SERVICE clause |
+| SPARQL Update | INSERT, DELETE, INSERT DATA, DELETE DATA, DELETE WHERE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD |
+
+*Note: This is a read-only query engine. Write operations use the TripleStore API directly (`AddCurrent`, `DeleteCurrent`, batch operations). SPARQL Update would require significant architectural changes.*
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
