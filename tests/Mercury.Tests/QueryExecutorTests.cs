@@ -1766,4 +1766,202 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== VALUES Tests ==========
+
+    [Fact]
+    public void Execute_ValuesBasic()
+    {
+        // VALUES constraining age to 25 or 30
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age VALUES ?age { 25 30 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify VALUES was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.Values.HasValues);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice (30) and Bob (25), Charlie (35) is excluded
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("25", ages);
+            Assert.Contains("30", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ValuesSingleValue()
+    {
+        // VALUES with single value
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age VALUES ?age { 35 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Charlie (35)
+            Assert.Single(ages);
+            Assert.Equal("35", ages[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ValuesNoMatch()
+    {
+        // VALUES that matches nothing
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age VALUES ?age { 100 200 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // No ages match 100 or 200
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ValuesAllMatch()
+    {
+        // VALUES that matches all results
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age VALUES ?age { 25 30 35 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // All 3 ages match
+            Assert.Equal(3, ages.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ValuesUnboundVariable()
+    {
+        // VALUES on a variable not in the pattern (should allow all results)
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name VALUES ?other { 1 2 3 } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // ?other is never bound, so VALUES constraint allows all results
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ValuesWithFilter()
+    {
+        // VALUES combined with FILTER
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age VALUES ?age { 25 30 35 } FILTER(?age > 25) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // VALUES allows 25, 30, 35 but FILTER excludes 25
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("30", ages);
+            Assert.Contains("35", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

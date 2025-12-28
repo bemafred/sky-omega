@@ -205,6 +205,9 @@ public ref struct QueryResults
     // MINUS support
     private readonly bool _hasMinus;
 
+    // VALUES support
+    private readonly bool _hasValues;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -241,6 +244,7 @@ public ref struct QueryResults
         _sortedIndex = -1;
         _hasBinds = pattern.HasBinds;
         _hasMinus = pattern.HasMinus;
+        _hasValues = pattern.HasValues;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
@@ -272,6 +276,7 @@ public ref struct QueryResults
         _sortedIndex = -1;
         _hasBinds = pattern.HasBinds;
         _hasMinus = pattern.HasMinus;
+        _hasValues = pattern.HasValues;
     }
 
     /// <summary>
@@ -471,6 +476,16 @@ public ref struct QueryResults
                 }
             }
 
+            // Apply VALUES - check if bound value matches any VALUES value
+            if (_hasValues)
+            {
+                if (!MatchesValuesConstraint())
+                {
+                    _bindingTable.Clear();
+                    continue;
+                }
+            }
+
             if (_distinct)
             {
                 var hash = ComputeBindingsHash();
@@ -557,6 +572,16 @@ public ref struct QueryResults
                 {
                     _bindingTable.Clear();
                     continue; // Matches MINUS, skip this row
+                }
+            }
+
+            // Apply VALUES - check if bound value matches any VALUES value
+            if (_hasValues)
+            {
+                if (!MatchesValuesConstraint())
+                {
+                    _bindingTable.Clear();
+                    continue; // Doesn't match VALUES, skip this row
                 }
             }
 
@@ -855,6 +880,44 @@ public ref struct QueryResults
 
         // Unbound - use wildcard
         return ReadOnlySpan<char>.Empty;
+    }
+
+    /// <summary>
+    /// Check if the current bindings match the VALUES constraint.
+    /// The VALUES variable must be bound to one of the VALUES values.
+    /// </summary>
+    private bool MatchesValuesConstraint()
+    {
+        var values = _pattern.Values;
+        if (!values.HasValues) return true;
+
+        // Get the variable name from VALUES
+        var varName = _source.Slice(values.VarStart, values.VarLength);
+
+        // Find the binding for this variable
+        var bindingIdx = _bindingTable.FindBinding(varName);
+        if (bindingIdx < 0)
+        {
+            // Variable not bound - this is valid in SPARQL (VALUES binds it)
+            // For simplicity, we'll allow unbound (implementation could bind it)
+            return true;
+        }
+
+        // Get the bound value
+        var boundValue = _bindingTable.GetString(bindingIdx);
+
+        // Check if it matches any VALUES value
+        for (int i = 0; i < values.ValueCount; i++)
+        {
+            var (start, len) = values.GetValue(i);
+            var valuesValue = _source.Slice(start, len);
+
+            if (boundValue.SequenceEqual(valuesValue))
+                return true;
+        }
+
+        // Bound value doesn't match any VALUES value
+        return false;
     }
 
     public void Dispose()

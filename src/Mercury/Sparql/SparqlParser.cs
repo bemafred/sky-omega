@@ -404,6 +404,13 @@ public ref struct SparqlParser
                 continue;
             }
 
+            // Check for VALUES
+            if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseValues(ref pattern);
+                continue;
+            }
+
             // Try to parse a triple pattern
             if (!TryParseTriplePattern(ref pattern))
                 break;
@@ -607,6 +614,102 @@ public ref struct SparqlParser
         SkipWhitespace();
         if (Peek() == '}')
             Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse VALUES clause: VALUES ?var { value1 value2 ... }
+    /// Supports single variable with multiple values.
+    /// </summary>
+    private void ParseValues(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("VALUES");
+        SkipWhitespace();
+
+        // Parse variable
+        if (Peek() != '?')
+            return;
+
+        var values = new ValuesClause();
+        values.VarStart = _position;
+
+        Advance(); // Skip '?'
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+            Advance();
+
+        values.VarLength = _position - values.VarStart;
+
+        SkipWhitespace();
+
+        // Expect '{'
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse values
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            int valueStart = _position;
+            int valueLen = 0;
+
+            var ch = Peek();
+            if (ch == '"')
+            {
+                // String literal
+                Advance();
+                while (!IsAtEnd() && Peek() != '"')
+                {
+                    if (Peek() == '\\') Advance();
+                    Advance();
+                }
+                if (!IsAtEnd()) Advance(); // Skip closing '"'
+                valueLen = _position - valueStart;
+            }
+            else if (ch == '<')
+            {
+                // IRI
+                Advance();
+                while (!IsAtEnd() && Peek() != '>')
+                    Advance();
+                if (!IsAtEnd()) Advance(); // Skip '>'
+                valueLen = _position - valueStart;
+            }
+            else if (IsDigit(ch) || ch == '-' || ch == '+')
+            {
+                // Numeric literal
+                if (ch == '-' || ch == '+') Advance();
+                while (!IsAtEnd() && (IsDigit(Peek()) || Peek() == '.'))
+                    Advance();
+                valueLen = _position - valueStart;
+            }
+            else if (IsLetter(ch))
+            {
+                // Boolean or prefixed name
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':'))
+                    Advance();
+                valueLen = _position - valueStart;
+            }
+            else
+            {
+                break;
+            }
+
+            if (valueLen > 0)
+            {
+                values.AddValue(valueStart, valueLen);
+            }
+
+            SkipWhitespace();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        pattern.SetValues(values);
     }
 
     /// <summary>
@@ -1305,14 +1408,20 @@ public struct GraphPattern
     // Inline storage for MINUS patterns (8 * 24 bytes = 192 bytes)
     private TriplePattern _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7;
 
+    // VALUES clause storage
+    private ValuesClause _values;
+
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
     public readonly int BindCount => _bindCount;
     public readonly int MinusPatternCount => _minusPatternCount;
     public readonly bool HasBinds => _bindCount > 0;
     public readonly bool HasMinus => _minusPatternCount > 0;
+    public readonly bool HasValues => _values.HasValues;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
     public readonly bool HasUnion => _unionStartIndex > 0;
+
+    public readonly ValuesClause Values => _values;
 
     /// <summary>
     /// Count of patterns in the first branch (before UNION).
@@ -1501,6 +1610,11 @@ public struct GraphPattern
             case 6: _m6 = pattern; break; case 7: _m7 = pattern; break;
         }
     }
+
+    public void SetValues(ValuesClause values)
+    {
+        _values = values;
+    }
 }
 
 /// <summary>
@@ -1570,6 +1684,59 @@ public struct BindExpr
     public int ExprLength;   // Length of expression
     public int VarStart;     // Start of target variable (including ?)
     public int VarLength;    // Length of target variable
+}
+
+/// <summary>
+/// A VALUES clause: VALUES ?var { value1 value2 ... }
+/// Stores a single variable and up to 8 inline values.
+/// </summary>
+public struct ValuesClause
+{
+    public const int MaxValues = 8;
+
+    public int VarStart;     // Start of variable name (including ?)
+    public int VarLength;    // Length of variable name
+    private int _valueCount;
+
+    // Inline storage for value offsets (8 values * 2 ints = 64 bytes)
+    private int _v0Start, _v0Len, _v1Start, _v1Len, _v2Start, _v2Len, _v3Start, _v3Len;
+    private int _v4Start, _v4Len, _v5Start, _v5Len, _v6Start, _v6Len, _v7Start, _v7Len;
+
+    public readonly int ValueCount => _valueCount;
+    public readonly bool HasValues => _valueCount > 0;
+
+    public void AddValue(int start, int length)
+    {
+        if (_valueCount >= MaxValues) return;
+        SetValue(_valueCount++, start, length);
+    }
+
+    public readonly (int Start, int Length) GetValue(int index)
+    {
+        return index switch
+        {
+            0 => (_v0Start, _v0Len), 1 => (_v1Start, _v1Len),
+            2 => (_v2Start, _v2Len), 3 => (_v3Start, _v3Len),
+            4 => (_v4Start, _v4Len), 5 => (_v5Start, _v5Len),
+            6 => (_v6Start, _v6Len), 7 => (_v7Start, _v7Len),
+            _ => (0, 0)
+        };
+    }
+
+    private void SetValue(int index, int start, int length)
+    {
+        switch (index)
+        {
+            case 0: _v0Start = start; _v0Len = length; break;
+            case 1: _v1Start = start; _v1Len = length; break;
+            case 2: _v2Start = start; _v2Len = length; break;
+            case 3: _v3Start = start; _v3Len = length; break;
+            case 4: _v4Start = start; _v4Len = length; break;
+            case 5: _v5Start = start; _v5Len = length; break;
+            case 6: _v6Start = start; _v6Len = length; break;
+            case 7: _v7Start = start; _v7Len = length; break;
+        }
+    }
 }
 
 public struct ConstructTemplate
