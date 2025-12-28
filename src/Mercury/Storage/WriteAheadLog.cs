@@ -18,7 +18,7 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 public sealed class WriteAheadLog : IDisposable
 {
-    public const int RecordSize = 64; // Fixed size for predictable I/O
+    public const int RecordSize = 72; // Fixed size for predictable I/O (includes GraphId)
     public const long DefaultCheckpointSizeThreshold = 16 * 1024 * 1024; // 16MB
     public const int DefaultCheckpointTimeSeconds = 60;
 
@@ -274,41 +274,44 @@ public enum LogOperation : byte
 }
 
 /// <summary>
-/// Fixed-size WAL record (64 bytes).
+/// Fixed-size WAL record (72 bytes).
 ///
 /// Layout:
 /// [0-7]   TxId (8 bytes)
 /// [8]     Operation (1 byte)
 /// [9-15]  Reserved (7 bytes)
-/// [16-23] SubjectId (8 bytes)
-/// [24-31] PredicateId (8 bytes)
-/// [32-39] ObjectId (8 bytes)
-/// [40-47] ValidFromTicks (8 bytes)
-/// [48-55] ValidToTicks (8 bytes)
-/// [56-63] Checksum (8 bytes)
+/// [16-23] GraphId (8 bytes) - 0 = default graph
+/// [24-31] SubjectId (8 bytes)
+/// [32-39] PredicateId (8 bytes)
+/// [40-47] ObjectId (8 bytes)
+/// [48-55] ValidFromTicks (8 bytes)
+/// [56-63] ValidToTicks (8 bytes)
+/// [64-71] Checksum (8 bytes)
 /// </summary>
-[StructLayout(LayoutKind.Explicit, Size = 64)]
+[StructLayout(LayoutKind.Explicit, Size = 72)]
 public struct LogRecord
 {
     [FieldOffset(0)] public long TxId;
     [FieldOffset(8)] public LogOperation Operation;
     // [9-15] reserved
-    [FieldOffset(16)] public long SubjectId;
-    [FieldOffset(24)] public long PredicateId;
-    [FieldOffset(32)] public long ObjectId;
-    [FieldOffset(40)] public long ValidFromTicks;
-    [FieldOffset(48)] public long ValidToTicks;
-    [FieldOffset(56)] public long Checksum;
+    [FieldOffset(16)] public long GraphId;
+    [FieldOffset(24)] public long SubjectId;
+    [FieldOffset(32)] public long PredicateId;
+    [FieldOffset(40)] public long ObjectId;
+    [FieldOffset(48)] public long ValidFromTicks;
+    [FieldOffset(56)] public long ValidToTicks;
+    [FieldOffset(64)] public long Checksum;
 
     /// <summary>
     /// Create a log record for an Add operation.
     /// </summary>
     public static LogRecord CreateAdd(long subjectId, long predicateId, long objectId,
-        DateTimeOffset validFrom, DateTimeOffset validTo)
+        DateTimeOffset validFrom, DateTimeOffset validTo, long graphId = 0)
     {
         return new LogRecord
         {
             Operation = LogOperation.Add,
+            GraphId = graphId,
             SubjectId = subjectId,
             PredicateId = predicateId,
             ObjectId = objectId,
@@ -321,11 +324,12 @@ public struct LogRecord
     /// Create a log record for a Delete operation.
     /// </summary>
     public static LogRecord CreateDelete(long subjectId, long predicateId, long objectId,
-        DateTimeOffset validFrom, DateTimeOffset validTo)
+        DateTimeOffset validFrom, DateTimeOffset validTo, long graphId = 0)
     {
         return new LogRecord
         {
             Operation = LogOperation.Delete,
+            GraphId = graphId,
             SubjectId = subjectId,
             PredicateId = predicateId,
             ObjectId = objectId,
@@ -345,6 +349,7 @@ public struct LogRecord
         const long prime = unchecked((long)0x9E3779B97F4A7C15UL); // Golden ratio prime
         long hash = TxId;
         hash ^= (long)Operation * prime;
+        hash ^= GraphId * prime;
         hash ^= SubjectId * prime;
         hash ^= PredicateId * prime;
         hash ^= ObjectId * prime;
@@ -370,12 +375,13 @@ public struct LogRecord
         BinaryPrimitives.WriteInt64LittleEndian(buffer[0..8], TxId);
         buffer[8] = (byte)Operation;
         buffer[9..16].Clear(); // Reserved
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[16..24], SubjectId);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[24..32], PredicateId);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[32..40], ObjectId);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[40..48], ValidFromTicks);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[48..56], ValidToTicks);
-        BinaryPrimitives.WriteInt64LittleEndian(buffer[56..64], Checksum);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[16..24], GraphId);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[24..32], SubjectId);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[32..40], PredicateId);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[40..48], ObjectId);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[48..56], ValidFromTicks);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[56..64], ValidToTicks);
+        BinaryPrimitives.WriteInt64LittleEndian(buffer[64..72], Checksum);
     }
 
     /// <summary>
@@ -387,12 +393,13 @@ public struct LogRecord
         {
             TxId = BinaryPrimitives.ReadInt64LittleEndian(buffer[0..8]),
             Operation = (LogOperation)buffer[8],
-            SubjectId = BinaryPrimitives.ReadInt64LittleEndian(buffer[16..24]),
-            PredicateId = BinaryPrimitives.ReadInt64LittleEndian(buffer[24..32]),
-            ObjectId = BinaryPrimitives.ReadInt64LittleEndian(buffer[32..40]),
-            ValidFromTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[40..48]),
-            ValidToTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[48..56]),
-            Checksum = BinaryPrimitives.ReadInt64LittleEndian(buffer[56..64])
+            GraphId = BinaryPrimitives.ReadInt64LittleEndian(buffer[16..24]),
+            SubjectId = BinaryPrimitives.ReadInt64LittleEndian(buffer[24..32]),
+            PredicateId = BinaryPrimitives.ReadInt64LittleEndian(buffer[32..40]),
+            ObjectId = BinaryPrimitives.ReadInt64LittleEndian(buffer[40..48]),
+            ValidFromTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[48..56]),
+            ValidToTicks = BinaryPrimitives.ReadInt64LittleEndian(buffer[56..64]),
+            Checksum = BinaryPrimitives.ReadInt64LittleEndian(buffer[64..72])
         };
     }
 }

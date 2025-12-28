@@ -70,23 +70,25 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
         _lock.EnterWriteLock();
         try
         {
             // 1. Intern atoms first (AtomStore is append-only, naturally durable)
+            var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
             var subjectId = _atoms.Intern(subject);
             var predicateId = _atoms.Intern(predicate);
             var objectId = _atoms.Intern(obj);
 
             // 2. Write to WAL (fsync ensures durability)
-            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo);
+            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId);
             _wal.Append(record);
 
             // 3. Apply to indexes
-            ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+            ApplyToIndexes(subject, predicate, obj, validFrom, validTo, graph);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -104,9 +106,10 @@ public sealed class TripleStore : IDisposable
     public void AddCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
-        Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
     }
 
     /// <summary>
@@ -119,26 +122,30 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
         _lock.EnterWriteLock();
         try
         {
             // 1. Look up atoms (don't intern - if they don't exist, triple doesn't exist)
+            var graphId = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
             var subjectId = _atoms.GetAtomId(subject);
             var predicateId = _atoms.GetAtomId(predicate);
             var objectId = _atoms.GetAtomId(obj);
 
             if (subjectId == 0 || predicateId == 0 || objectId == 0)
                 return false;
+            if (!graph.IsEmpty && graphId == 0)
+                return false;
 
             // 2. Write to WAL (fsync ensures durability)
-            var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo);
+            var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo, graphId);
             _wal.Append(record);
 
             // 3. Apply to indexes
-            var deleted = ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+            var deleted = ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, graph);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -159,10 +166,11 @@ public sealed class TripleStore : IDisposable
     public bool DeleteCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
         // Use a wide time range to match any current fact
-        return Delete(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        return Delete(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
     }
 
     #region Batch API
@@ -210,22 +218,24 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
         // 1. Intern atoms (AtomStore is append-only)
+        var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var subjectId = _atoms.Intern(subject);
         var predicateId = _atoms.Intern(predicate);
         var objectId = _atoms.Intern(obj);
 
         // 2. Write to WAL without fsync
-        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo);
+        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId);
         _wal.AppendBatch(record, _activeBatchTxId);
 
         // 3. Apply to indexes immediately (in-memory, fast)
-        ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+        ApplyToIndexes(subject, predicate, obj, validFrom, validTo, graph);
     }
 
     /// <summary>
@@ -234,9 +244,10 @@ public sealed class TripleStore : IDisposable
     public void AddCurrentBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
-        AddBatched(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue);
+        AddBatched(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
     }
 
     /// <summary>
@@ -249,25 +260,29 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
         // 1. Look up atoms (don't intern)
+        var graphId = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
         var subjectId = _atoms.GetAtomId(subject);
         var predicateId = _atoms.GetAtomId(predicate);
         var objectId = _atoms.GetAtomId(obj);
 
         if (subjectId == 0 || predicateId == 0 || objectId == 0)
             return false;
+        if (!graph.IsEmpty && graphId == 0)
+            return false;
 
         // 2. Write to WAL without fsync
-        var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo);
+        var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo, graphId);
         _wal.AppendBatch(record, _activeBatchTxId);
 
         // 3. Apply to indexes immediately (in-memory, fast)
-        return ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+        return ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, graph);
     }
 
     /// <summary>
@@ -277,9 +292,10 @@ public sealed class TripleStore : IDisposable
     public bool DeleteCurrentBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
-        return DeleteBatched(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue);
+        return DeleteBatched(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
     }
 
     /// <summary>
@@ -336,12 +352,13 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
-        _spotIndex.AddHistorical(subject, predicate, obj, validFrom, validTo);
-        _postIndex.AddHistorical(predicate, obj, subject, validFrom, validTo);
-        _osptIndex.AddHistorical(obj, subject, predicate, validFrom, validTo);
-        _tspoIndex.AddHistorical(subject, predicate, obj, validFrom, validTo);
+        _spotIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        _postIndex.AddHistorical(predicate, obj, subject, validFrom, validTo, graph);
+        _osptIndex.AddHistorical(obj, subject, predicate, validFrom, validTo, graph);
+        _tspoIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
     }
 
     /// <summary>
@@ -353,13 +370,14 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         // Delete from all 4 indexes - use the appropriate argument order for each
-        var d1 = _spotIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo);
-        var d2 = _postIndex.DeleteHistorical(predicate, obj, subject, validFrom, validTo);
-        var d3 = _osptIndex.DeleteHistorical(obj, subject, predicate, validFrom, validTo);
-        var d4 = _tspoIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo);
+        var d1 = _spotIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        var d2 = _postIndex.DeleteHistorical(predicate, obj, subject, validFrom, validTo, graph);
+        var d3 = _osptIndex.DeleteHistorical(obj, subject, predicate, validFrom, validTo, graph);
+        var d4 = _tspoIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
 
         return d1 || d2 || d3 || d4;
     }
@@ -381,6 +399,7 @@ public sealed class TripleStore : IDisposable
                 if (record.Operation == LogOperation.Add)
                 {
                     // Get atom strings from IDs
+                    var graph = record.GraphId == 0 ? string.Empty : _atoms.GetAtomString(record.GraphId);
                     var subject = _atoms.GetAtomString(record.SubjectId);
                     var predicate = _atoms.GetAtomString(record.PredicateId);
                     var obj = _atoms.GetAtomString(record.ObjectId);
@@ -389,12 +408,13 @@ public sealed class TripleStore : IDisposable
                     var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
 
                     // Apply to indexes (no WAL write - already in log)
-                    ApplyToIndexes(subject, predicate, obj, validFrom, validTo);
+                    ApplyToIndexes(subject, predicate, obj, validFrom, validTo, graph);
                     recoveredCount++;
                 }
                 else if (record.Operation == LogOperation.Delete)
                 {
                     // Get atom strings from IDs
+                    var graph = record.GraphId == 0 ? string.Empty : _atoms.GetAtomString(record.GraphId);
                     var subject = _atoms.GetAtomString(record.SubjectId);
                     var predicate = _atoms.GetAtomString(record.PredicateId);
                     var obj = _atoms.GetAtomString(record.ObjectId);
@@ -403,7 +423,7 @@ public sealed class TripleStore : IDisposable
                     var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
 
                     // Apply delete to indexes (no WAL write - already in log)
-                    ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo);
+                    ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, graph);
                     recoveredCount++;
                 }
             }
@@ -477,7 +497,8 @@ public sealed class TripleStore : IDisposable
         TemporalQueryType queryType,
         DateTimeOffset? asOfTime = null,
         DateTimeOffset? rangeStart = null,
-        DateTimeOffset? rangeEnd = null)
+        DateTimeOffset? rangeEnd = null,
+        ReadOnlySpan<char> graph = default)
     {
         // Select optimal index
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, obj, queryType);
@@ -509,82 +530,93 @@ public sealed class TripleStore : IDisposable
 
         var enumerator = queryType switch
         {
-            TemporalQueryType.AsOf => 
-                selectedIndex.QueryAsOf(arg1, arg2, arg3, 
-                    asOfTime ?? DateTimeOffset.UtcNow),
-            
-            TemporalQueryType.Range => 
-                selectedIndex.QueryRange(arg1, arg2, arg3, 
-                    rangeStart ?? DateTimeOffset.MinValue, 
-                    rangeEnd ?? DateTimeOffset.MaxValue),
-            
-            _ => selectedIndex.QueryHistory(arg1, arg2, arg3)
+            TemporalQueryType.AsOf =>
+                selectedIndex.QueryAsOf(arg1, arg2, arg3,
+                    asOfTime ?? DateTimeOffset.UtcNow, graph),
+
+            TemporalQueryType.Range =>
+                selectedIndex.QueryRange(arg1, arg2, arg3,
+                    rangeStart ?? DateTimeOffset.MinValue,
+                    rangeEnd ?? DateTimeOffset.MaxValue, graph),
+
+            _ => selectedIndex.QueryHistory(arg1, arg2, arg3, graph)
         };
 
         return new TemporalResultEnumerator(enumerator, indexType, _atoms);
     }
 
     /// <summary>
-    /// Query current state (as of now)
+    /// Query current state (as of now).
+    /// Empty graph means default graph.
     /// </summary>
     public TemporalResultEnumerator QueryCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AsOf);
+        return Query(subject, predicate, obj, TemporalQueryType.AsOf, graph: graph);
     }
 
     /// <summary>
-    /// Query as of a specific point in time (time-travel query)
+    /// Query as of a specific point in time (time-travel query).
+    /// Empty graph means default graph.
     /// </summary>
     public TemporalResultEnumerator QueryAsOf(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset asOfTime)
+        DateTimeOffset asOfTime,
+        ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: asOfTime);
+        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: asOfTime, graph: graph);
     }
 
     /// <summary>
-    /// Query all versions (evolution over time)
+    /// Query all versions (evolution over time).
+    /// Empty graph means default graph.
     /// </summary>
     public TemporalResultEnumerator QueryEvolution(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AllTime);
+        return Query(subject, predicate, obj, TemporalQueryType.AllTime, graph: graph);
     }
 
     /// <summary>
     /// Time-travel query: What was true at specific time?
+    /// Empty graph means default graph.
     /// </summary>
     public TemporalResultEnumerator TimeTravelTo(
         DateTimeOffset targetTime,
         ReadOnlySpan<char> subject = default,
         ReadOnlySpan<char> predicate = default,
-        ReadOnlySpan<char> obj = default)
+        ReadOnlySpan<char> obj = default,
+        ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: targetTime);
+        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: targetTime, graph: graph);
     }
 
     /// <summary>
     /// Temporal range query: What changed during period?
+    /// Empty graph means default graph.
     /// </summary>
     public TemporalResultEnumerator QueryChanges(
         DateTimeOffset periodStart,
         DateTimeOffset periodEnd,
         ReadOnlySpan<char> subject = default,
         ReadOnlySpan<char> predicate = default,
-        ReadOnlySpan<char> obj = default)
+        ReadOnlySpan<char> obj = default,
+        ReadOnlySpan<char> graph = default)
     {
         return Query(
             subject, predicate, obj,
             TemporalQueryType.Range,
             rangeStart: periodStart,
-            rangeEnd: periodEnd);
+            rangeEnd: periodEnd,
+            graph: graph);
     }
 
     private (TripleIndex Index, TemporalIndexType Type) SelectOptimalIndex(
@@ -596,13 +628,13 @@ public sealed class TripleStore : IDisposable
         var subjectBound = !subject.IsEmpty && subject[0] != '?';
         var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
         var objectBound = !obj.IsEmpty && obj[0] != '?';
-        
+
         // For time-range queries, prefer TSPO index
         if (queryType == TemporalQueryType.Range)
         {
             return (_tspoIndex, TemporalIndexType.TSPO);
         }
-        
+
         // Otherwise select based on bound variables
         if (subjectBound)
         {
@@ -762,6 +794,7 @@ public ref struct TemporalResultEnumerator
             const long MaxValidMs = 253402300799999L; // Dec 31, 9999
 
             return new ResolvedTemporalTriple(
+                triple.GraphAtom == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(triple.GraphAtom),
                 DecodeAtomToBuffer(s),
                 DecodeAtomToBuffer(p),
                 DecodeAtomToBuffer(o),
@@ -834,6 +867,7 @@ public enum TemporalIndexType
 /// </summary>
 public readonly ref struct ResolvedTemporalTriple
 {
+    public readonly ReadOnlySpan<char> Graph;
     public readonly ReadOnlySpan<char> Subject;
     public readonly ReadOnlySpan<char> Predicate;
     public readonly ReadOnlySpan<char> Object;
@@ -843,6 +877,7 @@ public readonly ref struct ResolvedTemporalTriple
     public readonly bool IsDeleted;
 
     public ResolvedTemporalTriple(
+        ReadOnlySpan<char> graph,
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -851,6 +886,7 @@ public readonly ref struct ResolvedTemporalTriple
         DateTimeOffset transactionTime,
         bool isDeleted = false)
     {
+        Graph = graph;
         Subject = subject;
         Predicate = predicate;
         Object = obj;

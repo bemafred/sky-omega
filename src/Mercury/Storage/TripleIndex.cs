@@ -15,7 +15,7 @@ namespace SkyOmega.Mercury.Storage;
 public sealed unsafe class TripleIndex : IDisposable
 {
     private const int PageSize = 16384;
-    private const int NodeDegree = 204; // (16384 - 32) / 80 bytes per temporal entry
+    private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry (with GraphAtom)
 
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmapFile;
@@ -99,15 +99,18 @@ public sealed unsafe class TripleIndex : IDisposable
         ReadOnlySpan<char> obj,
         long validFrom,
         long validTo,
-        long? transactionTime = null)
+        long? transactionTime = null,
+        ReadOnlySpan<char> graph = default)
     {
+        var g = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var s = _atoms.Intern(subject);
         var p = _atoms.Intern(predicate);
         var o = _atoms.Intern(obj);
         var tt = transactionTime ?? _currentTransactionTime;
-        
+
         var temporalKey = new TemporalKey
         {
+            GraphAtom = g,
             SubjectAtom = s,
             PredicateAtom = p,
             ObjectAtom = o,
@@ -115,7 +118,7 @@ public sealed unsafe class TripleIndex : IDisposable
             ValidTo = validTo,
             TransactionTime = tt
         };
-        
+
         InsertIntoTree(temporalKey, _rootPageId);
     }
 
@@ -125,11 +128,14 @@ public sealed unsafe class TripleIndex : IDisposable
     public void AddCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
         Add(subject, predicate, obj,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            long.MaxValue);
+            long.MaxValue,
+            transactionTime: null,
+            graph: graph);
     }
 
     /// <summary>
@@ -140,11 +146,14 @@ public sealed unsafe class TripleIndex : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         Add(subject, predicate, obj,
             validFrom.ToUnixTimeMilliseconds(),
-            validTo.ToUnixTimeMilliseconds());
+            validTo.ToUnixTimeMilliseconds(),
+            transactionTime: null,
+            graph: graph);
     }
 
     /// <summary>
@@ -156,18 +165,23 @@ public sealed unsafe class TripleIndex : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         long validFrom,
-        long validTo)
+        long validTo,
+        ReadOnlySpan<char> graph = default)
     {
         // Look up atom IDs - if any don't exist, the triple doesn't exist
+        var g = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
         var s = _atoms.GetAtomId(subject);
         var p = _atoms.GetAtomId(predicate);
         var o = _atoms.GetAtomId(obj);
 
         if (s == 0 || p == 0 || o == 0)
             return false;
+        if (!graph.IsEmpty && g == 0)
+            return false;
 
         var key = new TemporalKey
         {
+            GraphAtom = g,
             SubjectAtom = s,
             PredicateAtom = p,
             ObjectAtom = o,
@@ -188,11 +202,13 @@ public sealed unsafe class TripleIndex : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset validFrom,
-        DateTimeOffset validTo)
+        DateTimeOffset validTo,
+        ReadOnlySpan<char> graph = default)
     {
         return Delete(subject, predicate, obj,
             validFrom.ToUnixTimeMilliseconds(),
-            validTo.ToUnixTimeMilliseconds());
+            validTo.ToUnixTimeMilliseconds(),
+            graph);
     }
 
     /// <summary>
@@ -209,7 +225,7 @@ public sealed unsafe class TripleIndex : IDisposable
             ref var entry = ref page->GetEntry(i);
 
             // Check if this is the exact entry (same SPO and overlapping time)
-            if (IsSameSPO(entry.Key, key) && !entry.IsDeleted)
+            if (IsSameGSPO(entry.Key, key) && !entry.IsDeleted)
             {
                 // Check for time overlap
                 if (entry.Key.ValidFrom <= key.ValidTo && entry.Key.ValidTo >= key.ValidFrom)
@@ -233,21 +249,22 @@ public sealed unsafe class TripleIndex : IDisposable
     /// Query triples with temporal constraints
     /// </summary>
     public TemporalTripleEnumerator Query(
+        long graphAtom,
         long subjectAtom,
         long predicateAtom,
         long objectAtom,
         TemporalQuery temporalQuery)
     {
-        var minKey = CreateSearchKey(subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: true);
-        var maxKey = CreateSearchKey(subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: false);
-        
+        var minKey = CreateSearchKey(graphAtom, subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: true);
+        var maxKey = CreateSearchKey(graphAtom, subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: false);
+
         var leafPageId = FindLeafPage(_rootPageId, minKey);
-        
+
         return new TemporalTripleEnumerator(
-            this, 
-            leafPageId, 
-            minKey, 
-            maxKey, 
+            this,
+            leafPageId,
+            minKey,
+            maxKey,
             temporalQuery);
     }
 
@@ -257,15 +274,17 @@ public sealed unsafe class TripleIndex : IDisposable
     public TemporalTripleEnumerator QueryCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
+        var g = ResolveGraphAtom(graph);
         var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
         var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
         var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
-        
+
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        
-        return Query(s, p, o, new TemporalQuery
+
+        return Query(g, s, p, o, new TemporalQuery
         {
             Type = TemporalQueryType.AsOf,
             AsOfTime = now
@@ -279,13 +298,15 @@ public sealed unsafe class TripleIndex : IDisposable
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
-        DateTimeOffset asOfTime)
+        DateTimeOffset asOfTime,
+        ReadOnlySpan<char> graph = default)
     {
+        var g = ResolveGraphAtom(graph);
         var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
         var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
         var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
-        
-        return Query(s, p, o, new TemporalQuery
+
+        return Query(g, s, p, o, new TemporalQuery
         {
             Type = TemporalQueryType.AsOf,
             AsOfTime = asOfTime.ToUnixTimeMilliseconds()
@@ -300,13 +321,15 @@ public sealed unsafe class TripleIndex : IDisposable
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
         DateTimeOffset rangeStart,
-        DateTimeOffset rangeEnd)
+        DateTimeOffset rangeEnd,
+        ReadOnlySpan<char> graph = default)
     {
+        var g = ResolveGraphAtom(graph);
         var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
         var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
         var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
-        
-        return Query(s, p, o, new TemporalQuery
+
+        return Query(g, s, p, o, new TemporalQuery
         {
             Type = TemporalQueryType.Range,
             RangeStart = rangeStart.ToUnixTimeMilliseconds(),
@@ -320,16 +343,34 @@ public sealed unsafe class TripleIndex : IDisposable
     public TemporalTripleEnumerator QueryHistory(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj)
+        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> graph = default)
     {
+        var g = ResolveGraphAtom(graph);
         var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
         var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
         var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
-        
-        return Query(s, p, o, new TemporalQuery
+
+        return Query(g, s, p, o, new TemporalQuery
         {
             Type = TemporalQueryType.AllTime
         });
+    }
+
+    /// <summary>
+    /// Resolve graph span to atom ID.
+    /// Empty graph = 0 (default graph)
+    /// Non-empty graph = atom ID, or -2 if not found (will match nothing)
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long ResolveGraphAtom(ReadOnlySpan<char> graph)
+    {
+        if (graph.IsEmpty)
+            return 0; // Default graph
+
+        var atomId = _atoms.GetAtomId(graph);
+        // If graph was specified but not found, return -2 to prevent matching default graph
+        return atomId == 0 ? -2 : atomId;
     }
 
     /// <summary>
@@ -343,12 +384,13 @@ public sealed unsafe class TripleIndex : IDisposable
     }
 
     /// <summary>
-    /// Temporal key: SPO + ValidTime + TransactionTime (32 bytes)
-    /// Sorted lexicographically for temporal range queries
+    /// Temporal key: GSPO + ValidTime + TransactionTime (56 bytes)
+    /// Sorted by Graph first (GSPO ordering) for named graph queries
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct TemporalKey : IComparable<TemporalKey>
     {
+        public long GraphAtom;       // 64-bit graph ID (0 = default graph)
         public long SubjectAtom;     // 64-bit for TB-scale
         public long PredicateAtom;   // 64-bit for TB-scale
         public long ObjectAtom;      // 64-bit for TB-scale
@@ -359,23 +401,26 @@ public sealed unsafe class TripleIndex : IDisposable
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public readonly int CompareTo(TemporalKey other)
         {
-            // Primary sort: SPO
-            var cmp = SubjectAtom.CompareTo(other.SubjectAtom);
+            // Primary sort: GSPO (Graph first for named graph queries)
+            var cmp = GraphAtom.CompareTo(other.GraphAtom);
             if (cmp != 0) return cmp;
-            
+
+            cmp = SubjectAtom.CompareTo(other.SubjectAtom);
+            if (cmp != 0) return cmp;
+
             cmp = PredicateAtom.CompareTo(other.PredicateAtom);
             if (cmp != 0) return cmp;
-            
+
             cmp = ObjectAtom.CompareTo(other.ObjectAtom);
             if (cmp != 0) return cmp;
-            
+
             // Secondary sort: Valid time
             cmp = ValidFrom.CompareTo(other.ValidFrom);
             if (cmp != 0) return cmp;
-            
+
             cmp = ValidTo.CompareTo(other.ValidTo);
             if (cmp != 0) return cmp;
-            
+
             // Tertiary sort: Transaction time
             return TransactionTime.CompareTo(other.TransactionTime);
         }
@@ -402,8 +447,8 @@ public sealed unsafe class TripleIndex : IDisposable
     }
 
     /// <summary>
-    /// B+Tree entry for temporal triple (80 bytes)
-    /// Key: 32 bytes + Child/Value: 8 bytes + Metadata: 40 bytes
+    /// B+Tree entry for temporal triple (88 bytes)
+    /// Key: 56 bytes (with GraphAtom) + Child/Value: 8 bytes + Metadata: 24 bytes
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct TemporalBTreeEntry
@@ -516,6 +561,7 @@ public sealed unsafe class TripleIndex : IDisposable
         {
             get => new TemporalTriple
             {
+                GraphAtom = _currentKey.GraphAtom,
                 SubjectAtom = _currentKey.SubjectAtom,
                 PredicateAtom = _currentKey.PredicateAtom,
                 ObjectAtom = _currentKey.ObjectAtom,
@@ -634,7 +680,7 @@ public sealed unsafe class TripleIndex : IDisposable
         if (insertPos > 0)
         {
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
-            if (IsSameSPO(key, prevEntry.Key))
+            if (IsSameGSPO(key, prevEntry.Key))
             {
                 // Handle temporal update
                 HandleTemporalUpdate(page, insertPos - 1, key);
@@ -670,9 +716,10 @@ public sealed unsafe class TripleIndex : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsSameSPO(TemporalKey a, TemporalKey b)
+    private static bool IsSameGSPO(TemporalKey a, TemporalKey b)
     {
-        return a.SubjectAtom == b.SubjectAtom &&
+        return a.GraphAtom == b.GraphAtom &&
+               a.SubjectAtom == b.SubjectAtom &&
                a.PredicateAtom == b.PredicateAtom &&
                a.ObjectAtom == b.ObjectAtom;
     }
@@ -917,15 +964,25 @@ public sealed unsafe class TripleIndex : IDisposable
     }
 
     private static TemporalKey CreateSearchKey(
-        long subject, long predicate, long obj,
+        long graph, long subject, long predicate, long obj,
         TemporalQuery query,
         bool isMin)
     {
         var unboundValue = isMin ? 0L : long.MaxValue;
-        var unboundTime = isMin ? 0L : long.MaxValue;
-        
+
+        // Special case: -2 means "not found, match nothing"
+        // Set to -2 for both min and max so no entries will match
+        long graphValue;
+        if (graph == -2)
+            graphValue = -2; // Will never match any entry (entries have non-negative GraphAtom)
+        else if (graph < 0)
+            graphValue = unboundValue;
+        else
+            graphValue = graph;
+
         return new TemporalKey
         {
+            GraphAtom = graphValue,
             SubjectAtom = subject < 0 ? unboundValue : subject,
             PredicateAtom = predicate < 0 ? unboundValue : predicate,
             ObjectAtom = obj < 0 ? unboundValue : obj,
@@ -1017,6 +1074,7 @@ public enum TemporalQueryType
 /// </summary>
 public struct TemporalTriple
 {
+    public long GraphAtom;      // 64-bit graph ID (0 = default graph)
     public long SubjectAtom;    // 64-bit for TB-scale
     public long PredicateAtom;  // 64-bit for TB-scale
     public long ObjectAtom;     // 64-bit for TB-scale

@@ -1504,4 +1504,347 @@ public class TripleStoreTests : IDisposable
     }
 
     #endregion
+
+    #region Named Graphs
+
+    [Fact]
+    public void AddCurrent_WithGraph_CanQueryByGraph()
+    {
+        var store = CreateStore();
+
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query with correct graph
+            var results = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph1>");
+            try
+            {
+                Assert.True(results.MoveNext());
+                Assert.Equal("<http://ex.org/graph1>", results.Current.Graph.ToString());
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void AddCurrent_DifferentGraphs_IsolatedQueries()
+    {
+        var store = CreateStore();
+
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "\"value1\"",
+            "<http://ex.org/graph1>");
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "\"value2\"",
+            "<http://ex.org/graph2>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query graph1
+            var results1 = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", default,
+                "<http://ex.org/graph1>");
+            try
+            {
+                Assert.True(results1.MoveNext());
+                Assert.Equal("\"value1\"", results1.Current.Object.ToString());
+                Assert.False(results1.MoveNext());
+            }
+            finally
+            {
+                results1.Dispose();
+            }
+
+            // Query graph2
+            var results2 = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", default,
+                "<http://ex.org/graph2>");
+            try
+            {
+                Assert.True(results2.MoveNext());
+                Assert.Equal("\"value2\"", results2.Current.Object.ToString());
+                Assert.False(results2.MoveNext());
+            }
+            finally
+            {
+                results2.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void AddCurrent_DefaultGraph_EmptyGraphSpan()
+    {
+        var store = CreateStore();
+
+        // Add to default graph (no graph specified)
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query default graph (no graph specified)
+            var results = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.True(results.MoveNext());
+                Assert.True(results.Current.Graph.IsEmpty, "Default graph should have empty Graph span");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void AddCurrent_NamedGraph_NotVisibleInDefaultGraph()
+    {
+        var store = CreateStore();
+
+        // Add to named graph only
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query default graph - should not find it
+            var results = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+            try
+            {
+                Assert.False(results.MoveNext(), "Named graph triple should not be visible in default graph");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void AddCurrent_DefaultGraph_NotVisibleInNamedGraph()
+    {
+        var store = CreateStore();
+
+        // Add to default graph
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Query named graph - should not find it
+            var results = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph1>");
+            try
+            {
+                Assert.False(results.MoveNext(), "Default graph triple should not be visible in named graph");
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void DeleteCurrent_NamedGraph_OnlyDeletesFromThatGraph()
+    {
+        var store = CreateStore();
+
+        // Add same SPO to two different graphs
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph2>");
+
+        // Delete from graph1 only
+        store.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+
+        store.AcquireReadLock();
+        try
+        {
+            // Graph1 should be empty
+            var results1 = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph1>");
+            try
+            {
+                Assert.False(results1.MoveNext());
+            }
+            finally
+            {
+                results1.Dispose();
+            }
+
+            // Graph2 should still have the triple
+            var results2 = store.QueryCurrent(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph2>");
+            try
+            {
+                Assert.True(results2.MoveNext());
+            }
+            finally
+            {
+                results2.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void BatchAdd_NamedGraphs_AllPersisted()
+    {
+        var store = CreateStore();
+
+        store.BeginBatch();
+        store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+        store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+        store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph2>");
+        store.CommitBatch();
+
+        store.AcquireReadLock();
+        try
+        {
+            // Graph1 should have 2 triples
+            var results1 = store.QueryCurrent(
+                default, "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph1>");
+            try
+            {
+                var count = 0;
+                while (results1.MoveNext()) count++;
+                Assert.Equal(2, count);
+            }
+            finally
+            {
+                results1.Dispose();
+            }
+
+            // Graph2 should have 1 triple
+            var results2 = store.QueryCurrent(
+                default, "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph2>");
+            try
+            {
+                var count = 0;
+                while (results2.MoveNext()) count++;
+                Assert.Equal(1, count);
+            }
+            finally
+            {
+                results2.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void NamedGraph_Persistence_SurvivesRestart()
+    {
+        // First session
+        using (var store1 = new TripleStore(_testPath))
+        {
+            store1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph1>");
+        }
+
+        // Second session
+        using (var store2 = new TripleStore(_testPath))
+        {
+            store2.AcquireReadLock();
+            try
+            {
+                var results = store2.QueryCurrent(
+                    "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                    "<http://ex.org/graph1>");
+                try
+                {
+                    Assert.True(results.MoveNext());
+                    Assert.Equal("<http://ex.org/graph1>", results.Current.Graph.ToString());
+                }
+                finally
+                {
+                    results.Dispose();
+                }
+            }
+            finally
+            {
+                store2.ReleaseReadLock();
+            }
+        }
+    }
+
+    [Fact]
+    public void NamedGraph_QueryEvolution_IncludesGraph()
+    {
+        var store = CreateStore();
+
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+            "<http://ex.org/graph1>");
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryEvolution(
+                "<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
+                "<http://ex.org/graph1>");
+            try
+            {
+                Assert.True(results.MoveNext());
+                Assert.Equal("<http://ex.org/graph1>", results.Current.Graph.ToString());
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
