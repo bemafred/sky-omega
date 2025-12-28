@@ -2676,6 +2676,111 @@ public class QueryExecutorTests : IDisposable
         Assert.True(parsed3.SelectClause.GetAggregate(0).Distinct);
     }
 
+    // ========== SAMPLE Tests ==========
+
+    [Fact]
+    public void Execute_SampleBasic()
+    {
+        // SAMPLE returns an arbitrary value from each group
+        var query = "SELECT ?person (SAMPLE(?p) AS ?somePredicate) WHERE { ?person ?p ?o } GROUP BY ?person";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify SAMPLE was parsed
+        Assert.True(parsedQuery.SelectClause.HasAggregates);
+        Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
+        Assert.Equal(AggregateFunction.Sample, parsedQuery.SelectClause.GetAggregate(0).Function);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var samples = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var sampleIdx = results.Current.FindBinding("?somePredicate".AsSpan());
+                Assert.True(personIdx >= 0);
+                Assert.True(sampleIdx >= 0);
+
+                var person = results.Current.GetString(personIdx).ToString();
+                var sample = results.Current.GetString(sampleIdx).ToString();
+                samples[person] = sample;
+
+                // Sample should return a valid predicate IRI
+                Assert.StartsWith("<http://", sample);
+            }
+            results.Dispose();
+
+            // Should have samples for all 3 people
+            Assert.Equal(3, samples.Count);
+            Assert.True(samples.ContainsKey("<http://example.org/Alice>"));
+            Assert.True(samples.ContainsKey("<http://example.org/Bob>"));
+            Assert.True(samples.ContainsKey("<http://example.org/Charlie>"));
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_SampleWithDistinct()
+    {
+        // SAMPLE with DISTINCT - should still return one arbitrary value
+        var query = "SELECT ?person (SAMPLE(DISTINCT ?p) AS ?pred) WHERE { ?person ?p ?o } GROUP BY ?person";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify DISTINCT was parsed
+        var agg = parsedQuery.SelectClause.GetAggregate(0);
+        Assert.Equal(AggregateFunction.Sample, agg.Function);
+        Assert.True(agg.Distinct);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var predIdx = results.Current.FindBinding("?pred".AsSpan());
+                Assert.True(predIdx >= 0);
+                // Should have a non-empty value
+                Assert.False(string.IsNullOrEmpty(results.Current.GetString(predIdx).ToString()));
+            }
+            results.Dispose();
+
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_SampleParsingVariants()
+    {
+        // Test various SAMPLE syntax variations
+        var query1 = "SELECT (SAMPLE(?x) AS ?s) WHERE { ?a ?b ?x } GROUP BY ?a";
+        var parser1 = new SparqlParser(query1.AsSpan());
+        var parsed1 = parser1.ParseQuery();
+        Assert.Equal(AggregateFunction.Sample, parsed1.SelectClause.GetAggregate(0).Function);
+        Assert.False(parsed1.SelectClause.GetAggregate(0).Distinct);
+
+        var query2 = "SELECT (SAMPLE(DISTINCT ?x) AS ?s) WHERE { ?a ?b ?x } GROUP BY ?a";
+        var parser2 = new SparqlParser(query2.AsSpan());
+        var parsed2 = parser2.ParseQuery();
+        Assert.Equal(AggregateFunction.Sample, parsed2.SelectClause.GetAggregate(0).Function);
+        Assert.True(parsed2.SelectClause.GetAggregate(0).Distinct);
+    }
+
     // ========== EXISTS/NOT EXISTS Tests ==========
 
     [Fact]

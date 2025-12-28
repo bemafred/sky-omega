@@ -1299,6 +1299,7 @@ internal sealed class GroupedRow
     private readonly HashSet<string>?[] _distinctSets;
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
     private readonly string[] _separators;           // For GROUP_CONCAT
+    private readonly string?[] _sampleValues;        // For SAMPLE
 
     public int KeyCount => _keyCount;
     public int AggregateCount => _aggCount;
@@ -1332,6 +1333,7 @@ internal sealed class GroupedRow
         _distinctSets = new HashSet<string>?[_aggCount];
         _concatValues = new List<string>?[_aggCount];
         _separators = new string[_aggCount];
+        _sampleValues = new string?[_aggCount];
 
         for (int i = 0; i < _aggCount; i++)
         {
@@ -1431,6 +1433,11 @@ internal sealed class GroupedRow
                     if (valueStr != null)
                         _concatValues[i]!.Add(valueStr);
                     break;
+                case AggregateFunction.Sample:
+                    // SAMPLE returns an arbitrary value - we take the first one
+                    if (_sampleValues[i] == null && valueStr != null)
+                        _sampleValues[i] = valueStr;
+                    break;
             }
         }
     }
@@ -1449,6 +1456,7 @@ internal sealed class GroupedRow
                 AggregateFunction.GroupConcat => _concatValues[i] != null
                     ? string.Join(_separators[i], _concatValues[i]!)
                     : "",
+                AggregateFunction.Sample => _sampleValues[i] ?? "",
                 _ => ""
             };
         }

@@ -408,6 +408,11 @@ public ref struct SparqlParser
             ConsumeKeyword("MAX");
             agg.Function = AggregateFunction.Max;
         }
+        else if (span.Length >= 6 && span[..6].Equals("SAMPLE", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("SAMPLE");
+            agg.Function = AggregateFunction.Sample;
+        }
         else
         {
             // Not a recognized aggregate, skip to closing paren
@@ -2198,7 +2203,8 @@ public enum AggregateFunction
     Avg,
     Min,
     Max,
-    GroupConcat
+    GroupConcat,
+    Sample
 }
 
 public struct DatasetClause
