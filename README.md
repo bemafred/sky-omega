@@ -15,6 +15,12 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 
 ---
 
+## 🏛️ Project Evolution & Methodology
+
+[Sky Omega - On Emergence, Epistemics, and the Patience Required to Build What Matters](docs/sky-omega-convergence.md)
+
+---
+
 ## 🧠 Core Components
 
 | Component                      | Description                                                                                       |
