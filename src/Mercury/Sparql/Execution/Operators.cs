@@ -13,6 +13,7 @@ public ref struct TriplePatternScan
     private TemporalResultEnumerator _enumerator;
     private bool _initialized;
     private readonly BindingTable _initialBindings;
+    private readonly int _initialBindingsCount;
     private readonly ReadOnlySpan<char> _graph;
 
     // For property path traversal
@@ -34,6 +35,7 @@ public ref struct TriplePatternScan
         _source = source;
         _pattern = pattern;
         _initialBindings = initialBindings;
+        _initialBindingsCount = initialBindings.Count;
         _graph = graph;
         _initialized = false;
         _enumerator = default;
@@ -68,7 +70,8 @@ public ref struct TriplePatternScan
         {
             var triple = _enumerator.Current;
 
-            bindings.Clear();
+            // Preserve initial bindings (from subquery join), only clear added bindings
+            bindings.TruncateTo(_initialBindingsCount);
 
             if (_isInverse)
             {
@@ -96,7 +99,7 @@ public ref struct TriplePatternScan
         if (_isZeroOrOne && !_emittedReflexive)
         {
             _emittedReflexive = true;
-            bindings.Clear();
+            bindings.TruncateTo(_initialBindingsCount);
 
             // Only emit reflexive if subject variable is bound or is concrete
             var subjectSpan = ResolveTermForQuery(_pattern.Subject);
@@ -130,7 +133,7 @@ public ref struct TriplePatternScan
                     _visited.Add(targetNode);
                     _frontier!.Enqueue(targetNode);
 
-                    bindings.Clear();
+                    bindings.TruncateTo(_initialBindingsCount);
                     if (TryBindVariable(_pattern.Subject, _source.Slice(_pattern.Subject.Start, _pattern.Subject.Length), ref bindings) &&
                         TryBindVariable(_pattern.Object, triple.Object, ref bindings))
                     {
@@ -214,9 +217,17 @@ public ref struct TriplePatternScan
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<char> ResolveTermForQuery(Term term)
     {
-        // Variables become wildcards (empty span)
         if (term.IsVariable)
+        {
+            // Check if variable is already bound in initial bindings
+            var varName = _source.Slice(term.Start, term.Length);
+            var idx = _initialBindings.FindBinding(varName);
+            if (idx >= 0)
+                return _initialBindings.GetString(idx);
+
+            // Unbound variable becomes wildcard (empty span)
             return ReadOnlySpan<char>.Empty;
+        }
 
         // IRIs and literals use their source text
         return _source.Slice(term.Start, term.Length);
@@ -868,5 +879,155 @@ public ref struct SubQueryScan
     {
         _innerScan.Dispose();
         _singleScan.Dispose();
+    }
+}
+
+/// <summary>
+/// Joins subquery results with outer triple patterns using nested loop join.
+/// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
+/// Subquery is the driving (outer) relation; outer patterns are filtered using bound variables.
+/// </summary>
+public ref struct SubQueryJoinScan
+{
+    private readonly TripleStore _store;
+    private readonly ReadOnlySpan<char> _source;
+    private readonly GraphPattern _pattern;
+    private readonly SubSelect _subSelect;
+
+    // Subquery execution state
+    private SubQueryScan _subQueryScan;
+    private Binding[] _subBindingStorage;
+    private char[] _subStringBuffer;
+    private BindingTable _subBindings;
+
+    // Outer pattern execution state
+    private MultiPatternScan _outerScan;
+    private TriplePatternScan _singleOuterScan;
+    private GraphPattern _outerPattern;
+    private bool _outerInitialized;
+    private bool _useMultiPattern;
+
+    // Current binding checkpoint for rollback
+    private int _bindingCheckpoint;
+
+    public SubQueryJoinScan(TripleStore store, ReadOnlySpan<char> source,
+        GraphPattern pattern, SubSelect subSelect)
+    {
+        _store = store;
+        _source = source;
+        _pattern = pattern;
+        _subSelect = subSelect;
+
+        // Initialize subquery state
+        _subQueryScan = new SubQueryScan(store, source, subSelect);
+        _subBindingStorage = new Binding[16];
+        _subStringBuffer = new char[512];
+        _subBindings = new BindingTable(_subBindingStorage, _subStringBuffer);
+
+        // Build outer pattern from non-subquery patterns
+        _outerPattern = new GraphPattern();
+        for (int i = 0; i < pattern.PatternCount; i++)
+        {
+            _outerPattern.AddPattern(pattern.GetPattern(i));
+        }
+        _useMultiPattern = _outerPattern.PatternCount > 1;
+
+        _outerScan = default;
+        _singleOuterScan = default;
+        _outerInitialized = false;
+        _bindingCheckpoint = 0;
+    }
+
+    public bool MoveNext(ref BindingTable bindings)
+    {
+        // If no outer patterns, just return subquery results directly
+        if (_outerPattern.PatternCount == 0)
+        {
+            if (!_subQueryScan.MoveNext(ref _subBindings))
+                return false;
+            CopySubQueryBindings(ref bindings);
+            return true;
+        }
+
+        while (true)
+        {
+            // Try to get next result from current outer pattern scan
+            if (_outerInitialized)
+            {
+                bool hasOuter;
+                if (_useMultiPattern)
+                    hasOuter = _outerScan.MoveNext(ref bindings);
+                else
+                    hasOuter = _singleOuterScan.MoveNext(ref bindings);
+
+                if (hasOuter)
+                {
+                    // We have a joined result: subquery bindings + outer pattern bindings
+                    return true;
+                }
+
+                // Outer patterns exhausted for this subquery row
+                // Reset for next subquery row
+                _outerInitialized = false;
+                if (_useMultiPattern)
+                    _outerScan.Dispose();
+                else
+                    _singleOuterScan.Dispose();
+                bindings.TruncateTo(_bindingCheckpoint);
+            }
+
+            // Get next subquery result
+            if (!_subQueryScan.MoveNext(ref _subBindings))
+            {
+                return false;
+            }
+
+            // Save checkpoint and copy subquery bindings to outer bindings
+            _bindingCheckpoint = bindings.Count;
+            CopySubQueryBindings(ref bindings);
+
+            // Initialize outer pattern scan with current bindings
+            InitializeOuterScan(ref bindings);
+            _outerInitialized = true;
+        }
+    }
+
+    private void CopySubQueryBindings(ref BindingTable bindings)
+    {
+        // Project subquery variables to outer binding table
+        for (int i = 0; i < _subBindings.Count; i++)
+        {
+            var hash = _subBindings.GetVariableHash(i);
+            var value = _subBindings.GetString(i);
+            bindings.BindWithHash(hash, value);
+        }
+        _subBindings.Clear();
+    }
+
+    private void InitializeOuterScan(ref BindingTable bindings)
+    {
+        if (_useMultiPattern)
+        {
+            // MultiPatternScan with initial bindings
+            // MultiPatternScan resolves variables from bindings in ResolveAndQuery
+            _outerScan = new MultiPatternScan(_store, _source, _outerPattern);
+        }
+        else if (_outerPattern.PatternCount == 1)
+        {
+            var tp = _outerPattern.GetPattern(0);
+            _singleOuterScan = new TriplePatternScan(_store, _source, tp, bindings);
+        }
+    }
+
+    public void Dispose()
+    {
+        _subQueryScan.Dispose();
+        if (_outerInitialized)
+        {
+            if (_useMultiPattern)
+                _outerScan.Dispose();
+            else
+                _singleOuterScan.Dispose();
+        }
     }
 }

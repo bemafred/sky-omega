@@ -79,6 +79,71 @@ public ref struct QueryResults
         return result;
     }
 
+    /// <summary>
+    /// Create QueryResults from pre-materialized rows.
+    /// Used for subquery joins where results are collected eagerly to avoid stack overflow.
+    /// </summary>
+    internal static QueryResults FromMaterialized(List<MaterializedRow> rows, GraphPattern pattern,
+        ReadOnlySpan<char> source, TripleStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    {
+        // If actual ORDER BY is specified, sort the materialized results
+        if (orderBy.HasOrderBy && rows.Count > 1)
+        {
+            var sourceStr = source.ToString();
+            rows.Sort((a, b) => CompareRowsStatic(a, b, orderBy, sourceStr));
+        }
+
+        return new QueryResults(rows, pattern, source, store, bindings, stringBuffer,
+            limit, offset, distinct, orderBy, groupBy, selectClause, having);
+    }
+
+    /// <summary>
+    /// Private constructor for pre-materialized results.
+    /// </summary>
+    private QueryResults(List<MaterializedRow> rows, GraphPattern pattern, ReadOnlySpan<char> source,
+        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    {
+        _pattern = pattern;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = false; // Filters already applied during materialization
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isVariableGraph = false;
+        _isSubQuery = false;
+        _isEmpty = rows.Count == 0;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
+        _sortedResults = rows;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
+    }
+
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
@@ -865,6 +930,9 @@ public ref struct QueryResults
 
         var unionPatternCount = _pattern.UnionBranchPatternCount;
         if (unionPatternCount == 0) return false;
+
+        // Clear bindings from first branch before starting union branch
+        _bindingTable.Clear();
 
         if (unionPatternCount == 1)
         {

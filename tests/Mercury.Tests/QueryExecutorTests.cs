@@ -3676,5 +3676,210 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void SubQuery_WithOuterPattern_JoinsCorrectly()
+    {
+        // Test subquery with outer pattern join
+        // Subquery finds persons with names, outer pattern gets their ages
+        var query = @"SELECT ?person ?age WHERE {
+            ?person <http://xmlns.com/foaf/0.1/age> ?age .
+            { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var resultList = new List<(string person, string age)>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(personIdx >= 0, "Should have ?person binding");
+                Assert.True(ageIdx >= 0, "Should have ?age binding");
+
+                resultList.Add((
+                    results.Current.GetString(personIdx).ToString(),
+                    results.Current.GetString(ageIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // All three persons have both name and age
+            Assert.Equal(3, resultList.Count);
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Alice>" && r.age == "30");
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Bob>" && r.age == "25");
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Charlie>" && r.age == "35");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_WithOuterPatternFilter_FiltersAfterJoin()
+    {
+        // Test filter on outer pattern variables after join
+        var query = @"SELECT ?person ?age WHERE {
+            ?person <http://xmlns.com/foaf/0.1/age> ?age .
+            { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } }
+            FILTER(?age > 28)
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var resultList = new List<(string person, string age)>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+
+                resultList.Add((
+                    results.Current.GetString(personIdx).ToString(),
+                    results.Current.GetString(ageIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Only Alice (30) and Charlie (35) have age > 28
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Alice>");
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Charlie>");
+            Assert.DoesNotContain(resultList, r => r.person == "<http://example.org/Bob>");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_JoinWithSubqueryFilter_RespectsSubqueryFilter()
+    {
+        // Test that subquery filter is respected, then outer join is applied
+        var query = @"SELECT ?person ?age WHERE {
+            ?person <http://xmlns.com/foaf/0.1/age> ?age .
+            { SELECT ?person WHERE {
+                ?person <http://xmlns.com/foaf/0.1/name> ?name
+                FILTER(CONTAINS(?name, ""ob""))
+            } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var resultList = new List<string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                resultList.Add(results.Current.GetString(personIdx).ToString());
+            }
+            results.Dispose();
+
+            // Only Bob's name contains "ob"
+            Assert.Single(resultList);
+            Assert.Equal("<http://example.org/Bob>", resultList[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_EmptySubquery_ReturnsEmpty()
+    {
+        // Test that empty subquery results in empty outer results
+        var query = @"SELECT ?person ?age WHERE {
+            ?person <http://xmlns.com/foaf/0.1/age> ?age .
+            { SELECT ?person WHERE {
+                ?person <http://xmlns.com/foaf/0.1/name> ""NonExistent""
+            } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_MultipleOuterPatterns_JoinsAll()
+    {
+        // Test with multiple outer patterns
+        var query = @"SELECT ?person ?name ?age WHERE {
+            ?person <http://xmlns.com/foaf/0.1/name> ?name .
+            ?person <http://xmlns.com/foaf/0.1/age> ?age .
+            { SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/knows> ?other } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var resultList = new List<(string person, string name, string age)>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+
+                resultList.Add((
+                    results.Current.GetString(personIdx).ToString(),
+                    results.Current.GetString(nameIdx).ToString(),
+                    results.Current.GetString(ageIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Only Alice knows someone
+            Assert.Single(resultList);
+            Assert.Equal("<http://example.org/Alice>", resultList[0].person);
+            Assert.Equal("\"Alice\"", resultList[0].name);
+            Assert.Equal("30", resultList[0].age);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

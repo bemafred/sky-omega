@@ -807,6 +807,13 @@ public ref struct SparqlParser
                 continue;
             }
 
+            // Check for nested group { ... } which might be a subquery or UNION
+            if (Peek() == '{')
+            {
+                ParseNestedGroupGraphPattern(ref pattern);
+                continue;
+            }
+
             // Try to parse a triple pattern
             if (!TryParseTriplePattern(ref pattern))
                 break;

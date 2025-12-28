@@ -366,11 +366,77 @@ public ref struct QueryExecutor
         // For now, just execute the subquery directly
         if (pattern.PatternCount > 0)
         {
-            // TODO: Join outer patterns with subquery results
-            // For now, return just the subquery results
+            // Execute join using SubQueryJoinScan
+            // Note: This scan needs to be consumed before QueryResults to avoid stack overflow
+            // due to ref struct size. We collect results eagerly then return a MultiPatternScan.
+            return ExecuteSubQueryJoin(pattern, subSelect, bindings, stringBuffer,
+                limit, offset, distinct, orderBy, groupBy, selectClause, having);
         }
 
         return new QueryResults(subQueryScan, pattern, _source, _store, bindings, stringBuffer,
             limit, offset, distinct, orderBy, groupBy, selectClause, having);
+    }
+
+    /// <summary>
+    /// Execute a subquery join by collecting results eagerly to avoid stack overflow from nested ref structs.
+    /// </summary>
+    private QueryResults ExecuteSubQueryJoin(GraphPattern pattern, SubSelect subSelect,
+        Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    {
+        // Build outer pattern (without the subquery)
+        var outerPattern = new GraphPattern();
+        for (int i = 0; i < pattern.PatternCount; i++)
+        {
+            outerPattern.AddPattern(pattern.GetPattern(i));
+        }
+
+        // Execute the join and collect all results
+        var results = new System.Collections.Generic.List<MaterializedRow>();
+
+        var joinBindings = new Binding[16];
+        var joinStringBuffer = new char[1024];
+        var bindingTable = new BindingTable(joinBindings, joinStringBuffer);
+
+        var hasFilters = pattern.FilterCount > 0;
+
+        var joinScan = new SubQueryJoinScan(_store, _source, pattern, subSelect);
+        while (joinScan.MoveNext(ref bindingTable))
+        {
+            // Apply outer FILTER clauses
+            if (hasFilters)
+            {
+                bool passesFilters = true;
+                for (int i = 0; i < pattern.FilterCount; i++)
+                {
+                    var filter = pattern.GetFilter(i);
+                    var filterExpr = _source.Slice(filter.Start, filter.Length);
+                    var evaluator = new FilterEvaluator(filterExpr);
+                    if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                    {
+                        passesFilters = false;
+                        break;
+                    }
+                }
+                if (!passesFilters)
+                {
+                    bindingTable.Clear();
+                    continue;
+                }
+            }
+
+            // Materialize this row
+            results.Add(new MaterializedRow(bindingTable));
+            bindingTable.Clear();
+        }
+        joinScan.Dispose();
+
+        if (results.Count == 0)
+            return QueryResults.Empty();
+
+        // Return via materialized results
+        return QueryResults.FromMaterialized(results, outerPattern, _source, _store,
+            bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
     }
 }
