@@ -33,6 +33,8 @@ public ref struct QueryExecutor
     public QueryResults Execute()
     {
         var pattern = _query.WhereClause.Pattern;
+        var limit = _query.SolutionModifier.Limit;
+        var offset = _query.SolutionModifier.Offset;
 
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
@@ -51,17 +53,18 @@ public ref struct QueryExecutor
             // Apply filters if any
             if (pattern.FilterCount > 0)
             {
-                return new QueryResults(scan, pattern, _source, bindings, stringBuffer);
+                return new QueryResults(scan, pattern, _source, bindings, stringBuffer, limit, offset);
             }
 
-            return new QueryResults(scan, bindings, stringBuffer);
+            return new QueryResults(scan, bindings, stringBuffer, limit, offset);
         }
 
         // Multiple patterns - need join
-        return ExecuteWithJoins(pattern, bindings, stringBuffer);
+        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset);
     }
 
-    private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer)
+    private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset)
     {
         // For now, use nested loop join for all patterns
         // Future: optimize join order based on selectivity
@@ -70,7 +73,9 @@ public ref struct QueryExecutor
             pattern,
             _source,
             bindings,
-            stringBuffer);
+            stringBuffer,
+            limit,
+            offset);
     }
 }
 
@@ -91,6 +96,12 @@ public ref struct QueryResults
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
+    // LIMIT/OFFSET support
+    private readonly int _limit;
+    private readonly int _offset;
+    private int _skipped;
+    private int _returned;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -98,7 +109,8 @@ public ref struct QueryResults
         return result;
     }
 
-    internal QueryResults(TriplePatternScan scan, Binding[] bindings, char[] stringBuffer)
+    internal QueryResults(TriplePatternScan scan, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0)
     {
         _singleScan = scan;
         _bindings = bindings;
@@ -107,10 +119,14 @@ public ref struct QueryResults
         _hasFilters = false;
         _isMultiPattern = false;
         _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
     }
 
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        Binding[] bindings, char[] stringBuffer)
+        Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
     {
         _singleScan = scan;
         _pattern = pattern;
@@ -121,10 +137,14 @@ public ref struct QueryResults
         _hasFilters = pattern.FilterCount > 0;
         _isMultiPattern = false;
         _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        Binding[] bindings, char[] stringBuffer)
+        Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0)
     {
         _multiScan = scan;
         _pattern = pattern;
@@ -135,6 +155,10 @@ public ref struct QueryResults
         _hasFilters = pattern.FilterCount > 0;
         _isMultiPattern = true;
         _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
     }
 
     /// <summary>
@@ -148,6 +172,10 @@ public ref struct QueryResults
     public bool MoveNext()
     {
         if (_isEmpty) return false;
+
+        // Check if we've hit the limit
+        if (_limit > 0 && _returned >= _limit)
+            return false;
 
         while (true)
         {
@@ -174,6 +202,15 @@ public ref struct QueryResults
                 }
             }
 
+            // Apply OFFSET - skip results until we've skipped enough
+            if (_skipped < _offset)
+            {
+                _skipped++;
+                _bindingTable.Clear();
+                continue;
+            }
+
+            _returned++;
             return true;
         }
     }

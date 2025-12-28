@@ -315,4 +315,193 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    [Fact]
+    public void Execute_WithLimit_LimitsResults()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o } LIMIT 3";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify LIMIT was parsed
+        Assert.Equal(3, parsedQuery.SolutionModifier.Limit);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Should return exactly 3 results even though there are 7 triples
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_WithOffset_SkipsResults()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o } OFFSET 5";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify OFFSET was parsed
+        Assert.Equal(5, parsedQuery.SolutionModifier.Offset);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Should skip 5 and return 2 (7 total - 5 skipped)
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_WithLimitAndOffset_CombinesCorrectly()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o } LIMIT 2 OFFSET 3";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify both were parsed
+        Assert.Equal(2, parsedQuery.SolutionModifier.Limit);
+        Assert.Equal(3, parsedQuery.SolutionModifier.Offset);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Skip 3, then take 2 (7 total, skip 3 = 4 remaining, limit 2 = 2)
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OffsetExceedsResults_ReturnsEmpty()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o } OFFSET 100";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Offset exceeds total results
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_LimitWithFilter_AppliesAfterFilter()
+    {
+        // Find people older than 25, but limit to 1
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age > 25) } LIMIT 1";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Alice (30) and Charlie (35) match filter, but limit to 1
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_LimitZero_ReturnsAllResults()
+    {
+        // LIMIT 0 means no limit (return all)
+        var query = "SELECT * WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify no limit was set
+        Assert.Equal(0, parsedQuery.SolutionModifier.Limit);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // All 7 triples
+            Assert.Equal(7, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }
