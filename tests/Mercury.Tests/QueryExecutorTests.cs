@@ -2524,4 +2524,180 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== EXISTS/NOT EXISTS Tests ==========
+
+    [Fact]
+    public void Execute_ExistsFilter_ReturnsMatchingRows()
+    {
+        // Find people who know someone
+        var query = "SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER EXISTS { ?person <http://xmlns.com/foaf/0.1/knows> ?other } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify EXISTS was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ExistsFilterCount);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice knows someone (Alice knows Bob)
+            Assert.Single(persons);
+            Assert.Contains("<http://example.org/Alice>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NotExistsFilter_ReturnsNonMatchingRows()
+    {
+        // Find people who don't know anyone
+        var query = "SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER NOT EXISTS { ?person <http://xmlns.com/foaf/0.1/knows> ?other } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify NOT EXISTS was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
+        var existsFilter = parsedQuery.WhereClause.Pattern.GetExistsFilter(0);
+        Assert.True(existsFilter.Negated);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Bob and Charlie don't know anyone
+            Assert.Equal(2, persons.Count);
+            Assert.Contains("<http://example.org/Bob>", persons);
+            Assert.Contains("<http://example.org/Charlie>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ExistsWithBoundVariable()
+    {
+        // EXISTS with variable bound from outer pattern
+        var query = "SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER EXISTS { ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                Assert.True(idx >= 0);
+                names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // All people have ages, so all should match EXISTS
+            Assert.Equal(3, names.Count);
+            Assert.Contains("\"Alice\"", names);
+            Assert.Contains("\"Bob\"", names);
+            Assert.Contains("\"Charlie\"", names);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NotExistsExcludesAll()
+    {
+        // NOT EXISTS that matches nothing (everyone has a name)
+        var query = "SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER NOT EXISTS { ?person <http://xmlns.com/foaf/0.1/name> ?name } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Everyone has a name, so NOT EXISTS excludes all
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ExistsWithConstant()
+    {
+        // EXISTS checking for a specific relationship
+        var query = "SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER EXISTS { ?person <http://xmlns.com/foaf/0.1/knows> <http://example.org/Bob> } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice knows Bob
+            Assert.Single(persons);
+            Assert.Contains("<http://example.org/Alice>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

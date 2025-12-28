@@ -676,6 +676,28 @@ public ref struct SparqlParser
         ConsumeKeyword("FILTER");
         SkipWhitespace();
 
+        // Check for EXISTS or NOT EXISTS
+        var span = PeekSpan(10);
+        bool negated = false;
+
+        if (span.Length >= 3 && span[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("NOT");
+            SkipWhitespace();
+            span = PeekSpan(6);
+            negated = true;
+        }
+
+        if (span.Length >= 6 && span[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("EXISTS");
+            SkipWhitespace();
+            ParseExistsFilter(ref pattern, negated);
+            return;
+        }
+
+        // If we consumed NOT but no EXISTS, it's an error - but for now just continue
+        // Regular filter expression
         var start = _position;
 
         // FILTER can be: FILTER(expr) or FILTER expr
@@ -693,6 +715,71 @@ public ref struct SparqlParser
             var length = _position - start - 1; // Exclude closing ')'
             pattern.AddFilter(new FilterExpr { Start = start, Length = length });
         }
+    }
+
+    /// <summary>
+    /// Parse EXISTS or NOT EXISTS filter: [NOT] EXISTS { pattern }
+    /// </summary>
+    private void ParseExistsFilter(ref GraphPattern pattern, bool negated)
+    {
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        var existsFilter = new ExistsFilter { Negated = negated };
+
+        // Parse triple patterns inside the EXISTS block
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Try to parse a triple pattern
+            if (!TryParseExistsTriplePattern(ref existsFilter))
+                break;
+
+            SkipWhitespace();
+
+            // Skip optional '.'
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        pattern.AddExistsFilter(existsFilter);
+    }
+
+    /// <summary>
+    /// Parse a triple pattern inside an EXISTS block.
+    /// </summary>
+    private bool TryParseExistsTriplePattern(ref ExistsFilter filter)
+    {
+        SkipWhitespace();
+
+        if (IsAtEnd() || Peek() == '}')
+            return false;
+
+        var subject = ParseTerm();
+        if (subject.Type == TermType.Variable && subject.Length == 0)
+            return false;
+
+        SkipWhitespace();
+        var predicate = ParseTerm();
+        SkipWhitespace();
+        var obj = ParseTerm();
+
+        filter.AddPattern(new TriplePattern
+        {
+            Subject = subject,
+            Predicate = predicate,
+            Object = obj
+        });
+
+        return true;
     }
 
     /// <summary>
@@ -1697,11 +1784,13 @@ public struct GraphPattern
     public const int MaxFilters = 16;
     public const int MaxBinds = 8;
     public const int MaxMinusPatterns = 8;
+    public const int MaxExistsFilters = 4;
 
     private int _patternCount;
     private int _filterCount;
     private int _bindCount;
     private int _minusPatternCount;
+    private int _existsFilterCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
     private int _unionStartIndex; // If > 0, patterns from this index are the UNION branch
 
@@ -1721,6 +1810,9 @@ public struct GraphPattern
     // Inline storage for MINUS patterns (8 * 24 bytes = 192 bytes)
     private TriplePattern _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7;
 
+    // Inline storage for EXISTS/NOT EXISTS filters (4 * ~100 bytes)
+    private ExistsFilter _e0, _e1, _e2, _e3;
+
     // VALUES clause storage
     private ValuesClause _values;
 
@@ -1728,8 +1820,10 @@ public struct GraphPattern
     public readonly int FilterCount => _filterCount;
     public readonly int BindCount => _bindCount;
     public readonly int MinusPatternCount => _minusPatternCount;
+    public readonly int ExistsFilterCount => _existsFilterCount;
     public readonly bool HasBinds => _bindCount > 0;
     public readonly bool HasMinus => _minusPatternCount > 0;
+    public readonly bool HasExists => _existsFilterCount > 0;
     public readonly bool HasValues => _values.HasValues;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
     public readonly bool HasUnion => _unionStartIndex > 0;
@@ -1924,6 +2018,35 @@ public struct GraphPattern
         }
     }
 
+    public void AddExistsFilter(ExistsFilter filter)
+    {
+        if (_existsFilterCount >= MaxExistsFilters) return;
+        SetExistsFilter(_existsFilterCount++, filter);
+    }
+
+    public readonly ExistsFilter GetExistsFilter(int index)
+    {
+        return index switch
+        {
+            0 => _e0,
+            1 => _e1,
+            2 => _e2,
+            3 => _e3,
+            _ => default
+        };
+    }
+
+    private void SetExistsFilter(int index, ExistsFilter filter)
+    {
+        switch (index)
+        {
+            case 0: _e0 = filter; break;
+            case 1: _e1 = filter; break;
+            case 2: _e2 = filter; break;
+            case 3: _e3 = filter; break;
+        }
+    }
+
     public void SetValues(ValuesClause values)
     {
         _values = values;
@@ -1986,6 +2109,49 @@ public struct FilterExpr
 {
     public int Start;   // Offset into source (after "FILTER")
     public int Length;  // Length of expression
+}
+
+/// <summary>
+/// An EXISTS or NOT EXISTS filter: FILTER [NOT] EXISTS { pattern }
+/// Stores the pattern for later evaluation against the store.
+/// </summary>
+public struct ExistsFilter
+{
+    public const int MaxPatterns = 4;
+
+    public bool Negated;         // true for NOT EXISTS, false for EXISTS
+    private int _patternCount;
+
+    // Inline storage for up to 4 triple patterns
+    private TriplePattern _p0, _p1, _p2, _p3;
+
+    public readonly int PatternCount => _patternCount;
+    public readonly bool HasPatterns => _patternCount > 0;
+
+    public void AddPattern(TriplePattern pattern)
+    {
+        if (_patternCount >= MaxPatterns) return;
+        switch (_patternCount)
+        {
+            case 0: _p0 = pattern; break;
+            case 1: _p1 = pattern; break;
+            case 2: _p2 = pattern; break;
+            case 3: _p3 = pattern; break;
+        }
+        _patternCount++;
+    }
+
+    public readonly TriplePattern GetPattern(int index)
+    {
+        return index switch
+        {
+            0 => _p0,
+            1 => _p1,
+            2 => _p2,
+            3 => _p3,
+            _ => default
+        };
+    }
 }
 
 /// <summary>

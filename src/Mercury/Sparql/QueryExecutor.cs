@@ -263,6 +263,9 @@ public ref struct QueryResults
     // VALUES support
     private readonly bool _hasValues;
 
+    // EXISTS/NOT EXISTS support
+    private readonly bool _hasExists;
+
     // GROUP BY support
     private readonly bool _hasGroupBy;
     private readonly GroupByClause _groupBy;
@@ -312,6 +315,7 @@ public ref struct QueryResults
         _hasBinds = pattern.HasBinds;
         _hasMinus = pattern.HasMinus;
         _hasValues = pattern.HasValues;
+        _hasExists = pattern.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
         _hasGroupBy = groupBy.HasGroupBy;
@@ -352,6 +356,7 @@ public ref struct QueryResults
         _hasBinds = pattern.HasBinds;
         _hasMinus = pattern.HasMinus;
         _hasValues = pattern.HasValues;
+        _hasExists = pattern.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
         _hasGroupBy = groupBy.HasGroupBy;
@@ -549,6 +554,13 @@ public ref struct QueryResults
             }
 
             if (_hasFilters && !EvaluateFilters())
+            {
+                _bindingTable.Clear();
+                continue;
+            }
+
+            // Apply EXISTS/NOT EXISTS filters
+            if (_hasExists && !EvaluateExistsFilters())
             {
                 _bindingTable.Clear();
                 continue;
@@ -776,6 +788,16 @@ public ref struct QueryResults
                 }
             }
 
+            // Apply EXISTS/NOT EXISTS filters
+            if (_hasExists)
+            {
+                if (!EvaluateExistsFilters())
+                {
+                    _bindingTable.Clear();
+                    continue; // EXISTS condition failed
+                }
+            }
+
             // Apply MINUS - exclude matching rows
             if (_hasMinus)
             {
@@ -976,6 +998,94 @@ public ref struct QueryResults
             if (!result) return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Evaluate all EXISTS/NOT EXISTS filters.
+    /// Returns true if all filters pass, false if any filter fails.
+    /// </summary>
+    private bool EvaluateExistsFilters()
+    {
+        if (_store == null) return true;
+
+        for (int i = 0; i < _pattern.ExistsFilterCount; i++)
+        {
+            var existsFilter = _pattern.GetExistsFilter(i);
+            var matches = EvaluateExistsPattern(existsFilter);
+
+            // EXISTS: must match at least once
+            // NOT EXISTS: must not match at all
+            if (existsFilter.Negated)
+            {
+                if (matches) return false; // NOT EXISTS failed - found a match
+            }
+            else
+            {
+                if (!matches) return false; // EXISTS failed - no match found
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Check if an EXISTS pattern has at least one match with current bindings.
+    /// </summary>
+    private bool EvaluateExistsPattern(ExistsFilter existsFilter)
+    {
+        if (_store == null || existsFilter.PatternCount == 0)
+            return false;
+
+        // For each pattern, substitute bound variables and query the store
+        // All patterns must match for EXISTS to succeed (conjunction)
+        for (int p = 0; p < existsFilter.PatternCount; p++)
+        {
+            var pattern = existsFilter.GetPattern(p);
+
+            // Resolve terms - use bound values for variables
+            var subject = ResolveExistsTerm(pattern.Subject);
+            var predicate = ResolveExistsTerm(pattern.Predicate);
+            var obj = ResolveExistsTerm(pattern.Object);
+
+            // Query the store
+            var results = _store.QueryCurrent(subject, predicate, obj);
+            try
+            {
+                if (!results.MoveNext())
+                    return false; // No match for this pattern
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+
+        return true; // All patterns matched
+    }
+
+    /// <summary>
+    /// Resolve a term for EXISTS evaluation.
+    /// Variables are substituted with bound values, constants use source text.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveExistsTerm(Term term)
+    {
+        if (!term.IsVariable)
+        {
+            // Constant - use source text
+            return _source.Slice(term.Start, term.Length);
+        }
+
+        // Variable - check if bound
+        var varName = _source.Slice(term.Start, term.Length);
+        var idx = _bindingTable.FindBinding(varName);
+        if (idx >= 0)
+        {
+            // Use bound value
+            return _bindingTable.GetString(idx);
+        }
+
+        // Unbound variable - use wildcard (empty span)
+        return ReadOnlySpan<char>.Empty;
     }
 
     /// <summary>
