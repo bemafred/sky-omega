@@ -523,6 +523,18 @@ public ref struct FilterEvaluator
             return ParseSameTermFunction();
         }
 
+        // Handle STRBEFORE - substring before delimiter
+        if (funcName.Equals("strbefore", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStrBeforeFunction();
+        }
+
+        // Handle STRAFTER - substring after delimiter
+        if (funcName.Equals("strafter", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseStrAfterFunction();
+        }
+
         // Parse first argument for single-arg functions
         var arg1 = ParseTerm();
 
@@ -1140,6 +1152,108 @@ public ref struct FilterEvaluator
         };
 
         return new Value { Type = ValueType.Boolean, BooleanValue = same };
+    }
+
+    /// <summary>
+    /// Parse STRBEFORE(string, delimiter) - returns substring before first occurrence of delimiter
+    /// Returns empty string if delimiter not found
+    /// </summary>
+    private Value ParseStrBeforeFunction()
+    {
+        var stringArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var delimiterArg = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        if ((stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri) ||
+            (delimiterArg.Type != ValueType.String && delimiterArg.Type != ValueType.Uri))
+        {
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        var str = stringArg.StringValue;
+        var delimiter = delimiterArg.StringValue;
+
+        // Empty delimiter returns empty string
+        if (delimiter.IsEmpty)
+        {
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        var index = str.IndexOf(delimiter);
+        if (index < 0)
+        {
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        return new Value
+        {
+            Type = ValueType.String,
+            StringValue = str.Slice(0, index)
+        };
+    }
+
+    /// <summary>
+    /// Parse STRAFTER(string, delimiter) - returns substring after first occurrence of delimiter
+    /// Returns empty string if delimiter not found
+    /// </summary>
+    private Value ParseStrAfterFunction()
+    {
+        var stringArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var delimiterArg = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        if ((stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri) ||
+            (delimiterArg.Type != ValueType.String && delimiterArg.Type != ValueType.Uri))
+        {
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        var str = stringArg.StringValue;
+        var delimiter = delimiterArg.StringValue;
+
+        // Empty delimiter returns full string (per SPARQL spec)
+        if (delimiter.IsEmpty)
+        {
+            return new Value { Type = ValueType.String, StringValue = str };
+        }
+
+        var index = str.IndexOf(delimiter);
+        if (index < 0)
+        {
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        return new Value
+        {
+            Type = ValueType.String,
+            StringValue = str.Slice(index + delimiter.Length)
+        };
     }
 
     /// <summary>

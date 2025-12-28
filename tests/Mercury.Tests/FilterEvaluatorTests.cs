@@ -1721,4 +1721,84 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region STRBEFORE Function
+
+    [Fact]
+    public void StrBefore_BasicMatch_ReturnsSubstringBefore()
+    {
+        Assert.True(EvaluateWithStringBinding("STRBEFORE(?x, \"/\") == \"http:\"", "?x", "http://example.org/path"));
+    }
+
+    [Fact]
+    public void StrBefore_DelimiterNotFound_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("STRBEFORE(?x, \"xyz\") == \"\"", "?x", "hello world"));
+    }
+
+    [Fact]
+    public void StrBefore_MultipleOccurrences_ReturnsBeforeFirst()
+    {
+        Assert.True(EvaluateWithStringBinding("STRBEFORE(?x, \"-\") == \"a\"", "?x", "a-b-c-d"));
+    }
+
+    [Fact]
+    public void StrBefore_DelimiterAtStart_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("STRBEFORE(?x, \"/\") == \"\"", "?x", "/path/to/file"));
+    }
+
+    [Fact]
+    public void StrBefore_EmptyDelimiter_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("STRBEFORE(?x, \"\") == \"\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void StrBefore_MultiCharDelimiter_Works()
+    {
+        Assert.True(EvaluateWithStringBinding("STRBEFORE(?x, \"::\") == \"foo\"", "?x", "foo::bar::baz"));
+    }
+
+    #endregion
+
+    #region STRAFTER Function
+
+    [Fact]
+    public void StrAfter_BasicMatch_ReturnsSubstringAfter()
+    {
+        Assert.True(EvaluateWithStringBinding("STRAFTER(?x, \"://\") == \"example.org/path\"", "?x", "http://example.org/path"));
+    }
+
+    [Fact]
+    public void StrAfter_DelimiterNotFound_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("STRAFTER(?x, \"xyz\") == \"\"", "?x", "hello world"));
+    }
+
+    [Fact]
+    public void StrAfter_MultipleOccurrences_ReturnsAfterFirst()
+    {
+        Assert.True(EvaluateWithStringBinding("STRAFTER(?x, \"-\") == \"b-c-d\"", "?x", "a-b-c-d"));
+    }
+
+    [Fact]
+    public void StrAfter_DelimiterAtEnd_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("STRAFTER(?x, \"/\") == \"\"", "?x", "path/"));
+    }
+
+    [Fact]
+    public void StrAfter_EmptyDelimiter_ReturnsFullString()
+    {
+        Assert.True(EvaluateWithStringBinding("STRAFTER(?x, \"\") == \"hello\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void StrAfter_MultiCharDelimiter_Works()
+    {
+        Assert.True(EvaluateWithStringBinding("STRAFTER(?x, \"::\") == \"bar::baz\"", "?x", "foo::bar::baz"));
+    }
+
+    #endregion
 }
