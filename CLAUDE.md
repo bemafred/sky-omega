@@ -81,8 +81,8 @@ For the vision, methodology (EEE), and broader context, see [docs/sky-omega-conv
 
 | Component | Purpose |
 |-----------|---------|
-| `TripleStore` | Multi-index RDF store (SPOT/POST/OSPT/TSPO) |
-| `TripleIndex` | Single B+Tree index with bitemporal support |
+| `TripleStore` | Multi-index quad store (GSPO ordering) with named graph support |
+| `TripleIndex` | Single B+Tree index with bitemporal + graph support |
 | `AtomStore` | String interning with memory-mapped storage |
 | `PageCache` | LRU cache for B+Tree pages (clock algorithm) |
 
@@ -132,6 +132,31 @@ catch
 - `AddBatched()`/`AddCurrentBatched()` write to WAL without fsync
 - `CommitBatch()` performs single fsync, releases lock
 - `RollbackBatch()` releases lock without committing (in-memory changes persist but WAL uncommitted)
+
+### Named Graphs (Quads)
+
+TripleStore supports RDF named graphs for domain isolation. Each triple can belong to a named graph or the default graph:
+
+```csharp
+// Add to named graph
+store.AddCurrent(subject, predicate, obj, "<http://example.org/graph1>");
+
+// Add to default graph (no graph parameter)
+store.AddCurrent(subject, predicate, obj);
+
+// Query specific named graph
+var results = store.QueryCurrent(subject, predicate, obj, "<http://example.org/graph1>");
+
+// Query default graph (no graph parameter)
+var results = store.QueryCurrent(subject, predicate, obj);
+```
+
+**Design notes:**
+- **GSPO ordering**: B+Tree keys are ordered by Graph first, enabling efficient graph-scoped queries
+- **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
+- **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + ValidFrom + ValidTo + TransactionTime)
+- **WAL record**: 72 bytes (includes GraphId for crash recovery)
+- All Add/Delete/Query methods accept optional `graph` parameter
 
 ### Concurrency Design
 
@@ -191,14 +216,15 @@ Query results use pooled buffers. Call `Dispose()` to return buffers:
 store.AcquireReadLock();
 try
 {
-    var results = store.QueryCurrent(subject, predicate, obj);
+    var results = store.QueryCurrent(subject, predicate, obj, graph);
     try
     {
         while (results.MoveNext())
         {
             var triple = results.Current;
             // Spans valid until next MoveNext()
-            ProcessTriple(triple.Subject, triple.Predicate, triple.Object);
+            // triple.Graph is empty for default graph, otherwise the graph IRI
+            ProcessTriple(triple.Graph, triple.Subject, triple.Predicate, triple.Object);
         }
     }
     finally
