@@ -3004,4 +3004,182 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    #region GRAPH Clause Execution
+
+    [Fact]
+    public void Execute_GraphClause_QueriesNamedGraph()
+    {
+        // Add data to a named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/name>", "\"David\"", "<http://example.org/graph1>");
+        _store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/graph1>");
+        _store.CommitBatch();
+
+        var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // David has 2 triples in graph1
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GraphClause_DoesNotQueryDefaultGraph()
+    {
+        // Add data to a named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Eve>", "<http://xmlns.com/foaf/0.1/name>", "\"Eve\"", "<http://example.org/graph2>");
+        _store.CommitBatch();
+
+        // Query default graph - should NOT find Eve
+        var query = "SELECT * WHERE { <http://example.org/Eve> ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Eve is in graph2, not default graph
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GraphClause_BindsVariables()
+    {
+        // Add data to a named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Frank>", "<http://xmlns.com/foaf/0.1/name>", "\"Frank\"", "<http://example.org/graph3>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?name WHERE { GRAPH <http://example.org/graph3> { <http://example.org/Frank> <http://xmlns.com/foaf/0.1/name> ?name } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?name".AsSpan());
+                if (idx >= 0)
+                    names.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            Assert.Single(names);
+            Assert.Equal("\"Frank\"", names[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GraphClause_MultiplePatterns()
+    {
+        // Add data to a named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/name>", "\"Grace\"", "<http://example.org/graph4>");
+        _store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/age>", "28", "<http://example.org/graph4>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?name ?age WHERE { GRAPH <http://example.org/graph4> { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(nameIdx >= 0);
+                Assert.True(ageIdx >= 0);
+                Assert.Equal("\"Grace\"", results.Current.GetString(nameIdx).ToString());
+                Assert.Equal("28", results.Current.GetString(ageIdx).ToString());
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GraphClause_NonExistentGraph_ReturnsEmpty()
+    {
+        var query = "SELECT * WHERE { GRAPH <http://example.org/nonexistent> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }

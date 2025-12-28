@@ -42,6 +42,13 @@ public ref struct QueryExecutor
         var having = _query.SolutionModifier.Having;
         var selectClause = _query.SelectClause;
 
+        // Check for GRAPH clauses
+        if (pattern.HasGraph && pattern.PatternCount == 0)
+        {
+            // Only GRAPH clause(s), no default graph patterns
+            return ExecuteGraphClauses(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        }
+
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
 
@@ -245,6 +252,68 @@ public ref struct QueryExecutor
         // Use nested loop join for required patterns only
         return new QueryResults(
             new MultiPatternScan(_store, _source, pattern),
+            pattern,
+            _source,
+            _store,
+            bindings,
+            stringBuffer,
+            limit,
+            offset,
+            distinct,
+            orderBy,
+            groupBy,
+            selectClause,
+            having);
+    }
+
+    /// <summary>
+    /// Execute a query with only GRAPH clauses (no default graph patterns).
+    /// For queries like: SELECT * WHERE { GRAPH &lt;g&gt; { ?s ?p ?o } }
+    /// </summary>
+    private QueryResults ExecuteGraphClauses(GraphPattern pattern,
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    {
+        // For now, handle single GRAPH clause with IRI (not variable)
+        if (pattern.GraphClauseCount != 1)
+            return QueryResults.Empty(); // Multiple GRAPH clauses need join - not yet supported
+
+        var graphClause = pattern.GetGraphClause(0);
+        if (graphClause.IsVariable)
+            return QueryResults.Empty(); // Variable graph needs graph enumeration - not yet supported
+
+        // Get the graph IRI
+        var graphIri = _source.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
+
+        // Build binding storage
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        var patternCount = graphClause.PatternCount;
+        if (patternCount == 0)
+            return QueryResults.Empty();
+
+        // Single pattern in GRAPH clause
+        if (patternCount == 1)
+        {
+            var tp = graphClause.GetPattern(0);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
+
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+                limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        }
+
+        // Multiple patterns in GRAPH clause - need join with graph constraint
+        // Create a temporary GraphPattern from the GraphClause patterns
+        var graphPattern = new GraphPattern();
+        for (int i = 0; i < patternCount; i++)
+        {
+            graphPattern.AddPattern(graphClause.GetPattern(i));
+        }
+
+        return new QueryResults(
+            new MultiPatternScan(_store, _source, graphPattern, false, graphIri),
             pattern,
             _source,
             _store,
@@ -1869,6 +1938,7 @@ public ref struct TriplePatternScan
     private TemporalResultEnumerator _enumerator;
     private bool _initialized;
     private readonly BindingTable _initialBindings;
+    private readonly ReadOnlySpan<char> _graph;
 
     // For property path traversal
     private readonly bool _isInverse;
@@ -1883,12 +1953,13 @@ public ref struct TriplePatternScan
     private bool _emittedReflexive;
 
     public TriplePatternScan(TripleStore store, ReadOnlySpan<char> source,
-        TriplePattern pattern, BindingTable initialBindings)
+        TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
     {
         _store = store;
         _source = source;
         _pattern = pattern;
         _initialBindings = initialBindings;
+        _graph = graph;
         _initialized = false;
         _enumerator = default;
 
@@ -2006,7 +2077,8 @@ public ref struct TriplePatternScan
             _enumerator = _store.QueryCurrent(
                 _currentNode.AsSpan(),
                 predicate,
-                ReadOnlySpan<char>.Empty);
+                ReadOnlySpan<char>.Empty,
+                _graph);
         }
     }
 
@@ -2027,12 +2099,12 @@ public ref struct TriplePatternScan
         {
             // For inverse path, query with swapped subject/object
             predicate = ResolveTermForQuery(_pattern.Path.Iri);
-            _enumerator = _store.QueryCurrent(obj, predicate, subject);
+            _enumerator = _store.QueryCurrent(obj, predicate, subject, _graph);
         }
         else
         {
             predicate = ResolveTermForQuery(_pattern.Predicate);
-            _enumerator = _store.QueryCurrent(subject, predicate, obj);
+            _enumerator = _store.QueryCurrent(subject, predicate, obj, _graph);
         }
     }
 
@@ -2060,7 +2132,8 @@ public ref struct TriplePatternScan
         _enumerator = _store.QueryCurrent(
             startNode.AsSpan(),
             predicate,
-            ReadOnlySpan<char>.Empty);
+            ReadOnlySpan<char>.Empty,
+            _graph);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2116,6 +2189,7 @@ public ref struct MultiPatternScan
     private readonly ReadOnlySpan<char> _source;
     private readonly GraphPattern _pattern;
     private readonly bool _unionMode;
+    private readonly ReadOnlySpan<char> _graph;
 
     // Current state for each pattern level
     private TemporalResultEnumerator _enum0;
@@ -2130,12 +2204,14 @@ public ref struct MultiPatternScan
     // Track binding count at entry to each level for rollback
     private int _bindingCount0, _bindingCount1, _bindingCount2, _bindingCount3;
 
-    public MultiPatternScan(TripleStore store, ReadOnlySpan<char> source, GraphPattern pattern, bool unionMode = false)
+    public MultiPatternScan(TripleStore store, ReadOnlySpan<char> source, GraphPattern pattern,
+        bool unionMode = false, ReadOnlySpan<char> graph = default)
     {
         _store = store;
         _source = source;
         _pattern = pattern;
         _unionMode = unionMode;
+        _graph = graph;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _exhausted = false;
@@ -2361,7 +2437,7 @@ public ref struct MultiPatternScan
             obj = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
         }
 
-        enumerator = _store.QueryCurrent(subject, predicate, obj);
+        enumerator = _store.QueryCurrent(subject, predicate, obj, _graph);
     }
 
     private bool TryAdvanceEnumerator(ref TemporalResultEnumerator enumerator,

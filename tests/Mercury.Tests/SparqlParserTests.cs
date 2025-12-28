@@ -348,4 +348,100 @@ public class SparqlParserTests
     }
 
     #endregion
+
+    #region GRAPH Clause
+
+    [Fact]
+    public void Graph_ParsesGraphWithIri()
+    {
+        var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(1, result.WhereClause.Pattern.GraphClauseCount);
+        var graphClause = result.WhereClause.Pattern.GetGraphClause(0);
+        Assert.True(graphClause.Graph.IsIri);
+        Assert.Equal("<http://example.org/graph1>", query.AsSpan().Slice(graphClause.Graph.Start, graphClause.Graph.Length).ToString());
+        Assert.Equal(1, graphClause.PatternCount);
+    }
+
+    [Fact]
+    public void Graph_ParsesGraphWithVariable()
+    {
+        var query = "SELECT * WHERE { GRAPH ?g { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(1, result.WhereClause.Pattern.GraphClauseCount);
+        var graphClause = result.WhereClause.Pattern.GetGraphClause(0);
+        Assert.True(graphClause.Graph.IsVariable);
+        Assert.Equal("?g", query.AsSpan().Slice(graphClause.Graph.Start, graphClause.Graph.Length).ToString());
+    }
+
+    [Fact]
+    public void Graph_ParsesMultiplePatterns()
+    {
+        var query = "SELECT * WHERE { GRAPH <http://example.org/g> { ?s ?p ?o . ?x ?y ?z } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(1, result.WhereClause.Pattern.GraphClauseCount);
+        var graphClause = result.WhereClause.Pattern.GetGraphClause(0);
+        Assert.Equal(2, graphClause.PatternCount);
+    }
+
+    [Fact]
+    public void Graph_ParsesMultipleGraphClauses()
+    {
+        var query = "SELECT * WHERE { GRAPH <http://ex.org/g1> { ?s ?p ?o } GRAPH <http://ex.org/g2> { ?x ?y ?z } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(2, result.WhereClause.Pattern.GraphClauseCount);
+
+        var g1 = result.WhereClause.Pattern.GetGraphClause(0);
+        Assert.Equal("<http://ex.org/g1>", query.AsSpan().Slice(g1.Graph.Start, g1.Graph.Length).ToString());
+
+        var g2 = result.WhereClause.Pattern.GetGraphClause(1);
+        Assert.Equal("<http://ex.org/g2>", query.AsSpan().Slice(g2.Graph.Start, g2.Graph.Length).ToString());
+    }
+
+    [Fact]
+    public void Graph_MixedWithDefaultGraphPatterns()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o . GRAPH <http://ex.org/g> { ?x ?y ?z } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        // One pattern in default graph
+        Assert.Equal(1, result.WhereClause.Pattern.PatternCount);
+
+        // One GRAPH clause
+        Assert.Equal(1, result.WhereClause.Pattern.GraphClauseCount);
+        var graphClause = result.WhereClause.Pattern.GetGraphClause(0);
+        Assert.Equal(1, graphClause.PatternCount);
+    }
+
+    [Fact]
+    public void Graph_HasGraphProperty()
+    {
+        var query = "SELECT * WHERE { GRAPH <http://ex.org/g> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.True(result.WhereClause.Pattern.HasGraph);
+    }
+
+    [Fact]
+    public void Graph_NoGraphClause_HasGraphFalse()
+    {
+        var query = "SELECT * WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.False(result.WhereClause.Pattern.HasGraph);
+        Assert.Equal(0, result.WhereClause.Pattern.GraphClauseCount);
+    }
+
+    #endregion
 }
