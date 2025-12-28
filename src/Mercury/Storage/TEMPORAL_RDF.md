@@ -429,7 +429,6 @@ For Sky Omega's knowledge graph:
 - [ ] Temporal aggregations (COUNT at time T)
 - [ ] Allen's interval algebra for temporal reasoning
 - [ ] Coalescing of adjacent periods
-- [ ] Temporal indexes on disk (not just in-memory)
 - [ ] Incremental materialized views
 - [ ] Temporal CONSTRUCT queries
 - [ ] Periodic snapshots for fast historical queries
