@@ -2169,4 +2169,211 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== GROUP BY Tests ==========
+
+    [Fact]
+    public void Execute_GroupByWithCount()
+    {
+        // Count how many triples each person has
+        var query = "SELECT ?person (COUNT(?p) AS ?count) WHERE { ?person ?p ?o } GROUP BY ?person";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify GROUP BY was parsed
+        Assert.True(parsedQuery.SolutionModifier.GroupBy.HasGroupBy);
+        Assert.Equal(1, parsedQuery.SolutionModifier.GroupBy.Count);
+
+        // Verify aggregate was parsed
+        Assert.True(parsedQuery.SelectClause.HasAggregates);
+        Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var countIdx = results.Current.FindBinding("?count".AsSpan());
+                Assert.True(personIdx >= 0);
+                Assert.True(countIdx >= 0);
+
+                var person = results.Current.GetString(personIdx).ToString();
+                var count = results.Current.GetString(countIdx).ToString();
+                groups[person] = count;
+            }
+            results.Dispose();
+
+            // Alice has 3 triples, Bob has 2, Charlie has 2
+            Assert.Equal(3, groups.Count);
+            Assert.Equal("3", groups["<http://example.org/Alice>"]);
+            Assert.Equal("2", groups["<http://example.org/Bob>"]);
+            Assert.Equal("2", groups["<http://example.org/Charlie>"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupByWithSum()
+    {
+        // Sum of ages (all people)
+        var query = "SELECT (SUM(?age) AS ?totalAge) WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } GROUP BY ?unused";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            Assert.True(results.MoveNext());
+            var sumIdx = results.Current.FindBinding("?totalAge".AsSpan());
+            Assert.True(sumIdx >= 0);
+
+            var sum = results.Current.GetString(sumIdx).ToString();
+            // 30 + 25 + 35 = 90
+            Assert.Equal("90", sum);
+
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupByWithMinMax()
+    {
+        // Min and max ages
+        var query = "SELECT (MIN(?age) AS ?minAge) (MAX(?age) AS ?maxAge) WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } GROUP BY ?unused";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            Assert.True(results.MoveNext());
+
+            var minIdx = results.Current.FindBinding("?minAge".AsSpan());
+            var maxIdx = results.Current.FindBinding("?maxAge".AsSpan());
+            Assert.True(minIdx >= 0);
+            Assert.True(maxIdx >= 0);
+
+            var min = results.Current.GetString(minIdx).ToString();
+            var max = results.Current.GetString(maxIdx).ToString();
+
+            Assert.Equal("25", min);  // Bob
+            Assert.Equal("35", max);  // Charlie
+
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupByWithAvg()
+    {
+        // Average age
+        var query = "SELECT (AVG(?age) AS ?avgAge) WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } GROUP BY ?unused";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            Assert.True(results.MoveNext());
+
+            var avgIdx = results.Current.FindBinding("?avgAge".AsSpan());
+            Assert.True(avgIdx >= 0);
+
+            var avg = results.Current.GetString(avgIdx).ToString();
+            // (30 + 25 + 35) / 3 = 30
+            Assert.Equal("30", avg);
+
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupByMultipleVariables()
+    {
+        // This test uses the predicate as a grouping variable
+        var query = "SELECT ?p (COUNT(?o) AS ?count) WHERE { ?s ?p ?o } GROUP BY ?p";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var pIdx = results.Current.FindBinding("?p".AsSpan());
+                var countIdx = results.Current.FindBinding("?count".AsSpan());
+                Assert.True(pIdx >= 0);
+                Assert.True(countIdx >= 0);
+
+                var p = results.Current.GetString(pIdx).ToString();
+                var count = results.Current.GetString(countIdx).ToString();
+                groups[p] = count;
+            }
+            results.Dispose();
+
+            // 3 names, 3 ages, 1 knows
+            Assert.Equal(3, groups.Count);
+            Assert.Equal("3", groups["<http://xmlns.com/foaf/0.1/name>"]);
+            Assert.Equal("3", groups["<http://xmlns.com/foaf/0.1/age>"]);
+            Assert.Equal("1", groups["<http://xmlns.com/foaf/0.1/knows>"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupByParsingOnly()
+    {
+        // Just verify parsing works for various GROUP BY queries
+        var query1 = "SELECT ?x (COUNT(?y) AS ?c) WHERE { ?x ?p ?y } GROUP BY ?x";
+        var parser1 = new SparqlParser(query1.AsSpan());
+        var parsed1 = parser1.ParseQuery();
+        Assert.True(parsed1.SolutionModifier.GroupBy.HasGroupBy);
+        Assert.Equal(AggregateFunction.Count, parsed1.SelectClause.GetAggregate(0).Function);
+
+        var query2 = "SELECT (SUM(?val) AS ?total) WHERE { ?s ?p ?val } GROUP BY ?s";
+        var parser2 = new SparqlParser(query2.AsSpan());
+        var parsed2 = parser2.ParseQuery();
+        Assert.Equal(AggregateFunction.Sum, parsed2.SelectClause.GetAggregate(0).Function);
+
+        var query3 = "SELECT (AVG(?n) AS ?avg) WHERE { ?x <http://ex/val> ?n } GROUP BY ?x";
+        var parser3 = new SparqlParser(query3.AsSpan());
+        var parsed3 = parser3.ParseQuery();
+        Assert.Equal(AggregateFunction.Avg, parsed3.SelectClause.GetAggregate(0).Function);
+    }
 }

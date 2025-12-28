@@ -38,6 +38,8 @@ public ref struct QueryExecutor
         var offset = _query.SolutionModifier.Offset;
         var distinct = _query.SelectClause.Distinct;
         var orderBy = _query.SolutionModifier.OrderBy;
+        var groupBy = _query.SolutionModifier.GroupBy;
+        var selectClause = _query.SelectClause;
 
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
@@ -62,7 +64,7 @@ public ref struct QueryExecutor
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct, orderBy);
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause);
         }
 
         // No required patterns but have optional - need special handling
@@ -74,7 +76,7 @@ public ref struct QueryExecutor
         }
 
         // Multiple required patterns - need join
-        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy);
+        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause);
     }
 
     /// <summary>
@@ -188,7 +190,8 @@ public ref struct QueryExecutor
     }
 
     private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, OrderByClause orderBy)
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy = default, SelectClause selectClause = default)
     {
         // Use nested loop join for required patterns only
         return new QueryResults(
@@ -201,7 +204,9 @@ public ref struct QueryExecutor
             limit,
             offset,
             distinct,
-            orderBy);
+            orderBy,
+            groupBy,
+            selectClause);
     }
 }
 
@@ -256,6 +261,13 @@ public ref struct QueryResults
     // VALUES support
     private readonly bool _hasValues;
 
+    // GROUP BY support
+    private readonly bool _hasGroupBy;
+    private readonly GroupByClause _groupBy;
+    private readonly SelectClause _selectClause;
+    private List<GroupedRow>? _groupedResults;
+    private int _groupedIndex;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -265,7 +277,8 @@ public ref struct QueryResults
 
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default)
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default)
     {
         _singleScan = scan;
         _pattern = pattern;
@@ -293,11 +306,17 @@ public ref struct QueryResults
         _hasBinds = pattern.HasBinds;
         _hasMinus = pattern.HasMinus;
         _hasValues = pattern.HasValues;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default)
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default)
     {
         _multiScan = scan;
         _pattern = pattern;
@@ -325,6 +344,11 @@ public ref struct QueryResults
         _hasBinds = pattern.HasBinds;
         _hasMinus = pattern.HasMinus;
         _hasValues = pattern.HasValues;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
     }
 
     /// <summary>
@@ -338,6 +362,12 @@ public ref struct QueryResults
     public bool MoveNext()
     {
         if (_isEmpty) return false;
+
+        // GROUP BY requires collecting all results first, then grouping
+        if (_hasGroupBy)
+        {
+            return MoveNextGrouped();
+        }
 
         // ORDER BY requires collecting all results first, then sorting
         if (_hasOrderBy)
@@ -546,6 +576,107 @@ public ref struct QueryResults
 
             return true;
         }
+    }
+
+    /// <summary>
+    /// Move to next result for GROUP BY queries.
+    /// Collects all results on first call, groups them, then iterates.
+    /// </summary>
+    private bool MoveNextGrouped()
+    {
+        // First call - collect and group results
+        if (_groupedResults == null)
+        {
+            CollectAndGroupResults();
+        }
+
+        // Check if we've hit the limit
+        if (_limit > 0 && _returned >= _limit)
+            return false;
+
+        // Iterate through grouped results
+        while (++_groupedIndex < _groupedResults!.Count)
+        {
+            // Apply OFFSET
+            if (_skipped < _offset)
+            {
+                _skipped++;
+                continue;
+            }
+
+            // Load the grouped row into binding table
+            var group = _groupedResults[_groupedIndex];
+            _bindingTable.Clear();
+
+            // Bind the grouping variables
+            for (int i = 0; i < group.KeyCount; i++)
+            {
+                _bindingTable.BindWithHash(group.GetKeyHash(i), group.GetKeyValue(i));
+            }
+
+            // Bind the aggregate results
+            for (int i = 0; i < group.AggregateCount; i++)
+            {
+                _bindingTable.BindWithHash(group.GetAggregateHash(i), group.GetAggregateValue(i));
+            }
+
+            _returned++;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Collect all results and group them according to GROUP BY.
+    /// </summary>
+    private void CollectAndGroupResults()
+    {
+        var groups = new Dictionary<string, GroupedRow>();
+        var sourceStr = _source.ToString();
+
+        // Collect all results using the streaming approach
+        while (MoveNextUnorderedForCollection())
+        {
+            // Build group key from GROUP BY variables
+            var keyBuilder = new System.Text.StringBuilder();
+            for (int i = 0; i < _groupBy.Count; i++)
+            {
+                var (start, len) = _groupBy.GetVariable(i);
+                var varName = _source.Slice(start, len);
+                var bindingIdx = _bindingTable.FindBinding(varName);
+                if (bindingIdx >= 0)
+                {
+                    if (i > 0) keyBuilder.Append('\0');
+                    keyBuilder.Append(_bindingTable.GetString(bindingIdx));
+                }
+            }
+            var groupKey = keyBuilder.ToString();
+
+            // Get or create group
+            if (!groups.TryGetValue(groupKey, out var group))
+            {
+                group = new GroupedRow(_groupBy, _selectClause, _bindingTable, sourceStr);
+                groups[groupKey] = group;
+            }
+
+            // Update aggregates for this group
+            group.UpdateAggregates(_bindingTable, sourceStr);
+            _bindingTable.Clear();
+        }
+
+        // Finalize aggregates (e.g., compute AVG from sum/count)
+        _groupedResults = new List<GroupedRow>(groups.Count);
+        foreach (var group in groups.Values)
+        {
+            group.FinalizeAggregates();
+            _groupedResults.Add(group);
+        }
+
+        // Reset for iteration
+        _groupedIndex = -1;
+        _skipped = 0;
+        _returned = 0;
     }
 
     /// <summary>
@@ -1020,6 +1151,183 @@ internal sealed class MaterializedRow
     private static int ComputeHash(ReadOnlySpan<char> s)
     {
         // FNV-1a hash - must match BindingTable.ComputeHash
+        uint hash = 2166136261;
+        foreach (var ch in s)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
+    }
+}
+
+/// <summary>
+/// Grouped row for GROUP BY aggregation.
+/// Stores group key values and aggregate accumulators.
+/// </summary>
+internal sealed class GroupedRow
+{
+    // Group key storage
+    private readonly int[] _keyHashes;
+    private readonly string[] _keyValues;
+    private readonly int _keyCount;
+
+    // Aggregate storage
+    private readonly int[] _aggHashes;        // Hash of alias variable name
+    private readonly string[] _aggValues;      // Final computed values
+    private readonly AggregateFunction[] _aggFunctions;
+    private readonly int[] _aggVarHashes;      // Hash of source variable name
+    private readonly int _aggCount;
+
+    // Aggregate accumulators
+    private readonly long[] _counts;
+    private readonly double[] _sums;
+    private readonly double[] _mins;
+    private readonly double[] _maxes;
+    private readonly HashSet<string>?[] _distinctSets;
+
+    public int KeyCount => _keyCount;
+    public int AggregateCount => _aggCount;
+
+    public GroupedRow(GroupByClause groupBy, SelectClause selectClause, BindingTable bindings, string source)
+    {
+        // Store group key values
+        _keyCount = groupBy.Count;
+        _keyHashes = new int[_keyCount];
+        _keyValues = new string[_keyCount];
+
+        for (int i = 0; i < _keyCount; i++)
+        {
+            var (start, len) = groupBy.GetVariable(i);
+            var varName = source.AsSpan(start, len);
+            _keyHashes[i] = ComputeHash(varName);
+            var idx = bindings.FindBinding(varName);
+            _keyValues[i] = idx >= 0 ? bindings.GetString(idx).ToString() : "";
+        }
+
+        // Initialize aggregate accumulators
+        _aggCount = selectClause.AggregateCount;
+        _aggHashes = new int[_aggCount];
+        _aggValues = new string[_aggCount];
+        _aggFunctions = new AggregateFunction[_aggCount];
+        _aggVarHashes = new int[_aggCount];
+        _counts = new long[_aggCount];
+        _sums = new double[_aggCount];
+        _mins = new double[_aggCount];
+        _maxes = new double[_aggCount];
+        _distinctSets = new HashSet<string>?[_aggCount];
+
+        for (int i = 0; i < _aggCount; i++)
+        {
+            var agg = selectClause.GetAggregate(i);
+            _aggFunctions[i] = agg.Function;
+
+            // Hash of alias (result variable name)
+            var aliasName = source.AsSpan(agg.AliasStart, agg.AliasLength);
+            _aggHashes[i] = ComputeHash(aliasName);
+
+            // Hash of source variable
+            var varName = source.AsSpan(agg.VariableStart, agg.VariableLength);
+            _aggVarHashes[i] = ComputeHash(varName);
+
+            // Initialize accumulators
+            _mins[i] = double.MaxValue;
+            _maxes[i] = double.MinValue;
+            if (agg.Distinct)
+            {
+                _distinctSets[i] = new HashSet<string>();
+            }
+        }
+    }
+
+    public void UpdateAggregates(BindingTable bindings, string source)
+    {
+        for (int i = 0; i < _aggCount; i++)
+        {
+            var func = _aggFunctions[i];
+            var varHash = _aggVarHashes[i];
+
+            // Find the value for this aggregate's variable
+            string? valueStr = null;
+            double numValue = 0;
+            bool hasNumValue = false;
+
+            // For COUNT(*), we don't need a specific variable
+            if (varHash != ComputeHash("*".AsSpan()))
+            {
+                var idx = bindings.FindBindingByHash(varHash);
+                if (idx >= 0)
+                {
+                    valueStr = bindings.GetString(idx).ToString();
+                    hasNumValue = double.TryParse(valueStr, out numValue);
+                }
+                else
+                {
+                    // Variable not bound - skip for most aggregates
+                    if (func != AggregateFunction.Count)
+                        continue;
+                }
+            }
+
+            // Handle DISTINCT
+            if (_distinctSets[i] != null)
+            {
+                var val = valueStr ?? "";
+                if (!_distinctSets[i]!.Add(val))
+                    continue; // Already seen this value
+            }
+
+            // Update accumulator based on function
+            switch (func)
+            {
+                case AggregateFunction.Count:
+                    _counts[i]++;
+                    break;
+                case AggregateFunction.Sum:
+                    if (hasNumValue) _sums[i] += numValue;
+                    break;
+                case AggregateFunction.Avg:
+                    if (hasNumValue)
+                    {
+                        _sums[i] += numValue;
+                        _counts[i]++;
+                    }
+                    break;
+                case AggregateFunction.Min:
+                    if (hasNumValue && numValue < _mins[i])
+                        _mins[i] = numValue;
+                    break;
+                case AggregateFunction.Max:
+                    if (hasNumValue && numValue > _maxes[i])
+                        _maxes[i] = numValue;
+                    break;
+            }
+        }
+    }
+
+    public void FinalizeAggregates()
+    {
+        for (int i = 0; i < _aggCount; i++)
+        {
+            _aggValues[i] = _aggFunctions[i] switch
+            {
+                AggregateFunction.Count => _counts[i].ToString(),
+                AggregateFunction.Sum => _sums[i].ToString(),
+                AggregateFunction.Avg => _counts[i] > 0 ? (_sums[i] / _counts[i]).ToString() : "0",
+                AggregateFunction.Min => _mins[i] == double.MaxValue ? "" : _mins[i].ToString(),
+                AggregateFunction.Max => _maxes[i] == double.MinValue ? "" : _maxes[i].ToString(),
+                _ => ""
+            };
+        }
+    }
+
+    public int GetKeyHash(int index) => _keyHashes[index];
+    public ReadOnlySpan<char> GetKeyValue(int index) => _keyValues[index];
+    public int GetAggregateHash(int index) => _aggHashes[index];
+    public ReadOnlySpan<char> GetAggregateValue(int index) => _aggValues[index];
+
+    private static int ComputeHash(ReadOnlySpan<char> s)
+    {
         uint hash = 2166136261;
         foreach (var ch in s)
         {

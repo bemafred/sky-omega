@@ -305,37 +305,184 @@ public ref struct SparqlParser
     {
         ConsumeKeyword("SELECT");
         SkipWhitespace();
-        
-        var distinct = false;
-        var reduced = false;
-        
+
+        var clause = new SelectClause();
+
         var span = PeekSpan(8);
         if (span.Length >= 8 && span[..8].Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("DISTINCT");
             SkipWhitespace();
-            distinct = true;
+            clause.Distinct = true;
         }
         else if (span.Length >= 7 && span[..7].Equals("REDUCED", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("REDUCED");
             SkipWhitespace();
-            reduced = true;
+            clause.Reduced = true;
         }
-        
-        // Parse variables or *
-        var selectAll = Peek() == '*';
-        if (selectAll)
+
+        // Parse variables, * or aggregate expressions
+        if (Peek() == '*')
         {
             Advance();
+            clause.SelectAll = true;
         }
-        
-        return new SelectClause
+        else
         {
-            Distinct = distinct,
-            Reduced = reduced,
-            SelectAll = selectAll
-        };
+            // Parse projection list (variables and aggregate expressions)
+            while (!IsAtEnd())
+            {
+                SkipWhitespace();
+
+                // Check for aggregate expression: (COUNT(?x) AS ?alias)
+                if (Peek() == '(')
+                {
+                    var agg = ParseAggregateExpression();
+                    if (agg.Function != AggregateFunction.None)
+                    {
+                        clause.AddAggregate(agg);
+                    }
+                }
+                // Check for variable
+                else if (Peek() == '?')
+                {
+                    // Skip over variable (not stored currently, just parsed)
+                    Advance();
+                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                        Advance();
+                }
+                else
+                {
+                    // End of projection list
+                    break;
+                }
+
+                SkipWhitespace();
+            }
+        }
+
+        return clause;
+    }
+
+    private AggregateExpression ParseAggregateExpression()
+    {
+        var agg = new AggregateExpression();
+
+        if (Peek() != '(')
+            return agg;
+
+        Advance(); // Skip '('
+        SkipWhitespace();
+
+        // Parse aggregate function name
+        var span = PeekSpan(6);
+        if (span.Length >= 5 && span[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("COUNT");
+            agg.Function = AggregateFunction.Count;
+        }
+        else if (span.Length >= 3 && span[..3].Equals("SUM", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("SUM");
+            agg.Function = AggregateFunction.Sum;
+        }
+        else if (span.Length >= 3 && span[..3].Equals("AVG", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("AVG");
+            agg.Function = AggregateFunction.Avg;
+        }
+        else if (span.Length >= 3 && span[..3].Equals("MIN", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("MIN");
+            agg.Function = AggregateFunction.Min;
+        }
+        else if (span.Length >= 3 && span[..3].Equals("MAX", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("MAX");
+            agg.Function = AggregateFunction.Max;
+        }
+        else
+        {
+            // Not a recognized aggregate, skip to closing paren
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return agg;
+        }
+
+        SkipWhitespace();
+
+        // Expect '(' for function arguments
+        if (Peek() != '(')
+        {
+            // Skip to closing paren
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return agg;
+        }
+
+        Advance(); // Skip '('
+        SkipWhitespace();
+
+        // Check for DISTINCT
+        span = PeekSpan(8);
+        if (span.Length >= 8 && span[..8].Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("DISTINCT");
+            SkipWhitespace();
+            agg.Distinct = true;
+        }
+
+        // Parse variable or *
+        if (Peek() == '*')
+        {
+            agg.VariableStart = _position;
+            Advance();
+            agg.VariableLength = 1;
+        }
+        else if (Peek() == '?')
+        {
+            agg.VariableStart = _position;
+            Advance();
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                Advance();
+            agg.VariableLength = _position - agg.VariableStart;
+        }
+
+        SkipWhitespace();
+
+        // Skip closing ')' of function
+        if (Peek() == ')')
+            Advance();
+
+        SkipWhitespace();
+
+        // Parse AS ?alias
+        span = PeekSpan(3);
+        if (span.Length >= 2 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("AS");
+            SkipWhitespace();
+
+            if (Peek() == '?')
+            {
+                agg.AliasStart = _position;
+                Advance();
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                agg.AliasLength = _position - agg.AliasStart;
+            }
+        }
+
+        SkipWhitespace();
+
+        // Skip closing ')' of expression
+        if (Peek() == ')')
+            Advance();
+
+        return agg;
     }
 
     private DatasetClause[] ParseDatasetClauses()
@@ -1170,9 +1317,22 @@ public ref struct SparqlParser
     {
         var modifier = new SolutionModifier();
         SkipWhitespace();
-        
-        // Parse ORDER BY
+
+        // Parse GROUP BY (must come before ORDER BY)
         var span = PeekSpan(8);
+        if (span.Length >= 5 && span[..5].Equals("GROUP", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("GROUP");
+            SkipWhitespace();
+            ConsumeKeyword("BY");
+            SkipWhitespace();
+
+            modifier.GroupBy = ParseGroupByClause();
+        }
+
+        // Parse ORDER BY
+        SkipWhitespace();
+        span = PeekSpan(8);
         if (span.Length >= 5 && span[..5].Equals("ORDER", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("ORDER");
@@ -1204,6 +1364,38 @@ public ref struct SparqlParser
         }
         
         return modifier;
+    }
+
+    private GroupByClause ParseGroupByClause()
+    {
+        var clause = new GroupByClause();
+
+        // Parse one or more grouping variables
+        while (!IsAtEnd() && clause.Count < GroupByClause.MaxVariables)
+        {
+            SkipWhitespace();
+
+            // Check for variable
+            if (Peek() != '?')
+                break;
+
+            var start = _position;
+            Advance(); // Skip '?'
+
+            // Parse variable name
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                Advance();
+
+            var length = _position - start;
+            if (length > 1) // Must have at least one character after '?'
+            {
+                clause.AddVariable(start, length);
+            }
+
+            SkipWhitespace();
+        }
+
+        return clause;
     }
 
     private OrderByClause ParseOrderByClause()
@@ -1386,9 +1578,72 @@ public struct Prologue
 
 public struct SelectClause
 {
+    public const int MaxAggregates = 8;
     public bool Distinct;
     public bool Reduced;
     public bool SelectAll;
+
+    private int _aggregateCount;
+    // Inline storage for up to 8 aggregate expressions
+    private AggregateExpression _a0, _a1, _a2, _a3, _a4, _a5, _a6, _a7;
+
+    public readonly int AggregateCount => _aggregateCount;
+    public readonly bool HasAggregates => _aggregateCount > 0;
+
+    public void AddAggregate(AggregateExpression agg)
+    {
+        if (_aggregateCount >= MaxAggregates)
+            throw new SparqlParseException("Too many aggregate expressions (max 8)");
+
+        switch (_aggregateCount)
+        {
+            case 0: _a0 = agg; break;
+            case 1: _a1 = agg; break;
+            case 2: _a2 = agg; break;
+            case 3: _a3 = agg; break;
+            case 4: _a4 = agg; break;
+            case 5: _a5 = agg; break;
+            case 6: _a6 = agg; break;
+            case 7: _a7 = agg; break;
+        }
+        _aggregateCount++;
+    }
+
+    public readonly AggregateExpression GetAggregate(int index)
+    {
+        return index switch
+        {
+            0 => _a0,
+            1 => _a1,
+            2 => _a2,
+            3 => _a3,
+            4 => _a4,
+            5 => _a5,
+            6 => _a6,
+            7 => _a7,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+    }
+}
+
+public struct AggregateExpression
+{
+    public AggregateFunction Function;
+    public int VariableStart;   // The variable being aggregated (e.g., ?x in COUNT(?x))
+    public int VariableLength;
+    public int AliasStart;      // The alias (e.g., ?count in AS ?count)
+    public int AliasLength;
+    public bool Distinct;       // COUNT(DISTINCT ?x)
+}
+
+public enum AggregateFunction
+{
+    None = 0,
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max
 }
 
 public struct DatasetClause
@@ -1831,9 +2086,58 @@ public struct ConstructTemplate
 
 public struct SolutionModifier
 {
+    public GroupByClause GroupBy;
     public OrderByClause OrderBy;
     public int Limit;
     public int Offset;
+}
+
+public struct GroupByClause
+{
+    public const int MaxVariables = 8;
+    private int _count;
+
+    // Inline storage for up to 8 grouping variables (start, length pairs)
+    private int _v0Start, _v0Len, _v1Start, _v1Len, _v2Start, _v2Len, _v3Start, _v3Len;
+    private int _v4Start, _v4Len, _v5Start, _v5Len, _v6Start, _v6Len, _v7Start, _v7Len;
+
+    public readonly int Count => _count;
+    public readonly bool HasGroupBy => _count > 0;
+
+    public void AddVariable(int start, int length)
+    {
+        if (_count >= MaxVariables)
+            throw new SparqlParseException("Too many GROUP BY variables (max 8)");
+
+        switch (_count)
+        {
+            case 0: _v0Start = start; _v0Len = length; break;
+            case 1: _v1Start = start; _v1Len = length; break;
+            case 2: _v2Start = start; _v2Len = length; break;
+            case 3: _v3Start = start; _v3Len = length; break;
+            case 4: _v4Start = start; _v4Len = length; break;
+            case 5: _v5Start = start; _v5Len = length; break;
+            case 6: _v6Start = start; _v6Len = length; break;
+            case 7: _v7Start = start; _v7Len = length; break;
+        }
+        _count++;
+    }
+
+    public readonly (int Start, int Length) GetVariable(int index)
+    {
+        return index switch
+        {
+            0 => (_v0Start, _v0Len),
+            1 => (_v1Start, _v1Len),
+            2 => (_v2Start, _v2Len),
+            3 => (_v3Start, _v3Len),
+            4 => (_v4Start, _v4Len),
+            5 => (_v5Start, _v5Len),
+            6 => (_v6Start, _v6Len),
+            7 => (_v7Start, _v7Len),
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+    }
 }
 
 public struct OrderByClause
@@ -2062,6 +2366,19 @@ public ref struct BindingTable
     public readonly int FindBinding(ReadOnlySpan<char> variableName)
     {
         var hash = ComputeHash(variableName);
+        for (int i = 0; i < _count; i++)
+        {
+            if (_bindings[i].VariableNameHash == hash)
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Find the index of a binding by its pre-computed hash.
+    /// </summary>
+    public readonly int FindBindingByHash(int hash)
+    {
         for (int i = 0; i < _count; i++)
         {
             if (_bindings[i].VariableNameHash == hash)
