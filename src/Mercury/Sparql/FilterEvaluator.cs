@@ -652,6 +652,36 @@ public ref struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
+        // UCASE - convert string to uppercase
+        if (funcName.Equals("ucase", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                _caseResult = arg1.StringValue.ToString().ToUpperInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _caseResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // LCASE - convert string to lowercase
+        if (funcName.Equals("lcase", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                _caseResult = arg1.StringValue.ToString().ToLowerInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _caseResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
         // ABS - absolute value
         if (funcName.Equals("abs", StringComparison.OrdinalIgnoreCase))
         {
@@ -1172,6 +1202,9 @@ public ref struct FilterEvaluator
 
     // Storage for CONCAT result to keep span valid
     private string _concatResult = string.Empty;
+
+    // Storage for UCASE/LCASE result to keep span valid
+    private string _caseResult = string.Empty;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";

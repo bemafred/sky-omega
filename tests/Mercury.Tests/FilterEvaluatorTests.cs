@@ -1579,4 +1579,72 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region UCASE Function
+
+    [Fact]
+    public void Ucase_LowerToUpper()
+    {
+        Assert.True(EvaluateWithStringBinding("UCASE(?x) == \"HELLO\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Ucase_MixedCase()
+    {
+        Assert.True(EvaluateWithStringBinding("UCASE(?x) == \"HELLO WORLD\"", "?x", "Hello World"));
+    }
+
+    [Fact]
+    public void Ucase_AlreadyUpper()
+    {
+        Assert.True(EvaluateWithStringBinding("UCASE(?x) == \"HELLO\"", "?x", "HELLO"));
+    }
+
+    [Fact]
+    public void Ucase_EmptyString()
+    {
+        Assert.True(EvaluateWithStringBinding("UCASE(?x) == \"\"", "?x", ""));
+    }
+
+    [Fact]
+    public void Ucase_WithNumbers()
+    {
+        Assert.True(EvaluateWithStringBinding("UCASE(?x) == \"ABC123\"", "?x", "abc123"));
+    }
+
+    #endregion
+
+    #region LCASE Function
+
+    [Fact]
+    public void Lcase_UpperToLower()
+    {
+        Assert.True(EvaluateWithStringBinding("LCASE(?x) == \"hello\"", "?x", "HELLO"));
+    }
+
+    [Fact]
+    public void Lcase_MixedCase()
+    {
+        Assert.True(EvaluateWithStringBinding("LCASE(?x) == \"hello world\"", "?x", "Hello World"));
+    }
+
+    [Fact]
+    public void Lcase_AlreadyLower()
+    {
+        Assert.True(EvaluateWithStringBinding("LCASE(?x) == \"hello\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Lcase_EmptyString()
+    {
+        Assert.True(EvaluateWithStringBinding("LCASE(?x) == \"\"", "?x", ""));
+    }
+
+    [Fact]
+    public void Lcase_WithNumbers()
+    {
+        Assert.True(EvaluateWithStringBinding("LCASE(?x) == \"abc123\"", "?x", "ABC123"));
+    }
+
+    #endregion
 }
