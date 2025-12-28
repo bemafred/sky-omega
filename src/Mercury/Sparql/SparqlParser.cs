@@ -377,8 +377,13 @@ public ref struct SparqlParser
         SkipWhitespace();
 
         // Parse aggregate function name
-        var span = PeekSpan(6);
-        if (span.Length >= 5 && span[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase))
+        var span = PeekSpan(12);
+        if (span.Length >= 12 && span[..12].Equals("GROUP_CONCAT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("GROUP_CONCAT");
+            agg.Function = AggregateFunction.GroupConcat;
+        }
+        else if (span.Length >= 5 && span[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("COUNT");
             agg.Function = AggregateFunction.Count;
@@ -453,6 +458,41 @@ public ref struct SparqlParser
         }
 
         SkipWhitespace();
+
+        // For GROUP_CONCAT, parse optional SEPARATOR clause: ; SEPARATOR = "..."
+        if (agg.Function == AggregateFunction.GroupConcat && Peek() == ';')
+        {
+            Advance(); // Skip ';'
+            SkipWhitespace();
+
+            span = PeekSpan(9);
+            if (span.Length >= 9 && span[..9].Equals("SEPARATOR", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("SEPARATOR");
+                SkipWhitespace();
+
+                if (Peek() == '=')
+                {
+                    Advance(); // Skip '='
+                    SkipWhitespace();
+
+                    // Parse string literal (single or double quoted)
+                    if (Peek() == '"' || Peek() == '\'')
+                    {
+                        var quote = Peek();
+                        Advance(); // Skip opening quote
+                        agg.SeparatorStart = _position;
+                        while (!IsAtEnd() && Peek() != quote)
+                            Advance();
+                        agg.SeparatorLength = _position - agg.SeparatorStart;
+                        if (Peek() == quote)
+                            Advance(); // Skip closing quote
+                    }
+                }
+            }
+
+            SkipWhitespace();
+        }
 
         // Skip closing ')' of function
         if (Peek() == ')')
@@ -2146,6 +2186,8 @@ public struct AggregateExpression
     public int AliasStart;      // The alias (e.g., ?count in AS ?count)
     public int AliasLength;
     public bool Distinct;       // COUNT(DISTINCT ?x)
+    public int SeparatorStart;  // For GROUP_CONCAT: separator string position
+    public int SeparatorLength; // For GROUP_CONCAT: separator string length (0 = default " ")
 }
 
 public enum AggregateFunction
@@ -2155,7 +2197,8 @@ public enum AggregateFunction
     Sum,
     Avg,
     Min,
-    Max
+    Max,
+    GroupConcat
 }
 
 public struct DatasetClause

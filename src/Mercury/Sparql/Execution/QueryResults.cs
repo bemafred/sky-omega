@@ -1297,6 +1297,8 @@ internal sealed class GroupedRow
     private readonly double[] _mins;
     private readonly double[] _maxes;
     private readonly HashSet<string>?[] _distinctSets;
+    private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
+    private readonly string[] _separators;           // For GROUP_CONCAT
 
     public int KeyCount => _keyCount;
     public int AggregateCount => _aggCount;
@@ -1328,6 +1330,8 @@ internal sealed class GroupedRow
         _mins = new double[_aggCount];
         _maxes = new double[_aggCount];
         _distinctSets = new HashSet<string>?[_aggCount];
+        _concatValues = new List<string>?[_aggCount];
+        _separators = new string[_aggCount];
 
         for (int i = 0; i < _aggCount; i++)
         {
@@ -1348,6 +1352,16 @@ internal sealed class GroupedRow
             if (agg.Distinct)
             {
                 _distinctSets[i] = new HashSet<string>();
+            }
+
+            // Initialize GROUP_CONCAT accumulators
+            if (agg.Function == AggregateFunction.GroupConcat)
+            {
+                _concatValues[i] = new List<string>();
+                // Extract separator from source, default to space
+                _separators[i] = agg.SeparatorLength > 0
+                    ? source.Substring(agg.SeparatorStart, agg.SeparatorLength)
+                    : " ";
             }
         }
     }
@@ -1413,6 +1427,10 @@ internal sealed class GroupedRow
                     if (hasNumValue && numValue > _maxes[i])
                         _maxes[i] = numValue;
                     break;
+                case AggregateFunction.GroupConcat:
+                    if (valueStr != null)
+                        _concatValues[i]!.Add(valueStr);
+                    break;
             }
         }
     }
@@ -1428,6 +1446,9 @@ internal sealed class GroupedRow
                 AggregateFunction.Avg => _counts[i] > 0 ? (_sums[i] / _counts[i]).ToString() : "0",
                 AggregateFunction.Min => _mins[i] == double.MaxValue ? "" : _mins[i].ToString(),
                 AggregateFunction.Max => _maxes[i] == double.MinValue ? "" : _maxes[i].ToString(),
+                AggregateFunction.GroupConcat => _concatValues[i] != null
+                    ? string.Join(_separators[i], _concatValues[i]!)
+                    : "",
                 _ => ""
             };
         }

@@ -306,7 +306,7 @@ Key components:
 | UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |
 | DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ, TIMEZONE |
 | Computed values | BIND (arithmetic expressions) |
-| Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX |
+| Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 
 **Partially implemented SPARQL features:**
@@ -322,7 +322,7 @@ Key components:
 
 | Category | Features |
 |----------|----------|
-| Aggregation | GROUP_CONCAT, SAMPLE |
+| Aggregation | SAMPLE |
 | Federated query | SERVICE clause |
 | SPARQL Update | INSERT, DELETE, INSERT DATA, DELETE DATA, DELETE WHERE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD |
 

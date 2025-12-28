@@ -2525,6 +2525,157 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    // ========== GROUP_CONCAT Tests ==========
+
+    [Fact]
+    public void Execute_GroupConcatBasic()
+    {
+        // Concatenate all predicates for each subject using default separator (space)
+        var query = "SELECT ?s (GROUP_CONCAT(?p) AS ?predicates) WHERE { ?s ?p ?o } GROUP BY ?s";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify GROUP_CONCAT was parsed
+        Assert.True(parsedQuery.SelectClause.HasAggregates);
+        Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
+        Assert.Equal(AggregateFunction.GroupConcat, parsedQuery.SelectClause.GetAggregate(0).Function);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var predicatesIdx = results.Current.FindBinding("?predicates".AsSpan());
+                Assert.True(sIdx >= 0);
+                Assert.True(predicatesIdx >= 0);
+
+                groups[results.Current.GetString(sIdx).ToString()] =
+                    results.Current.GetString(predicatesIdx).ToString();
+            }
+            results.Dispose();
+
+            // Alice has 3 predicates (name, age, knows)
+            Assert.True(groups.ContainsKey("<http://example.org/Alice>"));
+            var alicePredicates = groups["<http://example.org/Alice>"];
+            Assert.Contains("<http://xmlns.com/foaf/0.1/name>", alicePredicates);
+            Assert.Contains("<http://xmlns.com/foaf/0.1/age>", alicePredicates);
+            Assert.Contains("<http://xmlns.com/foaf/0.1/knows>", alicePredicates);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupConcatWithSeparator()
+    {
+        // Concatenate names with comma separator
+        var query = "SELECT (GROUP_CONCAT(?name ; SEPARATOR=\", \") AS ?names) WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name } GROUP BY ?unused";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify separator was parsed
+        Assert.Equal(AggregateFunction.GroupConcat, parsedQuery.SelectClause.GetAggregate(0).Function);
+        var agg = parsedQuery.SelectClause.GetAggregate(0);
+        Assert.True(agg.SeparatorLength > 0);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            Assert.True(results.MoveNext());
+            var namesIdx = results.Current.FindBinding("?names".AsSpan());
+            Assert.True(namesIdx >= 0);
+
+            var names = results.Current.GetString(namesIdx).ToString();
+            // Should contain comma separator between names
+            Assert.Contains(", ", names);
+            // Should contain all 3 names
+            Assert.Contains("\"Alice\"", names);
+            Assert.Contains("\"Bob\"", names);
+            Assert.Contains("\"Charlie\"", names);
+
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupConcatDistinct()
+    {
+        // Test DISTINCT by using existing names - add duplicate Alice names
+        // First verify we have 3 distinct names in the store
+        var query = "SELECT ?person (GROUP_CONCAT(DISTINCT ?name ; SEPARATOR=\"|\") AS ?names) WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } GROUP BY ?person";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify DISTINCT was parsed
+        var agg = parsedQuery.SelectClause.GetAggregate(0);
+        Assert.True(agg.Distinct);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var namesIdx = results.Current.FindBinding("?names".AsSpan());
+                Assert.True(namesIdx >= 0);
+
+                var names = results.Current.GetString(namesIdx).ToString();
+                // Each person has exactly one name, so no separator needed in result
+                Assert.DoesNotContain("|", names);
+            }
+
+            // 3 people
+            Assert.Equal(3, count);
+
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GroupConcatParsingVariants()
+    {
+        // Test various GROUP_CONCAT syntax variations
+        var query1 = "SELECT (GROUP_CONCAT(?x) AS ?c) WHERE { ?s ?p ?x } GROUP BY ?s";
+        var parser1 = new SparqlParser(query1.AsSpan());
+        var parsed1 = parser1.ParseQuery();
+        Assert.Equal(AggregateFunction.GroupConcat, parsed1.SelectClause.GetAggregate(0).Function);
+        Assert.Equal(0, parsed1.SelectClause.GetAggregate(0).SeparatorLength); // Default separator
+
+        var query2 = "SELECT (GROUP_CONCAT(?x ; SEPARATOR=',') AS ?c) WHERE { ?s ?p ?x } GROUP BY ?s";
+        var parser2 = new SparqlParser(query2.AsSpan());
+        var parsed2 = parser2.ParseQuery();
+        Assert.Equal(AggregateFunction.GroupConcat, parsed2.SelectClause.GetAggregate(0).Function);
+        Assert.True(parsed2.SelectClause.GetAggregate(0).SeparatorLength > 0);
+
+        var query3 = "SELECT (GROUP_CONCAT(DISTINCT ?x) AS ?c) WHERE { ?s ?p ?x } GROUP BY ?s";
+        var parser3 = new SparqlParser(query3.AsSpan());
+        var parsed3 = parser3.ParseQuery();
+        Assert.Equal(AggregateFunction.GroupConcat, parsed3.SelectClause.GetAggregate(0).Function);
+        Assert.True(parsed3.SelectClause.GetAggregate(0).Distinct);
+    }
+
     // ========== EXISTS/NOT EXISTS Tests ==========
 
     [Fact]
