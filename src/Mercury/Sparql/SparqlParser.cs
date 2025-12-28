@@ -936,65 +936,86 @@ public ref struct SparqlParser
     private OrderByClause ParseOrderByClause()
     {
         var clause = new OrderByClause();
-        
+
         // Parse one or more order conditions
-        while (!IsAtEnd())
+        while (!IsAtEnd() && clause.Count < 4)
         {
             SkipWhitespace();
-            
+
             var direction = OrderDirection.Ascending;
-            
-            // Check for ASC/DESC
+            bool hasDirectionKeyword = false;
+
+            // Check for ASC/DESC keyword with parenthesis: ASC(?var) or DESC(?var)
             var span = PeekSpan(4);
             if (span.Length >= 3 && span[..3].Equals("ASC", StringComparison.OrdinalIgnoreCase))
             {
                 ConsumeKeyword("ASC");
                 SkipWhitespace();
+                hasDirectionKeyword = true;
             }
             else if (span.Length >= 4 && span[..4].Equals("DESC", StringComparison.OrdinalIgnoreCase))
             {
                 ConsumeKeyword("DESC");
                 SkipWhitespace();
                 direction = OrderDirection.Descending;
+                hasDirectionKeyword = true;
             }
-            
-            // Check for variable or expression
+
+            // If we had ASC/DESC, expect parenthesis around variable
+            if (hasDirectionKeyword)
+            {
+                if (Peek() == '(')
+                {
+                    Advance(); // Skip '('
+                    SkipWhitespace();
+                }
+            }
+
+            // Parse variable
             if (Peek() == '?')
             {
-                // Variable
-                clause.AddCondition(0, direction); // Simplified
-            }
-            else if (Peek() == '(')
-            {
-                // Expression - skip for now
-                Advance();
-                while (!IsAtEnd() && Peek() != ')')
+                var varStart = _position;
+                Advance(); // Skip '?'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                     Advance();
-                if (Peek() == ')')
-                    Advance();
+                var varLength = _position - varStart;
+
+                clause.AddCondition(varStart, varLength, direction);
+
+                // Skip closing parenthesis if we had direction keyword
+                if (hasDirectionKeyword)
+                {
+                    SkipWhitespace();
+                    if (Peek() == ')')
+                        Advance();
+                }
             }
             else
             {
+                // Not a variable - stop parsing order conditions
                 break;
             }
-            
+
             SkipWhitespace();
-            
-            // Check for more conditions
-            span = PeekSpan(5);
-            if (span.Length < 5 || !span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
-            {
-                if (span.Length < 6 || !span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (clause.Count >= 8)
-                        break;
-                    continue;
-                }
-            }
-            
+
+            // Check if next token is LIMIT, OFFSET, or end - if so, stop
+            span = PeekSpan(6);
+            if (span.Length >= 5 && span[..5].Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
+                break;
+            if (span.Length >= 6 && span[..6].Equals("OFFSET", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            // Check for ASC/DESC or variable to continue
+            if (span.Length >= 3 && span[..3].Equals("ASC", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (span.Length >= 4 && span[..4].Equals("DESC", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (Peek() == '?')
+                continue;
+
             break;
         }
-        
+
         return clause;
     }
 
@@ -1341,11 +1362,51 @@ public struct SolutionModifier
 
 public struct OrderByClause
 {
-    public int Count;
+    // Store up to 4 order conditions inline
+    private OrderCondition _cond0, _cond1, _cond2, _cond3;
+    private int _count;
 
-    public void AddCondition(int variableOffset, OrderDirection direction)
+    public readonly int Count => _count;
+    public readonly bool HasOrderBy => _count > 0;
+
+    public void AddCondition(int variableStart, int variableLength, OrderDirection direction)
     {
-        Count++;
+        var cond = new OrderCondition(variableStart, variableLength, direction);
+        switch (_count)
+        {
+            case 0: _cond0 = cond; break;
+            case 1: _cond1 = cond; break;
+            case 2: _cond2 = cond; break;
+            case 3: _cond3 = cond; break;
+            default: return; // Ignore beyond 4
+        }
+        _count++;
+    }
+
+    public readonly OrderCondition GetCondition(int index)
+    {
+        return index switch
+        {
+            0 => _cond0,
+            1 => _cond1,
+            2 => _cond2,
+            3 => _cond3,
+            _ => default
+        };
+    }
+}
+
+public readonly struct OrderCondition
+{
+    public readonly int VariableStart;
+    public readonly int VariableLength;
+    public readonly OrderDirection Direction;
+
+    public OrderCondition(int start, int length, OrderDirection direction)
+    {
+        VariableStart = start;
+        VariableLength = length;
+        Direction = direction;
     }
 }
 
@@ -1454,6 +1515,27 @@ public ref struct BindingTable
         ref var binding = ref _bindings[_count++];
         binding.VariableNameHash = ComputeHash(variableName);
         binding.Type = BindingValueType.Uri;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = value.Length;
+
+        _stringOffset += value.Length;
+    }
+
+    /// <summary>
+    /// Bind a string value using a pre-computed hash.
+    /// Used for ORDER BY result reconstruction.
+    /// </summary>
+    public void BindWithHash(int variableNameHash, ReadOnlySpan<char> value)
+    {
+        if (_count >= _bindings.Length) return;
+        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+
+        // Copy string to buffer
+        value.CopyTo(_stringBuffer.Slice(_stringOffset));
+
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = variableNameHash;
+        binding.Type = BindingValueType.String;
         binding.StringOffset = _stringOffset;
         binding.StringLength = value.Length;
 

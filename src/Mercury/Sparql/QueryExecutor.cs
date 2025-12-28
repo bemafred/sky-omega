@@ -37,6 +37,7 @@ public ref struct QueryExecutor
         var limit = _query.SolutionModifier.Limit;
         var offset = _query.SolutionModifier.Offset;
         var distinct = _query.SelectClause.Distinct;
+        var orderBy = _query.SolutionModifier.OrderBy;
 
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
@@ -61,7 +62,7 @@ public ref struct QueryExecutor
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct);
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct, orderBy);
         }
 
         // No required patterns but have optional - need special handling
@@ -73,11 +74,11 @@ public ref struct QueryExecutor
         }
 
         // Multiple required patterns - need join
-        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct);
+        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy);
     }
 
     private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct)
+        int limit, int offset, bool distinct, OrderByClause orderBy)
     {
         // Use nested loop join for required patterns only
         return new QueryResults(
@@ -89,7 +90,8 @@ public ref struct QueryExecutor
             stringBuffer,
             limit,
             offset,
-            distinct);
+            distinct,
+            orderBy);
     }
 }
 
@@ -129,6 +131,12 @@ public ref struct QueryResults
     private MultiPatternScan _unionMultiScan;
     private bool _unionIsMultiPattern;
 
+    // ORDER BY support
+    private readonly OrderByClause _orderBy;
+    private readonly bool _hasOrderBy;
+    private List<MaterializedRow>? _sortedResults;
+    private int _sortedIndex;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -138,7 +146,7 @@ public ref struct QueryResults
 
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false)
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default)
     {
         _singleScan = scan;
         _pattern = pattern;
@@ -159,11 +167,15 @@ public ref struct QueryResults
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
         _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = orderBy.HasOrderBy;
+        _sortedResults = null;
+        _sortedIndex = -1;
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
         TripleStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false)
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default)
     {
         _multiScan = scan;
         _pattern = pattern;
@@ -184,6 +196,10 @@ public ref struct QueryResults
         _distinct = distinct;
         _seenHashes = distinct ? new HashSet<int>() : null;
         _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = orderBy.HasOrderBy;
+        _sortedResults = null;
+        _sortedIndex = -1;
     }
 
     /// <summary>
@@ -198,6 +214,194 @@ public ref struct QueryResults
     {
         if (_isEmpty) return false;
 
+        // ORDER BY requires collecting all results first, then sorting
+        if (_hasOrderBy)
+        {
+            return MoveNextOrdered();
+        }
+
+        return MoveNextUnordered();
+    }
+
+    /// <summary>
+    /// Move to next result for ORDER BY queries.
+    /// Collects all results on first call, sorts them, then iterates.
+    /// </summary>
+    private bool MoveNextOrdered()
+    {
+        // First call - collect and sort all results
+        if (_sortedResults == null)
+        {
+            CollectAndSortResults();
+        }
+
+        // Check if we've hit the limit
+        if (_limit > 0 && _returned >= _limit)
+            return false;
+
+        // Iterate through sorted results
+        while (++_sortedIndex < _sortedResults!.Count)
+        {
+            // Apply OFFSET
+            if (_skipped < _offset)
+            {
+                _skipped++;
+                continue;
+            }
+
+            // Load the materialized row into binding table
+            var row = _sortedResults[_sortedIndex];
+            _bindingTable.Clear();
+            for (int i = 0; i < row.BindingCount; i++)
+            {
+                _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
+            }
+
+            _returned++;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Collect all results and sort them according to ORDER BY.
+    /// </summary>
+    private void CollectAndSortResults()
+    {
+        _sortedResults = new List<MaterializedRow>();
+
+        // Collect all results using the streaming approach
+        while (MoveNextUnorderedForCollection())
+        {
+            // Materialize the current row
+            var row = new MaterializedRow(_bindingTable);
+            _sortedResults.Add(row);
+            _bindingTable.Clear();
+        }
+
+        // Sort the results
+        if (_sortedResults.Count > 1)
+        {
+            var orderBy = _orderBy;
+            var sourceStr = _source.ToString();
+            _sortedResults.Sort((a, b) => CompareRowsStatic(a, b, orderBy, sourceStr));
+        }
+
+        // Reset for iteration
+        _sortedIndex = -1;
+        _skipped = 0;
+        _returned = 0;
+    }
+
+    /// <summary>
+    /// Compare two rows according to ORDER BY conditions.
+    /// </summary>
+    private static int CompareRowsStatic(MaterializedRow a, MaterializedRow b, OrderByClause orderBy, string source)
+    {
+        for (int i = 0; i < orderBy.Count; i++)
+        {
+            var cond = orderBy.GetCondition(i);
+            var varName = source.AsSpan(cond.VariableStart, cond.VariableLength);
+
+            var aValue = a.GetValueByName(varName);
+            var bValue = b.GetValueByName(varName);
+
+            int cmp = CompareValues(aValue, bValue);
+            if (cmp != 0)
+            {
+                return cond.Direction == OrderDirection.Descending ? -cmp : cmp;
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Compare two values, handling numeric comparison when possible.
+    /// </summary>
+    private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
+    {
+        // Try numeric comparison first
+        if (TryParseNumber(a, out var aNum) && TryParseNumber(b, out var bNum))
+        {
+            return aNum.CompareTo(bNum);
+        }
+
+        // Fall back to string comparison
+        return a.SequenceCompareTo(b);
+    }
+
+    private static bool TryParseNumber(ReadOnlySpan<char> s, out double result)
+    {
+        return double.TryParse(s, out result);
+    }
+
+    /// <summary>
+    /// MoveNext variant for collecting results (no LIMIT/OFFSET applied).
+    /// </summary>
+    private bool MoveNextUnorderedForCollection()
+    {
+        while (true)
+        {
+            bool hasNext;
+
+            if (_unionBranchActive)
+            {
+                if (_unionIsMultiPattern)
+                    hasNext = _unionMultiScan.MoveNext(ref _bindingTable);
+                else
+                    hasNext = _unionSingleScan.MoveNext(ref _bindingTable);
+            }
+            else
+            {
+                if (_isMultiPattern)
+                    hasNext = _multiScan.MoveNext(ref _bindingTable);
+                else
+                    hasNext = _singleScan.MoveNext(ref _bindingTable);
+            }
+
+            if (!hasNext)
+            {
+                if (_hasUnion && !_unionBranchActive)
+                {
+                    _unionBranchActive = true;
+                    if (!InitializeUnionBranch())
+                        return false;
+                    continue;
+                }
+                return false;
+            }
+
+            if (_hasFilters && !EvaluateFilters())
+            {
+                _bindingTable.Clear();
+                continue;
+            }
+
+            if (_hasOptional)
+            {
+                TryMatchOptionalPatterns();
+            }
+
+            if (_distinct)
+            {
+                var hash = ComputeBindingsHash();
+                if (!_seenHashes!.Add(hash))
+                {
+                    _bindingTable.Clear();
+                    continue;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Move to next result for non-ORDER BY queries (streaming).
+    /// </summary>
+    private bool MoveNextUnordered()
+    {
         // Check if we've hit the limit
         if (_limit > 0 && _returned >= _limit)
             return false;
@@ -440,6 +644,59 @@ public ref struct QueryResults
         _multiScan.Dispose();
         _unionSingleScan.Dispose();
         _unionMultiScan.Dispose();
+    }
+}
+
+/// <summary>
+/// Materialized row for ORDER BY sorting.
+/// Stores binding hashes and values as strings (heap-allocated).
+/// </summary>
+internal sealed class MaterializedRow
+{
+    private readonly int[] _hashes;
+    private readonly string[] _values;
+    private readonly int _count;
+
+    public int BindingCount => _count;
+
+    public MaterializedRow(BindingTable bindings)
+    {
+        _count = bindings.Count;
+        _hashes = new int[_count];
+        _values = new string[_count];
+
+        var bindingSpan = bindings.GetBindings();
+        for (int i = 0; i < _count; i++)
+        {
+            _hashes[i] = bindingSpan[i].VariableNameHash;
+            _values[i] = bindings.GetString(i).ToString();
+        }
+    }
+
+    public int GetHash(int index) => _hashes[index];
+    public ReadOnlySpan<char> GetValue(int index) => _values[index];
+
+    public ReadOnlySpan<char> GetValueByName(ReadOnlySpan<char> name)
+    {
+        var hash = ComputeHash(name);
+        for (int i = 0; i < _count; i++)
+        {
+            if (_hashes[i] == hash)
+                return _values[i];
+        }
+        return ReadOnlySpan<char>.Empty;
+    }
+
+    private static int ComputeHash(ReadOnlySpan<char> s)
+    {
+        // FNV-1a hash - must match BindingTable.ComputeHash
+        uint hash = 2166136261;
+        foreach (var ch in s)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
     }
 }
 

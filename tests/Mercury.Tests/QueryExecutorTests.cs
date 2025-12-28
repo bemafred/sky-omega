@@ -1008,4 +1008,233 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    [Fact]
+    public void Execute_OrderByAscending()
+    {
+        // Order by age ascending
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } ORDER BY ?age";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify ORDER BY was parsed
+        Assert.True(parsedQuery.SolutionModifier.OrderBy.HasOrderBy);
+        Assert.Equal(1, parsedQuery.SolutionModifier.OrderBy.Count);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var ageIdx = bindings.FindBinding("?age".AsSpan());
+                if (ageIdx >= 0)
+                {
+                    ages.Add(bindings.GetString(ageIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should be sorted ascending: 25, 30, 35
+            Assert.Equal(3, ages.Count);
+            Assert.Equal("25", ages[0]);
+            Assert.Equal("30", ages[1]);
+            Assert.Equal("35", ages[2]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OrderByDescending()
+    {
+        // Order by age descending
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } ORDER BY DESC(?age)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var ageIdx = bindings.FindBinding("?age".AsSpan());
+                if (ageIdx >= 0)
+                {
+                    ages.Add(bindings.GetString(ageIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should be sorted descending: 35, 30, 25
+            Assert.Equal(3, ages.Count);
+            Assert.Equal("35", ages[0]);
+            Assert.Equal("30", ages[1]);
+            Assert.Equal("25", ages[2]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OrderByWithLimit()
+    {
+        // Order by age and limit to 2
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } ORDER BY ?age LIMIT 2";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var ageIdx = bindings.FindBinding("?age".AsSpan());
+                if (ageIdx >= 0)
+                {
+                    ages.Add(bindings.GetString(ageIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should be first 2 sorted: 25, 30
+            Assert.Equal(2, ages.Count);
+            Assert.Equal("25", ages[0]);
+            Assert.Equal("30", ages[1]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OrderByWithOffset()
+    {
+        // Order by age and skip 1
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age } ORDER BY ?age OFFSET 1";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var ageIdx = bindings.FindBinding("?age".AsSpan());
+                if (ageIdx >= 0)
+                {
+                    ages.Add(bindings.GetString(ageIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should skip smallest, get: 30, 35
+            Assert.Equal(2, ages.Count);
+            Assert.Equal("30", ages[0]);
+            Assert.Equal("35", ages[1]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OrderByString()
+    {
+        // Order by name (string comparison)
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } ORDER BY ?name";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var nameIdx = bindings.FindBinding("?name".AsSpan());
+                if (nameIdx >= 0)
+                {
+                    names.Add(bindings.GetString(nameIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Should be sorted alphabetically: "Alice", "Bob", "Charlie"
+            Assert.Equal(3, names.Count);
+            Assert.Equal("\"Alice\"", names[0]);
+            Assert.Equal("\"Bob\"", names[1]);
+            Assert.Equal("\"Charlie\"", names[2]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OrderByWithFilter()
+    {
+        // Order by age with filter
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(?age > 25) } ORDER BY DESC(?age)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var ageIdx = bindings.FindBinding("?age".AsSpan());
+                if (ageIdx >= 0)
+                {
+                    ages.Add(bindings.GetString(ageIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Only Alice (30) and Charlie (35), sorted descending
+            Assert.Equal(2, ages.Count);
+            Assert.Equal("35", ages[0]);
+            Assert.Equal("30", ages[1]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }
