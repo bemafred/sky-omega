@@ -45,4 +45,4 @@ TripleRef` is used to navigate the input stream.
 ## Integration
 This module is the "bridge" between:
 1. **Parsers**: , `SkyOmega.Mercury.Rdf.Turtle``SkyOmega.Mercury.Sparql`
-2. **Storage**: , `SkyOmega.Mercury.Sparql.Temporal``SkyOmega.Mercury.Sparql.Storage`
+2. **Storage**: , `SkyOmega.Mercury.Storage`

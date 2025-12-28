@@ -19,25 +19,14 @@ public enum RdfTermType
 /// <summary>
 /// RDF literal with lexical form, datatype, and optional language tag
 /// </summary>
-public readonly record struct RdfLiteral
+public readonly record struct RdfLiteral(
+    string LexicalForm,
+    string? DatatypeIri = null,
+    string? LanguageTag = null,
+    string? Direction = null)
 {
-    public string LexicalForm { get; init; }
-    public string? DatatypeIri { get; init; }
-    public string? LanguageTag { get; init; }
-    public string? Direction { get; init; } // RDF 1.2 initial text direction
-    
-    public RdfLiteral(
-        string lexicalForm, 
-        string? datatypeIri = null, 
-        string? languageTag = null,
-        string? direction = null)
-    {
-        LexicalForm = lexicalForm ?? throw new ArgumentNullException(nameof(lexicalForm));
-        DatatypeIri = datatypeIri;
-        LanguageTag = languageTag;
-        Direction = direction;
-    }
-    
+    public string LexicalForm { get; init; } = LexicalForm ?? throw new ArgumentNullException(nameof(LexicalForm));
+
     public override string ToString()
     {
         if (!string.IsNullOrEmpty(LanguageTag))
