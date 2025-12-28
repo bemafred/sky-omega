@@ -507,25 +507,19 @@ public sealed class TripleStore : IDisposable
                 break;
         }
 
-        TripleIndex.TemporalTripleEnumerator enumerator;
-
-        if (queryType == TemporalQueryType.AsOf)
+        var enumerator = queryType switch
         {
-            enumerator = selectedIndex.QueryAsOf(
-                arg1, arg2, arg3,
-                asOfTime ?? DateTimeOffset.UtcNow);
-        }
-        else if (queryType == TemporalQueryType.Range)
-        {
-            enumerator = selectedIndex.QueryRange(
-                arg1, arg2, arg3,
-                rangeStart ?? DateTimeOffset.MinValue,
-                rangeEnd ?? DateTimeOffset.MaxValue);
-        }
-        else
-        {
-            enumerator = selectedIndex.QueryHistory(arg1, arg2, arg3);
-        }
+            TemporalQueryType.AsOf => 
+                selectedIndex.QueryAsOf(arg1, arg2, arg3, 
+                    asOfTime ?? DateTimeOffset.UtcNow),
+            
+            TemporalQueryType.Range => 
+                selectedIndex.QueryRange(arg1, arg2, arg3, 
+                    rangeStart ?? DateTimeOffset.MinValue, 
+                    rangeEnd ?? DateTimeOffset.MaxValue),
+            
+            _ => selectedIndex.QueryHistory(arg1, arg2, arg3)
+        };
 
         return new TemporalResultEnumerator(enumerator, indexType, _atoms);
     }
