@@ -40,10 +40,10 @@ Bitemporal allows:
 
 ```
 TemporalKey (32 bytes):
-┌──────────┬───────────┬──────────┬──────────┬─────────┬──────────────┐
+┌──────────┬────────────┬──────────┬──────────┬─────────┬───────────────┐
 │Subject(4)│Predicate(4)│Object(4) │ValidFrom │ValidTo  │TransactionTime│
 │          │            │          │  (8)     │  (8)    │     (8)       │
-└──────────┴───────────┴──────────┴──────────┴─────────┴──────────────┘
+└──────────┴────────────┴──────────┴──────────┴─────────┴───────────────┘
 
 Sorted lexicographically:
   1. Subject, Predicate, Object (spatial)
@@ -63,14 +63,16 @@ Sorted lexicographically:
 ```
 mydb/
 ├── spot.tdb           # Subject-Predicate-Object-Time index
-├── spot.tdb.atoms.*   # Atom storage for SPOT
 ├── post.tdb           # Predicate-Object-Subject-Time index
-├── post.tdb.atoms.*   # Atom storage for POST
 ├── ospt.tdb           # Object-Subject-Predicate-Time index
-├── ospt.tdb.atoms.*   # Atom storage for OSPT
 ├── tspo.tdb           # Time-Subject-Predicate-Object index
-└── tspo.tdb.atoms.*   # Atom storage for TSPO
+├── atoms.atoms        # Shared atom data (UTF-8 strings)
+├── atoms.atomidx      # Shared hash table for interning
+├── atoms.offsets      # Shared atomId→offset index
+└── wal.log            # Write-ahead log for crash recovery
 ```
+
+**Note**: All four indexes share a single AtomStore to avoid duplicating string data. Atoms are stored once and referenced by 64-bit IDs in all indexes.
 
 **Persistence Guarantees**
 - All temporal data persisted to disk
