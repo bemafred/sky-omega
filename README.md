@@ -1,6 +1,6 @@
 # 🌌 Sky Omega
 
-**Sky Omega** is a co-evolving, semantic-aware cognitive assistant—born from the intersection of grammar, memory, and intentional software design.  
+**Sky Omega** is a co-evolving, semantic-aware cognitive assistant — born from the intersection of grammar, memory, and intentional software design.  
 
 ---
 
@@ -17,12 +17,14 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 
 ## 🧠 Core Components
 
-| Component                  | Description |
-|----------------------------|-------------|
-| **Sky**                    | The agentic layer. Provides reasoning, reflection, and evolution through grammars. |
-| **Lucy**                   | The semantic memory layer. Triple-based, queryable, and precise. |
-| **Mercury**                | The execution substrate. Fast, low-level, persistent and deterministic. |
-| **Behavior & Intent Grammars** | Define what Sky *knows*, *intends*, and *verifies*. |
+| Component                      | Description                                                                                       |
+|--------------------------------|---------------------------------------------------------------------------------------------------|
+| **Sky**                        | The language layer. Provides pruned reasoning, reflection, and short-term memory.                 |
+| **James**                      | The cognitive orchestration layer. A tail recursive orchestration loop.                           |
+| **Lucy**                       | The long-term memory layer. Epistemic and semantic in nature, fast, huge, queryable, and precise. |
+| **Mira**                       | The integration layer. The expression and sensory capablities, UX/UI.                             |
+| **Mercury**                    | The temporal RDF-substrate. Fast, huge, low-level, persistent and deterministic.                  |
+| **Behavior & Intent Grammars** | Define what Sky *knows*, *intends*, and *verifies*.                                               |
 
 ---
 
