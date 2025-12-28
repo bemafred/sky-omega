@@ -1470,4 +1470,113 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region LANG Function
+
+    [Fact]
+    public void Lang_WithLanguageTag_ReturnsTag()
+    {
+        Assert.True(EvaluateWithStringBinding("LANG(?x) == \"en\"", "?x", "\"hello\"@en"));
+    }
+
+    [Fact]
+    public void Lang_WithComplexTag_ReturnsFullTag()
+    {
+        Assert.True(EvaluateWithStringBinding("LANG(?x) == \"en-US\"", "?x", "\"hello\"@en-US"));
+    }
+
+    [Fact]
+    public void Lang_NoTag_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithStringBinding("LANG(?x) == \"\"", "?x", "\"hello\""));
+    }
+
+    [Fact]
+    public void Lang_Integer_ReturnsEmpty()
+    {
+        Assert.True(EvaluateWithIntBinding("LANG(?x) == \"\"", "?x", 42L));
+    }
+
+    #endregion
+
+    #region DATATYPE Function
+
+    [Fact]
+    public void Datatype_Integer_ReturnsXsdInteger()
+    {
+        Assert.True(EvaluateWithIntBinding("str(DATATYPE(?x)) == \"http://www.w3.org/2001/XMLSchema#integer\"", "?x", 42L));
+    }
+
+    [Fact]
+    public void Datatype_Double_ReturnsXsdDouble()
+    {
+        Assert.True(EvaluateWithDoubleBinding("str(DATATYPE(?x)) == \"http://www.w3.org/2001/XMLSchema#double\"", "?x", 3.14));
+    }
+
+    [Fact]
+    public void Datatype_Boolean_ReturnsXsdBoolean()
+    {
+        Assert.True(EvaluateWithBoolBinding("str(DATATYPE(?x)) == \"http://www.w3.org/2001/XMLSchema#boolean\"", "?x", true));
+    }
+
+    [Fact]
+    public void Datatype_PlainString_ReturnsXsdString()
+    {
+        Assert.True(EvaluateWithStringBinding("str(DATATYPE(?x)) == \"http://www.w3.org/2001/XMLSchema#string\"", "?x", "\"hello\""));
+    }
+
+    [Fact]
+    public void Datatype_LangString_ReturnsRdfLangString()
+    {
+        Assert.True(EvaluateWithStringBinding("str(DATATYPE(?x)) == \"http://www.w3.org/1999/02/22-rdf-syntax-ns#langString\"", "?x", "\"hello\"@en"));
+    }
+
+    #endregion
+
+    #region LANGMATCHES Function
+
+    [Fact]
+    public void LangMatches_ExactMatch_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("LANGMATCHES(?x, \"en\")", "?x", "en"));
+    }
+
+    [Fact]
+    public void LangMatches_PrefixMatch_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("LANGMATCHES(?x, \"en\")", "?x", "en-US"));
+    }
+
+    [Fact]
+    public void LangMatches_NoMatch_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithStringBinding("LANGMATCHES(?x, \"en\")", "?x", "de"));
+    }
+
+    [Fact]
+    public void LangMatches_WildcardNonEmpty_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("LANGMATCHES(?x, \"*\")", "?x", "en"));
+    }
+
+    [Fact]
+    public void LangMatches_WildcardEmpty_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithStringBinding("LANGMATCHES(?x, \"*\")", "?x", ""));
+    }
+
+    [Fact]
+    public void LangMatches_CaseInsensitive()
+    {
+        Assert.True(EvaluateWithStringBinding("LANGMATCHES(?x, \"EN\")", "?x", "en-US"));
+    }
+
+    [Fact]
+    public void LangMatches_PartialNoHyphen_ReturnsFalse()
+    {
+        // "eng" should not match "en" because there's no hyphen after the prefix
+        Assert.False(EvaluateWithStringBinding("LANGMATCHES(?x, \"en\")", "?x", "eng"));
+    }
+
+    #endregion
 }

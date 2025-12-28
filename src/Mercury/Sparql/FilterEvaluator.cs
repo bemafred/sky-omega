@@ -511,6 +511,12 @@ public ref struct FilterEvaluator
             return ParseConcatFunction();
         }
 
+        // Handle LANGMATCHES - two string arguments
+        if (funcName.Equals("langmatches", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseLangMatchesFunction();
+        }
+
         // Parse first argument for single-arg functions
         var arg1 = ParseTerm();
 
@@ -584,6 +590,52 @@ public ref struct FilterEvaluator
                 Type = ValueType.String,
                 StringValue = arg1.StringValue
             };
+        }
+
+        // LANG - returns language tag of a literal
+        if (funcName.Equals("lang", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String)
+            {
+                // Look for language tag pattern: "value"@lang
+                var str = arg1.StringValue;
+                var atIndex = str.LastIndexOf('@');
+                if (atIndex > 0 && atIndex < str.Length - 1)
+                {
+                    // Check if it's a quoted string followed by @lang
+                    // e.g., "hello"@en -> lang is "en"
+                    var beforeAt = str.Slice(0, atIndex);
+                    if (beforeAt.Length >= 2 && beforeAt[^1] == '"')
+                    {
+                        return new Value
+                        {
+                            Type = ValueType.String,
+                            StringValue = str.Slice(atIndex + 1)
+                        };
+                    }
+                }
+                // No language tag - return empty string
+                return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            }
+            // Non-literals return empty string
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        // DATATYPE - returns datatype IRI of a literal
+        if (funcName.Equals("datatype", StringComparison.OrdinalIgnoreCase))
+        {
+            // Return XSD datatype based on value type
+            ReadOnlySpan<char> datatypeIri = arg1.Type switch
+            {
+                ValueType.Integer => "http://www.w3.org/2001/XMLSchema#integer".AsSpan(),
+                ValueType.Double => "http://www.w3.org/2001/XMLSchema#double".AsSpan(),
+                ValueType.Boolean => "http://www.w3.org/2001/XMLSchema#boolean".AsSpan(),
+                ValueType.String => GetStringDatatype(arg1.StringValue),
+                _ => ReadOnlySpan<char>.Empty
+            };
+            if (datatypeIri.IsEmpty)
+                return new Value { Type = ValueType.Unbound };
+            return new Value { Type = ValueType.Uri, StringValue = datatypeIri };
         }
 
         // STRLEN - returns string length
@@ -940,6 +992,72 @@ public ref struct FilterEvaluator
     }
 
     /// <summary>
+    /// Parse LANGMATCHES(langTag, langRange) - returns true if language tag matches range
+    /// </summary>
+    private Value ParseLangMatchesFunction()
+    {
+        var langTagArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var langRangeArg = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        if (langTagArg.Type != ValueType.String || langRangeArg.Type != ValueType.String)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        var langTag = langTagArg.StringValue;
+        var langRange = langRangeArg.StringValue;
+
+        // "*" matches any non-empty language tag
+        if (langRange.Length == 1 && langRange[0] == '*')
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = langTag.Length > 0 };
+        }
+
+        // Empty language tag never matches (except with *)
+        if (langTag.IsEmpty)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        // Case-insensitive prefix match with optional hyphen boundary
+        // e.g., "en-US" matches "en", "en" matches "en", "de" doesn't match "en"
+        if (langTag.Length < langRange.Length)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        var tagPrefix = langTag.Slice(0, langRange.Length);
+        if (!tagPrefix.Equals(langRange, StringComparison.OrdinalIgnoreCase))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        // If exact length match, it's a match
+        if (langTag.Length == langRange.Length)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = true };
+        }
+
+        // Otherwise, next char must be hyphen for subtag
+        var matches = langTag[langRange.Length] == '-';
+        return new Value { Type = ValueType.Boolean, BooleanValue = matches };
+    }
+
+    /// <summary>
     /// Parse SUBSTR(string, start [, length]) - returns substring
     /// Note: SPARQL uses 1-based indexing
     /// </summary>
@@ -1054,6 +1172,39 @@ public ref struct FilterEvaluator
 
     // Storage for CONCAT result to keep span valid
     private string _concatResult = string.Empty;
+
+    // XSD namespace for datatype URIs
+    private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
+    private const string RdfLangString = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+    /// <summary>
+    /// Get the datatype IRI for a string literal
+    /// </summary>
+    private static ReadOnlySpan<char> GetStringDatatype(ReadOnlySpan<char> str)
+    {
+        // Check for explicit datatype: "value"^^<datatype>
+        var caretIndex = str.LastIndexOf('^');
+        if (caretIndex > 0 && caretIndex < str.Length - 2 && str[caretIndex + 1] == '^')
+        {
+            var datatypePart = str.Slice(caretIndex + 2);
+            // Remove angle brackets if present
+            if (datatypePart.Length >= 2 && datatypePart[0] == '<' && datatypePart[^1] == '>')
+                return datatypePart.Slice(1, datatypePart.Length - 2);
+            return datatypePart;
+        }
+
+        // Check for language tag: "value"@lang -> rdf:langString
+        var atIndex = str.LastIndexOf('@');
+        if (atIndex > 0 && atIndex < str.Length - 1)
+        {
+            var beforeAt = str.Slice(0, atIndex);
+            if (beforeAt.Length >= 2 && beforeAt[^1] == '"')
+                return RdfLangString.AsSpan();
+        }
+
+        // Plain literal defaults to xsd:string
+        return XsdString.AsSpan();
+    }
 
     /// <summary>
     /// Skip to closing parenthesis
