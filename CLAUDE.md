@@ -259,10 +259,10 @@ Key components:
 | Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |
 | String functions | STR, STRLEN, SUBSTR, CONTAINS, STRSTARTS, STRENDS, STRBEFORE, STRAFTER, CONCAT, UCASE, LCASE, ENCODE_FOR_URI |
 | Numeric functions | ABS, ROUND, CEIL, FLOOR |
-| RDF term functions | LANG, DATATYPE, LANGMATCHES, IRI, URI |
+| RDF term functions | LANG, DATATYPE, LANGMATCHES, IRI, URI, STRDT, STRLANG, BNODE |
 | Hash functions | MD5, SHA1, SHA256, SHA384, SHA512 |
 | UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |
-| DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ |
+| DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ, TIMEZONE |
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, COUNT, SUM, AVG, MIN, MAX |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
