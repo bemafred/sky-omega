@@ -1895,4 +1895,64 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region Hash Functions
+
+    [Fact]
+    public void Md5_Hello()
+    {
+        Assert.True(EvaluateWithStringBinding("MD5(?x) == \"5d41402abc4b2a76b9719d911017c592\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Md5_EmptyString()
+    {
+        Assert.True(EvaluateWithStringBinding("MD5(?x) == \"d41d8cd98f00b204e9800998ecf8427e\"", "?x", ""));
+    }
+
+    [Fact]
+    public void Sha1_Hello()
+    {
+        Assert.True(EvaluateWithStringBinding("SHA1(?x) == \"aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Sha1_EmptyString()
+    {
+        Assert.True(EvaluateWithStringBinding("SHA1(?x) == \"da39a3ee5e6b4b0d3255bfef95601890afd80709\"", "?x", ""));
+    }
+
+    [Fact]
+    public void Sha256_Hello()
+    {
+        Assert.True(EvaluateWithStringBinding("SHA256(?x) == \"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Sha256_EmptyString()
+    {
+        Assert.True(EvaluateWithStringBinding("SHA256(?x) == \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"", "?x", ""));
+    }
+
+    [Fact]
+    public void Sha384_Hello()
+    {
+        Assert.True(EvaluateWithStringBinding("SHA384(?x) == \"59e1748777448c69de6b800d7a33bbfb9ff1b463e44354c3553bcdb9c666fa90125a3c79f90397bdf5f6a13de828684f\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Sha512_Hello()
+    {
+        Assert.True(EvaluateWithStringBinding("SHA512(?x) == \"9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Hash_CaseInsensitive()
+    {
+        // Function names should be case-insensitive
+        Assert.True(EvaluateWithStringBinding("md5(?x) == \"5d41402abc4b2a76b9719d911017c592\"", "?x", "hello"));
+        Assert.True(EvaluateWithStringBinding("sha256(?x) == \"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"", "?x", "hello"));
+    }
+
+    #endregion
 }

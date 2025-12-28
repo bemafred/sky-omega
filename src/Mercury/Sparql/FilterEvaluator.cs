@@ -1,6 +1,8 @@
 using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace SkyOmega.Mercury.Sparql;
@@ -716,6 +718,91 @@ public ref struct FilterEvaluator
                 {
                     Type = ValueType.String,
                     StringValue = _encodeResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // MD5 - compute MD5 hash
+        if (funcName.Equals("md5", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var hash = MD5.HashData(bytes);
+                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _hashResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // SHA1 - compute SHA-1 hash
+        if (funcName.Equals("sha1", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var hash = SHA1.HashData(bytes);
+                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _hashResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // SHA256 - compute SHA-256 hash
+        if (funcName.Equals("sha256", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var hash = SHA256.HashData(bytes);
+                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _hashResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // SHA384 - compute SHA-384 hash
+        if (funcName.Equals("sha384", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var hash = SHA384.HashData(bytes);
+                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _hashResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // SHA512 - compute SHA-512 hash
+        if (funcName.Equals("sha512", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var hash = SHA512.HashData(bytes);
+                _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _hashResult.AsSpan()
                 };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1499,6 +1586,9 @@ public ref struct FilterEvaluator
 
     // Storage for ENCODE_FOR_URI result to keep span valid
     private string _encodeResult = string.Empty;
+
+    // Storage for hash function results to keep span valid
+    private string _hashResult = string.Empty;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
