@@ -660,6 +660,21 @@ public ref struct FilterEvaluator
             };
         }
 
+        // IRI/URI - construct IRI from string
+        if (funcName.Equals("iri", StringComparison.OrdinalIgnoreCase) ||
+            funcName.Equals("uri", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                return new Value
+                {
+                    Type = ValueType.Uri,
+                    StringValue = arg1.StringValue
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
         // LANG - returns language tag of a literal
         if (funcName.Equals("lang", StringComparison.OrdinalIgnoreCase))
         {

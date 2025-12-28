@@ -2083,4 +2083,41 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region IRI/URI Constructor
+
+    [Fact]
+    public void Iri_ConvertsStringToIri()
+    {
+        Assert.True(EvaluateWithStringBinding("isIRI(IRI(?x))", "?x", "http://example.org/test"));
+    }
+
+    [Fact]
+    public void Uri_ConvertsStringToIri()
+    {
+        // URI is alias for IRI
+        Assert.True(EvaluateWithStringBinding("isIRI(URI(?x))", "?x", "http://example.org/test"));
+    }
+
+    [Fact]
+    public void Iri_PreservesValue()
+    {
+        Assert.True(EvaluateWithStringBinding("str(IRI(?x)) == \"http://example.org/test\"", "?x", "http://example.org/test"));
+    }
+
+    [Fact]
+    public void Iri_IriPassthrough()
+    {
+        // IRI of an IRI returns the same IRI
+        Assert.True(Evaluate("isIRI(IRI(UUID()))"));
+    }
+
+    [Fact]
+    public void Iri_CaseInsensitive()
+    {
+        Assert.True(EvaluateWithStringBinding("isIRI(iri(?x))", "?x", "http://example.org"));
+        Assert.True(EvaluateWithStringBinding("isIRI(uri(?x))", "?x", "http://example.org"));
+    }
+
+    #endregion
 }
