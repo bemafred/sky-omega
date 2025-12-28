@@ -1854,4 +1854,45 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region ENCODE_FOR_URI Function
+
+    [Fact]
+    public void EncodeForUri_Space_BecomesPercent20()
+    {
+        Assert.True(EvaluateWithStringBinding("ENCODE_FOR_URI(?x) == \"hello%20world\"", "?x", "hello world"));
+    }
+
+    [Fact]
+    public void EncodeForUri_SpecialChars_AreEncoded()
+    {
+        Assert.True(EvaluateWithStringBinding("ENCODE_FOR_URI(?x) == \"a%2Fb%3Fc%3Dd\"", "?x", "a/b?c=d"));
+    }
+
+    [Fact]
+    public void EncodeForUri_AlphanumericUnchanged()
+    {
+        Assert.True(EvaluateWithStringBinding("ENCODE_FOR_URI(?x) == \"abc123\"", "?x", "abc123"));
+    }
+
+    [Fact]
+    public void EncodeForUri_EmptyString()
+    {
+        Assert.True(EvaluateWithStringBinding("ENCODE_FOR_URI(?x) == \"\"", "?x", ""));
+    }
+
+    [Fact]
+    public void EncodeForUri_Unicode_IsEncoded()
+    {
+        // UTF-8 encoding of café: caf%C3%A9
+        Assert.True(EvaluateWithStringBinding("ENCODE_FOR_URI(?x) == \"caf%C3%A9\"", "?x", "café"));
+    }
+
+    [Fact]
+    public void EncodeForUri_Ampersand_IsEncoded()
+    {
+        Assert.True(EvaluateWithStringBinding("ENCODE_FOR_URI(?x) == \"a%26b\"", "?x", "a&b"));
+    }
+
+    #endregion
 }

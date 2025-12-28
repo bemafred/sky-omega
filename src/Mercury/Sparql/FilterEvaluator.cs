@@ -451,7 +451,7 @@ public ref struct FilterEvaluator
     {
         var start = _position;
 
-        while (!IsAtEnd() && IsLetterOrDigit(Peek()))
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
             Advance();
 
         var funcName = _expression.Slice(start, _position - start);
@@ -701,6 +701,21 @@ public ref struct FilterEvaluator
                 {
                     Type = ValueType.String,
                     StringValue = _caseResult.AsSpan()
+                };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // ENCODE_FOR_URI - percent-encode string for use in URI
+        if (funcName.Equals("encode_for_uri", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            {
+                _encodeResult = Uri.EscapeDataString(arg1.StringValue.ToString());
+                return new Value
+                {
+                    Type = ValueType.String,
+                    StringValue = _encodeResult.AsSpan()
                 };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1481,6 +1496,9 @@ public ref struct FilterEvaluator
 
     // Storage for REPLACE result to keep span valid
     private string _replaceResult = string.Empty;
+
+    // Storage for ENCODE_FOR_URI result to keep span valid
+    private string _encodeResult = string.Empty;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
