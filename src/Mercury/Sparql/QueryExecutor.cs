@@ -2328,9 +2328,37 @@ public ref struct BindExpressionEvaluator
         if (Peek() == '(')
         {
             Advance();
+            SkipWhitespace();
+
+            // IF function - needs special handling for condition evaluation
+            if (name.Equals("IF", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseIfFunction();
+            }
+
+            // COALESCE function - variable arguments
+            if (name.Equals("COALESCE", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseCoalesceFunction();
+            }
+
             var arg = ParseAdditive();
             SkipWhitespace();
+
+            // Check for more arguments (for multi-arg functions)
+            if (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+                var arg2 = ParseAdditive();
+                SkipWhitespace();
+            }
+
             if (Peek() == ')') Advance();
+
+            // BOUND function
+            if (name.Equals("BOUND", StringComparison.OrdinalIgnoreCase))
+                return new Value { Type = ValueType.Boolean, BooleanValue = arg.Type != ValueType.Unbound };
 
             // STR function
             if (name.Equals("STR", StringComparison.OrdinalIgnoreCase))
@@ -2354,6 +2382,79 @@ public ref struct BindExpressionEvaluator
         }
 
         return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Parse IF(condition, thenExpr, elseExpr)
+    /// </summary>
+    private Value ParseIfFunction()
+    {
+        // Parse condition - need to find comma while respecting parentheses
+        var conditionStart = _position;
+        int depth = 0;
+
+        while (!IsAtEnd())
+        {
+            var ch = Peek();
+            if (ch == '(') depth++;
+            else if (ch == ')') depth--;
+            else if (ch == ',' && depth == 0) break;
+            Advance();
+        }
+
+        var conditionExpr = _expression.Slice(conditionStart, _position - conditionStart);
+
+        // Evaluate condition using FilterEvaluator
+        var condEvaluator = new FilterEvaluator(conditionExpr);
+        var conditionResult = condEvaluator.Evaluate(_bindingData, _bindingCount, _bindingStrings);
+
+        SkipWhitespace();
+        if (Peek() == ',') Advance();
+        SkipWhitespace();
+
+        // Parse then expression
+        var thenValue = ParseAdditive();
+
+        SkipWhitespace();
+        if (Peek() == ',') Advance();
+        SkipWhitespace();
+
+        // Parse else expression
+        var elseValue = ParseAdditive();
+
+        SkipWhitespace();
+        if (Peek() == ')') Advance();
+
+        return conditionResult ? thenValue : elseValue;
+    }
+
+    /// <summary>
+    /// Parse COALESCE(expr1, expr2, ...) - returns first bound value
+    /// </summary>
+    private Value ParseCoalesceFunction()
+    {
+        Value result = new Value { Type = ValueType.Unbound };
+
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            var value = ParseAdditive();
+
+            if (result.Type == ValueType.Unbound && value.Type != ValueType.Unbound)
+            {
+                result = value;
+            }
+
+            SkipWhitespace();
+            if (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+        }
+
+        if (Peek() == ')') Advance();
+
+        return result;
     }
 
     /// <summary>

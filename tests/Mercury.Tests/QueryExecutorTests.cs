@@ -2804,4 +2804,138 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== BOUND/IF/COALESCE Tests ==========
+
+    [Fact]
+    public void Execute_FilterBound_FiltersUnbound()
+    {
+        // Use OPTIONAL to create unbound variables, then filter with BOUND
+        var query = "SELECT ?person ?other WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name OPTIONAL { ?person <http://xmlns.com/foaf/0.1/knows> ?other } FILTER(BOUND(?other)) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice has a knows relationship (to Bob)
+            Assert.Single(persons);
+            Assert.Contains("<http://example.org/Alice>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_FilterNotBound_FiltersOptional()
+    {
+        // Filter for unbound OPTIONAL results
+        var query = "SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name OPTIONAL { ?person <http://xmlns.com/foaf/0.1/knows> ?other } FILTER(!BOUND(?other)) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Bob and Charlie don't know anyone
+            Assert.Equal(2, persons.Count);
+            Assert.Contains("<http://example.org/Bob>", persons);
+            Assert.Contains("<http://example.org/Charlie>", persons);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_FilterWithIf()
+    {
+        // Use IF to categorize ages
+        var query = "SELECT ?person ?age WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age FILTER(IF(?age >= 30, 1, 0) == 1) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Alice is 30, Charlie is 35 - both >= 30
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("30", ages);
+            Assert.Contains("35", ages);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_FilterWithCoalesce()
+    {
+        // Use COALESCE with default value
+        var query = "SELECT ?person WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER(COALESCE(?age, 0) == 0) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            // Since ?age is not bound in the pattern, COALESCE returns 0
+            // All three people should match since ?age is unbound
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }

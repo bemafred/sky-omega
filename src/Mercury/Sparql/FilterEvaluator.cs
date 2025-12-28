@@ -460,14 +460,28 @@ public ref struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
 
         Advance(); // Skip '('
+        SkipWhitespace();
 
-        // Parse arguments
+        // Handle IF separately - needs special parsing for condition
+        if (funcName.Equals("if", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseIfFunction();
+        }
+
+        // Handle COALESCE - variable number of arguments
+        if (funcName.Equals("coalesce", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseCoalesceFunction();
+        }
+
+        // Parse first argument
         var arg1 = ParseTerm();
 
         SkipWhitespace();
         if (Peek() == ',')
         {
             Advance();
+            SkipWhitespace();
             var arg2 = ParseTerm();
         }
 
@@ -504,6 +518,86 @@ public ref struct FilterEvaluator
         }
 
         return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Parse IF(condition, thenExpr, elseExpr)
+    /// </summary>
+    private Value ParseIfFunction()
+    {
+        // Parse condition - this is a full expression that needs boolean evaluation
+        var conditionStart = _position;
+
+        // Find the first comma by tracking parentheses depth
+        int depth = 0;
+        while (!IsAtEnd())
+        {
+            var ch = Peek();
+            if (ch == '(') depth++;
+            else if (ch == ')') depth--;
+            else if (ch == ',' && depth == 0) break;
+            Advance();
+        }
+
+        var conditionExpr = _expression.Slice(conditionStart, _position - conditionStart);
+
+        // Evaluate the condition
+        var condEvaluator = new FilterEvaluator(conditionExpr);
+        var conditionResult = condEvaluator.Evaluate(_bindingData, _bindingCount, _bindingStrings);
+
+        SkipWhitespace();
+        if (Peek() == ',')
+            Advance();
+        SkipWhitespace();
+
+        // Parse then expression
+        var thenValue = ParseTerm();
+
+        SkipWhitespace();
+        if (Peek() == ',')
+            Advance();
+        SkipWhitespace();
+
+        // Parse else expression
+        var elseValue = ParseTerm();
+
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Return based on condition
+        return conditionResult ? thenValue : elseValue;
+    }
+
+    /// <summary>
+    /// Parse COALESCE(expr1, expr2, ...) - returns first bound value
+    /// </summary>
+    private Value ParseCoalesceFunction()
+    {
+        Value result = new Value { Type = ValueType.Unbound };
+
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            var value = ParseTerm();
+
+            // If we haven't found a bound value yet and this one is bound, use it
+            if (result.Type == ValueType.Unbound && value.Type != ValueType.Unbound)
+            {
+                result = value;
+            }
+
+            SkipWhitespace();
+            if (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+        }
+
+        if (Peek() == ')')
+            Advance();
+
+        return result;
     }
 
     private ComparisonOperator ParseComparisonOperator()

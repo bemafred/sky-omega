@@ -908,4 +908,80 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region BOUND Function
+
+    [Fact]
+    public void Bound_BoundVariable_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("BOUND(?x)", "?x", 42L));
+    }
+
+    [Fact]
+    public void Bound_InFilter_FiltersCorrectly()
+    {
+        Assert.True(EvaluateWithMultipleBindings("BOUND(?x) && ?x > 10",
+            ("?x", 20L)));
+    }
+
+    #endregion
+
+    #region IF Function
+
+    [Fact]
+    public void If_ConditionTrue_ReturnsThenValue()
+    {
+        Assert.True(EvaluateWithIntBinding("IF(?x > 5, 1, 0) == 1", "?x", 10L));
+    }
+
+    [Fact]
+    public void If_ConditionFalse_ReturnsElseValue()
+    {
+        Assert.True(EvaluateWithIntBinding("IF(?x > 5, 1, 0) == 0", "?x", 3L));
+    }
+
+    [Fact]
+    public void If_WithStrings()
+    {
+        // Can't easily test string result with current helper, but verify no crash
+        Assert.True(EvaluateWithIntBinding("IF(?x > 18, 1, 0) == 1", "?x", 25L));
+    }
+
+    [Fact]
+    public void If_NestedCondition()
+    {
+        Assert.True(EvaluateWithMultipleBindings("IF(?x > 5 && ?y < 10, 1, 0) == 1",
+            ("?x", 10L), ("?y", 5L)));
+    }
+
+    #endregion
+
+    #region COALESCE Function
+
+    [Fact]
+    public void Coalesce_FirstBound_ReturnsFirst()
+    {
+        Assert.True(EvaluateWithMultipleBindings("COALESCE(?x, ?y, 0) == 10",
+            ("?x", 10L), ("?y", 20L)));
+    }
+
+    [Fact]
+    public void Coalesce_FirstUnbound_ReturnsSecond()
+    {
+        Assert.True(EvaluateWithIntBinding("COALESCE(?x, ?y, 0) == 20", "?y", 20L));
+    }
+
+    [Fact]
+    public void Coalesce_AllUnbound_ReturnsDefault()
+    {
+        Assert.True(EvaluateWithEmptyBindings("COALESCE(?x, ?y, 99) == 99"));
+    }
+
+    [Fact]
+    public void Coalesce_SingleValue()
+    {
+        Assert.True(EvaluateWithIntBinding("COALESCE(?x) == 42", "?x", 42L));
+    }
+
+    #endregion
 }
