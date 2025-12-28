@@ -252,7 +252,7 @@ Key components:
 
 | Category | Features |
 |----------|----------|
-| Query types | SELECT, ASK, CONSTRUCT |
+| Query types | SELECT, ASK, CONSTRUCT, DESCRIBE |
 | Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
 | Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
