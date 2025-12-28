@@ -397,6 +397,13 @@ public ref struct SparqlParser
                 continue;
             }
 
+            // Check for BIND
+            if (span.Length >= 4 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseBind(ref pattern);
+                continue;
+            }
+
             // Try to parse a triple pattern
             if (!TryParseTriplePattern(ref pattern))
                 break;
@@ -550,6 +557,93 @@ public ref struct SparqlParser
         SkipWhitespace();
         if (Peek() == '}')
             Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse BIND clause: BIND ( expression AS ?variable )
+    /// </summary>
+    private void ParseBind(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("BIND");
+        SkipWhitespace();
+
+        if (Peek() != '(')
+            return;
+
+        Advance(); // Skip '('
+        SkipWhitespace();
+
+        // Parse expression - capture everything until "AS"
+        int exprStart = _position;
+        int parenDepth = 0;
+
+        while (!IsAtEnd())
+        {
+            var ch = Peek();
+            if (ch == '(')
+            {
+                parenDepth++;
+                Advance();
+            }
+            else if (ch == ')')
+            {
+                if (parenDepth == 0)
+                    break;
+                parenDepth--;
+                Advance();
+            }
+            else
+            {
+                // Check for "AS" keyword (with whitespace before)
+                if (parenDepth == 0)
+                {
+                    var span = PeekSpan(3);
+                    if (span.Length >= 2 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
+                        (span.Length < 3 || !char.IsLetterOrDigit(span[2])))
+                    {
+                        break;
+                    }
+                }
+                Advance();
+            }
+        }
+
+        int exprLength = _position - exprStart;
+
+        // Trim trailing whitespace from expression
+        while (exprLength > 0 && char.IsWhiteSpace(_source[exprStart + exprLength - 1]))
+            exprLength--;
+
+        SkipWhitespace();
+
+        // Consume "AS"
+        ConsumeKeyword("AS");
+        SkipWhitespace();
+
+        // Parse target variable
+        int varStart = _position;
+        if (Peek() == '?')
+        {
+            Advance(); // Skip '?'
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                Advance();
+        }
+        int varLength = _position - varStart;
+
+        SkipWhitespace();
+
+        // Skip closing ')'
+        if (Peek() == ')')
+            Advance();
+
+        // Add the bind expression
+        pattern.AddBind(new BindExpr
+        {
+            ExprStart = exprStart,
+            ExprLength = exprLength,
+            VarStart = varStart,
+            VarLength = varLength
+        });
     }
 
     /// <summary>
@@ -1135,9 +1229,11 @@ public struct GraphPattern
 {
     public const int MaxTriplePatterns = 32;
     public const int MaxFilters = 16;
+    public const int MaxBinds = 8;
 
     private int _patternCount;
     private int _filterCount;
+    private int _bindCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
     private int _unionStartIndex; // If > 0, patterns from this index are the UNION branch
 
@@ -1151,8 +1247,13 @@ public struct GraphPattern
     private FilterExpr _f0, _f1, _f2, _f3, _f4, _f5, _f6, _f7;
     private FilterExpr _f8, _f9, _f10, _f11, _f12, _f13, _f14, _f15;
 
+    // Inline storage for bind expressions (8 * 16 bytes = 128 bytes)
+    private BindExpr _b0, _b1, _b2, _b3, _b4, _b5, _b6, _b7;
+
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
+    public readonly int BindCount => _bindCount;
+    public readonly bool HasBinds => _bindCount > 0;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
     public readonly bool HasUnion => _unionStartIndex > 0;
 
@@ -1289,6 +1390,33 @@ public struct GraphPattern
             case 14: _f14 = filter; break; case 15: _f15 = filter; break;
         }
     }
+
+    public void AddBind(BindExpr bind)
+    {
+        if (_bindCount >= MaxBinds) return;
+        SetBind(_bindCount++, bind);
+    }
+
+    public readonly BindExpr GetBind(int index)
+    {
+        return index switch
+        {
+            0 => _b0, 1 => _b1, 2 => _b2, 3 => _b3,
+            4 => _b4, 5 => _b5, 6 => _b6, 7 => _b7,
+            _ => default
+        };
+    }
+
+    private void SetBind(int index, BindExpr bind)
+    {
+        switch (index)
+        {
+            case 0: _b0 = bind; break; case 1: _b1 = bind; break;
+            case 2: _b2 = bind; break; case 3: _b3 = bind; break;
+            case 4: _b4 = bind; break; case 5: _b5 = bind; break;
+            case 6: _b6 = bind; break; case 7: _b7 = bind; break;
+        }
+    }
 }
 
 /// <summary>
@@ -1347,6 +1475,17 @@ public struct FilterExpr
 {
     public int Start;   // Offset into source (after "FILTER")
     public int Length;  // Length of expression
+}
+
+/// <summary>
+/// A BIND expression: BIND(expression AS ?variable)
+/// </summary>
+public struct BindExpr
+{
+    public int ExprStart;    // Start of expression
+    public int ExprLength;   // Length of expression
+    public int VarStart;     // Start of target variable (including ?)
+    public int VarLength;    // Length of target variable
 }
 
 public struct ConstructTemplate
@@ -1449,10 +1588,23 @@ public ref struct BindingTable
     public void Bind(ReadOnlySpan<char> variableName, long value)
     {
         if (_count >= _bindings.Length) return;
+
+        // Format the value as string and store in buffer
+        Span<char> temp = stackalloc char[24];
+        if (!value.TryFormat(temp, out int written))
+            return;
+
+        if (_stringOffset + written > _stringBuffer.Length) return;
+
+        temp.Slice(0, written).CopyTo(_stringBuffer.Slice(_stringOffset));
+
         ref var binding = ref _bindings[_count++];
         binding.VariableNameHash = ComputeHash(variableName);
         binding.Type = BindingValueType.Integer;
         binding.IntegerValue = value;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = written;
+        _stringOffset += written;
     }
 
     /// <summary>
@@ -1461,10 +1613,23 @@ public ref struct BindingTable
     public void Bind(ReadOnlySpan<char> variableName, double value)
     {
         if (_count >= _bindings.Length) return;
+
+        // Format the value as string and store in buffer
+        Span<char> temp = stackalloc char[32];
+        if (!value.TryFormat(temp, out int written))
+            return;
+
+        if (_stringOffset + written > _stringBuffer.Length) return;
+
+        temp.Slice(0, written).CopyTo(_stringBuffer.Slice(_stringOffset));
+
         ref var binding = ref _bindings[_count++];
         binding.VariableNameHash = ComputeHash(variableName);
         binding.Type = BindingValueType.Double;
         binding.DoubleValue = value;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = written;
+        _stringOffset += written;
     }
 
     /// <summary>
@@ -1473,10 +1638,21 @@ public ref struct BindingTable
     public void Bind(ReadOnlySpan<char> variableName, bool value)
     {
         if (_count >= _bindings.Length) return;
+
+        // Store string representation
+        var str = value ? "true" : "false";
+        var len = str.Length;
+        if (_stringOffset + len > _stringBuffer.Length) return;
+
+        str.AsSpan().CopyTo(_stringBuffer.Slice(_stringOffset));
+
         ref var binding = ref _bindings[_count++];
         binding.VariableNameHash = ComputeHash(variableName);
         binding.Type = BindingValueType.Boolean;
         binding.BooleanValue = value;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = len;
+        _stringOffset += len;
     }
 
     /// <summary>

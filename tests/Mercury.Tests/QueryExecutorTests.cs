@@ -1237,4 +1237,223 @@ public class QueryExecutorTests : IDisposable
             _store.ReleaseReadLock();
         }
     }
+
+    // ========== BIND Tests ==========
+
+    [Fact]
+    public void Execute_BindConstant()
+    {
+        // BIND a constant value
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name BIND(42 AS ?answer) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var answers = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?answer".AsSpan());
+                Assert.True(idx >= 0, "?answer should be bound");
+                answers.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // All 3 people should have ?answer = 42
+            Assert.Equal(3, answers.Count);
+            Assert.All(answers, a => Assert.Equal("42", a));
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_BindArithmetic()
+    {
+        // BIND with arithmetic on a variable
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age BIND(?age + 10 AS ?agePlus10) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var computed = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                var computedIdx = results.Current.FindBinding("?agePlus10".AsSpan());
+                Assert.True(computedIdx >= 0, "?agePlus10 should be bound");
+
+                var age = results.Current.GetString(ageIdx).ToString();
+                var agePlus10 = results.Current.GetString(computedIdx).ToString();
+                computed[age] = agePlus10;
+            }
+            results.Dispose();
+
+            // Alice=30 -> 40, Bob=25 -> 35, Charlie=35 -> 45
+            Assert.Equal(3, computed.Count);
+            Assert.Equal("40", computed["30"]);
+            Assert.Equal("35", computed["25"]);
+            Assert.Equal("45", computed["35"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_BindMultiplication()
+    {
+        // BIND with multiplication
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age BIND(?age * 2 AS ?doubled) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var computed = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                var computedIdx = results.Current.FindBinding("?doubled".AsSpan());
+                Assert.True(computedIdx >= 0, "?doubled should be bound");
+
+                var age = results.Current.GetString(ageIdx).ToString();
+                var doubled = results.Current.GetString(computedIdx).ToString();
+                computed[age] = doubled;
+            }
+            results.Dispose();
+
+            // Alice=30 -> 60, Bob=25 -> 50, Charlie=35 -> 70
+            Assert.Equal(3, computed.Count);
+            Assert.Equal("60", computed["30"]);
+            Assert.Equal("50", computed["25"]);
+            Assert.Equal("70", computed["35"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_BindWithParentheses()
+    {
+        // BIND with complex expression using parentheses
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age BIND((?age + 5) * 2 AS ?computed) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var computed = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                var computedIdx = results.Current.FindBinding("?computed".AsSpan());
+                Assert.True(computedIdx >= 0, "?computed should be bound");
+
+                var age = results.Current.GetString(ageIdx).ToString();
+                var result = results.Current.GetString(computedIdx).ToString();
+                computed[age] = result;
+            }
+            results.Dispose();
+
+            // Alice=30 -> (30+5)*2 = 70
+            // Bob=25 -> (25+5)*2 = 60
+            // Charlie=35 -> (35+5)*2 = 80
+            Assert.Equal(3, computed.Count);
+            Assert.Equal("70", computed["30"]);
+            Assert.Equal("60", computed["25"]);
+            Assert.Equal("80", computed["35"]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_BindStringLiteral()
+    {
+        // BIND a string literal
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name BIND(\"greeting\" AS ?msg) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var messages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?msg".AsSpan());
+                Assert.True(idx >= 0, "?msg should be bound");
+                messages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            Assert.Equal(3, messages.Count);
+            Assert.All(messages, m => Assert.Equal("greeting", m));
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_BindWithFilter()
+    {
+        // BIND combined with FILTER
+        var query = "SELECT * WHERE { ?person <http://xmlns.com/foaf/0.1/age> ?age BIND(?age * 2 AS ?doubled) FILTER(?doubled > 60) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                ages.Add(results.Current.GetString(ageIdx).ToString());
+            }
+            results.Dispose();
+
+            // 30*2=60 (not > 60), 25*2=50 (no), 35*2=70 (yes)
+            // Only Charlie with age=35 should pass
+            Assert.Single(ages);
+            Assert.Equal("35", ages[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 }
