@@ -255,11 +255,14 @@ Key components:
 | Query types | SELECT, ASK, CONSTRUCT |
 | Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
-| Filter functions | BOUND, IF, COALESCE, REGEX, sameTerm |
+| Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
 | Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |
-| String functions | STR, STRLEN, SUBSTR, CONTAINS, STRSTARTS, STRENDS, STRBEFORE, STRAFTER, CONCAT, UCASE, LCASE |
+| String functions | STR, STRLEN, SUBSTR, CONTAINS, STRSTARTS, STRENDS, STRBEFORE, STRAFTER, CONCAT, UCASE, LCASE, ENCODE_FOR_URI |
 | Numeric functions | ABS, ROUND, CEIL, FLOOR |
-| RDF term functions | LANG, DATATYPE, LANGMATCHES |
+| RDF term functions | LANG, DATATYPE, LANGMATCHES, IRI, URI |
+| Hash functions | MD5, SHA1, SHA256, SHA384, SHA512 |
+| UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |
+| DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ |
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, COUNT, SUM, AVG, MIN, MAX |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
