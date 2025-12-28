@@ -481,6 +481,12 @@ public ref struct FilterEvaluator
             return ParseRegexFunction();
         }
 
+        // Handle REPLACE - regex-based string replacement
+        if (funcName.Equals("replace", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseReplaceFunction();
+        }
+
         // Handle CONTAINS - two string arguments
         if (funcName.Equals("contains", StringComparison.OrdinalIgnoreCase))
         {
@@ -944,6 +950,104 @@ public ref struct FilterEvaluator
     }
 
     /// <summary>
+    /// Parse REPLACE(string, pattern, replacement [, flags])
+    /// Replaces all occurrences of regex pattern with replacement string
+    /// </summary>
+    private Value ParseReplaceFunction()
+    {
+        // Parse string argument
+        var stringArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        // Parse pattern argument
+        var patternArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        // Parse replacement argument
+        var replacementArg = ParseTerm();
+        SkipWhitespace();
+
+        // Check for optional flags argument
+        ReadOnlySpan<char> flags = ReadOnlySpan<char>.Empty;
+        if (Peek() == ',')
+        {
+            Advance(); // Skip ','
+            SkipWhitespace();
+            var flagsArg = ParseTerm();
+            if (flagsArg.Type == ValueType.String)
+                flags = flagsArg.StringValue;
+        }
+
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Validate string argument
+        if (stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri)
+            return new Value { Type = ValueType.Unbound };
+
+        // Validate pattern argument
+        if (patternArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        // Validate replacement argument
+        if (replacementArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        var stringValue = stringArg.StringValue;
+        var pattern = patternArg.StringValue;
+        var replacement = replacementArg.StringValue;
+
+        // Build regex options from flags
+        var options = RegexOptions.None;
+        foreach (var flag in flags)
+        {
+            switch (flag)
+            {
+                case 'i': options |= RegexOptions.IgnoreCase; break;
+                case 's': options |= RegexOptions.Singleline; break;
+                case 'm': options |= RegexOptions.Multiline; break;
+                case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
+            }
+        }
+
+        // Perform regex replacement
+        try
+        {
+            var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
+            _replaceResult = regex.Replace(stringValue.ToString(), replacement.ToString());
+            return new Value
+            {
+                Type = ValueType.String,
+                StringValue = _replaceResult.AsSpan()
+            };
+        }
+        catch
+        {
+            // Invalid regex pattern
+            return new Value { Type = ValueType.Unbound };
+        }
+    }
+
+    /// <summary>
     /// Parse CONTAINS(string, substring) - returns true if string contains substring
     /// </summary>
     private Value ParseContainsFunction()
@@ -1374,6 +1478,9 @@ public ref struct FilterEvaluator
 
     // Storage for UCASE/LCASE result to keep span valid
     private string _caseResult = string.Empty;
+
+    // Storage for REPLACE result to keep span valid
+    private string _replaceResult = string.Empty;
 
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";

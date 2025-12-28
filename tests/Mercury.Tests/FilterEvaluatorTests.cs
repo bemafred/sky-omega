@@ -1801,4 +1801,57 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region REPLACE Function
+
+    [Fact]
+    public void Replace_BasicReplacement()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"world\", \"there\") == \"hello there\"", "?x", "hello world"));
+    }
+
+    [Fact]
+    public void Replace_MultipleOccurrences()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"a\", \"X\") == \"bXnXnX\"", "?x", "banana"));
+    }
+
+    [Fact]
+    public void Replace_RegexPattern()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"[0-9]+\", \"#\") == \"abc#def#\"", "?x", "abc123def456"));
+    }
+
+    [Fact]
+    public void Replace_NoMatch_ReturnsOriginal()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"xyz\", \"!\") == \"hello\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Replace_EmptyReplacement()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"l\", \"\") == \"heo\"", "?x", "hello"));
+    }
+
+    [Fact]
+    public void Replace_CaseInsensitiveFlag()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"HELLO\", \"hi\", \"i\") == \"hi world\"", "?x", "hello world"));
+    }
+
+    [Fact]
+    public void Replace_CharacterClass()
+    {
+        // Replace all vowels with underscore
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"[aeiou]\", \"_\") == \"h_ll_ w_rld\"", "?x", "hello world"));
+    }
+
+    [Fact]
+    public void Replace_DotMatchesNewlineWithFlag()
+    {
+        Assert.True(EvaluateWithStringBinding("REPLACE(?x, \"a.b\", \"X\", \"s\") == \"X\"", "?x", "a\nb"));
+    }
+
+    #endregion
 }
