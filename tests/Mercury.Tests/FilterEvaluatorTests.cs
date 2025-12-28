@@ -1339,4 +1339,135 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region isIRI/isURI Function
+
+    [Fact]
+    public void IsIRI_Uri_ReturnsTrue()
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
+        var evaluator = new FilterEvaluator("isIRI(?x)".AsSpan());
+        Assert.True(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
+    }
+
+    [Fact]
+    public void IsIRI_String_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithStringBinding("isIRI(?x)", "?x", "hello"));
+    }
+
+    [Fact]
+    public void IsURI_Uri_ReturnsTrue()
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
+        var evaluator = new FilterEvaluator("isURI(?x)".AsSpan());
+        Assert.True(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
+    }
+
+    #endregion
+
+    #region isBlank Function
+
+    [Fact]
+    public void IsBlank_BlankNode_ReturnsTrue()
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.BindUri("?x", "_:b1".AsSpan());
+        var evaluator = new FilterEvaluator("isBlank(?x)".AsSpan());
+        Assert.True(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
+    }
+
+    [Fact]
+    public void IsBlank_Uri_ReturnsFalse()
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
+        var evaluator = new FilterEvaluator("isBlank(?x)".AsSpan());
+        Assert.False(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
+    }
+
+    [Fact]
+    public void IsBlank_String_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithStringBinding("isBlank(?x)", "?x", "hello"));
+    }
+
+    #endregion
+
+    #region isLiteral Function
+
+    [Fact]
+    public void IsLiteral_String_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithStringBinding("isLiteral(?x)", "?x", "hello"));
+    }
+
+    [Fact]
+    public void IsLiteral_Integer_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("isLiteral(?x)", "?x", 42L));
+    }
+
+    [Fact]
+    public void IsLiteral_Double_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithDoubleBinding("isLiteral(?x)", "?x", 3.14));
+    }
+
+    [Fact]
+    public void IsLiteral_Boolean_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithBoolBinding("isLiteral(?x)", "?x", true));
+    }
+
+    [Fact]
+    public void IsLiteral_Uri_ReturnsFalse()
+    {
+        var bindingStorage = new Binding[16];
+        var stringBuffer = new char[256];
+        var bindings = new BindingTable(bindingStorage, stringBuffer);
+        bindings.BindUri("?x", "<http://example.org/test>".AsSpan());
+        var evaluator = new FilterEvaluator("isLiteral(?x)".AsSpan());
+        Assert.False(evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()));
+    }
+
+    #endregion
+
+    #region isNumeric Function
+
+    [Fact]
+    public void IsNumeric_Integer_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithIntBinding("isNumeric(?x)", "?x", 42L));
+    }
+
+    [Fact]
+    public void IsNumeric_Double_ReturnsTrue()
+    {
+        Assert.True(EvaluateWithDoubleBinding("isNumeric(?x)", "?x", 3.14));
+    }
+
+    [Fact]
+    public void IsNumeric_String_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithStringBinding("isNumeric(?x)", "?x", "42"));
+    }
+
+    [Fact]
+    public void IsNumeric_Boolean_ReturnsFalse()
+    {
+        Assert.False(EvaluateWithBoolBinding("isNumeric(?x)", "?x", true));
+    }
+
+    #endregion
 }

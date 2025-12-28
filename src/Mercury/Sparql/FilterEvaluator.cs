@@ -528,12 +528,52 @@ public ref struct FilterEvaluator
             };
         }
 
-        if (funcName.Equals("isIRI", StringComparison.OrdinalIgnoreCase))
+        if (funcName.Equals("isIRI", StringComparison.OrdinalIgnoreCase) ||
+            funcName.Equals("isURI", StringComparison.OrdinalIgnoreCase))
         {
             return new Value
             {
                 Type = ValueType.Boolean,
                 BooleanValue = arg1.Type == ValueType.Uri
+            };
+        }
+
+        if (funcName.Equals("isBlank", StringComparison.OrdinalIgnoreCase))
+        {
+            // Check if value is a blank node (starts with _:)
+            var isBlank = arg1.Type == ValueType.Uri &&
+                          arg1.StringValue.Length >= 2 &&
+                          arg1.StringValue[0] == '_' &&
+                          arg1.StringValue[1] == ':';
+            return new Value
+            {
+                Type = ValueType.Boolean,
+                BooleanValue = isBlank
+            };
+        }
+
+        if (funcName.Equals("isLiteral", StringComparison.OrdinalIgnoreCase))
+        {
+            // Literals are strings, integers, doubles, booleans
+            var isLiteral = arg1.Type == ValueType.String ||
+                            arg1.Type == ValueType.Integer ||
+                            arg1.Type == ValueType.Double ||
+                            arg1.Type == ValueType.Boolean;
+            return new Value
+            {
+                Type = ValueType.Boolean,
+                BooleanValue = isLiteral
+            };
+        }
+
+        if (funcName.Equals("isNumeric", StringComparison.OrdinalIgnoreCase))
+        {
+            var isNumeric = arg1.Type == ValueType.Integer ||
+                            arg1.Type == ValueType.Double;
+            return new Value
+            {
+                Type = ValueType.Boolean,
+                BooleanValue = isNumeric
             };
         }
 
