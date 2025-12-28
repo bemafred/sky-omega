@@ -987,6 +987,23 @@ public ref struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
+        // TIMEZONE - extract timezone as xsd:dayTimeDuration
+        if (funcName.Equals("timezone", StringComparison.OrdinalIgnoreCase))
+        {
+            if (arg1.Type == ValueType.String)
+            {
+                var tzStr = ExtractTimezone(arg1.StringValue);
+                if (string.IsNullOrEmpty(tzStr))
+                {
+                    // No timezone specified - return unbound per SPARQL spec
+                    return new Value { Type = ValueType.Unbound };
+                }
+                _timezoneResult = ConvertToXsdDuration(tzStr);
+                return new Value { Type = ValueType.String, StringValue = _timezoneResult.AsSpan() };
+            }
+            return new Value { Type = ValueType.Unbound };
+        }
+
         // ABS - absolute value
         if (funcName.Equals("abs", StringComparison.OrdinalIgnoreCase))
         {
@@ -1877,6 +1894,9 @@ public ref struct FilterEvaluator
     // Counter for generating unique blank node identifiers
     private int _bnodeCounter = 0;
 
+    // Storage for TIMEZONE result to keep span valid
+    private string _timezoneResult = string.Empty;
+
     // XSD namespace for datatype URIs
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
     private const string RdfLangString = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
@@ -1954,6 +1974,46 @@ public ref struct FilterEvaluator
 
         // No timezone specified
         return "";
+    }
+
+    /// <summary>
+    /// Convert timezone string to xsd:dayTimeDuration format
+    /// "Z" → "PT0S", "+05:30" → "PT5H30M", "-08:00" → "-PT8H"
+    /// </summary>
+    private static string ConvertToXsdDuration(string tz)
+    {
+        if (tz == "Z")
+            return "PT0S";
+
+        if (tz.Length != 6)
+            return "PT0S";
+
+        var sign = tz[0];
+        if (sign != '+' && sign != '-')
+            return "PT0S";
+
+        // Parse hours and minutes from +HH:MM or -HH:MM
+        if (!int.TryParse(tz.AsSpan(1, 2), out var hours))
+            return "PT0S";
+        if (!int.TryParse(tz.AsSpan(4, 2), out var minutes))
+            return "PT0S";
+
+        // Build duration string
+        var result = new StringBuilder();
+        if (sign == '-')
+            result.Append('-');
+        result.Append("PT");
+
+        if (hours > 0)
+            result.Append($"{hours}H");
+        if (minutes > 0)
+            result.Append($"{minutes}M");
+
+        // If both are zero, return PT0S
+        if (hours == 0 && minutes == 0)
+            return "PT0S";
+
+        return result.ToString();
     }
 
     /// <summary>

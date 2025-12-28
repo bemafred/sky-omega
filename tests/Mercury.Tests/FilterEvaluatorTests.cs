@@ -2275,4 +2275,57 @@ public class FilterEvaluatorTests
     }
 
     #endregion
+
+    #region TIMEZONE Function (Duration Format)
+
+    [Fact]
+    public void Timezone_Utc_ReturnsPT0S()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "TIMEZONE(?x) == \"PT0S\"",
+            "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    [Fact]
+    public void Timezone_PositiveOffset_ReturnsDuration()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "TIMEZONE(?x) == \"PT5H30M\"",
+            "?x", "2024-12-25T10:30:00+05:30"));
+    }
+
+    [Fact]
+    public void Timezone_NegativeOffset_ReturnsNegativeDuration()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "TIMEZONE(?x) == \"-PT8H\"",
+            "?x", "2024-12-25T10:30:00-08:00"));
+    }
+
+    [Fact]
+    public void Timezone_WholeHour_OmitsMinutes()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "TIMEZONE(?x) == \"PT2H\"",
+            "?x", "2024-12-25T10:30:00+02:00"));
+    }
+
+    [Fact]
+    public void Timezone_NoTimezone_ReturnsUnbound()
+    {
+        // TIMEZONE with no timezone returns unbound (different from TZ which returns "")
+        Assert.False(EvaluateWithStringBinding(
+            "BOUND(TIMEZONE(?x))",
+            "?x", "2024-12-25T10:30:00"));
+    }
+
+    [Fact]
+    public void Timezone_CaseInsensitive()
+    {
+        Assert.True(EvaluateWithStringBinding(
+            "timezone(?x) == \"PT0S\"",
+            "?x", "2024-12-25T10:30:00Z"));
+    }
+
+    #endregion
 }
