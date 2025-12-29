@@ -427,9 +427,11 @@ public class QueryExecutor : IDisposable
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteGraphClauses()
     {
-        // Check conditions WITHOUT creating local struct copies
-        if (_query.WhereClause.Pattern.GraphClauseCount != 1)
-            return QueryResults.Empty(); // Multiple GRAPH clauses need join - not yet supported
+        var graphCount = _query.WhereClause.Pattern.GraphClauseCount;
+
+        // Multiple GRAPH clauses - join results
+        if (graphCount > 1)
+            return ExecuteMultipleGraphClauses();
 
         // Check if it's a variable graph - use pattern.GetGraphClause(0).IsVariable directly
         // to avoid creating a local copy of GraphClause
@@ -444,6 +446,298 @@ public class QueryExecutor : IDisposable
 
         // For fixed IRI graph - proceed with smaller stack usage
         return ExecuteFixedGraphClause();
+    }
+
+    /// <summary>
+    /// Execute multiple GRAPH clauses and join their results.
+    /// Returns materialized rows directly since QueryResults is too large for normal stack.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteMultipleGraphClauses()
+    {
+        // Collect results from all GRAPH clauses and join them
+        var joinedResults = CollectAndJoinGraphResults();
+        if (joinedResults == null || joinedResults.Count == 0)
+            return QueryResults.Empty();
+
+        // Use the same approach as ExecuteVariableGraph - create QueryResults from materialized list
+        // Note: This works because FromMaterializedList has NoInlining and creates a smaller QueryResults
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        return QueryResults.FromMaterializedList(joinedResults, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Collect results from all GRAPH clauses and join them.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? CollectAndJoinGraphResults()
+    {
+        var graphCount = _query.WhereClause.Pattern.GraphClauseCount;
+
+        // Execute first GRAPH clause
+        var firstResults = ExecuteSingleGraphClauseForJoin(0);
+        if (firstResults == null || firstResults.Count == 0)
+            return null;
+
+        // Join with subsequent GRAPH clauses
+        var joinedResults = firstResults;
+        for (int i = 1; i < graphCount; i++)
+        {
+            var nextResults = ExecuteSingleGraphClauseForJoin(i);
+            if (nextResults == null || nextResults.Count == 0)
+                return null;
+
+            joinedResults = JoinMaterializedRows(joinedResults, nextResults);
+            if (joinedResults.Count == 0)
+                return null;
+        }
+
+        return joinedResults;
+    }
+
+    /// <summary>
+    /// Execute a single GRAPH clause and return materialized rows for joining.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? ExecuteSingleGraphClauseForJoin(int graphIndex)
+    {
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var graphClause = pattern.GetGraphClause(graphIndex);
+
+        if (graphClause.PatternCount == 0)
+            return null;
+
+        if (graphClause.IsVariable)
+        {
+            // Variable graph - use VariableGraphExecutor
+            return ExecuteVariableGraphClauseForJoin(graphIndex);
+        }
+        else
+        {
+            // Fixed IRI graph - execute patterns directly
+            return ExecuteFixedGraphClauseForJoin(graphIndex);
+        }
+    }
+
+    /// <summary>
+    /// Execute a variable graph clause for joining (GRAPH ?g { ... }).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? ExecuteVariableGraphClauseForJoin(int graphIndex)
+    {
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+
+        // Find the nth GRAPH header slot in the buffer
+        var patterns = _buffer.GetPatterns();
+        int graphHeaderIdx = -1;
+        int foundCount = 0;
+        for (int i = 0; i < _buffer.PatternCount; i++)
+        {
+            if (patterns[i].Kind == Patterns.PatternKind.GraphHeader)
+            {
+                if (foundCount == graphIndex)
+                {
+                    graphHeaderIdx = i;
+                    break;
+                }
+                foundCount++;
+            }
+        }
+
+        if (graphHeaderIdx < 0)
+            return null;
+
+        var graphHeader = patterns[graphHeaderIdx];
+
+        var config = new VariableGraphExecutor.BufferExecutionConfig
+        {
+            Store = _store,
+            Source = _source,
+            Buffer = _buffer,
+            NamedGraphs = _namedGraphs,
+            Bindings = bindings,
+            StringBuffer = stringBuffer,
+            GraphTermType = graphHeader.GraphTermType,
+            GraphTermStart = graphHeader.GraphTermStart,
+            GraphTermLength = graphHeader.GraphTermLength,
+            GraphHeaderIndex = graphHeaderIdx
+        };
+
+        return VariableGraphExecutor.ExecuteFromBuffer(config);
+    }
+
+    /// <summary>
+    /// Execute a fixed IRI graph clause for joining (GRAPH <iri> { ... }).
+    /// Dispatches to specialized methods to avoid large structs on same stack frame.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? ExecuteFixedGraphClauseForJoin(int graphIndex)
+    {
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var graphClause = pattern.GetGraphClause(graphIndex);
+        var patternCount = graphClause.PatternCount;
+
+        if (patternCount == 0)
+            return null;
+
+        if (patternCount == 1)
+            return ExecuteFixedGraphClauseSinglePattern(graphIndex);
+        else
+            return ExecuteFixedGraphClauseMultiPattern(graphIndex);
+    }
+
+    /// <summary>
+    /// Execute a fixed GRAPH clause with a single pattern.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteFixedGraphClauseSinglePattern(int graphIndex)
+    {
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var graphClause = pattern.GetGraphClause(graphIndex);
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        var graphIri = _source.AsSpan(graphClause.Graph.Start, graphClause.Graph.Length);
+        var tp = graphClause.GetPattern(0);
+        var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
+
+        var results = new List<MaterializedRow>();
+        while (scan.MoveNext(ref bindingTable))
+        {
+            results.Add(new MaterializedRow(bindingTable));
+            bindingTable.Clear();
+        }
+        scan.Dispose();
+        return results;
+    }
+
+    /// <summary>
+    /// Execute a fixed GRAPH clause with multiple patterns.
+    /// Uses a separate thread with larger stack to handle the large MultiPatternScan struct.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteFixedGraphClauseMultiPattern(int graphIndex)
+    {
+        List<MaterializedRow>? results = null;
+        var store = _store;
+        var source = _source;
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var graphClause = pattern.GetGraphClause(graphIndex);
+
+        // Run on thread with larger stack to handle large GraphPattern/MultiPatternScan structs
+        var thread = new System.Threading.Thread(() =>
+        {
+            var bindings = new Binding[16];
+            var stringBuffer = new char[1024];
+            var bindingTable = new BindingTable(bindings, stringBuffer);
+
+            var graphIri = source.AsSpan(graphClause.Graph.Start, graphClause.Graph.Length);
+
+            var graphPattern = new GraphPattern();
+            for (int i = 0; i < graphClause.PatternCount; i++)
+            {
+                graphPattern.AddPattern(graphClause.GetPattern(i));
+            }
+
+            var scan = new MultiPatternScan(store, source, graphPattern, false, graphIri);
+            results = new List<MaterializedRow>();
+            while (scan.MoveNext(ref bindingTable))
+            {
+                results.Add(new MaterializedRow(bindingTable));
+                bindingTable.Clear();
+            }
+            scan.Dispose();
+        }, 4 * 1024 * 1024); // 4MB stack
+
+        thread.Start();
+        thread.Join();
+
+        return results ?? new List<MaterializedRow>();
+    }
+
+    /// <summary>
+    /// Join two lists of materialized rows based on shared variable bindings.
+    /// Uses nested loop join - for each row in left, find matching rows in right.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static List<MaterializedRow> JoinMaterializedRows(List<MaterializedRow> left, List<MaterializedRow> right)
+    {
+        var results = new List<MaterializedRow>();
+
+        foreach (var leftRow in left)
+        {
+            foreach (var rightRow in right)
+            {
+                // Check if rows can be joined (shared variables must have same value)
+                if (CanJoinRows(leftRow, rightRow))
+                {
+                    // Merge the rows
+                    var merged = MergeRows(leftRow, rightRow);
+                    results.Add(merged);
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Check if two rows can be joined - shared variables must have same values.
+    /// </summary>
+    private static bool CanJoinRows(MaterializedRow left, MaterializedRow right)
+    {
+        // For each binding in left, if it also exists in right, values must match
+        for (int i = 0; i < left.BindingCount; i++)
+        {
+            var leftHash = left.GetHash(i);
+            var leftValue = left.GetValue(i);
+
+            // Check if right has this variable
+            for (int j = 0; j < right.BindingCount; j++)
+            {
+                if (right.GetHash(j) == leftHash)
+                {
+                    // Found same variable - values must match
+                    if (!leftValue.SequenceEqual(right.GetValue(j)))
+                        return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Merge two rows into one, combining all bindings.
+    /// </summary>
+    private static MaterializedRow MergeRows(MaterializedRow left, MaterializedRow right)
+    {
+        // Create a binding table with all bindings from both rows
+        var bindings = new Binding[32];
+        var stringBuffer = new char[2048];
+        var table = new BindingTable(bindings, stringBuffer);
+
+        // Add all bindings from left
+        for (int i = 0; i < left.BindingCount; i++)
+        {
+            table.BindWithHash(left.GetHash(i), left.GetValue(i));
+        }
+
+        // Add bindings from right that aren't already present
+        for (int i = 0; i < right.BindingCount; i++)
+        {
+            var hash = right.GetHash(i);
+            if (table.FindBindingByHash(hash) < 0)
+            {
+                table.BindWithHash(hash, right.GetValue(i));
+            }
+        }
+
+        return new MaterializedRow(table);
     }
 
     /// <summary>

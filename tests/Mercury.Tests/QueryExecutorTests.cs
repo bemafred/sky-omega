@@ -3605,6 +3605,141 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Execute_MultipleGraphClauses_JoinsResults()
+    {
+        // Add data to two different named graphs with a shared subject
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"", "<http://example.org/namesGraph>");
+        _store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/age>", "30", "<http://example.org/agesGraph>");
+        _store.AddCurrentBatched("<http://example.org/Person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"", "<http://example.org/namesGraph>");
+        // Person2 has no age in agesGraph - should not appear in join
+        _store.CommitBatch();
+
+        // Query with two GRAPH clauses - should join on ?person
+        var query = @"SELECT ?name ?age WHERE {
+            GRAPH <http://example.org/namesGraph> { ?person <http://xmlns.com/foaf/0.1/name> ?name }
+            GRAPH <http://example.org/agesGraph> { ?person <http://xmlns.com/foaf/0.1/age> ?age }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<(string name, string age)>();
+            while (results.MoveNext())
+            {
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                var ageIdx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(nameIdx >= 0);
+                Assert.True(ageIdx >= 0);
+                found.Add((results.Current.GetString(nameIdx).ToString(), results.Current.GetString(ageIdx).ToString()));
+            }
+            results.Dispose();
+
+            // Only Person1 should appear (has both name and age)
+            Assert.Single(found);
+            Assert.Equal("\"Alice\"", found[0].name);
+            Assert.Equal("30", found[0].age);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MultipleGraphClauses_WithVariableGraph()
+    {
+        // Add data with variable graph pattern
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/label>", "\"Widget\"", "<http://example.org/labelsGraph>");
+        _store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/price>", "100", "<http://example.org/pricesGraph>");
+        _store.CommitBatch();
+
+        // Mix of fixed and variable GRAPH clauses
+        var query = @"SELECT ?g ?label ?price WHERE {
+            GRAPH <http://example.org/labelsGraph> { ?item <http://example.org/label> ?label }
+            GRAPH ?g { ?item <http://example.org/price> ?price }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<(string g, string label, string price)>();
+            while (results.MoveNext())
+            {
+                var gIdx = results.Current.FindBinding("?g".AsSpan());
+                var labelIdx = results.Current.FindBinding("?label".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+                Assert.True(gIdx >= 0);
+                Assert.True(labelIdx >= 0);
+                Assert.True(priceIdx >= 0);
+                found.Add((
+                    results.Current.GetString(gIdx).ToString(),
+                    results.Current.GetString(labelIdx).ToString(),
+                    results.Current.GetString(priceIdx).ToString()));
+            }
+            results.Dispose();
+
+            Assert.Single(found);
+            Assert.Equal("<http://example.org/pricesGraph>", found[0].g);
+            Assert.Equal("\"Widget\"", found[0].label);
+            Assert.Equal("100", found[0].price);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MultipleGraphClauses_NoMatch_ReturnsEmpty()
+    {
+        // Add data with no shared subjects between graphs
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/A>", "<http://example.org/p>", "\"ValueA\"", "<http://example.org/graphA>");
+        _store.AddCurrentBatched("<http://example.org/B>", "<http://example.org/q>", "\"ValueB\"", "<http://example.org/graphB>");
+        _store.CommitBatch();
+
+        // Query with two GRAPH clauses - join on ?s should return no results
+        var query = @"SELECT * WHERE {
+            GRAPH <http://example.org/graphA> { ?s <http://example.org/p> ?v1 }
+            GRAPH <http://example.org/graphB> { ?s <http://example.org/q> ?v2 }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 
     #region FROM / FROM NAMED Dataset Clauses

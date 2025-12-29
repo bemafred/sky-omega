@@ -330,7 +330,6 @@ Key components:
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Multiple GRAPH clauses | Single only | Multiple GRAPH patterns need join support |
 | Multiple subqueries | Single only | Multiple subqueries need join support |
 | REDUCED | Parsed only | Flag set but not applied in execution |
 
