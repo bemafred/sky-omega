@@ -513,3 +513,354 @@ finally
     ArrayPool<byte>.Shared.Return(pooledBuffer);
 }
 */
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QueryBuffer - Pooled storage for parsed SPARQL queries
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Owns pooled buffer storage for a parsed SPARQL query.
+/// Replaces the large inline struct approach with Buffer + View pattern.
+/// </summary>
+/// <remarks>
+/// Buffer layout:
+/// - Main patterns: offset 0, DefaultCapacity slots
+/// - Subquery patterns: allocated on demand
+///
+/// This class is the antidote to large inline struct buffers:
+/// - ~100 bytes vs ~9KB for old Query struct
+/// - Pooled memory = zero-GC
+/// - No stack overflow on nested calls
+/// </remarks>
+public sealed class QueryBuffer : IDisposable
+{
+    /// <summary>Default capacity in pattern slots (64 bytes each)</summary>
+    public const int DefaultCapacity = 128;  // 8KB buffer - handles most queries
+
+    /// <summary>Maximum capacity to prevent runaway allocation</summary>
+    public const int MaxCapacity = 1024;     // 64KB max
+
+    private byte[]? _buffer;
+    private int _patternCount;
+    private bool _disposed;
+
+    // Query metadata (lightweight - no large inline storage)
+    public QueryType Type { get; set; }
+    public bool SelectDistinct { get; set; }
+    public bool SelectAll { get; set; }
+    public int Limit { get; set; }
+    public int Offset { get; set; }
+
+    // Source span offsets for lazily-evaluated expressions
+    public int BaseUriStart { get; set; }
+    public int BaseUriLength { get; set; }
+
+    // Dataset clauses (heap array is fine - small, infrequent)
+    public DatasetClause[]? Datasets { get; set; }
+
+    // Prefix mappings (heap array - typically small)
+    public PrefixMapping[]? Prefixes { get; set; }
+
+    // Order by offsets
+    public OrderByEntry[]? OrderBy { get; set; }
+
+    // Group by variable offsets
+    public GroupByEntry[]? GroupBy { get; set; }
+
+    // Aggregate expressions
+    public AggregateEntry[]? Aggregates { get; set; }
+
+    /// <summary>
+    /// Create a new query buffer with default capacity
+    /// </summary>
+    public QueryBuffer() : this(DefaultCapacity) { }
+
+    /// <summary>
+    /// Create a new query buffer with specified capacity
+    /// </summary>
+    public QueryBuffer(int capacitySlots)
+    {
+        if (capacitySlots > MaxCapacity)
+            throw new ArgumentOutOfRangeException(nameof(capacitySlots),
+                $"Capacity {capacitySlots} exceeds maximum {MaxCapacity}");
+
+        int bufferSize = capacitySlots * PatternSlot.Size;
+        _buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferSize);
+        _buffer.AsSpan(0, bufferSize).Clear(); // Zero-init for safety
+    }
+
+    /// <summary>
+    /// Get pattern array view for writing/reading
+    /// </summary>
+    public PatternArray GetPatterns()
+    {
+        ThrowIfDisposed();
+        return new PatternArray(_buffer.AsSpan());
+    }
+
+    /// <summary>
+    /// Pattern count after parsing
+    /// </summary>
+    public int PatternCount
+    {
+        get => _patternCount;
+        set => _patternCount = value;
+    }
+
+    /// <summary>
+    /// Capacity in pattern slots
+    /// </summary>
+    public int Capacity => _buffer?.Length / PatternSlot.Size ?? 0;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        if (_buffer != null)
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(_buffer);
+            _buffer = null;
+        }
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(QueryBuffer));
+    }
+}
+
+/// <summary>
+/// Prefix mapping (prefix -> IRI)
+/// </summary>
+public struct PrefixMapping
+{
+    public int PrefixStart;
+    public int PrefixLength;
+    public int IriStart;
+    public int IriLength;
+}
+
+/// <summary>
+/// ORDER BY entry
+/// </summary>
+public struct OrderByEntry
+{
+    public int VariableStart;
+    public int VariableLength;
+    public bool Descending;
+}
+
+/// <summary>
+/// GROUP BY entry
+/// </summary>
+public struct GroupByEntry
+{
+    public int VariableStart;
+    public int VariableLength;
+}
+
+/// <summary>
+/// Aggregate expression entry
+/// </summary>
+public struct AggregateEntry
+{
+    public AggregateFunction Function;
+    public int VariableStart;
+    public int VariableLength;
+    public int AliasStart;
+    public int AliasLength;
+    public bool Distinct;
+    public int SeparatorStart;  // For GROUP_CONCAT
+    public int SeparatorLength;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QueryBufferAdapter - Bridge from old Query struct to new QueryBuffer
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// <summary>
+/// Converts the old large Query struct into the new QueryBuffer format.
+/// This enables incremental migration: executor can use QueryBuffer while
+/// parser still produces Query struct.
+/// </summary>
+public static class QueryBufferAdapter
+{
+    /// <summary>
+    /// Create a QueryBuffer from an existing Query struct.
+    /// Caller owns the returned buffer and must dispose it.
+    /// </summary>
+    public static QueryBuffer FromQuery(in Query query, ReadOnlySpan<char> source)
+    {
+        // Estimate capacity: patterns + filters + binds + graph patterns
+        int estimatedSlots = query.WhereClause.Pattern.PatternCount
+            + query.WhereClause.Pattern.FilterCount
+            + query.WhereClause.Pattern.BindCount
+            + query.WhereClause.Pattern.GraphClauseCount * 10
+            + query.WhereClause.Pattern.ExistsFilterCount * 5
+            + 16; // Buffer room
+
+        var buffer = new QueryBuffer(Math.Max(estimatedSlots, 32));
+
+        try
+        {
+            PopulateBuffer(buffer, in query, source);
+            return buffer;
+        }
+        catch
+        {
+            buffer.Dispose();
+            throw;
+        }
+    }
+
+    private static void PopulateBuffer(QueryBuffer buffer, in Query query, ReadOnlySpan<char> source)
+    {
+        // Copy metadata
+        buffer.Type = query.Type;
+        buffer.SelectDistinct = query.SelectClause.Distinct;
+        buffer.SelectAll = query.SelectClause.SelectAll;
+        buffer.Limit = query.SolutionModifier.Limit;
+        buffer.Offset = query.SolutionModifier.Offset;
+        buffer.BaseUriStart = query.Prologue.BaseUriStart;
+        buffer.BaseUriLength = query.Prologue.BaseUriLength;
+
+        // Copy datasets
+        if (query.Datasets != null && query.Datasets.Length > 0)
+        {
+            buffer.Datasets = query.Datasets;
+        }
+
+        // Copy aggregates
+        if (query.SelectClause.HasAggregates)
+        {
+            var aggs = new AggregateEntry[query.SelectClause.AggregateCount];
+            for (int i = 0; i < query.SelectClause.AggregateCount; i++)
+            {
+                var src = query.SelectClause.GetAggregate(i);
+                aggs[i] = new AggregateEntry
+                {
+                    Function = src.Function,
+                    VariableStart = src.VariableStart,
+                    VariableLength = src.VariableLength,
+                    AliasStart = src.AliasStart,
+                    AliasLength = src.AliasLength,
+                    Distinct = src.Distinct,
+                    SeparatorStart = src.SeparatorStart,
+                    SeparatorLength = src.SeparatorLength
+                };
+            }
+            buffer.Aggregates = aggs;
+        }
+
+        // Copy ORDER BY
+        if (query.SolutionModifier.OrderBy.HasOrderBy)
+        {
+            var orderBy = query.SolutionModifier.OrderBy;
+            var entries = new OrderByEntry[orderBy.Count];
+            for (int i = 0; i < orderBy.Count; i++)
+            {
+                var cond = orderBy.GetCondition(i);
+                entries[i] = new OrderByEntry
+                {
+                    VariableStart = cond.VariableStart,
+                    VariableLength = cond.VariableLength,
+                    Descending = cond.Direction == OrderDirection.Descending
+                };
+            }
+            buffer.OrderBy = entries;
+        }
+
+        // Copy GROUP BY
+        if (query.SolutionModifier.GroupBy.HasGroupBy)
+        {
+            var groupBy = query.SolutionModifier.GroupBy;
+            var entries = new GroupByEntry[groupBy.Count];
+            for (int i = 0; i < groupBy.Count; i++)
+            {
+                var (start, length) = groupBy.GetVariable(i);
+                entries[i] = new GroupByEntry
+                {
+                    VariableStart = start,
+                    VariableLength = length
+                };
+            }
+            buffer.GroupBy = entries;
+        }
+
+        // Convert patterns to slots
+        var patterns = buffer.GetPatterns();
+        ConvertGraphPattern(ref patterns, in query.WhereClause.Pattern, source);
+        buffer.PatternCount = patterns.Count;
+    }
+
+    private static void ConvertGraphPattern(ref PatternArray patterns, in GraphPattern gp, ReadOnlySpan<char> source)
+    {
+        // Add triple patterns
+        for (int i = 0; i < gp.PatternCount; i++)
+        {
+            var tp = gp.GetPattern(i);
+            patterns.AddTriple(
+                tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
+                tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
+                tp.Object.Type, tp.Object.Start, tp.Object.Length,
+                tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length
+            );
+        }
+
+        // Add filters
+        for (int i = 0; i < gp.FilterCount; i++)
+        {
+            var f = gp.GetFilter(i);
+            patterns.AddFilter(f.Start, f.Length);
+        }
+
+        // Add binds
+        for (int i = 0; i < gp.BindCount; i++)
+        {
+            var b = gp.GetBind(i);
+            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength);
+        }
+
+        // Add GRAPH clauses
+        for (int i = 0; i < gp.GraphClauseCount; i++)
+        {
+            var gc = gp.GetGraphClause(i);
+            int headerIndex = patterns.BeginGraph(gc.Graph.Type, gc.Graph.Start, gc.Graph.Length);
+
+            // Add patterns within GRAPH clause
+            for (int j = 0; j < gc.PatternCount; j++)
+            {
+                var tp = gc.GetPattern(j);
+                patterns.AddTriple(
+                    tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
+                    tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
+                    tp.Object.Type, tp.Object.Start, tp.Object.Length,
+                    tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length
+                );
+            }
+
+            patterns.EndGraph(headerIndex);
+        }
+
+        // Add EXISTS filters
+        for (int i = 0; i < gp.ExistsFilterCount; i++)
+        {
+            var ef = gp.GetExistsFilter(i);
+            int headerIndex = patterns.BeginExists(ef.Negated);
+
+            for (int j = 0; j < ef.PatternCount; j++)
+            {
+                var tp = ef.GetPattern(j);
+                patterns.AddTriple(
+                    tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
+                    tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
+                    tp.Object.Type, tp.Object.Start, tp.Object.Length
+                );
+            }
+
+            patterns.EndExists(headerIndex);
+        }
+    }
+}
