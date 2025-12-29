@@ -161,7 +161,7 @@ public class QueryExecutor : IDisposable
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
             return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                 _query.SolutionModifier.Having);
         }
@@ -210,7 +210,7 @@ public class QueryExecutor : IDisposable
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
 
                 return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                    _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                    _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                     _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                     _query.SolutionModifier.Having);
             }
@@ -222,7 +222,7 @@ public class QueryExecutor : IDisposable
             return new QueryResults(
                 new MultiPatternScan(_store, _source, pattern, false, graphIri),
                 _buffer, _source, _store, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                 _query.SolutionModifier.Having);
         }
@@ -231,7 +231,7 @@ public class QueryExecutor : IDisposable
         // This allows joins where pattern1 matches in graph1 and pattern2 matches in graph2
         var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
         return new QueryResults(crossGraphScan, _buffer, _source, _store, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);
     }
@@ -412,7 +412,7 @@ public class QueryExecutor : IDisposable
             stringBuffer,
             _query.SolutionModifier.Limit,
             _query.SolutionModifier.Offset,
-            _query.SelectClause.Distinct,
+            (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
             _query.SolutionModifier.OrderBy,
             _query.SolutionModifier.GroupBy,
             _query.SelectClause,
@@ -862,7 +862,7 @@ public class QueryExecutor : IDisposable
         // Extract modifiers from _query
         var limit = _query.SolutionModifier.Limit;
         var offset = _query.SolutionModifier.Offset;
-        var distinct = _query.SelectClause.Distinct;
+        var distinct = (_query.SelectClause.Distinct || _query.SelectClause.Reduced);
         var orderBy = _query.SolutionModifier.OrderBy;
         var groupBy = _query.SolutionModifier.GroupBy;
         var selectClause = _query.SelectClause;
@@ -905,16 +905,33 @@ public class QueryExecutor : IDisposable
     /// <summary>
     /// Execute a query that contains subqueries.
     /// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
+    /// NOTE: NoInlining prevents stack overflow from QueryResults struct size.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteWithSubQueries()
+    {
+        // Check for multiple subqueries FIRST with minimal stack usage
+        // Accessing SubQueryCount directly avoids copying large pattern struct
+        if (_query.WhereClause.Pattern.SubQueryCount > 1)
+            return ExecuteMultipleSubQueries();
+
+        // Single subquery with outer patterns - delegate to join method directly
+        // to minimize call chain depth
+        if (_query.WhereClause.Pattern.PatternCount > 0)
+            return ExecuteSingleSubQueryWithJoin();
+
+        // Single subquery without outer patterns
+        return ExecuteSingleSubQuerySimple();
+    }
+
+    /// <summary>
+    /// Execute a single subquery with no outer patterns (simple case).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteSingleSubQuerySimple()
     {
         // Access pattern via ref to avoid copying
         ref readonly var pattern = ref _query.WhereClause.Pattern;
-
-        // For now, handle single subquery case
-        if (pattern.SubQueryCount != 1)
-            return QueryResults.Empty(); // Multiple subqueries need join - not yet supported
-
         var subSelect = pattern.GetSubQuery(0);
 
         // Build binding storage
@@ -924,20 +941,248 @@ public class QueryExecutor : IDisposable
         // Create SubQueryScan operator
         var subQueryScan = new SubQueryScan(_store, _source, subSelect);
 
-        // If there are outer patterns, we'd need to join them
-        // For now, just execute the subquery directly
-        if (pattern.PatternCount > 0)
-        {
-            // Execute join using SubQueryJoinScan
-            // Note: This scan needs to be consumed before QueryResults to avoid stack overflow
-            // due to ref struct size. We collect results eagerly then return a MultiPatternScan.
-            return ExecuteSubQueryJoin(subSelect, bindings, stringBuffer);
-        }
-
         return new QueryResults(subQueryScan, _buffer, _source, _store, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);
+    }
+
+    /// <summary>
+    /// Execute a single subquery with outer patterns (join case).
+    /// Minimal stack usage - collects results eagerly.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteSingleSubQueryWithJoin()
+    {
+        // Access pattern via ref to avoid copying
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var subSelect = pattern.GetSubQuery(0);
+
+        // Execute join and materialize results
+        var results = ExecuteSubQueryJoinCore(subSelect);
+        if (results == null || results.Count == 0)
+            return QueryResults.Empty();
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Execute multiple subqueries and join their results.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteMultipleSubQueries()
+    {
+        // Collect results from all subqueries and join them
+        var joinedResults = CollectAndJoinSubQueryResults();
+        if (joinedResults == null || joinedResults.Count == 0)
+            return QueryResults.Empty();
+
+        // If there are outer triple patterns, join with them too
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        if (pattern.RequiredPatternCount > 0)
+        {
+            joinedResults = JoinWithOuterPatterns(joinedResults);
+            if (joinedResults == null || joinedResults.Count == 0)
+                return QueryResults.Empty();
+        }
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        return QueryResults.FromMaterializedList(joinedResults, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Collect results from all subqueries and join them.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? CollectAndJoinSubQueryResults()
+    {
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var subQueryCount = pattern.SubQueryCount;
+
+        // Execute first subquery
+        var firstResults = ExecuteSingleSubQueryForJoin(0);
+        if (firstResults == null || firstResults.Count == 0)
+            return null;
+
+        // Join with subsequent subqueries
+        var joinedResults = firstResults;
+        for (int i = 1; i < subQueryCount; i++)
+        {
+            var nextResults = ExecuteSingleSubQueryForJoin(i);
+            if (nextResults == null || nextResults.Count == 0)
+                return null;
+
+            joinedResults = JoinMaterializedRows(joinedResults, nextResults);
+            if (joinedResults.Count == 0)
+                return null;
+        }
+
+        return joinedResults;
+    }
+
+    /// <summary>
+    /// Execute a single subquery and return materialized rows for joining.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? ExecuteSingleSubQueryForJoin(int subQueryIndex)
+    {
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var subSelect = pattern.GetSubQuery(subQueryIndex);
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        var results = new List<MaterializedRow>();
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect);
+
+        while (subQueryScan.MoveNext(ref bindingTable))
+        {
+            results.Add(new MaterializedRow(bindingTable));
+            bindingTable.Clear();
+        }
+        subQueryScan.Dispose();
+
+        return results;
+    }
+
+    /// <summary>
+    /// Join materialized subquery results with outer triple patterns.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? JoinWithOuterPatterns(List<MaterializedRow> subQueryResults)
+    {
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var results = new List<MaterializedRow>();
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // Create pattern scan for outer patterns
+        if (pattern.RequiredPatternCount == 1)
+        {
+            var tp = pattern.GetPattern(0);
+            foreach (var subRow in subQueryResults)
+            {
+                // Load subquery bindings
+                bindingTable.Clear();
+                for (int i = 0; i < subRow.BindingCount; i++)
+                {
+                    bindingTable.BindWithHash(subRow.GetHash(i), subRow.GetValue(i));
+                }
+
+                // Query with bound values
+                var subject = ResolveTermFromBindings(tp.Subject, bindingTable);
+                var predicate = ResolveTermFromBindings(tp.Predicate, bindingTable);
+                var obj = ResolveTermFromBindings(tp.Object, bindingTable);
+
+                var enumerator = _store.QueryCurrent(subject, predicate, obj);
+                try
+                {
+                    while (enumerator.MoveNext())
+                    {
+                        var triple = enumerator.Current;
+                        var rowBindings = new Binding[16];
+                        var rowStringBuffer = new char[1024];
+                        var rowTable = new BindingTable(rowBindings, rowStringBuffer);
+
+                        // Copy subquery bindings
+                        for (int i = 0; i < subRow.BindingCount; i++)
+                        {
+                            rowTable.BindWithHash(subRow.GetHash(i), subRow.GetValue(i));
+                        }
+
+                        // Bind new variables from triple
+                        if (TryBindTermFromTriple(tp.Subject, triple.Subject, ref rowTable) &&
+                            TryBindTermFromTriple(tp.Predicate, triple.Predicate, ref rowTable) &&
+                            TryBindTermFromTriple(tp.Object, triple.Object, ref rowTable))
+                        {
+                            results.Add(new MaterializedRow(rowTable));
+                        }
+                    }
+                }
+                finally
+                {
+                    enumerator.Dispose();
+                }
+            }
+        }
+        else
+        {
+            // Multiple outer patterns - use MultiPatternScan per subquery result
+            foreach (var subRow in subQueryResults)
+            {
+                // Load subquery bindings
+                bindingTable.Clear();
+                for (int i = 0; i < subRow.BindingCount; i++)
+                {
+                    bindingTable.BindWithHash(subRow.GetHash(i), subRow.GetValue(i));
+                }
+
+                // Create a temporary pattern with pre-bound variables
+                var outerPattern = new GraphPattern();
+                for (int i = 0; i < pattern.RequiredPatternCount; i++)
+                {
+                    if (!pattern.IsOptional(i))
+                    {
+                        outerPattern.AddPattern(pattern.GetPattern(i));
+                    }
+                }
+
+                var scan = new MultiPatternScan(_store, _source, outerPattern, false);
+                // Reset binding table but keep subquery bindings
+                var savedCount = bindingTable.Count;
+
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    results.Add(new MaterializedRow(bindingTable));
+                    bindingTable.TruncateTo(savedCount);
+                }
+                scan.Dispose();
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Resolve a term using current bindings.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveTermFromBindings(Term term, BindingTable bindings)
+    {
+        if (!term.IsVariable)
+            return _source.AsSpan(term.Start, term.Length);
+
+        var varName = _source.AsSpan(term.Start, term.Length);
+        var idx = bindings.FindBinding(varName);
+        return idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
+    }
+
+    /// <summary>
+    /// Try to bind a term from a triple value.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private bool TryBindTermFromTriple(Term term, ReadOnlySpan<char> value, ref BindingTable bindings)
+    {
+        if (!term.IsVariable)
+            return true;
+
+        var varName = _source.AsSpan(term.Start, term.Length);
+        var idx = bindings.FindBinding(varName);
+        if (idx >= 0)
+        {
+            // Already bound - check if values match
+            return value.SequenceEqual(bindings.GetString(idx));
+        }
+
+        bindings.Bind(varName, value);
+        return true;
     }
 
     /// <summary>

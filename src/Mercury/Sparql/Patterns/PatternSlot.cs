@@ -821,7 +821,7 @@ public static class QueryBufferAdapter
     {
         // Copy metadata
         buffer.Type = query.Type;
-        buffer.SelectDistinct = query.SelectClause.Distinct;
+        buffer.SelectDistinct = query.SelectClause.Distinct || query.SelectClause.Reduced;
         buffer.SelectAll = query.SelectClause.SelectAll;
         buffer.Limit = query.SolutionModifier.Limit;
         buffer.Offset = query.SolutionModifier.Offset;

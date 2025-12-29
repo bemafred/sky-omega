@@ -8,7 +8,19 @@ public enum QueryType
     Select,
     Construct,
     Describe,
-    Ask
+    Ask,
+    // SPARQL Update operations
+    InsertData,
+    DeleteData,
+    DeleteWhere,
+    Modify,  // DELETE/INSERT ... WHERE
+    Load,
+    Clear,
+    Create,
+    Drop,
+    Copy,
+    Move,
+    Add
 }
 
 public struct Query
@@ -1373,6 +1385,77 @@ public struct Binding
     public bool BooleanValue;
     public int StringOffset;
     public int StringLength;
+}
+
+/// <summary>
+/// Represents a parsed SPARQL Update operation.
+/// </summary>
+public struct UpdateOperation
+{
+    public QueryType Type;
+    public Prologue Prologue;
+
+    // For INSERT DATA / DELETE DATA - inline triple data
+    public QuadData[] InsertData;
+    public QuadData[] DeleteData;
+
+    // For DELETE/INSERT ... WHERE - template patterns
+    public GraphPattern DeleteTemplate;
+    public GraphPattern InsertTemplate;
+    public WhereClause WhereClause;
+
+    // For USING clause in DELETE/INSERT
+    public DatasetClause[] UsingClauses;
+
+    // For graph management (LOAD, CLEAR, DROP, CREATE, COPY, MOVE, ADD)
+    public GraphTarget SourceGraph;
+    public GraphTarget DestinationGraph;
+    public bool Silent;  // SILENT modifier
+
+    // For LOAD
+    public int SourceUriStart;
+    public int SourceUriLength;
+}
+
+/// <summary>
+/// Represents a quad (triple + optional graph) for INSERT DATA / DELETE DATA.
+/// Uses offsets into source span for zero-allocation parsing.
+/// </summary>
+public struct QuadData
+{
+    public int SubjectStart;
+    public int SubjectLength;
+    public TermType SubjectType;
+
+    public int PredicateStart;
+    public int PredicateLength;
+    public TermType PredicateType;
+
+    public int ObjectStart;
+    public int ObjectLength;
+    public TermType ObjectType;
+
+    // Optional graph (0 length = default graph)
+    public int GraphStart;
+    public int GraphLength;
+}
+
+/// <summary>
+/// Specifies a target graph for graph management operations.
+/// </summary>
+public struct GraphTarget
+{
+    public GraphTargetType Type;
+    public int IriStart;
+    public int IriLength;
+}
+
+public enum GraphTargetType
+{
+    Default,      // DEFAULT
+    Named,        // NAMED
+    All,          // ALL
+    Graph         // GRAPH <iri>
 }
 
 public class SparqlParseException : Exception

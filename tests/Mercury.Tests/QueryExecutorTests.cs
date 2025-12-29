@@ -923,6 +923,41 @@ public class QueryExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Execute_ReducedRemovesDuplicates()
+    {
+        // REDUCED is like DISTINCT - allows (but doesn't require) duplicate removal
+        // Our implementation treats REDUCED the same as DISTINCT
+        var query = "SELECT REDUCED * WHERE { { ?s <http://xmlns.com/foaf/0.1/name> ?o } UNION { ?s <http://xmlns.com/foaf/0.1/name> ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify REDUCED was parsed
+        Assert.True(parsedQuery.SelectClause.Reduced);
+        Assert.False(parsedQuery.SelectClause.Distinct);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Same pattern twice in UNION, but REDUCED removes duplicates - should get 3
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void Execute_UnionWithLimit()
     {
         // UNION with LIMIT
@@ -4551,6 +4586,177 @@ public class QueryExecutorTests : IDisposable
             Assert.Equal("<http://example.org/Alice>", resultList[0].person);
             Assert.Equal("\"Alice\"", resultList[0].name);
             Assert.Equal("30", resultList[0].age);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MultipleSubqueries_JoinsResults()
+    {
+        // Add data where two subqueries will join on a shared variable
+        // Use unique predicates to avoid conflicts with test fixture data
+        _store.BeginBatch();
+        // First subquery: employees with nicknames
+        _store.AddCurrentBatched("<http://example.org/emp100>", "<http://example.org/nickname>", "\"EmpAlice\"");
+        _store.AddCurrentBatched("<http://example.org/emp200>", "<http://example.org/nickname>", "\"EmpBob\"");
+        // Second subquery: employees with salaries (only emp100)
+        _store.AddCurrentBatched("<http://example.org/emp100>", "<http://example.org/salary>", "50000");
+        _store.CommitBatch();
+
+        // Query with two subqueries - should join on ?employee
+        var query = @"SELECT ?employee ?nick ?sal WHERE {
+            { SELECT ?employee ?nick WHERE { ?employee <http://example.org/nickname> ?nick } }
+            { SELECT ?employee ?sal WHERE { ?employee <http://example.org/salary> ?sal } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<(string employee, string nick, string sal)>();
+            while (results.MoveNext())
+            {
+                var empIdx = results.Current.FindBinding("?employee".AsSpan());
+                var nickIdx = results.Current.FindBinding("?nick".AsSpan());
+                var salIdx = results.Current.FindBinding("?sal".AsSpan());
+                if (empIdx < 0 || nickIdx < 0 || salIdx < 0)
+                {
+                    var subQueryCount = parsedQuery.WhereClause.Pattern.SubQueryCount;
+                    var requiredPatternCount = parsedQuery.WhereClause.Pattern.RequiredPatternCount;
+                    Assert.Fail($"Missing binding: empIdx={empIdx}, nickIdx={nickIdx}, salIdx={salIdx}. SubQueryCount={subQueryCount}, RequiredPatternCount={requiredPatternCount}");
+                }
+                found.Add((
+                    results.Current.GetString(empIdx).ToString(),
+                    results.Current.GetString(nickIdx).ToString(),
+                    results.Current.GetString(salIdx).ToString()));
+            }
+            results.Dispose();
+
+            // Only emp100 should appear (has both nickname and salary)
+            Assert.Single(found);
+            Assert.Equal("<http://example.org/emp100>", found[0].employee);
+            Assert.Equal("\"EmpAlice\"", found[0].nick);
+            Assert.Equal("50000", found[0].sal);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MultipleSubqueries_WithOuterPattern()
+    {
+        // Add data for subqueries plus outer pattern
+        _store.BeginBatch();
+        // Subquery 1: employees with departments
+        _store.AddCurrentBatched("<http://example.org/emp1>", "<http://example.org/dept>", "<http://example.org/engineering>");
+        _store.AddCurrentBatched("<http://example.org/emp2>", "<http://example.org/dept>", "<http://example.org/sales>");
+        // Subquery 2: employees with names
+        _store.AddCurrentBatched("<http://example.org/emp1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
+        _store.AddCurrentBatched("<http://example.org/emp2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
+        // Outer pattern: department labels (only engineering has label)
+        _store.AddCurrentBatched("<http://example.org/engineering>", "<http://www.w3.org/2000/01/rdf-schema#label>", "\"Engineering Dept\"");
+        _store.CommitBatch();
+
+        // Query with two subqueries and an outer pattern
+        var query = @"SELECT ?emp ?name ?deptLabel WHERE {
+            { SELECT ?emp ?dept WHERE { ?emp <http://example.org/dept> ?dept } }
+            { SELECT ?emp ?name WHERE { ?emp <http://xmlns.com/foaf/0.1/name> ?name } }
+            ?dept <http://www.w3.org/2000/01/rdf-schema#label> ?deptLabel
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<(string emp, string name, string label)>();
+            while (results.MoveNext())
+            {
+                var empIdx = results.Current.FindBinding("?emp".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                var labelIdx = results.Current.FindBinding("?deptLabel".AsSpan());
+                Assert.True(empIdx >= 0);
+                Assert.True(nameIdx >= 0);
+                Assert.True(labelIdx >= 0);
+                found.Add((
+                    results.Current.GetString(empIdx).ToString(),
+                    results.Current.GetString(nameIdx).ToString(),
+                    results.Current.GetString(labelIdx).ToString()));
+            }
+            results.Dispose();
+
+            // Only emp1 has department with a label
+            Assert.Single(found);
+            Assert.Equal("<http://example.org/emp1>", found[0].emp);
+            Assert.Equal("\"Alice\"", found[0].name);
+            Assert.Equal("\"Engineering Dept\"", found[0].label);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MultipleSubqueries_NoMatch_ReturnsEmpty()
+    {
+        // Add data with no shared values between subqueries
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/A>", "<http://example.org/typeA>", "\"Value1\"");
+        _store.AddCurrentBatched("<http://example.org/B>", "<http://example.org/typeB>", "\"Value2\"");
+        _store.CommitBatch();
+
+        // Query with two subqueries that have same variable but different subjects
+        var query = @"SELECT ?s ?v1 ?v2 WHERE {
+            { SELECT ?s ?v1 WHERE { ?s <http://example.org/typeA> ?v1 } }
+            { SELECT ?s ?v2 WHERE { ?s <http://example.org/typeB> ?v2 } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Debug: Check how many subqueries were parsed
+        var subQueryCount = parsedQuery.WhereClause.Pattern.SubQueryCount;
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            var bindingsInfo = new List<string>();
+            while (results.MoveNext())
+            {
+                count++;
+                // Collect all bindings for debug
+                var bindingStrs = new List<string>();
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var v1Idx = results.Current.FindBinding("?v1".AsSpan());
+                var v2Idx = results.Current.FindBinding("?v2".AsSpan());
+                bindingStrs.Add($"?s idx={sIdx} val={(sIdx >= 0 ? results.Current.GetString(sIdx).ToString() : "N/A")}");
+                bindingStrs.Add($"?v1 idx={v1Idx} val={(v1Idx >= 0 ? results.Current.GetString(v1Idx).ToString() : "N/A")}");
+                bindingStrs.Add($"?v2 idx={v2Idx} val={(v2Idx >= 0 ? results.Current.GetString(v2Idx).ToString() : "N/A")}");
+                bindingsInfo.Add(string.Join(", ", bindingStrs));
+            }
+            results.Dispose();
+
+            // If count > 0, fail with debug info
+            if (count > 0)
+            {
+                Assert.Fail($"Expected 0 results but got {count}. SubQueryCount={subQueryCount}. Bindings: [{string.Join("; ", bindingsInfo)}]");
+            }
         }
         finally
         {
