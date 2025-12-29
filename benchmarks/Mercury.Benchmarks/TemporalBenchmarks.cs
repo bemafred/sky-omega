@@ -4,14 +4,14 @@ using SkyOmega.Mercury.Storage;
 namespace SkyOmega.Mercury.Benchmarks;
 
 /// <summary>
-/// Benchmarks for temporal triple storage operations
+/// Benchmarks for temporal quad storage operations
 /// </summary>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 3, iterationCount: 5)]
 public class TemporalWriteBenchmarks
 {
     private string _dbPath = null!;
-    private TripleStore _store = null!;
+    private QuadStore _store = null!;
 
     [Params(1_000, 10_000)]
     public int TripleCount { get; set; }
@@ -23,7 +23,7 @@ public class TemporalWriteBenchmarks
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
-        _store = new TripleStore(_dbPath);
+        _store = new QuadStore(_dbPath);
     }
 
     [GlobalCleanup]
@@ -63,7 +63,7 @@ public class TemporalWriteBenchmarks
 public class TemporalQueryBenchmarks
 {
     private string _dbPath = null!;
-    private TripleStore _store = null!;
+    private QuadStore _store = null!;
     private DateTimeOffset _baseTime;
     private const int DataSize = 10_000;
 
@@ -74,7 +74,7 @@ public class TemporalQueryBenchmarks
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
-        _store = new TripleStore(_dbPath);
+        _store = new QuadStore(_dbPath);
         _baseTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         // Pre-populate with temporal data

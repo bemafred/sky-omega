@@ -6,14 +6,14 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
-/// Tests for TripleStore - multi-index RDF store with WAL durability.
+/// Tests for QuadStore - multi-index RDF store with WAL durability.
 /// </summary>
-public class TripleStoreTests : IDisposable
+public class QuadStoreTests : IDisposable
 {
     private readonly string _testPath;
-    private TripleStore? _store;
+    private QuadStore? _store;
 
-    public TripleStoreTests()
+    public QuadStoreTests()
     {
         _testPath = Path.Combine(Path.GetTempPath(), $"triplestore_test_{Guid.NewGuid():N}");
     }
@@ -30,10 +30,10 @@ public class TripleStoreTests : IDisposable
             Directory.Delete(_testPath, true);
     }
 
-    private TripleStore CreateStore()
+    private QuadStore CreateStore()
     {
         _store?.Dispose();
-        _store = new TripleStore(_testPath);
+        _store = new QuadStore(_testPath);
         return _store;
     }
 
@@ -984,13 +984,13 @@ public class TripleStoreTests : IDisposable
     public void Persistence_ReopenStore_DataSurvives()
     {
         // First session
-        using (var store1 = new TripleStore(_testPath))
+        using (var store1 = new QuadStore(_testPath))
         {
             store1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         }
 
         // Second session
-        using (var store2 = new TripleStore(_testPath))
+        using (var store2 = new QuadStore(_testPath))
         {
             store2.AcquireReadLock();
             try
@@ -1016,7 +1016,7 @@ public class TripleStoreTests : IDisposable
     public void Persistence_BatchDataSurvives()
     {
         // First session with batch
-        using (var store1 = new TripleStore(_testPath))
+        using (var store1 = new QuadStore(_testPath))
         {
             store1.BeginBatch();
             for (int i = 0; i < 50; i++)
@@ -1027,7 +1027,7 @@ public class TripleStoreTests : IDisposable
         }
 
         // Second session
-        using (var store2 = new TripleStore(_testPath))
+        using (var store2 = new QuadStore(_testPath))
         {
             store2.AcquireReadLock();
             try
@@ -1297,14 +1297,14 @@ public class TripleStoreTests : IDisposable
     public void Delete_Recovery_DeletedStatePreserved()
     {
         // First session: add and delete
-        using (var store1 = new TripleStore(_testPath))
+        using (var store1 = new QuadStore(_testPath))
         {
             store1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
             store1.DeleteCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         }
 
         // Second session: verify still deleted
-        using (var store2 = new TripleStore(_testPath))
+        using (var store2 = new QuadStore(_testPath))
         {
             store2.AcquireReadLock();
             try
@@ -1784,14 +1784,14 @@ public class TripleStoreTests : IDisposable
     public void NamedGraph_Persistence_SurvivesRestart()
     {
         // First session
-        using (var store1 = new TripleStore(_testPath))
+        using (var store1 = new QuadStore(_testPath))
         {
             store1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>",
                 "<http://ex.org/graph1>");
         }
 
         // Second session
-        using (var store2 = new TripleStore(_testPath))
+        using (var store2 = new QuadStore(_testPath))
         {
             store2.AcquireReadLock();
             try

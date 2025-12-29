@@ -7,7 +7,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref struct DescribeResults
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private QueryResults _queryResults;
     private Binding[]? _bindings;
     private char[]? _stringBuffer;
@@ -33,7 +33,7 @@ public ref struct DescribeResults
         return result;
     }
 
-    internal DescribeResults(TripleStore store, QueryResults queryResults,
+    internal DescribeResults(QuadStore store, QueryResults queryResults,
         Binding[] bindings, char[] stringBuffer, bool describeAll)
     {
         _store = store;

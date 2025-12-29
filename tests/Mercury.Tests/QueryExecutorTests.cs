@@ -13,13 +13,13 @@ namespace SkyOmega.Mercury.Tests;
 public class QueryExecutorTests : IDisposable
 {
     private readonly string _testDir;
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
 
     public QueryExecutorTests()
     {
         _testDir = Path.Combine(Path.GetTempPath(), $"QueryExecutorTests_{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDir);
-        _store = new TripleStore(_testDir);
+        _store = new QuadStore(_testDir);
 
         // Populate with test data
         _store.BeginBatch();

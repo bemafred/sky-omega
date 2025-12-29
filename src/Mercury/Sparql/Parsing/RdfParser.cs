@@ -24,7 +24,7 @@ public ref struct NTriplesParser
     /// <summary>
     /// Parse N-Triples format and add to store without intermediate allocations
     /// </summary>
-    public void Parse(TripleStore store)
+    public void Parse(QuadStore store)
     {
         while (!IsAtEnd())
         {
@@ -236,7 +236,7 @@ public sealed class StreamingRdfLoader : IDisposable
     /// <summary>
     /// Load N-Triples file without loading entire file into memory
     /// </summary>
-    public void LoadNTriples(string filePath, TripleStore store)
+    public void LoadNTriples(string filePath, QuadStore store)
     {
         using var reader = new StreamReader(filePath);
         var lineBuffer = _pool.Rent(8192);

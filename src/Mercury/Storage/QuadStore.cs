@@ -7,22 +7,22 @@ using System.Threading;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// RDF triple store with multiple indexes for optimal query patterns.
+/// RDF quad store with multiple indexes for optimal query patterns.
 /// Uses Write-Ahead Logging (WAL) for crash safety.
 /// Thread-safe: multiple concurrent readers, single writer.
 ///
 /// Indexes:
-/// 1. SPOT: Subject-Predicate-Object-Time (primary)
-/// 2. POST: Predicate-Object-Subject-Time (predicate queries)
-/// 3. OSPT: Object-Subject-Predicate-Time (object queries)
-/// 4. TSPO: Time-Subject-Predicate-Object (temporal range scans)
+/// 1. GSPO: Graph-Subject-Predicate-Object-Time (primary)
+/// 2. GPOS: Graph-Predicate-Object-Subject-Time (predicate queries)
+/// 3. GOSP: Graph-Object-Subject-Predicate-Time (object queries)
+/// 4. TGSP: Time-Graph-Subject-Predicate-Object (temporal range scans)
 /// </summary>
-public sealed class TripleStore : IDisposable
+public sealed class QuadStore : IDisposable
 {
-    private readonly TripleIndex _spotIndex; // Primary index
-    private readonly TripleIndex _postIndex; // Predicate-first
-    private readonly TripleIndex _osptIndex; // Object-first
-    private readonly TripleIndex _tspoIndex; // Time-first
+    private readonly QuadIndex _gspoIndex; // Primary index (was SPOT)
+    private readonly QuadIndex _gposIndex; // Predicate-first (was POST)
+    private readonly QuadIndex _gospIndex; // Object-first (was OSPT)
+    private readonly QuadIndex _tgspIndex; // Time-first (was TSPO)
 
     private readonly AtomStore _atoms;
     private readonly WriteAheadLog _wal;
@@ -31,17 +31,17 @@ public sealed class TripleStore : IDisposable
     private long _activeBatchTxId = -1;
     private bool _disposed;
 
-    public TripleStore(string baseDirectory)
+    public QuadStore(string baseDirectory)
     {
         _baseDirectory = baseDirectory;
 
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
 
-        var spotPath = Path.Combine(baseDirectory, "spot.tdb");
-        var postPath = Path.Combine(baseDirectory, "post.tdb");
-        var osptPath = Path.Combine(baseDirectory, "ospt.tdb");
-        var tspoPath = Path.Combine(baseDirectory, "tspo.tdb");
+        var gspoPath = Path.Combine(baseDirectory, "gspo.tdb");
+        var gposPath = Path.Combine(baseDirectory, "gpos.tdb");
+        var gospPath = Path.Combine(baseDirectory, "gosp.tdb");
+        var tgspPath = Path.Combine(baseDirectory, "tgsp.tdb");
         var atomPath = Path.Combine(baseDirectory, "atoms");
         var walPath = Path.Combine(baseDirectory, "wal.log");
 
@@ -52,17 +52,17 @@ public sealed class TripleStore : IDisposable
         _wal = new WriteAheadLog(walPath);
 
         // Create indexes with shared atom store
-        _spotIndex = new TripleIndex(spotPath, _atoms);
-        _postIndex = new TripleIndex(postPath, _atoms);
-        _osptIndex = new TripleIndex(osptPath, _atoms);
-        _tspoIndex = new TripleIndex(tspoPath, _atoms);
+        _gspoIndex = new QuadIndex(gspoPath, _atoms);
+        _gposIndex = new QuadIndex(gposPath, _atoms);
+        _gospIndex = new QuadIndex(gospPath, _atoms);
+        _tgspIndex = new QuadIndex(tgspPath, _atoms);
 
         // Recover any uncommitted transactions
         Recover();
     }
 
     /// <summary>
-    /// Add a temporal triple to all indexes with WAL durability.
+    /// Add a temporal quad to all indexes with WAL durability.
     /// Thread-safe: acquires write lock.
     /// </summary>
     public void Add(
@@ -115,7 +115,7 @@ public sealed class TripleStore : IDisposable
     /// <summary>
     /// Soft-delete a temporal triple from all indexes with WAL durability.
     /// Thread-safe: acquires write lock.
-    /// Returns true if the triple was found and deleted, false otherwise.
+    /// Returns true if the quad was found and deleted, false otherwise.
     /// </summary>
     public bool Delete(
         ReadOnlySpan<char> subject,
@@ -129,7 +129,7 @@ public sealed class TripleStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
-            // 1. Look up atoms (don't intern - if they don't exist, triple doesn't exist)
+            // 1. Look up atoms (don't intern - if they don't exist, quad doesn't exist)
             var graphId = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
             var subjectId = _atoms.GetAtomId(subject);
             var predicateId = _atoms.GetAtomId(predicate);
@@ -161,7 +161,7 @@ public sealed class TripleStore : IDisposable
     /// <summary>
     /// Soft-delete a current fact with WAL durability.
     /// Thread-safe: acquires write lock.
-    /// Returns true if the triple was found and deleted, false otherwise.
+    /// Returns true if the quad was found and deleted, false otherwise.
     /// </summary>
     public bool DeleteCurrent(
         ReadOnlySpan<char> subject,
@@ -210,7 +210,7 @@ public sealed class TripleStore : IDisposable
     }
 
     /// <summary>
-    /// Add a temporal triple to the current batch (no fsync until CommitBatch).
+    /// Add a temporal quad to the current batch (no fsync until CommitBatch).
     /// Must be called between BeginBatch() and CommitBatch()/RollbackBatch().
     /// </summary>
     public void AddBatched(
@@ -251,9 +251,9 @@ public sealed class TripleStore : IDisposable
     }
 
     /// <summary>
-    /// Soft-delete a temporal triple in the current batch (no fsync until CommitBatch).
+    /// Soft-delete a temporal quad in the current batch (no fsync until CommitBatch).
     /// Must be called between BeginBatch() and CommitBatch()/RollbackBatch().
-    /// Returns true if the triple was found and deleted, false otherwise.
+    /// Returns true if the quad was found and deleted, false otherwise.
     /// </summary>
     public bool DeleteBatched(
         ReadOnlySpan<char> subject,
@@ -287,7 +287,7 @@ public sealed class TripleStore : IDisposable
 
     /// <summary>
     /// Soft-delete a current fact in the batch.
-    /// Returns true if the triple was found and deleted, false otherwise.
+    /// Returns true if the quad was found and deleted, false otherwise.
     /// </summary>
     public bool DeleteCurrentBatched(
         ReadOnlySpan<char> subject,
@@ -341,11 +341,11 @@ public sealed class TripleStore : IDisposable
     private void ThrowIfDisposed()
     {
         if (_disposed)
-            throw new ObjectDisposedException(nameof(TripleStore));
+            throw new ObjectDisposedException(nameof(QuadStore));
     }
 
     /// <summary>
-    /// Apply a triple to all indexes (internal, no WAL).
+    /// Apply a quad to all indexes (internal, no WAL).
     /// </summary>
     private void ApplyToIndexes(
         ReadOnlySpan<char> subject,
@@ -355,10 +355,10 @@ public sealed class TripleStore : IDisposable
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
-        _spotIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
-        _postIndex.AddHistorical(predicate, obj, subject, validFrom, validTo, graph);
-        _osptIndex.AddHistorical(obj, subject, predicate, validFrom, validTo, graph);
-        _tspoIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        _gspoIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        _gposIndex.AddHistorical(predicate, obj, subject, validFrom, validTo, graph);
+        _gospIndex.AddHistorical(obj, subject, predicate, validFrom, validTo, graph);
+        _tgspIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
     }
 
     /// <summary>
@@ -374,10 +374,10 @@ public sealed class TripleStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         // Delete from all 4 indexes - use the appropriate argument order for each
-        var d1 = _spotIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
-        var d2 = _postIndex.DeleteHistorical(predicate, obj, subject, validFrom, validTo, graph);
-        var d3 = _osptIndex.DeleteHistorical(obj, subject, predicate, validFrom, validTo, graph);
-        var d4 = _tspoIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        var d1 = _gspoIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        var d2 = _gposIndex.DeleteHistorical(predicate, obj, subject, validFrom, validTo, graph);
+        var d3 = _gospIndex.DeleteHistorical(obj, subject, predicate, validFrom, validTo, graph);
+        var d4 = _tgspIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
 
         return d1 || d2 || d3 || d4;
     }
@@ -626,10 +626,10 @@ public sealed class TripleStore : IDisposable
     /// </summary>
     public NamedGraphEnumerator GetNamedGraphs()
     {
-        return new NamedGraphEnumerator(_spotIndex, _atoms);
+        return new NamedGraphEnumerator(_gspoIndex, _atoms);
     }
 
-    private (TripleIndex Index, TemporalIndexType Type) SelectOptimalIndex(
+    private (QuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -642,25 +642,25 @@ public sealed class TripleStore : IDisposable
         // For time-range queries, prefer TSPO index
         if (queryType == TemporalQueryType.Range)
         {
-            return (_tspoIndex, TemporalIndexType.TSPO);
+            return (_tgspIndex, TemporalIndexType.TSPO);
         }
 
         // Otherwise select based on bound variables
         if (subjectBound)
         {
-            return (_spotIndex, TemporalIndexType.SPOT);
+            return (_gspoIndex, TemporalIndexType.SPOT);
         }
         else if (predicateBound)
         {
-            return (_postIndex, TemporalIndexType.POST);
+            return (_gposIndex, TemporalIndexType.POST);
         }
         else if (objectBound)
         {
-            return (_osptIndex, TemporalIndexType.OSPT);
+            return (_gospIndex, TemporalIndexType.OSPT);
         }
         else
         {
-            return (_spotIndex, TemporalIndexType.SPOT);
+            return (_gspoIndex, TemporalIndexType.SPOT);
         }
     }
 
@@ -692,10 +692,10 @@ public sealed class TripleStore : IDisposable
         CheckpointInternal();
 
         _wal?.Dispose();
-        _spotIndex?.Dispose();
-        _postIndex?.Dispose();
-        _osptIndex?.Dispose();
-        _tspoIndex?.Dispose();
+        _gspoIndex?.Dispose();
+        _gposIndex?.Dispose();
+        _gospIndex?.Dispose();
+        _tgspIndex?.Dispose();
         _atoms?.Dispose();
         _lock?.Dispose();
     }
@@ -703,12 +703,12 @@ public sealed class TripleStore : IDisposable
     /// <summary>
     /// Get storage statistics
     /// </summary>
-    public (long TripleCount, long AtomCount, long TotalBytes) GetStatistics()
+    public (long QuadCount, long AtomCount, long TotalBytes) GetStatistics()
     {
-        var tripleCount = _spotIndex.TripleCount;
+        var quadCount = _gspoIndex.QuadCount;
         var (atomCount, atomBytes, _) = _atoms.GetStatistics();
         var walBytes = _wal.LogSize;
-        return (tripleCount, atomCount, atomBytes + walBytes);
+        return (quadCount, atomCount, atomBytes + walBytes);
     }
 
     /// <summary>
@@ -732,7 +732,7 @@ public sealed class TripleStore : IDisposable
 /// </summary>
 public ref struct TemporalResultEnumerator
 {
-    private TripleIndex.TemporalTripleEnumerator _baseEnumerator;
+    private QuadIndex.TemporalQuadEnumerator _baseEnumerator;
     private readonly TemporalIndexType _indexType;
     private readonly AtomStore _atoms;
 
@@ -742,7 +742,7 @@ public ref struct TemporalResultEnumerator
     private const int InitialBufferSize = 4096; // 4KB - typical for 3 URIs
 
     internal TemporalResultEnumerator(
-        TripleIndex.TemporalTripleEnumerator baseEnumerator,
+        QuadIndex.TemporalQuadEnumerator baseEnumerator,
         TemporalIndexType indexType,
         AtomStore atoms)
     {
@@ -760,7 +760,7 @@ public ref struct TemporalResultEnumerator
         return _baseEnumerator.MoveNext();
     }
 
-    public ResolvedTemporalTriple Current
+    public ResolvedTemporalQuad Current
     {
         get
         {
@@ -803,7 +803,7 @@ public ref struct TemporalResultEnumerator
             // Clamp milliseconds to valid DateTimeOffset range
             const long MaxValidMs = 253402300799999L; // Dec 31, 9999
 
-            return new ResolvedTemporalTriple(
+            return new ResolvedTemporalQuad(
                 triple.GraphAtom == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(triple.GraphAtom),
                 DecodeAtomToBuffer(s),
                 DecodeAtomToBuffer(p),
@@ -873,9 +873,9 @@ public enum TemporalIndexType
 }
 
 /// <summary>
-/// Resolved temporal triple with time dimensions
+/// Resolved temporal quad with time dimensions
 /// </summary>
-public readonly ref struct ResolvedTemporalTriple
+public readonly ref struct ResolvedTemporalQuad
 {
     public readonly ReadOnlySpan<char> Graph;
     public readonly ReadOnlySpan<char> Subject;
@@ -886,7 +886,7 @@ public readonly ref struct ResolvedTemporalTriple
     public readonly DateTimeOffset TransactionTime;
     public readonly bool IsDeleted;
 
-    public ResolvedTemporalTriple(
+    public ResolvedTemporalQuad(
         ReadOnlySpan<char> graph,
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
@@ -913,14 +913,14 @@ public readonly ref struct ResolvedTemporalTriple
 /// </summary>
 public ref struct NamedGraphEnumerator
 {
-    private TripleIndex.TemporalTripleEnumerator _enumerator;
+    private QuadIndex.TemporalQuadEnumerator _enumerator;
     private readonly AtomStore _atoms;
     private long _lastGraphAtom;
     private string? _current;
 
-    internal NamedGraphEnumerator(TripleIndex index, AtomStore atoms)
+    internal NamedGraphEnumerator(QuadIndex index, AtomStore atoms)
     {
-        // Query all current triples across ALL graphs (default + named)
+        // Query all current quads across ALL graphs (default + named)
         _enumerator = index.QueryCurrentAllGraphs();
         _atoms = atoms;
         _lastGraphAtom = -1; // -1 means "no graph seen yet"

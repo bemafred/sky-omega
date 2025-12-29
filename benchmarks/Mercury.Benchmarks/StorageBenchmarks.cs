@@ -34,7 +34,7 @@ public class BatchWriteBenchmarks
     [Benchmark(Baseline = true, Description = "Single writes (fsync each)")]
     public void SingleWrites()
     {
-        using var store = new TripleStore(_dbPath);
+        using var store = new QuadStore(_dbPath);
         for (int i = 0; i < TripleCount; i++)
         {
             store.AddCurrent(
@@ -48,7 +48,7 @@ public class BatchWriteBenchmarks
     [Benchmark(Description = "Batch writes (single fsync)")]
     public void BatchWrites()
     {
-        using var store = new TripleStore(_dbPath + "_batch");
+        using var store = new QuadStore(_dbPath + "_batch");
         store.BeginBatch();
         try
         {
@@ -78,7 +78,7 @@ public class BatchWriteBenchmarks
 public class QueryBenchmarks
 {
     private string _dbPath = null!;
-    private TripleStore _store = null!;
+    private QuadStore _store = null!;
     private const int DataSize = 50_000;
 
     [GlobalSetup]
@@ -88,7 +88,7 @@ public class QueryBenchmarks
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
-        _store = new TripleStore(_dbPath);
+        _store = new QuadStore(_dbPath);
 
         // Pre-populate with test data
         for (int i = 0; i < DataSize; i++)
@@ -198,7 +198,7 @@ public class QueryBenchmarks
 public class IndexSelectionBenchmarks
 {
     private string _dbPath = null!;
-    private TripleStore _store = null!;
+    private QuadStore _store = null!;
 
     [GlobalSetup]
     public void Setup()
@@ -207,7 +207,7 @@ public class IndexSelectionBenchmarks
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
-        _store = new TripleStore(_dbPath);
+        _store = new QuadStore(_dbPath);
 
         // Create skewed data (many triples with same subject)
         for (int s = 0; s < 100; s++)

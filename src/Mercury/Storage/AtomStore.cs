@@ -20,7 +20,7 @@ namespace SkyOmega.Mercury.Storage;
 /// For larger blobs, implement chunked access pattern (see GetAtomSpan remarks).</para>
 ///
 /// <para>Thread safety: AtomStore uses append-only semantics with atomic operations
-/// for allocation (Interlocked). Thread safety is ensured by TripleStore's
+/// for allocation (Interlocked). Thread safety is ensured by QuadStore's
 /// ReaderWriterLockSlim - writes occur under write lock, reads under read lock.</para>
 /// </remarks>
 public sealed unsafe class AtomStore : IDisposable

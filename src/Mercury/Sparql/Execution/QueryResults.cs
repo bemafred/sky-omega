@@ -15,7 +15,7 @@ public ref partial struct QueryResults
     private SubQueryScan _subQueryScan;
     private GraphPattern _pattern;
     private ReadOnlySpan<char> _source;
-    private TripleStore? _store;
+    private QuadStore? _store;
     private Binding[]? _bindings;
     private char[]? _stringBuffer;
     private BindingTable _bindingTable;
@@ -85,7 +85,7 @@ public ref partial struct QueryResults
     /// Used for subquery joins where results are collected eagerly to avoid stack overflow.
     /// </summary>
     internal static QueryResults FromMaterialized(List<MaterializedRow> rows, GraphPattern pattern,
-        ReadOnlySpan<char> source, TripleStore store, Binding[] bindings, char[] stringBuffer,
+        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
@@ -104,7 +104,7 @@ public ref partial struct QueryResults
     /// Private constructor for pre-materialized results.
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having)
     {
@@ -146,7 +146,7 @@ public ref partial struct QueryResults
     }
 
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
@@ -189,7 +189,7 @@ public ref partial struct QueryResults
     }
 
     internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
@@ -232,7 +232,7 @@ public ref partial struct QueryResults
     }
 
     internal QueryResults(VariableGraphScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
@@ -275,7 +275,7 @@ public ref partial struct QueryResults
     }
 
     internal QueryResults(SubQueryScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
-        TripleStore store, Binding[] bindings, char[] stringBuffer,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {

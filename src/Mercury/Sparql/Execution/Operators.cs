@@ -8,7 +8,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref struct TriplePatternScan
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly TriplePattern _pattern;
     private TemporalResultEnumerator _enumerator;
@@ -29,7 +29,7 @@ public ref struct TriplePatternScan
     private string? _currentNode;
     private bool _emittedReflexive;
 
-    public TriplePatternScan(TripleStore store, ReadOnlySpan<char> source,
+    public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
     {
         _store = store;
@@ -272,7 +272,7 @@ public ref struct TriplePatternScan
 /// </summary>
 public ref struct MultiPatternScan
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly GraphPattern _pattern;
     private readonly bool _unionMode;
@@ -291,7 +291,7 @@ public ref struct MultiPatternScan
     // Track binding count at entry to each level for rollback
     private int _bindingCount0, _bindingCount1, _bindingCount2, _bindingCount3;
 
-    public MultiPatternScan(TripleStore store, ReadOnlySpan<char> source, GraphPattern pattern,
+    public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode = false, ReadOnlySpan<char> graph = default)
     {
         _store = store;
@@ -580,7 +580,7 @@ public ref struct MultiPatternScan
 /// </summary>
 public ref struct VariableGraphScan
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly GraphClause _graphClause;
     private NamedGraphEnumerator _graphEnum;
@@ -591,7 +591,7 @@ public ref struct VariableGraphScan
     private bool _initialized;
     private bool _exhausted;
 
-    public VariableGraphScan(TripleStore store, ReadOnlySpan<char> source, GraphClause graphClause)
+    public VariableGraphScan(QuadStore store, ReadOnlySpan<char> source, GraphClause graphClause)
     {
         _store = store;
         _source = source;
@@ -669,7 +669,7 @@ public ref struct VariableGraphScan
 /// </summary>
 public ref struct SubQueryScan
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly SubSelect _subSelect;
     private MultiPatternScan _innerScan;
@@ -685,7 +685,7 @@ public ref struct SubQueryScan
     private int _returned;
     private HashSet<int>? _seenHashes;
 
-    public SubQueryScan(TripleStore store, ReadOnlySpan<char> source, SubSelect subSelect)
+    public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect)
     {
         _store = store;
         _source = source;
@@ -890,7 +890,7 @@ public ref struct SubQueryScan
 /// </summary>
 public ref struct SubQueryJoinScan
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly GraphPattern _pattern;
     private readonly SubSelect _subSelect;
@@ -911,7 +911,7 @@ public ref struct SubQueryJoinScan
     // Current binding checkpoint for rollback
     private int _bindingCheckpoint;
 
-    public SubQueryJoinScan(TripleStore store, ReadOnlySpan<char> source,
+    public SubQueryJoinScan(QuadStore store, ReadOnlySpan<char> source,
         GraphPattern pattern, SubSelect subSelect)
     {
         _store = store;

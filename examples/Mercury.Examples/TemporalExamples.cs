@@ -31,7 +31,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Alice worked at Anthropic from 2020 to 2023
         store.Add(
@@ -78,7 +78,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Create employment history
         var periods = new[]
@@ -137,7 +137,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Track salary changes over time
         var salaryHistory = new[]
@@ -188,7 +188,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Track project assignments
         var projects = new[]
@@ -239,7 +239,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Initially recorded: Eve worked at Acme from 2020-2023
         store.Add(
@@ -278,7 +278,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Track organization name changes
         var names = new[]
@@ -349,7 +349,7 @@ public static class TemporalExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Build knowledge base about a country over time
         store.Add("<http://ex.org/Country1>", "<http://ex.org/population>", "\"10M\"",
@@ -402,7 +402,7 @@ public static class TemporalExamples
         // Phase 1: Create and populate
         Console.WriteLine("Phase 1: Creating temporal database...");
 
-        using (var store = new TripleStore(dbPath))
+        using (var store = new QuadStore(dbPath))
         {
             for (int year = 2020; year <= 2024; year++)
             {
@@ -416,7 +416,7 @@ public static class TemporalExamples
             }
 
             var stats = store.GetStatistics();
-            Console.WriteLine($"  Temporal triples: {stats.TripleCount:N0}");
+            Console.WriteLine($"  Temporal triples: {stats.QuadCount:N0}");
         }
 
         Console.WriteLine("  Database closed");
@@ -424,10 +424,10 @@ public static class TemporalExamples
         // Phase 2: Reopen and verify
         Console.WriteLine("\nPhase 2: Reopening temporal database...");
 
-        using (var store = new TripleStore(dbPath))
+        using (var store = new QuadStore(dbPath))
         {
             var stats = store.GetStatistics();
-            Console.WriteLine($"  Temporal triples recovered: {stats.TripleCount:N0}");
+            Console.WriteLine($"  Temporal triples recovered: {stats.QuadCount:N0}");
 
             var results = store.QueryAsOf(
                 "<http://ex.org/metric>",

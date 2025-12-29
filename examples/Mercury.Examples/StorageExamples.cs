@@ -4,7 +4,7 @@ using SkyOmega.Mercury.Storage;
 namespace SkyOmega.Mercury.Examples;
 
 /// <summary>
-/// Examples demonstrating TB-scale temporal triple storage
+/// Examples demonstrating TB-scale temporal quad storage
 /// </summary>
 public static class StorageExamples
 {
@@ -28,7 +28,7 @@ public static class StorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Add triples
         Console.WriteLine("Inserting triples...");
@@ -42,7 +42,7 @@ public static class StorageExamples
         }
 
         var stats = store.GetStatistics();
-        Console.WriteLine($"Triples: {stats.TripleCount:N0}");
+        Console.WriteLine($"Triples: {stats.QuadCount:N0}");
         Console.WriteLine($"Atoms: {stats.AtomCount:N0}");
         Console.WriteLine($"Storage: {stats.TotalBytes:N0} bytes");
 
@@ -61,7 +61,7 @@ public static class StorageExamples
             count++;
         }
 
-        Console.WriteLine($"... and {stats.TripleCount - count} more\n");
+        Console.WriteLine($"... and {stats.QuadCount - count} more\n");
     }
 
     public static void Example_MultiIndexQueries()
@@ -73,7 +73,7 @@ public static class StorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         // Add diverse data
         Console.WriteLine("Loading data with multiple patterns...");
@@ -138,7 +138,7 @@ public static class StorageExamples
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
-        using var store = new TripleStore(dbPath);
+        using var store = new QuadStore(dbPath);
 
         const int tripleCount = 100_000;
 
@@ -166,7 +166,7 @@ public static class StorageExamples
         var stats = store.GetStatistics();
 
         Console.WriteLine($"\nBulk load complete:");
-        Console.WriteLine($"  Triples: {stats.TripleCount:N0}");
+        Console.WriteLine($"  Triples: {stats.QuadCount:N0}");
         Console.WriteLine($"  Atoms: {stats.AtomCount:N0}");
         Console.WriteLine($"  Storage: {stats.TotalBytes / (1024.0 * 1024.0):F2} MB");
         Console.WriteLine($"  Time: {sw.ElapsedMilliseconds:N0} ms");
@@ -185,7 +185,7 @@ public static class StorageExamples
         // Phase 1: Create and populate database
         Console.WriteLine("Phase 1: Creating database...");
 
-        using (var store = new TripleStore(dbPath))
+        using (var store = new QuadStore(dbPath))
         {
             for (int i = 0; i < 1000; i++)
             {
@@ -197,7 +197,7 @@ public static class StorageExamples
             }
 
             var stats = store.GetStatistics();
-            Console.WriteLine($"  Triples inserted: {stats.TripleCount:N0}");
+            Console.WriteLine($"  Triples inserted: {stats.QuadCount:N0}");
         }
 
         Console.WriteLine("  Database closed");
@@ -205,10 +205,10 @@ public static class StorageExamples
         // Phase 2: Reopen and verify
         Console.WriteLine("\nPhase 2: Reopening database...");
 
-        using (var store = new TripleStore(dbPath))
+        using (var store = new QuadStore(dbPath))
         {
             var stats = store.GetStatistics();
-            Console.WriteLine($"  Triples recovered: {stats.TripleCount:N0}");
+            Console.WriteLine($"  Triples recovered: {stats.QuadCount:N0}");
 
             // Verify data
             var results = store.QueryCurrent(

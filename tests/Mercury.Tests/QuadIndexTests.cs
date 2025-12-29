@@ -6,14 +6,14 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
-/// Tests for TripleIndex - B+Tree index with bitemporal semantics.
+/// Tests for QuadIndex - B+Tree index with bitemporal semantics.
 /// </summary>
-public class TripleIndexTests : IDisposable
+public class QuadIndexTests : IDisposable
 {
     private readonly string _testPath;
-    private TripleIndex? _index;
+    private QuadIndex? _index;
 
-    public TripleIndexTests()
+    public QuadIndexTests()
     {
         _testPath = Path.Combine(Path.GetTempPath(), $"tripleindex_test_{Guid.NewGuid():N}.tdb");
     }
@@ -38,10 +38,10 @@ public class TripleIndexTests : IDisposable
         }
     }
 
-    private TripleIndex CreateIndex()
+    private QuadIndex CreateIndex()
     {
         _index?.Dispose();
-        _index = new TripleIndex(_testPath);
+        _index = new QuadIndex(_testPath);
         return _index;
     }
 
@@ -274,18 +274,18 @@ public class TripleIndexTests : IDisposable
 
     #endregion
 
-    #region TripleCount
+    #region QuadCount
 
     [Fact]
-    public void TripleCount_EmptyIndex_ReturnsZero()
+    public void QuadCount_EmptyIndex_ReturnsZero()
     {
         var index = CreateIndex();
 
-        Assert.Equal(0, index.TripleCount);
+        Assert.Equal(0, index.QuadCount);
     }
 
     [Fact]
-    public void TripleCount_AfterAdds_ReflectsCount()
+    public void QuadCount_AfterAdds_ReflectsCount()
     {
         var index = CreateIndex();
 
@@ -293,7 +293,7 @@ public class TripleIndexTests : IDisposable
         index.AddCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
         index.AddCurrent("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o>");
 
-        Assert.Equal(3, index.TripleCount);
+        Assert.Equal(3, index.QuadCount);
     }
 
     #endregion
@@ -304,13 +304,13 @@ public class TripleIndexTests : IDisposable
     public void Persistence_ReopenIndex_DataSurvives()
     {
         // First session
-        using (var index1 = new TripleIndex(_testPath))
+        using (var index1 = new QuadIndex(_testPath))
         {
             index1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         }
 
         // Second session
-        using (var index2 = new TripleIndex(_testPath))
+        using (var index2 = new QuadIndex(_testPath))
         {
             var results = index2.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
             Assert.True(results.MoveNext());
@@ -318,10 +318,10 @@ public class TripleIndexTests : IDisposable
     }
 
     [Fact]
-    public void Persistence_TripleCountSurvives()
+    public void Persistence_QuadCountSurvives()
     {
         // First session
-        using (var index1 = new TripleIndex(_testPath))
+        using (var index1 = new QuadIndex(_testPath))
         {
             for (int i = 0; i < 10; i++)
             {
@@ -330,9 +330,9 @@ public class TripleIndexTests : IDisposable
         }
 
         // Second session
-        using (var index2 = new TripleIndex(_testPath))
+        using (var index2 = new QuadIndex(_testPath))
         {
-            Assert.Equal(10, index2.TripleCount);
+            Assert.Equal(10, index2.QuadCount);
         }
     }
 
@@ -347,7 +347,7 @@ public class TripleIndexTests : IDisposable
         try
         {
             using var sharedAtoms = new AtomStore(atomsPath);
-            using var index = new TripleIndex(_testPath, sharedAtoms);
+            using var index = new QuadIndex(_testPath, sharedAtoms);
 
             Assert.Same(sharedAtoms, index.Atoms);
 

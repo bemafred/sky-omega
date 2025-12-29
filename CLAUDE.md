@@ -81,8 +81,8 @@ For the vision, methodology (EEE), and broader context, see [docs/sky-omega-conv
 
 | Component | Purpose |
 |-----------|---------|
-| `TripleStore` | Multi-index quad store (GSPO ordering) with named graph support |
-| `TripleIndex` | Single B+Tree index with bitemporal + graph support |
+| `QuadStore` | Multi-index quad store (GSPO ordering) with named graph support |
+| `QuadIndex` | Single B+Tree index with bitemporal + graph support |
 | `AtomStore` | String interning with memory-mapped storage |
 | `PageCache` | LRU cache for B+Tree pages (clock algorithm) |
 
@@ -135,7 +135,7 @@ catch
 
 ### Named Graphs (Quads)
 
-TripleStore supports RDF named graphs for domain isolation. Each triple can belong to a named graph or the default graph:
+QuadStore supports RDF named graphs for domain isolation. Each quad can belong to a named graph or the default graph:
 
 ```csharp
 // Add to named graph
@@ -175,7 +175,7 @@ finally
 
 ### Concurrency Design
 
-TripleStore uses `ReaderWriterLockSlim` for thread-safety:
+QuadStore uses `ReaderWriterLockSlim` for thread-safety:
 
 1. **Single writer, multiple readers**: Write operations (`Add`, `Checkpoint`) acquire exclusive write lock
 2. **Explicit read locking**: Callers use `AcquireReadLock()`/`ReleaseReadLock()` around query enumeration
@@ -202,7 +202,7 @@ finally
 **Design decisions:**
 - **ReaderWriterLockSlim over lock**: Enables concurrent read throughput for query-heavy workloads
 - **NoRecursion policy**: Prevents accidental deadlocks, forces explicit lock management
-- **AtomStore relies on TripleStore lock**: Append-only with `Interlocked` for allocation; no separate lock needed
+- **AtomStore relies on QuadStore lock**: Append-only with `Interlocked` for allocation; no separate lock needed
 
 ### Zero-GC Design Principles
 
@@ -219,11 +219,11 @@ All parsers use aggressive zero-allocation techniques:
 |-----------|--------|-------|
 | SPARQL Parser | ✓ Zero-GC | ref struct, no allocations |
 | Query Executor | ✓ Zero-GC | ref struct operators, call Dispose() |
-| TripleStore Query | ✓ Zero-GC | Pooled buffer, call Dispose() |
+| QuadStore Query | ✓ Zero-GC | Pooled buffer, call Dispose() |
 | Turtle Parser (Handler) | ✓ Zero-GC | Use TripleHandler callback |
 | Turtle Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
 
-### TripleStore Query (Zero-GC)
+### QuadStore Query (Zero-GC)
 
 Query results use pooled buffers. Call `Dispose()` to return buffers:
 
@@ -325,7 +325,7 @@ Key components:
 | Federated query | SERVICE clause |
 | SPARQL Update | INSERT, DELETE, INSERT DATA, DELETE DATA, DELETE WHERE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD |
 
-*Note: SPARQL Update is planned for future implementation. Currently, write operations use the TripleStore API directly (`AddCurrent`, `DeleteCurrent`, batch operations).*
+*Note: SPARQL Update is planned for future implementation. Currently, write operations use the QuadStore API directly (`AddCurrent`, `DeleteCurrent`, batch operations).*
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers

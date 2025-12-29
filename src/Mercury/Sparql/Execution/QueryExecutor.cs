@@ -14,11 +14,11 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// </summary>
 public ref struct QueryExecutor
 {
-    private readonly TripleStore _store;
+    private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly Query _query;
 
-    public QueryExecutor(TripleStore store, ReadOnlySpan<char> source, Query query)
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query)
     {
         _store = store;
         _source = source;

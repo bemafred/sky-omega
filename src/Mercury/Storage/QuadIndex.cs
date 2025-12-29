@@ -7,12 +7,12 @@ using System.Runtime.InteropServices;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// B+Tree index for RDF triples with bitemporal semantics.
+/// B+Tree index for RDF quads (graph + triple) with bitemporal semantics.
 ///
 /// Valid Time (VT): When the fact is true in the real world
 /// Transaction Time (TT): When the fact was recorded in the database
 /// </summary>
-public sealed unsafe class TripleIndex : IDisposable
+public sealed unsafe class QuadIndex : IDisposable
 {
     private const int PageSize = 16384;
     private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry (with GraphAtom)
@@ -26,21 +26,21 @@ public sealed unsafe class TripleIndex : IDisposable
 
     private long _rootPageId;
     private long _nextPageId;
-    private long _tripleCount;
+    private long _quadCount;
     private long _currentTransactionTime;
 
     /// <summary>
-    /// Create a temporal triple store with its own atom store
+    /// Create a temporal quad store with its own atom store
     /// </summary>
-    public TripleIndex(string filePath, long initialSizeBytes = 1L << 30)
+    public QuadIndex(string filePath, long initialSizeBytes = 1L << 30)
         : this(filePath, null, initialSizeBytes)
     {
     }
 
     /// <summary>
-    /// Create a temporal triple store with a shared atom store
+    /// Create a temporal quad store with a shared atom store
     /// </summary>
-    public TripleIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
+    public QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
     {
         _fileStream = new FileStream(
             filePath,
@@ -91,7 +91,7 @@ public sealed unsafe class TripleIndex : IDisposable
     public AtomStore Atoms => _atoms;
 
     /// <summary>
-    /// Add a temporal triple with explicit time bounds
+    /// Add a temporal quad with explicit time bounds
     /// </summary>
     public void Add(
         ReadOnlySpan<char> subject,
@@ -248,7 +248,7 @@ public sealed unsafe class TripleIndex : IDisposable
     /// <summary>
     /// Query triples with temporal constraints
     /// </summary>
-    public TemporalTripleEnumerator Query(
+    public TemporalQuadEnumerator Query(
         long graphAtom,
         long subjectAtom,
         long predicateAtom,
@@ -260,7 +260,7 @@ public sealed unsafe class TripleIndex : IDisposable
 
         var leafPageId = FindLeafPage(_rootPageId, minKey);
 
-        return new TemporalTripleEnumerator(
+        return new TemporalQuadEnumerator(
             this,
             leafPageId,
             minKey,
@@ -271,7 +271,7 @@ public sealed unsafe class TripleIndex : IDisposable
     /// <summary>
     /// Query current state (as of now)
     /// </summary>
-    public TemporalTripleEnumerator QueryCurrent(
+    public TemporalQuadEnumerator QueryCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -295,7 +295,7 @@ public sealed unsafe class TripleIndex : IDisposable
     /// Query current state across all graphs (default + named).
     /// Internal method for named graph enumeration.
     /// </summary>
-    internal TemporalTripleEnumerator QueryCurrentAllGraphs()
+    internal TemporalQuadEnumerator QueryCurrentAllGraphs()
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -310,7 +310,7 @@ public sealed unsafe class TripleIndex : IDisposable
     /// <summary>
     /// Query historical state (as of specific time)
     /// </summary>
-    public TemporalTripleEnumerator QueryAsOf(
+    public TemporalQuadEnumerator QueryAsOf(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -332,7 +332,7 @@ public sealed unsafe class TripleIndex : IDisposable
     /// <summary>
     /// Query time range (all versions during period)
     /// </summary>
-    public TemporalTripleEnumerator QueryRange(
+    public TemporalQuadEnumerator QueryRange(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -356,7 +356,7 @@ public sealed unsafe class TripleIndex : IDisposable
     /// <summary>
     /// Query evolution (all versions ever)
     /// </summary>
-    public TemporalTripleEnumerator QueryHistory(
+    public TemporalQuadEnumerator QueryHistory(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> obj,
@@ -484,9 +484,9 @@ public sealed unsafe class TripleIndex : IDisposable
     /// <summary>
     /// Zero-allocation enumerator for temporal triples
     /// </summary>
-    public ref struct TemporalTripleEnumerator
+    public ref struct TemporalQuadEnumerator
     {
-        private readonly TripleIndex _store;
+        private readonly QuadIndex _store;
         private long _currentPageId;
         private int _currentSlot;
         private readonly TemporalKey _minKey;
@@ -495,8 +495,8 @@ public sealed unsafe class TripleIndex : IDisposable
         private TemporalKey _currentKey;
         private bool _currentIsDeleted;
 
-        internal TemporalTripleEnumerator(
-            TripleIndex store,
+        internal TemporalQuadEnumerator(
+            QuadIndex store,
             long startPageId,
             TemporalKey minKey,
             TemporalKey maxKey,
@@ -573,9 +573,9 @@ public sealed unsafe class TripleIndex : IDisposable
             };
         }
 
-        public readonly TemporalTriple Current
+        public readonly TemporalQuad Current
         {
-            get => new TemporalTriple
+            get => new TemporalQuad
             {
                 GraphAtom = _currentKey.GraphAtom,
                 SubjectAtom = _currentKey.SubjectAtom,
@@ -588,7 +588,7 @@ public sealed unsafe class TripleIndex : IDisposable
             };
         }
 
-        public TemporalTripleEnumerator GetEnumerator() => this;
+        public TemporalQuadEnumerator GetEnumerator() => this;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -725,7 +725,7 @@ public sealed unsafe class TripleIndex : IDisposable
         newEntry.IsDeleted = false;
 
         page->EntryCount++;
-        System.Threading.Interlocked.Increment(ref _tripleCount);
+        System.Threading.Interlocked.Increment(ref _quadCount);
         FlushPage(page);
 
         return default; // No split
@@ -1025,13 +1025,13 @@ public sealed unsafe class TripleIndex : IDisposable
         {
             _accessor.Read(0, out _rootPageId);
             _accessor.Read(8, out _nextPageId);
-            _accessor.Read(16, out _tripleCount);
+            _accessor.Read(16, out _quadCount);
         }
         else
         {
             _rootPageId = 1;
             _nextPageId = 2;
-            _tripleCount = 0;
+            _quadCount = 0;
 
             var root = GetPage(_rootPageId);
             root->PageId = _rootPageId;
@@ -1048,7 +1048,7 @@ public sealed unsafe class TripleIndex : IDisposable
     {
         _accessor.Write(0, _rootPageId);
         _accessor.Write(8, _nextPageId);
-        _accessor.Write(16, _tripleCount);
+        _accessor.Write(16, _quadCount);
         _accessor.Write(24, MagicNumber);
         _accessor.Flush();
     }
@@ -1064,7 +1064,7 @@ public sealed unsafe class TripleIndex : IDisposable
         _pageCache?.Dispose();
     }
 
-    public long TripleCount => _tripleCount;
+    public long QuadCount => _quadCount;
 }
 
 /// <summary>
@@ -1088,7 +1088,7 @@ public enum TemporalQueryType
 /// <summary>
 /// Temporal triple with time dimensions
 /// </summary>
-public struct TemporalTriple
+public struct TemporalQuad
 {
     public long GraphAtom;      // 64-bit graph ID (0 = default graph)
     public long SubjectAtom;    // 64-bit for TB-scale

@@ -51,17 +51,17 @@ public class AllocationTests
     }
 
     /// <summary>
-    /// TripleStore queries should not allocate when iterating results.
+    /// QuadStore queries should not allocate when iterating results.
     /// The ref struct enumerator lives on the stack.
     /// </summary>
     [Fact]
-    public void TripleStore_QueryIteration_ZeroAllocations()
+    public void QuadStore_QueryIteration_ZeroAllocations()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"alloc_test_{Guid.NewGuid():N}");
 
         try
         {
-            using var store = new TripleStore(dbPath);
+            using var store = new QuadStore(dbPath);
 
             // Pre-populate with test data
             for (int i = 0; i < 100; i++)
@@ -142,7 +142,7 @@ public class AllocationTests
             // The key improvement: 2MB → 8KB (99.6% reduction).
             // Per-query allocations are now zero after warmup.
             Assert.True(allocated < 16_000,
-                $"TripleStore query iteration allocated {allocated} bytes over 100 queries. " +
+                $"QuadStore query iteration allocated {allocated} bytes over 100 queries. " +
                 $"Expected < 16KB (ArrayPool overhead). Was {allocated / 100} bytes/query avg.");
         }
         finally
