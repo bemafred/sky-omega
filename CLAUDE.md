@@ -213,6 +213,19 @@ All parsers use aggressive zero-allocation techniques:
 - String interning via AtomStore to avoid duplicate allocations
 - Streaming enumerators that yield results without materializing collections
 
+**Key insight: Zero-GC ≠ "everything on stack"**
+
+Zero-GC means **no uncontrolled allocations**, not "avoid heap entirely". Pooled heap memory is equally zero-GC as stack memory, but without size limits.
+
+A naive approach of using large inline fixed buffers in structs (e.g., `GraphPattern` with 32 inline `TriplePattern` fields ≈ 4KB) causes stack overflow when structs pass by value through nested calls. The .NET stack is typically only 1MB.
+
+**The Buffer + View pattern** (used by `Span<T>`, `Utf8JsonReader`, `System.IO.Pipelines`):
+- Tiny handle/view struct (just a `Span<byte>` or pointer + length)
+- Caller owns/provides storage (stackalloc for small, pooled array for large, mmap for persistence)
+- Typed access via `MemoryMarshal.AsRef<T>()` for discriminated unions
+
+This pattern is implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/PatternSlot.cs`) - a 64-byte cache-aligned slot with a discriminator byte and typed views over raw bytes. The caller controls the buffer, eliminating hidden allocations while avoiding stack overflow.
+
 **Zero-GC compliance by component:**
 
 | Component | Status | Notes |
