@@ -324,6 +324,7 @@ Key components:
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
+| Dataset | FROM, FROM NAMED (cross-graph joins supported) |
 
 **Partially implemented SPARQL features:**
 
@@ -332,7 +333,6 @@ Key components:
 | Multiple GRAPH clauses | Single only | Multiple GRAPH patterns need join support |
 | Multiple subqueries | Single only | Multiple subqueries need join support |
 | REDUCED | Parsed only | Flag set but not applied in execution |
-| FROM cross-graph joins | Not supported | Each FROM graph queried independently; joins across graphs not implemented |
 
 **Not implemented SPARQL 1.1 features:**
 

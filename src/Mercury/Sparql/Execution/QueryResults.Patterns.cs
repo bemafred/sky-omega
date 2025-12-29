@@ -462,5 +462,6 @@ public ref partial struct QueryResults
         _unionMultiScan.Dispose();
         _subQueryScan.Dispose();
         _defaultGraphUnionScan.Dispose();
+        _crossGraphScan.Dispose();
     }
 }

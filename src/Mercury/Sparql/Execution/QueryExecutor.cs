@@ -227,9 +227,10 @@ public class QueryExecutor : IDisposable
                 _query.SolutionModifier.Having);
         }
 
-        // Multiple FROM clauses - use DefaultGraphUnionScan for streaming
-        var unionScan = new DefaultGraphUnionScan(_store, _source, pattern, _defaultGraphs);
-        return new QueryResults(unionScan, _buffer, _source, _store, bindings, stringBuffer,
+        // Multiple FROM clauses - use CrossGraphMultiPatternScan for cross-graph joins
+        // This allows joins where pattern1 matches in graph1 and pattern2 matches in graph2
+        var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
+        return new QueryResults(crossGraphScan, _buffer, _source, _store, bindings, stringBuffer,
             _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);

@@ -3842,7 +3842,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Cross-graph joins with FROM clauses not yet implemented - each graph is queried independently")]
+    [Fact]
     public void Execute_FromWithJoin_JoinsAcrossGraphs()
     {
         // Add related data across graphs

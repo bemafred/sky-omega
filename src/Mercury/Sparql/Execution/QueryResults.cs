@@ -14,6 +14,7 @@ public ref partial struct QueryResults
     // Note: VariableGraphScan removed - GRAPH ?g uses materialization to avoid stack overflow
     private SubQueryScan _subQueryScan;
     private DefaultGraphUnionScan _defaultGraphUnionScan;
+    private CrossGraphMultiPatternScan _crossGraphScan;
     // Pattern data stored on heap via QueryBuffer (eliminates ~4KB GraphPattern from stack)
     private Patterns.QueryBuffer? _buffer;
     private ReadOnlySpan<char> _source;
@@ -26,6 +27,7 @@ public ref partial struct QueryResults
     private readonly bool _isMultiPattern;
     private readonly bool _isSubQuery;
     private readonly bool _isDefaultGraphUnion;
+    private readonly bool _isCrossGraphMultiPattern;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
@@ -166,6 +168,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -212,6 +215,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -257,6 +261,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -301,6 +306,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -344,6 +350,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -387,6 +394,7 @@ public ref partial struct QueryResults
         _isMultiPattern = true;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -431,6 +439,8 @@ public ref partial struct QueryResults
         _hasUnion = false;
         _isMultiPattern = false;
         _isSubQuery = true;
+        _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -475,6 +485,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = true;
+        _isCrossGraphMultiPattern = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -491,6 +502,50 @@ public ref partial struct QueryResults
         _hasMinus = false;
         _hasValues = false;
         _hasExists = false;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
+    }
+
+    internal QueryResults(CrossGraphMultiPatternScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    {
+        _crossGraphScan = scan;
+        _buffer = buffer;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = buffer.HasFilters;
+        _hasOptional = buffer.HasOptionalPatterns;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = true;
+        _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = orderBy.HasOrderBy;
+        _sortedResults = null;
+        _sortedIndex = -1;
+        _hasBinds = buffer.HasBinds;
+        _hasMinus = buffer.HasMinus;
+        _hasValues = buffer.HasValues;
+        _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
         _hasGroupBy = groupBy.HasGroupBy;
@@ -545,6 +600,10 @@ public ref partial struct QueryResults
             {
                 hasNext = _subQueryScan.MoveNext(ref _bindingTable);
             }
+            else if (_isCrossGraphMultiPattern)
+            {
+                hasNext = _crossGraphScan.MoveNext(ref _bindingTable);
+            }
             else if (_isDefaultGraphUnion)
             {
                 hasNext = _defaultGraphUnionScan.MoveNext(ref _bindingTable);
@@ -569,7 +628,7 @@ public ref partial struct QueryResults
             if (!hasNext)
             {
                 // Try switching to UNION branch
-                if (!_isSubQuery && !_isDefaultGraphUnion && _hasUnion && !_unionBranchActive)
+                if (!_isSubQuery && !_isDefaultGraphUnion && !_isCrossGraphMultiPattern && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())
