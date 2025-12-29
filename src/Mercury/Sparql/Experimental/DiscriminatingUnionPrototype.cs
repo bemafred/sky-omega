@@ -1,518 +1,515 @@
-// Discriminated Union Prototype for Zero-GC SPARQL Pattern Storage
-// Addresses stack overflow from large inline struct arrays
-//
-// Key insight: Most queries use few pattern types. Embedding all 7 types
-// wastes ~8KB per GraphPattern. A discriminated union uses ONE array
-// with type tags, reducing typical usage to ~500 bytes.
-
 using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace SkyOmega.Mercury.Sparql.Experimental;
 
-/// <summary>
-/// Pattern element type discriminator (1 byte)
-/// </summary>
-public enum PatternElementKind : byte
-{
-Empty = 0,
-Triple,           // TriplePattern
-Filter,           // FilterExpr
-Bind,             // BindExpr
-MinusTriple,      // TriplePattern in MINUS context
-Exists,           // ExistsFilter header
-NotExists,        // ExistsFilter header (negated)
-GraphClause,      // GraphClause header
-SubSelect,        // SubSelect header (requires external storage)
-Values,           // ValuesClause header
-}
-
-/// <summary>
-/// Unified pattern element - fixed size discriminated union.
-///
-/// Design choices:
-/// - 64 bytes per slot (cache-line friendly, fits largest common element)
-/// - Type tag + payload in single struct
-/// - Complex nested types (SubSelect) use indirection
-/// </summary>
-[StructLayout(LayoutKind.Explicit, Size = 64)]
-public struct PatternElement
-{
-[FieldOffset(0)] public PatternElementKind Kind;
-
-```
-// Overlay: TriplePattern (most common) - 60 bytes max
-[FieldOffset(4)] public Term Subject;
-[FieldOffset(16)] public Term Predicate;
-[FieldOffset(28)] public Term Object;
-[FieldOffset(40)] public PropertyPath Path;
-
-// Overlay: FilterExpr - 8 bytes
-[FieldOffset(4)] public int FilterStart;
-[FieldOffset(8)] public int FilterLength;
-
-// Overlay: BindExpr - 16 bytes
-[FieldOffset(4)] public int BindExprStart;
-[FieldOffset(8)] public int BindExprLength;
-[FieldOffset(12)] public int BindVarStart;
-[FieldOffset(16)] public int BindVarLength;
-
-// Overlay: GraphClause header - 12 bytes + child index
-[FieldOffset(4)] public Term GraphTerm;
-[FieldOffset(16)] public int GraphChildStart;   // Index of first child pattern
-[FieldOffset(20)] public int GraphChildCount;   // Number of child patterns
-
-// Overlay: Exists header - child range
-[FieldOffset(4)] public int ExistsChildStart;
-[FieldOffset(8)] public int ExistsChildCount;
-
-// Overlay: SubSelect - requires pooled storage (too large for inline)
-[FieldOffset(4)] public int SubSelectPoolIndex;
-
-// Overlay: Values clause header
-[FieldOffset(4)] public int ValuesVarStart;
-[FieldOffset(8)] public int ValuesVarLength;
-[FieldOffset(12)] public int ValuesDataStart;   // Index to values data
-[FieldOffset(16)] public int ValuesDataCount;
-```
-
-}
-
-/// <summary>
-/// Compact graph pattern using discriminated union array.
-///
-/// Stack size: 32 elements × 64 bytes = 2,048 bytes (vs 9,000 bytes original)
-/// Typical query (3-5 patterns): effective usage ~320 bytes
-/// </summary>
-public struct CompactGraphPattern
-{
-public const int MaxElements = 32;
-
-```
-private int _count;
-
-// Single unified array - all pattern types share this space
-private PatternElement _e0, _e1, _e2, _e3, _e4, _e5, _e6, _e7;
-private PatternElement _e8, _e9, _e10, _e11, _e12, _e13, _e14, _e15;
-private PatternElement _e16, _e17, _e18, _e19, _e20, _e21, _e22, _e23;
-private PatternElement _e24, _e25, _e26, _e27, _e28, _e29, _e30, _e31;
-
-public readonly int Count => _count;
-
-// ═══════════════════════════════════════════════════════════════════════
-// Span Extension Pattern: Type-safe views over the unified buffer
-// ═══════════════════════════════════════════════════════════════════════
-
-/// <summary>
-/// Get all elements as a span for iteration
-/// </summary>
-public readonly Span<PatternElement> AsSpan()
-{
-    // This is the key: single contiguous buffer accessible via Span
-    ref var first = ref Unsafe.AsRef(in _e0);
-    return MemoryMarshal.CreateSpan(ref first, _count);
-}
-
-/// <summary>
-/// Add a triple pattern
-/// </summary>
-public void AddTriple(Term subject, Term predicate, Term obj, PropertyPath path = default)
-{
-    if (_count >= MaxElements) return;
-    
-    ref var element = ref GetElementRef(_count++);
-    element.Kind = PatternElementKind.Triple;
-    element.Subject = subject;
-    element.Predicate = predicate;
-    element.Object = obj;
-    element.Path = path;
-}
-
-/// <summary>
-/// Add a filter expression
-/// </summary>
-public void AddFilter(int start, int length)
-{
-    if (_count >= MaxElements) return;
-    
-    ref var element = ref GetElementRef(_count++);
-    element.Kind = PatternElementKind.Filter;
-    element.FilterStart = start;
-    element.FilterLength = length;
-}
-
-/// <summary>
-/// Add a BIND expression
-/// </summary>
-public void AddBind(int exprStart, int exprLength, int varStart, int varLength)
-{
-    if (_count >= MaxElements) return;
-    
-    ref var element = ref GetElementRef(_count++);
-    element.Kind = PatternElementKind.Bind;
-    element.BindExprStart = exprStart;
-    element.BindExprLength = exprLength;
-    element.BindVarStart = varStart;
-    element.BindVarLength = varLength;
-}
-
-/// <summary>
-/// Begin a GRAPH clause - returns index for adding child patterns
-/// </summary>
-public int BeginGraphClause(Term graphTerm)
-{
-    if (_count >= MaxElements) return -1;
-    
-    int headerIndex = _count++;
-    ref var element = ref GetElementRef(headerIndex);
-    element.Kind = PatternElementKind.GraphClause;
-    element.GraphTerm = graphTerm;
-    element.GraphChildStart = _count;  // Children follow immediately
-    element.GraphChildCount = 0;
-    
-    return headerIndex;
-}
-
-/// <summary>
-/// End a GRAPH clause by recording child count
-/// </summary>
-public void EndGraphClause(int headerIndex)
-{
-    ref var element = ref GetElementRef(headerIndex);
-    element.GraphChildCount = _count - element.GraphChildStart;
-}
-
-/// <summary>
-/// Begin an EXISTS/NOT EXISTS filter
-/// </summary>
-public int BeginExists(bool negated)
-{
-    if (_count >= MaxElements) return -1;
-    
-    int headerIndex = _count++;
-    ref var element = ref GetElementRef(headerIndex);
-    element.Kind = negated ? PatternElementKind.NotExists : PatternElementKind.Exists;
-    element.ExistsChildStart = _count;
-    element.ExistsChildCount = 0;
-    
-    return headerIndex;
-}
-
-/// <summary>
-/// End an EXISTS filter
-/// </summary>
-public void EndExists(int headerIndex)
-{
-    ref var element = ref GetElementRef(headerIndex);
-    element.ExistsChildCount = _count - element.ExistsChildStart;
-}
-
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private ref PatternElement GetElementRef(int index)
-{
-    // Manual switch - compiler optimizes this well
-    return ref index switch
-    {
-        0 => ref _e0, 1 => ref _e1, 2 => ref _e2, 3 => ref _e3,
-        4 => ref _e4, 5 => ref _e5, 6 => ref _e6, 7 => ref _e7,
-        8 => ref _e8, 9 => ref _e9, 10 => ref _e10, 11 => ref _e11,
-        12 => ref _e12, 13 => ref _e13, 14 => ref _e14, 15 => ref _e15,
-        16 => ref _e16, 17 => ref _e17, 18 => ref _e18, 19 => ref _e19,
-        20 => ref _e20, 21 => ref _e21, 22 => ref _e22, 23 => ref _e23,
-        24 => ref _e24, 25 => ref _e25, 26 => ref _e26, 27 => ref _e27,
-        28 => ref _e28, 29 => ref _e29, 30 => ref _e30, 31 => ref _e31,
-        _ => ref Unsafe.NullRef<PatternElement>()
-    };
-}
-```
-
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
-// Span Extension Methods for Type-Safe Access
+// Discriminated Union via Span<byte> Views
+// 
+// Pattern: ref struct wraps Span<byte>, properties use MemoryMarshal.AsRef<T>
+// Benefits: 
+//   - Zero copy - direct memory access
+//   - Storage-agnostic (stackalloc, array, mmap, pooled)
+//   - True union semantics (overlapping interpretations)
+//   - ref struct ensures stack discipline
 // ═══════════════════════════════════════════════════════════════════════════
 
-public static class PatternSpanExtensions
+/// <summary>
+/// Pattern element discriminator
+/// </summary>
+public enum PatternKind : byte
 {
-/// <summary>
-/// Enumerate only triple patterns
-/// </summary>
-public static TriplePatternEnumerator EnumerateTriples(this Span<PatternElement> elements)
-=> new(elements);
-
-```
-/// <summary>
-/// Enumerate only filter expressions
-/// </summary>
-public static FilterEnumerator EnumerateFilters(this Span<PatternElement> elements)
-    => new(elements);
+    Empty = 0,
+    Triple = 1,
+    Filter = 2,
+    Bind = 3,
+    GraphHeader = 4,
+    ExistsHeader = 5,
+    NotExistsHeader = 6,
+}
 
 /// <summary>
-/// Count elements of a specific kind
+/// Fixed-size pattern element slot (64 bytes)
+/// Provides typed view over raw bytes.
 /// </summary>
-public static int CountOfKind(this ReadOnlySpan<PatternElement> elements, PatternElementKind kind)
+public ref struct PatternSlot
 {
-    int count = 0;
-    foreach (ref readonly var e in elements)
+    public const int Size = 64;
+    
+    private readonly Span<byte> _span;
+    
+    public PatternSlot(Span<byte> buffer)
     {
-        if (e.Kind == kind) count++;
+        if (buffer.Length < Size)
+            throw new ArgumentOutOfRangeException(
+                $"Buffer too small for PatternSlot. Required={Size}, Got={buffer.Length}");
+        _span = buffer.Slice(0, Size);
     }
-    return count;
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Byte 0: Kind discriminator
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public ref PatternKind Kind => ref MemoryMarshal.AsRef<PatternKind>(_span.Slice(0, 1));
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: Triple (Kind == Triple)
+    // Layout: [Kind:1][pad:3][Subject:12][Predicate:12][Object:12][PathType:1][pad:3][PathIri:12] = 56 bytes
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public ref TermType SubjectType => ref MemoryMarshal.AsRef<TermType>(_span.Slice(4, 1));
+    public ref int SubjectStart => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    public ref int SubjectLength => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
+    
+    public ref TermType PredicateType => ref MemoryMarshal.AsRef<TermType>(_span.Slice(16, 1));
+    public ref int PredicateStart => ref MemoryMarshal.AsRef<int>(_span.Slice(20, 4));
+    public ref int PredicateLength => ref MemoryMarshal.AsRef<int>(_span.Slice(24, 4));
+    
+    public ref TermType ObjectType => ref MemoryMarshal.AsRef<TermType>(_span.Slice(28, 1));
+    public ref int ObjectStart => ref MemoryMarshal.AsRef<int>(_span.Slice(32, 4));
+    public ref int ObjectLength => ref MemoryMarshal.AsRef<int>(_span.Slice(36, 4));
+    
+    public ref PathType PathKind => ref MemoryMarshal.AsRef<PathType>(_span.Slice(40, 1));
+    public ref int PathIriStart => ref MemoryMarshal.AsRef<int>(_span.Slice(44, 4));
+    public ref int PathIriLength => ref MemoryMarshal.AsRef<int>(_span.Slice(48, 4));
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: Filter (Kind == Filter)
+    // Layout: [Kind:1][pad:3][Start:4][Length:4] = 12 bytes
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public ref int FilterStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
+    public ref int FilterLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: Bind (Kind == Bind)
+    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4] = 20 bytes
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public ref int BindExprStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
+    public ref int BindExprLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    public ref int BindVarStart => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
+    public ref int BindVarLength => ref MemoryMarshal.AsRef<int>(_span.Slice(16, 4));
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: GraphHeader (Kind == GraphHeader)
+    // Layout: [Kind:1][pad:3][GraphTermType:1][pad:3][GraphStart:4][GraphLen:4][ChildStart:4][ChildCount:4] = 24 bytes
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public ref TermType GraphTermType => ref MemoryMarshal.AsRef<TermType>(_span.Slice(4, 1));
+    public ref int GraphTermStart => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    public ref int GraphTermLength => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
+    public ref int ChildStartIndex => ref MemoryMarshal.AsRef<int>(_span.Slice(16, 4));
+    public ref int ChildCount => ref MemoryMarshal.AsRef<int>(_span.Slice(20, 4));
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: ExistsHeader / NotExistsHeader
+    // Layout: [Kind:1][pad:3][ChildStart:4][ChildCount:4] = 12 bytes
+    // (Same layout, Kind distinguishes EXISTS vs NOT EXISTS)
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public ref int ExistsChildStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
+    public ref int ExistsChildCount => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    
+    // ───────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ───────────────────────────────────────────────────────────────────────
+    
+    public readonly bool IsTriple => Kind == PatternKind.Triple;
+    public readonly bool IsFilter => Kind == PatternKind.Filter;
+    public readonly bool IsBind => Kind == PatternKind.Bind;
+    public readonly bool IsGraphHeader => Kind == PatternKind.GraphHeader;
+    public readonly bool IsExistsHeader => Kind == PatternKind.ExistsHeader || Kind == PatternKind.NotExistsHeader;
+    public readonly bool IsNegatedExists => Kind == PatternKind.NotExistsHeader;
+    
+    /// <summary>
+    /// Clear slot for reuse
+    /// </summary>
+    public void Clear() => _span.Clear();
 }
 
 /// <summary>
-/// Try to get element as triple pattern
+/// Array of pattern slots - view over contiguous byte buffer
 /// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-public static bool TryAsTriple(this ref PatternElement element, out Term subject, out Term predicate, out Term obj)
+public ref struct PatternArray
 {
-    if (element.Kind == PatternElementKind.Triple || element.Kind == PatternElementKind.MinusTriple)
+    private readonly Span<byte> _buffer;
+    private readonly int _capacity;
+    private int _count;
+    
+    public PatternArray(Span<byte> buffer)
     {
-        subject = element.Subject;
-        predicate = element.Predicate;
-        obj = element.Object;
-        return true;
+        _buffer = buffer;
+        _capacity = buffer.Length / PatternSlot.Size;
+        _count = 0;
     }
-    subject = default;
-    predicate = default;
-    obj = default;
-    return false;
-}
-
-/// <summary>
-/// Try to get element as filter
-/// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-public static bool TryAsFilter(this ref PatternElement element, out int start, out int length)
-{
-    if (element.Kind == PatternElementKind.Filter)
+    
+    public readonly int Count => _count;
+    public readonly int Capacity => _capacity;
+    
+    /// <summary>
+    /// Get slot at index
+    /// </summary>
+    public PatternSlot this[int index]
     {
-        start = element.FilterStart;
-        length = element.FilterLength;
-        return true;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if ((uint)index >= (uint)_count)
+                throw new IndexOutOfRangeException();
+            return new PatternSlot(_buffer.Slice(index * PatternSlot.Size, PatternSlot.Size));
+        }
     }
-    start = 0;
-    length = 0;
-    return false;
-}
-
-/// <summary>
-/// Get child elements for a GRAPH or EXISTS clause
-/// </summary>
-public static Span<PatternElement> GetChildren(this Span<PatternElement> elements, ref PatternElement header)
-{
-    return header.Kind switch
+    
+    /// <summary>
+    /// Allocate next slot
+    /// </summary>
+    public PatternSlot AllocateSlot()
     {
-        PatternElementKind.GraphClause => elements.Slice(header.GraphChildStart, header.GraphChildCount),
-        PatternElementKind.Exists or PatternElementKind.NotExists => elements.Slice(header.ExistsChildStart, header.ExistsChildCount),
-        _ => Span<PatternElement>.Empty
-    };
-}
-```
-
-}
-
-/// <summary>
-/// Zero-allocation enumerator for triple patterns only
-/// </summary>
-public ref struct TriplePatternEnumerator
-{
-private readonly Span<PatternElement> _elements;
-private int _index;
-
-```
-public TriplePatternEnumerator(Span<PatternElement> elements)
-{
-    _elements = elements;
-    _index = -1;
-}
-
-public bool MoveNext()
-{
-    while (++_index < _elements.Length)
-    {
-        var kind = _elements[_index].Kind;
-        if (kind == PatternElementKind.Triple || kind == PatternElementKind.MinusTriple)
-            return true;
+        if (_count >= _capacity)
+            throw new InvalidOperationException("PatternArray is full");
+        
+        var slot = new PatternSlot(_buffer.Slice(_count * PatternSlot.Size, PatternSlot.Size));
+        slot.Clear(); // Zero out for safety
+        _count++;
+        return slot;
     }
-    return false;
-}
-
-public readonly ref PatternElement Current => ref _elements[_index];
-public readonly bool IsMinus => _elements[_index].Kind == PatternElementKind.MinusTriple;
-
-public TriplePatternEnumerator GetEnumerator() => this;
-```
-
+    
+    /// <summary>
+    /// Add a triple pattern
+    /// </summary>
+    public void AddTriple(
+        TermType sType, int sStart, int sLen,
+        TermType pType, int pStart, int pLen,
+        TermType oType, int oStart, int oLen,
+        PathType pathType = PathType.None, int pathStart = 0, int pathLen = 0)
+    {
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.Triple;
+        slot.SubjectType = sType;
+        slot.SubjectStart = sStart;
+        slot.SubjectLength = sLen;
+        slot.PredicateType = pType;
+        slot.PredicateStart = pStart;
+        slot.PredicateLength = pLen;
+        slot.ObjectType = oType;
+        slot.ObjectStart = oStart;
+        slot.ObjectLength = oLen;
+        slot.PathKind = pathType;
+        slot.PathIriStart = pathStart;
+        slot.PathIriLength = pathLen;
+    }
+    
+    /// <summary>
+    /// Add a filter expression
+    /// </summary>
+    public void AddFilter(int start, int length)
+    {
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.Filter;
+        slot.FilterStart = start;
+        slot.FilterLength = length;
+    }
+    
+    /// <summary>
+    /// Add a BIND expression
+    /// </summary>
+    public void AddBind(int exprStart, int exprLen, int varStart, int varLen)
+    {
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.Bind;
+        slot.BindExprStart = exprStart;
+        slot.BindExprLength = exprLen;
+        slot.BindVarStart = varStart;
+        slot.BindVarLength = varLen;
+    }
+    
+    /// <summary>
+    /// Begin a GRAPH clause, returns header index
+    /// </summary>
+    public int BeginGraph(TermType termType, int termStart, int termLen)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.GraphHeader;
+        slot.GraphTermType = termType;
+        slot.GraphTermStart = termStart;
+        slot.GraphTermLength = termLen;
+        slot.ChildStartIndex = _count; // Children follow
+        slot.ChildCount = 0;
+        return headerIndex;
+    }
+    
+    /// <summary>
+    /// End a GRAPH clause
+    /// </summary>
+    public void EndGraph(int headerIndex)
+    {
+        var header = this[headerIndex];
+        header.ChildCount = _count - header.ChildStartIndex;
+    }
+    
+    /// <summary>
+    /// Begin an EXISTS/NOT EXISTS filter
+    /// </summary>
+    public int BeginExists(bool negated)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = negated ? PatternKind.NotExistsHeader : PatternKind.ExistsHeader;
+        slot.ExistsChildStart = _count;
+        slot.ExistsChildCount = 0;
+        return headerIndex;
+    }
+    
+    /// <summary>
+    /// End an EXISTS filter
+    /// </summary>
+    public void EndExists(int headerIndex)
+    {
+        var header = this[headerIndex];
+        header.ExistsChildCount = _count - header.ExistsChildStart;
+    }
+    
+    /// <summary>
+    /// Get child patterns for a header slot
+    /// </summary>
+    public PatternArraySlice GetChildren(int headerIndex)
+    {
+        var header = this[headerIndex];
+        return header.Kind switch
+        {
+            PatternKind.GraphHeader => new PatternArraySlice(_buffer, header.ChildStartIndex, header.ChildCount),
+            PatternKind.ExistsHeader or PatternKind.NotExistsHeader => 
+                new PatternArraySlice(_buffer, header.ExistsChildStart, header.ExistsChildCount),
+            _ => default
+        };
+    }
+    
+    /// <summary>
+    /// Get enumerator for all slots
+    /// </summary>
+    public PatternEnumerator GetEnumerator() => new(_buffer, _count);
+    
+    /// <summary>
+    /// Get enumerator for triples only
+    /// </summary>
+    public TripleEnumerator EnumerateTriples() => new(_buffer, _count);
+    
+    /// <summary>
+    /// Get enumerator for filters only
+    /// </summary>
+    public FilterEnumerator EnumerateFilters() => new(_buffer, _count);
 }
 
 /// <summary>
-/// Zero-allocation enumerator for filters only
+/// Slice of a pattern array (for children)
+/// </summary>
+public ref struct PatternArraySlice
+{
+    private readonly Span<byte> _buffer;
+    private readonly int _start;
+    private readonly int _count;
+    
+    public PatternArraySlice(Span<byte> buffer, int start, int count)
+    {
+        _buffer = buffer;
+        _start = start;
+        _count = count;
+    }
+    
+    public readonly int Count => _count;
+    
+    public PatternSlot this[int index]
+    {
+        get
+        {
+            if ((uint)index >= (uint)_count)
+                throw new IndexOutOfRangeException();
+            int offset = (_start + index) * PatternSlot.Size;
+            return new PatternSlot(_buffer.Slice(offset, PatternSlot.Size));
+        }
+    }
+    
+    public PatternEnumerator GetEnumerator() => 
+        new(_buffer.Slice(_start * PatternSlot.Size), _count);
+}
+
+/// <summary>
+/// Enumerator over all pattern slots
+/// </summary>
+public ref struct PatternEnumerator
+{
+    private readonly Span<byte> _buffer;
+    private readonly int _count;
+    private int _index;
+    
+    public PatternEnumerator(Span<byte> buffer, int count)
+    {
+        _buffer = buffer;
+        _count = count;
+        _index = -1;
+    }
+    
+    public bool MoveNext() => ++_index < _count;
+    
+    public PatternSlot Current => new(_buffer.Slice(_index * PatternSlot.Size, PatternSlot.Size));
+    
+    public PatternEnumerator GetEnumerator() => this;
+}
+
+/// <summary>
+/// Enumerator over triple patterns only
+/// </summary>
+public ref struct TripleEnumerator
+{
+    private readonly Span<byte> _buffer;
+    private readonly int _count;
+    private int _index;
+    
+    public TripleEnumerator(Span<byte> buffer, int count)
+    {
+        _buffer = buffer;
+        _count = count;
+        _index = -1;
+    }
+    
+    public bool MoveNext()
+    {
+        while (++_index < _count)
+        {
+            var kind = (PatternKind)_buffer[_index * PatternSlot.Size];
+            if (kind == PatternKind.Triple)
+                return true;
+        }
+        return false;
+    }
+    
+    public PatternSlot Current => new(_buffer.Slice(_index * PatternSlot.Size, PatternSlot.Size));
+    
+    public TripleEnumerator GetEnumerator() => this;
+}
+
+/// <summary>
+/// Enumerator over filter expressions only
 /// </summary>
 public ref struct FilterEnumerator
 {
-private readonly Span<PatternElement> _elements;
-private int _index;
-
-```
-public FilterEnumerator(Span<PatternElement> elements)
-{
-    _elements = elements;
-    _index = -1;
-}
-
-public bool MoveNext()
-{
-    while (++_index < _elements.Length)
+    private readonly Span<byte> _buffer;
+    private readonly int _count;
+    private int _index;
+    
+    public FilterEnumerator(Span<byte> buffer, int count)
     {
-        if (_elements[_index].Kind == PatternElementKind.Filter)
-            return true;
+        _buffer = buffer;
+        _count = count;
+        _index = -1;
     }
-    return false;
-}
-
-public readonly ref PatternElement Current => ref _elements[_index];
-
-public FilterEnumerator GetEnumerator() => this;
-```
-
+    
+    public bool MoveNext()
+    {
+        while (++_index < _count)
+        {
+            var kind = (PatternKind)_buffer[_index * PatternSlot.Size];
+            if (kind == PatternKind.Filter)
+                return true;
+        }
+        return false;
+    }
+    
+    public PatternSlot Current => new(_buffer.Slice(_index * PatternSlot.Size, PatternSlot.Size));
+    
+    public FilterEnumerator GetEnumerator() => this;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Usage Example
+// Extension methods for ergonomic creation
+// ═══════════════════════════════════════════════════════════════════════════
+
+public static class PatternArrayExtensions
+{
+    /// <summary>
+    /// Create pattern array from byte array
+    /// </summary>
+    public static PatternArray AsPatternArray(this byte[] buffer)
+        => new(buffer.AsSpan());
+    
+    /// <summary>
+    /// Create pattern array from span
+    /// </summary>
+    public static PatternArray AsPatternArray(this Span<byte> buffer)
+        => new(buffer);
+    
+    /// <summary>
+    /// Required buffer size for N patterns
+    /// </summary>
+    public static int PatternBufferSize(int patternCount)
+        => patternCount * PatternSlot.Size;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Usage Examples
 // ═══════════════════════════════════════════════════════════════════════════
 
 /*
-// Before (original): ~9KB on stack
-GraphPattern pattern = new();
-pattern.AddPattern(new TriplePattern { … });
-pattern.AddFilter(new FilterExpr { … });
+// Stack allocation - 32 patterns = 2048 bytes
+Span<byte> buffer = stackalloc byte[PatternArrayExtensions.PatternBufferSize(32)];
+var patterns = buffer.AsPatternArray();
 
-// After (compact): ~2KB on stack, typically uses <500 bytes
-CompactGraphPattern pattern = new();
-pattern.AddTriple(subject, predicate, obj);
-pattern.AddFilter(filterStart, filterLength);
+// Add patterns
+patterns.AddTriple(
+    TermType.Variable, 10, 2,   // ?s at offset 10, len 2
+    TermType.Iri, 20, 15,       // <http://...> at offset 20, len 15  
+    TermType.Variable, 40, 2    // ?o at offset 40, len 2
+);
 
-// Type-safe iteration via span extensions:
-var span = pattern.AsSpan();
+patterns.AddFilter(100, 25);    // FILTER expression at offset 100, len 25
 
-// Iterate only triples
-foreach (ref var element in span.EnumerateTriples())
+// GRAPH clause with children
+int graphHeader = patterns.BeginGraph(TermType.Iri, 200, 30);
+patterns.AddTriple(...);  // child pattern
+patterns.AddTriple(...);  // child pattern
+patterns.EndGraph(graphHeader);
+
+// Iterate all
+foreach (var slot in patterns)
 {
-element.TryAsTriple(out var s, out var p, out var o);
-// process triple…
-}
-
-// Get children of a GRAPH clause
-ref var graphHeader = ref span[0];
-var children = span.GetChildren(ref graphHeader);
-
-// Count specific types
-int filterCount = span.CountOfKind(PatternElementKind.Filter);
-*/
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Alternative: Byte-level discrimination with raw Span<byte>
-// (More memory-efficient but requires careful alignment)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// <summary>
-/// Ultra-compact variant: variable-size elements in byte buffer.
-/// Even smaller footprint but more complex to work with.
-/// </summary>
-public ref struct BytePackedPattern
-{
-private Span<byte> _buffer;
-private int _offset;
-
-```
-public BytePackedPattern(Span<byte> buffer)
-{
-    _buffer = buffer;
-    _offset = 0;
-}
-
-public void AddTriple(Term s, Term p, Term o)
-{
-    // [Kind:1][Subject:12][Predicate:12][Object:12] = 37 bytes
-    const int TripleSize = 1 + 12 + 12 + 12;
-    if (_offset + TripleSize > _buffer.Length) return;
-    
-    _buffer[_offset++] = (byte)PatternElementKind.Triple;
-    WriteTerm(_buffer.Slice(_offset), s); _offset += 12;
-    WriteTerm(_buffer.Slice(_offset), p); _offset += 12;
-    WriteTerm(_buffer.Slice(_offset), o); _offset += 12;
-}
-
-public void AddFilter(int start, int length)
-{
-    // [Kind:1][Start:4][Length:4] = 9 bytes
-    const int FilterSize = 1 + 4 + 4;
-    if (_offset + FilterSize > _buffer.Length) return;
-    
-    _buffer[_offset++] = (byte)PatternElementKind.Filter;
-    WriteInt(_buffer.Slice(_offset), start); _offset += 4;
-    WriteInt(_buffer.Slice(_offset), length); _offset += 4;
-}
-
-private static void WriteTerm(Span<byte> dest, Term term)
-{
-    dest[0] = (byte)term.Type;
-    WriteInt(dest.Slice(1), term.Start);
-    WriteInt(dest.Slice(5), term.Length);
-}
-
-private static void WriteInt(Span<byte> dest, int value)
-{
-    System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(dest, value);
-}
-
-// Reading requires walking the buffer since elements are variable size
-public BytePackedEnumerator GetEnumerator() => new(_buffer.Slice(0, _offset));
-```
-
-}
-
-public ref struct BytePackedEnumerator
-{
-private readonly ReadOnlySpan<byte> _buffer;
-private int _offset;
-private PatternElementKind _currentKind;
-private int _currentStart;
-
-```
-public BytePackedEnumerator(ReadOnlySpan<byte> buffer)
-{
-    _buffer = buffer;
-    _offset = 0;
-    _currentKind = PatternElementKind.Empty;
-    _currentStart = 0;
-}
-
-public bool MoveNext()
-{
-    if (_offset >= _buffer.Length) return false;
-    
-    _currentStart = _offset;
-    _currentKind = (PatternElementKind)_buffer[_offset++];
-    
-    // Skip past element data based on kind
-    _offset += _currentKind switch
+    switch (slot.Kind)
     {
-        PatternElementKind.Triple => 36,      // 3 Terms
-        PatternElementKind.Filter => 8,        // 2 ints
-        PatternElementKind.Bind => 16,         // 4 ints
-        _ => 0
-    };
-    
-    return true;
+        case PatternKind.Triple:
+            Console.WriteLine($"Triple: {slot.SubjectStart}...");
+            break;
+        case PatternKind.Filter:
+            Console.WriteLine($"Filter: {slot.FilterStart}, {slot.FilterLength}");
+            break;
+    }
 }
 
-public readonly PatternElementKind CurrentKind => _currentKind;
-public readonly ReadOnlySpan<byte> CurrentData => _buffer.Slice(_currentStart + 1);
-
-public BytePackedEnumerator GetEnumerator() => this;
-```
-
+// Iterate triples only
+foreach (var slot in patterns.EnumerateTriples())
+{
+    // slot.Kind is guaranteed to be Triple here
+    var sStart = slot.SubjectStart;
+    var sLen = slot.SubjectLength;
 }
+
+// Access children
+var children = patterns.GetChildren(graphHeader);
+foreach (var child in children)
+{
+    // Process child patterns...
+}
+
+// From pooled/array storage
+byte[] pooledBuffer = ArrayPool<byte>.Shared.Rent(2048);
+try
+{
+    var patterns = pooledBuffer.AsPatternArray();
+    // ... use patterns ...
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(pooledBuffer);
+}
+*/
