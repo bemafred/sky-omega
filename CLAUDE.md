@@ -48,6 +48,8 @@ SkyOmega.sln
 │   ├── Mercury/             # Core library - storage and query engine (BCL only)
 │   │   ├── Rdf/             # Triple data structures
 │   │   ├── Sparql/          # SPARQL parser and query execution
+│   │   │   ├── Execution/   # Query operators and executor
+│   │   │   └── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Cli.Turtle/  # Turtle parser CLI demo
@@ -488,10 +490,33 @@ finally
 **Operator pipeline:**
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
-- `VariableGraphScan` - Iterates all named graphs, executes inner patterns per graph
+- `SlotTriplePatternScan` - Slot-based variant reading from 64-byte PatternSlot
+- `SlotMultiPatternScan` - Slot-based multi-pattern join reading from byte[] buffer
 - `SubQueryScan` - Executes nested SELECT subquery, projects selected variables
 - `SubQueryJoinScan` - Joins subquery results with outer patterns via nested loop
 - Filter/BIND/MINUS/VALUES evaluation integrated into result iteration
+
+**QueryBuffer infrastructure:**
+
+`QueryExecutor` uses `QueryBuffer` to store parsed patterns on the heap, avoiding stack overflow from large struct copies:
+
+```csharp
+// QueryBuffer stores patterns in pooled byte[] (~100 bytes vs ~9KB for Query struct)
+// QueryBufferAdapter converts old Query struct to new buffer format
+var buffer = QueryBufferAdapter.FromQuery(in query, source);
+
+// Patterns accessed via PatternSlot views - no large struct copies
+var patterns = buffer.GetPatterns();
+foreach (var slot in patterns)
+{
+    if (slot.Kind == PatternKind.Triple)
+    {
+        // slot.SubjectType, slot.SubjectStart, slot.SubjectLength, etc.
+    }
+}
+```
+
+This enables GRAPH ?g queries and subquery joins to execute without thread workarounds that were previously needed to avoid stack overflow.
 
 ## Code Conventions
 
