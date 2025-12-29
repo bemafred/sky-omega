@@ -2,7 +2,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace SkyOmega.Mercury.Sparql.Experimental;
+namespace SkyOmega.Mercury.Sparql.Patterns;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Discriminated Union via Span<byte> Views
@@ -51,7 +51,7 @@ public ref struct PatternSlot
     // Byte 0: Kind discriminator
     // ───────────────────────────────────────────────────────────────────────
     
-    public ref PatternKind Kind => ref MemoryMarshal.AsRef<PatternKind>(_span.Slice(0, 1));
+    public readonly ref PatternKind Kind => ref MemoryMarshal.AsRef<PatternKind>(_span.Slice(0, 1));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Triple (Kind == Triple)
