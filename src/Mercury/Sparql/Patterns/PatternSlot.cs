@@ -27,6 +27,9 @@ public enum PatternKind : byte
     GraphHeader = 4,
     ExistsHeader = 5,
     NotExistsHeader = 6,
+    MinusTriple = 7,     // MINUS pattern - same layout as Triple
+    ValuesHeader = 8,    // VALUES clause header
+    ValuesEntry = 9,     // VALUES clause entry
 }
 
 /// <summary>
@@ -111,17 +114,37 @@ public ref struct PatternSlot
     
     public ref int ExistsChildStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
     public ref int ExistsChildCount => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
-    
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: ValuesHeader (Kind == ValuesHeader)
+    // Layout: [Kind:1][pad:3][VarStart:4][VarLen:4][EntryCount:4] = 16 bytes
+    // ───────────────────────────────────────────────────────────────────────
+
+    public ref int ValuesVarStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
+    public ref int ValuesVarLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    public ref int ValuesEntryCount => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Variant: ValuesEntry (Kind == ValuesEntry)
+    // Layout: [Kind:1][pad:3][Start:4][Length:4] = 12 bytes
+    // ───────────────────────────────────────────────────────────────────────
+
+    public ref int ValuesEntryStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
+    public ref int ValuesEntryLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+
     // ───────────────────────────────────────────────────────────────────────
     // Helpers
     // ───────────────────────────────────────────────────────────────────────
-    
+
     public readonly bool IsTriple => Kind == PatternKind.Triple;
+    public readonly bool IsMinusTriple => Kind == PatternKind.MinusTriple;
     public readonly bool IsFilter => Kind == PatternKind.Filter;
     public readonly bool IsBind => Kind == PatternKind.Bind;
     public readonly bool IsGraphHeader => Kind == PatternKind.GraphHeader;
     public readonly bool IsExistsHeader => Kind == PatternKind.ExistsHeader || Kind == PatternKind.NotExistsHeader;
     public readonly bool IsNegatedExists => Kind == PatternKind.NotExistsHeader;
+    public readonly bool IsValuesHeader => Kind == PatternKind.ValuesHeader;
+    public readonly bool IsValuesEntry => Kind == PatternKind.ValuesEntry;
     
     /// <summary>
     /// Clear slot for reuse
@@ -308,6 +331,56 @@ public ref struct PatternArray
     /// Get enumerator for filters only
     /// </summary>
     public FilterEnumerator EnumerateFilters() => new(_buffer, _count);
+
+    /// <summary>
+    /// Add a MINUS triple pattern (same layout as Triple but marked as MINUS)
+    /// </summary>
+    public void AddMinusTriple(
+        TermType sType, int sStart, int sLen,
+        TermType pType, int pStart, int pLen,
+        TermType oType, int oStart, int oLen)
+    {
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.MinusTriple;
+        slot.SubjectType = sType;
+        slot.SubjectStart = sStart;
+        slot.SubjectLength = sLen;
+        slot.PredicateType = pType;
+        slot.PredicateStart = pStart;
+        slot.PredicateLength = pLen;
+        slot.ObjectType = oType;
+        slot.ObjectStart = oStart;
+        slot.ObjectLength = oLen;
+    }
+
+    /// <summary>
+    /// Add a VALUES clause header, returns header index
+    /// </summary>
+    public int AddValuesHeader(int varStart, int varLen)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.ValuesHeader;
+        slot.ValuesVarStart = varStart;
+        slot.ValuesVarLength = varLen;
+        slot.ValuesEntryCount = 0;
+        return headerIndex;
+    }
+
+    /// <summary>
+    /// Add a VALUES entry
+    /// </summary>
+    public void AddValuesEntry(int start, int length, int headerIndex)
+    {
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.ValuesEntry;
+        slot.ValuesEntryStart = start;
+        slot.ValuesEntryLength = length;
+
+        // Increment entry count in header
+        var header = this[headerIndex];
+        header.ValuesEntryCount++;
+    }
 }
 
 /// <summary>
@@ -577,6 +650,24 @@ public sealed class QueryBuffer : IDisposable
     // Aggregate expressions
     public AggregateEntry[]? Aggregates { get; set; }
 
+    // Pattern metadata (computed during parsing, cached for fast access)
+    public int FilterCount { get; set; }
+    public int BindCount { get; set; }
+    public int MinusPatternCount { get; set; }
+    public int ExistsFilterCount { get; set; }
+    public int UnionStartIndex { get; set; }  // > 0 means has union
+    public uint OptionalFlags { get; set; }   // Bitmask for optional patterns
+    public bool HasValues { get; set; }
+
+    // Computed properties
+    public bool HasFilters => FilterCount > 0;
+    public bool HasBinds => BindCount > 0;
+    public bool HasMinus => MinusPatternCount > 0;
+    public bool HasExists => ExistsFilterCount > 0;
+    public bool HasUnion => UnionStartIndex > 0;
+    public bool HasOptionalPatterns => OptionalFlags != 0;
+    public int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
+
     /// <summary>
     /// Create a new query buffer with default capacity
     /// </summary>
@@ -800,6 +891,23 @@ public static class QueryBufferAdapter
             buffer.GroupBy = entries;
         }
 
+        // Copy pattern metadata from GraphPattern
+        ref readonly var gp = ref query.WhereClause.Pattern;
+        buffer.FilterCount = gp.FilterCount;
+        buffer.BindCount = gp.BindCount;
+        buffer.MinusPatternCount = gp.MinusPatternCount;
+        buffer.ExistsFilterCount = gp.ExistsFilterCount;
+        buffer.UnionStartIndex = gp.HasUnion ? gp.FirstBranchPatternCount : 0;
+        buffer.HasValues = gp.HasValues;
+        // Copy OptionalFlags - build bitmask from GraphPattern's IsOptional checks
+        uint optFlags = 0;
+        for (int i = 0; i < gp.PatternCount && i < 32; i++)
+        {
+            if (gp.IsOptional(i))
+                optFlags |= (1u << i);
+        }
+        buffer.OptionalFlags = optFlags;
+
         // Convert patterns to slots
         var patterns = buffer.GetPatterns();
         ConvertGraphPattern(ref patterns, in query.WhereClause.Pattern, source);
@@ -872,6 +980,29 @@ public static class QueryBufferAdapter
             }
 
             patterns.EndExists(headerIndex);
+        }
+
+        // Add MINUS patterns
+        for (int i = 0; i < gp.MinusPatternCount; i++)
+        {
+            var mp = gp.GetMinusPattern(i);
+            patterns.AddMinusTriple(
+                mp.Subject.Type, mp.Subject.Start, mp.Subject.Length,
+                mp.Predicate.Type, mp.Predicate.Start, mp.Predicate.Length,
+                mp.Object.Type, mp.Object.Start, mp.Object.Length
+            );
+        }
+
+        // Add VALUES clause if present
+        if (gp.HasValues)
+        {
+            var values = gp.Values;
+            int headerIdx = patterns.AddValuesHeader(values.VarStart, values.VarLength);
+            for (int i = 0; i < values.ValueCount; i++)
+            {
+                var (start, len) = values.GetValue(i);
+                patterns.AddValuesEntry(start, len, headerIdx);
+            }
         }
     }
 }

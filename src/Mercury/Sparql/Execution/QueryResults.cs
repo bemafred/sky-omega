@@ -14,7 +14,8 @@ public ref partial struct QueryResults
     // Note: VariableGraphScan removed - GRAPH ?g uses materialization to avoid stack overflow
     private SubQueryScan _subQueryScan;
     private DefaultGraphUnionScan _defaultGraphUnionScan;
-    private GraphPattern _pattern;
+    // Pattern data stored on heap via QueryBuffer (eliminates ~4KB GraphPattern from stack)
+    private Patterns.QueryBuffer? _buffer;
     private ReadOnlySpan<char> _source;
     private QuadStore? _store;
     private Binding[]? _bindings;
@@ -85,7 +86,7 @@ public ref partial struct QueryResults
     /// Create QueryResults from pre-materialized rows.
     /// Used for subquery joins where results are collected eagerly to avoid stack overflow.
     /// </summary>
-    internal static QueryResults FromMaterialized(List<MaterializedRow> rows, GraphPattern pattern,
+    internal static QueryResults FromMaterialized(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
@@ -97,7 +98,7 @@ public ref partial struct QueryResults
             rows.Sort(new MaterializedRowComparer(orderBy, sourceStr));
         }
 
-        return new QueryResults(rows, pattern, source, store, bindings, stringBuffer,
+        return new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
             limit, offset, distinct, orderBy, groupBy, selectClause, having);
     }
 
@@ -148,12 +149,12 @@ public ref partial struct QueryResults
     /// <summary>
     /// Private constructor for pre-materialized results.
     /// </summary>
-    private QueryResults(List<MaterializedRow> rows, GraphPattern pattern, ReadOnlySpan<char> source,
+    private QueryResults(List<MaterializedRow> rows, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having)
     {
-        _pattern = pattern;
+        _buffer = buffer;
         _source = source;
         _store = store;
         _bindings = bindings;
@@ -191,15 +192,15 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Private constructor for pre-materialized results without GraphPattern.
-    /// Uses default empty pattern to avoid stack overflow from large struct parameter.
+    /// Private constructor for pre-materialized results without pattern.
+    /// Used for simple materialized iteration where pattern access is not needed.
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having)
     {
-        _pattern = default; // Empty default pattern - not used for materialized results
+        _buffer = null; // No pattern needed for materialized results
         _source = source;
         _store = store;
         _bindings = bindings;
@@ -244,7 +245,7 @@ public ref partial struct QueryResults
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct)
     {
-        _pattern = default;
+        _buffer = null;
         _source = source;
         _store = store;
         _bindings = bindings;
@@ -288,7 +289,7 @@ public ref partial struct QueryResults
     private QueryResults(List<MaterializedRow> rows, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct)
     {
-        _pattern = default;
+        _buffer = null;
         _source = default;
         _store = null;
         _bindings = bindings;
@@ -325,21 +326,21 @@ public ref partial struct QueryResults
         _hasHaving = false;
     }
 
-    internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+    internal QueryResults(TriplePatternScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         _singleScan = scan;
-        _pattern = pattern;
+        _buffer = buffer;
         _source = source;
         _store = store;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = pattern.FilterCount > 0;
-        _hasOptional = pattern.HasOptionalPatterns;
-        _hasUnion = pattern.HasUnion;
+        _hasFilters = buffer.HasFilters;
+        _hasOptional = buffer.HasOptionalPatterns;
+        _hasUnion = buffer.HasUnion;
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
@@ -355,10 +356,10 @@ public ref partial struct QueryResults
         _hasOrderBy = orderBy.HasOrderBy;
         _sortedResults = null;
         _sortedIndex = -1;
-        _hasBinds = pattern.HasBinds;
-        _hasMinus = pattern.HasMinus;
-        _hasValues = pattern.HasValues;
-        _hasExists = pattern.HasExists;
+        _hasBinds = buffer.HasBinds;
+        _hasMinus = buffer.HasMinus;
+        _hasValues = buffer.HasValues;
+        _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
         _hasGroupBy = groupBy.HasGroupBy;
@@ -368,21 +369,21 @@ public ref partial struct QueryResults
         _hasHaving = having.HasHaving;
     }
 
-    internal QueryResults(MultiPatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+    internal QueryResults(MultiPatternScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         _multiScan = scan;
-        _pattern = pattern;
+        _buffer = buffer;
         _source = source;
         _store = store;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = pattern.FilterCount > 0;
-        _hasOptional = pattern.HasOptionalPatterns;
-        _hasUnion = pattern.HasUnion;
+        _hasFilters = buffer.HasFilters;
+        _hasOptional = buffer.HasOptionalPatterns;
+        _hasUnion = buffer.HasUnion;
         _isMultiPattern = true;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
@@ -398,10 +399,10 @@ public ref partial struct QueryResults
         _hasOrderBy = orderBy.HasOrderBy;
         _sortedResults = null;
         _sortedIndex = -1;
-        _hasBinds = pattern.HasBinds;
-        _hasMinus = pattern.HasMinus;
-        _hasValues = pattern.HasValues;
-        _hasExists = pattern.HasExists;
+        _hasBinds = buffer.HasBinds;
+        _hasMinus = buffer.HasMinus;
+        _hasValues = buffer.HasValues;
+        _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
         _hasGroupBy = groupBy.HasGroupBy;
@@ -413,19 +414,19 @@ public ref partial struct QueryResults
 
     // Note: VariableGraphScan constructor removed - GRAPH ?g now uses FromMaterialized
 
-    internal QueryResults(SubQueryScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+    internal QueryResults(SubQueryScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         _subQueryScan = scan;
-        _pattern = pattern;
+        _buffer = buffer;
         _source = source;
         _store = store;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = pattern.FilterCount > 0;
+        _hasFilters = buffer.HasFilters;
         _hasOptional = false;
         _hasUnion = false;
         _isMultiPattern = false;
@@ -456,19 +457,19 @@ public ref partial struct QueryResults
         _isDefaultGraphUnion = false;
     }
 
-    internal QueryResults(DefaultGraphUnionScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+    internal QueryResults(DefaultGraphUnionScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
     {
         _defaultGraphUnionScan = scan;
-        _pattern = pattern;
+        _buffer = buffer;
         _source = source;
         _store = store;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = pattern.FilterCount > 0;
+        _hasFilters = buffer.HasFilters;
         _hasOptional = false;
         _hasUnion = false;
         _isMultiPattern = false;

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -10,29 +11,35 @@ public ref partial struct QueryResults
 {
     private void TryMatchOptionalPatterns()
     {
-        if (_store == null) return;
+        if (_store == null || _buffer == null) return;
 
-        for (int i = 0; i < _pattern.PatternCount; i++)
+        var patterns = _buffer.GetPatterns();
+        var optionalFlags = _buffer.OptionalFlags;
+
+        // Iterate through patterns checking optional flag
+        for (int i = 0; i < _buffer.PatternCount && i < 32; i++)
         {
-            if (!_pattern.IsOptional(i)) continue;
+            if ((optionalFlags & (1u << i)) == 0) continue;
 
-            var optPattern = _pattern.GetPattern(i);
-            TryMatchSingleOptionalPattern(optPattern);
+            var slot = patterns[i];
+            if (slot.Kind != PatternKind.Triple) continue;
+
+            TryMatchSingleOptionalPatternFromSlot(slot);
         }
     }
 
     /// <summary>
-    /// Try to match a single optional pattern and bind its variables.
+    /// Try to match a single optional pattern from a PatternSlot and bind its variables.
     /// </summary>
-    private void TryMatchSingleOptionalPattern(TriplePattern pattern)
+    private void TryMatchSingleOptionalPatternFromSlot(PatternSlot slot)
     {
         if (_store == null) return;
 
         // Resolve terms - variables that are already bound use their value,
         // unbound variables become wildcards
-        var subject = ResolveTermForOptional(pattern.Subject);
-        var predicate = ResolveTermForOptional(pattern.Predicate);
-        var obj = ResolveTermForOptional(pattern.Object);
+        var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength);
+        var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength);
+        var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength);
 
         // Query the store
         var results = _store.QueryCurrent(subject, predicate, obj);
@@ -43,9 +50,9 @@ public ref partial struct QueryResults
                 var triple = results.Current;
 
                 // Bind any unbound variables from the result
-                TryBindOptionalVariable(pattern.Subject, triple.Subject);
-                TryBindOptionalVariable(pattern.Predicate, triple.Predicate);
-                TryBindOptionalVariable(pattern.Object, triple.Object);
+                TryBindSlotVariable(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, triple.Subject);
+                TryBindSlotVariable(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, triple.Predicate);
+                TryBindSlotVariable(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, triple.Object);
             }
             // If no match, we just don't add bindings (left outer join semantics)
         }
@@ -56,16 +63,16 @@ public ref partial struct QueryResults
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveTermForOptional(Term term)
+    private ReadOnlySpan<char> ResolveSlotTerm(TermType termType, int start, int length)
     {
-        if (!term.IsVariable)
+        if (termType != TermType.Variable)
         {
             // Constant - use source text
-            return _source.Slice(term.Start, term.Length);
+            return _source.Slice(start, length);
         }
 
         // Check if variable is already bound
-        var varName = _source.Slice(term.Start, term.Length);
+        var varName = _source.Slice(start, length);
         var idx = _bindingTable.FindBinding(varName);
         if (idx >= 0)
         {
@@ -78,11 +85,11 @@ public ref partial struct QueryResults
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void TryBindOptionalVariable(Term term, ReadOnlySpan<char> value)
+    private void TryBindSlotVariable(TermType termType, int start, int length, ReadOnlySpan<char> value)
     {
-        if (!term.IsVariable) return;
+        if (termType != TermType.Variable) return;
 
-        var varName = _source.Slice(term.Start, term.Length);
+        var varName = _source.Slice(start, length);
 
         // Only bind if not already bound
         if (_bindingTable.FindBinding(varName) < 0)
@@ -122,37 +129,95 @@ public ref partial struct QueryResults
     /// </summary>
     private bool InitializeUnionBranch()
     {
-        if (_store == null) return false;
+        if (_store == null || _buffer == null) return false;
 
-        var unionPatternCount = _pattern.UnionBranchPatternCount;
+        var unionPatternCount = _buffer.UnionBranchPatternCount;
         if (unionPatternCount == 0) return false;
 
         // Clear bindings from first branch before starting union branch
         _bindingTable.Clear();
 
+        var patterns = _buffer.GetPatterns();
+        var unionStart = _buffer.UnionStartIndex;
+
         if (unionPatternCount == 1)
         {
             // Single union pattern - use simple scan
-            var tp = _pattern.GetUnionPattern(0);
-            _unionSingleScan = new TriplePatternScan(_store, _source, tp, _bindingTable);
-            _unionIsMultiPattern = false;
-            return true;
+            // Find the first Triple pattern after union start
+            for (int i = unionStart; i < _buffer.PatternCount; i++)
+            {
+                if (patterns[i].Kind == PatternKind.Triple)
+                {
+                    var slot = patterns[i];
+                    var tp = SlotToTriplePattern(slot);
+                    _unionSingleScan = new TriplePatternScan(_store, _source, tp, _bindingTable);
+                    _unionIsMultiPattern = false;
+                    return true;
+                }
+            }
+            return false;
         }
         else
         {
             // Multiple union patterns - use multi-pattern scan with union mode
-            _unionMultiScan = new MultiPatternScan(_store, _source, _pattern, unionMode: true);
+            // Create a temporary GraphPattern from union patterns
+            var unionPattern = new GraphPattern();
+            for (int i = unionStart; i < _buffer.PatternCount; i++)
+            {
+                if (patterns[i].Kind == PatternKind.Triple)
+                {
+                    unionPattern.AddPattern(SlotToTriplePattern(patterns[i]));
+                }
+            }
+            _unionMultiScan = new MultiPatternScan(_store, _source, unionPattern, unionMode: false);
             _unionIsMultiPattern = true;
             return true;
         }
     }
 
+    /// <summary>
+    /// Convert a PatternSlot to a TriplePattern for use with existing scan operators.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private TriplePattern SlotToTriplePattern(PatternSlot slot)
+    {
+        return new TriplePattern
+        {
+            Subject = new Term
+            {
+                Type = slot.SubjectType,
+                Start = slot.SubjectStart,
+                Length = slot.SubjectLength
+            },
+            Predicate = new Term
+            {
+                Type = slot.PredicateType,
+                Start = slot.PredicateStart,
+                Length = slot.PredicateLength
+            },
+            Object = new Term
+            {
+                Type = slot.ObjectType,
+                Start = slot.ObjectStart,
+                Length = slot.ObjectLength
+            }
+        };
+    }
+
     private bool EvaluateFilters()
     {
-        for (int i = 0; i < _pattern.FilterCount; i++)
+        if (_buffer == null) return true;
+
+        var patterns = _buffer.GetPatterns();
+        int filtersSeen = 0;
+
+        for (int i = 0; i < _buffer.PatternCount && filtersSeen < _buffer.FilterCount; i++)
         {
-            var filter = _pattern.GetFilter(i);
-            var filterExpr = _source.Slice(filter.Start, filter.Length);
+            if (patterns[i].Kind != PatternKind.Filter) continue;
+            filtersSeen++;
+
+            var slot = patterns[i];
+            var filterExpr = _source.Slice(slot.FilterStart, slot.FilterLength);
 
             _filterEvaluator = new FilterEvaluator(filterExpr);
             var result = _filterEvaluator.Evaluate(
@@ -171,16 +236,23 @@ public ref partial struct QueryResults
     /// </summary>
     private bool EvaluateExistsFilters()
     {
-        if (_store == null) return true;
+        if (_store == null || _buffer == null) return true;
 
-        for (int i = 0; i < _pattern.ExistsFilterCount; i++)
+        var patterns = _buffer.GetPatterns();
+        int existsSeen = 0;
+
+        for (int i = 0; i < _buffer.PatternCount && existsSeen < _buffer.ExistsFilterCount; i++)
         {
-            var existsFilter = _pattern.GetExistsFilter(i);
-            var matches = EvaluateExistsPattern(existsFilter);
+            var kind = patterns[i].Kind;
+            if (kind != PatternKind.ExistsHeader && kind != PatternKind.NotExistsHeader) continue;
+            existsSeen++;
+
+            var slot = patterns[i];
+            var matches = EvaluateExistsPatternFromSlot(slot, patterns);
 
             // EXISTS: must match at least once
             // NOT EXISTS: must not match at all
-            if (existsFilter.Negated)
+            if (slot.IsNegatedExists)
             {
                 if (matches) return false; // NOT EXISTS failed - found a match
             }
@@ -195,21 +267,25 @@ public ref partial struct QueryResults
     /// <summary>
     /// Check if an EXISTS pattern has at least one match with current bindings.
     /// </summary>
-    private bool EvaluateExistsPattern(ExistsFilter existsFilter)
+    private bool EvaluateExistsPatternFromSlot(PatternSlot existsSlot, PatternArray patterns)
     {
-        if (_store == null || existsFilter.PatternCount == 0)
+        if (_store == null || existsSlot.ExistsChildCount == 0)
             return false;
 
-        // For each pattern, substitute bound variables and query the store
+        // For each pattern in EXISTS block, substitute bound variables and query the store
         // All patterns must match for EXISTS to succeed (conjunction)
-        for (int p = 0; p < existsFilter.PatternCount; p++)
+        int existsStart = existsSlot.ExistsChildStart;
+        int existsEnd = existsStart + existsSlot.ExistsChildCount;
+
+        for (int p = existsStart; p < existsEnd; p++)
         {
-            var pattern = existsFilter.GetPattern(p);
+            var patternSlot = patterns[p];
+            if (patternSlot.Kind != PatternKind.Triple) continue;
 
             // Resolve terms - use bound values for variables
-            var subject = ResolveExistsTerm(pattern.Subject);
-            var predicate = ResolveExistsTerm(pattern.Predicate);
-            var obj = ResolveExistsTerm(pattern.Object);
+            var subject = ResolveSlotTerm(patternSlot.SubjectType, patternSlot.SubjectStart, patternSlot.SubjectLength);
+            var predicate = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength);
+            var obj = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength);
 
             // Query the store
             var results = _store.QueryCurrent(subject, predicate, obj);
@@ -228,41 +304,23 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Resolve a term for EXISTS evaluation.
-    /// Variables are substituted with bound values, constants use source text.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveExistsTerm(Term term)
-    {
-        if (!term.IsVariable)
-        {
-            // Constant - use source text
-            return _source.Slice(term.Start, term.Length);
-        }
-
-        // Variable - check if bound
-        var varName = _source.Slice(term.Start, term.Length);
-        var idx = _bindingTable.FindBinding(varName);
-        if (idx >= 0)
-        {
-            // Use bound value
-            return _bindingTable.GetString(idx);
-        }
-
-        // Unbound variable - use wildcard (empty span)
-        return ReadOnlySpan<char>.Empty;
-    }
-
-    /// <summary>
     /// Evaluate all BIND expressions and add bindings to the binding table.
     /// </summary>
     private void EvaluateBindExpressions()
     {
-        for (int i = 0; i < _pattern.BindCount; i++)
+        if (_buffer == null) return;
+
+        var patterns = _buffer.GetPatterns();
+        int bindsSeen = 0;
+
+        for (int i = 0; i < _buffer.PatternCount && bindsSeen < _buffer.BindCount; i++)
         {
-            var bind = _pattern.GetBind(i);
-            var expr = _source.Slice(bind.ExprStart, bind.ExprLength);
-            var varName = _source.Slice(bind.VarStart, bind.VarLength);
+            if (patterns[i].Kind != PatternKind.Bind) continue;
+            bindsSeen++;
+
+            var slot = patterns[i];
+            var expr = _source.Slice(slot.BindExprStart, slot.BindExprLength);
+            var varName = _source.Slice(slot.BindVarStart, slot.BindVarLength);
 
             // Evaluate the expression
             var evaluator = new BindExpressionEvaluator(expr,
@@ -297,38 +355,42 @@ public ref partial struct QueryResults
     /// </summary>
     private bool MatchesMinusPattern()
     {
-        if (_store == null) return false;
+        if (_store == null || _buffer == null) return false;
 
-        // For MINUS semantics: exclude if ALL patterns in MINUS group match
-        // We need to check if there's a compatible solution in the MINUS pattern
-        for (int i = 0; i < _pattern.MinusPatternCount; i++)
+        var patterns = _buffer.GetPatterns();
+
+        // For MINUS semantics: exclude if ALL MINUS patterns match
+        bool allMatch = true;
+        int minusFound = 0;
+
+        for (int i = 0; i < _buffer.PatternCount; i++)
         {
-            var minusPattern = _pattern.GetMinusPattern(i);
-            if (!MatchesSingleMinusPattern(minusPattern))
+            if (patterns[i].Kind != PatternKind.MinusTriple) continue;
+            minusFound++;
+
+            var slot = patterns[i];
+            if (!MatchesSingleMinusPatternFromSlot(slot))
             {
-                // If any pattern doesn't match, the MINUS doesn't exclude this solution
-                return false;
+                allMatch = false;
+                break;
             }
         }
 
-        // All patterns matched - this solution should be excluded
-        return _pattern.MinusPatternCount > 0;
+        // All MINUS patterns matched - exclude this solution
+        return allMatch && minusFound > 0;
     }
 
     /// <summary>
     /// Check if a single MINUS pattern matches the current bindings.
-    /// SPARQL MINUS semantics: exclude if the pattern matches with compatible bindings.
-    /// Variables not in current bindings become wildcards.
     /// </summary>
-    private bool MatchesSingleMinusPattern(TriplePattern pattern)
+    private bool MatchesSingleMinusPatternFromSlot(PatternSlot slot)
     {
         if (_store == null) return false;
 
         // Resolve terms using current bindings
-        // Variables not in bindings become wildcards (empty span)
-        var subject = ResolveTermForMinus(pattern.Subject);
-        var predicate = ResolveTermForMinus(pattern.Predicate);
-        var obj = ResolveTermForMinus(pattern.Object);
+        var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength);
+        var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength);
+        var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength);
 
         // Query the store to see if this pattern matches
         var results = _store.QueryCurrent(subject, predicate, obj);
@@ -343,67 +405,53 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Resolve a term for MINUS pattern matching.
-    /// Variables use their bound value, constants use source text.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveTermForMinus(Term term)
-    {
-        if (!term.IsVariable)
-        {
-            // Constant - use source text
-            return _source.Slice(term.Start, term.Length);
-        }
-
-        // Check if variable is bound
-        var varName = _source.Slice(term.Start, term.Length);
-        var idx = _bindingTable.FindBinding(varName);
-        if (idx >= 0)
-        {
-            // Use bound value
-            return _bindingTable.GetString(idx);
-        }
-
-        // Unbound - use wildcard
-        return ReadOnlySpan<char>.Empty;
-    }
-
-    /// <summary>
     /// Check if the current bindings match the VALUES constraint.
     /// The VALUES variable must be bound to one of the VALUES values.
     /// </summary>
     private bool MatchesValuesConstraint()
     {
-        var values = _pattern.Values;
-        if (!values.HasValues) return true;
+        if (_buffer == null || !_buffer.HasValues) return true;
 
-        // Get the variable name from VALUES
-        var varName = _source.Slice(values.VarStart, values.VarLength);
+        var patterns = _buffer.GetPatterns();
 
-        // Find the binding for this variable
-        var bindingIdx = _bindingTable.FindBinding(varName);
-        if (bindingIdx < 0)
+        // Find VALUES header
+        for (int i = 0; i < _buffer.PatternCount; i++)
         {
-            // Variable not bound - this is valid in SPARQL (VALUES binds it)
-            // For simplicity, we'll allow unbound (implementation could bind it)
-            return true;
-        }
+            if (patterns[i].Kind != PatternKind.ValuesHeader) continue;
 
-        // Get the bound value
-        var boundValue = _bindingTable.GetString(bindingIdx);
+            var valuesSlot = patterns[i];
 
-        // Check if it matches any VALUES value
-        for (int i = 0; i < values.ValueCount; i++)
-        {
-            var (start, len) = values.GetValue(i);
-            var valuesValue = _source.Slice(start, len);
+            // Get the variable name from VALUES
+            var varName = _source.Slice(valuesSlot.ValuesVarStart, valuesSlot.ValuesVarLength);
 
-            if (boundValue.SequenceEqual(valuesValue))
+            // Find the binding for this variable
+            var bindingIdx = _bindingTable.FindBinding(varName);
+            if (bindingIdx < 0)
+            {
+                // Variable not bound - allow (VALUES would bind it in a more complete impl)
                 return true;
+            }
+
+            // Get the bound value
+            var boundValue = _bindingTable.GetString(bindingIdx);
+
+            // Check if it matches any VALUES entry
+            int entryCount = valuesSlot.ValuesEntryCount;
+            for (int e = i + 1; e <= i + entryCount && e < _buffer.PatternCount; e++)
+            {
+                var entrySlot = patterns[e];
+                if (entrySlot.Kind != PatternKind.ValuesEntry) continue;
+
+                var valuesValue = _source.Slice(entrySlot.ValuesEntryStart, entrySlot.ValuesEntryLength);
+                if (boundValue.SequenceEqual(valuesValue))
+                    return true;
+            }
+
+            // Bound value doesn't match any VALUES value
+            return false;
         }
 
-        // Bound value doesn't match any VALUES value
-        return false;
+        return true;
     }
 
     public void Dispose()

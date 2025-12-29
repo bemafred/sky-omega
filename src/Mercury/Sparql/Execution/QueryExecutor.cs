@@ -160,7 +160,7 @@ public class QueryExecutor : IDisposable
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+            return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                 _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                 _query.SolutionModifier.Having);
@@ -209,7 +209,7 @@ public class QueryExecutor : IDisposable
                 var tp = pattern.GetPattern(requiredIdx);
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
 
-                return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+                return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                     _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
                     _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                     _query.SolutionModifier.Having);
@@ -221,7 +221,7 @@ public class QueryExecutor : IDisposable
             // Multiple patterns - use MultiPatternScan with graph
             return new QueryResults(
                 new MultiPatternScan(_store, _source, pattern, false, graphIri),
-                pattern, _source, _store, bindings, stringBuffer,
+                _buffer, _source, _store, bindings, stringBuffer,
                 _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                 _query.SolutionModifier.Having);
@@ -229,7 +229,7 @@ public class QueryExecutor : IDisposable
 
         // Multiple FROM clauses - use DefaultGraphUnionScan for streaming
         var unionScan = new DefaultGraphUnionScan(_store, _source, pattern, _defaultGraphs);
-        return new QueryResults(unionScan, pattern, _source, _store, bindings, stringBuffer,
+        return new QueryResults(unionScan, _buffer, _source, _store, bindings, stringBuffer,
             _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);
@@ -267,7 +267,7 @@ public class QueryExecutor : IDisposable
 
             // For ASK, we just need to know if any result exists
             // No need for LIMIT/OFFSET/DISTINCT/ORDER BY
-            var results = new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer);
+            var results = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
             try
             {
                 return results.MoveNext();
@@ -286,7 +286,7 @@ public class QueryExecutor : IDisposable
 
         // Multiple required patterns - need join
         var multiScan = new MultiPatternScan(_store, _source, pattern);
-        var multiResults = new QueryResults(multiScan, pattern, _source, _store, bindings, stringBuffer);
+        var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
         try
         {
             return multiResults.MoveNext();
@@ -327,7 +327,7 @@ public class QueryExecutor : IDisposable
 
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
-            var queryResults = new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer);
+            var queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
 
             return new ConstructResults(queryResults, template, _source, bindings, stringBuffer);
         }
@@ -340,7 +340,7 @@ public class QueryExecutor : IDisposable
 
         // Multiple required patterns - need join
         var multiScan = new MultiPatternScan(_store, _source, pattern);
-        var multiResults = new QueryResults(multiScan, pattern, _source, _store, bindings, stringBuffer);
+        var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
 
         return new ConstructResults(multiResults, template, _source, bindings, stringBuffer);
     }
@@ -378,7 +378,7 @@ public class QueryExecutor : IDisposable
 
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
-            queryResults = new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer);
+            queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
         }
         else if (requiredCount == 0)
         {
@@ -387,7 +387,7 @@ public class QueryExecutor : IDisposable
         else
         {
             var multiScan = new MultiPatternScan(_store, _source, pattern);
-            queryResults = new QueryResults(multiScan, pattern, _source, _store, bindings, stringBuffer);
+            queryResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
         }
 
         return new DescribeResults(_store, queryResults, bindings, stringBuffer, describeAll);
@@ -404,7 +404,7 @@ public class QueryExecutor : IDisposable
         // Use nested loop join for required patterns only
         return new QueryResults(
             new MultiPatternScan(_store, _source, pattern),
-            pattern,
+            _buffer,
             _source,
             _store,
             bindings,
@@ -438,8 +438,7 @@ public class QueryExecutor : IDisposable
                 return QueryResults.Empty();
 
             // Variable graph execution returns materialized results
-            // The results must be collected on a thread with larger stack
-            return ExecuteVariableGraphOnThread();
+            return ExecuteVariableGraph();
         }
 
         // For fixed IRI graph - proceed with smaller stack usage
@@ -447,40 +446,15 @@ public class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Execute variable graph query on a thread with larger stack.
-    /// This is necessary because QueryResults struct is ~4KB (due to GraphPattern field)
-    /// and xUnit framework adds significant stack overhead.
+    /// Execute variable graph query.
+    /// Now that QueryResults uses buffer-based patterns (~100 bytes) instead of inline GraphPattern (~4KB),
+    /// no thread workaround is needed.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteVariableGraphOnThread()
+    private QueryResults ExecuteVariableGraph()
     {
-        // Collect results on thread with larger stack, store in List
-        List<MaterializedRow>? results = null;
-        Exception? threadEx = null;
-
-        // Capture needed values for the thread
-        var store = _store;
-        var source = _source;
-        var buffer = _buffer;
-        var namedGraphs = _namedGraphs;
-
-        var thread = new System.Threading.Thread(() =>
-        {
-            try
-            {
-                results = ExecuteVariableGraphCore(store, source, buffer, namedGraphs);
-            }
-            catch (Exception ex)
-            {
-                threadEx = ex;
-            }
-        }, 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
-
-        if (threadEx != null)
-            throw threadEx;
+        // Execute directly - no thread workaround needed with buffer-based patterns
+        var results = ExecuteVariableGraphCore(_store, _source, _buffer, _namedGraphs);
 
         if (results == null || results.Count == 0)
             return QueryResults.Empty();
@@ -492,7 +466,7 @@ public class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Core variable graph execution - runs on thread with larger stack.
+    /// Core variable graph execution.
     /// </summary>
     private static List<MaterializedRow>? ExecuteVariableGraphCore(
         QuadStore store, string source, Patterns.QueryBuffer buffer, string[]? namedGraphs)
@@ -605,7 +579,7 @@ public class QueryExecutor : IDisposable
             var tp = graphClause.GetPattern(0);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+            return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                 limit, offset, distinct, orderBy, groupBy, selectClause, having);
         }
 
@@ -619,7 +593,7 @@ public class QueryExecutor : IDisposable
 
         return new QueryResults(
             new MultiPatternScan(_store, _source, graphPattern, false, graphIri),
-            pattern,
+            _buffer,
             _source,
             _store,
             bindings,
@@ -665,41 +639,21 @@ public class QueryExecutor : IDisposable
             return ExecuteSubQueryJoin(subSelect, bindings, stringBuffer);
         }
 
-        return new QueryResults(subQueryScan, pattern, _source, _store, bindings, stringBuffer,
+        return new QueryResults(subQueryScan, _buffer, _source, _store, bindings, stringBuffer,
             _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);
     }
 
     /// <summary>
-    /// Execute a subquery join directly (no thread workaround needed with QueryBuffer).
+    /// Execute a subquery join directly.
+    /// Now that QueryResults uses buffer-based patterns (~100 bytes) instead of inline GraphPattern (~4KB),
+    /// no thread workaround is needed.
     /// </summary>
     private QueryResults ExecuteSubQueryJoin(SubSelect subSelect, Binding[] bindings, char[] stringBuffer)
     {
-        // Execute on a thread with larger stack (4MB) because QueryResults is ~4KB+
-        List<MaterializedRow>? results = null;
-        Exception? threadEx = null;
-
-        // Capture needed values for thread closure
-        var capturedSubSelect = subSelect;
-
-        var thread = new System.Threading.Thread(() =>
-        {
-            try
-            {
-                results = ExecuteSubQueryJoinCore(capturedSubSelect);
-            }
-            catch (Exception ex)
-            {
-                threadEx = ex;
-            }
-        }, 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
-
-        if (threadEx != null)
-            throw threadEx;
+        // Execute directly - no thread workaround needed with buffer-based patterns
+        var results = ExecuteSubQueryJoinCore(subSelect);
 
         if (results == null || results.Count == 0)
             return QueryResults.Empty();
