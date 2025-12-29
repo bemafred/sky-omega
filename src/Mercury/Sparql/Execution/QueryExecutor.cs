@@ -161,7 +161,7 @@ public class QueryExecutor : IDisposable
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
             return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                 _query.SolutionModifier.Having);
         }
@@ -210,7 +210,7 @@ public class QueryExecutor : IDisposable
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
 
                 return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                    _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                    _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                     _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                     _query.SolutionModifier.Having);
             }
@@ -222,7 +222,7 @@ public class QueryExecutor : IDisposable
             return new QueryResults(
                 new MultiPatternScan(_store, _source, pattern, false, graphIri),
                 _buffer, _source, _store, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
                 _query.SolutionModifier.Having);
         }
@@ -231,7 +231,7 @@ public class QueryExecutor : IDisposable
         // This allows joins where pattern1 matches in graph1 and pattern2 matches in graph2
         var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
         return new QueryResults(crossGraphScan, _buffer, _source, _store, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);
     }
@@ -412,7 +412,7 @@ public class QueryExecutor : IDisposable
             stringBuffer,
             _query.SolutionModifier.Limit,
             _query.SolutionModifier.Offset,
-            _query.SelectClause.Distinct,
+            (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
             _query.SolutionModifier.OrderBy,
             _query.SolutionModifier.GroupBy,
             _query.SelectClause,
@@ -862,7 +862,7 @@ public class QueryExecutor : IDisposable
         // Extract modifiers from _query
         var limit = _query.SolutionModifier.Limit;
         var offset = _query.SolutionModifier.Offset;
-        var distinct = _query.SelectClause.Distinct;
+        var distinct = (_query.SelectClause.Distinct || _query.SelectClause.Reduced);
         var orderBy = _query.SolutionModifier.OrderBy;
         var groupBy = _query.SolutionModifier.GroupBy;
         var selectClause = _query.SelectClause;
@@ -942,7 +942,7 @@ public class QueryExecutor : IDisposable
         var subQueryScan = new SubQueryScan(_store, _source, subSelect);
 
         return new QueryResults(subQueryScan, _buffer, _source, _store, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
             _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
             _query.SolutionModifier.Having);
     }

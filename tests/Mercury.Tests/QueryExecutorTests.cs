@@ -923,6 +923,41 @@ public class QueryExecutorTests : IDisposable
     }
 
     [Fact]
+    public void Execute_ReducedRemovesDuplicates()
+    {
+        // REDUCED is like DISTINCT - allows (but doesn't require) duplicate removal
+        // Our implementation treats REDUCED the same as DISTINCT
+        var query = "SELECT REDUCED * WHERE { { ?s <http://xmlns.com/foaf/0.1/name> ?o } UNION { ?s <http://xmlns.com/foaf/0.1/name> ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify REDUCED was parsed
+        Assert.True(parsedQuery.SelectClause.Reduced);
+        Assert.False(parsedQuery.SelectClause.Distinct);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Same pattern twice in UNION, but REDUCED removes duplicates - should get 3
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void Execute_UnionWithLimit()
     {
         // UNION with LIMIT

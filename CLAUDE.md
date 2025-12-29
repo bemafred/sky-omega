@@ -323,14 +323,8 @@ Key components:
 | DateTime functions | NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TZ, TIMEZONE |
 | Computed values | BIND (arithmetic expressions) |
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
-| Modifiers | DISTINCT, ORDER BY (ASC/DESC), LIMIT, OFFSET |
+| Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
-
-**Partially implemented SPARQL features:**
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| REDUCED | Parsed only | Flag set but not applied in execution |
 
 **Not implemented SPARQL 1.1 features:**
 
