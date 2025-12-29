@@ -39,40 +39,61 @@ Bitemporal allows:
 ## Temporal Key Structure
 
 ```
-TemporalKey (32 bytes):
-┌──────────┬────────────┬──────────┬──────────┬─────────┬───────────────┐
-│Subject(4)│Predicate(4)│Object(4) │ValidFrom │ValidTo  │TransactionTime│
-│          │            │          │  (8)     │  (8)    │     (8)       │
-└──────────┴────────────┴──────────┴──────────┴─────────┴───────────────┘
+TemporalKey (56 bytes):
+┌────────┬──────────┬────────────┬──────────┬──────────┬─────────┬───────────────┐
+│Graph(8)│Subject(8)│Predicate(8)│Object(8) │ValidFrom │ValidTo  │TransactionTime│
+│        │          │            │          │  (8)     │  (8)    │     (8)       │
+└────────┴──────────┴────────────┴──────────┴──────────┴─────────┴───────────────┘
 
-Sorted lexicographically:
-  1. Subject, Predicate, Object (spatial)
-  2. ValidFrom, ValidTo (temporal)
-  3. TransactionTime (versioning)
+Sorted lexicographically (GSPO ordering):
+  1. Graph (0 = default graph, enables named graph isolation)
+  2. Subject, Predicate, Object (spatial)
+  3. ValidFrom, ValidTo (temporal)
+  4. TransactionTime (versioning)
 ```
+
+### Named Graphs (Quads)
+
+Each triple can belong to a named graph or the default graph:
+
+```csharp
+// Add to named graph
+store.AddCurrent(subject, predicate, obj, "<http://example.org/graph1>");
+
+// Add to default graph (no graph parameter)
+store.AddCurrent(subject, predicate, obj);
+
+// Query specific named graph
+var results = store.QueryCurrent(subject, predicate, obj, "<http://example.org/graph1>");
+
+// Enumerate all named graphs
+foreach (var graphIri in store.GetNamedGraphs())
+{
+    // Process each distinct named graph
+}
+```
+
+**Graph isolation**: Default graph (atom 0) and named graphs are fully isolated. Querying without a graph parameter queries only the default graph.
 
 ## Persistent Storage Architecture
 
 **Memory-Mapped B+Trees**
-- Each temporal index is a separate file-based B+Tree
+- Single B+Tree index with GSPO ordering
 - Pages: 16KB (optimal for SSDs)
-- Entries per page: 204 temporal triples
+- Entries per page: 185 temporal quads (with graph atom)
 - Zero-copy access via memory mapping
 
 **File Organization**
 ```
 mydb/
-├── spot.tdb           # Subject-Predicate-Object-Time index
-├── post.tdb           # Predicate-Object-Subject-Time index
-├── ospt.tdb           # Object-Subject-Predicate-Time index
-├── tspo.tdb           # Time-Subject-Predicate-Object index
-├── atoms.atoms        # Shared atom data (UTF-8 strings)
-├── atoms.atomidx      # Shared hash table for interning
-├── atoms.offsets      # Shared atomId→offset index
+├── gspo.tdb           # Graph-Subject-Predicate-Object-Time index
+├── atoms.atoms        # Atom data (UTF-8 strings)
+├── atoms.atomidx      # Hash table for interning
+├── atoms.offsets      # AtomId→offset index
 └── wal.log            # Write-ahead log for crash recovery
 ```
 
-**Note**: All four indexes share a single AtomStore to avoid duplicating string data. Atoms are stored once and referenced by 64-bit IDs in all indexes.
+**Note**: Atoms are stored once and referenced by 64-bit IDs. Graph atom 0 represents the default graph.
 
 **Persistence Guarantees**
 - All temporal data persisted to disk
@@ -80,27 +101,41 @@ mydb/
 - No data loss on process termination
 - ACID semantics (simplified)
 
-## Four Temporal Indexes
+## GSPO Index
 
-### SPOT: Subject-Predicate-Object-Time
-- **Use**: Subject-bound queries
-- **Example**: "All facts about Alice across time"
-- **Order**: S→P→O→VT→TT
+The single B+Tree index uses **GSPO ordering** (Graph-Subject-Predicate-Object-Time):
 
-### POST: Predicate-Object-Subject-Time
-- **Use**: Predicate-bound queries
-- **Example**: "Everyone who worked at Anthropic (when?)"
-- **Order**: P→O→S→VT→TT
+```
+Order: G → S → P → O → ValidFrom → ValidTo → TransactionTime
+```
 
-### OSPT: Object-Subject-Predicate-Time
-- **Use**: Object-bound queries
-- **Example**: "Who referenced this document (when?)"
-- **Order**: O→S→P→VT→TT
+### Query Patterns
 
-### TSPO: Time-Subject-Predicate-Object
-- **Use**: Temporal range scans
-- **Example**: "What changed between 2023-Q1 and 2023-Q2?"
-- **Order**: VT→S→P→O→TT
+| Pattern | Efficiency | Example |
+|---------|------------|---------|
+| Graph + Subject bound | Optimal | "All facts about Alice in graph G" |
+| Graph bound | Good | "All facts in named graph G" |
+| Subject bound (default graph) | Optimal | "All facts about Alice" |
+| No bounds | Full scan | "All facts everywhere" |
+
+### Named Graph Queries
+
+```csharp
+// Query specific named graph
+var results = store.QueryCurrent(
+    "<http://ex.org/alice>",
+    ReadOnlySpan<char>.Empty,
+    ReadOnlySpan<char>.Empty,
+    "<http://example.org/graph1>"  // Named graph
+);
+
+// Query default graph (omit graph parameter)
+var results = store.QueryCurrent(
+    "<http://ex.org/alice>",
+    ReadOnlySpan<char>.Empty,
+    ReadOnlySpan<char>.Empty
+);
+```
 
 ## Query Types
 
@@ -275,12 +310,12 @@ for (var date = startDate; date < endDate; date = date.AddMonths(1))
 ### Storage
 
 ```
-Temporal triple:    80 bytes
-  Key:             32 bytes (SPO + VT + TT)
+Temporal quad:     88 bytes
+  Key:             56 bytes (GSPO + VT + TT)
   Child/Value:      8 bytes
-  Metadata:        40 bytes (creation, version, flags)
+  Metadata:        24 bytes (flags, padding)
 
-Page capacity:     204 entries per 16KB page
+Page capacity:     185 entries per 16KB page
 Tree height (1B):  ~5 levels
 Lookup latency:    ~5 disk seeks (or ~0 with cache)
 ```
@@ -297,29 +332,29 @@ Evolution scan:            ~500K triples/sec
 ### Index Selection Impact
 
 ```
-Query Pattern               Index Used    Performance
-────────────────────────────────────────────────────
-Subject + Time range       SPOT          Optimal
-Predicate + Time range     POST          Optimal
-Object + Time range        OSPT          Optimal
-Time range only            TSPO          Optimal
-No bounds                  SPOT          Full scan
+Query Pattern                    Performance
+──────────────────────────────────────────────
+Graph + Subject + Time range     Optimal (GSPO prefix)
+Graph + Time range               Good (G prefix)
+Subject + Time range             Optimal (default graph)
+No bounds                        Full scan
 ```
 
 ## Comparison with Non-Temporal
 
 ```
-Feature                Non-Temporal    Temporal
-─────────────────────────────────────────────────
-Triple size            12 bytes        32 bytes
-Metadata               None            40 bytes
-Indexes                3 (SPO/POS/OSP) 4 (SPOT/POST/OSPT/TSPO)
+Feature                Non-Temporal    Temporal + Graphs
+───────────────────────────────────────────────────────
+Quad size              32 bytes        56 bytes (key)
+Entry size             ~40 bytes       88 bytes (with metadata)
+Index                  1 (GSPO)        1 (GSPO + time)
+Named graphs           Yes             Yes
 History                No              Full
 Corrections            Destructive     Non-destructive
 Audit trail            No              Yes
 Time-travel            No              Yes
 Version tracking       No              Yes
-Storage overhead       1x              ~3x
+Storage overhead       1x              ~2.2x
 Query complexity       Lower           Higher
 Use cases              Static data     Evolving data
 ```
@@ -425,6 +460,8 @@ For Sky Omega's knowledge graph:
 
 ## Future Enhancements
 
+- [x] Named graph support (GSPO ordering)
+- [x] SPARQL GRAPH clause queries
 - [ ] Temporal property paths
 - [ ] Temporal aggregations (COUNT at time T)
 - [ ] Allen's interval algebra for temporal reasoning
