@@ -445,74 +445,93 @@ public class QueryExecutor : IDisposable
         return ExecuteFixedGraphClause();
     }
 
-    // Holder class for QueryResults since ref structs can't be captured in closures
-    private sealed class ResultHolder
-    {
-        public System.Collections.Generic.List<MaterializedRow>? Results;
-        public System.Exception? Exception;
-    }
-
     /// <summary>
     /// Helper method for variable graph execution.
-    /// Runs on a separate thread with larger stack to avoid stack overflow
-    /// from deep call chains combined with large struct locals.
+    /// Uses QueryBuffer to read patterns from heap, avoiding large struct copies on stack.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteVariableGraphClauses()
     {
-        // Create config object - copies structs to heap
         var bindings = new Binding[16];
         var stringBuffer = new char[1024];
 
-        var config = new VariableGraphExecutor.ExecutionConfig
+        // Find the GRAPH header slot in the buffer
+        var patterns = _buffer.GetPatterns();
+        int graphHeaderIdx = -1;
+        for (int i = 0; i < _buffer.PatternCount; i++)
+        {
+            if (patterns[i].Kind == Patterns.PatternKind.GraphHeader)
+            {
+                graphHeaderIdx = i;
+                break;
+            }
+        }
+
+        if (graphHeaderIdx < 0)
+            return QueryResults.Empty();
+
+        var graphHeader = patterns[graphHeaderIdx];
+
+        // Create config using QueryBuffer - no large struct copies!
+        var config = new VariableGraphExecutor.BufferExecutionConfig
         {
             Store = _store,
             Source = _source,
-            GraphClause = _query.WhereClause.Pattern.GetGraphClause(0),
-            Pattern = _query.WhereClause.Pattern,
+            Buffer = _buffer,
             NamedGraphs = _namedGraphs,
             Bindings = bindings,
             StringBuffer = stringBuffer,
-            Limit = _query.SolutionModifier.Limit,
-            Offset = _query.SolutionModifier.Offset,
-            Distinct = _query.SelectClause.Distinct,
-            OrderBy = _query.SolutionModifier.OrderBy,
-            GroupBy = _query.SolutionModifier.GroupBy,
-            SelectClause = _query.SelectClause,
-            Having = _query.SolutionModifier.Having
+            GraphTermType = graphHeader.GraphTermType,
+            GraphTermStart = graphHeader.GraphTermStart,
+            GraphTermLength = graphHeader.GraphTermLength,
+            GraphHeaderIndex = graphHeaderIdx
         };
 
-        // Execute on a thread with a larger stack (4MB instead of default ~1MB)
-        // This avoids stack overflow from combined large struct locals and xUnit framework overhead
-        var holder = new ResultHolder();
+        // Execute directly - no thread workaround needed since patterns are on heap
+        var results = VariableGraphExecutor.ExecuteFromBuffer(config);
 
-        var thread = new System.Threading.Thread(() =>
-        {
-            try
-            {
-                // Execute and collect results as materialized rows
-                holder.Results = VariableGraphExecutor.ExecuteAndCollect(config);
-            }
-            catch (System.Exception ex)
-            {
-                holder.Exception = ex;
-            }
-        }, maxStackSize: 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
-
-        if (holder.Exception != null)
-            throw holder.Exception;
-
-        if (holder.Results == null || holder.Results.Count == 0)
+        if (results == null || results.Count == 0)
             return QueryResults.Empty();
 
-        // Return results via FromMaterializedSimple to avoid stack overflow
-        // from passing large GraphPattern struct
-        return QueryResults.FromMaterializedSimple(holder.Results, _source, _store,
-            bindings, stringBuffer, config.Limit, config.Offset, config.Distinct,
-            config.OrderBy, config.GroupBy, config.SelectClause, config.Having);
+        // Return results via FromMaterializedSimple
+        return QueryResults.FromMaterializedSimple(results, _source, _store,
+            bindings, stringBuffer, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.OrderBy != null ? CreateOrderByClause(_buffer.OrderBy) : default,
+            _buffer.GroupBy != null ? CreateGroupByClause(_buffer.GroupBy) : default,
+            CreateSelectClause(), default);
+    }
+
+    // Helper to create OrderByClause from buffer's OrderByEntry array
+    private static OrderByClause CreateOrderByClause(Patterns.OrderByEntry[] entries)
+    {
+        var clause = new OrderByClause();
+        foreach (var entry in entries)
+        {
+            clause.AddCondition(entry.VariableStart, entry.VariableLength,
+                entry.Descending ? OrderDirection.Descending : OrderDirection.Ascending);
+        }
+        return clause;
+    }
+
+    // Helper to create GroupByClause from buffer's GroupByEntry array
+    private static GroupByClause CreateGroupByClause(Patterns.GroupByEntry[] entries)
+    {
+        var clause = new GroupByClause();
+        foreach (var entry in entries)
+        {
+            clause.AddVariable(entry.VariableStart, entry.VariableLength);
+        }
+        return clause;
+    }
+
+    // Helper to create minimal SelectClause from buffer
+    private SelectClause CreateSelectClause()
+    {
+        return new SelectClause
+        {
+            Distinct = _buffer.SelectDistinct,
+            SelectAll = _buffer.SelectAll
+        };
     }
 
     /// <summary>
@@ -620,67 +639,43 @@ public class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Execute a subquery join by running on a separate thread with larger stack
-    /// to avoid stack overflow from large struct locals.
+    /// Execute a subquery join directly (no thread workaround needed with QueryBuffer).
     /// </summary>
     private QueryResults ExecuteSubQueryJoin(SubSelect subSelect, Binding[] bindings, char[] stringBuffer)
     {
-        // Execute on a thread with a larger stack (4MB instead of default ~1MB)
-        // This avoids stack overflow from large structs (GraphPattern, SubQueryJoinScan)
-        var holder = new ResultHolder();
+        // Execute directly - QueryBuffer enables heap-based pattern access
+        var results = ExecuteSubQueryJoinCore(subSelect);
 
-        // Capture needed values for the thread
-        var store = _store;
-        var source = _source;
-        var query = _query;
-
-        var thread = new System.Threading.Thread(() =>
-        {
-            try
-            {
-                holder.Results = ExecuteSubQueryJoinCore(store, source, query, subSelect);
-            }
-            catch (System.Exception ex)
-            {
-                holder.Exception = ex;
-            }
-        }, maxStackSize: 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
-
-        if (holder.Exception != null)
-            throw holder.Exception;
-
-        if (holder.Results == null || holder.Results.Count == 0)
+        if (results == null || results.Count == 0)
             return QueryResults.Empty();
 
-        // Return results via FromMaterializedSimple to avoid stack overflow
-        return QueryResults.FromMaterializedSimple(holder.Results, _source, _store,
-            bindings, stringBuffer, _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
-            _query.SelectClause.Distinct, _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy,
-            _query.SelectClause, _query.SolutionModifier.Having);
+        // Return results via FromMaterializedSimple
+        return QueryResults.FromMaterializedSimple(results, _source, _store,
+            bindings, stringBuffer, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.OrderBy != null ? CreateOrderByClause(_buffer.OrderBy) : default,
+            _buffer.GroupBy != null ? CreateGroupByClause(_buffer.GroupBy) : default,
+            CreateSelectClause(), default);
     }
 
     /// <summary>
-    /// Core execution of subquery join. Called on separate thread with larger stack.
+    /// Core execution of subquery join. Uses instance fields to avoid copying large structs.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static System.Collections.Generic.List<MaterializedRow> ExecuteSubQueryJoinCore(
-        QuadStore store, string source, Query query, SubSelect subSelect)
+    private System.Collections.Generic.List<MaterializedRow> ExecuteSubQueryJoinCore(SubSelect subSelect)
     {
-        var pattern = query.WhereClause.Pattern;
+        // Access pattern via ref to avoid copying ~4KB struct
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
 
-        // Execute the join and collect all results
         var results = new System.Collections.Generic.List<MaterializedRow>();
-
         var joinBindings = new Binding[16];
         var joinStringBuffer = new char[1024];
         var bindingTable = new BindingTable(joinBindings, joinStringBuffer);
 
         var hasFilters = pattern.FilterCount > 0;
 
-        var joinScan = new SubQueryJoinScan(store, source, pattern, subSelect);
+        // Note: SubQueryJoinScan still takes pattern by value.
+        // This is acceptable since we're only copying once (not recursively).
+        var joinScan = new SubQueryJoinScan(_store, _source, pattern, subSelect);
         while (joinScan.MoveNext(ref bindingTable))
         {
             // Apply outer FILTER clauses
@@ -690,7 +685,7 @@ public class QueryExecutor : IDisposable
                 for (int i = 0; i < pattern.FilterCount; i++)
                 {
                     var filter = pattern.GetFilter(i);
-                    var filterExpr = source.AsSpan(filter.Start, filter.Length);
+                    var filterExpr = _source.AsSpan(filter.Start, filter.Length);
                     var evaluator = new FilterEvaluator(filterExpr);
                     if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
                     {
