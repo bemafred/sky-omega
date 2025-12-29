@@ -46,9 +46,11 @@ Sky Omega is a semantic-aware cognitive assistant with zero-GC performance desig
 SkyOmega.sln
 ├── src/
 │   ├── Mercury/             # Core library - storage and query engine (BCL only)
+│   │   ├── NTriples/        # Streaming N-Triples parser
 │   │   ├── Rdf/             # Triple data structures
+│   │   ├── RdfXml/          # Streaming RDF/XML parser
 │   │   ├── Sparql/          # SPARQL parser and query execution
-│   │   │   ├── Execution/   # Query operators and executor
+│   │   │   ├── Execution/   # Query operators, executor, LoadExecutor
 │   │   │   ├── Parsing/     # SparqlParser, RdfParser (zero-GC parsing)
 │   │   │   └── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
@@ -238,6 +240,9 @@ This pattern is implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/Patte
 | QuadStore Query | ✓ Zero-GC | Pooled buffer, call Dispose() |
 | Turtle Parser (Handler) | ✓ Zero-GC | Use TripleHandler callback |
 | Turtle Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+| N-Triples Parser (Handler) | ✓ Zero-GC | Use TripleHandler callback |
+| N-Triples Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+| RDF/XML Parser | Near Zero-GC | Allocates for namespace dictionary + async boundaries |
 
 ### QuadStore Query (Zero-GC)
 
@@ -295,6 +300,55 @@ await foreach (var triple in parser.ParseAsync())
 }
 ```
 
+### N-Triples Parser (`SkyOmega.Mercury.NTriples`)
+
+`NTriplesStreamParser` is a streaming parser for N-Triples format, following the same zero-GC pattern as the Turtle parser.
+
+**Zero-GC API (recommended):**
+```csharp
+await using var parser = new NTriplesStreamParser(stream);
+await parser.ParseAsync((subject, predicate, obj) =>
+{
+    // Spans valid only during callback
+    store.AddCurrent(subject, predicate, obj);
+});
+```
+
+**Legacy API (allocates strings):**
+```csharp
+await foreach (var triple in parser.ParseAsync())
+{
+    // triple.Subject, Predicate, Object are strings
+}
+```
+
+N-Triples is simpler than Turtle (no prefixes, no shortcuts), making the parser more straightforward. Each triple is on its own line, terminated by a period.
+
+### RDF/XML Parser (`SkyOmega.Mercury.RdfXml`)
+
+`RdfXmlStreamParser` is a custom streaming XML parser optimized for the RDF/XML subset. It does not use `System.Xml` - instead, it parses XML character-by-character for zero-allocation streaming.
+
+**Zero-GC API:**
+```csharp
+await using var parser = new RdfXmlStreamParser(stream);
+await parser.ParseAsync((subject, predicate, obj) =>
+{
+    // Spans valid only during callback
+    store.AddCurrent(subject, predicate, obj);
+});
+```
+
+**Supported RDF/XML features:**
+- `rdf:RDF` root element
+- `rdf:Description` with `rdf:about`, `rdf:ID`, `rdf:nodeID`
+- Property elements with `rdf:resource` for IRI objects
+- Literal objects (plain, typed with `rdf:datatype`, language-tagged with `xml:lang`)
+- `rdf:parseType="Resource"` for nested blank nodes
+- `rdf:parseType="Collection"` for RDF collections
+- XML namespaces and entity references (`&lt;`, `&gt;`, `&amp;`, `&apos;`, `&quot;`)
+
+**Note:** Near zero-GC - allocates for namespace dictionary and string values that cross async boundaries.
+
 ### SPARQL Engine (`SkyOmega.Mercury.Sparql`)
 
 `SparqlParser` is a `ref struct` that parses SPARQL queries from `ReadOnlySpan<char>`.
@@ -326,13 +380,7 @@ Key components:
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
-| SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE, CLEAR, DROP, CREATE, COPY, MOVE, ADD |
-
-**Partially implemented SPARQL 1.1 features:**
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| LOAD | Not supported | Requires external HTTP client |
+| SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE, CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
@@ -593,7 +641,33 @@ var update = "COPY <http://ex.org/src> TO <http://ex.org/dst>";   // Copy triple
 var update = "MOVE <http://ex.org/src> TO <http://ex.org/dst>";   // Move triples
 var update = "ADD <http://ex.org/src> TO <http://ex.org/dst>";    // Add triples
 var update = "DROP GRAPH <http://ex.org/g1>";                     // Drop graph
+
+// LOAD - fetch RDF from URL and add to store
+using var loadExecutor = new LoadExecutor();
+var update = "LOAD <http://example.org/data.ttl>";
+var parser = new SparqlParser(update.AsSpan());
+var operation = parser.ParseUpdate();
+var executor = new UpdateExecutor(store, update.AsSpan(), operation, loadExecutor);
+var result = executor.Execute();  // Fetches and parses RDF into default graph
+
+// LOAD into named graph
+var update = "LOAD <http://example.org/data.ttl> INTO GRAPH <http://ex.org/imported>";
+
+// LOAD SILENT - suppress errors on failure
+var update = "LOAD SILENT <http://might-not-exist.example.org/data.ttl>";
 ```
+
+**LOAD content negotiation:**
+
+The `LoadExecutor` uses HTTP content negotiation to determine the RDF format:
+
+| Content-Type | Parser |
+|--------------|--------|
+| `text/turtle`, `application/x-turtle` | TurtleStreamParser |
+| `application/n-triples` | NTriplesStreamParser |
+| `application/rdf+xml`, `text/xml`, `application/xml` | RdfXmlStreamParser |
+
+If Content-Type is unclear, falls back to URL extension (`.ttl`, `.nt`, `.rdf`).
 
 **UpdateResult struct:**
 ```csharp

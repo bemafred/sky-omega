@@ -21,20 +21,27 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// - DELETE WHERE: Requires pattern matching (simplified implementation)
 /// - DELETE/INSERT WHERE: Requires pattern matching (simplified implementation)
 ///
-/// Not supported:
-/// - LOAD: Requires external HTTP client
+/// LOAD support:
+/// - LOAD: Requires LoadExecutor instance (optional parameter)
 /// </summary>
 public class UpdateExecutor
 {
     private readonly QuadStore _store;
     private readonly string _source;
     private readonly UpdateOperation _update;
+    private readonly LoadExecutor? _loadExecutor;
 
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
+        : this(store, source, update, null)
+    {
+    }
+
+    public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update, LoadExecutor? loadExecutor)
     {
         _store = store;
         _source = source.ToString();
         _update = update;
+        _loadExecutor = loadExecutor;
     }
 
     /// <summary>
@@ -55,7 +62,7 @@ public class UpdateExecutor
             QueryType.Copy => ExecuteCopy(),
             QueryType.Move => ExecuteMove(),
             QueryType.Add => ExecuteAdd(),
-            QueryType.Load => new UpdateResult { Success = false, ErrorMessage = "LOAD operation requires external HTTP client and is not supported" },
+            QueryType.Load => ExecuteLoad(),
             _ => new UpdateResult { Success = false, ErrorMessage = $"Unknown update type: {_update.Type}" }
         };
     }
@@ -613,6 +620,35 @@ public class UpdateExecutor
                 return new UpdateResult { Success = true, AffectedCount = 0 };
             return new UpdateResult { Success = false, ErrorMessage = ex.Message };
         }
+    }
+
+    private UpdateResult ExecuteLoad()
+    {
+        // LOAD requires a LoadExecutor instance
+        if (_loadExecutor == null)
+        {
+            if (_update.Silent)
+                return new UpdateResult { Success = true, AffectedCount = 0 };
+            return new UpdateResult
+            {
+                Success = false,
+                ErrorMessage = "LOAD operation requires a LoadExecutor instance. Pass LoadExecutor to UpdateExecutor constructor."
+            };
+        }
+
+        // Get source URI - strip angle brackets if present
+        var sourceUriSpan = GetTermValue(_update.SourceUriStart, _update.SourceUriLength);
+        var sourceUri = sourceUriSpan.ToString();
+        if (sourceUri.StartsWith('<') && sourceUri.EndsWith('>'))
+            sourceUri = sourceUri[1..^1];
+
+        // Get destination graph
+        var destGraph = ResolveGraphTarget(_update.DestinationGraph);
+
+        // Execute async LOAD operation synchronously
+        // This is necessary because Execute() is synchronous
+        return _loadExecutor.ExecuteAsync(sourceUri, destGraph, _update.Silent, _store)
+            .GetAwaiter().GetResult();
     }
 
     private string? ResolveGraphTarget(GraphTarget target)
