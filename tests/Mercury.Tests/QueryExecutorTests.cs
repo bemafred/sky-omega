@@ -4765,4 +4765,233 @@ public class QueryExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region SERVICE clause tests
+
+    [Fact]
+    public void Parse_ServiceClause_Basic()
+    {
+        var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.True(parsedQuery.WhereClause.Pattern.HasService);
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
+
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.False(serviceClause.Silent);
+        Assert.False(serviceClause.IsVariable);
+        Assert.Equal(1, serviceClause.PatternCount);
+    }
+
+    [Fact]
+    public void Parse_ServiceClause_Silent()
+    {
+        var query = "SELECT * WHERE { SERVICE SILENT <http://remote.example.org/sparql> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.True(parsedQuery.WhereClause.Pattern.HasService);
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.True(serviceClause.Silent);
+    }
+
+    [Fact]
+    public void Parse_ServiceClause_Variable()
+    {
+        var query = "SELECT * WHERE { SERVICE ?endpoint { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.True(parsedQuery.WhereClause.Pattern.HasService);
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.True(serviceClause.IsVariable);
+    }
+
+    [Fact]
+    public void Parse_ServiceClause_MultiplePatterns()
+    {
+        var query = @"SELECT * WHERE {
+            SERVICE <http://remote.example.org/sparql> {
+                ?s <http://example.org/type> ?type .
+                ?s <http://example.org/name> ?name
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.Equal(2, serviceClause.PatternCount);
+    }
+
+    [Fact]
+    public void Execute_ServiceClause_WithMockExecutor()
+    {
+        var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Create mock executor with pre-configured results
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://remote.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["s"] = ("<http://remote.example.org/item1>", ServiceBindingType.Uri),
+                ["p"] = ("<http://example.org/name>", ServiceBindingType.Uri),
+                ["o"] = ("\"Item One\"", ServiceBindingType.Literal)
+            },
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["s"] = ("<http://remote.example.org/item2>", ServiceBindingType.Uri),
+                ["p"] = ("<http://example.org/name>", ServiceBindingType.Uri),
+                ["o"] = ("\"Item Two\"", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var pIdx = results.Current.FindBinding("?p".AsSpan());
+                var oIdx = results.Current.FindBinding("?o".AsSpan());
+
+                Assert.True(sIdx >= 0, "?s should be bound");
+                Assert.True(pIdx >= 0, "?p should be bound");
+                Assert.True(oIdx >= 0, "?o should be bound");
+            }
+            results.Dispose();
+            executor.Dispose();
+
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ServiceClause_Silent_ReturnsEmptyOnError()
+    {
+        var query = "SELECT * WHERE { SERVICE SILENT <http://failing.example.org/sparql> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Create mock executor that throws an error
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.SetErrorForEndpoint("http://failing.example.org/sparql", new SparqlServiceException("Simulated failure"));
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            // SILENT should return empty results, not throw
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+            executor.Dispose();
+
+            Assert.Equal(0, count); // No results due to error with SILENT
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ServiceClause_NoExecutor_ThrowsInvalidOperation()
+    {
+        var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            // Don't provide a service executor
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                var results = executor.Execute();
+                results.Dispose();
+            });
+
+            executor.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// Mock implementation of ISparqlServiceExecutor for testing.
+/// </summary>
+internal class MockSparqlServiceExecutor : ISparqlServiceExecutor
+{
+    private readonly Dictionary<string, List<Dictionary<string, (string value, ServiceBindingType type)>>> _results = new();
+    private readonly Dictionary<string, Exception> _errors = new();
+
+    public void AddResult(string endpoint, IEnumerable<Dictionary<string, (string value, ServiceBindingType type)>> rows)
+    {
+        _results[endpoint] = rows.ToList();
+    }
+
+    public void SetErrorForEndpoint(string endpoint, Exception error)
+    {
+        _errors[endpoint] = error;
+    }
+
+    public ValueTask<List<ServiceResultRow>> ExecuteSelectAsync(string endpointUri, string query, System.Threading.CancellationToken ct = default)
+    {
+        if (_errors.TryGetValue(endpointUri, out var error))
+        {
+            throw error;
+        }
+
+        var resultRows = new List<ServiceResultRow>();
+
+        if (_results.TryGetValue(endpointUri, out var rows))
+        {
+            foreach (var row in rows)
+            {
+                var resultRow = new ServiceResultRow();
+                foreach (var kvp in row)
+                {
+                    resultRow.AddBinding(kvp.Key, new ServiceBinding(kvp.Value.type, kvp.Value.value));
+                }
+                resultRows.Add(resultRow);
+            }
+        }
+
+        return ValueTask.FromResult(resultRows);
+    }
+
+    public ValueTask<bool> ExecuteAskAsync(string endpointUri, string query, System.Threading.CancellationToken ct = default)
+    {
+        if (_errors.TryGetValue(endpointUri, out var error))
+        {
+            throw error;
+        }
+
+        return ValueTask.FromResult(_results.ContainsKey(endpointUri) && _results[endpointUri].Count > 0);
+    }
 }

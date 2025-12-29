@@ -1515,3 +1515,199 @@ public ref struct CrossGraphMultiPatternScan
         if (_init3) _enum3.Dispose();
     }
 }
+
+/// <summary>
+/// Executes a SERVICE clause by sending patterns to a remote SPARQL endpoint.
+/// Materializes results and iterates through them.
+/// </summary>
+public ref struct ServiceScan
+{
+    private readonly ISparqlServiceExecutor _executor;
+    private readonly ReadOnlySpan<char> _source;
+    private readonly ServiceClause _serviceClause;
+    private readonly BindingTable _incomingBindings;
+    private readonly int _incomingBindingsCount;
+    private List<ServiceResultRow>? _results;
+    private int _resultIndex;
+    private bool _initialized;
+    private bool _exhausted;
+    private bool _failed;
+
+    public ServiceScan(ISparqlServiceExecutor executor, ReadOnlySpan<char> source,
+        ServiceClause serviceClause, BindingTable incomingBindings)
+    {
+        _executor = executor;
+        _source = source;
+        _serviceClause = serviceClause;
+        _incomingBindings = incomingBindings;
+        _incomingBindingsCount = incomingBindings.Count;
+        _results = null;
+        _resultIndex = 0;
+        _initialized = false;
+        _exhausted = false;
+        _failed = false;
+    }
+
+    public bool MoveNext(ref BindingTable bindings)
+    {
+        if (_exhausted)
+            return false;
+
+        if (!_initialized)
+        {
+            Initialize();
+            _initialized = true;
+        }
+
+        if (_failed)
+        {
+            _exhausted = true;
+            return false;
+        }
+
+        if (_results == null || _resultIndex >= _results.Count)
+        {
+            _exhausted = true;
+            return false;
+        }
+
+        // Clear bindings added by previous iteration, preserve incoming
+        bindings.TruncateTo(_incomingBindingsCount);
+
+        // Bind variables from current result row
+        var row = _results[_resultIndex++];
+        foreach (var varName in row.Variables)
+        {
+            var binding = row.GetBinding(varName);
+            var rdfTerm = binding.ToRdfTerm();
+
+            // Add ? prefix to match SPARQL variable naming
+            var fullVarName = $"?{varName}";
+            bindings.Bind(fullVarName.AsSpan(), rdfTerm.AsSpan());
+        }
+
+        return true;
+    }
+
+    private void Initialize()
+    {
+        // Build endpoint URI (resolve variable if needed)
+        string endpointUri;
+        if (_serviceClause.Endpoint.IsVariable)
+        {
+            var varName = _source.Slice(_serviceClause.Endpoint.Start, _serviceClause.Endpoint.Length);
+            var idx = _incomingBindings.FindBinding(varName);
+            if (idx < 0)
+            {
+                // Variable not bound - cannot execute SERVICE
+                _failed = true;
+                return;
+            }
+            endpointUri = _incomingBindings.GetString(idx).ToString();
+            // Strip angle brackets if present
+            if (endpointUri.StartsWith('<') && endpointUri.EndsWith('>'))
+                endpointUri = endpointUri[1..^1];
+        }
+        else
+        {
+            var iri = _source.Slice(_serviceClause.Endpoint.Start, _serviceClause.Endpoint.Length);
+            // Strip angle brackets
+            if (iri.Length > 2 && iri[0] == '<' && iri[^1] == '>')
+                endpointUri = iri[1..^1].ToString();
+            else
+                endpointUri = iri.ToString();
+        }
+
+        // Build SPARQL query from patterns
+        var query = BuildSparqlQuery();
+
+        try
+        {
+            // Execute query (blocking on async)
+            _results = _executor.ExecuteSelectAsync(endpointUri, query)
+                .AsTask().GetAwaiter().GetResult();
+        }
+        catch (SparqlServiceException)
+        {
+            if (_serviceClause.Silent)
+            {
+                // SILENT modifier - return empty results on error
+                _results = new List<ServiceResultRow>();
+            }
+            else
+            {
+                throw;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_serviceClause.Silent)
+            {
+                _results = new List<ServiceResultRow>();
+            }
+            else
+            {
+                throw new SparqlServiceException($"SERVICE execution failed: {ex.Message}", ex)
+                {
+                    EndpointUri = endpointUri,
+                    Query = query
+                };
+            }
+        }
+    }
+
+    private string BuildSparqlQuery()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("SELECT * WHERE { ");
+
+        for (int i = 0; i < _serviceClause.PatternCount; i++)
+        {
+            var pattern = _serviceClause.GetPattern(i);
+
+            // Serialize subject
+            AppendTerm(sb, pattern.Subject);
+            sb.Append(' ');
+
+            // Serialize predicate
+            AppendTerm(sb, pattern.Predicate);
+            sb.Append(' ');
+
+            // Serialize object
+            AppendTerm(sb, pattern.Object);
+            sb.Append(" . ");
+        }
+
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private void AppendTerm(System.Text.StringBuilder sb, Term term)
+    {
+        var value = _source.Slice(term.Start, term.Length);
+
+        if (term.IsVariable)
+        {
+            // Check if variable is bound in incoming bindings - substitute if so
+            var idx = _incomingBindings.FindBinding(value);
+            if (idx >= 0)
+            {
+                var boundValue = _incomingBindings.GetString(idx);
+                sb.Append(boundValue);
+            }
+            else
+            {
+                sb.Append(value);
+            }
+        }
+        else
+        {
+            sb.Append(value);
+        }
+    }
+
+    public void Dispose()
+    {
+        // Nothing to dispose - results are managed by GC
+    }
+}

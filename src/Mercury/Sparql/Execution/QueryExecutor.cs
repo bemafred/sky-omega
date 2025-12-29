@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
@@ -36,7 +37,14 @@ public class QueryExecutor : IDisposable
     private readonly string[]? _defaultGraphs;
     private readonly string[]? _namedGraphs;
 
+    // SERVICE clause execution
+    private readonly ISparqlServiceExecutor? _serviceExecutor;
+
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query)
+        : this(store, source, query, null) { }
+
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query,
+        ISparqlServiceExecutor? serviceExecutor)
     {
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
@@ -67,6 +75,8 @@ public class QueryExecutor : IDisposable
             if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
             if (namedList.Count > 0) _namedGraphs = namedList.ToArray();
         }
+
+        _serviceExecutor = serviceExecutor;
     }
 
     /// <summary>
@@ -74,11 +84,16 @@ public class QueryExecutor : IDisposable
     /// The caller transfers ownership of the buffer to the executor.
     /// </summary>
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer)
+        : this(store, source, buffer, null) { }
+
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
+        ISparqlServiceExecutor? serviceExecutor)
     {
         _store = store;
         _source = source.ToString();
         _buffer = buffer;
         _query = default;  // Not used when buffer is provided directly
+        _serviceExecutor = serviceExecutor;
 
         // Extract datasets from buffer
         if (buffer.Datasets != null && buffer.Datasets.Length > 0)
@@ -126,6 +141,12 @@ public class QueryExecutor : IDisposable
         if (_query.WhereClause.Pattern.HasSubQueries)
         {
             return ExecuteWithSubQueries();
+        }
+
+        // Check for SERVICE clauses
+        if (_query.WhereClause.Pattern.HasService)
+        {
+            return ExecuteWithService();
         }
 
         if (_query.WhereClause.Pattern.PatternCount == 0)
@@ -417,6 +438,58 @@ public class QueryExecutor : IDisposable
             _query.SolutionModifier.GroupBy,
             _query.SelectClause,
             _query.SolutionModifier.Having);
+    }
+
+    /// <summary>
+    /// Execute a query with SERVICE clauses (federated queries).
+    /// For queries like: SELECT * WHERE { SERVICE &lt;endpoint&gt; { ?s ?p ?o } }
+    /// Also supports: SERVICE SILENT &lt;endpoint&gt; { ... }
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteWithService()
+    {
+        if (_serviceExecutor == null)
+        {
+            throw new InvalidOperationException(
+                "SERVICE clause requires an ISparqlServiceExecutor. " +
+                "Use the QueryExecutor constructor that accepts ISparqlServiceExecutor.");
+        }
+
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var serviceCount = pattern.ServiceClauseCount;
+
+        // Build binding storage
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // For now, only handle the simple case: SERVICE clause only, no local patterns
+        if (pattern.PatternCount == 0 && serviceCount == 1)
+        {
+            // Execute single SERVICE clause
+            var serviceClause = pattern.GetServiceClause(0);
+            var serviceScan = new ServiceScan(_serviceExecutor, _source, serviceClause, bindingTable);
+
+            // Materialize results and return
+            var results = new List<MaterializedRow>();
+            while (serviceScan.MoveNext(ref bindingTable))
+            {
+                results.Add(new MaterializedRow(bindingTable));
+            }
+            serviceScan.Dispose();
+
+            if (results.Count == 0)
+                return QueryResults.Empty();
+
+            return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
+                (_query.SelectClause.Distinct || _query.SelectClause.Reduced));
+        }
+
+        // TODO: Handle SERVICE with local patterns (requires join)
+        // TODO: Handle multiple SERVICE clauses
+        // For now, return empty for unsupported cases
+        return QueryResults.Empty();
     }
 
     /// <summary>

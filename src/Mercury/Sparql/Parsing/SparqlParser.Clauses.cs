@@ -755,6 +755,13 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // Check for SERVICE
+            if (span.Length >= 7 && span[..7].Equals("SERVICE", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseService(ref pattern);
+                continue;
+            }
+
             // Check for GRAPH
             if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
             {
@@ -1255,6 +1262,90 @@ public ref partial struct SparqlParser
             VarStart = varStart,
             VarLength = varLength
         });
+    }
+
+    /// <summary>
+    /// [59] ServiceGraphPattern ::= 'SERVICE' 'SILENT'? VarOrIri GroupGraphPattern
+    /// Parses SERVICE [SILENT] &lt;uri&gt; { patterns } for federated queries.
+    /// </summary>
+    private void ParseService(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("SERVICE");
+        SkipWhitespace();
+
+        // Check for SILENT modifier
+        var silent = false;
+        var span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("SILENT", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("SILENT");
+            SkipWhitespace();
+            silent = true;
+        }
+
+        // Parse endpoint term (IRI or variable)
+        var endpointTerm = ParseTerm();
+        if (endpointTerm.Type == TermType.Variable && endpointTerm.Length == 0)
+            return;
+
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        var serviceClause = new ServiceClause { Endpoint = endpointTerm, Silent = silent };
+
+        // Parse patterns inside SERVICE block
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER inside SERVICE
+            span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                // For now, add filters to parent pattern
+                // (proper scoping would require nested patterns)
+                ParseFilter(ref pattern);
+                continue;
+            }
+
+            // Try to parse a triple pattern
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            serviceClause.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        pattern.AddServiceClause(serviceClause);
     }
 
     /// <summary>

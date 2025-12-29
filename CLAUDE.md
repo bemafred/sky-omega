@@ -310,7 +310,8 @@ Key components:
 | Category | Features |
 |----------|----------|
 | Query types | SELECT, ASK, CONSTRUCT, DESCRIBE |
-| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable, multiple), Subqueries (single and multiple) |
+| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable, multiple), Subqueries (single and multiple), SERVICE |
+| Federated query | SERVICE \<uri\> { patterns }, SERVICE SILENT, SERVICE ?variable (requires ISparqlServiceExecutor) |
 | Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
@@ -332,12 +333,6 @@ Key components:
 | Feature | Status | Notes |
 |---------|--------|-------|
 | LOAD | Not supported | Requires external HTTP client |
-
-**Not implemented SPARQL 1.1 features:**
-
-| Category | Features |
-|----------|----------|
-| Federated query | SERVICE clause |
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
@@ -484,6 +479,40 @@ finally
 }
 ```
 
+**SERVICE query example (federated queries):**
+```csharp
+// SERVICE clause requires an ISparqlServiceExecutor
+// Default implementation uses HttpClient + System.Text.Json (BCL only)
+var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+// Create executor with HttpSparqlServiceExecutor
+using var serviceExecutor = new HttpSparqlServiceExecutor();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery, serviceExecutor);
+    var results = executor.Execute();
+
+    while (results.MoveNext())
+    {
+        var bindings = results.Current;
+        // Remote results are bound to ?s, ?p, ?o
+    }
+    results.Dispose();
+    executor.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+
+// SERVICE SILENT ignores errors and returns empty results on failure
+var silentQuery = "SELECT * WHERE { SERVICE SILENT <http://might-fail.example.org/sparql> { ?x ?y ?z } }";
+```
+
 **Operator pipeline:**
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
@@ -491,6 +520,7 @@ finally
 - `SlotMultiPatternScan` - Slot-based multi-pattern join reading from byte[] buffer
 - `SubQueryScan` - Executes nested SELECT subquery, projects selected variables
 - `SubQueryJoinScan` - Joins subquery results with outer patterns via nested loop
+- `ServiceScan` - Executes SERVICE clause against remote SPARQL endpoint via ISparqlServiceExecutor
 - Filter/BIND/MINUS/VALUES evaluation integrated into result iteration
 
 **QueryBuffer infrastructure:**
