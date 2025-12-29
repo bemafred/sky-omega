@@ -49,6 +49,7 @@ SkyOmega.sln
 │   │   ├── Rdf/             # Triple data structures
 │   │   ├── Sparql/          # SPARQL parser and query execution
 │   │   │   ├── Execution/   # Query operators and executor
+│   │   │   ├── Parsing/     # SparqlParser, RdfParser (zero-GC parsing)
 │   │   │   └── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
