@@ -325,14 +325,12 @@ Key components:
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
-| SPARQL Update | INSERT DATA, DELETE DATA, CLEAR, DROP, CREATE, COPY, MOVE, ADD |
+| SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE, CLEAR, DROP, CREATE, COPY, MOVE, ADD |
 
 **Partially implemented SPARQL 1.1 features:**
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| DELETE WHERE | Simple patterns only | Concrete triples work; variable patterns require QueryExecutor integration |
-| DELETE/INSERT WHERE | Not yet | Use INSERT DATA/DELETE DATA for concrete triples |
 | LOAD | Not supported | Requires external HTTP client |
 
 **Not implemented SPARQL 1.1 features:**
@@ -538,6 +536,21 @@ var update = @"INSERT DATA {
         <http://ex.org/s> <http://ex.org/p> <http://ex.org/o>
     }
 }";
+
+// DELETE WHERE - delete matching triples with pattern variables
+var update = "DELETE WHERE { ?s <http://ex.org/type> <http://ex.org/Person> }";
+// Deletes all triples where predicate is type and object is Person
+
+// DELETE/INSERT WHERE - modify triples based on pattern matching
+var update = @"DELETE { ?p <http://ex.org/status> ""active"" }
+               INSERT { ?p <http://ex.org/status> ""inactive"" }
+               WHERE { ?p <http://ex.org/status> ""active"" }";
+// Changes status from "active" to "inactive" for all matching subjects
+
+// INSERT WHERE - add new triples based on existing patterns
+var update = @"INSERT { ?s <http://ex.org/type> <http://ex.org/Person> }
+               WHERE { ?s <http://ex.org/name> ?name }";
+// Adds type=Person triple for every subject that has a name
 
 // CLEAR operations
 var update = "CLEAR DEFAULT";           // Clear default graph

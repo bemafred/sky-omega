@@ -1,4 +1,5 @@
 using System;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -123,14 +124,12 @@ public class UpdateExecutor
 
     private UpdateResult ExecuteDeleteWhere()
     {
-        // DELETE WHERE requires pattern matching
-        // For now, return an error suggesting to use the simpler pattern-matching approach
+        // DELETE WHERE: The pattern serves as both the WHERE clause and delete template
         var pattern = _update.WhereClause.Pattern;
         if (pattern.PatternCount == 0)
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
         // For simple single-pattern DELETE WHERE without variables, we can execute directly
-        // For complex patterns, we need proper query execution
         if (pattern.PatternCount == 1 && !HasVariables(pattern.GetPattern(0)))
         {
             var tp = pattern.GetPattern(0);
@@ -142,24 +141,204 @@ public class UpdateExecutor
             return new UpdateResult { Success = true, AffectedCount = deleted ? 1 : 0 };
         }
 
-        // Complex DELETE WHERE with variables requires full query execution
-        // This is a simplified placeholder - full implementation would need QueryExecutor integration
-        return new UpdateResult
+        // Execute the WHERE pattern to find matching bindings
+        var toDelete = new System.Collections.Generic.List<(string s, string p, string o)>();
+
+        // Build a SELECT * query from the pattern
+        var query = new Query
         {
-            Success = false,
-            ErrorMessage = "DELETE WHERE with variables requires QueryExecutor integration (use DELETE DATA for concrete triples)"
+            Type = QueryType.Select,
+            SelectClause = new SelectClause { SelectAll = true },
+            WhereClause = _update.WhereClause,
+            Prologue = _update.Prologue
         };
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, _source.AsSpan(), query);
+            var results = executor.Execute();
+
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+
+                // For DELETE WHERE, the delete template is the same as the WHERE pattern
+                // Instantiate each pattern with the bindings
+                for (int i = 0; i < pattern.PatternCount; i++)
+                {
+                    var tp = pattern.GetPattern(i);
+
+                    // Skip optional patterns for deletion
+                    if (pattern.IsOptional(i))
+                        continue;
+
+                    var s = InstantiateTerm(tp.Subject, bindings);
+                    var p = InstantiateTerm(tp.Predicate, bindings);
+                    var o = InstantiateTerm(tp.Object, bindings);
+
+                    // Only delete if all terms are bound (no unbound variables)
+                    if (s != null && p != null && o != null)
+                    {
+                        toDelete.Add((s, p, o));
+                    }
+                }
+            }
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+
+        if (toDelete.Count == 0)
+            return new UpdateResult { Success = true, AffectedCount = 0 };
+
+        // Delete collected triples
+        _store.BeginBatch();
+        try
+        {
+            var deletedCount = 0;
+            foreach (var (s, p, o) in toDelete)
+            {
+                if (_store.DeleteCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan()))
+                    deletedCount++;
+            }
+            _store.CommitBatch();
+
+            return new UpdateResult { Success = true, AffectedCount = deletedCount };
+        }
+        catch (Exception ex)
+        {
+            _store.RollbackBatch();
+            return new UpdateResult { Success = false, ErrorMessage = ex.Message };
+        }
+    }
+
+    /// <summary>
+    /// Instantiate a term using variable bindings.
+    /// Returns null if the term is a variable that is not bound.
+    /// </summary>
+    private string? InstantiateTerm(Term term, BindingTable bindings)
+    {
+        var termSpan = _source.AsSpan(term.Start, term.Length);
+
+        if (term.Type == TermType.Variable)
+        {
+            var idx = bindings.FindBinding(termSpan);
+            if (idx >= 0)
+                return bindings.GetString(idx).ToString();
+            // Variable not bound
+            return null;
+        }
+
+        // Not a variable - return the literal value
+        return termSpan.ToString();
     }
 
     private UpdateResult ExecuteModify()
     {
-        // DELETE/INSERT ... WHERE requires pattern matching
-        // Similar to DELETE WHERE, complex cases need QueryExecutor integration
-        return new UpdateResult
+        // DELETE/INSERT ... WHERE: Execute WHERE pattern, then apply DELETE and INSERT templates
+        var wherePattern = _update.WhereClause.Pattern;
+
+        // Collect all delete and insert operations
+        var toDelete = new System.Collections.Generic.List<(string s, string p, string o)>();
+        var toInsert = new System.Collections.Generic.List<(string s, string p, string o)>();
+
+        // Build a SELECT * query from the WHERE pattern
+        var query = new Query
         {
-            Success = false,
-            ErrorMessage = "DELETE/INSERT WHERE requires QueryExecutor integration (use INSERT DATA/DELETE DATA for concrete triples)"
+            Type = QueryType.Select,
+            SelectClause = new SelectClause { SelectAll = true },
+            WhereClause = _update.WhereClause,
+            Prologue = _update.Prologue
         };
+
+        _store.AcquireReadLock();
+        try
+        {
+            // If there's no WHERE pattern, execute once with empty bindings
+            if (wherePattern.PatternCount == 0)
+            {
+                ProcessModifyTemplates(default, toDelete, toInsert);
+            }
+            else
+            {
+                var executor = new QueryExecutor(_store, _source.AsSpan(), query);
+                var results = executor.Execute();
+
+                while (results.MoveNext())
+                {
+                    ProcessModifyTemplates(results.Current, toDelete, toInsert);
+                }
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+
+        // Apply the changes
+        _store.BeginBatch();
+        try
+        {
+            var deletedCount = 0;
+            foreach (var (s, p, o) in toDelete)
+            {
+                if (_store.DeleteCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan()))
+                    deletedCount++;
+            }
+
+            foreach (var (s, p, o) in toInsert)
+            {
+                _store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan());
+            }
+            _store.CommitBatch();
+
+            return new UpdateResult { Success = true, AffectedCount = deletedCount + toInsert.Count };
+        }
+        catch (Exception ex)
+        {
+            _store.RollbackBatch();
+            return new UpdateResult { Success = false, ErrorMessage = ex.Message };
+        }
+    }
+
+    private void ProcessModifyTemplates(
+        BindingTable bindings,
+        System.Collections.Generic.List<(string s, string p, string o)> toDelete,
+        System.Collections.Generic.List<(string s, string p, string o)> toInsert)
+    {
+        // Process DELETE template
+        var deleteTemplate = _update.DeleteTemplate;
+        for (int i = 0; i < deleteTemplate.PatternCount; i++)
+        {
+            var tp = deleteTemplate.GetPattern(i);
+            var s = InstantiateTerm(tp.Subject, bindings);
+            var p = InstantiateTerm(tp.Predicate, bindings);
+            var o = InstantiateTerm(tp.Object, bindings);
+
+            if (s != null && p != null && o != null)
+            {
+                toDelete.Add((s, p, o));
+            }
+        }
+
+        // Process INSERT template
+        var insertTemplate = _update.InsertTemplate;
+        for (int i = 0; i < insertTemplate.PatternCount; i++)
+        {
+            var tp = insertTemplate.GetPattern(i);
+            var s = InstantiateTerm(tp.Subject, bindings);
+            var p = InstantiateTerm(tp.Predicate, bindings);
+            var o = InstantiateTerm(tp.Object, bindings);
+
+            if (s != null && p != null && o != null)
+            {
+                toInsert.Add((s, p, o));
+            }
+        }
     }
 
     private bool HasVariables(TriplePattern tp)

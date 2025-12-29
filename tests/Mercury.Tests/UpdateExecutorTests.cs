@@ -415,4 +415,202 @@ public class UpdateExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region DELETE WHERE Tests
+
+    [Fact]
+    public void DeleteWhere_PatternParsedCorrectly()
+    {
+        // Verify DELETE WHERE patterns are parsed correctly
+        var update = @"DELETE WHERE { ?s <http://ex.org/type> <http://ex.org/Person> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.DeleteWhere, operation.Type);
+        Assert.Equal(1, operation.WhereClause.Pattern.PatternCount);
+
+        var tp = operation.WhereClause.Pattern.GetPattern(0);
+        var subject = update.AsSpan(tp.Subject.Start, tp.Subject.Length);
+        var predicate = update.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
+        var obj = update.AsSpan(tp.Object.Start, tp.Object.Length);
+
+        Assert.Equal(TermType.Variable, tp.Subject.Type);
+        Assert.True(subject.SequenceEqual("?s".AsSpan()));
+        Assert.Equal(TermType.Iri, tp.Predicate.Type);
+        Assert.True(predicate.SequenceEqual("<http://ex.org/type>".AsSpan()));
+    }
+
+    [Fact]
+    public void DeleteWhere_SingleVariable_DeletesAllMatching()
+    {
+        // Add triples with same predicate but different subjects/objects
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/type>", "<http://ex.org/Person>");
+        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/type>", "<http://ex.org/Person>");
+        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/type>", "<http://ex.org/Animal>");
+        _store.CommitBatch();
+
+        Assert.Equal(3, CountTriples());
+
+        // DELETE WHERE matches only Person types
+        var update = @"DELETE WHERE { ?s <http://ex.org/type> <http://ex.org/Person> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.Equal(1, CountTriples()); // Only Animal remains
+    }
+
+    [Fact]
+    public void DeleteWhere_MultipleVariables_DeletesMatching()
+    {
+        // Add triples with various values
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        _store.AddCurrentBatched("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Charlie>");
+        _store.AddCurrentBatched("<http://ex.org/Bob>", "<http://ex.org/knows>", "<http://ex.org/Alice>");
+        _store.CommitBatch();
+
+        Assert.Equal(3, CountTriples());
+
+        // DELETE WHERE all "knows" relationships
+        var update = @"DELETE WHERE { ?s <http://ex.org/knows> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(3, result.AffectedCount);
+        Assert.Equal(0, CountTriples());
+    }
+
+    [Fact]
+    public void DeleteWhere_NoMatches_ReturnsZeroAffected()
+    {
+        // Add some triples
+        _store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Assert.Equal(1, CountTriples());
+
+        // DELETE WHERE with no matches
+        var update = @"DELETE WHERE { ?s <http://ex.org/notexist> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.AffectedCount);
+        Assert.Equal(1, CountTriples()); // Original triple unchanged
+    }
+
+    [Fact]
+    public void DeleteWhere_AllVariables_DeletesEverything()
+    {
+        // Add multiple triples
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p1>", "<http://ex.org/o1>");
+        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p2>", "<http://ex.org/o2>");
+        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p3>", "<http://ex.org/o3>");
+        _store.CommitBatch();
+
+        Assert.Equal(3, CountTriples());
+
+        // DELETE WHERE with all variables matches everything
+        var update = @"DELETE WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(3, result.AffectedCount);
+        Assert.Equal(0, CountTriples());
+    }
+
+    #endregion
+
+    #region DELETE/INSERT WHERE (Modify) Tests
+
+    [Fact]
+    public void Modify_DeleteAndInsert_ModifiesTriples()
+    {
+        // Add a triple to be modified
+        _store.AddCurrent("<http://ex.org/person1>", "<http://ex.org/status>", "\"active\"");
+        Assert.Equal(1, CountTriples());
+
+        // Modify: change status from "active" to "inactive"
+        var update = @"DELETE { ?p <http://ex.org/status> ""active"" }
+                       INSERT { ?p <http://ex.org/status> ""inactive"" }
+                       WHERE { ?p <http://ex.org/status> ""active"" }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount); // 1 deleted + 1 inserted
+        Assert.Equal(1, CountTriples()); // Still have one triple (with new value)
+    }
+
+    [Fact]
+    public void Modify_InsertOnly_InsertsNewTriples()
+    {
+        // Add existing triples
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/name>", "\"Alice\"");
+        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/name>", "\"Bob\"");
+        _store.CommitBatch();
+
+        Assert.Equal(2, CountTriples());
+
+        // INSERT WHERE: Add a type triple for each person with a name
+        var update = @"INSERT { ?s <http://ex.org/type> <http://ex.org/Person> }
+                       WHERE { ?s <http://ex.org/name> ?name }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount); // 2 inserted
+        Assert.Equal(4, CountTriples()); // 2 original + 2 new
+    }
+
+    [Fact]
+    public void Modify_DeleteOnly_DeletesMatchingTriples()
+    {
+        // Add triples
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value1\"");
+        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/temp>", "\"value2\"");
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/perm>", "\"keep\"");
+        _store.CommitBatch();
+
+        Assert.Equal(3, CountTriples());
+
+        // DELETE WHERE: Remove all temp predicates
+        var update = @"DELETE { ?s <http://ex.org/temp> ?o }
+                       WHERE { ?s <http://ex.org/temp> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount); // 2 deleted
+        Assert.Equal(1, CountTriples()); // Only perm triple remains
+    }
+
+    #endregion
 }
