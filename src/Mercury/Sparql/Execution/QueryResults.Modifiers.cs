@@ -128,10 +128,6 @@ public ref partial struct QueryResults
             {
                 hasNext = _subQueryScan.MoveNext(ref _bindingTable);
             }
-            else if (_isVariableGraph)
-            {
-                hasNext = _variableGraphScan.MoveNext(ref _bindingTable);
-            }
             else if (_unionBranchActive)
             {
                 if (_unionIsMultiPattern)
@@ -149,7 +145,7 @@ public ref partial struct QueryResults
 
             if (!hasNext)
             {
-                if (!_isSubQuery && !_isVariableGraph && _hasUnion && !_unionBranchActive)
+                if (!_isSubQuery && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())

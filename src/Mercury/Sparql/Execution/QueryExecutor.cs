@@ -377,16 +377,17 @@ public ref struct QueryExecutor
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Variable graph - iterate named graphs (filtered by FROM NAMED if present)
+        // Use static helper to avoid stack overflow from large QueryExecutor this pointer
         if (graphClause.IsVariable)
         {
             if (graphClause.PatternCount == 0)
                 return QueryResults.Empty();
 
-            // Apply FROM NAMED restriction if present
-            var scan = new VariableGraphScan(_store, _source, graphClause, _namedGraphs);
-
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
-                limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            // Use static helper to minimize stack usage (avoids carrying large Query struct)
+            return VariableGraphExecutor.Execute(
+                _store, _source.ToString(), graphClause, pattern, _namedGraphs,
+                bindings, stringBuffer, limit, offset, distinct, orderBy,
+                groupBy, selectClause, having);
         }
 
         // Get the graph IRI

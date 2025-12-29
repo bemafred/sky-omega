@@ -314,9 +314,11 @@ Key components:
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Multiple GRAPH clauses | Single only | Multiple GRAPH patterns need join support |
-| Multiple subqueries | Single only | Multiple subqueries need join support |
 | REDUCED | Parsed only | Flag set but not applied in execution |
-| FROM/FROM NAMED | FROM works, FROM NAMED parsing only | FROM queries specified graphs; FROM NAMED + GRAPH ?g has stack limits |
+| GRAPH ?g (variable) | Execution skipped | Stack overflow due to large inline buffers in Query struct (2KB Prologue + 8 AggregateExpression). Parsing works. |
+| Subquery execution | Execution skipped | Stack overflow in ExecuteSubQueryJoin. Parsing works. |
+| FROM with multiple graphs | Execution skipped | Stack overflow in DefaultGraphUnionScan. Parsing works. |
+| FROM NAMED + GRAPH ?g | Parsing only | Combined dataset + variable graph hits stack limits |
 
 **Not implemented SPARQL 1.1 features:**
 
