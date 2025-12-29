@@ -1,5 +1,6 @@
 using System;
 using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -20,12 +21,16 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// Note: This is a class (not ref struct) to enable heap-based execution context,
 /// which reduces stack pressure for complex queries. The string source is copied
 /// once at construction time.
+///
+/// Implements IDisposable to clean up the internal QueryBuffer (pooled storage).
 /// </summary>
-public class QueryExecutor
+public class QueryExecutor : IDisposable
 {
     private readonly QuadStore _store;
     private readonly string _source;
     private readonly Query _query;
+    private readonly QueryBuffer _buffer;  // New: heap-allocated pattern storage
+    private bool _disposed;
 
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
     private readonly string[]? _defaultGraphs;
@@ -36,11 +41,16 @@ public class QueryExecutor
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _query = query;
+
+        // Convert Query to QueryBuffer for heap-based pattern storage
+        // This avoids stack overflow when accessing patterns in nested calls
+        _buffer = QueryBufferAdapter.FromQuery(in query, source);
+
         _defaultGraphs = null;
         _namedGraphs = null;
 
         // Extract dataset clauses into arrays
-        if (query.Datasets.Length > 0)
+        if (query.Datasets != null && query.Datasets.Length > 0)
         {
             var defaultList = new System.Collections.Generic.List<string>();
             var namedList = new System.Collections.Generic.List<string>();
@@ -57,6 +67,44 @@ public class QueryExecutor
             if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
             if (namedList.Count > 0) _namedGraphs = namedList.ToArray();
         }
+    }
+
+    /// <summary>
+    /// Alternative constructor that takes a pre-allocated QueryBuffer directly.
+    /// The caller transfers ownership of the buffer to the executor.
+    /// </summary>
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer)
+    {
+        _store = store;
+        _source = source.ToString();
+        _buffer = buffer;
+        _query = default;  // Not used when buffer is provided directly
+
+        // Extract datasets from buffer
+        if (buffer.Datasets != null && buffer.Datasets.Length > 0)
+        {
+            var defaultList = new System.Collections.Generic.List<string>();
+            var namedList = new System.Collections.Generic.List<string>();
+
+            foreach (var ds in buffer.Datasets)
+            {
+                var iri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length).ToString();
+                if (ds.IsNamed)
+                    namedList.Add(iri);
+                else
+                    defaultList.Add(iri);
+            }
+
+            if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
+            if (namedList.Count > 0) _namedGraphs = namedList.ToArray();
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _buffer?.Dispose();
     }
 
     /// <summary>
