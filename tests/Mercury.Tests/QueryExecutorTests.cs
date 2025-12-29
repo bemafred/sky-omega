@@ -3712,10 +3712,58 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal("<http://example.org/namedGraph2>", graph2);
     }
 
-    // Note: Mixed FROM and FROM NAMED with GRAPH ?g hits stack size limitations due to
-    // large ref struct combinations. This is a known limitation - the implementation
-    // is correct but the test cannot run reliably. Testing FROM NAMED with GRAPH ?g
-    // separately in Execute_FromNamedClause_RestrictsGraphVariable works correctly.
+    [Fact]
+    public void Execute_FromNamedClause_RestrictsGraphVariable()
+    {
+        // Add data to multiple named graphs
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/type>", "\"TypeA\"", "<http://example.org/restrictGraph1>");
+        _store.AddCurrentBatched("<http://example.org/Item2>", "<http://example.org/type>", "\"TypeB\"", "<http://example.org/restrictGraph2>");
+        _store.AddCurrentBatched("<http://example.org/Item3>", "<http://example.org/type>", "\"TypeC\"", "<http://example.org/restrictGraph3>");
+        _store.CommitBatch();
+
+        // Query with FROM NAMED - should only see restrictGraph1 and restrictGraph2
+        var query = @"SELECT ?g ?s ?type
+                      FROM NAMED <http://example.org/restrictGraph1>
+                      FROM NAMED <http://example.org/restrictGraph2>
+                      WHERE { GRAPH ?g { ?s <http://example.org/type> ?type } }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var graphs = new HashSet<string>();
+            var items = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var gIdx = results.Current.FindBinding("?g".AsSpan());
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                if (gIdx >= 0) graphs.Add(results.Current.GetString(gIdx).ToString());
+                if (sIdx >= 0) items.Add(results.Current.GetString(sIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should only find Item1 and Item2, not Item3
+            Assert.Equal(2, items.Count);
+            Assert.Contains("<http://example.org/Item1>", items);
+            Assert.Contains("<http://example.org/Item2>", items);
+            Assert.DoesNotContain("<http://example.org/Item3>", items);
+
+            // Should only bind restrictGraph1 and restrictGraph2
+            Assert.Equal(2, graphs.Count);
+            Assert.Contains("<http://example.org/restrictGraph1>", graphs);
+            Assert.Contains("<http://example.org/restrictGraph2>", graphs);
+            Assert.DoesNotContain("<http://example.org/restrictGraph3>", graphs);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
 
     [Fact]
     public void Execute_NoDatasetClauses_QueriesDefaultGraphAndAllNamed()
