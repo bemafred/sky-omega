@@ -2,8 +2,9 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref partial struct FilterEvaluator
 {

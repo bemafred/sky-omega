@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref partial struct QueryResults
 {

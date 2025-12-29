@@ -1,7 +1,8 @@
 using System;
+using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Execution;
 
 /// <summary>
 /// Zero-allocation SPARQL query executor using specialized operators.

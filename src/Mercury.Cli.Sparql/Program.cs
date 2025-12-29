@@ -1,6 +1,7 @@
 using System;
 using System.Runtime;
 using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Parsing;
 
 namespace SkyOmega.Mercury.Cli.Sparql;
 

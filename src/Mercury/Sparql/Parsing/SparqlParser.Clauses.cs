@@ -1,6 +1,7 @@
 using System;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Parsing;
 
 public ref partial struct SparqlParser
 {

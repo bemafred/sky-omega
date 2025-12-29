@@ -2,9 +2,10 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref partial struct QueryResults
 {

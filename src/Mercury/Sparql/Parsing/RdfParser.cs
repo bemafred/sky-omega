@@ -2,9 +2,10 @@ using System;
 using System.Buffers;
 using System.IO;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Parsing;
 
 /// <summary>
 /// Zero-allocation N-Triples parser using streaming and Span&lt;T&gt;

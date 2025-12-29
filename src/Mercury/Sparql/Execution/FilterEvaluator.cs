@@ -4,8 +4,9 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Execution;
 
 /// <summary>
 /// Zero-allocation FILTER expression evaluator using stack-based evaluation

@@ -1,7 +1,8 @@
 using System;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref struct BindExpressionEvaluator
 {

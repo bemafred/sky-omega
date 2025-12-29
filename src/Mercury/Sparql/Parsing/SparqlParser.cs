@@ -2,8 +2,9 @@ using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Mercury.Sparql;
 
-namespace SkyOmega.Mercury.Sparql;
+namespace SkyOmega.Mercury.Sparql.Parsing;
 
 /// <summary>
 /// Zero-allocation SPARQL 1.1 parser using stack-based parsing and Span&lt;T&gt;
