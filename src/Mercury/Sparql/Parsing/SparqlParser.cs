@@ -68,6 +68,91 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// Parse a SPARQL Update operation.
+    /// [29] Update ::= Prologue ( Update1 ( ';' Update )? )?
+    /// </summary>
+    public UpdateOperation ParseUpdate()
+    {
+        SkipWhitespace();
+        var prologue = ParsePrologue();
+        SkipWhitespace();
+
+        var updateType = DetermineUpdateType();
+        return updateType switch
+        {
+            QueryType.InsertData => ParseInsertData(prologue),
+            QueryType.DeleteData => ParseDeleteData(prologue),
+            QueryType.DeleteWhere => ParseDeleteWhere(prologue),
+            QueryType.Modify => ParseModify(prologue),
+            QueryType.Load => ParseLoad(prologue),
+            QueryType.Clear => ParseClear(prologue),
+            QueryType.Create => ParseCreate(prologue),
+            QueryType.Drop => ParseDrop(prologue),
+            QueryType.Copy => ParseCopy(prologue),
+            QueryType.Move => ParseMove(prologue),
+            QueryType.Add => ParseAdd(prologue),
+            _ => throw new SparqlParseException("Expected INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, or ADD")
+        };
+    }
+
+    private QueryType DetermineUpdateType()
+    {
+        // Use remaining length (up to 12) to handle short inputs like "CLEAR ALL"
+        var remaining = _source.Length - _position;
+        var span = remaining > 0 ? _source.Slice(_position, Math.Min(remaining, 12)) : ReadOnlySpan<char>.Empty;
+
+        // INSERT DATA or INSERT (with WHERE)
+        if (span.Length >= 6 && span[..6].Equals("INSERT", StringComparison.OrdinalIgnoreCase))
+        {
+            // Check if it's INSERT DATA
+            var savedPos = _position;
+            ConsumeKeyword("INSERT");
+            SkipWhitespace();
+            var next = PeekSpan(4);
+            _position = savedPos; // Restore position
+            if (next.Length >= 4 && next[..4].Equals("DATA", StringComparison.OrdinalIgnoreCase))
+                return QueryType.InsertData;
+            return QueryType.Modify; // INSERT { } WHERE
+        }
+
+        // DELETE DATA, DELETE WHERE, or DELETE (with INSERT)
+        if (span.Length >= 6 && span[..6].Equals("DELETE", StringComparison.OrdinalIgnoreCase))
+        {
+            var savedPos = _position;
+            ConsumeKeyword("DELETE");
+            SkipWhitespace();
+            var next = PeekSpan(5);
+            _position = savedPos;
+            if (next.Length >= 4 && next[..4].Equals("DATA", StringComparison.OrdinalIgnoreCase))
+                return QueryType.DeleteData;
+            if (next.Length >= 5 && next[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase))
+                return QueryType.DeleteWhere;
+            return QueryType.Modify; // DELETE { } INSERT { } WHERE or DELETE { } WHERE
+        }
+
+        // WITH ... DELETE/INSERT (Modify operation)
+        if (span.Length >= 4 && span[..4].Equals("WITH", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Modify;
+
+        if (span.Length >= 4 && span[..4].Equals("LOAD", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Load;
+        if (span.Length >= 5 && span[..5].Equals("CLEAR", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Clear;
+        if (span.Length >= 6 && span[..6].Equals("CREATE", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Create;
+        if (span.Length >= 4 && span[..4].Equals("DROP", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Drop;
+        if (span.Length >= 4 && span[..4].Equals("COPY", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Copy;
+        if (span.Length >= 4 && span[..4].Equals("MOVE", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Move;
+        if (span.Length >= 3 && span[..3].Equals("ADD", StringComparison.OrdinalIgnoreCase))
+            return QueryType.Add;
+
+        return QueryType.Unknown;
+    }
+
+    /// <summary>
     /// [2] Query ::= Prologue ( SelectQuery | ConstructQuery | DescribeQuery | AskQuery ) ValuesClause
     /// </summary>
     private Query ParseQueryInternal()

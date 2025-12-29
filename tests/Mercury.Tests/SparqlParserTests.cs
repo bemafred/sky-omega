@@ -556,4 +556,311 @@ public class SparqlParserTests
     }
 
     #endregion
+
+    #region SPARQL Update Parsing
+
+    [Fact]
+    public void InsertData_ParsesBasicInsert()
+    {
+        var update = "INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.NotNull(result.InsertData);
+        Assert.Single(result.InsertData);
+    }
+
+    [Fact]
+    public void InsertData_ParsesMultipleTriples()
+    {
+        var update = @"INSERT DATA {
+            <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o1> .
+            <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o2>
+        }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Equal(2, result.InsertData.Length);
+    }
+
+    [Fact]
+    public void InsertData_ParsesWithGraph()
+    {
+        var update = @"INSERT DATA {
+            GRAPH <http://ex.org/g1> {
+                <http://ex.org/s> <http://ex.org/p> <http://ex.org/o>
+            }
+        }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Single(result.InsertData);
+        Assert.True(result.InsertData[0].GraphLength > 0);
+    }
+
+    [Fact]
+    public void DeleteData_ParsesBasicDelete()
+    {
+        var update = "DELETE DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.DeleteData, result.Type);
+        Assert.NotNull(result.DeleteData);
+        Assert.Single(result.DeleteData);
+    }
+
+    [Fact]
+    public void DeleteWhere_ParsesPattern()
+    {
+        var update = "DELETE WHERE { ?s <http://ex.org/p> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.DeleteWhere, result.Type);
+        Assert.True(result.DeleteTemplate.PatternCount > 0);
+        Assert.True(result.WhereClause.Pattern.PatternCount > 0);
+    }
+
+    [Fact]
+    public void Modify_ParsesDeleteInsertWhere()
+    {
+        var update = @"DELETE { ?s <http://ex.org/old> ?o }
+                       INSERT { ?s <http://ex.org/new> ?o }
+                       WHERE { ?s <http://ex.org/old> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Modify, result.Type);
+        Assert.True(result.DeleteTemplate.PatternCount > 0);
+        Assert.True(result.InsertTemplate.PatternCount > 0);
+        Assert.True(result.WhereClause.Pattern.PatternCount > 0);
+    }
+
+    [Fact]
+    public void Modify_ParsesWithGraph()
+    {
+        var update = @"WITH <http://ex.org/g1>
+                       DELETE { ?s <http://ex.org/old> ?o }
+                       INSERT { ?s <http://ex.org/new> ?o }
+                       WHERE { ?s <http://ex.org/old> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Modify, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.SourceGraph.Type);
+    }
+
+    [Fact]
+    public void Load_ParsesBasicLoad()
+    {
+        var update = "LOAD <http://ex.org/data.ttl>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Load, result.Type);
+        Assert.True(result.SourceUriLength > 0);
+        Assert.False(result.Silent);
+    }
+
+    [Fact]
+    public void Load_ParsesSilentIntoGraph()
+    {
+        var update = "LOAD SILENT <http://ex.org/data.ttl> INTO GRAPH <http://ex.org/g1>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Load, result.Type);
+        Assert.True(result.Silent);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Clear_ParsesDefault()
+    {
+        var update = "CLEAR DEFAULT";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Clear, result.Type);
+        Assert.Equal(GraphTargetType.Default, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Clear_ParsesNamedGraph()
+    {
+        var update = "CLEAR GRAPH <http://ex.org/g1>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Clear, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Clear_ParsesAll()
+    {
+        var update = "CLEAR ALL";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Clear, result.Type);
+        Assert.Equal(GraphTargetType.All, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Clear_ParsesSilent()
+    {
+        var update = "CLEAR SILENT NAMED";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Clear, result.Type);
+        Assert.True(result.Silent);
+        Assert.Equal(GraphTargetType.Named, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Create_ParsesGraph()
+    {
+        var update = "CREATE GRAPH <http://ex.org/newgraph>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Create, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Create_ParsesSilent()
+    {
+        var update = "CREATE SILENT GRAPH <http://ex.org/newgraph>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Create, result.Type);
+        Assert.True(result.Silent);
+    }
+
+    [Fact]
+    public void Drop_ParsesGraph()
+    {
+        var update = "DROP GRAPH <http://ex.org/oldgraph>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Drop, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Drop_ParsesAll()
+    {
+        var update = "DROP ALL";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Drop, result.Type);
+        Assert.Equal(GraphTargetType.All, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Copy_ParsesSourceToDestination()
+    {
+        var update = "COPY <http://ex.org/src> TO <http://ex.org/dst>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Copy, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.SourceGraph.Type);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Copy_ParsesDefaultToGraph()
+    {
+        var update = "COPY DEFAULT TO <http://ex.org/dst>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Copy, result.Type);
+        Assert.Equal(GraphTargetType.Default, result.SourceGraph.Type);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Move_ParsesGraphToDefault()
+    {
+        var update = "MOVE <http://ex.org/src> TO DEFAULT";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Move, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.SourceGraph.Type);
+        Assert.Equal(GraphTargetType.Default, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void Move_ParsesSilent()
+    {
+        var update = "MOVE SILENT <http://ex.org/src> TO <http://ex.org/dst>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Move, result.Type);
+        Assert.True(result.Silent);
+    }
+
+    [Fact]
+    public void Add_ParsesSourceToDestination()
+    {
+        var update = "ADD <http://ex.org/src> TO <http://ex.org/dst>";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Add, result.Type);
+        Assert.Equal(GraphTargetType.Graph, result.SourceGraph.Type);
+        Assert.Equal(GraphTargetType.Graph, result.DestinationGraph.Type);
+    }
+
+    [Fact]
+    public void InsertData_ParsesWithPrefixes()
+    {
+        var update = @"PREFIX ex: <http://ex.org/>
+                       INSERT DATA { ex:s ex:p ex:o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Single(result.InsertData);
+    }
+
+    [Fact]
+    public void InsertData_ParsesLiterals()
+    {
+        var update = @"INSERT DATA { <http://ex.org/s> <http://ex.org/name> ""John"" }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Single(result.InsertData);
+        Assert.Equal(TermType.Literal, result.InsertData[0].ObjectType);
+    }
+
+    [Fact]
+    public void InsertData_ParsesBlankNodes()
+    {
+        var update = @"INSERT DATA { _:b1 <http://ex.org/p> <http://ex.org/o> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Single(result.InsertData);
+        Assert.Equal(TermType.BlankNode, result.InsertData[0].SubjectType);
+    }
+
+    #endregion
 }

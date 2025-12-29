@@ -325,15 +325,21 @@ Key components:
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
+| SPARQL Update | INSERT DATA, DELETE DATA, CLEAR, DROP, CREATE, COPY, MOVE, ADD |
+
+**Partially implemented SPARQL 1.1 features:**
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| DELETE WHERE | Simple patterns only | Concrete triples work; variable patterns require QueryExecutor integration |
+| DELETE/INSERT WHERE | Not yet | Use INSERT DATA/DELETE DATA for concrete triples |
+| LOAD | Not supported | Requires external HTTP client |
 
 **Not implemented SPARQL 1.1 features:**
 
 | Category | Features |
 |----------|----------|
 | Federated query | SERVICE clause |
-| SPARQL Update | INSERT, DELETE, INSERT DATA, DELETE DATA, DELETE WHERE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD |
-
-*Note: SPARQL Update is planned for future implementation. Currently, write operations use the QuadStore API directly (`AddCurrent`, `DeleteCurrent`, batch operations).*
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
@@ -510,6 +516,51 @@ foreach (var slot in patterns)
 ```
 
 This enables GRAPH ?g queries and subquery joins to execute without thread workarounds that were previously needed to avoid stack overflow.
+
+**SPARQL Update execution:**
+
+```csharp
+// INSERT DATA - add triples directly
+var update = "INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }";
+var parser = new SparqlParser(update.AsSpan());
+var operation = parser.ParseUpdate();
+
+var executor = new UpdateExecutor(store, update.AsSpan(), operation);
+var result = executor.Execute();
+// result.Success, result.AffectedCount, result.ErrorMessage
+
+// DELETE DATA - remove specific triples
+var update = "DELETE DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }";
+
+// INSERT DATA with named graph
+var update = @"INSERT DATA {
+    GRAPH <http://ex.org/graph1> {
+        <http://ex.org/s> <http://ex.org/p> <http://ex.org/o>
+    }
+}";
+
+// CLEAR operations
+var update = "CLEAR DEFAULT";           // Clear default graph
+var update = "CLEAR GRAPH <http://ex.org/g1>";  // Clear specific graph
+var update = "CLEAR NAMED";             // Clear all named graphs
+var update = "CLEAR ALL";               // Clear everything
+
+// Graph management
+var update = "COPY <http://ex.org/src> TO <http://ex.org/dst>";   // Copy triples
+var update = "MOVE <http://ex.org/src> TO <http://ex.org/dst>";   // Move triples
+var update = "ADD <http://ex.org/src> TO <http://ex.org/dst>";    // Add triples
+var update = "DROP GRAPH <http://ex.org/g1>";                     // Drop graph
+```
+
+**UpdateResult struct:**
+```csharp
+public struct UpdateResult
+{
+    public bool Success;        // Whether operation completed successfully
+    public int AffectedCount;   // Number of triples affected
+    public string? ErrorMessage; // Error details if Success is false
+}
+```
 
 ## Code Conventions
 
