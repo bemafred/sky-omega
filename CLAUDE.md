@@ -411,6 +411,7 @@ Key components:
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
 | Temporal queries | AS OF (point-in-time), DURING (range), ALL VERSIONS (history) |
+| SPARQL-star | Quoted triples (`<< s p o >>`), expanded to reification at parse time |
 | SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE, CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
 **Query execution model:**
@@ -592,9 +593,53 @@ finally
 var silentQuery = "SELECT * WHERE { SERVICE SILENT <http://might-fail.example.org/sparql> { ?x ?y ?z } }";
 ```
 
+**SPARQL-star query example:**
+```csharp
+// SPARQL-star quoted triples are expanded to reification patterns at parse time
+// This allows querying RDF-star data stored via the Turtle parser
+
+// Query metadata about a specific triple
+var query = @"SELECT ?confidence WHERE {
+    << <http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> >>
+        <http://ex.org/confidence> ?confidence .
+}";
+
+// Query with variable inside quoted triple
+var query2 = @"SELECT ?person ?score WHERE {
+    << <http://ex.org/Alice> <http://ex.org/knows> ?person >>
+        <http://ex.org/score> ?score .
+}";
+
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.Execute();
+
+    while (results.MoveNext())
+    {
+        var bindings = results.Current;
+        var confIdx = bindings.FindBinding("?confidence".AsSpan());
+        if (confIdx >= 0)
+        {
+            var confidence = bindings.GetString(confIdx);
+            // Process confidence value...
+        }
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
 **Operator pipeline:**
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
-- `MultiPatternScan` - Nested loop join for up to 4 patterns with backtracking
+- `MultiPatternScan` - Nested loop join for up to 12 patterns with backtracking (supports SPARQL-star expansion)
 - `SlotTriplePatternScan` - Slot-based variant reading from 64-byte PatternSlot
 - `SlotMultiPatternScan` - Slot-based multi-pattern join reading from byte[] buffer
 - `SubQueryScan` - Executes nested SELECT subquery, projects selected variables

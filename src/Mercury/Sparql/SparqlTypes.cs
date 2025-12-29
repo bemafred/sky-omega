@@ -590,8 +590,10 @@ public enum PathType : byte
 }
 
 /// <summary>
-/// A term in a triple pattern - can be a variable, IRI, literal, or blank node.
+/// A term in a triple pattern - can be a variable, IRI, literal, blank node, or quoted triple.
 /// Uses offsets into the source string for zero-allocation.
+/// For QuotedTriple, Start/Length point to the "<< s p o >>" text;
+/// nested terms are re-parsed on demand during pattern expansion.
 /// </summary>
 public struct Term
 {
@@ -611,10 +613,18 @@ public struct Term
     public static Term BlankNode(int start, int length) =>
         new() { Type = TermType.BlankNode, Start = start, Length = length };
 
+    /// <summary>
+    /// Create a QuotedTriple term. The start/length point to the "<< s p o >>" text.
+    /// Nested terms are parsed on demand via ParseQuotedTripleContent.
+    /// </summary>
+    public static Term QuotedTriple(int start, int length) =>
+        new() { Type = TermType.QuotedTriple, Start = start, Length = length };
+
     public readonly bool IsVariable => Type == TermType.Variable;
     public readonly bool IsIri => Type == TermType.Iri;
     public readonly bool IsLiteral => Type == TermType.Literal;
     public readonly bool IsBlankNode => Type == TermType.BlankNode;
+    public readonly bool IsQuotedTriple => Type == TermType.QuotedTriple;
 }
 
 /// <summary>
@@ -625,7 +635,8 @@ public enum TermType : byte
     Variable,
     Iri,
     Literal,
-    BlankNode
+    BlankNode,
+    QuotedTriple
 }
 
 /// <summary>

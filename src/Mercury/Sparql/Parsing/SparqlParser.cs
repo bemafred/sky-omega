@@ -14,11 +14,21 @@ public ref partial struct SparqlParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;
-    
+    private int _quotedTripleCounter; // Counter for generating synthetic reifier variables
+
+    // RDF namespace constants for reification expansion (offsets into synthetic buffer)
+    // These are appended to the source during query execution
+    private const int RdfTypeOffset = -1;
+    private const int RdfStatementOffset = -2;
+    private const int RdfSubjectOffset = -3;
+    private const int RdfPredicateOffset = -4;
+    private const int RdfObjectOffset = -5;
+
     public SparqlParser(ReadOnlySpan<char> source)
     {
         _source = source;
         _position = 0;
+        _quotedTripleCounter = 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -269,6 +279,7 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Try to parse a triple pattern (subject predicate object)
     /// Supports property paths in the predicate position.
+    /// Expands SPARQL-star quoted triples to reification patterns.
     /// </summary>
     private bool TryParseTriplePattern(ref GraphPattern pattern)
     {
@@ -290,6 +301,12 @@ public ref partial struct SparqlParser
         SkipWhitespace();
         var obj = ParseTerm();
 
+        // Check if subject or object is a quoted triple - if so, expand to reification patterns
+        if (subject.IsQuotedTriple || obj.IsQuotedTriple)
+        {
+            return ExpandQuotedTriplePattern(ref pattern, subject, predicate, obj, path);
+        }
+
         pattern.AddPattern(new TriplePattern
         {
             Subject = subject,
@@ -299,6 +316,106 @@ public ref partial struct SparqlParser
         });
 
         return true;
+    }
+
+    /// <summary>
+    /// Expand a pattern containing quoted triples into reification patterns.
+    /// For: &lt;&lt; s p o &gt;&gt; pred obj
+    /// Generates:
+    ///   ?_qt{N} rdf:type rdf:Statement .
+    ///   ?_qt{N} rdf:subject s .
+    ///   ?_qt{N} rdf:predicate p .
+    ///   ?_qt{N} rdf:object o .
+    ///   ?_qt{N} pred obj .
+    /// </summary>
+    private bool ExpandQuotedTriplePattern(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
+    {
+        Term actualSubject = subject;
+        Term actualObject = obj;
+
+        // Expand subject if it's a quoted triple
+        if (subject.IsQuotedTriple)
+        {
+            actualSubject = ExpandQuotedTriple(ref pattern, subject);
+        }
+
+        // Expand object if it's a quoted triple
+        if (obj.IsQuotedTriple)
+        {
+            actualObject = ExpandQuotedTriple(ref pattern, obj);
+        }
+
+        // Add the main pattern with reifier(s) as subject/object
+        pattern.AddPattern(new TriplePattern
+        {
+            Subject = actualSubject,
+            Predicate = predicate,
+            Object = actualObject,
+            Path = path
+        });
+
+        return true;
+    }
+
+    /// <summary>
+    /// Expand a single quoted triple into reification patterns.
+    /// Returns a synthetic variable Term representing the reifier.
+    /// </summary>
+    private Term ExpandQuotedTriple(ref GraphPattern pattern, Term quotedTriple)
+    {
+        // Generate synthetic reifier variable: ?_qt{N}
+        // We use negative offsets to indicate synthetic terms
+        var reifierIndex = _quotedTripleCounter++;
+        var reifierTerm = Term.Variable(-(reifierIndex + 100), 0); // Synthetic variable marker
+
+        // Re-parse the quoted triple content to extract nested terms
+        var (innerSubject, innerPredicate, innerObject) =
+            ParseQuotedTripleContent(quotedTriple.Start, quotedTriple.Length);
+
+        // Handle nested quoted triples recursively
+        if (innerSubject.IsQuotedTriple)
+        {
+            innerSubject = ExpandQuotedTriple(ref pattern, innerSubject);
+        }
+        if (innerObject.IsQuotedTriple)
+        {
+            innerObject = ExpandQuotedTriple(ref pattern, innerObject);
+        }
+
+        // Add reification patterns:
+        // ?_qt{N} rdf:type rdf:Statement
+        pattern.AddPattern(new TriplePattern
+        {
+            Subject = reifierTerm,
+            Predicate = Term.Iri(RdfTypeOffset, 0),
+            Object = Term.Iri(RdfStatementOffset, 0)
+        });
+
+        // ?_qt{N} rdf:subject innerSubject
+        pattern.AddPattern(new TriplePattern
+        {
+            Subject = reifierTerm,
+            Predicate = Term.Iri(RdfSubjectOffset, 0),
+            Object = innerSubject
+        });
+
+        // ?_qt{N} rdf:predicate innerPredicate
+        pattern.AddPattern(new TriplePattern
+        {
+            Subject = reifierTerm,
+            Predicate = Term.Iri(RdfPredicateOffset, 0),
+            Object = innerPredicate
+        });
+
+        // ?_qt{N} rdf:object innerObject
+        pattern.AddPattern(new TriplePattern
+        {
+            Subject = reifierTerm,
+            Predicate = Term.Iri(RdfObjectOffset, 0),
+            Object = innerObject
+        });
+
+        return reifierTerm;
     }
 
     /// <summary>
@@ -375,7 +492,7 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse a term (variable, IRI, or literal)
+    /// Parse a term (variable, IRI, literal, or quoted triple)
     /// </summary>
     private Term ParseTerm()
     {
@@ -386,6 +503,12 @@ public ref partial struct SparqlParser
         if (ch == '?' || ch == '$')
         {
             return ParseVariable();
+        }
+
+        // Quoted triple (SPARQL-star): << s p o >>
+        if (ch == '<' && PeekAt(1) == '<')
+        {
+            return ParseQuotedTriple();
         }
 
         // IRI: <uri>
@@ -440,6 +563,61 @@ public ref partial struct SparqlParser
             Advance();
 
         return Term.Variable(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse a quoted triple (SPARQL-star): &lt;&lt; subject predicate object &gt;&gt;
+    /// Records the range; nested terms are re-parsed on demand during expansion.
+    /// </summary>
+    private Term ParseQuotedTriple()
+    {
+        var start = _position;
+
+        // Consume '<<'
+        Advance(); // '<'
+        Advance(); // '<'
+        SkipWhitespace();
+
+        // Parse subject (can be IRI, blank node, variable, or nested quoted triple)
+        ParseTerm(); // We don't store this; re-parse on demand
+        SkipWhitespace();
+
+        // Parse predicate (IRI, variable, or 'a')
+        ParseTerm();
+        SkipWhitespace();
+
+        // Parse object (can be IRI, blank node, literal, variable, or nested quoted triple)
+        ParseTerm();
+        SkipWhitespace();
+
+        // Consume '>>'
+        if (Peek() != '>' || PeekAt(1) != '>')
+            throw new InvalidOperationException("Expected '>>' to close quoted triple");
+        Advance(); // '>'
+        Advance(); // '>'
+
+        return Term.QuotedTriple(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse the content of a quoted triple, returning the three nested terms.
+    /// This is used during pattern expansion to extract subject, predicate, object.
+    /// </summary>
+    private (Term subject, Term predicate, Term obj) ParseQuotedTripleContent(int start, int length)
+    {
+        // Save and restore position
+        var savedPos = _position;
+        _position = start + 2; // Skip '<<'
+        SkipWhitespace();
+
+        var subject = ParseTerm();
+        SkipWhitespace();
+        var predicate = ParseTerm();
+        SkipWhitespace();
+        var obj = ParseTerm();
+
+        _position = savedPos;
+        return (subject, predicate, obj);
     }
 
     /// <summary>

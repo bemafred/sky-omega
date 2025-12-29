@@ -293,6 +293,18 @@ public ref struct SlotTriplePatternScan
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<char> ResolveTermForQuery(TermType type, int start, int length)
     {
+        // Handle synthetic terms (negative offsets from SPARQL-star expansion)
+        if (SyntheticTermHelper.IsSynthetic(start))
+        {
+            if (type == TermType.Variable)
+            {
+                var varName = SyntheticTermHelper.GetSyntheticVarName(start);
+                var idx = _initialBindings.FindBinding(varName);
+                return idx >= 0 ? _initialBindings.GetString(idx) : ReadOnlySpan<char>.Empty;
+            }
+            return SyntheticTermHelper.GetSyntheticIri(start);
+        }
+
         if (type == TermType.Variable)
         {
             var varName = _source.Slice(start, length);
@@ -312,7 +324,13 @@ public ref struct SlotTriplePatternScan
         if (type != TermType.Variable)
             return true;
 
-        var varName = _source.Slice(start, length);
+        // Handle synthetic variables (from SPARQL-star expansion)
+        ReadOnlySpan<char> varName;
+        if (SyntheticTermHelper.IsSynthetic(start))
+            varName = SyntheticTermHelper.GetSyntheticVarName(start);
+        else
+            varName = _source.Slice(start, length);
+
         var existingIndex = bindings.FindBinding(varName);
         if (existingIndex >= 0)
         {
@@ -511,37 +529,39 @@ public ref struct SlotMultiPatternScan
         var slot = GetSlot(slotIndex);
         ReadOnlySpan<char> subject, predicate, obj;
 
-        // Resolve subject
-        if (slot.SubjectType != TermType.Variable)
-            subject = _source.Slice(slot.SubjectStart, slot.SubjectLength);
-        else
-        {
-            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
-            var idx = bindings.FindBinding(varName);
-            subject = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
-        }
+        // Resolve subject (handles synthetic terms from SPARQL-star expansion)
+        subject = ResolveTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, ref bindings);
 
         // Resolve predicate
-        if (slot.PredicateType != TermType.Variable)
-            predicate = _source.Slice(slot.PredicateStart, slot.PredicateLength);
-        else
-        {
-            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
-            var idx = bindings.FindBinding(varName);
-            predicate = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
-        }
+        predicate = ResolveTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, ref bindings);
 
         // Resolve object
-        if (slot.ObjectType != TermType.Variable)
-            obj = _source.Slice(slot.ObjectStart, slot.ObjectLength);
-        else
-        {
-            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
-            var idx = bindings.FindBinding(varName);
-            obj = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
-        }
+        obj = ResolveTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, ref bindings);
 
         enumerator = _store.QueryCurrent(subject, predicate, obj, _graph);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveTerm(TermType type, int start, int length, scoped ref BindingTable bindings)
+    {
+        // Handle synthetic terms (negative offsets from SPARQL-star expansion)
+        if (SyntheticTermHelper.IsSynthetic(start))
+        {
+            if (type == TermType.Variable)
+            {
+                var varName = SyntheticTermHelper.GetSyntheticVarName(start);
+                var idx = bindings.FindBinding(varName);
+                return idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
+            }
+            return SyntheticTermHelper.GetSyntheticIri(start);
+        }
+
+        if (type != TermType.Variable)
+            return _source.Slice(start, length);
+
+        var name = _source.Slice(start, length);
+        var index = bindings.FindBinding(name);
+        return index >= 0 ? bindings.GetString(index) : ReadOnlySpan<char>.Empty;
     }
 
     private bool TryAdvanceEnumerator(ref TemporalResultEnumerator enumerator, int slotIndex, ref BindingTable bindings)
@@ -585,7 +605,13 @@ public ref struct SlotMultiPatternScan
         if (type != TermType.Variable)
             return true;
 
-        var varName = _source.Slice(start, length);
+        // Handle synthetic variables (from SPARQL-star expansion)
+        ReadOnlySpan<char> varName;
+        if (SyntheticTermHelper.IsSynthetic(start))
+            varName = SyntheticTermHelper.GetSyntheticVarName(start);
+        else
+            varName = _source.Slice(start, length);
+
         var existingIndex = bindings.FindBinding(varName);
         if (existingIndex >= 0)
         {
