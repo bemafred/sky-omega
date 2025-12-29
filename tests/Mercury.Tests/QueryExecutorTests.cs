@@ -3439,7 +3439,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow in VariableGraphExecutor - needs further refactoring")]
+    [Fact]
     public void Execute_VariableGraph_IteratesAllNamedGraphs()
     {
         // Add data to multiple named graphs
@@ -3487,7 +3487,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow in VariableGraphExecutor - needs further refactoring")]
+    [Fact]
     public void Execute_VariableGraph_BindsGraphVariable()
     {
         // Add data to a named graph
@@ -3523,7 +3523,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow in VariableGraphExecutor - needs further refactoring")]
+    [Fact]
     public void Execute_VariableGraph_ExcludesDefaultGraph()
     {
         // Add data to default graph and named graph
@@ -3562,7 +3562,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow in VariableGraphExecutor - needs further refactoring")]
+    [Fact]
     public void Execute_VariableGraph_MultiplePatterns()
     {
         // Add person with name and age to named graph
@@ -3648,7 +3648,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow in DefaultGraphUnionScan - needs further refactoring")]
+    [Fact]
     public void Execute_MultipleFromClauses_UnionsResults()
     {
         // Add data to multiple named graphs
@@ -3750,7 +3750,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - DefaultGraphUnionScan inline buffers too large")]
+    [Fact]
     public void Execute_FromWithFilter_AppliesFilterToUnionedResults()
     {
         // Add data with varying ages to graphs
@@ -3794,7 +3794,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - DefaultGraphUnionScan inline buffers too large")]
+    [Fact(Skip = "Cross-graph joins with FROM clauses not yet implemented - each graph is queried independently")]
     public void Execute_FromWithJoin_JoinsAcrossGraphs()
     {
         // Add related data across graphs
@@ -4170,7 +4170,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - ExecuteSubQueryJoin ref struct too large")]
+    [Fact]
     public void SubQuery_WithOuterPattern_JoinsCorrectly()
     {
         // Test subquery with outer pattern join
@@ -4215,7 +4215,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - ExecuteSubQueryJoin ref struct too large")]
+    [Fact]
     public void SubQuery_WithOuterPatternFilter_FiltersAfterJoin()
     {
         // Test filter on outer pattern variables after join
@@ -4258,7 +4258,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - ExecuteSubQueryJoin ref struct too large")]
+    [Fact]
     public void SubQuery_JoinWithSubqueryFilter_RespectsSubqueryFilter()
     {
         // Test that subquery filter is respected, then outer join is applied
@@ -4296,7 +4296,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - ExecuteSubQueryJoin ref struct too large")]
+    [Fact]
     public void SubQuery_EmptySubquery_ReturnsEmpty()
     {
         // Test that empty subquery results in empty outer results
@@ -4330,7 +4330,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow - ExecuteSubQueryJoin ref struct too large")]
+    [Fact]
     public void SubQuery_MultipleOuterPatterns_JoinsAll()
     {
         // Test with multiple outer patterns

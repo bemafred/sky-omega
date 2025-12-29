@@ -102,6 +102,26 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
+    /// Create QueryResults from pre-materialized rows without requiring the full GraphPattern.
+    /// This overload avoids stack overflow by not passing the large GraphPattern struct.
+    /// </summary>
+    internal static QueryResults FromMaterializedSimple(List<MaterializedRow> rows,
+        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    {
+        // If actual ORDER BY is specified, sort the materialized results
+        if (orderBy.HasOrderBy && rows.Count > 1)
+        {
+            var sourceStr = source.ToString();
+            rows.Sort((a, b) => CompareRowsStatic(a, b, orderBy, sourceStr));
+        }
+
+        return new QueryResults(rows, source, store, bindings, stringBuffer,
+            limit, offset, distinct, orderBy, groupBy, selectClause, having);
+    }
+
+    /// <summary>
     /// Private constructor for pre-materialized results.
     /// </summary>
     private QueryResults(List<MaterializedRow> rows, GraphPattern pattern, ReadOnlySpan<char> source,
@@ -110,6 +130,52 @@ public ref partial struct QueryResults
         GroupByClause groupBy, SelectClause selectClause, HavingClause having)
     {
         _pattern = pattern;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = false; // Filters already applied during materialization
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = false;
+        _isEmpty = rows.Count == 0;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
+        _sortedResults = rows;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
+    }
+
+    /// <summary>
+    /// Private constructor for pre-materialized results without GraphPattern.
+    /// Uses default empty pattern to avoid stack overflow from large struct parameter.
+    /// </summary>
+    private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    {
+        _pattern = default; // Empty default pattern - not used for materialized results
         _source = source;
         _store = store;
         _bindings = bindings;

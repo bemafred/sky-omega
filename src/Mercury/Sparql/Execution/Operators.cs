@@ -1123,6 +1123,10 @@ public ref struct DefaultGraphUnionScan
                 return false;
             }
 
+            // Clear bindings before switching to new graph
+            // Each graph should start fresh (FROM semantics = union of independent queries)
+            bindings.Clear();
+
             // Initialize scan for new graph
             var graphIri = _defaultGraphs[_currentGraphIndex++].AsSpan();
             InitializeScan(graphIri, ref bindings);

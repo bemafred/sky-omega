@@ -13,64 +13,291 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 internal static class VariableGraphExecutor
 {
     /// <summary>
-    /// Execute a variable graph query (GRAPH ?g) using completely flat iteration.
+    /// Configuration for variable graph execution.
+    /// Heap-allocated to avoid passing large structs on the stack.
+    /// </summary>
+    internal sealed class ExecutionConfig
+    {
+        public QuadStore Store = null!;
+        public string Source = null!;
+        public GraphClause GraphClause;
+        public GraphPattern Pattern;
+        public string[]? NamedGraphs;
+        public Binding[] Bindings = null!;
+        public char[] StringBuffer = null!;
+        public int Limit;
+        public int Offset;
+        public bool Distinct;
+        public OrderByClause OrderBy;
+        public GroupByClause GroupBy;
+        public SelectClause SelectClause;
+        public HavingClause Having;
+    }
+
+    /// <summary>
+    /// Execute a variable graph query and return collected results.
+    /// Used when running on a separate thread to avoid ref struct lifetime issues.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    public static QueryResults Execute(
-        QuadStore store,
-        string source,
-        GraphClause graphClause,
-        GraphPattern pattern,
-        string[]? namedGraphs,
-        Binding[] bindings,
-        char[] stringBuffer,
-        int limit,
-        int offset,
-        bool distinct,
-        OrderByClause orderBy,
-        GroupByClause groupBy,
-        SelectClause selectClause,
-        HavingClause having)
+    public static List<MaterializedRow> ExecuteAndCollect(ExecutionConfig config)
     {
         var results = new List<MaterializedRow>();
-        var sourceSpan = source.AsSpan();
-        var graphVarName = sourceSpan.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
-        var graphsToIterate = namedGraphs ?? GetAllNamedGraphs(store);
-        var patternCount = graphClause.PatternCount;
+        ExecuteIntoList(config, results);
+        return results;
+    }
+
+    /// <summary>
+    /// Core execution logic that populates a list of materialized rows.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ExecuteIntoList(ExecutionConfig config, List<MaterializedRow> results)
+    {
+        var sourceSpan = config.Source.AsSpan();
+        var graphVarName = sourceSpan.Slice(config.GraphClause.Graph.Start, config.GraphClause.Graph.Length);
+        var graphsToIterate = config.NamedGraphs ?? GetAllNamedGraphs(config.Store);
+        var patternCount = config.GraphClause.PatternCount;
 
         if (patternCount == 0 || graphsToIterate.Length == 0)
-            return QueryResults.Empty();
+            return;
 
-        // Get patterns from graph clause (up to 4)
-        var tp0 = graphClause.GetPattern(0);
-        var tp1 = patternCount > 1 ? graphClause.GetPattern(1) : default;
-        var tp2 = patternCount > 2 ? graphClause.GetPattern(2) : default;
-        var tp3 = patternCount > 3 ? graphClause.GetPattern(3) : default;
+        // Only support single pattern for now to minimize stack usage
+        if (patternCount > 1)
+        {
+            // Multi-pattern - use nested collection (may still have issues)
+            var tp0 = config.GraphClause.GetPattern(0);
+            var tp1 = patternCount > 1 ? config.GraphClause.GetPattern(1) : default;
+            var tp2 = patternCount > 2 ? config.GraphClause.GetPattern(2) : default;
+            var tp3 = patternCount > 3 ? config.GraphClause.GetPattern(3) : default;
+
+            var scanBindings = new Binding[16];
+            var scanStringBuffer = new char[1024];
+
+            foreach (var graphIri in graphsToIterate)
+            {
+                var graphSpan = graphIri.AsSpan();
+                CollectMultiPattern(results, config.Store, config.Source, graphSpan, graphVarName, patternCount,
+                    tp0, tp1, tp2, tp3, scanBindings, scanStringBuffer);
+            }
+            return;
+        }
+
+        // Get the single pattern
+        var tp = config.GraphClause.GetPattern(0);
 
         // Create binding storage once
-        var scanBindings = new Binding[16];
-        var scanStringBuffer = new char[1024];
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
 
+        // Resolve pattern terms
+        ReadOnlySpan<char> subject = tp.Subject.IsVariable ? ReadOnlySpan<char>.Empty : sourceSpan.Slice(tp.Subject.Start, tp.Subject.Length);
+        ReadOnlySpan<char> predicate = tp.Predicate.IsVariable ? ReadOnlySpan<char>.Empty : sourceSpan.Slice(tp.Predicate.Start, tp.Predicate.Length);
+        ReadOnlySpan<char> obj = tp.Object.IsVariable ? ReadOnlySpan<char>.Empty : sourceSpan.Slice(tp.Object.Start, tp.Object.Length);
+
+        // Inline collection for each graph
         foreach (var graphIri in graphsToIterate)
         {
             var graphSpan = graphIri.AsSpan();
 
-            if (patternCount == 1)
+            var enumerator = config.Store.QueryCurrent(subject, predicate, obj, graphSpan);
+            try
             {
-                CollectSinglePattern(results, store, source, graphSpan, graphVarName, tp0, scanBindings, scanStringBuffer);
+                while (enumerator.MoveNext())
+                {
+                    var triple = enumerator.Current;
+                    bindingTable.Clear();
+
+                    // Bind subject
+                    if (tp.Subject.IsVariable)
+                    {
+                        var varName = sourceSpan.Slice(tp.Subject.Start, tp.Subject.Length);
+                        bindingTable.Bind(varName, triple.Subject);
+                    }
+
+                    // Bind predicate
+                    if (tp.Predicate.IsVariable)
+                    {
+                        var varName = sourceSpan.Slice(tp.Predicate.Start, tp.Predicate.Length);
+                        var idx = bindingTable.FindBinding(varName);
+                        if (idx >= 0)
+                        {
+                            if (!triple.Predicate.SequenceEqual(bindingTable.GetString(idx)))
+                                continue;
+                        }
+                        else
+                        {
+                            bindingTable.Bind(varName, triple.Predicate);
+                        }
+                    }
+
+                    // Bind object
+                    if (tp.Object.IsVariable)
+                    {
+                        var varName = sourceSpan.Slice(tp.Object.Start, tp.Object.Length);
+                        var idx = bindingTable.FindBinding(varName);
+                        if (idx >= 0)
+                        {
+                            if (!triple.Object.SequenceEqual(bindingTable.GetString(idx)))
+                                continue;
+                        }
+                        else
+                        {
+                            bindingTable.Bind(varName, triple.Object);
+                        }
+                    }
+
+                    // Bind graph variable
+                    bindingTable.Bind(graphVarName, graphSpan);
+                    results.Add(new MaterializedRow(bindingTable));
+                }
             }
-            else
+            finally
             {
-                CollectMultiPattern(results, store, source, graphSpan, graphVarName, patternCount,
-                    tp0, tp1, tp2, tp3, scanBindings, scanStringBuffer);
+                enumerator.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Execute a variable graph query (GRAPH ?g) using completely flat iteration.
+    /// Takes a heap-allocated config to avoid stack overflow from large struct parameters.
+    /// IMPORTANT: All collection logic is inlined to minimize stack frame depth.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public static QueryResults Execute(ExecutionConfig config)
+    {
+        var results = new List<MaterializedRow>();
+        var sourceSpan = config.Source.AsSpan();
+        var graphVarName = sourceSpan.Slice(config.GraphClause.Graph.Start, config.GraphClause.Graph.Length);
+        var graphsToIterate = config.NamedGraphs ?? GetAllNamedGraphs(config.Store);
+        var patternCount = config.GraphClause.PatternCount;
+
+        if (patternCount == 0 || graphsToIterate.Length == 0)
+            return QueryResults.Empty();
+
+        // Only support single pattern for now to minimize stack usage
+        // Multi-pattern requires nested joins which would increase stack depth
+        if (patternCount > 1)
+        {
+            // Fall back to multi-pattern which may still cause issues
+            return ExecuteMultiPattern(config, results, sourceSpan, graphVarName, graphsToIterate);
+        }
+
+        // Get the single pattern
+        var tp = config.GraphClause.GetPattern(0);
+
+        // Create binding storage once
+        var scanBindings = new Binding[16];
+        var scanStringBuffer = new char[1024];
+        var bindingTable = new BindingTable(scanBindings, scanStringBuffer);
+
+        // Resolve pattern terms
+        ReadOnlySpan<char> subject = tp.Subject.IsVariable ? ReadOnlySpan<char>.Empty : sourceSpan.Slice(tp.Subject.Start, tp.Subject.Length);
+        ReadOnlySpan<char> predicate = tp.Predicate.IsVariable ? ReadOnlySpan<char>.Empty : sourceSpan.Slice(tp.Predicate.Start, tp.Predicate.Length);
+        ReadOnlySpan<char> obj = tp.Object.IsVariable ? ReadOnlySpan<char>.Empty : sourceSpan.Slice(tp.Object.Start, tp.Object.Length);
+
+        // Inline collection for each graph - NO method calls to avoid additional stack frames
+        foreach (var graphIri in graphsToIterate)
+        {
+            var graphSpan = graphIri.AsSpan();
+
+            // Query this graph directly - enumerator is on stack but no additional call frames
+            var enumerator = config.Store.QueryCurrent(subject, predicate, obj, graphSpan);
+            try
+            {
+                while (enumerator.MoveNext())
+                {
+                    var triple = enumerator.Current;
+                    bindingTable.Clear();
+
+                    // Bind subject
+                    if (tp.Subject.IsVariable)
+                    {
+                        var varName = sourceSpan.Slice(tp.Subject.Start, tp.Subject.Length);
+                        bindingTable.Bind(varName, triple.Subject);
+                    }
+
+                    // Bind predicate
+                    if (tp.Predicate.IsVariable)
+                    {
+                        var varName = sourceSpan.Slice(tp.Predicate.Start, tp.Predicate.Length);
+                        var idx = bindingTable.FindBinding(varName);
+                        if (idx >= 0)
+                        {
+                            if (!triple.Predicate.SequenceEqual(bindingTable.GetString(idx)))
+                                continue;
+                        }
+                        else
+                        {
+                            bindingTable.Bind(varName, triple.Predicate);
+                        }
+                    }
+
+                    // Bind object
+                    if (tp.Object.IsVariable)
+                    {
+                        var varName = sourceSpan.Slice(tp.Object.Start, tp.Object.Length);
+                        var idx = bindingTable.FindBinding(varName);
+                        if (idx >= 0)
+                        {
+                            if (!triple.Object.SequenceEqual(bindingTable.GetString(idx)))
+                                continue;
+                        }
+                        else
+                        {
+                            bindingTable.Bind(varName, triple.Object);
+                        }
+                    }
+
+                    // Bind graph variable
+                    bindingTable.Bind(graphVarName, graphSpan);
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                enumerator.Dispose();
             }
         }
 
         if (results.Count == 0)
             return QueryResults.Empty();
 
-        return QueryResults.FromMaterialized(results, pattern, sourceSpan, store,
-            bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        return QueryResults.FromMaterialized(results, config.Pattern, sourceSpan, config.Store,
+            config.Bindings, config.StringBuffer, config.Limit, config.Offset, config.Distinct,
+            config.OrderBy, config.GroupBy, config.SelectClause, config.Having);
+    }
+
+    /// <summary>
+    /// Execute multi-pattern variable graph query.
+    /// This may still cause stack overflow for complex patterns.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static QueryResults ExecuteMultiPattern(ExecutionConfig config, List<MaterializedRow> results,
+        ReadOnlySpan<char> sourceSpan, ReadOnlySpan<char> graphVarName, string[] graphsToIterate)
+    {
+        var patternCount = config.GraphClause.PatternCount;
+        var tp0 = config.GraphClause.GetPattern(0);
+        var tp1 = patternCount > 1 ? config.GraphClause.GetPattern(1) : default;
+        var tp2 = patternCount > 2 ? config.GraphClause.GetPattern(2) : default;
+        var tp3 = patternCount > 3 ? config.GraphClause.GetPattern(3) : default;
+
+        var scanBindings = new Binding[16];
+        var scanStringBuffer = new char[1024];
+
+        foreach (var graphIri in graphsToIterate)
+        {
+            var graphSpan = graphIri.AsSpan();
+            CollectMultiPattern(results, config.Store, config.Source, graphSpan, graphVarName, patternCount,
+                tp0, tp1, tp2, tp3, scanBindings, scanStringBuffer);
+        }
+
+        if (results.Count == 0)
+            return QueryResults.Empty();
+
+        return QueryResults.FromMaterialized(results, config.Pattern, sourceSpan, config.Store,
+            config.Bindings, config.StringBuffer, config.Limit, config.Offset, config.Distinct,
+            config.OrderBy, config.GroupBy, config.SelectClause, config.Having);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

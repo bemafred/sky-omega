@@ -62,45 +62,41 @@ public class QueryExecutor
     /// <summary>
     /// Execute a parsed query and return results.
     /// Caller must hold read lock on store and call Dispose on results.
+    /// Note: Avoid extracting large structs as locals here to prevent stack overflow.
+    /// Access _query fields directly when possible.
     /// </summary>
     public QueryResults Execute()
     {
-        var pattern = _query.WhereClause.Pattern;
-        var limit = _query.SolutionModifier.Limit;
-        var offset = _query.SolutionModifier.Offset;
-        var distinct = _query.SelectClause.Distinct;
-        var orderBy = _query.SolutionModifier.OrderBy;
-        var groupBy = _query.SolutionModifier.GroupBy;
-        var having = _query.SolutionModifier.Having;
-        var selectClause = _query.SelectClause;
-
-        // Check for GRAPH clauses
-        if (pattern.HasGraph && pattern.PatternCount == 0)
+        // Check for GRAPH clauses first - uses separate method to avoid stack overflow
+        // ExecuteGraphClauses accesses _query directly
+        if (_query.WhereClause.Pattern.HasGraph && _query.WhereClause.Pattern.PatternCount == 0)
         {
-            // Only GRAPH clause(s), no default graph patterns
-            return ExecuteGraphClauses(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            return ExecuteGraphClauses();
         }
 
         // Check for subqueries
-        if (pattern.HasSubQueries)
+        if (_query.WhereClause.Pattern.HasSubQueries)
         {
-            return ExecuteWithSubQueries(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            return ExecuteWithSubQueries();
         }
 
-        if (pattern.PatternCount == 0)
+        if (_query.WhereClause.Pattern.PatternCount == 0)
             return QueryResults.Empty();
 
         // Check for FROM clauses (default graph dataset)
         if (_defaultGraphs != null && _defaultGraphs.Length > 0)
         {
-            return ExecuteWithDefaultGraphs(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            return ExecuteWithDefaultGraphs();
         }
 
+        // For regular queries, access _query fields directly to build result
         // Build binding storage
         var bindings = new Binding[16];
         var stringBuffer = new char[1024];
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
+        // Access pattern directly from _query
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
         var requiredCount = pattern.RequiredPatternCount;
 
         // Single required pattern - just scan
@@ -116,7 +112,10 @@ public class QueryExecutor
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
 
-            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
+                _query.SolutionModifier.Having);
         }
 
         // No required patterns but have optional - need special handling
@@ -128,7 +127,7 @@ public class QueryExecutor
         }
 
         // Multiple required patterns - need join
-        return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        return ExecuteWithJoins();
     }
 
     /// <summary>
@@ -136,13 +135,14 @@ public class QueryExecutor
     /// For single FROM: query that graph directly.
     /// For multiple FROM: use DefaultGraphUnionScan for streaming results.
     /// </summary>
-    private QueryResults ExecuteWithDefaultGraphs(GraphPattern pattern,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    private QueryResults ExecuteWithDefaultGraphs()
     {
         var bindings = new Binding[16];
         var stringBuffer = new char[1024];
         var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // Access pattern via ref to avoid copying
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
         var requiredCount = pattern.RequiredPatternCount;
 
         // Single FROM clause - query that specific graph
@@ -162,7 +162,9 @@ public class QueryExecutor
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
 
                 return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
-                    limit, offset, distinct, orderBy, groupBy, selectClause, having);
+                    _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                    _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
+                    _query.SolutionModifier.Having);
             }
 
             if (requiredCount == 0)
@@ -172,13 +174,17 @@ public class QueryExecutor
             return new QueryResults(
                 new MultiPatternScan(_store, _source, pattern, false, graphIri),
                 pattern, _source, _store, bindings, stringBuffer,
-                limit, offset, distinct, orderBy, groupBy, selectClause, having);
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+                _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
+                _query.SolutionModifier.Having);
         }
 
         // Multiple FROM clauses - use DefaultGraphUnionScan for streaming
         var unionScan = new DefaultGraphUnionScan(_store, _source, pattern, _defaultGraphs);
         return new QueryResults(unionScan, pattern, _source, _store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+            _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
+            _query.SolutionModifier.Having);
     }
 
     /// <summary>
@@ -339,10 +345,14 @@ public class QueryExecutor
         return new DescribeResults(_store, queryResults, bindings, stringBuffer, describeAll);
     }
 
-    private QueryResults ExecuteWithJoins(GraphPattern pattern, Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    private QueryResults ExecuteWithJoins()
     {
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+
+        // Access pattern via ref to avoid copying
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+
         // Use nested loop join for required patterns only
         return new QueryResults(
             new MultiPatternScan(_store, _source, pattern),
@@ -351,27 +361,121 @@ public class QueryExecutor
             _store,
             bindings,
             stringBuffer,
-            limit,
-            offset,
-            distinct,
-            orderBy,
-            groupBy,
-            selectClause,
-            having);
+            _query.SolutionModifier.Limit,
+            _query.SolutionModifier.Offset,
+            _query.SelectClause.Distinct,
+            _query.SolutionModifier.OrderBy,
+            _query.SolutionModifier.GroupBy,
+            _query.SelectClause,
+            _query.SolutionModifier.Having);
     }
 
     /// <summary>
     /// Execute a query with only GRAPH clauses (no default graph patterns).
     /// For queries like: SELECT * WHERE { GRAPH &lt;g&gt; { ?s ?p ?o } }
+    /// NOTE: This method is carefully structured to minimize stack usage.
     /// </summary>
-    private QueryResults ExecuteGraphClauses(GraphPattern pattern,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    private QueryResults ExecuteGraphClauses()
     {
-        // For now, handle single GRAPH clause
-        if (pattern.GraphClauseCount != 1)
+        // Check conditions WITHOUT creating local struct copies
+        if (_query.WhereClause.Pattern.GraphClauseCount != 1)
             return QueryResults.Empty(); // Multiple GRAPH clauses need join - not yet supported
 
+        // Check if it's a variable graph - use pattern.GetGraphClause(0).IsVariable directly
+        // to avoid creating a local copy of GraphClause
+        if (_query.WhereClause.Pattern.GetGraphClause(0).IsVariable)
+        {
+            if (_query.WhereClause.Pattern.GetGraphClause(0).PatternCount == 0)
+                return QueryResults.Empty();
+
+            // Delegate to static method that creates the config directly
+            // This avoids having large struct locals on THIS method's stack
+            return ExecuteVariableGraphClauses();
+        }
+
+        // For fixed IRI graph - proceed with smaller stack usage
+        return ExecuteFixedGraphClause();
+    }
+
+    // Holder class for QueryResults since ref structs can't be captured in closures
+    private sealed class ResultHolder
+    {
+        public System.Collections.Generic.List<MaterializedRow>? Results;
+        public System.Exception? Exception;
+    }
+
+    /// <summary>
+    /// Helper method for variable graph execution.
+    /// Runs on a separate thread with larger stack to avoid stack overflow
+    /// from deep call chains combined with large struct locals.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteVariableGraphClauses()
+    {
+        // Create config object - copies structs to heap
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+
+        var config = new VariableGraphExecutor.ExecutionConfig
+        {
+            Store = _store,
+            Source = _source,
+            GraphClause = _query.WhereClause.Pattern.GetGraphClause(0),
+            Pattern = _query.WhereClause.Pattern,
+            NamedGraphs = _namedGraphs,
+            Bindings = bindings,
+            StringBuffer = stringBuffer,
+            Limit = _query.SolutionModifier.Limit,
+            Offset = _query.SolutionModifier.Offset,
+            Distinct = _query.SelectClause.Distinct,
+            OrderBy = _query.SolutionModifier.OrderBy,
+            GroupBy = _query.SolutionModifier.GroupBy,
+            SelectClause = _query.SelectClause,
+            Having = _query.SolutionModifier.Having
+        };
+
+        // Execute on a thread with a larger stack (4MB instead of default ~1MB)
+        // This avoids stack overflow from combined large struct locals and xUnit framework overhead
+        var holder = new ResultHolder();
+
+        var thread = new System.Threading.Thread(() =>
+        {
+            try
+            {
+                // Execute and collect results as materialized rows
+                holder.Results = VariableGraphExecutor.ExecuteAndCollect(config);
+            }
+            catch (System.Exception ex)
+            {
+                holder.Exception = ex;
+            }
+        }, maxStackSize: 4 * 1024 * 1024); // 4MB stack
+
+        thread.Start();
+        thread.Join();
+
+        if (holder.Exception != null)
+            throw holder.Exception;
+
+        if (holder.Results == null || holder.Results.Count == 0)
+            return QueryResults.Empty();
+
+        // Return results via FromMaterializedSimple to avoid stack overflow
+        // from passing large GraphPattern struct
+        return QueryResults.FromMaterializedSimple(holder.Results, _source, _store,
+            bindings, stringBuffer, config.Limit, config.Offset, config.Distinct,
+            config.OrderBy, config.GroupBy, config.SelectClause, config.Having);
+    }
+
+    /// <summary>
+    /// Helper method for fixed IRI graph execution.
+    /// Isolated to separate stack frame.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteFixedGraphClause()
+    {
+        // Now we can create local copies since we're in a separate frame
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
         var graphClause = pattern.GetGraphClause(0);
 
         // Build binding storage
@@ -379,26 +483,21 @@ public class QueryExecutor
         var stringBuffer = new char[1024];
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Variable graph - iterate named graphs (filtered by FROM NAMED if present)
-        // Use static helper to avoid stack overflow from large QueryExecutor this pointer
-        if (graphClause.IsVariable)
-        {
-            if (graphClause.PatternCount == 0)
-                return QueryResults.Empty();
-
-            // Use static helper to minimize stack usage (avoids carrying large Query struct)
-            return VariableGraphExecutor.Execute(
-                _store, _source.ToString(), graphClause, pattern, _namedGraphs,
-                bindings, stringBuffer, limit, offset, distinct, orderBy,
-                groupBy, selectClause, having);
-        }
-
         // Get the graph IRI
         var graphIri = _source.AsSpan(graphClause.Graph.Start, graphClause.Graph.Length);
 
         var patternCount = graphClause.PatternCount;
         if (patternCount == 0)
             return QueryResults.Empty();
+
+        // Extract modifiers from _query
+        var limit = _query.SolutionModifier.Limit;
+        var offset = _query.SolutionModifier.Offset;
+        var distinct = _query.SelectClause.Distinct;
+        var orderBy = _query.SolutionModifier.OrderBy;
+        var groupBy = _query.SolutionModifier.GroupBy;
+        var selectClause = _query.SelectClause;
+        var having = _query.SolutionModifier.Having;
 
         // Single pattern in GRAPH clause
         if (patternCount == 1)
@@ -438,10 +537,11 @@ public class QueryExecutor
     /// Execute a query that contains subqueries.
     /// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
     /// </summary>
-    private QueryResults ExecuteWithSubQueries(GraphPattern pattern,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    private QueryResults ExecuteWithSubQueries()
     {
+        // Access pattern via ref to avoid copying
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+
         // For now, handle single subquery case
         if (pattern.SubQueryCount != 1)
             return QueryResults.Empty(); // Multiple subqueries need join - not yet supported
@@ -462,28 +562,66 @@ public class QueryExecutor
             // Execute join using SubQueryJoinScan
             // Note: This scan needs to be consumed before QueryResults to avoid stack overflow
             // due to ref struct size. We collect results eagerly then return a MultiPatternScan.
-            return ExecuteSubQueryJoin(pattern, subSelect, bindings, stringBuffer,
-                limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            return ExecuteSubQueryJoin(subSelect, bindings, stringBuffer);
         }
 
         return new QueryResults(subQueryScan, pattern, _source, _store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, _query.SelectClause.Distinct,
+            _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
+            _query.SolutionModifier.Having);
     }
 
     /// <summary>
-    /// Execute a subquery join by collecting results eagerly to avoid stack overflow from nested ref structs.
+    /// Execute a subquery join by running on a separate thread with larger stack
+    /// to avoid stack overflow from large struct locals.
     /// </summary>
-    private QueryResults ExecuteSubQueryJoin(GraphPattern pattern, SubSelect subSelect,
-        Binding[] bindings, char[] stringBuffer,
-        int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    private QueryResults ExecuteSubQueryJoin(SubSelect subSelect, Binding[] bindings, char[] stringBuffer)
     {
-        // Build outer pattern (without the subquery)
-        var outerPattern = new GraphPattern();
-        for (int i = 0; i < pattern.PatternCount; i++)
+        // Execute on a thread with a larger stack (4MB instead of default ~1MB)
+        // This avoids stack overflow from large structs (GraphPattern, SubQueryJoinScan)
+        var holder = new ResultHolder();
+
+        // Capture needed values for the thread
+        var store = _store;
+        var source = _source;
+        var query = _query;
+
+        var thread = new System.Threading.Thread(() =>
         {
-            outerPattern.AddPattern(pattern.GetPattern(i));
-        }
+            try
+            {
+                holder.Results = ExecuteSubQueryJoinCore(store, source, query, subSelect);
+            }
+            catch (System.Exception ex)
+            {
+                holder.Exception = ex;
+            }
+        }, maxStackSize: 4 * 1024 * 1024); // 4MB stack
+
+        thread.Start();
+        thread.Join();
+
+        if (holder.Exception != null)
+            throw holder.Exception;
+
+        if (holder.Results == null || holder.Results.Count == 0)
+            return QueryResults.Empty();
+
+        // Return results via FromMaterializedSimple to avoid stack overflow
+        return QueryResults.FromMaterializedSimple(holder.Results, _source, _store,
+            bindings, stringBuffer, _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
+            _query.SelectClause.Distinct, _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy,
+            _query.SelectClause, _query.SolutionModifier.Having);
+    }
+
+    /// <summary>
+    /// Core execution of subquery join. Called on separate thread with larger stack.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static System.Collections.Generic.List<MaterializedRow> ExecuteSubQueryJoinCore(
+        QuadStore store, string source, Query query, SubSelect subSelect)
+    {
+        var pattern = query.WhereClause.Pattern;
 
         // Execute the join and collect all results
         var results = new System.Collections.Generic.List<MaterializedRow>();
@@ -494,7 +632,7 @@ public class QueryExecutor
 
         var hasFilters = pattern.FilterCount > 0;
 
-        var joinScan = new SubQueryJoinScan(_store, _source, pattern, subSelect);
+        var joinScan = new SubQueryJoinScan(store, source, pattern, subSelect);
         while (joinScan.MoveNext(ref bindingTable))
         {
             // Apply outer FILTER clauses
@@ -504,7 +642,7 @@ public class QueryExecutor
                 for (int i = 0; i < pattern.FilterCount; i++)
                 {
                     var filter = pattern.GetFilter(i);
-                    var filterExpr = _source.AsSpan(filter.Start, filter.Length);
+                    var filterExpr = source.AsSpan(filter.Start, filter.Length);
                     var evaluator = new FilterEvaluator(filterExpr);
                     if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
                     {
@@ -525,11 +663,6 @@ public class QueryExecutor
         }
         joinScan.Dispose();
 
-        if (results.Count == 0)
-            return QueryResults.Empty();
-
-        // Return via materialized results
-        return QueryResults.FromMaterialized(results, outerPattern, _source, _store,
-            bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        return results;
     }
 }
