@@ -5,7 +5,7 @@ using SkyOmega.Mercury.Storage;
 namespace SkyOmega.Mercury.Sparql.Execution;
 
 /// <summary>
-/// Zero-allocation SPARQL query executor using specialized operators.
+/// SPARQL query executor using specialized operators.
 ///
 /// Execution model:
 /// 1. Parse query → Query struct with triple patterns + filters
@@ -16,22 +16,25 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// - FROM clauses define default graph(s) - patterns without GRAPH query these
 /// - FROM NAMED clauses define named graphs available to GRAPH patterns
 /// - Without dataset clauses, default graph = atom 0, all named graphs available
+///
+/// Note: This is a class (not ref struct) to enable heap-based execution context,
+/// which reduces stack pressure for complex queries. The string source is copied
+/// once at construction time.
 /// </summary>
-public ref struct QueryExecutor
+public class QueryExecutor
 {
     private readonly QuadStore _store;
-    private readonly ReadOnlySpan<char> _source;
+    private readonly string _source;
     private readonly Query _query;
 
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
-    // Stored as heap-allocated arrays to minimize ref struct size
     private readonly string[]? _defaultGraphs;
     private readonly string[]? _namedGraphs;
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query)
     {
         _store = store;
-        _source = source;
+        _source = source.ToString();  // Copy to heap - enables class-based execution
         _query = query;
         _defaultGraphs = null;
         _namedGraphs = null;
@@ -391,7 +394,7 @@ public ref struct QueryExecutor
         }
 
         // Get the graph IRI
-        var graphIri = _source.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
+        var graphIri = _source.AsSpan(graphClause.Graph.Start, graphClause.Graph.Length);
 
         var patternCount = graphClause.PatternCount;
         if (patternCount == 0)
@@ -501,7 +504,7 @@ public ref struct QueryExecutor
                 for (int i = 0; i < pattern.FilterCount; i++)
                 {
                     var filter = pattern.GetFilter(i);
-                    var filterExpr = _source.Slice(filter.Start, filter.Length);
+                    var filterExpr = _source.AsSpan(filter.Start, filter.Length);
                     var evaluator = new FilterEvaluator(filterExpr);
                     if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
                     {
