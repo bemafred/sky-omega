@@ -11,6 +11,11 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// 1. Parse query → Query struct with triple patterns + filters
 /// 2. Build execution plan → Stack of operators
 /// 3. Execute → Pull-based iteration through operator pipeline
+///
+/// Dataset clauses (FROM/FROM NAMED):
+/// - FROM clauses define default graph(s) - patterns without GRAPH query these
+/// - FROM NAMED clauses define named graphs available to GRAPH patterns
+/// - Without dataset clauses, default graph = atom 0, all named graphs available
 /// </summary>
 public ref struct QueryExecutor
 {
@@ -18,11 +23,37 @@ public ref struct QueryExecutor
     private readonly ReadOnlySpan<char> _source;
     private readonly Query _query;
 
+    // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
+    // Stored as heap-allocated arrays to minimize ref struct size
+    private readonly string[]? _defaultGraphs;
+    private readonly string[]? _namedGraphs;
+
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query)
     {
         _store = store;
         _source = source;
         _query = query;
+        _defaultGraphs = null;
+        _namedGraphs = null;
+
+        // Extract dataset clauses into arrays
+        if (query.Datasets.Length > 0)
+        {
+            var defaultList = new System.Collections.Generic.List<string>();
+            var namedList = new System.Collections.Generic.List<string>();
+
+            foreach (var ds in query.Datasets)
+            {
+                var iri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length).ToString();
+                if (ds.IsNamed)
+                    namedList.Add(iri);
+                else
+                    defaultList.Add(iri);
+            }
+
+            if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
+            if (namedList.Count > 0) _namedGraphs = namedList.ToArray();
+        }
     }
 
     /// <summary>
@@ -55,6 +86,12 @@ public ref struct QueryExecutor
 
         if (pattern.PatternCount == 0)
             return QueryResults.Empty();
+
+        // Check for FROM clauses (default graph dataset)
+        if (_defaultGraphs != null && _defaultGraphs.Length > 0)
+        {
+            return ExecuteWithDefaultGraphs(pattern, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        }
 
         // Build binding storage
         var bindings = new Binding[16];
@@ -89,6 +126,56 @@ public ref struct QueryExecutor
 
         // Multiple required patterns - need join
         return ExecuteWithJoins(pattern, bindings, stringBuffer, limit, offset, distinct, orderBy, groupBy, selectClause, having);
+    }
+
+    /// <summary>
+    /// Execute query against specified default graphs (FROM clauses).
+    /// For single FROM: query that graph directly.
+    /// For multiple FROM: use DefaultGraphUnionScan for streaming results.
+    /// </summary>
+    private QueryResults ExecuteWithDefaultGraphs(GraphPattern pattern,
+        int limit, int offset, bool distinct, OrderByClause orderBy,
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+    {
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+        var requiredCount = pattern.RequiredPatternCount;
+
+        // Single FROM clause - query that specific graph
+        if (_defaultGraphs!.Length == 1)
+        {
+            var graphIri = _defaultGraphs[0].AsSpan();
+
+            if (requiredCount == 1)
+            {
+                int requiredIdx = 0;
+                for (int i = 0; i < pattern.PatternCount; i++)
+                {
+                    if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
+                }
+
+                var tp = pattern.GetPattern(requiredIdx);
+                var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
+
+                return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
+                    limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            }
+
+            if (requiredCount == 0)
+                return QueryResults.Empty();
+
+            // Multiple patterns - use MultiPatternScan with graph
+            return new QueryResults(
+                new MultiPatternScan(_store, _source, pattern, false, graphIri),
+                pattern, _source, _store, bindings, stringBuffer,
+                limit, offset, distinct, orderBy, groupBy, selectClause, having);
+        }
+
+        // Multiple FROM clauses - use DefaultGraphUnionScan for streaming
+        var unionScan = new DefaultGraphUnionScan(_store, _source, pattern, _defaultGraphs);
+        return new QueryResults(unionScan, pattern, _source, _store, bindings, stringBuffer,
+            limit, offset, distinct, orderBy, groupBy, selectClause, having);
     }
 
     /// <summary>
@@ -289,13 +376,14 @@ public ref struct QueryExecutor
         var stringBuffer = new char[1024];
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Variable graph - iterate all named graphs
+        // Variable graph - iterate named graphs (filtered by FROM NAMED if present)
         if (graphClause.IsVariable)
         {
             if (graphClause.PatternCount == 0)
                 return QueryResults.Empty();
 
-            var scan = new VariableGraphScan(_store, _source, graphClause);
+            // Apply FROM NAMED restriction if present
+            var scan = new VariableGraphScan(_store, _source, graphClause, _namedGraphs);
 
             return new QueryResults(scan, pattern, _source, _store, bindings, stringBuffer,
                 limit, offset, distinct, orderBy, groupBy, selectClause, having);

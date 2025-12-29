@@ -13,6 +13,7 @@ public ref partial struct QueryResults
     private MultiPatternScan _multiScan;
     private VariableGraphScan _variableGraphScan;
     private SubQueryScan _subQueryScan;
+    private DefaultGraphUnionScan _defaultGraphUnionScan;
     private GraphPattern _pattern;
     private ReadOnlySpan<char> _source;
     private QuadStore? _store;
@@ -24,6 +25,7 @@ public ref partial struct QueryResults
     private readonly bool _isMultiPattern;
     private readonly bool _isVariableGraph;
     private readonly bool _isSubQuery;
+    private readonly bool _isDefaultGraphUnion;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
@@ -120,6 +122,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isVariableGraph = false;
         _isSubQuery = false;
+        _isDefaultGraphUnion = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -163,6 +166,7 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isVariableGraph = false;
         _isSubQuery = false;
+        _isDefaultGraphUnion = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -206,6 +210,7 @@ public ref partial struct QueryResults
         _isMultiPattern = true;
         _isVariableGraph = false;
         _isSubQuery = false;
+        _isDefaultGraphUnion = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -248,6 +253,7 @@ public ref partial struct QueryResults
         _hasUnion = false;
         _isMultiPattern = false;
         _isVariableGraph = true;
+        _isDefaultGraphUnion = false;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -292,6 +298,51 @@ public ref partial struct QueryResults
         _isMultiPattern = false;
         _isVariableGraph = false;
         _isSubQuery = true;
+        _isEmpty = false;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = orderBy;
+        _hasOrderBy = orderBy.HasOrderBy;
+        _sortedResults = null;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
+        _groupBy = groupBy;
+        _selectClause = selectClause;
+        _hasGroupBy = groupBy.HasGroupBy;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = having;
+        _hasHaving = having.HasHaving;
+        _isDefaultGraphUnion = false;
+    }
+
+    internal QueryResults(DefaultGraphUnionScan scan, GraphPattern pattern, ReadOnlySpan<char> source,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+    {
+        _defaultGraphUnionScan = scan;
+        _pattern = pattern;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = pattern.FilterCount > 0;
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isVariableGraph = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = true;
         _isEmpty = false;
         _limit = limit;
         _offset = offset;
@@ -366,6 +417,10 @@ public ref partial struct QueryResults
             {
                 hasNext = _variableGraphScan.MoveNext(ref _bindingTable);
             }
+            else if (_isDefaultGraphUnion)
+            {
+                hasNext = _defaultGraphUnionScan.MoveNext(ref _bindingTable);
+            }
             else if (_unionBranchActive)
             {
                 // Using UNION branch scans
@@ -386,7 +441,7 @@ public ref partial struct QueryResults
             if (!hasNext)
             {
                 // Try switching to UNION branch
-                if (!_isSubQuery && !_isVariableGraph && _hasUnion && !_unionBranchActive)
+                if (!_isSubQuery && !_isVariableGraph && !_isDefaultGraphUnion && _hasUnion && !_unionBranchActive)
                 {
                     _unionBranchActive = true;
                     if (!InitializeUnionBranch())

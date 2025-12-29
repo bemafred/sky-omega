@@ -577,6 +577,7 @@ public ref struct MultiPatternScan
 /// <summary>
 /// Scans triple patterns across all named graphs, binding a graph variable.
 /// For queries like: SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }
+/// Supports FROM NAMED restriction: only iterate specified named graphs.
 /// </summary>
 public ref struct VariableGraphScan
 {
@@ -591,17 +592,24 @@ public ref struct VariableGraphScan
     private bool _initialized;
     private bool _exhausted;
 
-    public VariableGraphScan(QuadStore store, ReadOnlySpan<char> source, GraphClause graphClause)
+    // FROM NAMED restriction: if non-null, only iterate these graphs
+    private readonly string[]? _allowedNamedGraphs;
+    private int _allowedGraphIndex;  // For iterating _allowedNamedGraphs directly
+
+    public VariableGraphScan(QuadStore store, ReadOnlySpan<char> source, GraphClause graphClause,
+        string[]? allowedNamedGraphs = null)
     {
         _store = store;
         _source = source;
         _graphClause = graphClause;
-        _graphEnum = store.GetNamedGraphs();
+        _graphEnum = allowedNamedGraphs == null ? store.GetNamedGraphs() : default;
         _currentScan = default;
         _innerPattern = default;
         _currentGraph = default;
         _initialized = false;
         _exhausted = false;
+        _allowedNamedGraphs = allowedNamedGraphs;
+        _allowedGraphIndex = 0;
 
         // Compute hash for graph variable name for binding
         var graphVarName = source.Slice(graphClause.Graph.Start, graphClause.Graph.Length);
@@ -644,16 +652,35 @@ public ref struct VariableGraphScan
             }
 
             // Move to next graph
-            if (!_graphEnum.MoveNext())
+            if (!MoveToNextGraph())
             {
                 _exhausted = true;
                 return false;
             }
 
             // Initialize scan for new graph
-            _currentGraph = _graphEnum.Current;
             _currentScan = new MultiPatternScan(_store, _source, _innerPattern, false, _currentGraph);
             _initialized = true;
+        }
+    }
+
+    private bool MoveToNextGraph()
+    {
+        if (_allowedNamedGraphs != null)
+        {
+            // Iterate through allowed graphs list
+            if (_allowedGraphIndex >= _allowedNamedGraphs.Length)
+                return false;
+            _currentGraph = _allowedNamedGraphs[_allowedGraphIndex++].AsSpan();
+            return true;
+        }
+        else
+        {
+            // Iterate all named graphs
+            if (!_graphEnum.MoveNext())
+                return false;
+            _currentGraph = _graphEnum.Current;
+            return true;
         }
     }
 
@@ -1029,6 +1056,108 @@ public ref struct SubQueryJoinScan
                 _outerScan.Dispose();
             else
                 _singleOuterScan.Dispose();
+        }
+    }
+}
+
+/// <summary>
+/// Scans triple patterns across multiple default graphs (FROM clauses), unioning results.
+/// This is a streaming operator that avoids materializing all results upfront.
+/// </summary>
+public ref struct DefaultGraphUnionScan
+{
+    private readonly QuadStore _store;
+    private readonly ReadOnlySpan<char> _source;
+    private readonly GraphPattern _pattern;
+    private readonly string[] _defaultGraphs;
+    private int _currentGraphIndex;
+    private TriplePatternScan _singleScan;
+    private MultiPatternScan _multiScan;
+    private bool _isMultiPattern;
+    private bool _initialized;
+    private bool _exhausted;
+
+    public DefaultGraphUnionScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern, string[] defaultGraphs)
+    {
+        _store = store;
+        _source = source;
+        _pattern = pattern;
+        _defaultGraphs = defaultGraphs;
+        _currentGraphIndex = 0;
+        _singleScan = default;
+        _multiScan = default;
+        _isMultiPattern = pattern.RequiredPatternCount > 1;
+        _initialized = false;
+        _exhausted = false;
+    }
+
+    public bool MoveNext(ref BindingTable bindings)
+    {
+        if (_exhausted)
+            return false;
+
+        while (true)
+        {
+            // Try to get next result from current graph's scan
+            if (_initialized)
+            {
+                bool hasNext = _isMultiPattern
+                    ? _multiScan.MoveNext(ref bindings)
+                    : _singleScan.MoveNext(ref bindings);
+
+                if (hasNext)
+                    return true;
+
+                // Current graph exhausted, dispose and move to next
+                if (_isMultiPattern)
+                    _multiScan.Dispose();
+                else
+                    _singleScan.Dispose();
+                _initialized = false;
+            }
+
+            // Move to next graph
+            if (_currentGraphIndex >= _defaultGraphs.Length)
+            {
+                _exhausted = true;
+                return false;
+            }
+
+            // Initialize scan for new graph
+            var graphIri = _defaultGraphs[_currentGraphIndex++].AsSpan();
+            InitializeScan(graphIri, ref bindings);
+            _initialized = true;
+        }
+    }
+
+    private void InitializeScan(ReadOnlySpan<char> graphIri, ref BindingTable bindings)
+    {
+        if (_isMultiPattern)
+        {
+            _multiScan = new MultiPatternScan(_store, _source, _pattern, false, graphIri);
+        }
+        else
+        {
+            // Find the first required pattern
+            int requiredIdx = 0;
+            for (int i = 0; i < _pattern.PatternCount; i++)
+            {
+                if (!_pattern.IsOptional(i)) { requiredIdx = i; break; }
+            }
+
+            var tp = _pattern.GetPattern(requiredIdx);
+            _singleScan = new TriplePatternScan(_store, _source, tp, bindings, graphIri);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_initialized)
+        {
+            if (_isMultiPattern)
+                _multiScan.Dispose();
+            else
+                _singleScan.Dispose();
         }
     }
 }

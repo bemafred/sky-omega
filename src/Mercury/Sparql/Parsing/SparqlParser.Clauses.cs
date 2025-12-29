@@ -386,10 +386,64 @@ public ref partial struct SparqlParser
         return agg;
     }
 
+    /// <summary>
+    /// [13] DatasetClause ::= 'FROM' ( DefaultGraphClause | NamedGraphClause )
+    /// [14] DefaultGraphClause ::= SourceSelector
+    /// [15] NamedGraphClause ::= 'NAMED' SourceSelector
+    /// [16] SourceSelector ::= iri
+    /// </summary>
     private DatasetClause[] ParseDatasetClauses()
     {
-        // Simplified - return empty for now
-        return Array.Empty<DatasetClause>();
+        const int MaxDatasetClauses = 16;
+        Span<DatasetClause> clauses = stackalloc DatasetClause[MaxDatasetClauses];
+        int count = 0;
+
+        SkipWhitespace();
+
+        // Loop while we see FROM keyword
+        while (!IsAtEnd())
+        {
+            var span = PeekSpan(4);
+            if (span.Length < 4 || !span.Equals("FROM", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            if (count >= MaxDatasetClauses)
+                throw new SparqlParseException($"Too many dataset clauses (max {MaxDatasetClauses})");
+
+            ConsumeKeyword("FROM");
+            SkipWhitespace();
+
+            // Check for NAMED keyword
+            bool isNamed = false;
+            span = PeekSpan(5);
+            if (span.Length >= 5 && span.Equals("NAMED", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("NAMED");
+                SkipWhitespace();
+                isNamed = true;
+            }
+
+            // Parse the IRI
+            var iri = ParseTerm();
+            if (!iri.IsIri)
+                throw new SparqlParseException("Expected IRI in FROM clause");
+
+            clauses[count++] = isNamed
+                ? DatasetClause.Named(iri.Start, iri.Length)
+                : DatasetClause.Default(iri.Start, iri.Length);
+
+            SkipWhitespace();
+        }
+
+        if (count == 0)
+            return Array.Empty<DatasetClause>();
+
+        // Copy to heap array
+        var result = new DatasetClause[count];
+        for (int i = 0; i < count; i++)
+            result[i] = clauses[i];
+
+        return result;
     }
 
     private WhereClause ParseWhereClause()
