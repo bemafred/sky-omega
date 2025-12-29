@@ -310,7 +310,7 @@ Key components:
 | Category | Features |
 |----------|----------|
 | Query types | SELECT, ASK, CONSTRUCT, DESCRIBE |
-| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable), Subqueries |
+| Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable, multiple), Subqueries (single and multiple) |
 | Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
@@ -330,7 +330,6 @@ Key components:
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Multiple subqueries | Single only | Multiple subqueries need join support |
 | REDUCED | Parsed only | Flag set but not applied in execution |
 
 **Not implemented SPARQL 1.1 features:**

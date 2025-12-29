@@ -709,7 +709,8 @@ public ref partial struct SparqlParser
         if (Peek() == '{')
         {
             ParseGroupOrUnionGraphPattern(ref pattern);
-            return;
+            SkipWhitespace();
+            // Don't return - continue to parse additional nested groups or patterns
         }
 
         while (!IsAtEnd() && Peek() != '}')
