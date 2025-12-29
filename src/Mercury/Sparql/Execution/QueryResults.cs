@@ -94,7 +94,7 @@ public ref partial struct QueryResults
         if (orderBy.HasOrderBy && rows.Count > 1)
         {
             var sourceStr = source.ToString();
-            rows.Sort((a, b) => CompareRowsStatic(a, b, orderBy, sourceStr));
+            rows.Sort(new MaterializedRowComparer(orderBy, sourceStr));
         }
 
         return new QueryResults(rows, pattern, source, store, bindings, stringBuffer,
@@ -114,11 +114,35 @@ public ref partial struct QueryResults
         if (orderBy.HasOrderBy && rows.Count > 1)
         {
             var sourceStr = source.ToString();
-            rows.Sort((a, b) => CompareRowsStatic(a, b, orderBy, sourceStr));
+            rows.Sort(new MaterializedRowComparer(orderBy, sourceStr));
         }
 
         return new QueryResults(rows, source, store, bindings, stringBuffer,
             limit, offset, distinct, orderBy, groupBy, selectClause, having);
+    }
+
+    /// <summary>
+    /// Create QueryResults from pre-materialized rows without any large clause structs.
+    /// This is the minimal version that avoids stack overflow.
+    /// NoInlining prevents the compiler from merging this into a larger stack frame.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal static QueryResults FromMaterializedRows(List<MaterializedRow> rows,
+        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit = 0, int offset = 0, bool distinct = false)
+    {
+        return new QueryResults(rows, source, store, bindings, stringBuffer, limit, offset, distinct);
+    }
+
+    /// <summary>
+    /// Create QueryResults from a pre-materialized list without source/store references.
+    /// This is the most minimal version - just iterates the list directly.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal static QueryResults FromMaterializedList(List<MaterializedRow> rows,
+        Binding[] bindings, char[] stringBuffer, int limit = 0, int offset = 0, bool distinct = false)
+    {
+        return new QueryResults(rows, bindings, stringBuffer, limit, offset, distinct);
     }
 
     /// <summary>
@@ -210,6 +234,95 @@ public ref partial struct QueryResults
         _groupedIndex = -1;
         _having = having;
         _hasHaving = having.HasHaving;
+    }
+
+    /// <summary>
+    /// Minimal private constructor for pre-materialized results without any large clause structs.
+    /// Avoids stack overflow by not passing ORDER BY, GROUP BY, SELECT, HAVING clauses.
+    /// </summary>
+    private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct)
+    {
+        _pattern = default;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = false;
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = false;
+        _isEmpty = rows.Count == 0;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = default;
+        _hasOrderBy = true; // Use MoveNextOrdered() to iterate pre-collected results
+        _sortedResults = rows;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
+        _groupBy = default;
+        _selectClause = default;
+        _hasGroupBy = false;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = default;
+        _hasHaving = false;
+    }
+
+    /// <summary>
+    /// Most minimal constructor - just for iterating a pre-materialized list.
+    /// No source/store references needed.
+    /// </summary>
+    private QueryResults(List<MaterializedRow> rows, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct)
+    {
+        _pattern = default;
+        _source = default;
+        _store = null;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = false;
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = false;
+        _isEmpty = rows.Count == 0;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = default;
+        _hasOrderBy = true;
+        _sortedResults = rows;
+        _sortedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasExists = false;
+        _groupBy = default;
+        _selectClause = default;
+        _hasGroupBy = false;
+        _groupedResults = null;
+        _groupedIndex = -1;
+        _having = default;
+        _hasHaving = false;
     }
 
     internal QueryResults(TriplePatternScan scan, GraphPattern pattern, ReadOnlySpan<char> source,

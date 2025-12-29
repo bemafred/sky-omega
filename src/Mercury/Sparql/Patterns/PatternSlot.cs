@@ -144,6 +144,13 @@ public ref struct PatternArray
         _capacity = buffer.Length / PatternSlot.Size;
         _count = 0;
     }
+
+    public PatternArray(Span<byte> buffer, int count)
+    {
+        _buffer = buffer;
+        _capacity = buffer.Length / PatternSlot.Size;
+        _count = count;
+    }
     
     public readonly int Count => _count;
     public readonly int Capacity => _capacity;
@@ -590,12 +597,16 @@ public sealed class QueryBuffer : IDisposable
     }
 
     /// <summary>
-    /// Get pattern array view for writing/reading
+    /// Get pattern array view for writing/reading.
+    /// When PatternCount > 0 (after parsing), returns read-only view with count.
+    /// When PatternCount == 0 (during parsing), returns writable view.
     /// </summary>
     public PatternArray GetPatterns()
     {
         ThrowIfDisposed();
-        return new PatternArray(_buffer.AsSpan());
+        return _patternCount > 0
+            ? new PatternArray(_buffer.AsSpan(), _patternCount)
+            : new PatternArray(_buffer.AsSpan());
     }
 
     /// <summary>

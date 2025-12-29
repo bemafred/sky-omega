@@ -62,9 +62,8 @@ public ref partial struct QueryResults
         // Sort the results
         if (_sortedResults.Count > 1)
         {
-            var orderBy = _orderBy;
             var sourceStr = _source.ToString();
-            _sortedResults.Sort((a, b) => CompareRowsStatic(a, b, orderBy, sourceStr));
+            _sortedResults.Sort(new MaterializedRowComparer(_orderBy, sourceStr));
         }
 
         // Reset for iteration
@@ -339,4 +338,50 @@ public ref partial struct QueryResults
     /// <summary>
     /// Move to next result for non-ORDER BY queries (streaming).
     /// </summary>
+}
+
+/// <summary>
+/// Comparer for sorting materialized rows by ORDER BY conditions.
+/// Uses a class instead of lambda closure to avoid stack overflow from capturing large structs.
+/// </summary>
+internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
+{
+    private readonly OrderByClause _orderBy;
+    private readonly string _source;
+
+    public MaterializedRowComparer(OrderByClause orderBy, string source)
+    {
+        _orderBy = orderBy;
+        _source = source;
+    }
+
+    public int Compare(MaterializedRow? a, MaterializedRow? b)
+    {
+        if (a == null || b == null) return 0;
+
+        for (int i = 0; i < _orderBy.Count; i++)
+        {
+            var cond = _orderBy.GetCondition(i);
+            var varName = _source.AsSpan(cond.VariableStart, cond.VariableLength);
+
+            var aValue = a.GetValueByName(varName);
+            var bValue = b.GetValueByName(varName);
+
+            int cmp = CompareValues(aValue, bValue);
+            if (cmp != 0)
+            {
+                return cond.Direction == OrderDirection.Descending ? -cmp : cmp;
+            }
+        }
+        return 0;
+    }
+
+    private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
+    {
+        if (double.TryParse(a, out var aNum) && double.TryParse(b, out var bNum))
+        {
+            return aNum.CompareTo(bNum);
+        }
+        return a.SequenceCompareTo(b);
+    }
 }

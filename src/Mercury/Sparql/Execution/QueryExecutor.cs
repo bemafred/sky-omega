@@ -423,6 +423,7 @@ public class QueryExecutor : IDisposable
     /// For queries like: SELECT * WHERE { GRAPH &lt;g&gt; { ?s ?p ?o } }
     /// NOTE: This method is carefully structured to minimize stack usage.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteGraphClauses()
     {
         // Check conditions WITHOUT creating local struct copies
@@ -436,9 +437,9 @@ public class QueryExecutor : IDisposable
             if (_query.WhereClause.Pattern.GetGraphClause(0).PatternCount == 0)
                 return QueryResults.Empty();
 
-            // Delegate to static method that creates the config directly
-            // This avoids having large struct locals on THIS method's stack
-            return ExecuteVariableGraphClauses();
+            // Variable graph execution returns materialized results
+            // The results must be collected on a thread with larger stack
+            return ExecuteVariableGraphOnThread();
         }
 
         // For fixed IRI graph - proceed with smaller stack usage
@@ -446,19 +447,63 @@ public class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Helper method for variable graph execution.
-    /// Uses QueryBuffer to read patterns from heap, avoiding large struct copies on stack.
+    /// Execute variable graph query on a thread with larger stack.
+    /// This is necessary because QueryResults struct is ~4KB (due to GraphPattern field)
+    /// and xUnit framework adds significant stack overhead.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteVariableGraphClauses()
+    private QueryResults ExecuteVariableGraphOnThread()
+    {
+        // Collect results on thread with larger stack, store in List
+        List<MaterializedRow>? results = null;
+        Exception? threadEx = null;
+
+        // Capture needed values for the thread
+        var store = _store;
+        var source = _source;
+        var buffer = _buffer;
+        var namedGraphs = _namedGraphs;
+
+        var thread = new System.Threading.Thread(() =>
+        {
+            try
+            {
+                results = ExecuteVariableGraphCore(store, source, buffer, namedGraphs);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        }, 4 * 1024 * 1024); // 4MB stack
+
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null)
+            throw threadEx;
+
+        if (results == null || results.Count == 0)
+            return QueryResults.Empty();
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Core variable graph execution - runs on thread with larger stack.
+    /// </summary>
+    private static List<MaterializedRow>? ExecuteVariableGraphCore(
+        QuadStore store, string source, Patterns.QueryBuffer buffer, string[]? namedGraphs)
     {
         var bindings = new Binding[16];
         var stringBuffer = new char[1024];
 
         // Find the GRAPH header slot in the buffer
-        var patterns = _buffer.GetPatterns();
+        var patterns = buffer.GetPatterns();
         int graphHeaderIdx = -1;
-        for (int i = 0; i < _buffer.PatternCount; i++)
+        for (int i = 0; i < buffer.PatternCount; i++)
         {
             if (patterns[i].Kind == Patterns.PatternKind.GraphHeader)
             {
@@ -468,17 +513,16 @@ public class QueryExecutor : IDisposable
         }
 
         if (graphHeaderIdx < 0)
-            return QueryResults.Empty();
+            return null;
 
         var graphHeader = patterns[graphHeaderIdx];
 
-        // Create config using QueryBuffer - no large struct copies!
         var config = new VariableGraphExecutor.BufferExecutionConfig
         {
-            Store = _store,
-            Source = _source,
-            Buffer = _buffer,
-            NamedGraphs = _namedGraphs,
+            Store = store,
+            Source = source,
+            Buffer = buffer,
+            NamedGraphs = namedGraphs,
             Bindings = bindings,
             StringBuffer = stringBuffer,
             GraphTermType = graphHeader.GraphTermType,
@@ -487,18 +531,7 @@ public class QueryExecutor : IDisposable
             GraphHeaderIndex = graphHeaderIdx
         };
 
-        // Execute directly - no thread workaround needed since patterns are on heap
-        var results = VariableGraphExecutor.ExecuteFromBuffer(config);
-
-        if (results == null || results.Count == 0)
-            return QueryResults.Empty();
-
-        // Return results via FromMaterializedSimple
-        return QueryResults.FromMaterializedSimple(results, _source, _store,
-            bindings, stringBuffer, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
-            _buffer.OrderBy != null ? CreateOrderByClause(_buffer.OrderBy) : default,
-            _buffer.GroupBy != null ? CreateGroupByClause(_buffer.GroupBy) : default,
-            CreateSelectClause(), default);
+        return VariableGraphExecutor.ExecuteFromBuffer(config);
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array
@@ -643,18 +676,37 @@ public class QueryExecutor : IDisposable
     /// </summary>
     private QueryResults ExecuteSubQueryJoin(SubSelect subSelect, Binding[] bindings, char[] stringBuffer)
     {
-        // Execute directly - QueryBuffer enables heap-based pattern access
-        var results = ExecuteSubQueryJoinCore(subSelect);
+        // Execute on a thread with larger stack (4MB) because QueryResults is ~4KB+
+        List<MaterializedRow>? results = null;
+        Exception? threadEx = null;
+
+        // Capture needed values for thread closure
+        var capturedSubSelect = subSelect;
+
+        var thread = new System.Threading.Thread(() =>
+        {
+            try
+            {
+                results = ExecuteSubQueryJoinCore(capturedSubSelect);
+            }
+            catch (Exception ex)
+            {
+                threadEx = ex;
+            }
+        }, 4 * 1024 * 1024); // 4MB stack
+
+        thread.Start();
+        thread.Join();
+
+        if (threadEx != null)
+            throw threadEx;
 
         if (results == null || results.Count == 0)
             return QueryResults.Empty();
 
-        // Return results via FromMaterializedSimple
-        return QueryResults.FromMaterializedSimple(results, _source, _store,
-            bindings, stringBuffer, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
-            _buffer.OrderBy != null ? CreateOrderByClause(_buffer.OrderBy) : default,
-            _buffer.GroupBy != null ? CreateGroupByClause(_buffer.GroupBy) : default,
-            CreateSelectClause(), default);
+        // Return via minimal materialized list wrapper
+        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
     /// <summary>
