@@ -17,6 +17,12 @@ public ref struct TriplePatternScan
     private readonly int _initialBindingsCount;
     private readonly ReadOnlySpan<char> _graph;
 
+    // Temporal query parameters
+    private readonly TemporalQueryMode _temporalMode;
+    private readonly DateTimeOffset _asOfTime;
+    private readonly DateTimeOffset _rangeStart;
+    private readonly DateTimeOffset _rangeEnd;
+
     // For property path traversal
     private readonly bool _isInverse;
     private readonly bool _isZeroOrMore;
@@ -31,6 +37,15 @@ public ref struct TriplePatternScan
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
+        : this(store, source, pattern, initialBindings, graph,
+               TemporalQueryMode.Current, default, default, default)
+    {
+    }
+
+    public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
+        TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph,
+        TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
+        DateTimeOffset rangeStart, DateTimeOffset rangeEnd)
     {
         _store = store;
         _source = source;
@@ -40,6 +55,12 @@ public ref struct TriplePatternScan
         _graph = graph;
         _initialized = false;
         _enumerator = default;
+
+        // Temporal parameters
+        _temporalMode = temporalMode;
+        _asOfTime = asOfTime;
+        _rangeStart = rangeStart;
+        _rangeEnd = rangeEnd;
 
         // Check property path type
         _isInverse = pattern.Path.Type == PathType.Inverse;
@@ -153,11 +174,10 @@ public ref struct TriplePatternScan
                 ? ResolveTermForQuery(_pattern.Path.Iri)
                 : ResolveTermForQuery(_pattern.Predicate);
 
-            _enumerator = _store.QueryCurrent(
+            _enumerator = ExecuteTemporalQuery(
                 _currentNode.AsSpan(),
                 predicate,
-                ReadOnlySpan<char>.Empty,
-                _graph);
+                ReadOnlySpan<char>.Empty);
         }
     }
 
@@ -178,13 +198,28 @@ public ref struct TriplePatternScan
         {
             // For inverse path, query with swapped subject/object
             predicate = ResolveTermForQuery(_pattern.Path.Iri);
-            _enumerator = _store.QueryCurrent(obj, predicate, subject, _graph);
+            _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
         }
         else
         {
             predicate = ResolveTermForQuery(_pattern.Predicate);
-            _enumerator = _store.QueryCurrent(subject, predicate, obj, _graph);
+            _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
         }
+    }
+
+    private TemporalResultEnumerator ExecuteTemporalQuery(
+        ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+    {
+        return _temporalMode switch
+        {
+            TemporalQueryMode.AsOf =>
+                _store.QueryAsOf(subject, predicate, obj, _asOfTime, _graph),
+            TemporalQueryMode.During =>
+                _store.QueryChanges(_rangeStart, _rangeEnd, subject, predicate, obj, _graph),
+            TemporalQueryMode.AllVersions =>
+                _store.QueryEvolution(subject, predicate, obj, _graph),
+            _ => _store.QueryCurrent(subject, predicate, obj, _graph)
+        };
     }
 
     private void InitializeTransitive()
@@ -208,11 +243,10 @@ public ref struct TriplePatternScan
             ? ResolveTermForQuery(_pattern.Path.Iri)
             : ResolveTermForQuery(_pattern.Predicate);
 
-        _enumerator = _store.QueryCurrent(
+        _enumerator = ExecuteTemporalQuery(
             startNode.AsSpan(),
             predicate,
-            ReadOnlySpan<char>.Empty,
-            _graph);
+            ReadOnlySpan<char>.Empty);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -278,6 +312,12 @@ public ref struct MultiPatternScan
     private readonly bool _unionMode;
     private readonly ReadOnlySpan<char> _graph;
 
+    // Temporal query parameters
+    private readonly TemporalQueryMode _temporalMode;
+    private readonly DateTimeOffset _asOfTime;
+    private readonly DateTimeOffset _rangeStart;
+    private readonly DateTimeOffset _rangeEnd;
+
     // Current state for each pattern level
     private TemporalResultEnumerator _enum0;
     private TemporalResultEnumerator _enum1;
@@ -293,12 +333,25 @@ public ref struct MultiPatternScan
 
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode = false, ReadOnlySpan<char> graph = default)
+        : this(store, source, pattern, unionMode, graph,
+               TemporalQueryMode.Current, default, default, default)
+    {
+    }
+
+    public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
+        bool unionMode, ReadOnlySpan<char> graph,
+        TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
+        DateTimeOffset rangeStart, DateTimeOffset rangeEnd)
     {
         _store = store;
         _source = source;
         _pattern = pattern;
         _unionMode = unionMode;
         _graph = graph;
+        _temporalMode = temporalMode;
+        _asOfTime = asOfTime;
+        _rangeStart = rangeStart;
+        _rangeEnd = rangeEnd;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _exhausted = false;
@@ -524,7 +577,22 @@ public ref struct MultiPatternScan
             obj = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
         }
 
-        enumerator = _store.QueryCurrent(subject, predicate, obj, _graph);
+        enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+    }
+
+    private TemporalResultEnumerator ExecuteTemporalQuery(
+        ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+    {
+        return _temporalMode switch
+        {
+            TemporalQueryMode.AsOf =>
+                _store.QueryAsOf(subject, predicate, obj, _asOfTime, _graph),
+            TemporalQueryMode.During =>
+                _store.QueryChanges(_rangeStart, _rangeEnd, subject, predicate, obj, _graph),
+            TemporalQueryMode.AllVersions =>
+                _store.QueryEvolution(subject, predicate, obj, _graph),
+            _ => _store.QueryCurrent(subject, predicate, obj, _graph)
+        };
     }
 
     private bool TryAdvanceEnumerator(ref TemporalResultEnumerator enumerator,

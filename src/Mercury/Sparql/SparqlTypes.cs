@@ -1054,6 +1054,36 @@ public struct SolutionModifier
     public OrderByClause OrderBy;
     public int Limit;
     public int Offset;
+    public TemporalClause Temporal;
+}
+
+/// <summary>
+/// Temporal query mode for bitemporal queries.
+/// </summary>
+public enum TemporalQueryMode
+{
+    Current,      // Default: valid at UtcNow
+    AsOf,         // Point-in-time: valid at specific time
+    During,       // Range: changed during period
+    AllVersions   // Evolution: all versions ever
+}
+
+/// <summary>
+/// Temporal clause parsed from SPARQL query.
+/// Supports: AS OF, DURING, ALL VERSIONS
+/// </summary>
+public struct TemporalClause
+{
+    public TemporalQueryMode Mode;
+
+    // For AS OF: single timestamp (TimeStart only)
+    // For DURING: range [TimeStart, TimeEnd]
+    public int TimeStartStart;   // Offset into source for start time literal
+    public int TimeStartLength;
+    public int TimeEndStart;     // Offset for end time (DURING only)
+    public int TimeEndLength;
+
+    public readonly bool HasTemporal => Mode != TemporalQueryMode.Current;
 }
 
 public struct HavingClause

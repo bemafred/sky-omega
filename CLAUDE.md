@@ -380,6 +380,7 @@ Key components:
 | Aggregation | GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE |
 | Modifiers | DISTINCT, REDUCED, ORDER BY (ASC/DESC), LIMIT, OFFSET |
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
+| Temporal queries | AS OF (point-in-time), DURING (range), ALL VERSIONS (history) |
 | SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE, CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
 **Query execution model:**
@@ -678,6 +679,84 @@ public struct UpdateResult
     public string? ErrorMessage; // Error details if Success is false
 }
 ```
+
+### Temporal SPARQL Extensions
+
+Mercury exposes the bitemporal storage layer through SPARQL query syntax. All triples have implicit valid-time bounds (`ValidFrom`, `ValidTo`), and temporal clauses filter based on these bounds.
+
+**Temporal query modes:**
+
+| Mode | Syntax | Storage Method | Description |
+|------|--------|----------------|-------------|
+| Current | (default) | `QueryCurrent()` | Data valid at `UtcNow` |
+| AS OF | `AS OF "date"^^xsd:date` | `QueryAsOf()` | Data valid at specific time |
+| DURING | `DURING ["start"^^xsd:date, "end"^^xsd:date]` | `QueryChanges()` | Data overlapping period |
+| ALL VERSIONS | `ALL VERSIONS` | `QueryEvolution()` | Complete history |
+
+**AS OF query (point-in-time):**
+```csharp
+// Who worked where on June 15, 2021?
+var query = @"SELECT ?person ?company
+              WHERE { ?person <http://ex.org/worksFor> ?company }
+              AS OF ""2021-06-15""^^xsd:date";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.Execute();
+    // Returns only data where ValidFrom <= 2021-06-15 < ValidTo
+    while (results.MoveNext())
+    {
+        var b = results.Current;
+        // ...
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
+**DURING query (range):**
+```csharp
+// What employment changes happened in 2023?
+var query = @"SELECT ?person ?company
+              WHERE { ?person <http://ex.org/worksFor> ?company }
+              DURING [""2023-01-01""^^xsd:date, ""2023-12-31""^^xsd:date]";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+// Returns all versions whose validity period overlaps with 2023
+```
+
+**ALL VERSIONS query (history):**
+```csharp
+// Get Alice's complete employment history
+var query = @"SELECT ?company
+              WHERE { <http://ex.org/alice> <http://ex.org/worksFor> ?company }
+              ALL VERSIONS";
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+// Returns all versions ever recorded for this pattern
+```
+
+**Temporal clauses with modifiers:**
+```csharp
+// Temporal clauses can be combined with LIMIT/OFFSET
+var query = @"SELECT ?company
+              WHERE { <http://ex.org/alice> <http://ex.org/worksFor> ?company }
+              LIMIT 10 OFFSET 5
+              ALL VERSIONS";
+```
+
+**Design notes:**
+- Temporal clauses come after LIMIT/OFFSET in solution modifiers
+- DateTime literals support both `xsd:date` and `xsd:dateTime` formats
+- Zero-GC parsing stores datetime literals as offsets, parsed at execution time
+- Default mode is `Current` (equivalent to calling `QueryCurrent()`)
 
 ## Code Conventions
 

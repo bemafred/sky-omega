@@ -40,6 +40,12 @@ public class QueryExecutor : IDisposable
     // SERVICE clause execution
     private readonly ISparqlServiceExecutor? _serviceExecutor;
 
+    // Temporal query parameters
+    private readonly TemporalQueryMode _temporalMode;
+    private readonly DateTimeOffset _asOfTime;
+    private readonly DateTimeOffset _rangeStart;
+    private readonly DateTimeOffset _rangeEnd;
+
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query)
         : this(store, source, query, null) { }
 
@@ -77,6 +83,61 @@ public class QueryExecutor : IDisposable
         }
 
         _serviceExecutor = serviceExecutor;
+
+        // Extract temporal clause parameters
+        _temporalMode = query.SolutionModifier.Temporal.Mode;
+        if (_temporalMode == TemporalQueryMode.AsOf)
+        {
+            var timeStr = source.Slice(
+                query.SolutionModifier.Temporal.TimeStartStart,
+                query.SolutionModifier.Temporal.TimeStartLength);
+            _asOfTime = ParseDateTimeOffset(timeStr);
+        }
+        else if (_temporalMode == TemporalQueryMode.During)
+        {
+            var startStr = source.Slice(
+                query.SolutionModifier.Temporal.TimeStartStart,
+                query.SolutionModifier.Temporal.TimeStartLength);
+            var endStr = source.Slice(
+                query.SolutionModifier.Temporal.TimeEndStart,
+                query.SolutionModifier.Temporal.TimeEndLength);
+            _rangeStart = ParseDateTimeOffset(startStr);
+            _rangeEnd = ParseDateTimeOffset(endStr);
+        }
+    }
+
+    /// <summary>
+    /// Parse a datetime literal like "2023-06-15"^^xsd:date or "2023-06-15T10:30:00"^^xsd:dateTime
+    /// </summary>
+    private static DateTimeOffset ParseDateTimeOffset(ReadOnlySpan<char> literal)
+    {
+        // Extract value between quotes
+        int start = 0;
+        int end = literal.Length;
+
+        // Find opening quote
+        for (int i = 0; i < literal.Length; i++)
+        {
+            if (literal[i] == '"') { start = i + 1; break; }
+        }
+
+        // Find closing quote
+        for (int i = start; i < literal.Length; i++)
+        {
+            if (literal[i] == '"') { end = i; break; }
+        }
+
+        var value = literal.Slice(start, end - start);
+
+        // Try parse as DateTimeOffset
+        if (DateTimeOffset.TryParse(value, out var result))
+            return result;
+
+        // Try parse as date only (assume start of day)
+        if (DateTime.TryParse(value.ToString(), out var dt))
+            return new DateTimeOffset(dt, TimeSpan.Zero);
+
+        return DateTimeOffset.MinValue;
     }
 
     /// <summary>
@@ -179,7 +240,8 @@ public class QueryExecutor : IDisposable
             }
 
             var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
 
             return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                 _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
@@ -228,7 +290,8 @@ public class QueryExecutor : IDisposable
                 }
 
                 var tp = pattern.GetPattern(requiredIdx);
-                var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
+                var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri,
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
 
                 return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                     _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
@@ -241,7 +304,8 @@ public class QueryExecutor : IDisposable
 
             // Multiple patterns - use MultiPatternScan with graph
             return new QueryResults(
-                new MultiPatternScan(_store, _source, pattern, false, graphIri),
+                new MultiPatternScan(_store, _source, pattern, false, graphIri,
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd),
                 _buffer, _source, _store, bindings, stringBuffer,
                 _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
                 _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,

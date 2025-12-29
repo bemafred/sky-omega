@@ -735,8 +735,110 @@ public ref partial struct SparqlParser
             SkipWhitespace();
             modifier.Offset = ParseInteger();
         }
-        
+
+        // Parse temporal clauses (AS OF, DURING, ALL VERSIONS)
+        SkipWhitespace();
+        modifier.Temporal = ParseTemporalClause();
+
         return modifier;
+    }
+
+    private TemporalClause ParseTemporalClause()
+    {
+        var clause = new TemporalClause { Mode = TemporalQueryMode.Current };
+
+        var span = PeekSpan(12);  // "ALL VERSIONS" is longest
+
+        // Check for "AS OF"
+        if (span.Length >= 2 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("AS");
+            SkipWhitespace();
+            ConsumeKeyword("OF");
+            SkipWhitespace();
+
+            clause.Mode = TemporalQueryMode.AsOf;
+            (clause.TimeStartStart, clause.TimeStartLength) = ParseTemporalLiteral();
+        }
+        // Check for "DURING"
+        else if (span.Length >= 6 && span[..6].Equals("DURING", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("DURING");
+            SkipWhitespace();
+
+            clause.Mode = TemporalQueryMode.During;
+
+            // Parse [start, end] bracket syntax
+            if (Peek() == '[')
+            {
+                Advance(); // Skip '['
+                SkipWhitespace();
+                (clause.TimeStartStart, clause.TimeStartLength) = ParseTemporalLiteral();
+                SkipWhitespace();
+                if (Peek() == ',')
+                    Advance(); // Skip ','
+                SkipWhitespace();
+                (clause.TimeEndStart, clause.TimeEndLength) = ParseTemporalLiteral();
+                SkipWhitespace();
+                if (Peek() == ']')
+                    Advance(); // Skip ']'
+            }
+        }
+        // Check for "ALL VERSIONS"
+        else if (span.Length >= 3 && span[..3].Equals("ALL", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("ALL");
+            SkipWhitespace();
+            ConsumeKeyword("VERSIONS");
+
+            clause.Mode = TemporalQueryMode.AllVersions;
+        }
+
+        return clause;
+    }
+
+    private (int Start, int Length) ParseTemporalLiteral()
+    {
+        // Parse "value"^^xsd:date or "value"^^xsd:dateTime or just "value"
+        int start = _position;
+
+        if (Peek() != '"')
+            return (0, 0);
+
+        Advance(); // Skip opening '"'
+
+        // Read until closing quote
+        while (!IsAtEnd() && Peek() != '"')
+            Advance();
+
+        if (Peek() == '"')
+            Advance(); // Skip closing '"'
+
+        // Check for optional datatype suffix
+        if (_position + 1 < _source.Length && _source[_position] == '^' && _source[_position + 1] == '^')
+        {
+            _position += 2; // Skip ^^
+
+            // Skip datatype IRI (xsd:date, xsd:dateTime, <uri>, etc.)
+            if (Peek() == '<')
+            {
+                // Full IRI: <http://...>
+                Advance();
+                while (!IsAtEnd() && Peek() != '>')
+                    Advance();
+                if (Peek() == '>')
+                    Advance();
+            }
+            else
+            {
+                // Prefixed name: xsd:date
+                while (!IsAtEnd() && !char.IsWhiteSpace(Peek())
+                       && Peek() != ',' && Peek() != ']' && Peek() != ')')
+                    Advance();
+            }
+        }
+
+        return (start, _position - start);
     }
 
     private GroupByClause ParseGroupByClause()
