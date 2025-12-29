@@ -59,6 +59,12 @@ public sealed partial class TurtleStreamParser : IDisposable
     // Reusable StringBuilder for legacy API (allocating)
     private readonly StringBuilder _sb = new StringBuilder(256);
 
+    // Pending triples from RDF-star reification (emitted alongside main triples)
+    private readonly List<RdfTriple> _pendingTriples = new();
+
+    // Handler for zero-GC reification triple emission
+    private TripleHandler? _zeroGcHandler;
+
     // Current parse state
     private int _line;
     private int _column;
@@ -204,9 +210,27 @@ public sealed partial class TurtleStreamParser : IDisposable
         }
 
         if (string.IsNullOrEmpty(subject))
+        {
+            // Still drain any pending triples from nested reification
+            if (_pendingTriples.Count > 0)
+            {
+                var pending = new List<RdfTriple>(_pendingTriples);
+                _pendingTriples.Clear();
+                return pending;
+            }
             return new List<RdfTriple>();
+        }
 
-        return ParsePredicateObjectListSync(subject);
+        var result = ParsePredicateObjectListSync(subject);
+
+        // Drain any pending triples from RDF-star reification
+        if (_pendingTriples.Count > 0)
+        {
+            result.AddRange(_pendingTriples);
+            _pendingTriples.Clear();
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -397,6 +421,9 @@ public sealed partial class TurtleStreamParser : IDisposable
     public async Task ParseAsync(TripleHandler handler, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(handler);
+
+        // Store handler for use by ParseReifiedTripleSpan
+        _zeroGcHandler = handler;
 
         await FillBufferAsync(cancellationToken);
 

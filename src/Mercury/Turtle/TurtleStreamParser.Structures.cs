@@ -257,31 +257,39 @@ public sealed partial class TurtleStreamParser
         return firstNode;
     }
     
+    // RDF namespace constants for reification (with angle brackets to match parsed IRIs)
+    private const string RdfType = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
+    private const string RdfStatement = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement>";
+    private const string RdfSubjectProp = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#subject>";
+    private const string RdfPredicateProp = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate>";
+    private const string RdfObjectProp = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#object>";
+
     /// <summary>
     /// [29] reifiedTriple ::= '<<' rtSubject verb rtObject reifier? '>>'
+    /// Emits standard RDF reification triples for queryability.
     /// </summary>
     private string ParseReifiedTriple()
     {
         if (!TryConsume('<') || !TryConsume('<'))
             return string.Empty;
-        
+
         SkipWhitespaceAndComments();
-        
+
         // Parse subject
         var subject = ParseReifiedTripleSubject();
-        
+
         SkipWhitespaceAndComments();
-        
+
         // Parse predicate
         var predicate = ParseVerb();
-        
+
         SkipWhitespaceAndComments();
-        
+
         // Parse object
         var obj = ParseReifiedTripleObject();
-        
+
         SkipWhitespaceAndComments();
-        
+
         // Optional reifier: ~ iri/blankNode
         string? reifier = null;
 
@@ -294,18 +302,28 @@ public sealed partial class TurtleStreamParser
                 reifier = ParseBlankNode();
             }
         }
-        
+
         SkipWhitespaceAndComments();
-        
+
         if (!TryConsume('>') || !TryConsume('>'))
             throw ParserException("Expected '>>' to close reified triple");
-        
+
         // If no reifier provided, allocate blank node
         if (string.IsNullOrEmpty(reifier))
         {
             reifier = string.Concat("_:b", _blankNodeCounter++.ToString());
         }
-        
+
+        // Emit standard RDF reification triples
+        // This allows querying reified triples with normal SPARQL patterns
+        _pendingTriples.Add(new RdfTriple(reifier, RdfType, RdfStatement));
+        _pendingTriples.Add(new RdfTriple(reifier, RdfSubjectProp, subject));
+        _pendingTriples.Add(new RdfTriple(reifier, RdfPredicateProp, predicate));
+        _pendingTriples.Add(new RdfTriple(reifier, RdfObjectProp, obj));
+
+        // Also assert the triple itself (RDF-star "asserted" semantics)
+        _pendingTriples.Add(new RdfTriple(subject, predicate, obj));
+
         // The reifier is what gets returned as the "term"
         // It represents the reification of the triple
         return reifier;
@@ -574,36 +592,132 @@ public sealed partial class TurtleStreamParser
         return firstNode;
     }
 
+    // Span-based RDF namespace constants for zero-GC reification (with angle brackets)
+    private static ReadOnlySpan<char> RdfTypeSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>".AsSpan();
+    private static ReadOnlySpan<char> RdfStatementSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement>".AsSpan();
+    private static ReadOnlySpan<char> RdfSubjectPropSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#subject>".AsSpan();
+    private static ReadOnlySpan<char> RdfPredicatePropSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate>".AsSpan();
+    private static ReadOnlySpan<char> RdfObjectPropSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#object>".AsSpan();
+
     /// <summary>
     /// Parse reified triple and return span with reifier ID.
+    /// Emits standard RDF reification triples for queryability.
     /// </summary>
     private ReadOnlySpan<char> ParseReifiedTripleSpan()
     {
         if (!TryConsume('<') || !TryConsume('<'))
             return ReadOnlySpan<char>.Empty;
 
-        // Skip to matching '>>' - simplified
-        while (true)
+        SkipWhitespaceAndComments();
+
+        // Parse rtSubject (IRI, BlankNode, or nested reifiedTriple)
+        var subject = ParseReifiedTripleSubjectSpan();
+
+        SkipWhitespaceAndComments();
+
+        // Parse verb
+        var predicate = ParseVerbSpan();
+
+        SkipWhitespaceAndComments();
+
+        // Parse rtObject (IRI, BlankNode, literal, tripleTerm, or nested reifiedTriple)
+        var obj = ParseReifiedTripleObjectSpan();
+
+        SkipWhitespaceAndComments();
+
+        // Optional reifier: ~ iri/blankNode
+        ReadOnlySpan<char> reifier = ReadOnlySpan<char>.Empty;
+        int reifierStart = _outputOffset;
+
+        if (TryConsume('~'))
         {
-            var ch = Peek();
-
-            if (ch == -1)
-                throw ParserException("Unexpected end of input in reified triple");
-
-            if (ch == '>' && PeekAhead(1) == '>')
+            SkipWhitespaceAndComments();
+            reifier = ParseIriSpan();
+            if (reifier.IsEmpty)
             {
-                Consume(); Consume();
-                break;
+                reifier = ParseBlankNodeSpan();
             }
-
-            Consume();
         }
 
-        // Generate blank node for reification
-        int start = _outputOffset;
-        AppendToOutput("_:b".AsSpan());
-        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
-        return GetOutputSpan(start);
+        SkipWhitespaceAndComments();
+
+        if (!TryConsume('>') || !TryConsume('>'))
+            throw ParserException("Expected '>>' to close reified triple");
+
+        // If no reifier provided, generate blank node
+        if (reifier.IsEmpty)
+        {
+            reifierStart = _outputOffset;
+            AppendToOutput("_:b".AsSpan());
+            AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+            reifier = GetOutputSpan(reifierStart);
+        }
+
+        // Emit reification triples via handler if available
+        if (_zeroGcHandler != null)
+        {
+            _zeroGcHandler(reifier, RdfTypeSpan, RdfStatementSpan);
+            _zeroGcHandler(reifier, RdfSubjectPropSpan, subject);
+            _zeroGcHandler(reifier, RdfPredicatePropSpan, predicate);
+            _zeroGcHandler(reifier, RdfObjectPropSpan, obj);
+
+            // Also assert the triple itself (RDF-star "asserted" semantics)
+            _zeroGcHandler(subject, predicate, obj);
+        }
+
+        return reifier;
+    }
+
+    /// <summary>
+    /// Parse rtSubject (IRI, BlankNode, or reifiedTriple) and return span.
+    /// </summary>
+    private ReadOnlySpan<char> ParseReifiedTripleSubjectSpan()
+    {
+        SkipWhitespaceAndComments();
+
+        // Nested reified triple
+        if (PeekString("<<"))
+            return ParseReifiedTripleSpan();
+
+        // Blank node
+        if (Peek() == '_' && PeekAhead(1) == ':')
+            return ParseBlankNodeSpan();
+
+        // IRI
+        return ParseIriSpan();
+    }
+
+    /// <summary>
+    /// Parse rtObject (IRI, BlankNode, literal, tripleTerm, reifiedTriple) and return span.
+    /// </summary>
+    private ReadOnlySpan<char> ParseReifiedTripleObjectSpan()
+    {
+        SkipWhitespaceAndComments();
+
+        // Triple term
+        if (PeekString("<<("))
+            return ParseTripleTermSpan();
+
+        // Nested reified triple
+        if (PeekString("<<"))
+            return ParseReifiedTripleSpan();
+
+        // Blank node
+        if (Peek() == '_' && PeekAhead(1) == ':')
+            return ParseBlankNodeSpan();
+
+        var ch = Peek();
+
+        // Literal
+        if (ch == '"' || ch == '\'' || char.IsDigit((char)ch) || ch == '+' || ch == '-' || ch == '.')
+            return ParseLiteralSpan();
+
+        // Boolean
+        if (PeekString("true") || PeekString("false"))
+            return ParseBooleanLiteralSpan();
+
+        // IRI
+        return ParseIriSpan();
     }
 
     /// <summary>

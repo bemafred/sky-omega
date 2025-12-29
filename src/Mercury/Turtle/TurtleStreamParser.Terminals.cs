@@ -27,6 +27,7 @@ public sealed partial class TurtleStreamParser
     
     /// <summary>
     /// [38] IRIREF ::= '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>'
+    /// Returns IRI with angle brackets for compatibility with SPARQL and QuadStore.
     /// </summary>
     private string ParseIriRef()
     {
@@ -34,6 +35,7 @@ public sealed partial class TurtleStreamParser
             return string.Empty;
 
         _sb.Clear();
+        _sb.Append('<'); // Include opening bracket
 
         while (true)
         {
@@ -45,6 +47,7 @@ public sealed partial class TurtleStreamParser
             if (ch == '>')
             {
                 Consume();
+                _sb.Append('>'); // Include closing bracket
                 break;
             }
 
@@ -623,6 +626,7 @@ public sealed partial class TurtleStreamParser
 
     /// <summary>
     /// Parse IRIREF and return span into output buffer.
+    /// Returns IRI with angle brackets for compatibility with SPARQL and QuadStore.
     /// </summary>
     private ReadOnlySpan<char> ParseIriRefSpan()
     {
@@ -630,6 +634,7 @@ public sealed partial class TurtleStreamParser
             return ReadOnlySpan<char>.Empty;
 
         int start = _outputOffset;
+        AppendToOutput('<'); // Include opening bracket
 
         while (true)
         {
@@ -641,6 +646,7 @@ public sealed partial class TurtleStreamParser
             if (ch == '>')
             {
                 Consume();
+                AppendToOutput('>'); // Include closing bracket
                 break;
             }
 

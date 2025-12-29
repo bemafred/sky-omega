@@ -300,6 +300,36 @@ await foreach (var triple in parser.ParseAsync())
 }
 ```
 
+**RDF-star support:**
+
+The Turtle parser supports RDF-star (RDF 1.2) syntax. Reified triples are converted to standard RDF reification triples for storage and query:
+
+```turtle
+# RDF-star input
+<< <http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> >>
+    <http://ex.org/confidence> "0.9" .
+```
+
+Generates these standard RDF triples:
+```turtle
+# Reification triples
+_:b0 rdf:type rdf:Statement .
+_:b0 rdf:subject <http://ex.org/Alice> .
+_:b0 rdf:predicate <http://ex.org/knows> .
+_:b0 rdf:object <http://ex.org/Bob> .
+
+# Asserted triple (RDF-star "asserted" semantics)
+<http://ex.org/Alice> <http://ex.org/knows> <http://ex.org/Bob> .
+
+# Annotation triple
+_:b0 <http://ex.org/confidence> "0.9" .
+```
+
+Features:
+- Nested reified triples (`<< << s p o >> p2 o2 >> p3 o3`)
+- Explicit reifier IRI (`<< s p o ~ <http://ex.org/stmt1> >>`)
+- Query reified triples using standard SPARQL reification patterns
+
 ### N-Triples Parser (`SkyOmega.Mercury.NTriples`)
 
 `NTriplesStreamParser` is a streaming parser for N-Triples format, following the same zero-GC pattern as the Turtle parser.
