@@ -15,7 +15,7 @@ public class WriteAheadLogTests : IDisposable
 
     public WriteAheadLogTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"wal_test_{Guid.NewGuid():N}.log");
+        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-wal-{Guid.NewGuid():N}.log");
     }
 
     public void Dispose()

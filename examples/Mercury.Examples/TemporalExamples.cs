@@ -27,7 +27,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Basic Temporal Triples");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_temporal_basic");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-temporal-basic");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -74,7 +74,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Time-Travel Queries");
         Console.WriteLine("----------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_timetravel");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-timetravel");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -133,7 +133,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Version Tracking");
         Console.WriteLine("-------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_versions");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-versions");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -184,7 +184,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Temporal Range Queries");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_range");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-range");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -235,7 +235,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Bitemporal Corrections");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_bitemporal");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-bitemporal");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -274,7 +274,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Entity Evolution Tracking");
         Console.WriteLine("-----------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_evolution");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-evolution");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -345,7 +345,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Historical Snapshot Reconstruction");
         Console.WriteLine("-------------------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_snapshot");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-snapshot");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -395,7 +395,7 @@ public static class TemporalExamples
         Console.WriteLine("Example: Temporal Database Persistence");
         Console.WriteLine("---------------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_temporal_persist");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-temporal-persist");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 

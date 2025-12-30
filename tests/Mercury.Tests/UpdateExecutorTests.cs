@@ -17,7 +17,7 @@ public class UpdateExecutorTests : IDisposable
 
     public UpdateExecutorTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), $"UpdateExecutorTests_{Guid.NewGuid():N}");
+        _testDir = Path.Combine(Path.GetTempPath(), $"mercury-test-update-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
     }

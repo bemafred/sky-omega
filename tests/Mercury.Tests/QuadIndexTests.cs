@@ -15,7 +15,7 @@ public class QuadIndexTests : IDisposable
 
     public QuadIndexTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"tripleindex_test_{Guid.NewGuid():N}.tdb");
+        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-index-{Guid.NewGuid():N}.tdb");
     }
 
     public void Dispose()

@@ -15,7 +15,7 @@ public class QuadStoreTests : IDisposable
 
     public QuadStoreTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"triplestore_test_{Guid.NewGuid():N}");
+        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-store-{Guid.NewGuid():N}");
     }
 
     public void Dispose()

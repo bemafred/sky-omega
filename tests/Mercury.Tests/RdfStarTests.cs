@@ -31,7 +31,7 @@ public class RdfStarTests : IDisposable
 
     public RdfStarTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"rdfstar_{Guid.NewGuid():N}");
+        _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-test-rdfstar-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
         _store = new QuadStore(_tempDir);
     }

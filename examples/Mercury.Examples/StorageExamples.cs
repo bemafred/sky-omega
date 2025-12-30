@@ -24,7 +24,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Basic File Storage");
         Console.WriteLine("---------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_basic");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-basic");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -69,7 +69,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Multi-Index Query Optimization");
         Console.WriteLine("---------------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_multiindex");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-multiindex");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -134,7 +134,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Large Dataset Bulk Load");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_bulk");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-bulk");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -178,7 +178,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Persistence and Recovery");
         Console.WriteLine("---------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "example_persist");
+        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-persist");
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 

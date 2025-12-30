@@ -24,7 +24,7 @@ public class SparqlStarTests : IDisposable
 
     public SparqlStarTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"sparqlstar_{Guid.NewGuid():N}");
+        _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-test-sparqlstar-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
         _store = new QuadStore(_tempDir);
     }

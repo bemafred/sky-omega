@@ -17,7 +17,7 @@ public class AtomStoreTests : IDisposable
 
     public AtomStoreTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"atomstore_test_{Guid.NewGuid():N}");
+        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-atom-{Guid.NewGuid():N}");
     }
 
     public void Dispose()

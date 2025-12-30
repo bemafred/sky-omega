@@ -19,7 +19,7 @@ public class TemporalSparqlTests : IDisposable
 
     public TemporalSparqlTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"temporal_sparql_{Guid.NewGuid():N}");
+        _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-test-temporal-sparql-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
         _store = new QuadStore(_tempDir);
 

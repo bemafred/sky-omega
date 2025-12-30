@@ -24,7 +24,7 @@ public class SparqlHttpServerTests : IDisposable
 
     public SparqlHttpServerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "http_test_" + Guid.NewGuid().ToString("N"));
+        _testDir = Path.Combine(Path.GetTempPath(), "mercury-test-http-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
 

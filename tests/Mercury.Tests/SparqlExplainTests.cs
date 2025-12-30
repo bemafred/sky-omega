@@ -18,7 +18,7 @@ public class SparqlExplainTests : IDisposable
 
     public SparqlExplainTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "explain_test_" + Guid.NewGuid().ToString("N"));
+        _testDir = Path.Combine(Path.GetTempPath(), "mercury-test-explain-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
 

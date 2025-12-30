@@ -29,7 +29,7 @@ public class OwlReasonerTests : IDisposable
 
     public OwlReasonerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "owl_test_" + Guid.NewGuid().ToString("N"));
+        _testDir = Path.Combine(Path.GetTempPath(), "mercury-test-owl-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
     }
