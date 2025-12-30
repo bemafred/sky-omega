@@ -247,6 +247,9 @@ This pattern is implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/Patte
 | TriG Parser (Handler) | ✓ Zero-GC | Use QuadHandler callback |
 | TriG Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
 | TriG Writer | ✓ Zero-GC | Streaming output, no allocations |
+| JSON-LD Parser (Handler) | Near Zero-GC | Uses System.Text.Json, allocates for context |
+| JSON-LD Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+| JSON-LD Writer | Allocates | Collects quads, outputs on flush |
 | RDF/XML Parser | Near Zero-GC | Allocates for namespace dictionary + async boundaries |
 
 ### QuadStore Query (Zero-GC)
@@ -457,6 +460,70 @@ GRAPH <http://example.org/graph1> {
 - Shorthand syntax: `<iri> { ... }`
 - All Turtle features: prefixes, base IRI, subject grouping, 'a' shorthand
 - Prefix abbreviation in output
+
+### JSON-LD Parser/Writer (`SkyOmega.Mercury.JsonLd`)
+
+`JsonLdStreamParser` and `JsonLdStreamWriter` handle JSON-LD format - a JSON-based RDF serialization. The parser uses `System.Text.Json` for efficient parsing.
+
+**Zero-GC Parsing API:**
+```csharp
+await using var parser = new JsonLdStreamParser(stream);
+await parser.ParseAsync((subject, predicate, obj, graph) =>
+{
+    // Spans valid only during callback
+    // graph is empty for default graph
+    store.AddCurrent(subject, predicate, obj, graph);
+});
+```
+
+**Legacy Parsing API (allocates strings):**
+```csharp
+await foreach (var quad in parser.ParseAsync())
+{
+    // quad.Subject, Predicate, Object, Graph are strings
+}
+```
+
+**Writing API:**
+```csharp
+using var sw = new StringWriter();
+using var writer = new JsonLdStreamWriter(sw, JsonLdForm.Compacted);
+
+// Register prefixes for compacted output
+writer.RegisterPrefix("foaf", "http://xmlns.com/foaf/0.1/");
+
+// Write quads
+writer.WriteQuad("<http://example.org/alice>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
+writer.WriteQuad("<http://example.org/alice>",
+    "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>",
+    "<http://xmlns.com/foaf/0.1/Person>");
+
+writer.Flush();
+```
+
+**Compacted JSON-LD output:**
+```json
+{
+  "@context": {
+    "foaf": "http://xmlns.com/foaf/0.1/"
+  },
+  "@id": "http://example.org/alice",
+  "@type": "foaf:Person",
+  "foaf:name": "Alice"
+}
+```
+
+**Supported JSON-LD features:**
+- `@context` (inline term definitions, prefix mappings, @base, @vocab)
+- `@id` (subject/object IRIs)
+- `@type` (rdf:type shorthand and typed literals)
+- `@value`, `@language` (literals with language tags)
+- `@graph` (named graphs)
+- `@list` (RDF lists)
+- Nested objects (automatic blank node generation)
+- Type coercion (`"@type": "@id"` for IRI references)
+- Native JSON types (integers, doubles, booleans)
+- Expanded and compacted output forms
 
 ### RDF/XML Parser (`SkyOmega.Mercury.RdfXml`)
 

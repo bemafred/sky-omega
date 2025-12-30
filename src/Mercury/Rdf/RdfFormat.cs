@@ -33,7 +33,10 @@ public enum RdfFormat
     NQuads,
 
     /// <summary>TriG format (application/trig).</summary>
-    TriG
+    TriG,
+
+    /// <summary>JSON-LD format (application/ld+json).</summary>
+    JsonLd
 }
 
 /// <summary>
@@ -92,6 +95,11 @@ public static class RdfFormatNegotiator
             return RdfFormat.TriG;
         }
 
+        if (contentType.Equals("application/ld+json".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return RdfFormat.JsonLd;
+        }
+
         return RdfFormat.Unknown;
     }
 
@@ -139,6 +147,11 @@ public static class RdfFormatNegotiator
             return RdfFormat.TriG;
         }
 
+        if (extension.Equals("jsonld".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return RdfFormat.JsonLd;
+        }
+
         return RdfFormat.Unknown;
     }
 
@@ -182,6 +195,7 @@ public static class RdfFormatNegotiator
         RdfFormat.RdfXml => "application/rdf+xml",
         RdfFormat.NQuads => "application/n-quads",
         RdfFormat.TriG => "application/trig",
+        RdfFormat.JsonLd => "application/ld+json",
         _ => "application/octet-stream"
     };
 
@@ -195,6 +209,7 @@ public static class RdfFormatNegotiator
         RdfFormat.RdfXml => ".rdf",
         RdfFormat.NQuads => ".nq",
         RdfFormat.TriG => ".trig",
+        RdfFormat.JsonLd => ".jsonld",
         _ => ""
     };
 
@@ -254,6 +269,7 @@ public static class RdfFormatNegotiator
             RdfFormat.RdfXml => new RdfXmlStreamParser(stream),
             RdfFormat.NQuads => throw new NotSupportedException("N-Quads is a quad format. Use NQuadsStreamParser directly."),
             RdfFormat.TriG => throw new NotSupportedException("TriG is a quad format. Use TriGStreamParser directly."),
+            RdfFormat.JsonLd => throw new NotSupportedException("JSON-LD is a quad format. Use JsonLdStreamParser directly."),
             _ => throw new NotSupportedException($"Unsupported RDF format: {format}")
         };
     }
@@ -275,6 +291,7 @@ public static class RdfFormatNegotiator
             RdfFormat.RdfXml => new RdfXmlStreamWriter(writer),
             RdfFormat.NQuads => throw new NotSupportedException("N-Quads is a quad format. Use NQuadsStreamWriter directly."),
             RdfFormat.TriG => throw new NotSupportedException("TriG is a quad format. Use TriGStreamWriter directly."),
+            RdfFormat.JsonLd => throw new NotSupportedException("JSON-LD is a quad format. Use JsonLdStreamWriter directly."),
             _ => throw new NotSupportedException($"Unsupported RDF format: {format}")
         };
     }

@@ -30,6 +30,8 @@ public class ContentNegotiationTests
     [InlineData("text/x-nquads", RdfFormat.NQuads)]
     [InlineData("application/trig", RdfFormat.TriG)]
     [InlineData("application/x-trig", RdfFormat.TriG)]
+    [InlineData("application/ld+json", RdfFormat.JsonLd)]
+    [InlineData("APPLICATION/LD+JSON", RdfFormat.JsonLd)]
     [InlineData("application/octet-stream", RdfFormat.Unknown)]
     [InlineData("", RdfFormat.Unknown)]
     public void RdfFormat_FromContentType_DetectsCorrectly(string contentType, RdfFormat expected)
@@ -55,6 +57,8 @@ public class ContentNegotiationTests
     [InlineData(".nquads", RdfFormat.NQuads)]
     [InlineData(".trig", RdfFormat.TriG)]
     [InlineData(".TRIG", RdfFormat.TriG)]
+    [InlineData(".jsonld", RdfFormat.JsonLd)]
+    [InlineData(".JSONLD", RdfFormat.JsonLd)]
     [InlineData(".json", RdfFormat.Unknown)]
     [InlineData("", RdfFormat.Unknown)]
     public void RdfFormat_FromExtension_DetectsCorrectly(string extension, RdfFormat expected)
@@ -76,6 +80,8 @@ public class ContentNegotiationTests
     [InlineData("http://example.org/data.nquads", RdfFormat.NQuads)]
     [InlineData("/data/graphs.trig", RdfFormat.TriG)]
     [InlineData("http://example.org/data.trig?format=true", RdfFormat.TriG)]
+    [InlineData("/data/linked.jsonld", RdfFormat.JsonLd)]
+    [InlineData("http://example.org/context.jsonld?v=1", RdfFormat.JsonLd)]
     [InlineData("/no-extension", RdfFormat.Unknown)]
     public void RdfFormat_FromPath_DetectsCorrectly(string path, RdfFormat expected)
     {
@@ -120,6 +126,7 @@ public class ContentNegotiationTests
     [InlineData(RdfFormat.RdfXml, "application/rdf+xml")]
     [InlineData(RdfFormat.NQuads, "application/n-quads")]
     [InlineData(RdfFormat.TriG, "application/trig")]
+    [InlineData(RdfFormat.JsonLd, "application/ld+json")]
     public void RdfFormat_GetContentType_ReturnsCorrect(RdfFormat format, string expected)
     {
         var result = RdfFormatNegotiator.GetContentType(format);
@@ -132,6 +139,7 @@ public class ContentNegotiationTests
     [InlineData(RdfFormat.RdfXml, ".rdf")]
     [InlineData(RdfFormat.NQuads, ".nq")]
     [InlineData(RdfFormat.TriG, ".trig")]
+    [InlineData(RdfFormat.JsonLd, ".jsonld")]
     public void RdfFormat_GetExtension_ReturnsCorrect(RdfFormat format, string expected)
     {
         var result = RdfFormatNegotiator.GetExtension(format);
@@ -247,6 +255,24 @@ public class ContentNegotiationTests
         using var sw = new StringWriter();
         var ex = Assert.Throws<NotSupportedException>(() =>
             RdfFormatNegotiator.CreateWriter(sw, RdfFormat.TriG));
+        Assert.Contains("quad format", ex.Message);
+    }
+
+    [Fact]
+    public void RdfFormat_CreateParser_JsonLd_ThrowsNotSupported()
+    {
+        using var stream = new MemoryStream();
+        var ex = Assert.Throws<NotSupportedException>(() =>
+            RdfFormatNegotiator.CreateParser(stream, RdfFormat.JsonLd));
+        Assert.Contains("quad format", ex.Message);
+    }
+
+    [Fact]
+    public void RdfFormat_CreateWriter_JsonLd_ThrowsNotSupported()
+    {
+        using var sw = new StringWriter();
+        var ex = Assert.Throws<NotSupportedException>(() =>
+            RdfFormatNegotiator.CreateWriter(sw, RdfFormat.JsonLd));
         Assert.Contains("quad format", ex.Message);
     }
 
