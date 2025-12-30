@@ -1528,6 +1528,106 @@ curl "http://localhost:8080/sparql"
 - Service description endpoint
 - JSON error responses
 
+## Production Hardening Roadmap
+
+This section documents known gaps and planned improvements for production readiness.
+
+### Infrastructure Abstractions
+
+**ILogger** (`SkyOmega.Mercury.Diagnostics.ILogger`):
+- BCL-only logging abstraction with zero-allocation hot path
+- Levels: Trace, Debug, Info, Warning, Error, Critical
+- `NullLogger.Instance` for production (no overhead)
+- `ConsoleLogger` for development/debugging
+
+```csharp
+// Production (zero overhead)
+var store = new QuadStore("/path/to/store");
+
+// Development (with logging)
+var logger = new ConsoleLogger(LogLevel.Debug);
+var store = new QuadStore("/path/to/store", logger);
+
+// Custom logging
+if (logger.IsEnabled(LogLevel.Debug))
+    logger.Log(LogLevel.Debug, "Processing {0} triples".AsSpan(), count);
+
+// Extension methods
+logger.Info("Store opened".AsSpan());
+logger.Warning("Large result set: {0}".AsSpan(), rowCount);
+```
+
+**IBufferManager** (`SkyOmega.Mercury.Buffers.IBufferManager`):
+- Unified buffer allocation strategy across all components
+- `PooledBufferManager.Shared` uses `ArrayPool<T>` internally
+- `BufferLease<T>` ref struct for RAII-style automatic cleanup
+- Replaces scattered `new char[1024]` allocations with pooled buffers
+
+```csharp
+// Simple pooled buffer
+using var lease = PooledBufferManager.Shared.RentCharBuffer(1024);
+var span = lease.Span;
+// buffer automatically returned at end of scope
+
+// Smart allocation: stack for small, pool for large
+Span<char> stackBuffer = stackalloc char[256];
+var span = PooledBufferManager.Shared.AllocateSmartChar(
+    neededLength, stackBuffer, out var rented);
+try
+{
+    // use span...
+}
+finally
+{
+    rented.Dispose(); // no-op if stack was used
+}
+```
+
+### Query Optimization (Planned)
+
+| Optimization | Impact | Status |
+|--------------|--------|--------|
+| Join Reordering | 10-100x | Planned - selectivity-based pattern reordering |
+| Statistics Collection | 2-10x | Planned - per-predicate cardinality at checkpoint |
+| Plan Caching | 2-5x | Planned - SHA256(query) → cached plan |
+| Predicate Pushdown | 5-50x | Planned - push FILTERs to leaf patterns |
+
+### Full-Text Search (Planned)
+
+BCL-only trigram index for SPARQL text search:
+- Trigram extraction and inverted index
+- Integration via `text:match(?var, "query")` filter function
+- Zero external dependencies
+
+### Test Coverage Gaps
+
+| Component | Status | Priority |
+|-----------|--------|----------|
+| REPL system | 0 tests | High |
+| HttpSparqlServiceExecutor | 0 tests | High |
+| LoadExecutor | 0 tests | High |
+| Concurrent access stress | 0 tests | High |
+| PatternSlot/QueryBuffer | 0 tests | Medium |
+
+### Benchmark Gaps
+
+| Component | Status | Priority |
+|-----------|--------|----------|
+| SPARQL parsing | 0 benchmarks | Critical |
+| SPARQL execution | 0 benchmarks | Critical |
+| JOIN operators | 0 benchmarks | High |
+| Parser throughput | 0 benchmarks | High |
+| Concurrent access | 0 benchmarks | High |
+
+### Production Hardening Checklist
+
+- [ ] Query timeout via CancellationToken
+- [ ] Max atom size validation (default 1MB)
+- [ ] Max query depth limits
+- [ ] try/finally for all operator disposal
+- [ ] Pointer leak fix in AtomStore
+- [ ] Thread-safety documentation for parsers
+
 ## Code Conventions
 
 - All parsing methods follow W3C EBNF grammar productions (comments reference production numbers)

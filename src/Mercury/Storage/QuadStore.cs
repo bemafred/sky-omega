@@ -3,6 +3,7 @@ using System.Buffers;
 using System.IO;
 using System.Text;
 using System.Threading;
+using SkyOmega.Mercury.Diagnostics;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -28,12 +29,25 @@ public sealed class QuadStore : IDisposable
     private readonly WriteAheadLog _wal;
     private readonly string _baseDirectory;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
+    private readonly ILogger _logger;
     private long _activeBatchTxId = -1;
     private bool _disposed;
 
-    public QuadStore(string baseDirectory)
+    /// <summary>
+    /// Creates a new QuadStore at the specified directory.
+    /// </summary>
+    /// <param name="baseDirectory">Directory for store files.</param>
+    public QuadStore(string baseDirectory) : this(baseDirectory, null) { }
+
+    /// <summary>
+    /// Creates a new QuadStore at the specified directory with logging.
+    /// </summary>
+    /// <param name="baseDirectory">Directory for store files.</param>
+    /// <param name="logger">Logger for diagnostics (null for no logging).</param>
+    public QuadStore(string baseDirectory, ILogger? logger)
     {
         _baseDirectory = baseDirectory;
+        _logger = logger ?? NullLogger.Instance;
 
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
@@ -56,6 +70,8 @@ public sealed class QuadStore : IDisposable
         _gposIndex = new QuadIndex(gposPath, _atoms);
         _gospIndex = new QuadIndex(gospPath, _atoms);
         _tgspIndex = new QuadIndex(tgspPath, _atoms);
+
+        _logger.Info("Opening store at {0}".AsSpan(), baseDirectory);
 
         // Recover any uncommitted transactions
         Recover();
@@ -387,6 +403,7 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private void Recover()
     {
+        _logger.Debug("Starting WAL recovery".AsSpan());
         var enumerator = _wal.GetUncommittedRecords();
         var recoveredCount = 0;
 
@@ -435,9 +452,14 @@ public sealed class QuadStore : IDisposable
 
         if (recoveredCount > 0)
         {
+            _logger.Info("Recovered {0} records from WAL".AsSpan(), recoveredCount);
             // Checkpoint after recovery to avoid re-replaying
             // Note: No lock needed here - called from constructor before any concurrent access
             CheckpointInternal();
+        }
+        else
+        {
+            _logger.Debug("No records to recover".AsSpan());
         }
     }
 
@@ -464,11 +486,15 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private void CheckpointInternal()
     {
+        _logger.Debug("Starting checkpoint".AsSpan());
+
         // Flush all indexes (memory-mapped files auto-flush, but we can force it)
         // In a more complete implementation, we'd flush the mmap views here
 
         // Write checkpoint marker to WAL
         _wal.Checkpoint();
+
+        _logger.Debug("Checkpoint complete".AsSpan());
     }
 
     /// <summary>

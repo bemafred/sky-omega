@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Patterns;
@@ -31,6 +32,7 @@ public class QueryExecutor : IDisposable
     private readonly string _source;
     private readonly Query _query;
     private readonly QueryBuffer _buffer;  // New: heap-allocated pattern storage
+    private readonly char[] _stringBuffer; // Pooled buffer for string operations (replaces scattered new char[1024])
     private bool _disposed;
 
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
@@ -55,6 +57,7 @@ public class QueryExecutor : IDisposable
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _query = query;  // Copy here is unavoidable since we store it
+        _stringBuffer = ArrayPool<char>.Shared.Rent(1024);  // Pooled buffer for string operations
 
         // Convert Query to QueryBuffer for heap-based pattern storage
         // This avoids stack overflow when accessing patterns in nested calls
@@ -153,6 +156,7 @@ public class QueryExecutor : IDisposable
         _store = store;
         _source = source.ToString();
         _buffer = buffer;
+        _stringBuffer = ArrayPool<char>.Shared.Rent(1024);  // Pooled buffer for string operations
         _query = default;  // Not used when buffer is provided directly
         _serviceExecutor = serviceExecutor;
 
@@ -181,6 +185,8 @@ public class QueryExecutor : IDisposable
         if (_disposed) return;
         _disposed = true;
         _buffer?.Dispose();
+        if (_stringBuffer != null)
+            ArrayPool<char>.Shared.Return(_stringBuffer);
     }
 
     /// <summary>
@@ -221,7 +227,7 @@ public class QueryExecutor : IDisposable
             return MaterializedQueryResults.Empty();
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         return new MaterializedQueryResults(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
@@ -242,7 +248,7 @@ public class QueryExecutor : IDisposable
 
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Access pattern via ref to avoid copying
@@ -371,7 +377,7 @@ public class QueryExecutor : IDisposable
             return MaterializedQueryResults.Empty();
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         return new MaterializedQueryResults(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
@@ -385,7 +391,7 @@ public class QueryExecutor : IDisposable
     {
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Create SubQueryScan operator
@@ -426,7 +432,7 @@ public class QueryExecutor : IDisposable
 
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // For now, only handle the simple case: SERVICE clause only, no local patterns
@@ -495,7 +501,7 @@ public class QueryExecutor : IDisposable
         // For regular queries, access _query fields directly to build result
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Access pattern directly from _query
@@ -542,7 +548,7 @@ public class QueryExecutor : IDisposable
     private QueryResults ExecuteWithDefaultGraphs()
     {
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Access pattern via ref to avoid copying
@@ -607,7 +613,7 @@ public class QueryExecutor : IDisposable
 
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         var requiredCount = pattern.RequiredPatternCount;
@@ -670,7 +676,7 @@ public class QueryExecutor : IDisposable
 
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         var requiredCount = pattern.RequiredPatternCount;
@@ -716,7 +722,7 @@ public class QueryExecutor : IDisposable
 
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // If no WHERE clause, return empty
@@ -755,7 +761,7 @@ public class QueryExecutor : IDisposable
     private QueryResults ExecuteWithJoins()
     {
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
 
         // Access pattern via ref to avoid copying
         ref readonly var pattern = ref _query.WhereClause.Pattern;
@@ -797,7 +803,7 @@ public class QueryExecutor : IDisposable
 
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // For now, only handle the simple case: SERVICE clause only, no local patterns
@@ -849,7 +855,7 @@ public class QueryExecutor : IDisposable
                 return QueryResults.Empty();
 
             var bindings = new Binding[16];
-            var stringBuffer = new char[1024];
+            var stringBuffer = _stringBuffer;
             return QueryResults.FromMaterializedList(joinedResults, bindings, stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
@@ -866,7 +872,7 @@ public class QueryExecutor : IDisposable
                 return QueryResults.Empty();
 
             var bindings = new Binding[16];
-            var stringBuffer = new char[1024];
+            var stringBuffer = _stringBuffer;
             return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
@@ -877,8 +883,7 @@ public class QueryExecutor : IDisposable
             return QueryResults.Empty();
 
         var fixedBindings = new Binding[16];
-        var fixedStringBuffer = new char[1024];
-        return QueryResults.FromMaterializedList(fixedResults, fixedBindings, fixedStringBuffer,
+        return QueryResults.FromMaterializedList(fixedResults, fixedBindings, _stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
@@ -950,7 +955,7 @@ public class QueryExecutor : IDisposable
     {
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Get variable name from source
@@ -1067,7 +1072,7 @@ public class QueryExecutor : IDisposable
         // Materialize results - this avoids issues with returning scan refs
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         if (children.Count == 1)
@@ -1101,7 +1106,7 @@ public class QueryExecutor : IDisposable
 
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         if (children.Count == 1)
@@ -1279,7 +1284,7 @@ public class QueryExecutor : IDisposable
             return QueryResults.Empty();
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
@@ -1291,7 +1296,7 @@ public class QueryExecutor : IDisposable
         QuadStore store, string source, Patterns.QueryBuffer buffer, string[]? namedGraphs)
     {
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = new char[1024]; // Static method - can't use pooled instance buffer
 
         // Find the GRAPH header slot in the buffer
         var patterns = buffer.GetPatterns();
@@ -1374,7 +1379,7 @@ public class QueryExecutor : IDisposable
             return QueryResults.Empty();
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
@@ -1418,7 +1423,7 @@ public class QueryExecutor : IDisposable
         var thread = new System.Threading.Thread(() =>
         {
             var bindings = new Binding[16];
-            var stringBuffer = new char[1024];
+            var stringBuffer = _stringBuffer;
             var bindingTable = new BindingTable(bindings, stringBuffer);
             var graphIri = source.AsSpan(graphStart, graphLength);
 
@@ -1453,7 +1458,7 @@ public class QueryExecutor : IDisposable
         QuadStore store, string source, TriplePattern tp, int graphStart, int graphLength)
     {
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = new char[1024]; // Static method - can't use pooled instance buffer
         var bindingTable = new BindingTable(bindings, stringBuffer);
         var graphIri = source.AsSpan(graphStart, graphLength);
 
@@ -1503,7 +1508,7 @@ public class QueryExecutor : IDisposable
 
         // Build binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
 
         // Create SubQueryScan operator
         var subQueryScan = new SubQueryScan(_store, _source, subSelect);
@@ -1531,7 +1536,7 @@ public class QueryExecutor : IDisposable
             return QueryResults.Empty();
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
@@ -1557,7 +1562,7 @@ public class QueryExecutor : IDisposable
         }
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         return QueryResults.FromMaterializedList(joinedResults, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
@@ -1602,7 +1607,7 @@ public class QueryExecutor : IDisposable
         var subSelect = pattern.GetSubQuery(subQueryIndex);
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         var results = new List<MaterializedRow>();
@@ -1627,7 +1632,7 @@ public class QueryExecutor : IDisposable
         ref readonly var pattern = ref _query.WhereClause.Pattern;
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Create pattern scan for outer patterns
@@ -1781,8 +1786,7 @@ public class QueryExecutor : IDisposable
 
         var results = new System.Collections.Generic.List<MaterializedRow>();
         var joinBindings = new Binding[16];
-        var joinStringBuffer = new char[1024];
-        var bindingTable = new BindingTable(joinBindings, joinStringBuffer);
+        var bindingTable = new BindingTable(joinBindings, _stringBuffer);
 
         var hasFilters = pattern.FilterCount > 0;
 
