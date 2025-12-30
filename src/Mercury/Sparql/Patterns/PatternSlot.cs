@@ -333,6 +333,11 @@ public ref struct PatternArray
     public FilterEnumerator EnumerateFilters() => new(_buffer, _count);
 
     /// <summary>
+    /// Get enumerator for graph headers only
+    /// </summary>
+    public GraphHeaderEnumerator EnumerateGraphHeaders() => new(_buffer, _count);
+
+    /// <summary>
     /// Add a MINUS triple pattern (same layout as Triple but marked as MINUS)
     /// </summary>
     public void AddMinusTriple(
@@ -499,8 +504,55 @@ public ref struct FilterEnumerator
     }
     
     public PatternSlot Current => new(_buffer.Slice(_index * PatternSlot.Size, PatternSlot.Size));
-    
+
     public FilterEnumerator GetEnumerator() => this;
+}
+
+/// <summary>
+/// Enumerator over graph header patterns only
+/// </summary>
+public ref struct GraphHeaderEnumerator
+{
+    private readonly Span<byte> _buffer;
+    private readonly int _count;
+    private int _index;
+    private int _headerIndex;  // 0-based index among graph headers
+
+    public GraphHeaderEnumerator(Span<byte> buffer, int count)
+    {
+        _buffer = buffer;
+        _count = count;
+        _index = -1;
+        _headerIndex = -1;
+    }
+
+    public bool MoveNext()
+    {
+        while (++_index < _count)
+        {
+            var kind = (PatternKind)_buffer[_index * PatternSlot.Size];
+            if (kind == PatternKind.GraphHeader)
+            {
+                _headerIndex++;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public PatternSlot Current => new(_buffer.Slice(_index * PatternSlot.Size, PatternSlot.Size));
+
+    /// <summary>
+    /// Current index in the pattern array (for GetChildren)
+    /// </summary>
+    public int CurrentIndex => _index;
+
+    /// <summary>
+    /// 0-based index among graph headers (0 for first, 1 for second, etc.)
+    /// </summary>
+    public int HeaderIndex => _headerIndex;
+
+    public GraphHeaderEnumerator GetEnumerator() => this;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -659,6 +711,14 @@ public sealed class QueryBuffer : IDisposable
     public uint OptionalFlags { get; set; }   // Bitmask for optional patterns
     public bool HasValues { get; set; }
 
+    // Graph clause metadata (cached to avoid large struct copies)
+    public int GraphClauseCount { get; set; }
+    public bool FirstGraphIsVariable { get; set; }
+    public int FirstGraphPatternCount { get; set; }
+    public int TriplePatternCount { get; set; }  // Count of direct triple patterns (not in GRAPH)
+    public bool HasSubQueries { get; set; }
+    public bool HasService { get; set; }
+
     // Computed properties
     public bool HasFilters => FilterCount > 0;
     public bool HasBinds => BindCount > 0;
@@ -667,6 +727,7 @@ public sealed class QueryBuffer : IDisposable
     public bool HasUnion => UnionStartIndex > 0;
     public bool HasOptionalPatterns => OptionalFlags != 0;
     public int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
+    public bool HasGraph => GraphClauseCount > 0;
 
     /// <summary>
     /// Create a new query buffer with default capacity
@@ -907,6 +968,17 @@ public static class QueryBufferAdapter
                 optFlags |= (1u << i);
         }
         buffer.OptionalFlags = optFlags;
+
+        // Copy graph clause metadata (cached to avoid large struct copies in QueryExecutor)
+        buffer.GraphClauseCount = gp.GraphClauseCount;
+        buffer.TriplePatternCount = gp.PatternCount;
+        buffer.HasSubQueries = gp.HasSubQueries;
+        buffer.HasService = gp.HasService;
+        if (gp.GraphClauseCount > 0)
+        {
+            buffer.FirstGraphIsVariable = gp.IsGraphClauseVariable(0);
+            buffer.FirstGraphPatternCount = gp.GetGraphClausePatternCount(0);
+        }
 
         // Convert patterns to slots
         var patterns = buffer.GetPatterns();

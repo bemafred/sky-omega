@@ -836,11 +836,7 @@ public class UpdateExecutorTests : IDisposable
 
     #region DELETE WHERE with GRAPH Clause Tests
 
-    // NOTE: DELETE WHERE with only GRAPH clauses (no base patterns) causes stack overflow
-    // in QueryExecutor.ExecuteGraphClauses(). This is a pre-existing limitation.
-    // The fix requires refactoring QueryExecutor to use thread-based execution for
-    // GRAPH-only patterns, similar to how it handles multi-pattern GRAPH clauses.
-    [Fact(Skip = "Pre-existing limitation: GRAPH-only patterns cause stack overflow in QueryExecutor")]
+    [Fact]
     public void DeleteWhere_WithGraphClause_DeletesFromSpecifiedGraph()
     {
         // Add data to named graph

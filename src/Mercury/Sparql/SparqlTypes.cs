@@ -458,6 +458,38 @@ public struct GraphPattern
         };
     }
 
+    /// <summary>
+    /// Check if a graph clause uses a variable (without copying the full GraphClause struct).
+    /// This avoids ~600 byte struct copy on each call.
+    /// </summary>
+    public readonly bool IsGraphClauseVariable(int index)
+    {
+        return index switch
+        {
+            0 => _g0.IsVariable,
+            1 => _g1.IsVariable,
+            2 => _g2.IsVariable,
+            3 => _g3.IsVariable,
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Get the pattern count of a graph clause (without copying the full GraphClause struct).
+    /// This avoids ~600 byte struct copy on each call.
+    /// </summary>
+    public readonly int GetGraphClausePatternCount(int index)
+    {
+        return index switch
+        {
+            0 => _g0.PatternCount,
+            1 => _g1.PatternCount,
+            2 => _g2.PatternCount,
+            3 => _g3.PatternCount,
+            _ => 0
+        };
+    }
+
     private void SetGraphClause(int index, GraphClause clause)
     {
         switch (index)
