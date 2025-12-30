@@ -852,6 +852,56 @@ public struct UpdateResult
 }
 ```
 
+### SPARQL Result Writers
+
+Streaming writers for W3C SPARQL Query Results formats.
+
+**JSON Format (`SparqlJsonResultWriter`):**
+```csharp
+using var sw = new StringWriter();
+using var writer = new SparqlJsonResultWriter(sw);
+writer.WriteHead(["s", "p", "o"]);
+
+// For each result row from query execution:
+writer.WriteResult(ref bindings);
+
+writer.WriteEnd();
+// Output: {"head":{"vars":["s","p","o"]},"results":{"bindings":[...]}}
+
+// For ASK queries:
+writer.WriteBooleanResult(true);
+```
+
+**XML Format (`SparqlXmlResultWriter`):**
+```csharp
+using var sw = new StringWriter();
+using var writer = new SparqlXmlResultWriter(sw);
+writer.WriteHead(["s", "p", "o"]);
+writer.WriteResult(ref bindings);
+writer.WriteEnd();
+// Output: <sparql xmlns="..."><head>...</head><results>...</results></sparql>
+```
+
+**CSV/TSV Format (`SparqlCsvResultWriter`):**
+```csharp
+// CSV format
+using var writer = new SparqlCsvResultWriter(sw);
+
+// TSV format
+using var writer = new SparqlCsvResultWriter(sw, useTsv: true);
+
+writer.WriteHead(["s", "p", "o"]);
+writer.WriteResult(ref bindings);
+writer.WriteEnd();
+```
+
+| Format | Content-Type | Features |
+|--------|--------------|----------|
+| JSON | application/sparql-results+json | Full type info, datatypes, language tags |
+| XML | application/sparql-results+xml | Full type info, datatypes, language tags |
+| CSV | text/csv | Compact, values only (no type info) |
+| TSV | text/tab-separated-values | Preserves RDF syntax (brackets, quotes) |
+
 ### Temporal SPARQL Extensions
 
 Mercury exposes the bitemporal storage layer through SPARQL query syntax. All triples have implicit valid-time bounds (`ValidFrom`, `ValidTo`), and temporal clauses filter based on these bounds.
