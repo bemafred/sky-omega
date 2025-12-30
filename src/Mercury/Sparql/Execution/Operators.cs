@@ -908,16 +908,29 @@ public ref struct MultiPatternScan
         // Synthetic terms (negative offsets) come from SPARQL-star expansion.
         ReadOnlySpan<char> subject, predicate, obj;
 
+        // Check if this is an inverse path
+        bool isInverse = pattern.Path.Type == PathType.Inverse;
+
         // Resolve subject
         subject = ResolveTerm(pattern.Subject, ref bindings);
 
-        // Resolve predicate
-        predicate = ResolveTerm(pattern.Predicate, ref bindings);
+        // Resolve predicate - for inverse paths, use Path.Iri
+        predicate = isInverse
+            ? ResolveTerm(pattern.Path.Iri, ref bindings)
+            : ResolveTerm(pattern.Predicate, ref bindings);
 
         // Resolve object
         obj = ResolveTerm(pattern.Object, ref bindings);
 
-        enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+        // For inverse paths, swap subject and object in the query
+        if (isInverse)
+        {
+            enumerator = ExecuteTemporalQuery(obj, predicate, subject);
+        }
+        else
+        {
+            enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -961,16 +974,31 @@ public ref struct MultiPatternScan
     private bool TryAdvanceEnumerator(ref TemporalResultEnumerator enumerator,
         TriplePattern pattern, scoped ref BindingTable bindings)
     {
+        bool isInverse = pattern.Path.Type == PathType.Inverse;
+
         while (enumerator.MoveNext())
         {
             var triple = enumerator.Current;
 
             // Try to bind variables, checking consistency with existing bindings
-            if (TryBindVariable(pattern.Subject, triple.Subject, ref bindings) &&
-                TryBindVariable(pattern.Predicate, triple.Predicate, ref bindings) &&
-                TryBindVariable(pattern.Object, triple.Object, ref bindings))
+            // For inverse paths, swap subject and object bindings
+            if (isInverse)
             {
-                return true;
+                // Inverse: pattern.Subject binds to triple.Object, pattern.Object binds to triple.Subject
+                if (TryBindVariable(pattern.Subject, triple.Object, ref bindings) &&
+                    TryBindVariable(pattern.Object, triple.Subject, ref bindings))
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                if (TryBindVariable(pattern.Subject, triple.Subject, ref bindings) &&
+                    TryBindVariable(pattern.Predicate, triple.Predicate, ref bindings) &&
+                    TryBindVariable(pattern.Object, triple.Object, ref bindings))
+                {
+                    return true;
+                }
             }
         }
 

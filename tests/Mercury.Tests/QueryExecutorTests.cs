@@ -5285,6 +5285,203 @@ public class QueryExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region Property Path Inverse Tests
+
+    [Fact]
+    public void Execute_InversePath_BasicInverseTraversal()
+    {
+        // Alice knows Bob - inverse path semantics:
+        // ?s ^<knows> ?o is equivalent to ?o <knows> ?s
+        // So ?s ^<knows> <Alice> asks "who does Alice know?" = "find ?s where Alice knows ?s"
+        // This should return Bob
+        var query = "SELECT ?s WHERE { ?s ^<http://xmlns.com/foaf/0.1/knows> <http://example.org/Alice> }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.Inverse, pattern.Path.Type);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var subjects = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var sIdx = bindings.FindBinding("?s".AsSpan());
+                if (sIdx >= 0)
+                {
+                    subjects.Add(bindings.GetString(sIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Alice knows Bob, so inverse from Alice gives Bob
+            Assert.Single(subjects);
+            Assert.Contains("<http://example.org/Bob>", subjects);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_InversePath_FindAllKnown()
+    {
+        // Inverse path semantics: ?s ^<p> ?o is equivalent to ?o <p> ?s
+        // ?known ^<knows> ?knower = ?knower <knows> ?known
+        // This finds all triples with predicate knows, binding object to ?known
+        // With Alice knows Bob: ?knower=Alice, ?known=Bob
+        var query = "SELECT ?known WHERE { ?known ^<http://xmlns.com/foaf/0.1/knows> ?knower }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var known = new List<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?known".AsSpan());
+                if (idx >= 0)
+                {
+                    known.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Alice knows Bob, inverse gives Bob as known
+            Assert.Single(known);
+            Assert.Contains("<http://example.org/Bob>", known);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_InversePath_NoMatches()
+    {
+        // Inverse: <Charlie> ^<knows> ?knower = ?knower <knows> <Charlie>
+        // This asks "who knows Charlie?" - no one in our data
+        var query = "SELECT ?knower WHERE { <http://example.org/Charlie> ^<http://xmlns.com/foaf/0.1/knows> ?knower }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // No one knows Charlie
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_InversePath_WithDistinct()
+    {
+        // Inverse: ?name ^<name> ?person = ?person <name> ?name
+        // This finds all distinct names - should return 3 (Alice, Bob, Charlie)
+        var query = "SELECT DISTINCT ?name WHERE { ?name ^<http://xmlns.com/foaf/0.1/name> ?person }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var names = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?name".AsSpan());
+                if (idx >= 0)
+                {
+                    names.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // All three persons have names
+            Assert.Equal(3, names.Count);
+            Assert.Contains("\"Alice\"", names);
+            Assert.Contains("\"Bob\"", names);
+            Assert.Contains("\"Charlie\"", names);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_InversePath_BothDirections()
+    {
+        // Combining forward and inverse paths:
+        // Pattern 1: <Alice> <knows> ?friend -> finds Bob
+        // Pattern 2: ?friend ^<knows> ?knower = ?knower <knows> ?friend
+        //            With ?friend=Bob, asks "who knows Bob?" = Alice
+        var query = "SELECT ?friend ?knower WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> ?friend . ?friend ^<http://xmlns.com/foaf/0.1/knows> ?knower }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var pairs = new List<(string friend, string knower)>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var friendIdx = bindings.FindBinding("?friend".AsSpan());
+                var knowerIdx = bindings.FindBinding("?knower".AsSpan());
+                if (friendIdx >= 0 && knowerIdx >= 0)
+                {
+                    pairs.Add((bindings.GetString(friendIdx).ToString(), bindings.GetString(knowerIdx).ToString()));
+                }
+            }
+            results.Dispose();
+
+            // Alice knows Bob, and Bob is known by Alice
+            Assert.Single(pairs);
+            Assert.Equal("<http://example.org/Bob>", pairs[0].friend);
+            Assert.Equal("<http://example.org/Alice>", pairs[0].knower);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
 
 /// <summary>
