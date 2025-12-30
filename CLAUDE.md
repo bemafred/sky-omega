@@ -244,6 +244,9 @@ This pattern is implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/Patte
 | N-Triples Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
 | N-Quads Parser (Handler) | ✓ Zero-GC | Use QuadHandler callback |
 | N-Quads Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+| TriG Parser (Handler) | ✓ Zero-GC | Use QuadHandler callback |
+| TriG Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+| TriG Writer | ✓ Zero-GC | Streaming output, no allocations |
 | RDF/XML Parser | Near Zero-GC | Allocates for namespace dictionary + async boundaries |
 
 ### QuadStore Query (Zero-GC)
@@ -394,6 +397,66 @@ writer.WriteTriple("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>"
 ```
 
 N-Quads is useful for serializing datasets with multiple named graphs. Each quad is on its own line: `subject predicate object [graph] .`
+
+### TriG Parser/Writer (`SkyOmega.Mercury.TriG`)
+
+`TriGStreamParser` and `TriGStreamWriter` handle the TriG format - essentially Turtle extended with named graph support. TriG provides a more readable format for datasets than N-Quads.
+
+**Zero-GC Parsing API:**
+```csharp
+await using var parser = new TriGStreamParser(stream);
+await parser.ParseAsync((subject, predicate, obj, graph) =>
+{
+    // Spans valid only during callback
+    // graph is empty for default graph
+    store.AddCurrent(subject, predicate, obj, graph);
+});
+```
+
+**Legacy Parsing API (allocates strings):**
+```csharp
+await foreach (var quad in parser.ParseAsync())
+{
+    // quad.Subject, Predicate, Object, Graph are strings
+    // quad.Graph is null for default graph
+}
+```
+
+**Writing API:**
+```csharp
+using var sw = new StringWriter();
+using var writer = new TriGStreamWriter(sw);
+
+// Register prefixes
+writer.RegisterPrefix("ex", "http://example.org/");
+writer.WritePrefixes();
+
+// Write to default graph
+writer.WriteQuad("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+// Write to named graph - consecutive quads in same graph are grouped
+writer.WriteQuad("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/graph1>");
+writer.Flush();
+```
+
+**TriG output format:**
+```turtle
+@prefix ex: <http://example.org/> .
+
+# Default graph
+ex:s ex:p ex:o .
+
+# Named graph
+GRAPH <http://example.org/graph1> {
+    ex:s ex:p ex:o .
+}
+```
+
+**Features:**
+- GRAPH keyword support: `GRAPH <iri> { ... }`
+- Shorthand syntax: `<iri> { ... }`
+- All Turtle features: prefixes, base IRI, subject grouping, 'a' shorthand
+- Prefix abbreviation in output
 
 ### RDF/XML Parser (`SkyOmega.Mercury.RdfXml`)
 

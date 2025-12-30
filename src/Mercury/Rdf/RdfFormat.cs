@@ -30,7 +30,10 @@ public enum RdfFormat
     RdfXml,
 
     /// <summary>N-Quads format (application/n-quads).</summary>
-    NQuads
+    NQuads,
+
+    /// <summary>TriG format (application/trig).</summary>
+    TriG
 }
 
 /// <summary>
@@ -83,6 +86,12 @@ public static class RdfFormatNegotiator
             return RdfFormat.NQuads;
         }
 
+        if (contentType.Equals("application/trig".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            contentType.Equals("application/x-trig".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return RdfFormat.TriG;
+        }
+
         return RdfFormat.Unknown;
     }
 
@@ -123,6 +132,11 @@ public static class RdfFormatNegotiator
             extension.Equals("nquads".AsSpan(), StringComparison.OrdinalIgnoreCase))
         {
             return RdfFormat.NQuads;
+        }
+
+        if (extension.Equals("trig".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            return RdfFormat.TriG;
         }
 
         return RdfFormat.Unknown;
@@ -167,6 +181,7 @@ public static class RdfFormatNegotiator
         RdfFormat.Turtle => "text/turtle",
         RdfFormat.RdfXml => "application/rdf+xml",
         RdfFormat.NQuads => "application/n-quads",
+        RdfFormat.TriG => "application/trig",
         _ => "application/octet-stream"
     };
 
@@ -179,6 +194,7 @@ public static class RdfFormatNegotiator
         RdfFormat.Turtle => ".ttl",
         RdfFormat.RdfXml => ".rdf",
         RdfFormat.NQuads => ".nq",
+        RdfFormat.TriG => ".trig",
         _ => ""
     };
 
@@ -223,12 +239,12 @@ public static class RdfFormatNegotiator
 
     /// <summary>
     /// Create a parser for the specified format.
-    /// For N-Quads, use NQuadsStreamParser directly.
+    /// For quad formats (N-Quads, TriG), use the dedicated parsers directly.
     /// </summary>
     /// <param name="stream">The stream to parse.</param>
     /// <param name="format">The RDF format.</param>
     /// <returns>A parser for the format.</returns>
-    /// <exception cref="NotSupportedException">If the format is unknown or N-Quads.</exception>
+    /// <exception cref="NotSupportedException">If the format is unknown or a quad format.</exception>
     public static IDisposable CreateParser(Stream stream, RdfFormat format)
     {
         return format switch
@@ -237,18 +253,19 @@ public static class RdfFormatNegotiator
             RdfFormat.Turtle => new TurtleStreamParser(stream),
             RdfFormat.RdfXml => new RdfXmlStreamParser(stream),
             RdfFormat.NQuads => throw new NotSupportedException("N-Quads is a quad format. Use NQuadsStreamParser directly."),
+            RdfFormat.TriG => throw new NotSupportedException("TriG is a quad format. Use TriGStreamParser directly."),
             _ => throw new NotSupportedException($"Unsupported RDF format: {format}")
         };
     }
 
     /// <summary>
     /// Create a writer for the specified TextWriter based on format.
-    /// For N-Quads, use NQuadsStreamWriter directly.
+    /// For quad formats (N-Quads, TriG), use the dedicated writers directly.
     /// </summary>
     /// <param name="writer">The TextWriter to write to.</param>
     /// <param name="format">The RDF format.</param>
     /// <returns>A writer for the format.</returns>
-    /// <exception cref="NotSupportedException">If the format is unknown or N-Quads.</exception>
+    /// <exception cref="NotSupportedException">If the format is unknown or a quad format.</exception>
     public static IDisposable CreateWriter(TextWriter writer, RdfFormat format)
     {
         return format switch
@@ -257,6 +274,7 @@ public static class RdfFormatNegotiator
             RdfFormat.Turtle => new TurtleStreamWriter(writer),
             RdfFormat.RdfXml => new RdfXmlStreamWriter(writer),
             RdfFormat.NQuads => throw new NotSupportedException("N-Quads is a quad format. Use NQuadsStreamWriter directly."),
+            RdfFormat.TriG => throw new NotSupportedException("TriG is a quad format. Use TriGStreamWriter directly."),
             _ => throw new NotSupportedException($"Unsupported RDF format: {format}")
         };
     }
