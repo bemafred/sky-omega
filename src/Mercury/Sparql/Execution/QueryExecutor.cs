@@ -48,16 +48,25 @@ public class QueryExecutor : IDisposable
     private readonly DateTimeOffset _rangeStart;
     private readonly DateTimeOffset _rangeEnd;
 
+    // Query optimization
+    private readonly QueryPlanner? _planner;
+    private readonly int[]? _optimizedPatternOrder;
+
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
-        : this(store, source, in query, null) { }
+        : this(store, source, in query, null, null) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor)
+        : this(store, source, in query, serviceExecutor, null) { }
+
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
+        ISparqlServiceExecutor? serviceExecutor, QueryPlanner? planner)
     {
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _query = query;  // Copy here is unavoidable since we store it
         _stringBuffer = ArrayPool<char>.Shared.Rent(1024);  // Pooled buffer for string operations
+        _planner = planner;
 
         // Convert Query to QueryBuffer for heap-based pattern storage
         // This avoids stack overflow when accessing patterns in nested calls
@@ -106,6 +115,13 @@ public class QueryExecutor : IDisposable
                 query.SolutionModifier.Temporal.TimeEndLength);
             _rangeStart = ParseDateTimeOffset(startStr);
             _rangeEnd = ParseDateTimeOffset(endStr);
+        }
+
+        // Compute optimized pattern order if planner is available and we have multiple patterns
+        if (_planner != null && query.WhereClause.Pattern.RequiredPatternCount > 1)
+        {
+            _optimizedPatternOrder = _planner.OptimizePatternOrder(
+                in query.WhereClause.Pattern, source);
         }
     }
 
@@ -767,8 +783,10 @@ public class QueryExecutor : IDisposable
         ref readonly var pattern = ref _query.WhereClause.Pattern;
 
         // Use nested loop join for required patterns only
+        // Pass optimized pattern order if available for join reordering
         return new QueryResults(
-            new MultiPatternScan(_store, _source, pattern),
+            new MultiPatternScan(_store, _source, pattern, false, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder),
             _buffer,
             _source,
             _store,

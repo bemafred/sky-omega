@@ -462,6 +462,7 @@ public ref struct MultiPatternScan
     private readonly GraphPattern _pattern;
     private readonly bool _unionMode;
     private readonly ReadOnlySpan<char> _graph;
+    private readonly int[]? _patternOrder;  // Optimized pattern execution order
 
     // Temporal query parameters
     private readonly TemporalQueryMode _temporalMode;
@@ -497,20 +498,22 @@ public ref struct MultiPatternScan
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode = false, ReadOnlySpan<char> graph = default)
         : this(store, source, pattern, unionMode, graph,
-               TemporalQueryMode.Current, default, default, default)
+               TemporalQueryMode.Current, default, default, default, null)
     {
     }
 
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode, ReadOnlySpan<char> graph,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
-        DateTimeOffset rangeStart, DateTimeOffset rangeEnd)
+        DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
+        int[]? patternOrder = null)
     {
         _store = store;
         _source = source;
         _pattern = pattern;
         _unionMode = unionMode;
         _graph = graph;
+        _patternOrder = patternOrder;
         _temporalMode = temporalMode;
         _asOfTime = asOfTime;
         _rangeStart = rangeStart;
@@ -538,12 +541,18 @@ public ref struct MultiPatternScan
     }
 
     /// <summary>
-    /// Get pattern at index, respecting union mode.
+    /// Get pattern at level, respecting union mode and pattern ordering.
+    /// When _patternOrder is set, maps level to pattern index for optimized execution.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private TriplePattern GetPatternAt(int index)
+    private TriplePattern GetPatternAt(int level)
     {
-        return _unionMode ? _pattern.GetUnionPattern(index) : _pattern.GetPattern(index);
+        // Apply pattern order mapping if set
+        var patternIndex = _patternOrder != null && level < _patternOrder.Length
+            ? _patternOrder[level]
+            : level;
+
+        return _unionMode ? _pattern.GetUnionPattern(patternIndex) : _pattern.GetPattern(patternIndex);
     }
 
     /// <summary>

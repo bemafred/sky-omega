@@ -1583,13 +1583,64 @@ finally
 }
 ```
 
-### Query Optimization (Planned)
+### Query Optimization
+
+The query optimizer provides statistics-based join reordering for 10-100x performance improvement on multi-pattern queries.
+
+**Components:**
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `PredicateStats` | `Storage/PredicateStatistics.cs` | Per-predicate cardinality statistics |
+| `StatisticsStore` | `Storage/PredicateStatistics.cs` | Thread-safe statistics storage |
+| `QueryPlanner` | `Sparql/Execution/QueryPlanner.cs` | Cardinality estimation and pattern reordering |
+| `QueryPlanCache` | `Sparql/Execution/QueryPlanCache.cs` | LRU cache for execution plans |
+
+**Usage:**
+
+```csharp
+// Collect statistics at checkpoint
+store.Checkpoint();  // Automatically collects predicate cardinalities
+
+// Create planner with statistics
+var planner = new QueryPlanner(store.Statistics, store.Atoms);
+
+// Execute with optimization
+var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery, null, planner);
+var results = executor.Execute();
+
+// Plan caching for repeated queries
+var cache = new QueryPlanCache(capacity: 1000);
+var queryHash = QueryPlanCache.ComputeQueryHash(query.AsSpan());
+var cached = cache.Get(queryHash, store.Statistics.LastUpdateTxId);
+
+// EXPLAIN with estimated rows
+var explainer = new SparqlExplainer(query.AsSpan(), parsedQuery, planner);
+var plan = explainer.Explain();
+// plan.Root.EstimatedRows now populated
+```
+
+**How it works:**
+
+1. **Statistics Collection**: During `Checkpoint()`, scans GPOS index to collect per-predicate:
+   - Triple count
+   - Distinct subjects
+   - Distinct objects
+
+2. **Cardinality Estimation**: For each triple pattern, estimates result count:
+   - Bound subject: avg objects per subject
+   - Bound object: avg subjects per object
+   - Neither bound: total count for predicate
+
+3. **Join Reordering**: Sorts patterns by estimated cardinality (lowest first) while respecting variable dependencies
+
+4. **Plan Caching**: Caches reordered pattern order, invalidates when statistics change
 
 | Optimization | Impact | Status |
 |--------------|--------|--------|
-| Join Reordering | 10-100x | Planned - selectivity-based pattern reordering |
-| Statistics Collection | 2-10x | Planned - per-predicate cardinality at checkpoint |
-| Plan Caching | 2-5x | Planned - SHA256(query) → cached plan |
+| Join Reordering | 10-100x | Implemented |
+| Statistics Collection | 2-10x | Implemented |
+| Plan Caching | 2-5x | Implemented |
 | Predicate Pushdown | 5-50x | Planned - push FILTERs to leaf patterns |
 
 ### Full-Text Search (Planned)

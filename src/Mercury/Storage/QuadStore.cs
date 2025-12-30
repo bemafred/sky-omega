@@ -30,6 +30,7 @@ public sealed class QuadStore : IDisposable
     private readonly string _baseDirectory;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private readonly ILogger _logger;
+    private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
     private bool _disposed;
 
@@ -76,6 +77,18 @@ public sealed class QuadStore : IDisposable
         // Recover any uncommitted transactions
         Recover();
     }
+
+    /// <summary>
+    /// Access to predicate statistics for query optimization.
+    /// Thread-safe: returns immutable snapshots via copy-on-write.
+    /// </summary>
+    public StatisticsStore Statistics => _statistics;
+
+    /// <summary>
+    /// Access to atom store for looking up atom IDs.
+    /// Required by QueryPlanner for cardinality estimation.
+    /// </summary>
+    public AtomStore Atoms => _atoms;
 
     /// <summary>
     /// Add a temporal quad to all indexes with WAL durability.
@@ -491,6 +504,9 @@ public sealed class QuadStore : IDisposable
         // Flush all indexes (memory-mapped files auto-flush, but we can force it)
         // In a more complete implementation, we'd flush the mmap views here
 
+        // Collect predicate statistics for query optimization
+        CollectPredicateStatistics();
+
         // Write checkpoint marker to WAL
         _wal.Checkpoint();
 
@@ -506,6 +522,61 @@ public sealed class QuadStore : IDisposable
         if (_wal.ShouldCheckpoint())
         {
             CheckpointInternal();
+        }
+    }
+
+    /// <summary>
+    /// Collect per-predicate statistics by scanning the GPOS index.
+    /// Called during checkpoint when write lock is held.
+    /// Uses GPOS index ordering (predicate-first) for efficient collection.
+    /// </summary>
+    private void CollectPredicateStatistics()
+    {
+        var stats = new System.Collections.Generic.Dictionary<long, (long count, System.Collections.Generic.HashSet<long> subjects, System.Collections.Generic.HashSet<long> objects)>();
+        long totalTriples = 0;
+
+        // Scan GPOS index using QueryAsOf with empty bounds
+        // GPOS ordering: Predicate-Object-Subject, so grouped by predicate
+        var enumerator = _gposIndex.QueryAsOf(
+            ReadOnlySpan<char>.Empty,  // All predicates
+            ReadOnlySpan<char>.Empty,  // All objects (arg2 in POST ordering)
+            ReadOnlySpan<char>.Empty,  // All subjects (arg3 in POST ordering)
+            DateTimeOffset.UtcNow);
+
+        while (enumerator.MoveNext())
+        {
+            var quad = enumerator.Current;
+
+            // In GPOS index, Subject position is predicate, Predicate position is object, Object position is subject
+            // (based on TemporalIndexType.POST remapping)
+            var predicateAtom = quad.SubjectAtom;  // POST: predicate stored in Subject position
+            var objectAtom = quad.PredicateAtom;    // POST: object stored in Predicate position
+            var subjectAtom = quad.ObjectAtom;      // POST: subject stored in Object position
+
+            if (!stats.TryGetValue(predicateAtom, out var entry))
+            {
+                entry = (0, new System.Collections.Generic.HashSet<long>(), new System.Collections.Generic.HashSet<long>());
+            }
+
+            entry.subjects.Add(subjectAtom);
+            entry.objects.Add(objectAtom);
+            stats[predicateAtom] = (entry.count + 1, entry.subjects, entry.objects);
+            totalTriples++;
+        }
+
+        // Convert to immutable PredicateStats
+        var txId = _wal.CurrentTxId;
+        var predicateStats = new System.Collections.Generic.Dictionary<long, PredicateStats>();
+        foreach (var (predicateId, (count, subjects, objects)) in stats)
+        {
+            predicateStats[predicateId] = new PredicateStats(
+                predicateId, count, subjects.Count, objects.Count, txId);
+        }
+
+        _statistics.Update(predicateStats, totalTriples, txId);
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.Debug($"Collected statistics for {predicateStats.Count} predicates, {totalTriples} triples".AsSpan());
         }
     }
 

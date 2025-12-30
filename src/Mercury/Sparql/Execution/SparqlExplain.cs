@@ -328,11 +328,20 @@ public sealed class SparqlExplainer
 {
     private readonly string _source;
     private readonly Query _query;
+    private readonly QueryPlanner? _planner;
+    private readonly List<int> _boundVariables = new();
 
     public SparqlExplainer(ReadOnlySpan<char> source, in Query query)
+        : this(source, in query, null) { }
+
+    /// <summary>
+    /// Create an explainer with optional query planner for cardinality estimation.
+    /// </summary>
+    public SparqlExplainer(ReadOnlySpan<char> source, in Query query, QueryPlanner? planner)
     {
         _source = source.ToString();
         _query = query;
+        _planner = planner;
     }
 
     /// <summary>
@@ -722,7 +731,45 @@ public sealed class SparqlExplainer
 
         node.Properties["index"] = index.ToString();
 
+        // Estimate cardinality if planner is available
+        if (_planner != null)
+        {
+            var estimate = _planner.EstimateCardinality(in tp, _source.AsSpan(), _boundVariables);
+            node.EstimatedRows = (long)estimate;
+
+            // Track variables bound by this pattern for subsequent estimates
+            TrackBoundVariables(tp);
+        }
+
         return node;
+    }
+
+    /// <summary>
+    /// Track variables bound by a pattern for accurate cardinality estimation.
+    /// </summary>
+    private void TrackBoundVariables(TriplePattern tp)
+    {
+        if (IsVariable(tp.Subject))
+            AddVariableHash(tp.Subject);
+        if (IsVariable(tp.Predicate))
+            AddVariableHash(tp.Predicate);
+        if (IsVariable(tp.Object))
+            AddVariableHash(tp.Object);
+    }
+
+    private void AddVariableHash(Term term)
+    {
+        var name = _source.AsSpan().Slice(term.Start, term.Length);
+        unchecked
+        {
+            int hash = (int)2166136261;
+            foreach (var c in name)
+            {
+                hash = (hash ^ c) * 16777619;
+            }
+            if (!_boundVariables.Contains(hash))
+                _boundVariables.Add(hash);
+        }
     }
 
     private string GetTriplePatternDescription(TriplePattern tp)
