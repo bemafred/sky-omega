@@ -559,6 +559,47 @@ finally
 }
 ```
 
+**Property path query examples:**
+```csharp
+// Transitive closure: find all people reachable via knows* (0 or more hops)
+var query = "SELECT ?reachable WHERE { <http://ex.org/Alice> <http://foaf/knows>* ?reachable }";
+// Returns: Alice (0 hops), Bob (1 hop), Charlie (2 hops), etc.
+
+// One-or-more: find people reachable via knows+ (at least 1 hop)
+var query = "SELECT ?reachable WHERE { <http://ex.org/Alice> <http://foaf/knows>+ ?reachable }";
+// Returns: Bob (1 hop), Charlie (2 hops), etc. - excludes Alice
+
+// Inverse path: find who knows Alice (equivalent to ?knower <knows> <Alice>)
+var query = "SELECT ?knower WHERE { <http://ex.org/Alice> ^<http://foaf/knows> ?knower }";
+
+// Sequence path: find friends of friends
+var query = "SELECT ?fof WHERE { <http://ex.org/Alice> <http://foaf/knows>/<http://foaf/knows> ?fof }";
+
+// Alternative path: find connections via knows OR follows
+var query = "SELECT ?connected WHERE { <http://ex.org/Alice> (<http://foaf/knows>|<http://ex.org/follows>) ?connected }";
+
+var parser = new SparqlParser(query.AsSpan());
+var parsedQuery = parser.ParseQuery();
+
+store.AcquireReadLock();
+try
+{
+    var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+    var results = executor.Execute();
+
+    while (results.MoveNext())
+    {
+        var bindings = results.Current;
+        // Process path results...
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
 **SERVICE query example (federated queries):**
 ```csharp
 // SERVICE clause requires an ISparqlServiceExecutor
