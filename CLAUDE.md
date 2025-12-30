@@ -1280,6 +1280,104 @@ var query = @"SELECT ?company
 - Zero-GC parsing stores datetime literals as offsets, parsed at execution time
 - Default mode is `Current` (equivalent to calling `QueryCurrent()`)
 
+### OWL/RDFS Reasoning (`SkyOmega.Mercury.Owl`)
+
+`OwlReasoner` implements forward-chaining rule-based inference for RDFS and OWL ontologies.
+
+**Supported inference rules:**
+
+| Rule Set | Rules | Description |
+|----------|-------|-------------|
+| RDFS | `RdfsSubClass` | Transitive subClassOf, type inference from class hierarchy |
+| RDFS | `RdfsSubProperty` | Transitive subPropertyOf, property inheritance |
+| RDFS | `RdfsDomain` | Infer subject type from property domain |
+| RDFS | `RdfsRange` | Infer object type from property range |
+| OWL | `OwlTransitive` | TransitiveProperty closure |
+| OWL | `OwlSymmetric` | SymmetricProperty inverse |
+| OWL | `OwlInverse` | inverseOf bidirectional inference |
+| OWL | `OwlSameAs` | Identity-based triple copying |
+| OWL | `OwlEquivalentClass` | equivalentClass to mutual subClassOf |
+| OWL | `OwlEquivalentProperty` | equivalentProperty to mutual subPropertyOf |
+
+**Basic usage:**
+```csharp
+var store = new QuadStore("/path/to/store");
+
+// Add ontology and data
+store.AddCurrent("<http://ex.org/Dog>", "<http://www.w3.org/2000/01/rdf-schema#subClassOf>", "<http://ex.org/Animal>");
+store.AddCurrent("<http://ex.org/Fido>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Dog>");
+
+// Run reasoning with all rules
+var reasoner = new OwlReasoner(store, InferenceRules.All);
+int inferred = reasoner.Materialize();
+// Fido is now also rdf:type Animal
+
+// Query inferred facts
+store.AcquireReadLock();
+try
+{
+    var results = store.QueryCurrent(
+        "<http://ex.org/Fido>".AsSpan(),
+        "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>".AsSpan(),
+        ReadOnlySpan<char>.Empty);
+    while (results.MoveNext())
+    {
+        // Returns both Dog and Animal
+    }
+    results.Dispose();
+}
+finally
+{
+    store.ReleaseReadLock();
+}
+```
+
+**Selective rules:**
+```csharp
+// Only RDFS rules
+var reasoner = new OwlReasoner(store, InferenceRules.AllRdfs);
+
+// Only OWL transitive and symmetric
+var reasoner = new OwlReasoner(store, InferenceRules.OwlTransitive | InferenceRules.OwlSymmetric);
+
+// Specific graph only
+int inferred = reasoner.Materialize(graph: "<http://ex.org/ontology>");
+```
+
+**Example - transitive property:**
+```csharp
+// Define ancestor as transitive
+store.AddCurrent("<http://ex.org/ancestor>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>",
+    "<http://www.w3.org/2002/07/owl#TransitiveProperty>");
+
+// Add facts
+store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/ancestor>", "<http://ex.org/Bob>");
+store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/ancestor>", "<http://ex.org/Carol>");
+
+var reasoner = new OwlReasoner(store, InferenceRules.OwlTransitive);
+reasoner.Materialize();
+// Now: Alice ancestor Carol (inferred)
+```
+
+**Example - inverse properties:**
+```csharp
+// Define hasChild as inverse of hasParent
+store.AddCurrent("<http://ex.org/hasChild>", "<http://www.w3.org/2002/07/owl#inverseOf>", "<http://ex.org/hasParent>");
+
+// Add fact
+store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/hasChild>", "<http://ex.org/Bob>");
+
+var reasoner = new OwlReasoner(store, InferenceRules.OwlInverse);
+reasoner.Materialize();
+// Now: Bob hasParent Alice (inferred)
+```
+
+**Design notes:**
+- Forward-chaining materialization (inferred triples stored in graph)
+- Fixed-point iteration (runs until no new facts)
+- Configurable max iterations to prevent infinite loops
+- Duplicate detection avoids re-adding existing triples
+
 ## Code Conventions
 
 - All parsing methods follow W3C EBNF grammar productions (comments reference production numbers)
