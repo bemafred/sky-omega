@@ -3782,7 +3782,7 @@ public class QueryExecutorTests : IDisposable
 
     #region FROM / FROM NAMED Dataset Clauses
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_SingleFromClause_QueriesSpecifiedGraph()
     {
         // Add data to named graphs
@@ -3799,8 +3799,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteFromToMaterialized();
 
             var subjects = new List<string>();
             while (results.MoveNext())
@@ -3821,7 +3821,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large with FROM dataset execution.")]
+    [Fact]
     public void Execute_MultipleFromClauses_UnionsResults()
     {
         // Add data to multiple named graphs
@@ -3839,8 +3839,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteFromToMaterialized();
 
             var subjects = new HashSet<string>();
             while (results.MoveNext())
@@ -3885,7 +3885,7 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal("<http://example.org/namedGraph2>", graph2);
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large with GRAPH ?g.")]
+    [Fact]
     public void Execute_FromNamedClause_RestrictsGraphVariable()
     {
         // Add data to multiple named graphs
@@ -3900,14 +3900,13 @@ public class QueryExecutorTests : IDisposable
                       FROM NAMED <http://example.org/restrictGraph1>
                       FROM NAMED <http://example.org/restrictGraph2>
                       WHERE { GRAPH ?g { ?s <http://example.org/type> ?type } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var graphs = new HashSet<string>();
             var items = new HashSet<string>();
@@ -3971,7 +3970,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large with FROM dataset execution.")]
+    [Fact]
     public void Execute_FromWithFilter_AppliesFilterToUnionedResults()
     {
         // Add data with varying ages to graphs
@@ -3993,8 +3992,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteFromToMaterialized();
 
             var subjects = new HashSet<string>();
             while (results.MoveNext())
@@ -4015,7 +4014,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large with FROM dataset execution.")]
+    [Fact]
     public void Execute_FromWithJoin_JoinsAcrossGraphs()
     {
         // Add related data across graphs
@@ -4035,8 +4034,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteFromToMaterialized();
 
             var foundJoin = false;
             while (results.MoveNext())
@@ -4103,7 +4102,7 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal("?name", objectVar);
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_SimpleExecution_ReturnsResults()
     {
         // Test basic subquery execution
@@ -4114,8 +4113,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var persons = new List<string>();
             while (results.MoveNext())
@@ -4140,7 +4139,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_SelectAll_ReturnsAllInnerVariables()
     {
         // Test SELECT * in subquery
@@ -4151,8 +4150,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -4173,7 +4172,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_WithLimit_RespectsLimit()
     {
         // Test LIMIT in subquery
@@ -4184,8 +4183,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -4202,7 +4201,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_WithOffset_SkipsResults()
     {
         // Test OFFSET in subquery
@@ -4213,8 +4212,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -4231,7 +4230,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_VariableProjection_OnlyProjectsSelectedVariables()
     {
         // Test that only SELECT-ed variables are projected to outer query
@@ -4242,8 +4241,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             while (results.MoveNext())
             {
@@ -4261,7 +4260,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_MultiplePatterns_JoinsCorrectly()
     {
         // Test subquery with multiple triple patterns
@@ -4279,8 +4278,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var names = new List<string>();
             while (results.MoveNext())
@@ -4302,7 +4301,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_WithFilter_FiltersInnerResults()
     {
         // Test FILTER in subquery
@@ -4320,8 +4319,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var persons = new List<string>();
             while (results.MoveNext())
@@ -4345,7 +4344,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_WithDistinct_RemovesDuplicates()
     {
         // Add duplicate entries for this test
@@ -4367,8 +4366,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var knowers = new List<string>();
             while (results.MoveNext())
@@ -4391,7 +4390,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_WithOuterPattern_JoinsCorrectly()
     {
         // Test subquery with outer pattern join
@@ -4406,8 +4405,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<(string person, string age)>();
             while (results.MoveNext())
@@ -4436,7 +4435,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_WithOuterPatternFilter_FiltersAfterJoin()
     {
         // Test filter on outer pattern variables after join
@@ -4451,8 +4450,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<(string person, string age)>();
             while (results.MoveNext())
@@ -4479,7 +4478,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_JoinWithSubqueryFilter_RespectsSubqueryFilter()
     {
         // Test that subquery filter is respected, then outer join is applied
@@ -4496,8 +4495,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<string>();
             while (results.MoveNext())
@@ -4517,7 +4516,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_EmptySubquery_ReturnsEmpty()
     {
         // Test that empty subquery results in empty outer results
@@ -4533,8 +4532,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -4551,7 +4550,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void SubQuery_MultipleOuterPatterns_JoinsAll()
     {
         // Test with multiple outer patterns
@@ -4566,8 +4565,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<(string person, string name, string age)>();
             while (results.MoveNext())
@@ -4596,7 +4595,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void Execute_MultipleSubqueries_JoinsResults()
     {
         // Add data where two subqueries will join on a shared variable
@@ -4620,8 +4619,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var found = new List<(string employee, string nick, string sal)>();
             while (results.MoveNext())
@@ -4654,7 +4653,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void Execute_MultipleSubqueries_WithOuterPattern()
     {
         // Add data for subqueries plus outer pattern
@@ -4681,8 +4680,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             var found = new List<(string emp, string name, string label)>();
             while (results.MoveNext())
@@ -4712,7 +4711,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for subquery execution.")]
+    [Fact]
     public void Execute_MultipleSubqueries_NoMatch_ReturnsEmpty()
     {
         // Add data with no shared values between subqueries
@@ -4735,8 +4734,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
             var bindingsInfo = new List<string>();
@@ -4827,7 +4826,7 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(2, serviceClause.PatternCount);
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for SERVICE execution.")]
+    [Fact]
     public void Execute_ServiceClause_WithMockExecutor()
     {
         var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
@@ -4855,8 +4854,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.ExecuteServiceToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -4871,7 +4870,6 @@ public class QueryExecutorTests : IDisposable
                 Assert.True(oIdx >= 0, "?o should be bound");
             }
             results.Dispose();
-            executor.Dispose();
 
             Assert.Equal(2, count);
         }
@@ -4881,7 +4879,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for SERVICE execution.")]
+    [Fact]
     public void Execute_ServiceClause_Silent_ReturnsEmptyOnError()
     {
         var query = "SELECT * WHERE { SERVICE SILENT <http://failing.example.org/sparql> { ?s ?p ?o } }";
@@ -4895,8 +4893,8 @@ public class QueryExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.ExecuteServiceToMaterialized();
 
             // SILENT should return empty results, not throw
             int count = 0;
@@ -4905,7 +4903,6 @@ public class QueryExecutorTests : IDisposable
                 count++;
             }
             results.Dispose();
-            executor.Dispose();
 
             Assert.Equal(0, count); // No results due to error with SILENT
         }
@@ -4915,7 +4912,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large for SERVICE execution.")]
+    [Fact]
     public void Execute_ServiceClause_NoExecutor_ThrowsInvalidOperation()
     {
         var query = "SELECT * WHERE { SERVICE <http://remote.example.org/sparql> { ?s ?p ?o } }";
@@ -4926,15 +4923,13 @@ public class QueryExecutorTests : IDisposable
         try
         {
             // Don't provide a service executor
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
 
             Assert.Throws<InvalidOperationException>(() =>
             {
-                var results = executor.Execute();
+                var results = executor.ExecuteServiceToMaterialized();
                 results.Dispose();
             });
-
-            executor.Dispose();
         }
         finally
         {

@@ -227,6 +227,237 @@ public class QueryExecutor : IDisposable
     }
 
     /// <summary>
+    /// Execute a query with FROM clauses and return lightweight materialized results.
+    /// Use this for queries with FROM dataset clauses to avoid stack overflow from large QueryResults struct.
+    /// Caller must hold read lock on store.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public MaterializedQueryResults ExecuteFromToMaterialized()
+    {
+        if (_defaultGraphs == null || _defaultGraphs.Length == 0)
+        {
+            // Not a FROM query - return empty
+            return MaterializedQueryResults.Empty();
+        }
+
+        var results = new List<MaterializedRow>();
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // Access pattern via ref to avoid copying
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var requiredCount = pattern.RequiredPatternCount;
+
+        if (requiredCount == 0)
+            return MaterializedQueryResults.Empty();
+
+        // Single FROM clause - query that specific graph
+        if (_defaultGraphs.Length == 1)
+        {
+            var graphIri = _defaultGraphs[0];
+
+            if (requiredCount == 1)
+            {
+                int requiredIdx = 0;
+                for (int i = 0; i < pattern.PatternCount; i++)
+                {
+                    if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
+                }
+
+                var tp = pattern.GetPattern(requiredIdx);
+                var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri.AsSpan(),
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (!PassesFilters(in pattern, ref bindingTable))
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+                scan.Dispose();
+            }
+            else
+            {
+                // Multiple patterns - use MultiPatternScan with graph
+                var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri.AsSpan(),
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+
+                while (multiScan.MoveNext(ref bindingTable))
+                {
+                    if (!PassesFilters(in pattern, ref bindingTable))
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+                multiScan.Dispose();
+            }
+        }
+        else
+        {
+            // Multiple FROM clauses - use CrossGraphMultiPatternScan
+            var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
+
+            while (crossGraphScan.MoveNext(ref bindingTable))
+            {
+                if (!PassesFilters(in pattern, ref bindingTable))
+                {
+                    bindingTable.Clear();
+                    continue;
+                }
+                results.Add(new MaterializedRow(bindingTable));
+            }
+            crossGraphScan.Dispose();
+        }
+
+        if (results.Count == 0)
+            return MaterializedQueryResults.Empty();
+
+        return new MaterializedQueryResults(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Execute a query with subqueries and return lightweight materialized results.
+    /// Use this for queries with subqueries to avoid stack overflow from large QueryResults struct.
+    /// Caller must hold read lock on store.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public MaterializedQueryResults ExecuteSubQueryToMaterialized()
+    {
+        if (!_buffer.HasSubQueries)
+        {
+            // Not a subquery - return empty
+            return MaterializedQueryResults.Empty();
+        }
+
+        // Access pattern via ref to avoid copying
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        List<MaterializedRow>? results;
+
+        // Check for multiple subqueries
+        if (pattern.SubQueryCount > 1)
+        {
+            // Collect results from all subqueries and join them
+            results = CollectAndJoinSubQueryResults();
+            if (results == null || results.Count == 0)
+                return MaterializedQueryResults.Empty();
+
+            // If there are outer triple patterns, join with them too
+            if (pattern.RequiredPatternCount > 0)
+            {
+                results = JoinWithOuterPatterns(results);
+            }
+        }
+        else if (pattern.PatternCount > 0)
+        {
+            // Single subquery with outer patterns - use join
+            var subSelect = pattern.GetSubQuery(0);
+            results = ExecuteSubQueryJoinCore(subSelect);
+        }
+        else
+        {
+            // Single subquery without outer patterns
+            var subSelect = pattern.GetSubQuery(0);
+            results = ExecuteSubQuerySimpleCore(subSelect);
+        }
+
+        if (results == null || results.Count == 0)
+            return MaterializedQueryResults.Empty();
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        return new MaterializedQueryResults(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Core logic for executing a single subquery without outer patterns.
+    /// Returns materialized rows.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow>? ExecuteSubQuerySimpleCore(SubSelect subSelect)
+    {
+        var results = new List<MaterializedRow>();
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // Create SubQueryScan operator
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect);
+
+        while (subQueryScan.MoveNext(ref bindingTable))
+        {
+            results.Add(new MaterializedRow(bindingTable));
+        }
+        subQueryScan.Dispose();
+
+        return results;
+    }
+
+    /// <summary>
+    /// Execute a query with SERVICE clause and return lightweight materialized results.
+    /// Use this for queries with SERVICE clauses to avoid stack overflow from large QueryResults struct.
+    /// Caller must hold read lock on store.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public MaterializedQueryResults ExecuteServiceToMaterialized()
+    {
+        if (!_buffer.HasService)
+        {
+            // Not a SERVICE query - return empty
+            return MaterializedQueryResults.Empty();
+        }
+
+        if (_serviceExecutor == null)
+        {
+            throw new InvalidOperationException(
+                "SERVICE clause requires an ISparqlServiceExecutor. " +
+                "Use the QueryExecutor constructor that accepts ISparqlServiceExecutor.");
+        }
+
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        var serviceCount = pattern.ServiceClauseCount;
+
+        // Build binding storage
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // For now, only handle the simple case: SERVICE clause only, no local patterns
+        if (pattern.PatternCount == 0 && serviceCount == 1)
+        {
+            // Execute single SERVICE clause
+            var serviceClause = pattern.GetServiceClause(0);
+            var serviceScan = new ServiceScan(_serviceExecutor, _source, serviceClause, bindingTable);
+
+            // Materialize results
+            var results = new List<MaterializedRow>();
+            while (serviceScan.MoveNext(ref bindingTable))
+            {
+                results.Add(new MaterializedRow(bindingTable));
+            }
+            serviceScan.Dispose();
+
+            if (results.Count == 0)
+                return MaterializedQueryResults.Empty();
+
+            return new MaterializedQueryResults(results, bindings, stringBuffer,
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+        }
+
+        // TODO: Handle SERVICE with local patterns (requires join)
+        // TODO: Handle multiple SERVICE clauses
+        // For now, return empty for unsupported cases
+        return MaterializedQueryResults.Empty();
+    }
+
+    /// <summary>
     /// Execute a parsed query and return results.
     /// Caller must hold read lock on store and call Dispose on results.
     /// Note: Use _buffer for pattern metadata to avoid large struct copies that cause stack overflow.
@@ -725,7 +956,38 @@ public class QueryExecutor : IDisposable
         // Get variable name from source
         var varName = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength);
 
-        // Iterate all named graphs
+        // Iterate all named graphs (or FROM NAMED restricted graphs)
+        if (_namedGraphs != null && _namedGraphs.Length > 0)
+        {
+            // FROM NAMED specified - only iterate those graphs
+            foreach (var graphStr in _namedGraphs)
+            {
+                var graphIri = graphStr.AsSpan();
+
+                // Bind graph variable
+                bindingTable.Clear();
+                bindingTable.Bind(varName, graphIri);
+
+                // Execute patterns in this graph
+                var children = patterns.GetChildren(headerIndex);
+
+                if (children.Count == 1)
+                {
+                    var childSlot = children[0];
+                    if (childSlot.IsTriple)
+                    {
+                        ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, results);
+                    }
+                }
+                else
+                {
+                    ExecuteMultiPatternSlotBased(children, ref bindingTable, graphStr, results);
+                }
+            }
+            return results;
+        }
+
+        // No FROM NAMED restriction - iterate all named graphs
         foreach (var graphIri in _store.GetNamedGraphs())
         {
             // Bind graph variable
@@ -1558,5 +1820,27 @@ public class QueryExecutor : IDisposable
         joinScan.Dispose();
 
         return results;
+    }
+
+    /// <summary>
+    /// Evaluates all filter expressions for the given pattern against the current bindings.
+    /// Returns true if all filters pass, false if any filter fails.
+    /// </summary>
+    private bool PassesFilters(in GraphPattern pattern, ref BindingTable bindingTable)
+    {
+        if (pattern.FilterCount == 0)
+            return true;
+
+        for (int i = 0; i < pattern.FilterCount; i++)
+        {
+            var filter = pattern.GetFilter(i);
+            var filterExpr = _source.AsSpan(filter.Start, filter.Length);
+            var evaluator = new FilterEvaluator(filterExpr);
+            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 }
