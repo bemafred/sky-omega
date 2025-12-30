@@ -19,7 +19,7 @@ public class BatchWriteBenchmarks
     [IterationSetup]
     public void IterationSetup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_batch_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-batch-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
     }
@@ -84,7 +84,7 @@ public class QueryBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_query_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-query-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -203,7 +203,7 @@ public class IndexSelectionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_index_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-index-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 

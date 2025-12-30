@@ -102,7 +102,7 @@ public class SparqlExecutionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_sparql_exec_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-sparql-exec-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -313,7 +313,7 @@ public class JoinBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_join_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-join-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -514,7 +514,7 @@ public class FilterBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_filter_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-filter-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 

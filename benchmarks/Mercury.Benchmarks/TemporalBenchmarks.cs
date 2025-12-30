@@ -19,7 +19,7 @@ public class TemporalWriteBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_temporal_write_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-temporal-write-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -70,7 +70,7 @@ public class TemporalQueryBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"bench_temporal_query_{Guid.NewGuid():N}");
+        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-temporal-query-{Guid.NewGuid():N}");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
