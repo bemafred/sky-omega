@@ -1023,6 +1023,76 @@ public struct UpdateResult
 }
 ```
 
+### SPARQL EXPLAIN
+
+`SparqlExplainer` generates query execution plans for analysis and debugging. Similar to PostgreSQL's EXPLAIN, it visualizes the operator tree and optionally captures execution statistics.
+
+**Basic EXPLAIN (plan only):**
+```csharp
+var query = "SELECT * WHERE { ?s <http://ex.org/knows> ?o . ?o <http://ex.org/age> ?age } ORDER BY ?age LIMIT 10";
+var parser = new SparqlParser(query.AsSpan());
+var parsed = parser.ParseQuery();
+
+// Generate execution plan without running the query
+var plan = parsed.Explain(query.AsSpan());
+
+// Format as human-readable text
+string textPlan = plan.Format(ExplainFormat.Text);
+Console.WriteLine(textPlan);
+
+// Format as JSON for tooling
+string jsonPlan = plan.Format(ExplainFormat.Json);
+```
+
+**EXPLAIN ANALYZE (with execution statistics):**
+```csharp
+// Actually execute the query and capture timing/row counts
+var plan = parsed.ExplainAnalyze(query.AsSpan(), store);
+
+Console.WriteLine($"Total rows: {plan.TotalRows}");
+Console.WriteLine($"Execution time: {plan.TotalExecutionTimeMs}ms");
+Console.WriteLine(plan.Format(ExplainFormat.Text));
+```
+
+**Text output format:**
+```
+QUERY PLAN
+──────────────────────────────────────────────────────────
+⌊ Slice (LIMIT 10)
+  └─ ↑ Sort (ORDER BY ?age ASC)
+       └─ ⋈ NestedLoopJoin
+            ├─ ⊳ TriplePatternScan (?s <http://ex.org/knows> ?o) [binds: ?s, ?o]
+            └─ ⊳ TriplePatternScan (?o <http://ex.org/age> ?age) [binds: ?age]
+```
+
+**Operator symbols:**
+
+| Symbol | Operator | Description |
+|--------|----------|-------------|
+| ⊳ | TriplePatternScan | Scan index for triple pattern |
+| ⋈ | NestedLoopJoin | Join two patterns |
+| ⟕ | LeftOuterJoin | OPTIONAL pattern |
+| ∪ | Union | UNION alternatives |
+| σ | Filter | FILTER expression |
+| γ | GroupBy | GROUP BY with aggregation |
+| ↑ | Sort | ORDER BY |
+| ⌊ | Slice | LIMIT/OFFSET |
+| π | Project | SELECT projection |
+
+**Plan properties:**
+- `plan.Query` - Original query string
+- `plan.IsAnalyzed` - Whether execution stats are available
+- `plan.TotalRows` - Result count (ANALYZE only)
+- `plan.TotalExecutionTimeMs` - Total time (ANALYZE only)
+- `plan.Root` - Root node of operator tree
+
+**ExplainNode properties:**
+- `OperatorType` - Enum identifying the operator
+- `Description` - Human-readable description
+- `Children` - Child operators in the tree
+- `Properties` - Key-value metadata (variables, expressions)
+- `OutputVariables` - Variables bound by this operator
+
 ### SPARQL Result Writers
 
 Streaming writers for W3C SPARQL Query Results formats.
