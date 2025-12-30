@@ -3,6 +3,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 namespace SkyOmega.Mercury.Benchmarks;
 
@@ -102,7 +103,7 @@ public class SparqlExecutionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-sparql-exec-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("sparql-exec");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -313,7 +314,7 @@ public class JoinBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-join-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("join");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -514,7 +515,7 @@ public class FilterBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-filter-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("filter");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 

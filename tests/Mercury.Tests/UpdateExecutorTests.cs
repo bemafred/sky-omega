@@ -3,6 +3,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -17,7 +18,7 @@ public class UpdateExecutorTests : IDisposable
 
     public UpdateExecutorTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), $"mercury-test-update-{Guid.NewGuid():N}");
+        _testDir = TempPath.Test("update");
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
     }

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -15,7 +16,7 @@ public class QuadIndexTests : IDisposable
 
     public QuadIndexTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-index-{Guid.NewGuid():N}.tdb");
+        _testPath = TempPath.Test("index").WithExtension(".tdb");
     }
 
     public void Dispose()

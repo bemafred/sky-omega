@@ -10,6 +10,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 namespace Mercury.Tests;
 
@@ -24,7 +25,7 @@ public class SparqlStarTests : IDisposable
 
     public SparqlStarTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-test-sparqlstar-{Guid.NewGuid():N}");
+        _tempDir = TempPath.Test("sparqlstar");
         Directory.CreateDirectory(_tempDir);
         _store = new QuadStore(_tempDir);
     }

@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mercury\Mercury.csproj" />
+    <ProjectReference Include="..\..\src\Mercury.Utilities\Mercury.Utilities.csproj" />
   </ItemGroup>
 
 </Project>

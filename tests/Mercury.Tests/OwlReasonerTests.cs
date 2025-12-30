@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using SkyOmega.Mercury.Owl;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -29,7 +30,7 @@ public class OwlReasonerTests : IDisposable
 
     public OwlReasonerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "mercury-test-owl-" + Guid.NewGuid().ToString("N"));
+        _testDir = TempPath.Test("owl");
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
     }

@@ -10,6 +10,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 namespace Mercury.Tests;
 
@@ -31,7 +32,7 @@ public class RdfStarTests : IDisposable
 
     public RdfStarTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-test-rdfstar-{Guid.NewGuid():N}");
+        _tempDir = TempPath.Test("rdfstar");
         Directory.CreateDirectory(_tempDir);
         _store = new QuadStore(_tempDir);
     }

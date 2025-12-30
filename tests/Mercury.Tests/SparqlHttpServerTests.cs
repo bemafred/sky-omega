@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -24,7 +25,7 @@ public class SparqlHttpServerTests : IDisposable
 
     public SparqlHttpServerTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "mercury-test-http-" + Guid.NewGuid().ToString("N"));
+        _testDir = TempPath.Test("http");
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
 

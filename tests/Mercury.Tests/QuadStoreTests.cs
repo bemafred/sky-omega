@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -15,7 +16,7 @@ public class QuadStoreTests : IDisposable
 
     public QuadStoreTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-store-{Guid.NewGuid():N}");
+        _testPath = TempPath.Test("store");
     }
 
     public void Dispose()

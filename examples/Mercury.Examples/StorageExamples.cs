@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 namespace SkyOmega.Mercury.Examples;
 
@@ -24,7 +25,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Basic File Storage");
         Console.WriteLine("---------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-basic");
+        var dbPath = TempPath.Example("basic").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -69,7 +70,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Multi-Index Query Optimization");
         Console.WriteLine("---------------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-multiindex");
+        var dbPath = TempPath.Example("multiindex").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -134,7 +135,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Large Dataset Bulk Load");
         Console.WriteLine("--------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-bulk");
+        var dbPath = TempPath.Example("bulk").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 
@@ -178,7 +179,7 @@ public static class StorageExamples
         Console.WriteLine("Example: Persistence and Recovery");
         Console.WriteLine("---------------------------------");
 
-        var dbPath = Path.Combine(Path.GetTempPath(), "mercury-example-persist");
+        var dbPath = TempPath.Example("persist").FullPath;
         if (Directory.Exists(dbPath))
             Directory.Delete(dbPath, true);
 

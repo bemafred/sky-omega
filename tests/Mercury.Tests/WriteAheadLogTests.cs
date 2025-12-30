@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -15,7 +16,7 @@ public class WriteAheadLogTests : IDisposable
 
     public WriteAheadLogTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-wal-{Guid.NewGuid():N}.log");
+        _testPath = TempPath.Test("wal").WithExtension(".log");
     }
 
     public void Dispose()

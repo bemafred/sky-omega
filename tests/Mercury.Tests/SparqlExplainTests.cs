@@ -4,6 +4,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -18,7 +19,7 @@ public class SparqlExplainTests : IDisposable
 
     public SparqlExplainTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), "mercury-test-explain-" + Guid.NewGuid().ToString("N"));
+        _testDir = TempPath.Test("explain");
         Directory.CreateDirectory(_testDir);
         _store = new QuadStore(_testDir);
 

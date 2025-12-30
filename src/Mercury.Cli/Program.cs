@@ -3,6 +3,7 @@
 
 using SkyOmega.Mercury.Repl;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 // Parse command line arguments
 string? storePath = null;
@@ -65,7 +66,7 @@ bool usingTempStore = false;
 if (inMemory || storePath == null)
 {
     // Use temp directory for in-memory mode
-    actualPath = Path.Combine(Path.GetTempPath(), $"mercury-{Guid.NewGuid():N}");
+    actualPath = TempPath.Cli("session");
     usingTempStore = true;
 
     if (!inMemory && storePath == null)

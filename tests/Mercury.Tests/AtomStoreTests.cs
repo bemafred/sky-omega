@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -17,7 +18,7 @@ public class AtomStoreTests : IDisposable
 
     public AtomStoreTests()
     {
-        _testPath = Path.Combine(Path.GetTempPath(), $"mercury-test-atom-{Guid.NewGuid():N}");
+        _testPath = TempPath.Test("atom");
     }
 
     public void Dispose()

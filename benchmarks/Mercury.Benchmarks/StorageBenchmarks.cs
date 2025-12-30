@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 namespace SkyOmega.Mercury.Benchmarks;
 
@@ -19,7 +20,7 @@ public class BatchWriteBenchmarks
     [IterationSetup]
     public void IterationSetup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-batch-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("batch");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
     }
@@ -84,7 +85,7 @@ public class QueryBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-query-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("query");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -203,7 +204,7 @@ public class IndexSelectionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-index-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("index");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 

@@ -1,5 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Utilities;
 
 namespace SkyOmega.Mercury.Benchmarks;
 
@@ -19,7 +20,7 @@ public class TemporalWriteBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-temporal-write-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("temporal-write");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
@@ -70,7 +71,7 @@ public class TemporalQueryBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = Path.Combine(Path.GetTempPath(), $"mercury-bench-temporal-query-{Guid.NewGuid():N}");
+        _dbPath = TempPath.Benchmark("temporal-query");
         if (Directory.Exists(_dbPath))
             Directory.Delete(_dbPath, true);
 
