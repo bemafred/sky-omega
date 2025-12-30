@@ -902,6 +902,70 @@ writer.WriteEnd();
 | CSV | text/csv | Compact, values only (no type info) |
 | TSV | text/tab-separated-values | Preserves RDF syntax (brackets, quotes) |
 
+### Content Negotiation
+
+Automatic format detection from MIME types, file extensions, and Accept headers.
+
+**RDF Format Detection (`RdfFormatNegotiator`):**
+```csharp
+// Detect from Content-Type header
+var format = RdfFormatNegotiator.FromContentType("text/turtle; charset=utf-8");
+// Returns RdfFormat.Turtle
+
+// Detect from file extension
+var format = RdfFormatNegotiator.FromExtension(".nt");
+// Returns RdfFormat.NTriples
+
+// Detect from path (handles query strings)
+var format = RdfFormatNegotiator.FromPath("http://example.org/data.rdf?version=2");
+// Returns RdfFormat.RdfXml
+
+// Negotiate: content type wins, falls back to path
+var format = RdfFormatNegotiator.Negotiate("application/octet-stream", "/data/graph.ttl");
+// Returns RdfFormat.Turtle (from path, since content type is unknown)
+
+// Create parser/writer from format
+using var parser = RdfFormatNegotiator.CreateParser(stream, RdfFormat.Turtle);
+using var writer = RdfFormatNegotiator.CreateWriter(textWriter, RdfFormat.NTriples);
+
+// Create from content negotiation
+using var parser = RdfFormatNegotiator.CreateParser(stream, contentType: "text/turtle");
+using var writer = RdfFormatNegotiator.CreateWriter(textWriter, path: "/output.rdf");
+```
+
+**SPARQL Result Format Detection (`SparqlResultFormatNegotiator`):**
+```csharp
+// Detect from Content-Type
+var format = SparqlResultFormatNegotiator.FromContentType("application/sparql-results+json");
+// Returns SparqlResultFormat.Json
+
+// Parse Accept header with quality values
+var format = SparqlResultFormatNegotiator.FromAcceptHeader(
+    "application/sparql-results+json;q=0.8, application/sparql-results+xml;q=1.0");
+// Returns SparqlResultFormat.Xml (higher quality)
+
+// Create writer from Accept header
+using var writer = SparqlResultFormatNegotiator.CreateWriter(textWriter, "application/sparql-results+xml");
+
+// Create writer from file path
+using var writer = SparqlResultFormatNegotiator.CreateWriterFromPath(textWriter, "/results/output.csv");
+```
+
+**Supported formats:**
+
+| RDF Format | Content Types | Extensions |
+|------------|---------------|------------|
+| Turtle | text/turtle, application/x-turtle | .ttl, .turtle |
+| N-Triples | application/n-triples, text/plain | .nt, .ntriples |
+| RDF/XML | application/rdf+xml, application/xml, text/xml | .rdf, .xml, .rdfxml |
+
+| SPARQL Result Format | Content Types | Extensions |
+|---------------------|---------------|------------|
+| JSON | application/sparql-results+json, application/json | .json, .srj |
+| XML | application/sparql-results+xml, application/xml | .xml, .srx |
+| CSV | text/csv | .csv |
+| TSV | text/tab-separated-values, text/tsv | .tsv |
+
 ### Temporal SPARQL Extensions
 
 Mercury exposes the bitemporal storage layer through SPARQL query syntax. All triples have implicit valid-time bounds (`ValidFrom`, `ValidTo`), and temporal clauses filter based on these bounds.
