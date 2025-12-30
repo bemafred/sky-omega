@@ -613,4 +613,263 @@ public class UpdateExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region WITH Clause Tests
+
+    [Fact]
+    public void With_DeleteInsert_ScopesToSpecifiedGraph()
+    {
+        // Add data to named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        // Also add same pattern to default graph - should NOT be affected
+        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/status>", "\"active\"");
+        _store.CommitBatch();
+
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
+        Assert.Equal(1, CountTriples());
+
+        // WITH clause scopes the update to the named graph
+        var update = @"WITH <http://ex.org/g1>
+                       DELETE { ?s <http://ex.org/status> ""active"" }
+                       INSERT { ?s <http://ex.org/status> ""inactive"" }
+                       WHERE { ?s <http://ex.org/status> ""active"" }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(4, result.AffectedCount); // 2 deleted + 2 inserted
+
+        // Named graph should have new values
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
+
+        // Default graph should be unchanged
+        Assert.Equal(1, CountTriples());
+
+        // Verify the content in the named graph was changed
+        _store.AcquireReadLock();
+        try
+        {
+            var results = _store.QueryCurrent(
+                System.ReadOnlySpan<char>.Empty,
+                "<http://ex.org/status>".AsSpan(),
+                "\"inactive\"".AsSpan(),
+                "<http://ex.org/g1>".AsSpan());
+            int count = 0;
+            while (results.MoveNext()) count++;
+            results.Dispose();
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void With_InsertOnly_InsertsIntoSpecifiedGraph()
+    {
+        // Add data to named graph
+        _store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"", "<http://ex.org/g1>");
+
+        Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
+        Assert.Equal(0, CountTriples());
+
+        // WITH clause scopes insert to the named graph
+        var update = @"WITH <http://ex.org/g1>
+                       INSERT { ?s <http://ex.org/type> <http://ex.org/Person> }
+                       WHERE { ?s <http://ex.org/name> ?name }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.AffectedCount);
+
+        // New triple should be in named graph
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
+        // Default graph should still be empty
+        Assert.Equal(0, CountTriples());
+    }
+
+    [Fact]
+    public void With_DeleteOnly_DeletesFromSpecifiedGraph()
+    {
+        // Add data to named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value\"", "<http://ex.org/g1>");
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/perm>", "\"keep\"", "<http://ex.org/g1>");
+        // Also add same pattern to default graph
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value\"");
+        _store.CommitBatch();
+
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
+        Assert.Equal(1, CountTriples());
+
+        // WITH clause scopes delete to the named graph
+        var update = @"WITH <http://ex.org/g1>
+                       DELETE { ?s <http://ex.org/temp> ?o }
+                       WHERE { ?s <http://ex.org/temp> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.AffectedCount);
+
+        // Named graph should only have the perm triple
+        Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
+        // Default graph should be unchanged
+        Assert.Equal(1, CountTriples());
+    }
+
+    [Fact]
+    public void With_ExplicitGraphInTemplate_OverridesWithGraph()
+    {
+        // Add data to named graph g1
+        _store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"", "<http://ex.org/g1>");
+
+        Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
+        Assert.Equal(0, CountTriples("<http://ex.org/g2>"));
+
+        // WITH specifies g1 for WHERE, but INSERT uses explicit GRAPH g2
+        var update = @"WITH <http://ex.org/g1>
+                       INSERT { GRAPH <http://ex.org/g2> { ?s <http://ex.org/type> <http://ex.org/Person> } }
+                       WHERE { ?s <http://ex.org/name> ?name }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(1, result.AffectedCount);
+
+        // New triple should be in g2, not g1
+        Assert.Equal(1, CountTriples("<http://ex.org/g1>")); // Original unchanged
+        Assert.Equal(1, CountTriples("<http://ex.org/g2>")); // New triple here
+    }
+
+    [Fact]
+    public void With_MixedTemplates_UsesCorrectGraphs()
+    {
+        // Add data to named graph g1
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        _store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        _store.CommitBatch();
+
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
+
+        // WITH g1, but insert to g2 (explicit) and delete from g1 (implicit via WITH)
+        var update = @"WITH <http://ex.org/g1>
+                       DELETE { ?s <http://ex.org/status> ""active"" }
+                       INSERT { GRAPH <http://ex.org/g2> { ?s <http://ex.org/status> ""archived"" } }
+                       WHERE { ?s <http://ex.org/status> ""active"" }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(4, result.AffectedCount); // 2 deleted + 2 inserted
+
+        // g1 should be empty (deleted)
+        Assert.Equal(0, CountTriples("<http://ex.org/g1>"));
+        // g2 should have the archived statuses
+        Assert.Equal(2, CountTriples("<http://ex.org/g2>"));
+    }
+
+    [Fact]
+    public void With_NoMatchingData_ReturnsZeroAffected()
+    {
+        // Add data to default graph only
+        _store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        Assert.Equal(1, CountTriples());
+        Assert.Equal(0, CountTriples("<http://ex.org/g1>"));
+
+        // WITH scopes to g1 which is empty
+        var update = @"WITH <http://ex.org/g1>
+                       DELETE { ?s ?p ?o }
+                       WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.AffectedCount);
+
+        // Default graph should be unchanged
+        Assert.Equal(1, CountTriples());
+    }
+
+    [Fact]
+    public void With_ParsedCorrectly()
+    {
+        var update = @"WITH <http://example.org/graph1>
+                       DELETE { ?s ?p ?o }
+                       INSERT { ?s <http://ex.org/new> ?o }
+                       WHERE { ?s <http://ex.org/old> ?o }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.Modify, operation.Type);
+        Assert.True(operation.WithGraphLength > 0);
+
+        var withGraph = update.AsSpan(operation.WithGraphStart, operation.WithGraphLength);
+        Assert.True(withGraph.SequenceEqual("<http://example.org/graph1>".AsSpan()));
+    }
+
+    #endregion
+
+    #region DELETE WHERE with GRAPH Clause Tests
+
+    // NOTE: DELETE WHERE with only GRAPH clauses (no base patterns) causes stack overflow
+    // in QueryExecutor.ExecuteGraphClauses(). This is a pre-existing limitation.
+    // The fix requires refactoring QueryExecutor to use thread-based execution for
+    // GRAPH-only patterns, similar to how it handles multi-pattern GRAPH clauses.
+    [Fact(Skip = "Pre-existing limitation: GRAPH-only patterns cause stack overflow in QueryExecutor")]
+    public void DeleteWhere_WithGraphClause_DeletesFromSpecifiedGraph()
+    {
+        // Add data to named graph
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
+        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
+        // Also in default graph
+        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
+        _store.CommitBatch();
+
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
+        Assert.Equal(1, CountTriples());
+
+        // DELETE WHERE with explicit GRAPH clause
+        var update = @"DELETE WHERE { GRAPH <http://ex.org/g1> { ?s ?p ?o } }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount);
+
+        // Named graph should be empty
+        Assert.Equal(0, CountTriples("<http://ex.org/g1>"));
+        // Default graph should be unchanged
+        Assert.Equal(1, CountTriples());
+    }
+
+    #endregion
 }

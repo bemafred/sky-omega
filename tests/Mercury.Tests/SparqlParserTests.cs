@@ -651,7 +651,9 @@ public class SparqlParserTests
         var result = parser.ParseUpdate();
 
         Assert.Equal(QueryType.Modify, result.Type);
-        Assert.Equal(GraphTargetType.Graph, result.SourceGraph.Type);
+        Assert.True(result.WithGraphLength > 0);
+        var withGraph = update.AsSpan(result.WithGraphStart, result.WithGraphLength);
+        Assert.True(withGraph.SequenceEqual("<http://ex.org/g1>".AsSpan()));
     }
 
     [Fact]

@@ -412,7 +412,7 @@ Key components:
 | Dataset | FROM, FROM NAMED (cross-graph joins supported) |
 | Temporal queries | AS OF (point-in-time), DURING (range), ALL VERSIONS (history) |
 | SPARQL-star | Quoted triples (`<< s p o >>`), expanded to reification at parse time |
-| SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE, CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
+| SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE (WITH clause), CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
@@ -705,6 +705,20 @@ var update = @"DELETE { ?p <http://ex.org/status> ""active"" }
 var update = @"INSERT { ?s <http://ex.org/type> <http://ex.org/Person> }
                WHERE { ?s <http://ex.org/name> ?name }";
 // Adds type=Person triple for every subject that has a name
+
+// WITH clause - scope updates to a named graph
+var update = @"WITH <http://ex.org/graph1>
+               DELETE { ?s <http://ex.org/status> ""active"" }
+               INSERT { ?s <http://ex.org/status> ""inactive"" }
+               WHERE { ?s <http://ex.org/status> ""active"" }";
+// WITH scopes WHERE clause and template patterns to the named graph
+// Explicit GRAPH clauses in templates can override WITH
+
+// WITH with explicit GRAPH override
+var update = @"WITH <http://ex.org/source>
+               INSERT { GRAPH <http://ex.org/archive> { ?s <http://ex.org/archived> true } }
+               WHERE { ?s <http://ex.org/status> ""active"" }";
+// WHERE matches from <source> graph, INSERT goes to <archive> graph
 
 // CLEAR operations
 var update = "CLEAR DEFAULT";           // Clear default graph

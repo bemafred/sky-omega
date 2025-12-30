@@ -1533,6 +1533,10 @@ public struct UpdateOperation
     // For USING clause in DELETE/INSERT
     public DatasetClause[] UsingClauses;
 
+    // For WITH clause in DELETE/INSERT WHERE
+    public int WithGraphStart;
+    public int WithGraphLength;
+
     // For graph management (LOAD, CLEAR, DROP, CREATE, COPY, MOVE, ADD)
     public GraphTarget SourceGraph;
     public GraphTarget DestinationGraph;

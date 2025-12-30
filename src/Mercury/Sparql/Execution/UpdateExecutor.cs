@@ -133,11 +133,11 @@ public class UpdateExecutor
     {
         // DELETE WHERE: The pattern serves as both the WHERE clause and delete template
         var pattern = _update.WhereClause.Pattern;
-        if (pattern.PatternCount == 0)
+        if (pattern.PatternCount == 0 && pattern.GraphClauseCount == 0)
             return new UpdateResult { Success = true, AffectedCount = 0 };
 
-        // For simple single-pattern DELETE WHERE without variables, we can execute directly
-        if (pattern.PatternCount == 1 && !HasVariables(pattern.GetPattern(0)))
+        // For simple single-pattern DELETE WHERE without variables or GRAPH clauses, we can execute directly
+        if (pattern.PatternCount == 1 && pattern.GraphClauseCount == 0 && !HasVariables(pattern.GetPattern(0)))
         {
             var tp = pattern.GetPattern(0);
             var subject = _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
@@ -149,7 +149,7 @@ public class UpdateExecutor
         }
 
         // Execute the WHERE pattern to find matching bindings
-        var toDelete = new System.Collections.Generic.List<(string s, string p, string o)>();
+        var toDelete = new System.Collections.Generic.List<(string s, string p, string o, string? g)>();
 
         // Build a SELECT * query from the pattern
         var query = new Query
@@ -171,7 +171,7 @@ public class UpdateExecutor
                 var bindings = results.Current;
 
                 // For DELETE WHERE, the delete template is the same as the WHERE pattern
-                // Instantiate each pattern with the bindings
+                // Instantiate each base pattern with the bindings (default graph)
                 for (int i = 0; i < pattern.PatternCount; i++)
                 {
                     var tp = pattern.GetPattern(i);
@@ -187,7 +187,27 @@ public class UpdateExecutor
                     // Only delete if all terms are bound (no unbound variables)
                     if (s != null && p != null && o != null)
                     {
-                        toDelete.Add((s, p, o));
+                        toDelete.Add((s, p, o, null));
+                    }
+                }
+
+                // Process GRAPH clauses - delete from specified graphs
+                for (int i = 0; i < pattern.GraphClauseCount; i++)
+                {
+                    var gc = pattern.GetGraphClause(i);
+                    var graphIri = ResolveGraphTerm(gc.Graph, bindings);
+
+                    for (int j = 0; j < gc.PatternCount; j++)
+                    {
+                        var tp = gc.GetPattern(j);
+                        var s = InstantiateTerm(tp.Subject, bindings);
+                        var p = InstantiateTerm(tp.Predicate, bindings);
+                        var o = InstantiateTerm(tp.Object, bindings);
+
+                        if (s != null && p != null && o != null && graphIri != null)
+                        {
+                            toDelete.Add((s, p, o, graphIri));
+                        }
                     }
                 }
             }
@@ -206,9 +226,10 @@ public class UpdateExecutor
         try
         {
             var deletedCount = 0;
-            foreach (var (s, p, o) in toDelete)
+            foreach (var (s, p, o, g) in toDelete)
             {
-                if (_store.DeleteCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan()))
+                var graphSpan = g != null ? g.AsSpan() : ReadOnlySpan<char>.Empty;
+                if (_store.DeleteCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), graphSpan))
                     deletedCount++;
             }
             _store.CommitBatch();
@@ -248,9 +269,16 @@ public class UpdateExecutor
         // DELETE/INSERT ... WHERE: Execute WHERE pattern, then apply DELETE and INSERT templates
         var wherePattern = _update.WhereClause.Pattern;
 
-        // Collect all delete and insert operations
-        var toDelete = new System.Collections.Generic.List<(string s, string p, string o)>();
-        var toInsert = new System.Collections.Generic.List<(string s, string p, string o)>();
+        // Extract WITH graph if present
+        string? withGraph = null;
+        if (_update.WithGraphLength > 0)
+        {
+            withGraph = _source.Substring(_update.WithGraphStart, _update.WithGraphLength);
+        }
+
+        // Collect all delete and insert operations (now with graph context)
+        var toDelete = new System.Collections.Generic.List<(string s, string p, string o, string? g)>();
+        var toInsert = new System.Collections.Generic.List<(string s, string p, string o, string? g)>();
 
         // Build a SELECT * query from the WHERE pattern
         var query = new Query
@@ -265,18 +293,29 @@ public class UpdateExecutor
         try
         {
             // If there's no WHERE pattern, execute once with empty bindings
-            if (wherePattern.PatternCount == 0)
+            if (wherePattern.PatternCount == 0 && wherePattern.GraphClauseCount == 0)
             {
-                ProcessModifyTemplates(default, toDelete, toInsert);
+                ProcessModifyTemplates(default, toDelete, toInsert, withGraph);
+            }
+            // WITH clause with simple single pattern - use direct store query to avoid stack overflow
+            else if (withGraph != null && wherePattern.GraphClauseCount == 0 && wherePattern.PatternCount == 1)
+            {
+                ExecuteModifyWithSimplePattern(wherePattern, withGraph, toDelete, toInsert);
+            }
+            // WITH clause with multiple patterns - run on thread with larger stack
+            else if (withGraph != null && wherePattern.GraphClauseCount == 0 && wherePattern.PatternCount > 1)
+            {
+                ExecuteModifyWithMultiPatternOnThread(query, withGraph, toDelete, toInsert);
             }
             else
             {
+                // Standard path - no WITH clause or has GRAPH clauses
                 var executor = new QueryExecutor(_store, _source.AsSpan(), query);
                 var results = executor.Execute();
 
                 while (results.MoveNext())
                 {
-                    ProcessModifyTemplates(results.Current, toDelete, toInsert);
+                    ProcessModifyTemplates(results.Current, toDelete, toInsert, withGraph);
                 }
                 results.Dispose();
             }
@@ -291,15 +330,17 @@ public class UpdateExecutor
         try
         {
             var deletedCount = 0;
-            foreach (var (s, p, o) in toDelete)
+            foreach (var (s, p, o, g) in toDelete)
             {
-                if (_store.DeleteCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan()))
+                var graphSpan = g != null ? g.AsSpan() : ReadOnlySpan<char>.Empty;
+                if (_store.DeleteCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), graphSpan))
                     deletedCount++;
             }
 
-            foreach (var (s, p, o) in toInsert)
+            foreach (var (s, p, o, g) in toInsert)
             {
-                _store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan());
+                var graphSpan = g != null ? g.AsSpan() : ReadOnlySpan<char>.Empty;
+                _store.AddCurrentBatched(s.AsSpan(), p.AsSpan(), o.AsSpan(), graphSpan);
             }
             _store.CommitBatch();
 
@@ -312,13 +353,163 @@ public class UpdateExecutor
         }
     }
 
+    /// <summary>
+    /// Execute modify with simple single pattern using direct store query.
+    /// Avoids QueryExecutor stack issues for WITH clause.
+    /// </summary>
+    private void ExecuteModifyWithSimplePattern(
+        GraphPattern pattern,
+        string withGraph,
+        System.Collections.Generic.List<(string s, string p, string o, string? g)> toDelete,
+        System.Collections.Generic.List<(string s, string p, string o, string? g)> toInsert)
+    {
+        var tp = pattern.GetPattern(0);
+        var subjectSpan = tp.Subject.Type == TermType.Variable
+            ? ReadOnlySpan<char>.Empty
+            : _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
+        var predicateSpan = tp.Predicate.Type == TermType.Variable
+            ? ReadOnlySpan<char>.Empty
+            : _source.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
+        var objectSpan = tp.Object.Type == TermType.Variable
+            ? ReadOnlySpan<char>.Empty
+            : _source.AsSpan(tp.Object.Start, tp.Object.Length);
+
+        var results = _store.QueryCurrent(subjectSpan, predicateSpan, objectSpan, withGraph.AsSpan());
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        while (results.MoveNext())
+        {
+            var t = results.Current;
+            // Only include triples from the WITH graph
+            if (!t.Graph.Equals(withGraph.AsSpan(), StringComparison.Ordinal))
+                continue;
+
+            bindingTable.Clear();
+
+            // Bind variables from the matched triple
+            if (tp.Subject.Type == TermType.Variable)
+            {
+                var varName = _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
+                bindingTable.Bind(varName, t.Subject);
+            }
+            if (tp.Predicate.Type == TermType.Variable)
+            {
+                var varName = _source.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
+                bindingTable.Bind(varName, t.Predicate);
+            }
+            if (tp.Object.Type == TermType.Variable)
+            {
+                var varName = _source.AsSpan(tp.Object.Start, tp.Object.Length);
+                bindingTable.Bind(varName, t.Object);
+            }
+
+            ProcessModifyTemplates(bindingTable, toDelete, toInsert, withGraph);
+        }
+        results.Dispose();
+    }
+
+    /// <summary>
+    /// Execute modify with multiple patterns on separate thread with larger stack.
+    /// </summary>
+    private void ExecuteModifyWithMultiPatternOnThread(
+        Query query,
+        string withGraph,
+        System.Collections.Generic.List<(string s, string p, string o, string? g)> toDelete,
+        System.Collections.Generic.List<(string s, string p, string o, string? g)> toInsert)
+    {
+        var store = _store;
+        var source = _source;
+        var update = _update;
+
+        // Run on thread with larger stack to handle large struct copies
+        var thread = new System.Threading.Thread(() =>
+        {
+            // Add WITH graph as dataset clause
+            var modifiedQuery = query;
+            modifiedQuery.Datasets = new[] { DatasetClause.Default(update.WithGraphStart, update.WithGraphLength) };
+
+            var executor = new QueryExecutor(store, source.AsSpan(), modifiedQuery);
+            var results = executor.Execute();
+
+            while (results.MoveNext())
+            {
+                // Copy bindings since we need to use them across template processing
+                var b = results.Current;
+                var deleteTemplate = update.DeleteTemplate;
+                var insertTemplate = update.InsertTemplate;
+
+                // Process DELETE template - base patterns use WITH graph
+                for (int i = 0; i < deleteTemplate.PatternCount; i++)
+                {
+                    var tp = deleteTemplate.GetPattern(i);
+                    var s = InstantiateTermFromSpan(tp.Subject, b, source);
+                    var p = InstantiateTermFromSpan(tp.Predicate, b, source);
+                    var o = InstantiateTermFromSpan(tp.Object, b, source);
+
+                    if (s != null && p != null && o != null)
+                    {
+                        lock (toDelete)
+                        {
+                            toDelete.Add((s, p, o, withGraph));
+                        }
+                    }
+                }
+
+                // Process INSERT template - base patterns use WITH graph
+                for (int i = 0; i < insertTemplate.PatternCount; i++)
+                {
+                    var tp = insertTemplate.GetPattern(i);
+                    var s = InstantiateTermFromSpan(tp.Subject, b, source);
+                    var p = InstantiateTermFromSpan(tp.Predicate, b, source);
+                    var o = InstantiateTermFromSpan(tp.Object, b, source);
+
+                    if (s != null && p != null && o != null)
+                    {
+                        lock (toInsert)
+                        {
+                            toInsert.Add((s, p, o, withGraph));
+                        }
+                    }
+                }
+            }
+            results.Dispose();
+        }, 4 * 1024 * 1024); // 4MB stack
+
+        thread.Start();
+        thread.Join();
+    }
+
+    /// <summary>
+    /// Instantiate a term from a span-based source.
+    /// </summary>
+    private static string? InstantiateTermFromSpan(Term term, BindingTable bindings, string source)
+    {
+        var termSpan = source.AsSpan(term.Start, term.Length);
+
+        if (term.Type == TermType.Variable)
+        {
+            var idx = bindings.FindBinding(termSpan);
+            if (idx >= 0)
+                return bindings.GetString(idx).ToString();
+            return null;
+        }
+
+        return termSpan.ToString();
+    }
+
     private void ProcessModifyTemplates(
         BindingTable bindings,
-        System.Collections.Generic.List<(string s, string p, string o)> toDelete,
-        System.Collections.Generic.List<(string s, string p, string o)> toInsert)
+        System.Collections.Generic.List<(string s, string p, string o, string? g)> toDelete,
+        System.Collections.Generic.List<(string s, string p, string o, string? g)> toInsert,
+        string? withGraph)
     {
         // Process DELETE template
         var deleteTemplate = _update.DeleteTemplate;
+
+        // Process base patterns (use WITH graph as default)
         for (int i = 0; i < deleteTemplate.PatternCount; i++)
         {
             var tp = deleteTemplate.GetPattern(i);
@@ -328,12 +519,34 @@ public class UpdateExecutor
 
             if (s != null && p != null && o != null)
             {
-                toDelete.Add((s, p, o));
+                toDelete.Add((s, p, o, withGraph));
+            }
+        }
+
+        // Process explicit GRAPH clauses in DELETE template (override WITH graph)
+        for (int i = 0; i < deleteTemplate.GraphClauseCount; i++)
+        {
+            var gc = deleteTemplate.GetGraphClause(i);
+            var graphIri = ResolveGraphTerm(gc.Graph, bindings);
+
+            for (int j = 0; j < gc.PatternCount; j++)
+            {
+                var tp = gc.GetPattern(j);
+                var s = InstantiateTerm(tp.Subject, bindings);
+                var p = InstantiateTerm(tp.Predicate, bindings);
+                var o = InstantiateTerm(tp.Object, bindings);
+
+                if (s != null && p != null && o != null && graphIri != null)
+                {
+                    toDelete.Add((s, p, o, graphIri));
+                }
             }
         }
 
         // Process INSERT template
         var insertTemplate = _update.InsertTemplate;
+
+        // Process base patterns (use WITH graph as default)
         for (int i = 0; i < insertTemplate.PatternCount; i++)
         {
             var tp = insertTemplate.GetPattern(i);
@@ -343,9 +556,48 @@ public class UpdateExecutor
 
             if (s != null && p != null && o != null)
             {
-                toInsert.Add((s, p, o));
+                toInsert.Add((s, p, o, withGraph));
             }
         }
+
+        // Process explicit GRAPH clauses in INSERT template (override WITH graph)
+        for (int i = 0; i < insertTemplate.GraphClauseCount; i++)
+        {
+            var gc = insertTemplate.GetGraphClause(i);
+            var graphIri = ResolveGraphTerm(gc.Graph, bindings);
+
+            for (int j = 0; j < gc.PatternCount; j++)
+            {
+                var tp = gc.GetPattern(j);
+                var s = InstantiateTerm(tp.Subject, bindings);
+                var p = InstantiateTerm(tp.Predicate, bindings);
+                var o = InstantiateTerm(tp.Object, bindings);
+
+                if (s != null && p != null && o != null && graphIri != null)
+                {
+                    toInsert.Add((s, p, o, graphIri));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Resolve a graph term to its IRI string.
+    /// Returns null if the term is a variable that is not bound.
+    /// </summary>
+    private string? ResolveGraphTerm(Term term, BindingTable bindings)
+    {
+        var termSpan = _source.AsSpan(term.Start, term.Length);
+
+        if (term.Type == TermType.Variable)
+        {
+            var idx = bindings.FindBinding(termSpan);
+            if (idx >= 0)
+                return bindings.GetString(idx).ToString();
+            return null;
+        }
+
+        return termSpan.ToString();
     }
 
     private bool HasVariables(TriplePattern tp)

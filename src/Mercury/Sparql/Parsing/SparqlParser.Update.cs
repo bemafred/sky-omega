@@ -94,16 +94,12 @@ public ref partial struct SparqlParser
         if (TryConsumeKeyword("WITH"))
         {
             SkipWhitespace();
-            // Parse graph IRI - for now store in SourceGraph
+            // Parse graph IRI - store in dedicated WithGraph fields
             var iriStart = _position;
             ParseIriRef();
             var iriLen = _position - iriStart;
-            op.SourceGraph = new GraphTarget
-            {
-                Type = GraphTargetType.Graph,
-                IriStart = iriStart,
-                IriLength = iriLen
-            };
+            op.WithGraphStart = iriStart;
+            op.WithGraphLength = iriLen;
             SkipWhitespace();
         }
 
