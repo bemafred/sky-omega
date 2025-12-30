@@ -46,15 +46,15 @@ public class QueryExecutor : IDisposable
     private readonly DateTimeOffset _rangeStart;
     private readonly DateTimeOffset _rangeEnd;
 
-    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query)
-        : this(store, source, query, null) { }
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
+        : this(store, source, in query, null) { }
 
-    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, Query query,
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor)
     {
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
-        _query = query;
+        _query = query;  // Copy here is unavoidable since we store it
 
         // Convert Query to QueryBuffer for heap-based pattern storage
         // This avoids stack overflow when accessing patterns in nested calls
@@ -181,6 +181,49 @@ public class QueryExecutor : IDisposable
         if (_disposed) return;
         _disposed = true;
         _buffer?.Dispose();
+    }
+
+    /// <summary>
+    /// Execute a GRAPH-only query and return lightweight materialized results.
+    /// Use this for queries with GRAPH clauses to avoid stack overflow from large QueryResults struct.
+    /// The returned MaterializedQueryResults is ~200 bytes vs ~22KB for full QueryResults.
+    /// Caller must hold read lock on store.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public MaterializedQueryResults ExecuteGraphToMaterialized()
+    {
+        if (!_buffer.HasGraph || _buffer.TriplePatternCount != 0)
+        {
+            // Not a pure GRAPH query - return empty
+            return MaterializedQueryResults.Empty();
+        }
+
+        var patterns = _buffer.GetPatterns();
+        var graphCount = _buffer.GraphClauseCount;
+        List<MaterializedRow>? results;
+
+        if (graphCount > 1)
+        {
+            results = CollectAndJoinGraphResultsSlotBased(patterns);
+        }
+        else if (_buffer.FirstGraphIsVariable)
+        {
+            if (_buffer.FirstGraphPatternCount == 0)
+                return MaterializedQueryResults.Empty();
+            results = ExecuteVariableGraphSlotBased(patterns);
+        }
+        else
+        {
+            results = ExecuteFixedGraphSlotBasedList(patterns);
+        }
+
+        if (results == null || results.Count == 0)
+            return MaterializedQueryResults.Empty();
+
+        var bindings = new Binding[16];
+        var stringBuffer = new char[1024];
+        return new MaterializedQueryResults(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
     /// <summary>
@@ -597,8 +640,15 @@ public class QueryExecutor : IDisposable
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
 
-        // Fixed IRI graph execution
-        return ExecuteFixedGraphSlotBased(patterns);
+        // Fixed IRI graph execution - get list to avoid returning large QueryResults from nested call
+        var fixedResults = ExecuteFixedGraphSlotBasedList(patterns);
+        if (fixedResults == null || fixedResults.Count == 0)
+            return QueryResults.Empty();
+
+        var fixedBindings = new Binding[16];
+        var fixedStringBuffer = new char[1024];
+        return QueryResults.FromMaterializedList(fixedResults, fixedBindings, fixedStringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
     /// <summary>
@@ -732,14 +782,15 @@ public class QueryExecutor : IDisposable
 
     /// <summary>
     /// Execute fixed graph clause using PatternSlot views (GRAPH &lt;iri&gt; { ... }).
+    /// Returns List to avoid stack overflow from returning large QueryResults by value.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteFixedGraphSlotBased(Patterns.PatternArray patterns)
+    private List<MaterializedRow>? ExecuteFixedGraphSlotBasedList(Patterns.PatternArray patterns)
     {
         // Find the first graph header
         var graphHeaders = patterns.EnumerateGraphHeaders();
         if (!graphHeaders.MoveNext())
-            return QueryResults.Empty();
+            return null;
 
         var header = graphHeaders.Current;
         var headerIndex = graphHeaders.CurrentIndex;
@@ -749,7 +800,7 @@ public class QueryExecutor : IDisposable
         var children = patterns.GetChildren(headerIndex);
 
         if (children.Count == 0)
-            return QueryResults.Empty();
+            return null;
 
         // Materialize results - this avoids issues with returning scan refs
         var results = new List<MaterializedRow>();
@@ -770,11 +821,7 @@ public class QueryExecutor : IDisposable
             ExecuteMultiPatternSlotBased(children, ref bindingTable, graphIri, results);
         }
 
-        if (results.Count == 0)
-            return QueryResults.Empty();
-
-        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+        return results.Count == 0 ? null : results;
     }
 
     /// <summary>
@@ -873,145 +920,6 @@ public class QueryExecutor : IDisposable
         }
 
         scan.Dispose();
-    }
-
-    /// <summary>
-    /// Execute a variable graph clause for joining (GRAPH ?g { ... }).
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private List<MaterializedRow>? ExecuteVariableGraphClauseForJoin(int graphIndex)
-    {
-        var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
-
-        // Find the nth GRAPH header slot in the buffer
-        var patterns = _buffer.GetPatterns();
-        int graphHeaderIdx = -1;
-        int foundCount = 0;
-        for (int i = 0; i < _buffer.PatternCount; i++)
-        {
-            if (patterns[i].Kind == Patterns.PatternKind.GraphHeader)
-            {
-                if (foundCount == graphIndex)
-                {
-                    graphHeaderIdx = i;
-                    break;
-                }
-                foundCount++;
-            }
-        }
-
-        if (graphHeaderIdx < 0)
-            return null;
-
-        var graphHeader = patterns[graphHeaderIdx];
-
-        var config = new VariableGraphExecutor.BufferExecutionConfig
-        {
-            Store = _store,
-            Source = _source,
-            Buffer = _buffer,
-            NamedGraphs = _namedGraphs,
-            Bindings = bindings,
-            StringBuffer = stringBuffer,
-            GraphTermType = graphHeader.GraphTermType,
-            GraphTermStart = graphHeader.GraphTermStart,
-            GraphTermLength = graphHeader.GraphTermLength,
-            GraphHeaderIndex = graphHeaderIdx
-        };
-
-        return VariableGraphExecutor.ExecuteFromBuffer(config);
-    }
-
-    /// <summary>
-    /// Execute a fixed IRI graph clause for joining (GRAPH <iri> { ... }).
-    /// Dispatches to specialized methods to avoid large structs on same stack frame.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private List<MaterializedRow>? ExecuteFixedGraphClauseForJoin(int graphIndex)
-    {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
-        var graphClause = pattern.GetGraphClause(graphIndex);
-        var patternCount = graphClause.PatternCount;
-
-        if (patternCount == 0)
-            return null;
-
-        if (patternCount == 1)
-            return ExecuteFixedGraphClauseSinglePattern(graphIndex);
-        else
-            return ExecuteFixedGraphClauseMultiPattern(graphIndex);
-    }
-
-    /// <summary>
-    /// Execute a fixed GRAPH clause with a single pattern.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private List<MaterializedRow> ExecuteFixedGraphClauseSinglePattern(int graphIndex)
-    {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
-        var graphClause = pattern.GetGraphClause(graphIndex);
-
-        var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
-        var bindingTable = new BindingTable(bindings, stringBuffer);
-
-        var graphIri = _source.AsSpan(graphClause.Graph.Start, graphClause.Graph.Length);
-        var tp = graphClause.GetPattern(0);
-        var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri);
-
-        var results = new List<MaterializedRow>();
-        while (scan.MoveNext(ref bindingTable))
-        {
-            results.Add(new MaterializedRow(bindingTable));
-            bindingTable.Clear();
-        }
-        scan.Dispose();
-        return results;
-    }
-
-    /// <summary>
-    /// Execute a fixed GRAPH clause with multiple patterns.
-    /// Uses a separate thread with larger stack to handle the large MultiPatternScan struct.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private List<MaterializedRow> ExecuteFixedGraphClauseMultiPattern(int graphIndex)
-    {
-        List<MaterializedRow>? results = null;
-        var store = _store;
-        var source = _source;
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
-        var graphClause = pattern.GetGraphClause(graphIndex);
-
-        // Run on thread with larger stack to handle large GraphPattern/MultiPatternScan structs
-        var thread = new System.Threading.Thread(() =>
-        {
-            var bindings = new Binding[16];
-            var stringBuffer = new char[1024];
-            var bindingTable = new BindingTable(bindings, stringBuffer);
-
-            var graphIri = source.AsSpan(graphClause.Graph.Start, graphClause.Graph.Length);
-
-            var graphPattern = new GraphPattern();
-            for (int i = 0; i < graphClause.PatternCount; i++)
-            {
-                graphPattern.AddPattern(graphClause.GetPattern(i));
-            }
-
-            var scan = new MultiPatternScan(store, source, graphPattern, false, graphIri);
-            results = new List<MaterializedRow>();
-            while (scan.MoveNext(ref bindingTable))
-            {
-                results.Add(new MaterializedRow(bindingTable));
-                bindingTable.Clear();
-            }
-            scan.Dispose();
-        }, 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
-
-        return results ?? new List<MaterializedRow>();
     }
 
     /// <summary>

@@ -40,6 +40,18 @@ public class QueryExecutorTests : IDisposable
             Directory.Delete(_testDir, true);
     }
 
+    /// <summary>
+    /// Parse a query directly to QueryBuffer, avoiding storage of large Query struct on stack.
+    /// Uses [MethodImpl(NoInlining)] to ensure Query is in a separate stack frame that gets cleaned up.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static SkyOmega.Mercury.Sparql.Patterns.QueryBuffer ParseToBuffer(string query)
+    {
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+        return SkyOmega.Mercury.Sparql.Patterns.QueryBufferAdapter.FromQuery(in parsedQuery, query.AsSpan());
+    }
+
     [Fact]
     public void Execute_SinglePatternAllVariables_ReturnsAllTriples()
     {
@@ -3300,7 +3312,7 @@ public class QueryExecutorTests : IDisposable
 
     #region GRAPH Clause Execution
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_GraphClause_QueriesNamedGraph()
     {
         // Add data to a named graph
@@ -3310,14 +3322,16 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+
+        // Use buffer-based constructor to avoid storing large Query struct
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            // Use ExecuteGraphToMaterialized() to avoid stack overflow from large QueryResults struct
+            var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -3335,7 +3349,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_GraphClause_DoesNotQueryDefaultGraph()
     {
         // Add data to a named graph
@@ -3345,13 +3359,12 @@ public class QueryExecutorTests : IDisposable
 
         // Query default graph - should NOT find Eve
         var query = "SELECT * WHERE { <http://example.org/Eve> ?p ?o }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
             var results = executor.Execute();
 
             int count = 0;
@@ -3370,7 +3383,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_GraphClause_BindsVariables()
     {
         // Add data to a named graph
@@ -3379,14 +3392,13 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT ?name WHERE { GRAPH <http://example.org/graph3> { <http://example.org/Frank> <http://xmlns.com/foaf/0.1/name> ?name } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var names = new List<string>();
             while (results.MoveNext())
@@ -3406,7 +3418,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_GraphClause_MultiplePatterns()
     {
         // Add data to a named graph
@@ -3416,14 +3428,13 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT ?name ?age WHERE { GRAPH <http://example.org/graph4> { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -3446,18 +3457,17 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_GraphClause_NonExistentGraph_ReturnsEmpty()
     {
         var query = "SELECT * WHERE { GRAPH <http://example.org/nonexistent> { ?s ?p ?o } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -3474,7 +3484,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_VariableGraph_IteratesAllNamedGraphs()
     {
         // Add data to multiple named graphs
@@ -3485,14 +3495,13 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT ?g ?s ?name WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> ?name } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var foundGraphs = new HashSet<string>();
             var foundNames = new HashSet<string>();
@@ -3522,7 +3531,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_VariableGraph_BindsGraphVariable()
     {
         // Add data to a named graph
@@ -3531,14 +3540,13 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT ?g WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> \"Kate\" } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var graphs = new List<string>();
             while (results.MoveNext())
@@ -3558,7 +3566,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_VariableGraph_ExcludesDefaultGraph()
     {
         // Add data to default graph and named graph
@@ -3568,14 +3576,13 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var foundGraphs = new HashSet<string>();
             while (results.MoveNext())
@@ -3597,7 +3604,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_VariableGraph_MultiplePatterns()
     {
         // Add person with name and age to named graph
@@ -3607,14 +3614,13 @@ public class QueryExecutorTests : IDisposable
         _store.CommitBatch();
 
         var query = "SELECT ?g ?name ?age WHERE { GRAPH ?g { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -3640,7 +3646,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_MultipleGraphClauses_JoinsResults()
     {
         // Add data to two different named graphs with a shared subject
@@ -3656,14 +3662,13 @@ public class QueryExecutorTests : IDisposable
             GRAPH <http://example.org/namesGraph> { ?person <http://xmlns.com/foaf/0.1/name> ?name }
             GRAPH <http://example.org/agesGraph> { ?person <http://xmlns.com/foaf/0.1/age> ?age }
         }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var found = new List<(string name, string age)>();
             while (results.MoveNext())
@@ -3687,7 +3692,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_MultipleGraphClauses_WithVariableGraph()
     {
         // Add data with variable graph pattern
@@ -3701,14 +3706,13 @@ public class QueryExecutorTests : IDisposable
             GRAPH <http://example.org/labelsGraph> { ?item <http://example.org/label> ?label }
             GRAPH ?g { ?item <http://example.org/price> ?price }
         }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             var found = new List<(string g, string label, string price)>();
             while (results.MoveNext())
@@ -3737,7 +3741,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults too large.")]
+    [Fact]
     public void Execute_MultipleGraphClauses_NoMatch_ReturnsEmpty()
     {
         // Add data with no shared subjects between graphs
@@ -3751,14 +3755,13 @@ public class QueryExecutorTests : IDisposable
             GRAPH <http://example.org/graphA> { ?s <http://example.org/p> ?v1 }
             GRAPH <http://example.org/graphB> { ?s <http://example.org/q> ?v2 }
         }";
-        var parser = new SparqlParser(query.AsSpan());
-        var parsedQuery = parser.ParseQuery();
+        var buffer = ParseToBuffer(query);
 
         _store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
