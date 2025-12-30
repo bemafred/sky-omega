@@ -1448,6 +1448,86 @@ reasoner.Materialize();
 - Configurable max iterations to prevent infinite loops
 - Duplicate detection avoids re-adding existing triples
 
+### SPARQL HTTP Server (`SkyOmega.Mercury.Sparql.Protocol`)
+
+`SparqlHttpServer` implements the W3C SPARQL 1.1 Protocol using BCL HttpListener. It provides HTTP endpoints for SPARQL queries and updates with full content negotiation.
+
+**Basic usage:**
+```csharp
+var store = new QuadStore("/path/to/store");
+
+// Create server with default options (read-only, CORS enabled)
+var server = new SparqlHttpServer(store, "http://localhost:8080/");
+server.Start();
+
+// Server is now accepting requests at:
+// - http://localhost:8080/sparql (queries)
+// - http://localhost:8080/sparql/update (updates, if enabled)
+
+// Stop server
+await server.StopAsync();
+server.Dispose();
+```
+
+**Enable updates:**
+```csharp
+var options = new SparqlHttpServerOptions
+{
+    EnableUpdates = true,  // Allow INSERT/DELETE operations
+    EnableCors = true,     // CORS headers for browser access
+    CorsOrigin = "*"       // Allow all origins (customize for production)
+};
+
+var server = new SparqlHttpServer(store, "http://localhost:8080/", options);
+server.Start();
+```
+
+**Query endpoint (GET/POST):**
+```bash
+# GET with query parameter
+curl "http://localhost:8080/sparql?query=SELECT%20*%20WHERE%20%7B%20%3Fs%20%3Fp%20%3Fo%20%7D%20LIMIT%2010"
+
+# POST with form-encoded body
+curl -X POST "http://localhost:8080/sparql" \
+    -d "query=SELECT * WHERE { ?s ?p ?o } LIMIT 10"
+
+# POST with direct query body
+curl -X POST "http://localhost:8080/sparql" \
+    -H "Content-Type: application/sparql-query" \
+    -d "SELECT * WHERE { ?s ?p ?o } LIMIT 10"
+```
+
+**Update endpoint (POST only):**
+```bash
+# POST with direct update body
+curl -X POST "http://localhost:8080/sparql/update" \
+    -H "Content-Type: application/sparql-update" \
+    -d "INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }"
+```
+
+**Content negotiation:**
+
+| Accept Header | Result Format |
+|---------------|---------------|
+| `application/sparql-results+json` | JSON (default) |
+| `application/sparql-results+xml` | XML |
+| `text/csv` | CSV |
+| `text/tab-separated-values` | TSV |
+
+**Service description:**
+```bash
+# GET without query returns service description (Turtle)
+curl "http://localhost:8080/sparql"
+```
+
+**Features:**
+- SELECT, ASK, CONSTRUCT, DESCRIBE queries
+- SPARQL Update (INSERT DATA, DELETE DATA, etc.) when enabled
+- Content negotiation for result formats
+- CORS headers for browser access
+- Service description endpoint
+- JSON error responses
+
 ## Code Conventions
 
 - All parsing methods follow W3C EBNF grammar productions (comments reference production numbers)
