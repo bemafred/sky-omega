@@ -5482,6 +5482,322 @@ public class QueryExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region Property Path Transitive Tests
+
+    [Fact]
+    public void Execute_ZeroOrMorePath_ReflexiveCase()
+    {
+        // p* includes reflexive case (0 hops): start node matches itself
+        // Query: <Alice> <knows>* ?x should include Alice (0 hops) and Bob (1 hop)
+        var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>* ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.ZeroOrMore, pattern.Path.Type);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p* should include Alice (0 hops) and Bob (1 hop)
+            Assert.Contains("<http://example.org/Alice>", found);
+            Assert.Contains("<http://example.org/Bob>", found);
+            Assert.Equal(2, found.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OneOrMorePath_NoReflexiveCase()
+    {
+        // p+ does NOT include reflexive case: requires at least 1 hop
+        // Query: <Alice> <knows>+ ?x should only include Bob (1 hop), not Alice
+        var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>+ ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.OneOrMore, pattern.Path.Type);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p+ should only include Bob (1 hop), not Alice (0 hops)
+            Assert.Contains("<http://example.org/Bob>", found);
+            Assert.DoesNotContain("<http://example.org/Alice>", found);
+            Assert.Single(found);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ZeroOrMorePath_MultiHop()
+    {
+        // Test multi-hop transitive closure with a chain: Alice -> Bob -> Charlie
+        // First add the extra triple
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>* ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p* from Alice: Alice (0 hops), Bob (1 hop), Charlie (2 hops)
+            Assert.Contains("<http://example.org/Alice>", found);
+            Assert.Contains("<http://example.org/Bob>", found);
+            Assert.Contains("<http://example.org/Charlie>", found);
+            Assert.Equal(3, found.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OneOrMorePath_MultiHop()
+    {
+        // Test multi-hop with p+ (no reflexive): Alice -> Bob -> Charlie
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
+        _store.CommitBatch();
+
+        var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>+ ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p+ from Alice: Bob (1 hop), Charlie (2 hops) - NOT Alice
+            Assert.DoesNotContain("<http://example.org/Alice>", found);
+            Assert.Contains("<http://example.org/Bob>", found);
+            Assert.Contains("<http://example.org/Charlie>", found);
+            Assert.Equal(2, found.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ZeroOrMorePath_NoMatches()
+    {
+        // Start from Charlie who knows no one - p* should return just Charlie (reflexive)
+        var query = "SELECT ?x WHERE { <http://example.org/Charlie> <http://xmlns.com/foaf/0.1/knows>* ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p* with no outgoing edges: only reflexive case
+            Assert.Contains("<http://example.org/Charlie>", found);
+            Assert.Single(found);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OneOrMorePath_NoMatches()
+    {
+        // Start from Charlie who knows no one - p+ should return nothing
+        var query = "SELECT ?x WHERE { <http://example.org/Charlie> <http://xmlns.com/foaf/0.1/knows>+ ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // p+ with no outgoing edges: empty result
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ZeroOrOnePath_WithMatch()
+    {
+        // p? matches 0 or 1 hop: <Alice> <knows>? ?x should give Alice and Bob
+        var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>? ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.ZeroOrOne, pattern.Path.Type);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p? from Alice: Alice (0 hops) and Bob (1 hop)
+            Assert.Contains("<http://example.org/Alice>", found);
+            Assert.Contains("<http://example.org/Bob>", found);
+            Assert.Equal(2, found.Count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ZeroOrOnePath_NoMatch()
+    {
+        // p? with no outgoing edges: only reflexive case
+        var query = "SELECT ?x WHERE { <http://example.org/Charlie> <http://xmlns.com/foaf/0.1/knows>? ?x }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var bindings = results.Current;
+                var idx = bindings.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    found.Add(bindings.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // p? with no outgoing edges: only Charlie (reflexive)
+            Assert.Contains("<http://example.org/Charlie>", found);
+            Assert.Single(found);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
 
 /// <summary>

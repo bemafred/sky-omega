@@ -116,6 +116,7 @@ public ref struct TriplePatternScan
     private HashSet<string>? _visited;
     private Queue<string>? _frontier;
     private string? _currentNode;
+    private string? _startNode;  // Original start node for binding
     private bool _emittedReflexive;
 
     // State for alternative path traversal (p1|p2)
@@ -158,6 +159,7 @@ public ref struct TriplePatternScan
         _visited = null;
         _frontier = null;
         _currentNode = null;
+        _startNode = null;
         _emittedReflexive = false;
         _alternativePhase = 0;
     }
@@ -250,6 +252,20 @@ public ref struct TriplePatternScan
 
     private bool MoveNextTransitive(ref BindingTable bindings)
     {
+        // For zero-or-more (p*), emit reflexive case first: start node matches itself at 0 hops
+        if (_isZeroOrMore && !_emittedReflexive)
+        {
+            _emittedReflexive = true;
+            bindings.TruncateTo(_initialBindingsCount);
+
+            // Bind subject to start node, object to start node (reflexive)
+            if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
+                TryBindVariable(_pattern.Object, _startNode.AsSpan(), ref bindings))
+            {
+                return true;
+            }
+        }
+
         // BFS for transitive closure
         while (true)
         {
@@ -265,7 +281,8 @@ public ref struct TriplePatternScan
                     _frontier!.Enqueue(targetNode);
 
                     bindings.TruncateTo(_initialBindingsCount);
-                    if (TryBindVariable(_pattern.Subject, _source.Slice(_pattern.Subject.Start, _pattern.Subject.Length), ref bindings) &&
+                    // Bind subject to original start node, object to the discovered target
+                    if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
                         TryBindVariable(_pattern.Object, triple.Object, ref bindings))
                     {
                         return true;
@@ -279,7 +296,7 @@ public ref struct TriplePatternScan
                 return false;
 
             _currentNode = _frontier.Dequeue();
-            var predicate = _isInverse
+            var predicate = _pattern.HasPropertyPath
                 ? ResolveTermForQuery(_pattern.Path.Iri)
                 : ResolveTermForQuery(_pattern.Predicate);
 
@@ -343,23 +360,21 @@ public ref struct TriplePatternScan
         _frontier = new Queue<string>();
 
         var subject = ResolveTermForQuery(_pattern.Subject);
-        var startNode = subject.ToString();
+        _startNode = subject.ToString();
 
-        // For zero-or-more, emit reflexive first
-        if (_isZeroOrMore && !_emittedReflexive)
-        {
-            _emittedReflexive = true;
-        }
+        // For zero-or-more, we'll emit reflexive first in MoveNextTransitive
+        // For one-or-more, we skip the reflexive case
+        _emittedReflexive = false;
 
-        _visited.Add(startNode);
-        _currentNode = startNode;
+        _visited.Add(_startNode);
+        _currentNode = _startNode;
 
         var predicate = _pattern.HasPropertyPath
             ? ResolveTermForQuery(_pattern.Path.Iri)
             : ResolveTermForQuery(_pattern.Predicate);
 
         _enumerator = ExecuteTemporalQuery(
-            startNode.AsSpan(),
+            _startNode.AsSpan(),
             predicate,
             ReadOnlySpan<char>.Empty);
     }
