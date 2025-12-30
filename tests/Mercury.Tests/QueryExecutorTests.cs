@@ -4938,6 +4938,180 @@ public class QueryExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region Property Path Sequence Tests
+
+    [Fact]
+    public void Execute_SequencePath_BasicTwoStep()
+    {
+        // Add data for a 2-step path: Alice knows Bob, Bob worksAt AcmeCorp
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
+        _store.CommitBatch();
+
+        // Query: ?s knows/worksAt ?company - find companies where someone Alice knows works
+        var query = "SELECT ?s ?company WHERE { ?s <http://xmlns.com/foaf/0.1/knows>/<http://example.org/worksAt> ?company }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify sequence path was expanded to 2 patterns
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            string? foundCompany = null;
+            string? foundSubject = null;
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var companyIdx = results.Current.FindBinding("?company".AsSpan());
+                Assert.True(sIdx >= 0);
+                Assert.True(companyIdx >= 0);
+                foundSubject = results.Current.GetString(sIdx).ToString();
+                foundCompany = results.Current.GetString(companyIdx).ToString();
+                count++;
+            }
+            results.Dispose();
+
+            // Alice knows Bob, Bob worksAt AcmeCorp, so Alice -> AcmeCorp
+            Assert.Equal(1, count);
+            Assert.Equal("<http://example.org/Alice>", foundSubject);
+            Assert.Equal("<http://example.org/AcmeCorp>", foundCompany);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_SequencePath_NoMatches()
+    {
+        // Query with predicates that don't exist or don't form a chain
+        var query = "SELECT ?s ?o WHERE { ?s <http://example.org/nonexistent>/<http://example.org/alsoNonexistent> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify sequence path was expanded to 2 patterns
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // No matches expected
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_SequencePath_WithBoundSubject()
+    {
+        // Add data for a 2-step path
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
+        _store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Bob>");
+        _store.CommitBatch();
+
+        // Query starting from specific subject: Alice knows/worksAt ?company
+        var query = "SELECT ?company WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>/<http://example.org/worksAt> ?company }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify sequence path was expanded to 2 patterns
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            string? foundCompany = null;
+            while (results.MoveNext())
+            {
+                var companyIdx = results.Current.FindBinding("?company".AsSpan());
+                Assert.True(companyIdx >= 0);
+                foundCompany = results.Current.GetString(companyIdx).ToString();
+                count++;
+            }
+            results.Dispose();
+
+            // Alice knows Bob, Bob worksAt AcmeCorp
+            Assert.Equal(1, count);
+            Assert.Equal("<http://example.org/AcmeCorp>", foundCompany);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_SequencePath_MultipleResults()
+    {
+        // Add data where multiple paths exist
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
+        _store.AddCurrentBatched("<http://example.org/Dave>", "<http://xmlns.com/foaf/0.1/name>", "\"Dave\"");
+        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Dave>");
+        _store.AddCurrentBatched("<http://example.org/Dave>", "<http://example.org/worksAt>", "<http://example.org/TechCorp>");
+        _store.CommitBatch();
+
+        // Query: ?s knows/worksAt ?company
+        var query = "SELECT ?s ?company WHERE { ?s <http://xmlns.com/foaf/0.1/knows>/<http://example.org/worksAt> ?company }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var foundResults = new List<(string subject, string company)>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var companyIdx = results.Current.FindBinding("?company".AsSpan());
+                foundResults.Add((
+                    results.Current.GetString(sIdx).ToString(),
+                    results.Current.GetString(companyIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Alice knows Bob (worksAt AcmeCorp) and Dave (worksAt TechCorp)
+            Assert.Equal(2, foundResults.Count);
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && r.company == "<http://example.org/AcmeCorp>");
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && r.company == "<http://example.org/TechCorp>");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
 
 /// <summary>

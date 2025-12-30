@@ -22,10 +22,15 @@ internal static class SyntheticTermHelper
     // Pre-allocated synthetic variable names for reifier bindings (up to 32 per query)
     private static readonly string[] SyntheticVarNames = new string[32];
 
+    // Pre-allocated synthetic variable names for sequence path intermediates (up to 32 per query)
+    private static readonly string[] SyntheticSeqVarNames = new string[32];
+
     static SyntheticTermHelper()
     {
         for (int i = 0; i < SyntheticVarNames.Length; i++)
             SyntheticVarNames[i] = $"?_qt{i}";
+        for (int i = 0; i < SyntheticSeqVarNames.Length; i++)
+            SyntheticSeqVarNames[i] = $"?_seq{i}";
     }
 
     /// <summary>
@@ -54,16 +59,33 @@ internal static class SyntheticTermHelper
 
     /// <summary>
     /// Get the synthetic variable name for a negative offset.
-    /// Synthetic variables start at offset -100: -100 = ?_qt0, -101 = ?_qt1, etc.
+    /// Reifier variables: -100 to -131 = ?_qt0 to ?_qt31
+    /// Sequence variables: -200 to -231 = ?_seq0 to ?_seq31
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ReadOnlySpan<char> GetSyntheticVarName(int start)
     {
-        var index = -start - 100;
-        if (index >= 0 && index < SyntheticVarNames.Length)
-            return SyntheticVarNames[index].AsSpan();
+        // Check for sequence variables first (-200 to -231)
+        if (start <= -200 && start > -232)
+        {
+            var index = -start - 200;
+            if (index < SyntheticSeqVarNames.Length)
+                return SyntheticSeqVarNames[index].AsSpan();
+        }
+
+        // Reifier variables (-100 to -131)
+        var qtIndex = -start - 100;
+        if (qtIndex >= 0 && qtIndex < SyntheticVarNames.Length)
+            return SyntheticVarNames[qtIndex].AsSpan();
         return ReadOnlySpan<char>.Empty;
     }
+
+    /// <summary>
+    /// Get the synthetic offset for a sequence intermediate variable.
+    /// Index 0 = offset -200, index 1 = offset -201, etc.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetSeqVarOffset(int index) => -(200 + index);
 }
 
 public ref struct TriplePatternScan

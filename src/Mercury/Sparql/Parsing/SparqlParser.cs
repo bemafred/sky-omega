@@ -15,6 +15,7 @@ public ref partial struct SparqlParser
     private ReadOnlySpan<char> _source;
     private int _position;
     private int _quotedTripleCounter; // Counter for generating synthetic reifier variables
+    private int _seqVarCounter; // Counter for generating synthetic sequence intermediate variables
 
     // RDF namespace constants for reification expansion (offsets into synthetic buffer)
     // These are appended to the source during query execution
@@ -29,6 +30,7 @@ public ref partial struct SparqlParser
         _source = source;
         _position = 0;
         _quotedTripleCounter = 0;
+        _seqVarCounter = 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -307,6 +309,12 @@ public ref partial struct SparqlParser
             return ExpandQuotedTriplePattern(ref pattern, subject, predicate, obj, path);
         }
 
+        // Check for sequence path - expand to multiple patterns with intermediate variables
+        if (path.Type == PathType.Sequence)
+        {
+            return ExpandSequencePath(ref pattern, subject, obj, path);
+        }
+
         pattern.AddPattern(new TriplePattern
         {
             Subject = subject,
@@ -416,6 +424,125 @@ public ref partial struct SparqlParser
         });
 
         return reifierTerm;
+    }
+
+    /// <summary>
+    /// Expand a sequence path (p1/p2) into multiple triple patterns with synthetic intermediate variables.
+    /// For: ?s &lt;p1&gt;/&lt;p2&gt; ?o
+    /// Generates:
+    ///   ?s &lt;p1&gt; ?_seq0 .
+    ///   ?_seq0 &lt;p2&gt; ?o .
+    /// Handles nested sequences recursively: ?s &lt;p1&gt;/&lt;p2&gt;/&lt;p3&gt; ?o becomes 3 patterns.
+    /// </summary>
+    private bool ExpandSequencePath(ref GraphPattern pattern, Term subject, Term obj, PropertyPath path)
+    {
+        // Generate synthetic intermediate variable: ?_seq{N}
+        var seqIndex = _seqVarCounter++;
+        var intermediateTerm = Term.Variable(-(seqIndex + 200), 0); // Synthetic sequence variable marker
+
+        // Re-parse left and right path segments from source offsets
+        var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
+        var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
+
+        // Add left pattern: subject -> intermediate
+        if (leftPath.Type == PathType.Sequence)
+        {
+            // Recursively expand nested sequence on left side
+            ExpandSequencePath(ref pattern, subject, intermediateTerm, leftPath);
+        }
+        else
+        {
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = leftPredicate,
+                Object = intermediateTerm,
+                Path = leftPath
+            });
+        }
+
+        // Add right pattern: intermediate -> object
+        if (rightPath.Type == PathType.Sequence)
+        {
+            // Recursively expand nested sequence on right side
+            ExpandSequencePath(ref pattern, intermediateTerm, obj, rightPath);
+        }
+        else
+        {
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = intermediateTerm,
+                Predicate = rightPredicate,
+                Object = obj,
+                Path = rightPath
+            });
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Re-parse a path segment from source offsets.
+    /// Parses just the term and optional modifier (*, +, ?) without looking for sequence (/) or alternative (|).
+    /// </summary>
+    private (Term predicate, PropertyPath path) ParsePathSegment(int start, int length)
+    {
+        // Save current parser position
+        var savedPosition = _position;
+
+        // Temporarily set position to the segment location
+        _position = start;
+
+        SkipWhitespace();
+        var ch = Peek();
+
+        Term term;
+        PropertyPath resultPath = default;
+
+        // Check for inverse path: ^predicate
+        if (ch == '^')
+        {
+            Advance(); // Skip '^'
+            SkipWhitespace();
+            term = ParseTerm();
+            resultPath = PropertyPath.Inverse(term);
+        }
+        else
+        {
+            // Parse the term
+            term = ParseTerm();
+
+            // Check for modifier after the term (but NOT / or |)
+            SkipWhitespace();
+            ch = Peek();
+
+            if (ch == '*')
+            {
+                Advance();
+                resultPath = PropertyPath.ZeroOrMore(term);
+            }
+            else if (ch == '+')
+            {
+                Advance();
+                resultPath = PropertyPath.OneOrMore(term);
+            }
+            else if (ch == '?')
+            {
+                // Need to distinguish from variable - '?' followed by letter is variable
+                var next = PeekAt(1);
+                if (!IsLetter(next) && next != '_')
+                {
+                    Advance();
+                    resultPath = PropertyPath.ZeroOrOne(term);
+                }
+            }
+            // Do NOT check for / or | here - that would cause infinite recursion
+        }
+
+        // Restore original position
+        _position = savedPosition;
+
+        return (term, resultPath);
     }
 
     /// <summary>

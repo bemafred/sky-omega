@@ -274,15 +274,24 @@ public class SparqlParserTests
     }
 
     [Fact]
-    public void PropertyPath_ParsesSequence()
+    public void PropertyPath_ParsesSequence_ExpandsToMultiplePatterns()
     {
+        // Sequence paths are expanded at parse time into multiple patterns with synthetic intermediate variables
+        // ?s <a>/<b> ?o becomes: ?s <a> ?_seq0 . ?_seq0 <b> ?o
         var query = "SELECT * WHERE { ?s <http://example/a>/<http://example/b> ?o }";
         var parser = new SparqlParser(query.AsSpan());
         var result = parser.ParseQuery();
 
-        var pattern = result.WhereClause.Pattern.GetPattern(0);
-        Assert.True(pattern.HasPropertyPath);
-        Assert.Equal(PathType.Sequence, pattern.Path.Type);
+        // Should have 2 patterns after expansion
+        Assert.Equal(2, result.WhereClause.Pattern.PatternCount);
+
+        // First pattern: ?s <a> ?_seq0 (no path modifier)
+        var pattern0 = result.WhereClause.Pattern.GetPattern(0);
+        Assert.False(pattern0.HasPropertyPath);
+
+        // Second pattern: ?_seq0 <b> ?o (no path modifier)
+        var pattern1 = result.WhereClause.Pattern.GetPattern(1);
+        Assert.False(pattern1.HasPropertyPath);
     }
 
     [Fact]
