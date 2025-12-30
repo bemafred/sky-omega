@@ -251,15 +251,17 @@ The [grammar-meta-standard](https://github.com/canyala/grammar-meta-standard) pr
 
 ### Language Coverage
 
-| Language | Versions | Status |
-|----------|----------|--------|
-| C# | 12-14 | Full-featured |
-| Python | 3.12-3.13 | Full-featured |
-| JavaScript | ES2022-2024 | Full-featured |
-| Java | 21 | Emerging |
-| Go | 1.22 | Emerging |
-| **Turtle** | 1.1 | Semantic web |
-| **SPARQL** | 1.1 | Semantic web |
+| Language   | Versions    | Status          |
+|------------|-------------|-----------------|
+| C#         | 12-14       | Emerging        |
+| Python     | 3.12-3.13   | Emerging        |
+| JavaScript | ES2022-2024 | Emerging        |
+| Java       | 21          | Emerging        |
+| Go         | 1.22        | Emerging        |
+| **Turtle** | 1.2         | Semantic web(1) |
+| **SPARQL** | 1.1         | Semantic web(1) |
+
+(1) W3C standards are more complete than what's available in the repository.
 
 The Turtle and SPARQL grammars directly support Mercury's parser implementations, providing formal specifications that Claude Code can implement confidently.
 
