@@ -379,6 +379,48 @@ await parser.ParseAsync((subject, predicate, obj) =>
 
 **Note:** Near zero-GC - allocates for namespace dictionary and string values that cross async boundaries.
 
+### RDF Writers
+
+Streaming writers for all three RDF formats, following the same zero-GC patterns as the parsers.
+
+**N-Triples Writer (`NTriplesStreamWriter`):**
+```csharp
+using var sw = new StringWriter();
+using var writer = new NTriplesStreamWriter(sw);
+writer.WriteTriple("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+writer.WriteTriple("<http://ex.org/s>", "<http://ex.org/name>", "\"Alice\"@en");
+```
+
+**Turtle Writer (`TurtleStreamWriter`):**
+```csharp
+using var sw = new StringWriter();
+using var writer = new TurtleStreamWriter(sw);
+writer.RegisterPrefix("ex", "http://example.org/");
+writer.WritePrefixes();
+writer.WriteTriple("<http://example.org/Alice>".AsSpan(), "<http://example.org/knows>".AsSpan(), "<http://example.org/Bob>".AsSpan());
+writer.Flush(); // Finishes subject grouping
+// Output: ex:Alice ex:knows ex:Bob .
+```
+
+**RDF/XML Writer (`RdfXmlStreamWriter`):**
+```csharp
+using var sw = new StringWriter();
+using var writer = new RdfXmlStreamWriter(sw);
+writer.RegisterNamespace("ex", "http://example.org/");
+writer.WriteStartDocument();
+writer.WriteTriple("<http://example.org/Alice>".AsSpan(), "<http://example.org/knows>".AsSpan(), "<http://example.org/Bob>".AsSpan());
+writer.WriteEndDocument();
+```
+
+| Feature | N-Triples | Turtle | RDF/XML |
+|---------|-----------|--------|---------|
+| Prefix/namespace support | No | Yes | Yes |
+| Subject grouping | No | Yes (`;`) | Yes (`rdf:Description`) |
+| `rdf:type` shorthand | No | Yes (`a`) | No |
+| Language tags | Yes | Yes | Yes (`xml:lang`) |
+| Typed literals | Yes | Yes | Yes (`rdf:datatype`) |
+| Blank nodes | Yes | Yes | Yes (`rdf:nodeID`) |
+
 ### SPARQL Engine (`SkyOmega.Mercury.Sparql`)
 
 `SparqlParser` is a `ref struct` that parses SPARQL queries from `ReadOnlySpan<char>`.
