@@ -160,6 +160,7 @@ public sealed class ReplSession : IDisposable
             ":load" => ExecuteLoad(args),
             ":graphs" => ExecuteListGraphs(),
             ":count" => ExecuteCount(args),
+            ":stats" or ":s" => ExecuteStats(),
             ":quit" or ":q" or ":exit" => ExecutionResult.Command("EXIT"),
             _ => ExecutionResult.Error($"Unknown command: {command}. Type :help for available commands.")
         };
@@ -765,11 +766,52 @@ public sealed class ReplSession : IDisposable
         return result;
     }
 
+    private ExecutionResult ExecuteStats()
+    {
+        var sb = new System.Text.StringBuilder();
+
+        // Get store statistics
+        var (quadCount, atomCount, totalBytes) = _store.GetStatistics();
+        var (walTxId, walCheckpoint, walSize) = _store.GetWalStatistics();
+
+        sb.AppendLine("Store Statistics:");
+        sb.AppendLine($"  Quads:           {quadCount:N0}");
+        sb.AppendLine($"  Atoms:           {atomCount:N0}");
+        sb.AppendLine($"  Storage:         {FormatBytes(totalBytes)}");
+        sb.AppendLine();
+        sb.AppendLine("Write-Ahead Log:");
+        sb.AppendLine($"  Current TxId:    {walTxId:N0}");
+        sb.AppendLine($"  Last Checkpoint: {walCheckpoint:N0}");
+        sb.AppendLine($"  Log Size:        {FormatBytes(walSize)}");
+        sb.AppendLine();
+        sb.AppendLine("Session:");
+        sb.AppendLine($"  Prefixes:        {_prefixes.Count}");
+        sb.AppendLine($"  History:         {_history.Count} queries");
+
+        return ExecutionResult.Command(sb.ToString().TrimEnd());
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double size = bytes;
+        int unit = 0;
+
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return unit == 0 ? $"{size:N0} {units[unit]}" : $"{size:N1} {units[unit]}";
+    }
+
     private static string GetHelpText() => """
         Mercury REPL Commands:
 
           :help, :h, :?     Show this help
           :prefixes, :p     List registered prefixes
+          :stats, :s        Show store statistics
           :clear            Clear query history
           :reset            Reset session (prefixes, history)
           :history          Show query history
