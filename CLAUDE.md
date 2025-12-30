@@ -242,6 +242,8 @@ This pattern is implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/Patte
 | Turtle Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
 | N-Triples Parser (Handler) | ✓ Zero-GC | Use TripleHandler callback |
 | N-Triples Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
+| N-Quads Parser (Handler) | ✓ Zero-GC | Use QuadHandler callback |
+| N-Quads Parser (Legacy) | Allocates | IAsyncEnumerable for compatibility |
 | RDF/XML Parser | Near Zero-GC | Allocates for namespace dictionary + async boundaries |
 
 ### QuadStore Query (Zero-GC)
@@ -353,6 +355,45 @@ await foreach (var triple in parser.ParseAsync())
 ```
 
 N-Triples is simpler than Turtle (no prefixes, no shortcuts), making the parser more straightforward. Each triple is on its own line, terminated by a period.
+
+### N-Quads Parser/Writer (`SkyOmega.Mercury.NQuads`)
+
+`NQuadsStreamParser` and `NQuadsStreamWriter` handle the N-Quads format - essentially N-Triples with an optional fourth element for named graphs.
+
+**Zero-GC Parsing API:**
+```csharp
+await using var parser = new NQuadsStreamParser(stream);
+await parser.ParseAsync((subject, predicate, obj, graph) =>
+{
+    // Spans valid only during callback
+    // graph is empty for default graph
+    store.AddCurrent(subject, predicate, obj, graph);
+});
+```
+
+**Legacy Parsing API (allocates strings):**
+```csharp
+await foreach (var quad in parser.ParseAsync())
+{
+    // quad.Subject, Predicate, Object, Graph are strings
+    // quad.Graph is null for default graph
+}
+```
+
+**Writing API:**
+```csharp
+using var sw = new StringWriter();
+using var writer = new NQuadsStreamWriter(sw);
+
+// Write to named graph
+writer.WriteQuad("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/graph1>");
+
+// Write to default graph (omit graph parameter)
+writer.WriteQuad("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+writer.WriteTriple("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>"); // Equivalent
+```
+
+N-Quads is useful for serializing datasets with multiple named graphs. Each quad is on its own line: `subject predicate object [graph] .`
 
 ### RDF/XML Parser (`SkyOmega.Mercury.RdfXml`)
 
@@ -958,6 +999,7 @@ using var writer = SparqlResultFormatNegotiator.CreateWriterFromPath(textWriter,
 | Turtle | text/turtle, application/x-turtle | .ttl, .turtle |
 | N-Triples | application/n-triples, text/plain | .nt, .ntriples |
 | RDF/XML | application/rdf+xml, application/xml, text/xml | .rdf, .xml, .rdfxml |
+| N-Quads | application/n-quads, text/x-nquads | .nq, .nquads |
 
 | SPARQL Result Format | Content Types | Extensions |
 |---------------------|---------------|------------|
