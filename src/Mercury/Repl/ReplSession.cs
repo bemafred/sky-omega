@@ -282,8 +282,9 @@ public sealed class ReplSession : IDisposable
         var sw = Stopwatch.StartNew();
         var rows = new List<Dictionary<string, string>>();
 
-        // Extract variable names from query
+        // Extract variable names from query (for explicit SELECT or aggregates)
         var varNames = ExtractVariableNames(parsed, query);
+        bool hasExplicitVars = varNames.Length > 0;
 
         _store.AcquireReadLock();
         try
@@ -294,16 +295,16 @@ public sealed class ReplSession : IDisposable
             try
             {
                 // For SELECT *, we need to get variable names from first result
-                if (varNames.Length == 0 && results.MoveNext())
+                if (!hasExplicitVars && results.MoveNext())
                 {
                     var bindings = results.Current;
                     varNames = ExtractVariablesFromBindings(bindings, query);
 
-                    // Process first row
+                    // Process first row by index
                     var firstRow = new Dictionary<string, string>();
                     for (int i = 0; i < bindings.Count; i++)
                     {
-                        var varName = varNames.Length > i ? varNames[i] : $"var{i}";
+                        var varName = varNames.Length > i ? varNames[i] : $"?var{i}";
                         firstRow[varName] = bindings.GetString(i).ToString();
                     }
                     rows.Add(firstRow);
@@ -315,10 +316,23 @@ public sealed class ReplSession : IDisposable
                     var bindings = results.Current;
                     var row = new Dictionary<string, string>();
 
-                    for (int i = 0; i < bindings.Count; i++)
+                    if (hasExplicitVars)
                     {
-                        var varName = varNames.Length > i ? varNames[i] : $"var{i}";
-                        row[varName] = bindings.GetString(i).ToString();
+                        // For explicit variables/aggregates, use FindBinding by name
+                        foreach (var varName in varNames)
+                        {
+                            var idx = bindings.FindBinding(varName.AsSpan());
+                            row[varName] = idx >= 0 ? bindings.GetString(idx).ToString() : "";
+                        }
+                    }
+                    else
+                    {
+                        // For SELECT *, iterate by index
+                        for (int i = 0; i < bindings.Count; i++)
+                        {
+                            var varName = varNames.Length > i ? varNames[i] : $"?var{i}";
+                            row[varName] = bindings.GetString(i).ToString();
+                        }
                     }
                     rows.Add(row);
                 }
@@ -425,10 +439,14 @@ public sealed class ReplSession : IDisposable
     /// </summary>
     private static int ComputeVariableHash(ReadOnlySpan<char> name)
     {
-        int hash = 17;
-        foreach (var c in name)
-            hash = hash * 31 + c;
-        return hash;
+        // FNV-1a hash - must match BindingTable.ComputeHash
+        uint hash = 2166136261;
+        foreach (var ch in name)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
     }
 
     private ExecutionResult ExecuteAsk(string query, Query parsed, TimeSpan parseTime, ref DiagnosticBag diagnostics)
@@ -723,16 +741,25 @@ public sealed class ReplSession : IDisposable
 
     private ExecutionResult ExecuteCount(string pattern)
     {
-        // Quick count query
+        // Quick count query - use GROUP BY for proper aggregation
         var query = string.IsNullOrWhiteSpace(pattern)
-            ? "SELECT (COUNT(*) AS ?count) WHERE { ?s ?p ?o }"
-            : $"SELECT (COUNT(*) AS ?count) WHERE {{ {pattern} }}";
+            ? "SELECT (COUNT(?s) AS ?count) WHERE { ?s ?p ?o } GROUP BY ?dummy"
+            : $"SELECT (COUNT(?s) AS ?count) WHERE {{ {pattern} }} GROUP BY ?dummy";
 
         var result = Execute(query);
         if (result.Success && result.Rows?.Count > 0)
         {
-            var count = result.Rows[0].TryGetValue("?count", out var c) ? c : "0";
-            return ExecutionResult.Command($"Count: {count}");
+            // Try both with and without ? prefix
+            var row = result.Rows[0];
+            string? count = null;
+            if (row.TryGetValue("?count", out var c1))
+                count = c1;
+            else if (row.TryGetValue("count", out var c2))
+                count = c2;
+            else if (row.Count > 0)
+                count = row.Values.First(); // Fallback to first value
+
+            return ExecutionResult.Command($"Count: {count ?? "0"}");
         }
 
         return result;
