@@ -1073,6 +1073,70 @@ writer.WriteEnd();
 | CSV | text/csv | Compact, values only (no type info) |
 | TSV | text/tab-separated-values | Preserves RDF syntax (brackets, quotes) |
 
+### SPARQL Result Parsers
+
+Parsers for reading W3C SPARQL Query Results formats (JSON, XML, CSV, TSV).
+
+**JSON Format (`SparqlJsonResultParser`):**
+```csharp
+await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(jsonContent));
+await using var parser = new SparqlJsonResultParser(stream);
+await parser.ParseAsync();
+
+// Access variables
+foreach (var varName in parser.Variables) { ... }
+
+// Access rows
+foreach (var row in parser.Rows)
+{
+    if (row.TryGetValue("name", out var value))
+    {
+        // value.Type: Uri, Literal, BlankNode
+        // value.Value: the actual value
+        // value.Datatype: datatype IRI (for typed literals)
+        // value.Language: language tag (for language-tagged literals)
+        Console.WriteLine(value.ToTermString()); // N-Triples format
+    }
+}
+
+// For ASK queries
+if (parser.IsAskResult)
+{
+    bool result = parser.BooleanResult.Value;
+}
+```
+
+**XML Format (`SparqlXmlResultParser`):**
+```csharp
+await using var parser = new SparqlXmlResultParser(stream);
+await parser.ParseAsync();
+// Same API as JSON parser
+```
+
+**CSV/TSV Format (`SparqlCsvResultParser`):**
+```csharp
+// CSV format
+await using var parser = new SparqlCsvResultParser(stream);
+
+// TSV format
+await using var parser = new SparqlCsvResultParser(stream, isTsv: true);
+
+await parser.ParseAsync();
+// Same API as JSON parser
+```
+
+**Content negotiation for parsers:**
+```csharp
+// From Content-Type header
+using var parser = SparqlResultFormatNegotiator.CreateParser(stream, "application/sparql-results+json");
+
+// From file extension
+using var parser = SparqlResultFormatNegotiator.CreateParserFromPath(stream, "/results/output.srj");
+
+// Direct format
+using var parser = SparqlResultFormatNegotiator.CreateParser(stream, SparqlResultFormat.Json);
+```
+
 ### Content Negotiation
 
 Automatic format detection from MIME types, file extensions, and Accept headers.

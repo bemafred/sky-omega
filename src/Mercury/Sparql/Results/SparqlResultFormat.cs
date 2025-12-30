@@ -294,4 +294,53 @@ public static class SparqlResultFormatNegotiator
         var format = Negotiate(null, path, defaultFormat);
         return CreateWriter(writer, format);
     }
+
+    /// <summary>
+    /// Create a result parser for the specified format.
+    /// </summary>
+    /// <param name="stream">The stream to read from.</param>
+    /// <param name="format">The result format.</param>
+    /// <returns>A result parser for the format.</returns>
+    /// <exception cref="NotSupportedException">If the format is unknown.</exception>
+    public static IDisposable CreateParser(Stream stream, SparqlResultFormat format)
+    {
+        return format switch
+        {
+            SparqlResultFormat.Json => new SparqlJsonResultParser(stream),
+            SparqlResultFormat.Xml => new SparqlXmlResultParser(stream),
+            SparqlResultFormat.Csv => new SparqlCsvResultParser(stream),
+            SparqlResultFormat.Tsv => new SparqlCsvResultParser(stream, isTsv: true),
+            _ => throw new NotSupportedException($"Unsupported SPARQL result format: {format}")
+        };
+    }
+
+    /// <summary>
+    /// Create a result parser based on Content-Type header.
+    /// </summary>
+    /// <param name="stream">The stream to read from.</param>
+    /// <param name="contentType">The Content-Type header.</param>
+    /// <param name="defaultFormat">Default format if detection fails.</param>
+    /// <returns>A result parser for the detected format.</returns>
+    public static IDisposable CreateParser(Stream stream, string? contentType, SparqlResultFormat defaultFormat = SparqlResultFormat.Json)
+    {
+        var format = string.IsNullOrEmpty(contentType)
+            ? defaultFormat
+            : FromContentType(contentType.AsSpan());
+        if (format == SparqlResultFormat.Unknown)
+            format = defaultFormat;
+        return CreateParser(stream, format);
+    }
+
+    /// <summary>
+    /// Create a result parser based on file path extension.
+    /// </summary>
+    /// <param name="stream">The stream to read from.</param>
+    /// <param name="path">File path for extension-based format detection.</param>
+    /// <param name="defaultFormat">Default format if detection fails.</param>
+    /// <returns>A result parser for the detected format.</returns>
+    public static IDisposable CreateParserFromPath(Stream stream, string path, SparqlResultFormat defaultFormat = SparqlResultFormat.Json)
+    {
+        var format = Negotiate(null, path, defaultFormat);
+        return CreateParser(stream, format);
+    }
 }
