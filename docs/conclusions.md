@@ -94,6 +94,51 @@ The zero-GC constraint was particularly valuable. It forced intentional decision
 
 This discipline made the codebase more predictable for both human and AI contributors. There are no hidden allocations - every memory decision is visible and documented.
 
+### The BCL-Only Constraint
+
+The decision to avoid external dependencies had counterintuitive effects with AI-assisted development.
+
+**The Conventional Wisdom**
+
+"Don't reinvent the wheel" - use NuGet packages because they're tested, maintained by domain experts, and provide faster time to market. This view holds for one-offs and proof-of-concept work.
+
+**The Reality for Long-Lived Systems**
+
+Anyone who has experienced DLL-hell (and its modern successor, Package-hell) knows the hidden costs. Packages are fast-time-to-market for throwaway code, but that calculus changes for expected long-lived systems.
+
+**What Actually Happened**
+
+| Aspect | BCL | External Packages |
+|--------|-----|-------------------|
+| API knowledge | Claude knows BCL exhaustively | Version confusion, hallucinated APIs |
+| Stability | Fixed target tied to .NET version | Drift across versions in training data |
+| Zero-GC | Full control over allocations | Inherit library allocation patterns |
+| Idioms | Consistent patterns throughout | Mixed styles from different libraries |
+| Iteration speed | Write confidently from specs | Research, debug compatibility issues |
+
+**The Key Insight**
+
+The BCL constraint converted *external complexity* (dependency management, version research, API discovery) into *internal complexity* (more code to write). AI assistance dramatically reduced the cost of internal complexity while external complexity remained constant.
+
+With Claude Code:
+- `ArrayPool<T>.Shared.Rent()` has exact, known semantics
+- `Span<T>` behavior is completely understood
+- No guessing at which package version, which overload, which options
+
+Building parsers from W3C specs became faster than researching how third-party libraries handle edge cases.
+
+## Validation: EEE Methodology
+
+This experiment followed the **Emergence, Epistemics, Engineering (EEE)** methodology:
+
+1. **Emergence** - Prior small MVPs connecting LLM ⇔ RDF established empirically that the approach works
+2. **Epistemics** - .NET 10 and C# 14 capabilities were validated through targeted experiments
+3. **Engineering** - Sky Omega applies those learnings at scale with production constraints
+
+The result: **proof that Sky Omega WILL work**. Not speculation, not theory - validated through systematic experimentation building on prior emergence experiments.
+
+The experiment continues with MCP capability for Mercury.
+
 ## Metrics
 
 The experiment produced:
