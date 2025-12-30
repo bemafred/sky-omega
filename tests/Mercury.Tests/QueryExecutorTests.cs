@@ -5112,6 +5112,179 @@ public class QueryExecutorTests : IDisposable
     }
 
     #endregion
+
+    #region Property Path Alternative Tests
+
+    [Fact]
+    public void Execute_AlternativePath_MatchesEitherPredicate()
+    {
+        // Query: ?s name|age ?o - should match both name and age predicates
+        var query = "SELECT ?s ?o WHERE { ?s <http://xmlns.com/foaf/0.1/name>|<http://xmlns.com/foaf/0.1/age> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify alternative path is preserved (not expanded like sequences)
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.PatternCount);
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath);
+        Assert.Equal(PathType.Alternative, pattern.Path.Type);
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var foundResults = new List<(string subject, string obj)>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var oIdx = results.Current.FindBinding("?o".AsSpan());
+                foundResults.Add((
+                    results.Current.GetString(sIdx).ToString(),
+                    results.Current.GetString(oIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get 3 names + 3 ages = 6 results (Alice, Bob, Charlie each have name and age)
+            Assert.Equal(6, foundResults.Count);
+
+            // Verify we have both names and ages
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && r.obj == "\"Alice\"");
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && r.obj == "30");
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Bob>" && r.obj == "\"Bob\"");
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Bob>" && r.obj == "25");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_AlternativePath_WithBoundSubject()
+    {
+        // Query with specific subject: Alice name|age ?o
+        var query = "SELECT ?o WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/name>|<http://xmlns.com/foaf/0.1/age> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var foundValues = new List<string>();
+            while (results.MoveNext())
+            {
+                var oIdx = results.Current.FindBinding("?o".AsSpan());
+                foundValues.Add(results.Current.GetString(oIdx).ToString());
+            }
+            results.Dispose();
+
+            // Alice has name "Alice" and age 30
+            Assert.Equal(2, foundValues.Count);
+            Assert.Contains("\"Alice\"", foundValues);
+            Assert.Contains("30", foundValues);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_AlternativePath_NoMatches()
+    {
+        // Query with predicates that don't exist
+        var query = "SELECT ?s ?o WHERE { ?s <http://example.org/nonexistent1>|<http://example.org/nonexistent2> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_AlternativePath_OnlyFirstPredicateMatches()
+    {
+        // Only name exists, not nonexistent
+        var query = "SELECT ?s ?o WHERE { ?s <http://xmlns.com/foaf/0.1/name>|<http://example.org/nonexistent> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // 3 names (Alice, Bob, Charlie)
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_AlternativePath_OnlySecondPredicateMatches()
+    {
+        // Only age exists (second alternative), not nonexistent (first)
+        var query = "SELECT ?s ?o WHERE { ?s <http://example.org/nonexistent>|<http://xmlns.com/foaf/0.1/age> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        _store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // 3 ages (Alice, Bob, Charlie)
+            Assert.Equal(3, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
 
 /// <summary>

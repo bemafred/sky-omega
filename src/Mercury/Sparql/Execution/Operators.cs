@@ -110,12 +110,16 @@ public ref struct TriplePatternScan
     private readonly bool _isZeroOrMore;
     private readonly bool _isOneOrMore;
     private readonly bool _isZeroOrOne;
+    private readonly bool _isAlternative;
 
     // State for transitive path traversal
     private HashSet<string>? _visited;
     private Queue<string>? _frontier;
     private string? _currentNode;
     private bool _emittedReflexive;
+
+    // State for alternative path traversal (p1|p2)
+    private int _alternativePhase; // 0 = first predicate, 1 = second predicate
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
@@ -149,11 +153,13 @@ public ref struct TriplePatternScan
         _isZeroOrMore = pattern.Path.Type == PathType.ZeroOrMore;
         _isOneOrMore = pattern.Path.Type == PathType.OneOrMore;
         _isZeroOrOne = pattern.Path.Type == PathType.ZeroOrOne;
+        _isAlternative = pattern.Path.Type == PathType.Alternative;
 
         _visited = null;
         _frontier = null;
         _currentNode = null;
         _emittedReflexive = false;
+        _alternativePhase = 0;
     }
 
     public bool MoveNext(ref BindingTable bindings)
@@ -170,33 +176,54 @@ public ref struct TriplePatternScan
             return MoveNextTransitive(ref bindings);
         }
 
-        while (_enumerator.MoveNext())
+        while (true)
         {
-            var triple = _enumerator.Current;
-
-            // Preserve initial bindings (from subquery join), only clear added bindings
-            bindings.TruncateTo(_initialBindingsCount);
-
-            if (_isInverse)
+            while (_enumerator.MoveNext())
             {
-                // For inverse, swap subject and object bindings
-                if (!TryBindVariable(_pattern.Subject, triple.Object, ref bindings))
-                    continue;
-                if (!TryBindVariable(_pattern.Object, triple.Subject, ref bindings))
-                    continue;
-            }
-            else
-            {
-                // Normal binding
-                if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
-                    continue;
-                if (!TryBindVariable(_pattern.Predicate, triple.Predicate, ref bindings))
-                    continue;
-                if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
-                    continue;
+                var triple = _enumerator.Current;
+
+                // Preserve initial bindings (from subquery join), only clear added bindings
+                bindings.TruncateTo(_initialBindingsCount);
+
+                if (_isInverse)
+                {
+                    // For inverse, swap subject and object bindings
+                    if (!TryBindVariable(_pattern.Subject, triple.Object, ref bindings))
+                        continue;
+                    if (!TryBindVariable(_pattern.Object, triple.Subject, ref bindings))
+                        continue;
+                }
+                else
+                {
+                    // Normal binding
+                    if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
+                        continue;
+                    if (!TryBindVariable(_pattern.Predicate, triple.Predicate, ref bindings))
+                        continue;
+                    if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                        continue;
+                }
+
+                return true;
             }
 
-            return true;
+            // Current predicate exhausted - check for alternative path
+            if (_isAlternative && _alternativePhase == 0)
+            {
+                // Switch to second predicate in the alternative
+                _alternativePhase = 1;
+                _enumerator.Dispose();
+
+                // Re-initialize with second predicate from path's Right offsets
+                var subject = ResolveTermForQuery(_pattern.Subject);
+                var obj = ResolveTermForQuery(_pattern.Object);
+                var predicate2 = _source.Slice(_pattern.Path.RightStart, _pattern.Path.RightLength);
+
+                _enumerator = ExecuteTemporalQuery(subject, predicate2, obj);
+                continue; // Try again with second predicate
+            }
+
+            break; // No more alternatives
         }
 
         // For zero-or-one, also emit reflexive case if subject == object and not yet emitted
@@ -281,6 +308,12 @@ public ref struct TriplePatternScan
             // For inverse path, query with swapped subject/object
             predicate = ResolveTermForQuery(_pattern.Path.Iri);
             _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
+        }
+        else if (_isAlternative)
+        {
+            // For alternative path (p1|p2), start with first predicate from Left offsets
+            predicate = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+            _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
         }
         else
         {
