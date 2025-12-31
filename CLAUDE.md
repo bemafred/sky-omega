@@ -439,10 +439,10 @@ BCL-only trigram index for SPARQL text search:
 | Component | Status | Priority |
 |-----------|--------|----------|
 | REPL system | 0 tests | High |
-| HttpSparqlServiceExecutor | 0 tests | High |
-| LoadExecutor | 0 tests | High |
-| Concurrent access stress | 0 tests | High |
-| PatternSlot/QueryBuffer | 0 tests | Medium |
+| HttpSparqlServiceExecutor | ✓ 44 tests | Done |
+| LoadExecutor | ✓ tests | Done |
+| Concurrent access stress | ✓ 15 tests | Done |
+| PatternSlot/QueryBuffer | ✓ tests | Done |
 
 ### Benchmark Gaps
 
@@ -454,7 +454,7 @@ BCL-only trigram index for SPARQL text search:
 | FILTER evaluation | ✓ FilterBenchmarks | Done |
 | Storage (batch/query) | ✓ BatchWrite/QueryBenchmarks | Done |
 | Temporal queries | ✓ TemporalQueryBenchmarks | Done |
-| Concurrent access | 0 benchmarks | High |
+| Concurrent access | ✓ ConcurrentBenchmarks | Done |
 | RDF parser throughput (Turtle/N-Triples) | 0 benchmarks | Medium |
 
 ### Running Benchmarks via Claude Code
