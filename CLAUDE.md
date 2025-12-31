@@ -448,11 +448,67 @@ BCL-only trigram index for SPARQL text search:
 
 | Component | Status | Priority |
 |-----------|--------|----------|
-| SPARQL parsing | 0 benchmarks | Critical |
-| SPARQL execution | 0 benchmarks | Critical |
-| JOIN operators | 0 benchmarks | High |
-| Parser throughput | 0 benchmarks | High |
+| SPARQL parsing | ✓ SparqlParserBenchmarks | Done |
+| SPARQL execution | ✓ SparqlExecutionBenchmarks | Done |
+| JOIN operators | ✓ JoinBenchmarks | Done |
+| FILTER evaluation | ✓ FilterBenchmarks | Done |
+| Storage (batch/query) | ✓ BatchWrite/QueryBenchmarks | Done |
+| Temporal queries | ✓ TemporalQueryBenchmarks | Done |
 | Concurrent access | 0 benchmarks | High |
+| RDF parser throughput (Turtle/N-Triples) | 0 benchmarks | Medium |
+
+### Running Benchmarks via Claude Code
+
+BenchmarkDotNet produces verbose output that exceeds context limits. Use this file-based workflow:
+
+**Strategy: Run targeted benchmarks, read artifact files**
+
+```bash
+# 1. Run a single benchmark class (generates markdown report)
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- \
+  --filter "*QueryBenchmarks*"
+
+# 2. Results are written to: BenchmarkDotNet.Artifacts/results/ (repo root)
+# Read the generated markdown summary (compact, ~18 lines per class)
+```
+
+**Available benchmark classes:**
+
+| Class | Filter | Purpose |
+|-------|--------|---------|
+| `BatchWriteBenchmarks` | `*BatchWrite*` | Single vs batch write throughput |
+| `QueryBenchmarks` | `*QueryBenchmarks*` | Query operations on pre-populated store |
+| `IndexSelectionBenchmarks` | `*IndexSelection*` | Index selection impact (SPO/POS/OSP) |
+| `SparqlParserBenchmarks` | `*ParserBenchmarks*` | SPARQL parsing throughput |
+| `SparqlExecutionBenchmarks` | `*ExecutionBenchmarks*` | SPARQL query execution |
+| `JoinBenchmarks` | `*JoinBenchmarks*` | JOIN operator scaling (2/5/8 patterns) |
+| `FilterBenchmarks` | `*FilterBenchmarks*` | FILTER expression overhead |
+| `TemporalWriteBenchmarks` | `*TemporalWrite*` | Temporal triple write performance |
+| `TemporalQueryBenchmarks` | `*TemporalQuery*` | Temporal query operations |
+
+**Workflow for Claude Code:**
+
+1. Run benchmark with `--filter` (one class at a time)
+2. Wait for completion (may take 1-5 minutes per class)
+3. Read the markdown report from `BenchmarkDotNet.Artifacts/results/`
+4. Compare results, identify regressions
+
+**Example - investigating query performance:**
+
+```bash
+# Run storage query benchmarks (use precise filter to avoid matching TemporalQueryBenchmarks)
+dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter "*.QueryBenchmarks.*"
+
+# Read the compact markdown report
+cat BenchmarkDotNet.Artifacts/results/SkyOmega.Mercury.Benchmarks.QueryBenchmarks-report-github.md
+```
+
+**Filter tips:**
+- `*.ClassName.*` is more precise than `*ClassName*`
+- `*QueryBenchmarks*` matches both `QueryBenchmarks` and `TemporalQueryBenchmarks`
+- `*.QueryBenchmarks.*` matches only `QueryBenchmarks`
+
+**Note:** Artifacts directory is gitignored. Results persist locally between runs for comparison.
 
 ### Production Hardening Checklist
 
