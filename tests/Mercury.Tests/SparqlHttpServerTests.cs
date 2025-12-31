@@ -6,7 +6,7 @@ using System.Text;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Utilities;
+using SkyOmega.Mercury.Runtime;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;

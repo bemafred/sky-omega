@@ -288,7 +288,6 @@ public class RdfXmlStreamParserTests
 
         // Find the address triple
         var addressTriple = triples.Find(t => t.P.Contains("address"));
-        Assert.NotNull(addressTriple);
         Assert.StartsWith("_:b", addressTriple.O);
 
         // Find street and city triples with blank node as subject

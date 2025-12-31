@@ -464,7 +464,7 @@ public class SparqlParserTests
         var parser = new SparqlParser(query.AsSpan());
         var result = parser.ParseQuery();
 
-        Assert.Equal(1, result.Datasets.Length);
+        Assert.Single(result.Datasets);
         Assert.False(result.Datasets[0].IsNamed);
         Assert.Equal("<http://example.org/graph1>", query.AsSpan().Slice(result.Datasets[0].GraphIri.Start, result.Datasets[0].GraphIri.Length).ToString());
     }
@@ -490,7 +490,7 @@ public class SparqlParserTests
         var parser = new SparqlParser(query.AsSpan());
         var result = parser.ParseQuery();
 
-        Assert.Equal(1, result.Datasets.Length);
+        Assert.Single(result.Datasets);
         Assert.True(result.Datasets[0].IsNamed);
         Assert.Equal("<http://example.org/named1>", query.AsSpan().Slice(result.Datasets[0].GraphIri.Start, result.Datasets[0].GraphIri.Length).ToString());
     }
@@ -538,7 +538,7 @@ public class SparqlParserTests
         var result = parser.ParseQuery();
 
         Assert.Equal(QueryType.Construct, result.Type);
-        Assert.Equal(1, result.Datasets.Length);
+        Assert.Single(result.Datasets);
         Assert.False(result.Datasets[0].IsNamed);
     }
 
@@ -550,7 +550,7 @@ public class SparqlParserTests
         var result = parser.ParseQuery();
 
         Assert.Equal(QueryType.Ask, result.Type);
-        Assert.Equal(1, result.Datasets.Length);
+        Assert.Single(result.Datasets);
     }
 
     [Fact]
@@ -561,7 +561,7 @@ public class SparqlParserTests
         var result = parser.ParseQuery();
 
         Assert.Equal(QueryType.Describe, result.Type);
-        Assert.Equal(1, result.Datasets.Length);
+        Assert.Single(result.Datasets);
     }
 
     #endregion

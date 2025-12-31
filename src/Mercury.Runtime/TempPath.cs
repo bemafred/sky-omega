@@ -1,4 +1,4 @@
-namespace SkyOmega.Mercury.Utilities;
+namespace SkyOmega.Mercury.Runtime;
 
 /// <summary>
 /// Provides standardized temporary path generation for Mercury projects.

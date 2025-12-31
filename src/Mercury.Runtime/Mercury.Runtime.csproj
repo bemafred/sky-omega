@@ -4,8 +4,8 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <AssemblyName>SkyOmega.Mercury.Utilities</AssemblyName>
-        <RootNamespace>SkyOmega.Mercury.Utilities</RootNamespace>
+        <AssemblyName>SkyOmega.Mercury.Runtime</AssemblyName>
+        <RootNamespace>SkyOmega.Mercury.Runtime</RootNamespace>
     </PropertyGroup>
 
 </Project>

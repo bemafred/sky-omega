@@ -1,6 +1,6 @@
 using BenchmarkDotNet.Attributes;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Utilities;
+using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Benchmarks;
 

@@ -4,7 +4,7 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 
-namespace SkyOmega.Mercury.Buffers;
+namespace SkyOmega.Mercury.Runtime.Buffers;
 
 /// <summary>
 /// Abstraction for buffer allocation strategies.
@@ -155,7 +155,7 @@ public sealed class PooledBufferManager : IBufferManager
 
     /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Return<T>(T[] buffer, bool clearArray = false) where T : unmanaged
+    public void Return<T>(T[]? buffer, bool clearArray = false) where T : unmanaged
     {
         if (buffer != null)
             ArrayPool<T>.Shared.Return(buffer, clearArray);
@@ -167,82 +167,79 @@ public sealed class PooledBufferManager : IBufferManager
 /// </summary>
 public static class BufferManagerExtensions
 {
-    /// <summary>
-    /// Rents a char buffer of at least the specified length.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static BufferLease<char> RentCharBuffer(this IBufferManager manager, int minimumLength)
-        => manager.Rent<char>(minimumLength);
-
-    /// <summary>
-    /// Rents a byte buffer of at least the specified length.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static BufferLease<byte> RentByteBuffer(this IBufferManager manager, int minimumLength)
-        => manager.Rent<byte>(minimumLength);
-
-    /// <summary>
-    /// Allocates a buffer using stackalloc for small sizes, falling back to pooled allocation.
-    /// </summary>
-    /// <typeparam name="T">Element type.</typeparam>
     /// <param name="manager">The buffer manager.</param>
-    /// <param name="length">Required length.</param>
-    /// <param name="stackBuffer">Pre-allocated stack buffer (use stackalloc).</param>
-    /// <param name="rentedBuffer">Output: the rented buffer if stack was too small, null otherwise.</param>
-    /// <returns>A span covering the allocated space.</returns>
-    /// <remarks>
-    /// <para>
-    /// This method enables the "small-stack, large-pool" pattern:
-    /// <code>
-    /// Span&lt;char&gt; stack = stackalloc char[256];
-    /// var span = manager.AllocateSmart(neededLength, stack, out var rented);
-    /// try
-    /// {
-    ///     // use span...
-    /// }
-    /// finally
-    /// {
-    ///     rented.Dispose();
-    /// }
-    /// </code>
-    /// </para>
-    /// </remarks>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Span<T> AllocateSmart<T>(
-        this IBufferManager manager,
-        int length,
-        Span<T> stackBuffer,
-        out BufferLease<T> rentedBuffer) where T : unmanaged
+    extension(IBufferManager manager)
     {
-        if (length <= stackBuffer.Length)
+        /// <summary>
+        /// Rents a char buffer of at least the specified length.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public BufferLease<char> RentCharBuffer(int minimumLength)
+            => manager.Rent<char>(minimumLength);
+
+        /// <summary>
+        /// Rents a byte buffer of at least the specified length.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public BufferLease<byte> RentByteBuffer(int minimumLength)
+            => manager.Rent<byte>(minimumLength);
+
+        /// <summary>
+        /// Allocates a buffer using stackalloc for small sizes, falling back to pooled allocation.
+        /// </summary>
+        /// <typeparam name="T">Element type.</typeparam>
+        /// <param name="length">Required length.</param>
+        /// <param name="stackBuffer">Pre-allocated stack buffer (use stackalloc).</param>
+        /// <param name="rentedBuffer">Output: the rented buffer if stack was too small, null otherwise.</param>
+        /// <returns>A span covering the allocated space.</returns>
+        /// <remarks>
+        /// <para>
+        /// This method enables the "small-stack, large-pool" pattern:
+        /// <code>
+        /// Span&lt;char&gt; stack = stackalloc char[256];
+        /// var span = manager.AllocateSmart(neededLength, stack, out var rented);
+        /// try
+        /// {
+        ///     // use span...
+        /// }
+        /// finally
+        /// {
+        ///     rented.Dispose();
+        /// }
+        /// </code>
+        /// </para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Span<T> AllocateSmart<T>(int length,
+            Span<T> stackBuffer,
+            out BufferLease<T> rentedBuffer) where T : unmanaged
         {
-            rentedBuffer = BufferLease<T>.Empty;
-            return stackBuffer.Slice(0, length);
+            if (length <= stackBuffer.Length)
+            {
+                rentedBuffer = BufferLease<T>.Empty;
+                return stackBuffer.Slice(0, length);
+            }
+
+            rentedBuffer = manager.Rent<T>(length);
+            return rentedBuffer.Span;
         }
 
-        rentedBuffer = manager.Rent<T>(length);
-        return rentedBuffer.Span;
+        /// <summary>
+        /// Rents a char buffer, using the provided stack buffer if large enough.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Span<char> AllocateSmartChar(int length,
+            Span<char> stackBuffer,
+            out BufferLease<char> rentedBuffer)
+            => manager.AllocateSmart(length, stackBuffer, out rentedBuffer);
+
+        /// <summary>
+        /// Rents a byte buffer, using the provided stack buffer if large enough.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Span<byte> AllocateSmartByte(int length,
+            Span<byte> stackBuffer,
+            out BufferLease<byte> rentedBuffer)
+            => manager.AllocateSmart(length, stackBuffer, out rentedBuffer);
     }
-
-    /// <summary>
-    /// Rents a char buffer, using the provided stack buffer if large enough.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Span<char> AllocateSmartChar(
-        this IBufferManager manager,
-        int length,
-        Span<char> stackBuffer,
-        out BufferLease<char> rentedBuffer)
-        => manager.AllocateSmart(length, stackBuffer, out rentedBuffer);
-
-    /// <summary>
-    /// Rents a byte buffer, using the provided stack buffer if large enough.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Span<byte> AllocateSmartByte(
-        this IBufferManager manager,
-        int length,
-        Span<byte> stackBuffer,
-        out BufferLease<byte> rentedBuffer)
-        => manager.AllocateSmart(length, stackBuffer, out rentedBuffer);
 }

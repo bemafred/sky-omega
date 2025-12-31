@@ -3,7 +3,7 @@
 
 using SkyOmega.Mercury.Repl;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Utilities;
+using SkyOmega.Mercury.Runtime;
 
 // Parse command line arguments
 string? storePath = null;

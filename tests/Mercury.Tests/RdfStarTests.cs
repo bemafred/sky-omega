@@ -10,7 +10,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Utilities;
+using SkyOmega.Mercury.Runtime;
 
 namespace Mercury.Tests;
 
