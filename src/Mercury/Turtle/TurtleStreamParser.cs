@@ -12,6 +12,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Rdf.Turtle;
 
@@ -34,8 +35,7 @@ public delegate void TripleHandler(
 public sealed partial class TurtleStreamParser : IDisposable
 {
     private readonly Stream _stream;
-    private readonly ArrayPool<byte> _bufferPool;
-    private readonly ArrayPool<char> _charPool;
+    private readonly IBufferManager _bufferManager;
 
     // Reusable buffers - rented from pool, never resize
     private byte[] _inputBuffer;
@@ -71,16 +71,15 @@ public sealed partial class TurtleStreamParser : IDisposable
     private int _statementStartPos; // Track where current statement started for rewind
 
     private const int DefaultBufferSize = 8192;
-    
-    public TurtleStreamParser(Stream stream, int bufferSize = DefaultBufferSize)
+
+    public TurtleStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
-        _bufferPool = ArrayPool<byte>.Shared;
-        _charPool = ArrayPool<char>.Shared;
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
 
-        _inputBuffer = _bufferPool.Rent(bufferSize);
-        _charBuffer = _charPool.Rent(bufferSize);
-        _outputBuffer = _charPool.Rent(OutputBufferSize);
+        _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
+        _charBuffer = _bufferManager.Rent<char>(bufferSize).Array!;
+        _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
 
         _namespaces = new Dictionary<string, string>();
         _blankNodes = new Dictionary<string, string>();
@@ -405,9 +404,9 @@ public sealed partial class TurtleStreamParser : IDisposable
         if (_isDisposed == true)
             return;
 
-        _bufferPool.Return(_inputBuffer);
-        _charPool.Return(_charBuffer);
-        _charPool.Return(_outputBuffer);
+        _bufferManager.Return(_inputBuffer);
+        _bufferManager.Return(_charBuffer);
+        _bufferManager.Return(_outputBuffer);
 
         _isDisposed = true;
     }
@@ -605,9 +604,9 @@ public sealed partial class TurtleStreamParser : IDisposable
     private void GrowOutputBuffer(int minSize = 0)
     {
         var newSize = Math.Max(_outputBuffer.Length * 2, minSize + 1024);
-        var newBuffer = _charPool.Rent(newSize);
+        var newBuffer = _bufferManager.Rent<char>(newSize).Array!;
         _outputBuffer.AsSpan(0, _outputOffset).CopyTo(newBuffer);
-        _charPool.Return(_outputBuffer);
+        _bufferManager.Return(_outputBuffer);
         _outputBuffer = newBuffer;
     }
 

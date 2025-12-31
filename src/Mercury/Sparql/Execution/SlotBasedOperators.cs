@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
@@ -412,7 +413,7 @@ public ref struct SlotMultiPatternScan
         _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
 
         _bindings = new Binding[16];
-        _stringBuffer = new char[1024];
+        _stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
         _bindingTable = new BindingTable(_bindings, _stringBuffer);
     }
 
@@ -659,5 +660,7 @@ public ref struct SlotMultiPatternScan
         if (_init1) _enum1.Dispose();
         if (_init2) _enum2.Dispose();
         if (_init3) _enum3.Dispose();
+        if (_stringBuffer != null)
+            PooledBufferManager.Shared.Return(_stringBuffer);
     }
 }

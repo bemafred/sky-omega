@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
@@ -79,9 +80,11 @@ internal static class VariableGraphExecutor
 
         // Create binding storage
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
+        try
+        {
         // Handle single pattern case (most common)
         if (childCount == 1)
         {
@@ -187,6 +190,11 @@ internal static class VariableGraphExecutor
                 CollectMultiPatternFromSlots(results, config.Store, config.Source, graphSpan, graphVarName,
                     foundCount, config.Buffer, patternIndices, bindings, stringBuffer);
             }
+        }
+        }
+        finally
+        {
+            PooledBufferManager.Shared.Return(stringBuffer);
         }
     }
 

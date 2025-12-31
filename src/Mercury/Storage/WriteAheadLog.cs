@@ -1,9 +1,9 @@
 using System;
-using System.Buffers;
 using System.Buffers.Binary;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -25,6 +25,7 @@ public sealed class WriteAheadLog : IDisposable
     private readonly FileStream _logFile;
     private readonly string _logPath;
     private readonly byte[] _writeBuffer;
+    private readonly IBufferManager _bufferManager;
     private long _currentTxId;
     private long _lastCheckpointTxId;
     private long _lastCheckpointTime;
@@ -40,10 +41,17 @@ public sealed class WriteAheadLog : IDisposable
     public WriteAheadLog(string logPath,
         long checkpointSizeThreshold = DefaultCheckpointSizeThreshold,
         int checkpointTimeSeconds = DefaultCheckpointTimeSeconds)
+        : this(logPath, checkpointSizeThreshold, checkpointTimeSeconds, null) { }
+
+    public WriteAheadLog(string logPath,
+        long checkpointSizeThreshold,
+        int checkpointTimeSeconds,
+        IBufferManager? bufferManager)
     {
         _logPath = logPath;
         _checkpointSizeThreshold = checkpointSizeThreshold;
         _checkpointTimeSeconds = checkpointTimeSeconds;
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _writeBuffer = new byte[RecordSize];
 
         var exists = File.Exists(logPath);
@@ -155,7 +163,7 @@ public sealed class WriteAheadLog : IDisposable
         if (checkpointPosition < 0)
             return;
 
-        var buffer = ArrayPool<byte>.Shared.Rent(RecordSize);
+        var buffer = _bufferManager.Rent<byte>(RecordSize).Array!;
         try
         {
             _logFile.Position = checkpointPosition;
@@ -178,7 +186,7 @@ public sealed class WriteAheadLog : IDisposable
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            _bufferManager.Return(buffer);
         }
     }
 
@@ -217,7 +225,7 @@ public sealed class WriteAheadLog : IDisposable
 
     private void RecoverState()
     {
-        var buffer = ArrayPool<byte>.Shared.Rent(RecordSize);
+        var buffer = _bufferManager.Rent<byte>(RecordSize).Array!;
         try
         {
             _logFile.Position = 0;
@@ -248,7 +256,7 @@ public sealed class WriteAheadLog : IDisposable
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            _bufferManager.Return(buffer);
         }
     }
 
@@ -420,7 +428,7 @@ public ref struct LogRecordEnumerator
     {
         _logFile = logFile;
         _afterTxId = afterTxId;
-        _buffer = ArrayPool<byte>.Shared.Rent(WriteAheadLog.RecordSize);
+        _buffer = PooledBufferManager.Shared.Rent<byte>(WriteAheadLog.RecordSize).Array!;
         _current = default;
 
         // Position at start
@@ -462,7 +470,7 @@ public ref struct LogRecordEnumerator
     {
         if (_buffer != null)
         {
-            ArrayPool<byte>.Shared.Return(_buffer);
+            PooledBufferManager.Shared.Return(_buffer);
             _buffer = null;
         }
     }

@@ -141,9 +141,9 @@ public sealed partial class RdfXmlStreamParser
     private void GrowOutputBuffer(int minSize = 0)
     {
         var newSize = Math.Max(_outputBuffer.Length * 2, minSize + 1024);
-        var newBuffer = _charPool.Rent(newSize);
+        var newBuffer = _bufferManager.Rent<char>(newSize).Array!;
         _outputBuffer.AsSpan(0, _outputOffset).CopyTo(newBuffer);
-        _charPool.Return(_outputBuffer);
+        _bufferManager.Return(_outputBuffer);
         _outputBuffer = newBuffer;
     }
 

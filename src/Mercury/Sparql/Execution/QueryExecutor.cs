@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
@@ -32,6 +33,7 @@ public class QueryExecutor : IDisposable
     private readonly string _source;
     private readonly Query _query;
     private readonly QueryBuffer _buffer;  // New: heap-allocated pattern storage
+    private readonly IBufferManager _bufferManager;
     private readonly char[] _stringBuffer; // Pooled buffer for string operations (replaces scattered new char[1024])
     private bool _disposed;
 
@@ -53,19 +55,24 @@ public class QueryExecutor : IDisposable
     private readonly int[]? _optimizedPatternOrder;
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
-        : this(store, source, in query, null, null) { }
+        : this(store, source, in query, null, null, null) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor)
-        : this(store, source, in query, serviceExecutor, null) { }
+        : this(store, source, in query, serviceExecutor, null, null) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor, QueryPlanner? planner)
+        : this(store, source, in query, serviceExecutor, planner, null) { }
+
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
+        ISparqlServiceExecutor? serviceExecutor, QueryPlanner? planner, IBufferManager? bufferManager)
     {
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _query = query;  // Copy here is unavoidable since we store it
-        _stringBuffer = ArrayPool<char>.Shared.Rent(1024);  // Pooled buffer for string operations
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _planner = planner;
 
         // Convert Query to QueryBuffer for heap-based pattern storage
@@ -164,15 +171,20 @@ public class QueryExecutor : IDisposable
     /// The caller transfers ownership of the buffer to the executor.
     /// </summary>
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer)
-        : this(store, source, buffer, null) { }
+        : this(store, source, buffer, null, null) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
         ISparqlServiceExecutor? serviceExecutor)
+        : this(store, source, buffer, serviceExecutor, null) { }
+
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
+        ISparqlServiceExecutor? serviceExecutor, IBufferManager? bufferManager)
     {
         _store = store;
         _source = source.ToString();
         _buffer = buffer;
-        _stringBuffer = ArrayPool<char>.Shared.Rent(1024);  // Pooled buffer for string operations
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _query = default;  // Not used when buffer is provided directly
         _serviceExecutor = serviceExecutor;
 
@@ -202,7 +214,7 @@ public class QueryExecutor : IDisposable
         _disposed = true;
         _buffer?.Dispose();
         if (_stringBuffer != null)
-            ArrayPool<char>.Shared.Return(_stringBuffer);
+            _bufferManager.Return(_stringBuffer);
     }
 
     /// <summary>
@@ -1265,7 +1277,7 @@ public class QueryExecutor : IDisposable
     {
         // Create a binding table with all bindings from both rows
         var bindings = new Binding[32];
-        var stringBuffer = new char[2048];
+        var stringBuffer = PooledBufferManager.Shared.Rent<char>(2048).Array!;
         var table = new BindingTable(bindings, stringBuffer);
 
         // Add all bindings from left
@@ -1284,7 +1296,9 @@ public class QueryExecutor : IDisposable
             }
         }
 
-        return new MaterializedRow(table);
+        var result = new MaterializedRow(table);
+        PooledBufferManager.Shared.Return(stringBuffer);
+        return result;
     }
 
     /// <summary>
@@ -1314,7 +1328,7 @@ public class QueryExecutor : IDisposable
         QuadStore store, string source, Patterns.QueryBuffer buffer, string[]? namedGraphs)
     {
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024]; // Static method - can't use pooled instance buffer
+        var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
 
         // Find the GRAPH header slot in the buffer
         var patterns = buffer.GetPatterns();
@@ -1329,7 +1343,10 @@ public class QueryExecutor : IDisposable
         }
 
         if (graphHeaderIdx < 0)
+        {
+            PooledBufferManager.Shared.Return(stringBuffer);
             return null;
+        }
 
         var graphHeader = patterns[graphHeaderIdx];
 
@@ -1347,7 +1364,9 @@ public class QueryExecutor : IDisposable
             GraphHeaderIndex = graphHeaderIdx
         };
 
-        return VariableGraphExecutor.ExecuteFromBuffer(config);
+        var result = VariableGraphExecutor.ExecuteFromBuffer(config);
+        PooledBufferManager.Shared.Return(stringBuffer);
+        return result;
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array
@@ -1476,7 +1495,7 @@ public class QueryExecutor : IDisposable
         QuadStore store, string source, TriplePattern tp, int graphStart, int graphLength)
     {
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024]; // Static method - can't use pooled instance buffer
+        var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
         var bindingTable = new BindingTable(bindings, stringBuffer);
         var graphIri = source.AsSpan(graphStart, graphLength);
 
@@ -1488,6 +1507,7 @@ public class QueryExecutor : IDisposable
             bindingTable.Clear();
         }
         scan.Dispose();
+        PooledBufferManager.Shared.Return(stringBuffer);
 
         return results;
     }
@@ -1678,7 +1698,7 @@ public class QueryExecutor : IDisposable
                     {
                         var triple = enumerator.Current;
                         var rowBindings = new Binding[16];
-                        var rowStringBuffer = new char[1024];
+                        var rowStringBuffer = _bufferManager.Rent<char>(1024).Array!;
                         var rowTable = new BindingTable(rowBindings, rowStringBuffer);
 
                         // Copy subquery bindings
@@ -1694,6 +1714,7 @@ public class QueryExecutor : IDisposable
                         {
                             results.Add(new MaterializedRow(rowTable));
                         }
+                        _bufferManager.Return(rowStringBuffer);
                     }
                 }
                 finally

@@ -9,6 +9,7 @@ using SkyOmega.Mercury.NQuads;
 using SkyOmega.Mercury.NTriples;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.RdfXml;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Rdf;
 
@@ -244,12 +245,13 @@ public static class RdfFormatNegotiator
     /// <param name="stream">The stream to parse.</param>
     /// <param name="contentType">Content-Type header (may be null).</param>
     /// <param name="path">File path or URL for extension-based detection (may be null).</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A parser for the detected format.</returns>
     /// <exception cref="NotSupportedException">If the format cannot be detected.</exception>
-    public static IDisposable CreateParser(Stream stream, string? contentType = null, string? path = null)
+    public static IDisposable CreateParser(Stream stream, string? contentType = null, string? path = null, IBufferManager? bufferManager = null)
     {
         var format = Negotiate(contentType, path);
-        return CreateParser(stream, format);
+        return CreateParser(stream, format, bufferManager);
     }
 
     /// <summary>
@@ -258,15 +260,16 @@ public static class RdfFormatNegotiator
     /// </summary>
     /// <param name="stream">The stream to parse.</param>
     /// <param name="format">The RDF format.</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A parser for the format.</returns>
     /// <exception cref="NotSupportedException">If the format is unknown or a quad format.</exception>
-    public static IDisposable CreateParser(Stream stream, RdfFormat format)
+    public static IDisposable CreateParser(Stream stream, RdfFormat format, IBufferManager? bufferManager = null)
     {
         return format switch
         {
-            RdfFormat.NTriples => new NTriplesStreamParser(stream),
-            RdfFormat.Turtle => new TurtleStreamParser(stream),
-            RdfFormat.RdfXml => new RdfXmlStreamParser(stream),
+            RdfFormat.NTriples => new NTriplesStreamParser(stream, bufferManager: bufferManager),
+            RdfFormat.Turtle => new TurtleStreamParser(stream, bufferManager: bufferManager),
+            RdfFormat.RdfXml => new RdfXmlStreamParser(stream, bufferManager: bufferManager),
             RdfFormat.NQuads => throw new NotSupportedException("N-Quads is a quad format. Use NQuadsStreamParser directly."),
             RdfFormat.TriG => throw new NotSupportedException("TriG is a quad format. Use TriGStreamParser directly."),
             RdfFormat.JsonLd => throw new NotSupportedException("JSON-LD is a quad format. Use JsonLdStreamParser directly."),
@@ -280,15 +283,16 @@ public static class RdfFormatNegotiator
     /// </summary>
     /// <param name="writer">The TextWriter to write to.</param>
     /// <param name="format">The RDF format.</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A writer for the format.</returns>
     /// <exception cref="NotSupportedException">If the format is unknown or a quad format.</exception>
-    public static IDisposable CreateWriter(TextWriter writer, RdfFormat format)
+    public static IDisposable CreateWriter(TextWriter writer, RdfFormat format, IBufferManager? bufferManager = null)
     {
         return format switch
         {
-            RdfFormat.NTriples => new NTriplesStreamWriter(writer),
-            RdfFormat.Turtle => new TurtleStreamWriter(writer),
-            RdfFormat.RdfXml => new RdfXmlStreamWriter(writer),
+            RdfFormat.NTriples => new NTriplesStreamWriter(writer, bufferManager: bufferManager),
+            RdfFormat.Turtle => new TurtleStreamWriter(writer, bufferManager: bufferManager),
+            RdfFormat.RdfXml => new RdfXmlStreamWriter(writer, bufferManager: bufferManager),
             RdfFormat.NQuads => throw new NotSupportedException("N-Quads is a quad format. Use NQuadsStreamWriter directly."),
             RdfFormat.TriG => throw new NotSupportedException("TriG is a quad format. Use TriGStreamWriter directly."),
             RdfFormat.JsonLd => throw new NotSupportedException("JSON-LD is a quad format. Use JsonLdStreamWriter directly."),
@@ -303,12 +307,13 @@ public static class RdfFormatNegotiator
     /// <param name="contentType">Content-Type for format detection (may be null).</param>
     /// <param name="path">File path for extension-based detection (may be null).</param>
     /// <param name="defaultFormat">Default format if detection fails.</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A writer for the detected format.</returns>
-    public static IDisposable CreateWriter(TextWriter writer, string? contentType = null, string? path = null, RdfFormat defaultFormat = RdfFormat.Turtle)
+    public static IDisposable CreateWriter(TextWriter writer, string? contentType = null, string? path = null, RdfFormat defaultFormat = RdfFormat.Turtle, IBufferManager? bufferManager = null)
     {
         var format = Negotiate(contentType, path);
         if (format == RdfFormat.Unknown)
             format = defaultFormat;
-        return CreateWriter(writer, format);
+        return CreateWriter(writer, format, bufferManager);
     }
 }

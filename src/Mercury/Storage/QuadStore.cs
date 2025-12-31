@@ -1,9 +1,9 @@
 using System;
-using System.Buffers;
 using System.IO;
 using System.Text;
 using System.Threading;
 using SkyOmega.Mercury.Diagnostics;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -30,6 +30,7 @@ public sealed class QuadStore : IDisposable
     private readonly string _baseDirectory;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private readonly ILogger _logger;
+    private readonly IBufferManager _bufferManager;
     private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
     private bool _disposed;
@@ -38,17 +39,26 @@ public sealed class QuadStore : IDisposable
     /// Creates a new QuadStore at the specified directory.
     /// </summary>
     /// <param name="baseDirectory">Directory for store files.</param>
-    public QuadStore(string baseDirectory) : this(baseDirectory, null) { }
+    public QuadStore(string baseDirectory) : this(baseDirectory, null, null) { }
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory with logging.
     /// </summary>
     /// <param name="baseDirectory">Directory for store files.</param>
     /// <param name="logger">Logger for diagnostics (null for no logging).</param>
-    public QuadStore(string baseDirectory, ILogger? logger)
+    public QuadStore(string baseDirectory, ILogger? logger) : this(baseDirectory, logger, null) { }
+
+    /// <summary>
+    /// Creates a new QuadStore at the specified directory with logging and buffer management.
+    /// </summary>
+    /// <param name="baseDirectory">Directory for store files.</param>
+    /// <param name="logger">Logger for diagnostics (null for no logging).</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
+    public QuadStore(string baseDirectory, ILogger? logger, IBufferManager? bufferManager)
     {
         _baseDirectory = baseDirectory;
         _logger = logger ?? NullLogger.Instance;
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
 
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
@@ -61,10 +71,11 @@ public sealed class QuadStore : IDisposable
         var walPath = Path.Combine(baseDirectory, "wal.log");
 
         // Create shared atom store for all indexes
-        _atoms = new AtomStore(atomPath);
+        _atoms = new AtomStore(atomPath, _bufferManager);
 
         // Create WAL for durability
-        _wal = new WriteAheadLog(walPath);
+        _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
+            WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager);
 
         // Create indexes with shared atom store
         _gspoIndex = new QuadIndex(gspoPath, _atoms);
@@ -923,7 +934,7 @@ public ref struct TemporalResultEnumerator
             return ReadOnlySpan<char>.Empty;
 
         // Ensure buffer is allocated
-        _buffer ??= ArrayPool<char>.Shared.Rent(InitialBufferSize);
+        _buffer ??= PooledBufferManager.Shared.Rent<char>(InitialBufferSize).Array!;
 
         // Calculate char count needed
         int charCount = Encoding.UTF8.GetCharCount(utf8Span);
@@ -932,9 +943,9 @@ public ref struct TemporalResultEnumerator
         if (_bufferOffset + charCount > _buffer.Length)
         {
             var newSize = Math.Max(_buffer.Length * 2, _bufferOffset + charCount + 256);
-            var newBuffer = ArrayPool<char>.Shared.Rent(newSize);
+            var newBuffer = PooledBufferManager.Shared.Rent<char>(newSize).Array!;
             _buffer.AsSpan(0, _bufferOffset).CopyTo(newBuffer);
-            ArrayPool<char>.Shared.Return(_buffer);
+            PooledBufferManager.Shared.Return(_buffer);
             _buffer = newBuffer;
         }
 
@@ -953,7 +964,7 @@ public ref struct TemporalResultEnumerator
     {
         if (_buffer != null)
         {
-            ArrayPool<char>.Shared.Return(_buffer);
+            PooledBufferManager.Shared.Return(_buffer);
             _buffer = null;
         }
     }

@@ -11,6 +11,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.NQuads;
 
@@ -74,8 +75,7 @@ public readonly record struct RdfQuad(string Subject, string Predicate, string O
 public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
-    private readonly ArrayPool<byte> _bufferPool;
-    private readonly ArrayPool<char> _charPool;
+    private readonly IBufferManager _bufferManager;
 
     // Reusable buffers - rented from pool
     private byte[] _inputBuffer;
@@ -95,14 +95,13 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
     private const int DefaultBufferSize = 8192;
 
-    public NQuadsStreamParser(Stream stream, int bufferSize = DefaultBufferSize)
+    public NQuadsStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
-        _bufferPool = ArrayPool<byte>.Shared;
-        _charPool = ArrayPool<char>.Shared;
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
 
-        _inputBuffer = _bufferPool.Rent(bufferSize);
-        _outputBuffer = _charPool.Rent(OutputBufferSize);
+        _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
+        _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
 
         _line = 1;
         _column = 1;
@@ -749,9 +748,9 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
     private void GrowOutputBuffer()
     {
-        var newBuffer = _charPool.Rent(_outputBuffer.Length * 2);
+        var newBuffer = _bufferManager.Rent<char>(_outputBuffer.Length * 2).Array!;
         _outputBuffer.AsSpan(0, _outputOffset).CopyTo(newBuffer);
-        _charPool.Return(_outputBuffer);
+        _bufferManager.Return(_outputBuffer);
         _outputBuffer = newBuffer;
     }
 
@@ -816,8 +815,8 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         if (_isDisposed)
             return;
 
-        _bufferPool.Return(_inputBuffer);
-        _charPool.Return(_outputBuffer);
+        _bufferManager.Return(_inputBuffer);
+        _bufferManager.Return(_outputBuffer);
         _isDisposed = true;
     }
 

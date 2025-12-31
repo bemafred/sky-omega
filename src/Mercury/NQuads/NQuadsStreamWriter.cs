@@ -10,6 +10,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.NQuads;
 
@@ -33,18 +34,18 @@ namespace SkyOmega.Mercury.NQuads;
 public sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
-    private readonly ArrayPool<char> _charPool;
+    private readonly IBufferManager _bufferManager;
     private char[] _buffer;
     private int _bufferPos;
     private bool _isDisposed;
 
     private const int DefaultBufferSize = 4096;
 
-    public NQuadsStreamWriter(TextWriter writer, int bufferSize = DefaultBufferSize)
+    public NQuadsStreamWriter(TextWriter writer, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _charPool = ArrayPool<char>.Shared;
-        _buffer = _charPool.Rent(bufferSize);
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _buffer = _bufferManager.Rent<char>(bufferSize).Array!;
         _bufferPos = 0;
         _isDisposed = false;
     }
@@ -344,8 +345,8 @@ public sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
             if (needed > _buffer.Length)
             {
                 // Need a larger buffer
-                _charPool.Return(_buffer);
-                _buffer = _charPool.Rent(needed * 2);
+                _bufferManager.Return(_buffer);
+                _buffer = _bufferManager.Rent<char>(needed * 2).Array!;
             }
         }
     }
@@ -394,7 +395,7 @@ public sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
         _isDisposed = true;
 
         FlushBuffer();
-        _charPool.Return(_buffer);
+        _bufferManager.Return(_buffer);
         _buffer = null!;
     }
 
@@ -404,7 +405,7 @@ public sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
         _isDisposed = true;
 
         await FlushBufferAsync(default).ConfigureAwait(false);
-        _charPool.Return(_buffer);
+        _bufferManager.Return(_buffer);
         _buffer = null!;
     }
 }

@@ -9,4 +9,8 @@
         <RootNamespace>SkyOmega.Mercury</RootNamespace>
     </PropertyGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\Mercury.Runtime\Mercury.Runtime.csproj" />
+    </ItemGroup>
+
 </Project>

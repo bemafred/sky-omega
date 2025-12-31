@@ -1,4 +1,5 @@
 using System;
+using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 
@@ -487,7 +488,7 @@ public class UpdateExecutor
         var results = _store.QueryCurrent(subjectSpan, predicateSpan, objectSpan, withGraph.AsSpan());
 
         var bindings = new Binding[16];
-        var stringBuffer = new char[1024];
+        var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         while (results.MoveNext())
@@ -519,6 +520,7 @@ public class UpdateExecutor
             ProcessModifyTemplates(bindingTable, toDelete, toInsert, withGraph);
         }
         results.Dispose();
+        PooledBufferManager.Shared.Return(stringBuffer);
     }
 
     /// <summary>

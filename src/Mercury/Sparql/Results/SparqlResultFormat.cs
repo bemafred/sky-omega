@@ -5,6 +5,7 @@
 
 using System;
 using System.IO;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Sparql.Results;
 
@@ -253,16 +254,17 @@ public static class SparqlResultFormatNegotiator
     /// </summary>
     /// <param name="writer">The TextWriter to write to.</param>
     /// <param name="format">The result format.</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A result writer for the format.</returns>
     /// <exception cref="NotSupportedException">If the format is unknown.</exception>
-    public static IDisposable CreateWriter(TextWriter writer, SparqlResultFormat format)
+    public static IDisposable CreateWriter(TextWriter writer, SparqlResultFormat format, IBufferManager? bufferManager = null)
     {
         return format switch
         {
-            SparqlResultFormat.Json => new SparqlJsonResultWriter(writer),
-            SparqlResultFormat.Xml => new SparqlXmlResultWriter(writer),
-            SparqlResultFormat.Csv => new SparqlCsvResultWriter(writer),
-            SparqlResultFormat.Tsv => new SparqlCsvResultWriter(writer, useTsv: true),
+            SparqlResultFormat.Json => new SparqlJsonResultWriter(writer, bufferManager: bufferManager),
+            SparqlResultFormat.Xml => new SparqlXmlResultWriter(writer, bufferManager: bufferManager),
+            SparqlResultFormat.Csv => new SparqlCsvResultWriter(writer, bufferManager: bufferManager),
+            SparqlResultFormat.Tsv => new SparqlCsvResultWriter(writer, useTsv: true, bufferManager: bufferManager),
             _ => throw new NotSupportedException($"Unsupported SPARQL result format: {format}")
         };
     }
@@ -273,13 +275,14 @@ public static class SparqlResultFormatNegotiator
     /// <param name="writer">The TextWriter to write to.</param>
     /// <param name="acceptHeader">The Accept header for content negotiation.</param>
     /// <param name="defaultFormat">Default format if negotiation fails.</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A result writer for the negotiated format.</returns>
-    public static IDisposable CreateWriter(TextWriter writer, string? acceptHeader, SparqlResultFormat defaultFormat = SparqlResultFormat.Json)
+    public static IDisposable CreateWriter(TextWriter writer, string? acceptHeader, SparqlResultFormat defaultFormat = SparqlResultFormat.Json, IBufferManager? bufferManager = null)
     {
         var format = string.IsNullOrEmpty(acceptHeader)
             ? defaultFormat
             : FromAcceptHeader(acceptHeader.AsSpan(), defaultFormat);
-        return CreateWriter(writer, format);
+        return CreateWriter(writer, format, bufferManager);
     }
 
     /// <summary>
@@ -288,11 +291,12 @@ public static class SparqlResultFormatNegotiator
     /// <param name="writer">The TextWriter to write to.</param>
     /// <param name="path">File path for extension-based format detection.</param>
     /// <param name="defaultFormat">Default format if detection fails.</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     /// <returns>A result writer for the detected format.</returns>
-    public static IDisposable CreateWriterFromPath(TextWriter writer, string path, SparqlResultFormat defaultFormat = SparqlResultFormat.Json)
+    public static IDisposable CreateWriterFromPath(TextWriter writer, string path, SparqlResultFormat defaultFormat = SparqlResultFormat.Json, IBufferManager? bufferManager = null)
     {
         var format = Negotiate(null, path, defaultFormat);
-        return CreateWriter(writer, format);
+        return CreateWriter(writer, format, bufferManager);
     }
 
     /// <summary>

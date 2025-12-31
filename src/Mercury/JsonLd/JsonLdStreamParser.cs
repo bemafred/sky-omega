@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.NQuads;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.JsonLd;
 
@@ -36,8 +37,7 @@ namespace SkyOmega.Mercury.JsonLd;
 public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
-    private readonly ArrayPool<byte> _bufferPool;
-    private readonly ArrayPool<char> _charPool;
+    private readonly IBufferManager _bufferManager;
 
     private byte[] _inputBuffer;
     private char[] _outputBuffer;
@@ -69,13 +69,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private const string RdfNil = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>";
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
 
-    public JsonLdStreamParser(Stream stream, int bufferSize = DefaultBufferSize)
+    public JsonLdStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
-        _bufferPool = ArrayPool<byte>.Shared;
-        _charPool = ArrayPool<char>.Shared;
-        _inputBuffer = _bufferPool.Rent(bufferSize);
-        _outputBuffer = _charPool.Rent(OutputBufferSize);
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
+        _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
         _context = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeCoercion = new Dictionary<string, string>(StringComparer.Ordinal);
         _containerList = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -722,13 +721,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
         if (_inputBuffer != null)
         {
-            _bufferPool.Return(_inputBuffer);
+            _bufferManager.Return(_inputBuffer);
             _inputBuffer = null!;
         }
 
         if (_outputBuffer != null)
         {
-            _charPool.Return(_outputBuffer);
+            _bufferManager.Return(_outputBuffer);
             _outputBuffer = null!;
         }
     }

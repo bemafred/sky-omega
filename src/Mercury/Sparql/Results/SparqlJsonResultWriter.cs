@@ -11,6 +11,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Sparql.Results;
 
@@ -32,7 +33,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 public sealed class SparqlJsonResultWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
-    private readonly ArrayPool<char> _charPool;
+    private readonly IBufferManager _bufferManager;
     private char[] _buffer;
     private int _bufferPos;
     private bool _isDisposed;
@@ -42,11 +43,11 @@ public sealed class SparqlJsonResultWriter : IDisposable, IAsyncDisposable
 
     private const int DefaultBufferSize = 4096;
 
-    public SparqlJsonResultWriter(TextWriter writer, int bufferSize = DefaultBufferSize)
+    public SparqlJsonResultWriter(TextWriter writer, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
-        _charPool = ArrayPool<char>.Shared;
-        _buffer = _charPool.Rent(bufferSize);
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _buffer = _bufferManager.Rent<char>(bufferSize).Array!;
         _bufferPos = 0;
         _isDisposed = false;
         _headWritten = false;
@@ -458,8 +459,8 @@ public sealed class SparqlJsonResultWriter : IDisposable, IAsyncDisposable
             FlushBuffer();
             if (needed > _buffer.Length)
             {
-                _charPool.Return(_buffer);
-                _buffer = _charPool.Rent(needed * 2);
+                _bufferManager.Return(_buffer);
+                _buffer = _bufferManager.Rent<char>(needed * 2).Array!;
             }
         }
     }
@@ -490,7 +491,7 @@ public sealed class SparqlJsonResultWriter : IDisposable, IAsyncDisposable
         _isDisposed = true;
 
         FlushBuffer();
-        _charPool.Return(_buffer);
+        _bufferManager.Return(_buffer);
         _buffer = null!;
     }
 
@@ -500,7 +501,7 @@ public sealed class SparqlJsonResultWriter : IDisposable, IAsyncDisposable
         _isDisposed = true;
 
         await FlushBufferAsync(default).ConfigureAwait(false);
-        _charPool.Return(_buffer);
+        _bufferManager.Return(_buffer);
         _buffer = null!;
     }
 }

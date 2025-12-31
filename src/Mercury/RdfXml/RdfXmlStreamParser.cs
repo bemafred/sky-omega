@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Rdf.Turtle;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.RdfXml;
 
@@ -50,8 +51,7 @@ public enum ElementKind
 public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
-    private readonly ArrayPool<byte> _bufferPool;
-    private readonly ArrayPool<char> _charPool;
+    private readonly IBufferManager _bufferManager;
 
     // Input buffer
     private byte[] _inputBuffer;
@@ -79,14 +79,13 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 
     private const int DefaultBufferSize = 16384;
 
-    public RdfXmlStreamParser(Stream stream, int bufferSize = DefaultBufferSize)
+    public RdfXmlStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
-        _bufferPool = ArrayPool<byte>.Shared;
-        _charPool = ArrayPool<char>.Shared;
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
 
-        _inputBuffer = _bufferPool.Rent(bufferSize);
-        _outputBuffer = _charPool.Rent(OutputBufferSize);
+        _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
+        _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
 
         _namespaces = new Dictionary<string, string>(16);
 
@@ -812,8 +811,8 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         if (_isDisposed)
             return;
 
-        _bufferPool.Return(_inputBuffer);
-        _charPool.Return(_outputBuffer);
+        _bufferManager.Return(_inputBuffer);
+        _bufferManager.Return(_outputBuffer);
         _isDisposed = true;
     }
 

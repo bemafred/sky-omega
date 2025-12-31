@@ -5,6 +5,7 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -61,8 +62,16 @@ public sealed unsafe class AtomStore : IDisposable
     // UTF-8 encoder for efficient conversion
     private static readonly Encoding Utf8 = Encoding.UTF8;
 
+    // Buffer manager for pooled allocations
+    private readonly IBufferManager _bufferManager;
+
     public AtomStore(string baseFilePath)
+        : this(baseFilePath, null) { }
+
+    public AtomStore(string baseFilePath, IBufferManager? bufferManager)
     {
+        _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+
         var dataPath = baseFilePath + ".atoms";
         var indexPath = baseFilePath + ".atomidx";
         var offsetPath = baseFilePath + ".offsets";
@@ -175,12 +184,17 @@ public sealed unsafe class AtomStore : IDisposable
 
         // Convert to UTF-8 once upfront
         var byteCount = Utf8.GetByteCount(value);
-        Span<byte> utf8Bytes = byteCount <= 512
-            ? stackalloc byte[byteCount]
-            : new byte[byteCount];
-        Utf8.GetBytes(value, utf8Bytes);
-
-        return InternUtf8(utf8Bytes);
+        Span<byte> stackBuffer = stackalloc byte[Math.Min(byteCount, 512)];
+        var utf8Bytes = _bufferManager.AllocateSmart(byteCount, stackBuffer, out var rentedBuffer);
+        try
+        {
+            Utf8.GetBytes(value, utf8Bytes);
+            return InternUtf8(utf8Bytes);
+        }
+        finally
+        {
+            rentedBuffer.Dispose();
+        }
     }
 
     /// <summary>
@@ -228,12 +242,17 @@ public sealed unsafe class AtomStore : IDisposable
 
         // Convert to UTF-8 once upfront
         var byteCount = Utf8.GetByteCount(value);
-        Span<byte> utf8Bytes = byteCount <= 512
-            ? stackalloc byte[byteCount]
-            : new byte[byteCount];
-        Utf8.GetBytes(value, utf8Bytes);
-
-        return GetAtomIdUtf8(utf8Bytes);
+        Span<byte> stackBuffer = stackalloc byte[Math.Min(byteCount, 512)];
+        var utf8Bytes = _bufferManager.AllocateSmart(byteCount, stackBuffer, out var rentedBuffer);
+        try
+        {
+            Utf8.GetBytes(value, utf8Bytes);
+            return GetAtomIdUtf8(utf8Bytes);
+        }
+        finally
+        {
+            rentedBuffer.Dispose();
+        }
     }
 
     /// <summary>
@@ -388,14 +407,17 @@ public sealed unsafe class AtomStore : IDisposable
     {
         // Convert to UTF-8
         var byteCount = Utf8.GetByteCount(value);
-        Span<byte> utf8Bytes = stackalloc byte[Math.Min(byteCount, 1024)];
-        if (byteCount > 1024)
+        Span<byte> stackBuffer = stackalloc byte[Math.Min(byteCount, 1024)];
+        var utf8Bytes = _bufferManager.AllocateSmart(byteCount, stackBuffer, out var rentedBuffer);
+        try
         {
-            utf8Bytes = new byte[byteCount];
+            Utf8.GetBytes(value, utf8Bytes);
+            return InsertAtomUtf8(utf8Bytes, hash, bucket);
         }
-        Utf8.GetBytes(value, utf8Bytes);
-
-        return InsertAtomUtf8(utf8Bytes.Slice(0, byteCount), hash, bucket);
+        finally
+        {
+            rentedBuffer.Dispose();
+        }
     }
 
     private long InsertAtomUtf8(ReadOnlySpan<byte> utf8Value, long hash, long bucket)

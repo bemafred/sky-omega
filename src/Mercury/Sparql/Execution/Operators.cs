@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
 
@@ -1218,7 +1219,7 @@ public ref struct SubQueryScan
         _singleScan = default;
         _isMultiPattern = false;
         _innerBindingStorage = new Binding[16];
-        _innerStringBuffer = new char[512];
+        _innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
         _innerBindings = new BindingTable(_innerBindingStorage, _innerStringBuffer);
         _innerPattern = default;
         _initialized = false;
@@ -1404,6 +1405,8 @@ public ref struct SubQueryScan
     {
         _innerScan.Dispose();
         _singleScan.Dispose();
+        if (_innerStringBuffer != null)
+            PooledBufferManager.Shared.Return(_innerStringBuffer);
     }
 }
 
@@ -1446,7 +1449,7 @@ public ref struct SubQueryJoinScan
         // Initialize subquery state
         _subQueryScan = new SubQueryScan(store, source, subSelect);
         _subBindingStorage = new Binding[16];
-        _subStringBuffer = new char[512];
+        _subStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
         _subBindings = new BindingTable(_subBindingStorage, _subStringBuffer);
 
         // Build outer pattern from non-subquery patterns
@@ -1554,6 +1557,8 @@ public ref struct SubQueryJoinScan
             else
                 _singleOuterScan.Dispose();
         }
+        if (_subStringBuffer != null)
+            PooledBufferManager.Shared.Return(_subStringBuffer);
     }
 }
 
