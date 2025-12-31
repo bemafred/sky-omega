@@ -32,6 +32,14 @@ public delegate void TripleHandler(
 /// For zero-GC parsing, use ParseAsync(TripleHandler).
 /// The IAsyncEnumerable overload allocates strings for compatibility.
 /// </summary>
+/// <remarks>
+/// <para><b>Thread Safety:</b> This class is NOT thread-safe. Each instance
+/// maintains internal parsing state and buffers that cannot be shared across threads.
+/// Create a separate instance per thread or serialize access with locking.</para>
+/// <para><b>Usage Pattern:</b> Create one instance per stream. The parser is
+/// designed for sequential parsing of a single Turtle document. Dispose when done
+/// to return pooled buffers.</para>
+/// </remarks>
 public sealed partial class TurtleStreamParser : IDisposable
 {
     private readonly Stream _stream;

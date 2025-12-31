@@ -151,6 +151,56 @@ public class AtomStoreTests : IDisposable
         Assert.Equal(longString, retrieved);
     }
 
+    [Fact]
+    public void Intern_AtMaxSize_Succeeds()
+    {
+        // Use a small max size for test speed
+        var maxSize = 1000L;
+        using var store = new AtomStore(_testPath + "_maxsize", null, maxSize);
+        var exactlyAtLimit = new string('x', (int)maxSize);
+
+        var id = store.Intern(exactlyAtLimit);
+        var retrieved = store.GetAtomString(id);
+
+        Assert.Equal(exactlyAtLimit, retrieved);
+    }
+
+    [Fact]
+    public void Intern_OverMaxSize_ThrowsArgumentException()
+    {
+        var maxSize = 100L;
+        using var store = new AtomStore(_testPath + "_over", null, maxSize);
+        var overLimit = new string('x', (int)maxSize + 1);
+
+        var ex = Assert.Throws<ArgumentException>(() => store.Intern(overLimit));
+        Assert.Contains("exceeds maximum", ex.Message);
+    }
+
+    [Fact]
+    public void InternUtf8_OverMaxSize_ThrowsArgumentException()
+    {
+        var maxSize = 100L;
+        using var store = new AtomStore(_testPath + "_utf8over", null, maxSize);
+        var overLimit = new byte[(int)maxSize + 1];
+
+        var ex = Assert.Throws<ArgumentException>(() => store.InternUtf8(overLimit));
+        Assert.Contains("exceeds maximum", ex.Message);
+    }
+
+    [Fact]
+    public void Constructor_NegativeMaxSize_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new AtomStore(_testPath + "_neg", null, -1));
+    }
+
+    [Fact]
+    public void Constructor_ZeroMaxSize_ThrowsArgumentOutOfRangeException()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new AtomStore(_testPath + "_zero", null, 0));
+    }
+
     #endregion
 
     #region GetAtomId (Lookup Without Interning)

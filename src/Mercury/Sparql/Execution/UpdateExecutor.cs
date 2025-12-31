@@ -241,12 +241,18 @@ public class UpdateExecutor
             var obj = ResolveTermForQuery(tp.Object);
 
             var results = _store.QueryCurrent(subject, predicate, obj, graphIri.AsSpan());
-            while (results.MoveNext())
+            try
             {
-                var current = results.Current;
-                toDelete.Add((current.Subject.ToString(), current.Predicate.ToString(), current.Object.ToString(), graphIri));
+                while (results.MoveNext())
+                {
+                    var current = results.Current;
+                    toDelete.Add((current.Subject.ToString(), current.Predicate.ToString(), current.Object.ToString(), graphIri));
+                }
             }
-            results.Dispose();
+            finally
+            {
+                results.Dispose();
+            }
         }
         else
         {
@@ -258,14 +264,20 @@ public class UpdateExecutor
             var obj0 = ResolveTermForQuery(tp0.Object);
 
             var results0 = _store.QueryCurrent(subject0, predicate0, obj0, graphIri.AsSpan());
-            while (results0.MoveNext())
+            try
             {
-                var current = results0.Current;
-                // For DELETE WHERE, we delete the matching triples from the first pattern
-                // (variables would need more sophisticated handling for multi-pattern joins)
-                toDelete.Add((current.Subject.ToString(), current.Predicate.ToString(), current.Object.ToString(), graphIri));
+                while (results0.MoveNext())
+                {
+                    var current = results0.Current;
+                    // For DELETE WHERE, we delete the matching triples from the first pattern
+                    // (variables would need more sophisticated handling for multi-pattern joins)
+                    toDelete.Add((current.Subject.ToString(), current.Predicate.ToString(), current.Object.ToString(), graphIri));
+                }
             }
-            results0.Dispose();
+            finally
+            {
+                results0.Dispose();
+            }
         }
     }
 
@@ -300,53 +312,58 @@ public class UpdateExecutor
         {
             var executor = new QueryExecutor(_store, _source.AsSpan(), query);
             var results = executor.Execute();
-
-            while (results.MoveNext())
+            try
             {
-                var bindings = results.Current;
-
-                // For DELETE WHERE, the delete template is the same as the WHERE pattern
-                // Instantiate each base pattern with the bindings (default graph)
-                for (int i = 0; i < _update.WhereClause.Pattern.PatternCount; i++)
+                while (results.MoveNext())
                 {
-                    var tp = _update.WhereClause.Pattern.GetPattern(i);
+                    var bindings = results.Current;
 
-                    // Skip optional patterns for deletion
-                    if (_update.WhereClause.Pattern.IsOptional(i))
-                        continue;
-
-                    var s = InstantiateTerm(tp.Subject, bindings);
-                    var p = InstantiateTerm(tp.Predicate, bindings);
-                    var o = InstantiateTerm(tp.Object, bindings);
-
-                    // Only delete if all terms are bound (no unbound variables)
-                    if (s != null && p != null && o != null)
+                    // For DELETE WHERE, the delete template is the same as the WHERE pattern
+                    // Instantiate each base pattern with the bindings (default graph)
+                    for (int i = 0; i < _update.WhereClause.Pattern.PatternCount; i++)
                     {
-                        toDelete.Add((s, p, o, null));
-                    }
-                }
+                        var tp = _update.WhereClause.Pattern.GetPattern(i);
 
-                // Process GRAPH clauses - delete from specified graphs
-                for (int i = 0; i < _update.WhereClause.Pattern.GraphClauseCount; i++)
-                {
-                    var gc = _update.WhereClause.Pattern.GetGraphClause(i);
-                    var graphIri = ResolveGraphTerm(gc.Graph, bindings);
+                        // Skip optional patterns for deletion
+                        if (_update.WhereClause.Pattern.IsOptional(i))
+                            continue;
 
-                    for (int j = 0; j < gc.PatternCount; j++)
-                    {
-                        var tp = gc.GetPattern(j);
                         var s = InstantiateTerm(tp.Subject, bindings);
                         var p = InstantiateTerm(tp.Predicate, bindings);
                         var o = InstantiateTerm(tp.Object, bindings);
 
-                        if (s != null && p != null && o != null && graphIri != null)
+                        // Only delete if all terms are bound (no unbound variables)
+                        if (s != null && p != null && o != null)
                         {
-                            toDelete.Add((s, p, o, graphIri));
+                            toDelete.Add((s, p, o, null));
+                        }
+                    }
+
+                    // Process GRAPH clauses - delete from specified graphs
+                    for (int i = 0; i < _update.WhereClause.Pattern.GraphClauseCount; i++)
+                    {
+                        var gc = _update.WhereClause.Pattern.GetGraphClause(i);
+                        var graphIri = ResolveGraphTerm(gc.Graph, bindings);
+
+                        for (int j = 0; j < gc.PatternCount; j++)
+                        {
+                            var tp = gc.GetPattern(j);
+                            var s = InstantiateTerm(tp.Subject, bindings);
+                            var p = InstantiateTerm(tp.Predicate, bindings);
+                            var o = InstantiateTerm(tp.Object, bindings);
+
+                            if (s != null && p != null && o != null && graphIri != null)
+                            {
+                                toDelete.Add((s, p, o, graphIri));
+                            }
                         }
                     }
                 }
             }
-            results.Dispose();
+            finally
+            {
+                results.Dispose();
+            }
         }
         finally
         {
@@ -423,12 +440,17 @@ public class UpdateExecutor
                 // Standard path - no WITH clause or has GRAPH clauses
                 var executor = new QueryExecutor(_store, _source.AsSpan(), query);
                 var results = executor.Execute();
-
-                while (results.MoveNext())
+                try
                 {
-                    ProcessModifyTemplates(results.Current, toDelete, toInsert, withGraph);
+                    while (results.MoveNext())
+                    {
+                        ProcessModifyTemplates(results.Current, toDelete, toInsert, withGraph);
+                    }
                 }
-                results.Dispose();
+                finally
+                {
+                    results.Dispose();
+                }
             }
         }
         finally
@@ -490,37 +512,42 @@ public class UpdateExecutor
         var bindings = new Binding[16];
         var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
         var bindingTable = new BindingTable(bindings, stringBuffer);
-
-        while (results.MoveNext())
+        try
         {
-            var t = results.Current;
-            // Only include triples from the WITH graph
-            if (!t.Graph.Equals(withGraph.AsSpan(), StringComparison.Ordinal))
-                continue;
-
-            bindingTable.Clear();
-
-            // Bind variables from the matched triple
-            if (tp.Subject.Type == TermType.Variable)
+            while (results.MoveNext())
             {
-                var varName = _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
-                bindingTable.Bind(varName, t.Subject);
-            }
-            if (tp.Predicate.Type == TermType.Variable)
-            {
-                var varName = _source.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
-                bindingTable.Bind(varName, t.Predicate);
-            }
-            if (tp.Object.Type == TermType.Variable)
-            {
-                var varName = _source.AsSpan(tp.Object.Start, tp.Object.Length);
-                bindingTable.Bind(varName, t.Object);
-            }
+                var t = results.Current;
+                // Only include triples from the WITH graph
+                if (!t.Graph.Equals(withGraph.AsSpan(), StringComparison.Ordinal))
+                    continue;
 
-            ProcessModifyTemplates(bindingTable, toDelete, toInsert, withGraph);
+                bindingTable.Clear();
+
+                // Bind variables from the matched triple
+                if (tp.Subject.Type == TermType.Variable)
+                {
+                    var varName = _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
+                    bindingTable.Bind(varName, t.Subject);
+                }
+                if (tp.Predicate.Type == TermType.Variable)
+                {
+                    var varName = _source.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
+                    bindingTable.Bind(varName, t.Predicate);
+                }
+                if (tp.Object.Type == TermType.Variable)
+                {
+                    var varName = _source.AsSpan(tp.Object.Start, tp.Object.Length);
+                    bindingTable.Bind(varName, t.Object);
+                }
+
+                ProcessModifyTemplates(bindingTable, toDelete, toInsert, withGraph);
+            }
         }
-        results.Dispose();
-        PooledBufferManager.Shared.Return(stringBuffer);
+        finally
+        {
+            results.Dispose();
+            PooledBufferManager.Shared.Return(stringBuffer);
+        }
     }
 
     /// <summary>
@@ -545,49 +572,54 @@ public class UpdateExecutor
 
             var executor = new QueryExecutor(store, source.AsSpan(), modifiedQuery);
             var results = executor.Execute();
-
-            while (results.MoveNext())
+            try
             {
-                // Copy bindings since we need to use them across template processing
-                var b = results.Current;
-                var deleteTemplate = update.DeleteTemplate;
-                var insertTemplate = update.InsertTemplate;
-
-                // Process DELETE template - base patterns use WITH graph
-                for (int i = 0; i < deleteTemplate.PatternCount; i++)
+                while (results.MoveNext())
                 {
-                    var tp = deleteTemplate.GetPattern(i);
-                    var s = InstantiateTermFromSpan(tp.Subject, b, source);
-                    var p = InstantiateTermFromSpan(tp.Predicate, b, source);
-                    var o = InstantiateTermFromSpan(tp.Object, b, source);
+                    // Copy bindings since we need to use them across template processing
+                    var b = results.Current;
+                    var deleteTemplate = update.DeleteTemplate;
+                    var insertTemplate = update.InsertTemplate;
 
-                    if (s != null && p != null && o != null)
+                    // Process DELETE template - base patterns use WITH graph
+                    for (int i = 0; i < deleteTemplate.PatternCount; i++)
                     {
-                        lock (toDelete)
+                        var tp = deleteTemplate.GetPattern(i);
+                        var s = InstantiateTermFromSpan(tp.Subject, b, source);
+                        var p = InstantiateTermFromSpan(tp.Predicate, b, source);
+                        var o = InstantiateTermFromSpan(tp.Object, b, source);
+
+                        if (s != null && p != null && o != null)
                         {
-                            toDelete.Add((s, p, o, withGraph));
+                            lock (toDelete)
+                            {
+                                toDelete.Add((s, p, o, withGraph));
+                            }
                         }
                     }
-                }
 
-                // Process INSERT template - base patterns use WITH graph
-                for (int i = 0; i < insertTemplate.PatternCount; i++)
-                {
-                    var tp = insertTemplate.GetPattern(i);
-                    var s = InstantiateTermFromSpan(tp.Subject, b, source);
-                    var p = InstantiateTermFromSpan(tp.Predicate, b, source);
-                    var o = InstantiateTermFromSpan(tp.Object, b, source);
-
-                    if (s != null && p != null && o != null)
+                    // Process INSERT template - base patterns use WITH graph
+                    for (int i = 0; i < insertTemplate.PatternCount; i++)
                     {
-                        lock (toInsert)
+                        var tp = insertTemplate.GetPattern(i);
+                        var s = InstantiateTermFromSpan(tp.Subject, b, source);
+                        var p = InstantiateTermFromSpan(tp.Predicate, b, source);
+                        var o = InstantiateTermFromSpan(tp.Object, b, source);
+
+                        if (s != null && p != null && o != null)
                         {
-                            toInsert.Add((s, p, o, withGraph));
+                            lock (toInsert)
+                            {
+                                toInsert.Add((s, p, o, withGraph));
+                            }
                         }
                     }
                 }
             }
-            results.Dispose();
+            finally
+            {
+                results.Dispose();
+            }
         }, 4 * 1024 * 1024); // 4MB stack
 
         thread.Start();
@@ -779,17 +811,22 @@ public class UpdateExecutor
                 ReadOnlySpan<char>.Empty,
                 ReadOnlySpan<char>.Empty,
                 ReadOnlySpan<char>.Empty);
-
-            while (results.MoveNext())
+            try
             {
-                var t = results.Current;
-                // Only include triples from default graph (no graph IRI)
-                if (t.Graph.IsEmpty)
+                while (results.MoveNext())
                 {
-                    toDelete.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+                    var t = results.Current;
+                    // Only include triples from default graph (no graph IRI)
+                    if (t.Graph.IsEmpty)
+                    {
+                        toDelete.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+                    }
                 }
             }
-            results.Dispose();
+            finally
+            {
+                results.Dispose();
+            }
         }
         finally
         {
@@ -861,13 +898,18 @@ public class UpdateExecutor
                 ReadOnlySpan<char>.Empty,
                 ReadOnlySpan<char>.Empty,
                 graphIri.AsSpan());
-
-            while (results.MoveNext())
+            try
             {
-                var t = results.Current;
-                toDelete.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+                while (results.MoveNext())
+                {
+                    var t = results.Current;
+                    toDelete.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+                }
             }
-            results.Dispose();
+            finally
+            {
+                results.Dispose();
+            }
         }
         finally
         {
@@ -1038,21 +1080,26 @@ public class UpdateExecutor
                 ReadOnlySpan<char>.Empty,
                 ReadOnlySpan<char>.Empty,
                 srcGraphSpan);
-
-            while (results.MoveNext())
+            try
             {
-                var t = results.Current;
-                // Only include triples from the source graph
-                var isFromSourceGraph = srcGraph == null
-                    ? t.Graph.IsEmpty
-                    : t.Graph.Equals(srcGraph.AsSpan(), StringComparison.Ordinal);
-
-                if (isFromSourceGraph)
+                while (results.MoveNext())
                 {
-                    toCopy.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+                    var t = results.Current;
+                    // Only include triples from the source graph
+                    var isFromSourceGraph = srcGraph == null
+                        ? t.Graph.IsEmpty
+                        : t.Graph.Equals(srcGraph.AsSpan(), StringComparison.Ordinal);
+
+                    if (isFromSourceGraph)
+                    {
+                        toCopy.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+                    }
                 }
             }
-            results.Dispose();
+            finally
+            {
+                results.Dispose();
+            }
         }
         finally
         {

@@ -8,14 +8,26 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 
 /// <summary>
 /// Zero-allocation SPARQL 1.1 parser using stack-based parsing and Span&lt;T&gt;
-/// Based on SPARQL 1.1 Query Language EBNF grammar
+/// Based on SPARQL 1.1 Query Language EBNF grammar.
 /// </summary>
+/// <remarks>
+/// <para><b>Thread Safety:</b> This is a ref struct that exists only on the stack.
+/// It cannot be shared between threads or captured in closures/async methods.
+/// Each thread must create its own parser instance.</para>
+/// <para><b>Usage Pattern:</b> Create a new instance for each query to parse.
+/// The parser is designed for single-use: parse one query, then discard.</para>
+/// </remarks>
 public ref partial struct SparqlParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;
     private int _quotedTripleCounter; // Counter for generating synthetic reifier variables
     private int _seqVarCounter; // Counter for generating synthetic sequence intermediate variables
+    private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
+    private readonly int _maxDepth; // Maximum allowed recursion depth
+
+    // Default maximum query depth (subqueries, property paths, quoted triples)
+    public const int DefaultMaxDepth = 10;
 
     // RDF namespace constants for reification expansion (offsets into synthetic buffer)
     // These are appended to the source during query execution
@@ -26,11 +38,41 @@ public ref partial struct SparqlParser
     private const int RdfObjectOffset = -5;
 
     public SparqlParser(ReadOnlySpan<char> source)
+        : this(source, DefaultMaxDepth)
     {
+    }
+
+    public SparqlParser(ReadOnlySpan<char> source, int maxDepth)
+    {
+        if (maxDepth <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxDepth), "Max depth must be positive");
+
         _source = source;
         _position = 0;
         _quotedTripleCounter = 0;
         _seqVarCounter = 0;
+        _currentDepth = 0;
+        _maxDepth = maxDepth;
+    }
+
+    /// <summary>
+    /// Checks depth limit and increments current depth. Must be paired with DecrementDepth.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void IncrementDepth(string context)
+    {
+        if (_currentDepth >= _maxDepth)
+            throw new SparqlParseException($"{context} nesting exceeds maximum depth of {_maxDepth}");
+        _currentDepth++;
+    }
+
+    /// <summary>
+    /// Decrements current depth after recursive operation completes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void DecrementDepth()
+    {
+        _currentDepth--;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -371,59 +413,67 @@ public ref partial struct SparqlParser
     /// </summary>
     private Term ExpandQuotedTriple(ref GraphPattern pattern, Term quotedTriple)
     {
-        // Generate synthetic reifier variable: ?_qt{N}
-        // We use negative offsets to indicate synthetic terms
-        var reifierIndex = _quotedTripleCounter++;
-        var reifierTerm = Term.Variable(-(reifierIndex + 100), 0); // Synthetic variable marker
-
-        // Re-parse the quoted triple content to extract nested terms
-        var (innerSubject, innerPredicate, innerObject) =
-            ParseQuotedTripleContent(quotedTriple.Start, quotedTriple.Length);
-
-        // Handle nested quoted triples recursively
-        if (innerSubject.IsQuotedTriple)
+        IncrementDepth("Quoted triple");
+        try
         {
-            innerSubject = ExpandQuotedTriple(ref pattern, innerSubject);
+            // Generate synthetic reifier variable: ?_qt{N}
+            // We use negative offsets to indicate synthetic terms
+            var reifierIndex = _quotedTripleCounter++;
+            var reifierTerm = Term.Variable(-(reifierIndex + 100), 0); // Synthetic variable marker
+
+            // Re-parse the quoted triple content to extract nested terms
+            var (innerSubject, innerPredicate, innerObject) =
+                ParseQuotedTripleContent(quotedTriple.Start, quotedTriple.Length);
+
+            // Handle nested quoted triples recursively
+            if (innerSubject.IsQuotedTriple)
+            {
+                innerSubject = ExpandQuotedTriple(ref pattern, innerSubject);
+            }
+            if (innerObject.IsQuotedTriple)
+            {
+                innerObject = ExpandQuotedTriple(ref pattern, innerObject);
+            }
+
+            // Add reification patterns:
+            // ?_qt{N} rdf:type rdf:Statement
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = reifierTerm,
+                Predicate = Term.Iri(RdfTypeOffset, 0),
+                Object = Term.Iri(RdfStatementOffset, 0)
+            });
+
+            // ?_qt{N} rdf:subject innerSubject
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = reifierTerm,
+                Predicate = Term.Iri(RdfSubjectOffset, 0),
+                Object = innerSubject
+            });
+
+            // ?_qt{N} rdf:predicate innerPredicate
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = reifierTerm,
+                Predicate = Term.Iri(RdfPredicateOffset, 0),
+                Object = innerPredicate
+            });
+
+            // ?_qt{N} rdf:object innerObject
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = reifierTerm,
+                Predicate = Term.Iri(RdfObjectOffset, 0),
+                Object = innerObject
+            });
+
+            return reifierTerm;
         }
-        if (innerObject.IsQuotedTriple)
+        finally
         {
-            innerObject = ExpandQuotedTriple(ref pattern, innerObject);
+            DecrementDepth();
         }
-
-        // Add reification patterns:
-        // ?_qt{N} rdf:type rdf:Statement
-        pattern.AddPattern(new TriplePattern
-        {
-            Subject = reifierTerm,
-            Predicate = Term.Iri(RdfTypeOffset, 0),
-            Object = Term.Iri(RdfStatementOffset, 0)
-        });
-
-        // ?_qt{N} rdf:subject innerSubject
-        pattern.AddPattern(new TriplePattern
-        {
-            Subject = reifierTerm,
-            Predicate = Term.Iri(RdfSubjectOffset, 0),
-            Object = innerSubject
-        });
-
-        // ?_qt{N} rdf:predicate innerPredicate
-        pattern.AddPattern(new TriplePattern
-        {
-            Subject = reifierTerm,
-            Predicate = Term.Iri(RdfPredicateOffset, 0),
-            Object = innerPredicate
-        });
-
-        // ?_qt{N} rdf:object innerObject
-        pattern.AddPattern(new TriplePattern
-        {
-            Subject = reifierTerm,
-            Predicate = Term.Iri(RdfObjectOffset, 0),
-            Object = innerObject
-        });
-
-        return reifierTerm;
     }
 
     /// <summary>
@@ -436,49 +486,57 @@ public ref partial struct SparqlParser
     /// </summary>
     private bool ExpandSequencePath(ref GraphPattern pattern, Term subject, Term obj, PropertyPath path)
     {
-        // Generate synthetic intermediate variable: ?_seq{N}
-        var seqIndex = _seqVarCounter++;
-        var intermediateTerm = Term.Variable(-(seqIndex + 200), 0); // Synthetic sequence variable marker
-
-        // Re-parse left and right path segments from source offsets
-        var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
-        var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
-
-        // Add left pattern: subject -> intermediate
-        if (leftPath.Type == PathType.Sequence)
+        IncrementDepth("Property path");
+        try
         {
-            // Recursively expand nested sequence on left side
-            ExpandSequencePath(ref pattern, subject, intermediateTerm, leftPath);
-        }
-        else
-        {
-            pattern.AddPattern(new TriplePattern
+            // Generate synthetic intermediate variable: ?_seq{N}
+            var seqIndex = _seqVarCounter++;
+            var intermediateTerm = Term.Variable(-(seqIndex + 200), 0); // Synthetic sequence variable marker
+
+            // Re-parse left and right path segments from source offsets
+            var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
+            var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
+
+            // Add left pattern: subject -> intermediate
+            if (leftPath.Type == PathType.Sequence)
             {
-                Subject = subject,
-                Predicate = leftPredicate,
-                Object = intermediateTerm,
-                Path = leftPath
-            });
-        }
-
-        // Add right pattern: intermediate -> object
-        if (rightPath.Type == PathType.Sequence)
-        {
-            // Recursively expand nested sequence on right side
-            ExpandSequencePath(ref pattern, intermediateTerm, obj, rightPath);
-        }
-        else
-        {
-            pattern.AddPattern(new TriplePattern
+                // Recursively expand nested sequence on left side
+                ExpandSequencePath(ref pattern, subject, intermediateTerm, leftPath);
+            }
+            else
             {
-                Subject = intermediateTerm,
-                Predicate = rightPredicate,
-                Object = obj,
-                Path = rightPath
-            });
-        }
+                pattern.AddPattern(new TriplePattern
+                {
+                    Subject = subject,
+                    Predicate = leftPredicate,
+                    Object = intermediateTerm,
+                    Path = leftPath
+                });
+            }
 
-        return true;
+            // Add right pattern: intermediate -> object
+            if (rightPath.Type == PathType.Sequence)
+            {
+                // Recursively expand nested sequence on right side
+                ExpandSequencePath(ref pattern, intermediateTerm, obj, rightPath);
+            }
+            else
+            {
+                pattern.AddPattern(new TriplePattern
+                {
+                    Subject = intermediateTerm,
+                    Predicate = rightPredicate,
+                    Object = obj,
+                    Path = rightPath
+                });
+            }
+
+            return true;
+        }
+        finally
+        {
+            DecrementDepth();
+        }
     }
 
     /// <summary>

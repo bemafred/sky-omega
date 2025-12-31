@@ -512,12 +512,13 @@ cat BenchmarkDotNet.Artifacts/results/SkyOmega.Mercury.Benchmarks.QueryBenchmark
 
 ### Production Hardening Checklist
 
-- [ ] Query timeout via CancellationToken
-- [ ] Max atom size validation (default 1MB)
-- [ ] Max query depth limits
-- [ ] try/finally for all operator disposal
+- [x] Query timeout via CancellationToken
+- [x] Max atom size validation (default 1MB)
+- [x] Max query depth limits (parser)
+- [x] Max join depth limits (executor)
+- [x] try/finally for all operator disposal
 - [x] Pointer leak fix in AtomStore
-- [ ] Thread-safety documentation for parsers
+- [x] Thread-safety documentation for parsers
 
 ## Code Conventions
 

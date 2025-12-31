@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Threading;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Patterns;
@@ -29,12 +30,19 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// </summary>
 public class QueryExecutor : IDisposable
 {
+    /// <summary>
+    /// Default maximum join depth (number of patterns in a single nested loop join).
+    /// Prevents stack overflow from queries with excessive pattern counts.
+    /// </summary>
+    public const int DefaultMaxJoinDepth = 32;
+
     private readonly QuadStore _store;
     private readonly string _source;
     private readonly Query _query;
     private readonly QueryBuffer _buffer;  // New: heap-allocated pattern storage
     private readonly IBufferManager _bufferManager;
     private readonly char[] _stringBuffer; // Pooled buffer for string operations (replaces scattered new char[1024])
+    private readonly int _maxJoinDepth;
     private bool _disposed;
 
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
@@ -54,26 +62,47 @@ public class QueryExecutor : IDisposable
     private readonly QueryPlanner? _planner;
     private readonly int[]? _optimizedPatternOrder;
 
+    // Cancellation support
+    private CancellationToken _cancellationToken;
+
+    /// <summary>
+    /// Throws OperationCanceledException if cancellation has been requested.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private void ThrowIfCancellationRequested()
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+    }
+
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
-        : this(store, source, in query, null, null, null) { }
+        : this(store, source, in query, null, null, null, DefaultMaxJoinDepth) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor)
-        : this(store, source, in query, serviceExecutor, null, null) { }
+        : this(store, source, in query, serviceExecutor, null, null, DefaultMaxJoinDepth) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor, QueryPlanner? planner)
-        : this(store, source, in query, serviceExecutor, planner, null) { }
+        : this(store, source, in query, serviceExecutor, planner, null, DefaultMaxJoinDepth) { }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
         ISparqlServiceExecutor? serviceExecutor, QueryPlanner? planner, IBufferManager? bufferManager)
+        : this(store, source, in query, serviceExecutor, planner, bufferManager, DefaultMaxJoinDepth) { }
+
+    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query,
+        ISparqlServiceExecutor? serviceExecutor, QueryPlanner? planner, IBufferManager? bufferManager,
+        int maxJoinDepth)
     {
+        if (maxJoinDepth <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxJoinDepth), "Max join depth must be positive");
+
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
         _query = query;  // Copy here is unavoidable since we store it
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _planner = planner;
+        _maxJoinDepth = maxJoinDepth;
 
         // Convert Query to QueryBuffer for heap-based pattern storage
         // This avoids stack overflow when accessing patterns in nested calls
@@ -302,26 +331,57 @@ public class QueryExecutor : IDisposable
                 var tp = pattern.GetPattern(requiredIdx);
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri.AsSpan(),
                     _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
-
-                while (scan.MoveNext(ref bindingTable))
+                try
                 {
-                    if (!PassesFilters(in pattern, ref bindingTable))
+                    while (scan.MoveNext(ref bindingTable))
                     {
-                        bindingTable.Clear();
-                        continue;
+                        ThrowIfCancellationRequested();
+                        if (!PassesFilters(in pattern, ref bindingTable))
+                        {
+                            bindingTable.Clear();
+                            continue;
+                        }
+                        results.Add(new MaterializedRow(bindingTable));
                     }
-                    results.Add(new MaterializedRow(bindingTable));
                 }
-                scan.Dispose();
+                finally
+                {
+                    scan.Dispose();
+                }
             }
             else
             {
                 // Multiple patterns - use MultiPatternScan with graph
                 var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri.AsSpan(),
                     _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
-
-                while (multiScan.MoveNext(ref bindingTable))
+                try
                 {
+                    while (multiScan.MoveNext(ref bindingTable))
+                    {
+                        ThrowIfCancellationRequested();
+                        if (!PassesFilters(in pattern, ref bindingTable))
+                        {
+                            bindingTable.Clear();
+                            continue;
+                        }
+                        results.Add(new MaterializedRow(bindingTable));
+                    }
+                }
+                finally
+                {
+                    multiScan.Dispose();
+                }
+            }
+        }
+        else
+        {
+            // Multiple FROM clauses - use CrossGraphMultiPatternScan
+            var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
+            try
+            {
+                while (crossGraphScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
                     if (!PassesFilters(in pattern, ref bindingTable))
                     {
                         bindingTable.Clear();
@@ -329,24 +389,11 @@ public class QueryExecutor : IDisposable
                     }
                     results.Add(new MaterializedRow(bindingTable));
                 }
-                multiScan.Dispose();
             }
-        }
-        else
-        {
-            // Multiple FROM clauses - use CrossGraphMultiPatternScan
-            var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
-
-            while (crossGraphScan.MoveNext(ref bindingTable))
+            finally
             {
-                if (!PassesFilters(in pattern, ref bindingTable))
-                {
-                    bindingTable.Clear();
-                    continue;
-                }
-                results.Add(new MaterializedRow(bindingTable));
+                crossGraphScan.Dispose();
             }
-            crossGraphScan.Dispose();
         }
 
         if (results.Count == 0)
@@ -424,12 +471,18 @@ public class QueryExecutor : IDisposable
 
         // Create SubQueryScan operator
         var subQueryScan = new SubQueryScan(_store, _source, subSelect);
-
-        while (subQueryScan.MoveNext(ref bindingTable))
+        try
         {
-            results.Add(new MaterializedRow(bindingTable));
+            while (subQueryScan.MoveNext(ref bindingTable))
+            {
+                ThrowIfCancellationRequested();
+                results.Add(new MaterializedRow(bindingTable));
+            }
         }
-        subQueryScan.Dispose();
+        finally
+        {
+            subQueryScan.Dispose();
+        }
 
         return results;
     }
@@ -472,11 +525,18 @@ public class QueryExecutor : IDisposable
 
             // Materialize results
             var results = new List<MaterializedRow>();
-            while (serviceScan.MoveNext(ref bindingTable))
+            try
             {
-                results.Add(new MaterializedRow(bindingTable));
+                while (serviceScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
             }
-            serviceScan.Dispose();
+            finally
+            {
+                serviceScan.Dispose();
+            }
 
             if (results.Count == 0)
                 return MaterializedQueryResults.Empty();
@@ -496,6 +556,17 @@ public class QueryExecutor : IDisposable
     /// Caller must hold read lock on store and call Dispose on results.
     /// Note: Use _buffer for pattern metadata to avoid large struct copies that cause stack overflow.
     /// </summary>
+    /// <summary>
+    /// Execute the query with cancellation support.
+    /// </summary>
+    /// <param name="cancellationToken">Token to cancel query execution.</param>
+    /// <returns>Query results that can be iterated.</returns>
+    public QueryResults Execute(CancellationToken cancellationToken)
+    {
+        _cancellationToken = cancellationToken;
+        return Execute();
+    }
+
     public QueryResults Execute()
     {
         // Check for GRAPH clauses first - use _buffer to avoid large struct copies
@@ -845,11 +916,18 @@ public class QueryExecutor : IDisposable
 
             // Materialize results and return
             var results = new List<MaterializedRow>();
-            while (serviceScan.MoveNext(ref bindingTable))
+            try
             {
-                results.Add(new MaterializedRow(bindingTable));
+                while (serviceScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
             }
-            serviceScan.Dispose();
+            finally
+            {
+                serviceScan.Dispose();
+            }
 
             if (results.Count == 0)
                 return QueryResults.Empty();
@@ -928,6 +1006,7 @@ public class QueryExecutor : IDisposable
 
         while (graphHeaders.MoveNext())
         {
+            ThrowIfCancellationRequested();
             var header = graphHeaders.Current;
             var headerIndex = graphHeaders.CurrentIndex;
 
@@ -997,6 +1076,7 @@ public class QueryExecutor : IDisposable
             // FROM NAMED specified - only iterate those graphs
             foreach (var graphStr in _namedGraphs)
             {
+                ThrowIfCancellationRequested();
                 var graphIri = graphStr.AsSpan();
 
                 // Bind graph variable
@@ -1025,6 +1105,7 @@ public class QueryExecutor : IDisposable
         // No FROM NAMED restriction - iterate all named graphs
         foreach (var graphIri in _store.GetNamedGraphs())
         {
+            ThrowIfCancellationRequested();
             // Bind graph variable
             bindingTable.Clear();
             bindingTable.Bind(varName, graphIri);
@@ -1068,13 +1149,17 @@ public class QueryExecutor : IDisposable
 
         var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graph.AsSpan(),
             _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
-
-        while (scan.MoveNext(ref bindingTable))
+        try
         {
-            results.Add(new MaterializedRow(bindingTable));
+            while (scan.MoveNext(ref bindingTable))
+            {
+                results.Add(new MaterializedRow(bindingTable));
+            }
         }
-
-        scan.Dispose();
+        finally
+        {
+            scan.Dispose();
+        }
     }
 
     /// <summary>
@@ -1187,6 +1272,11 @@ public class QueryExecutor : IDisposable
         if (patternCount == 0)
             return;
 
+        // Check join depth limit before starting recursive join
+        if (patternCount > _maxJoinDepth)
+            throw new InvalidOperationException(
+                $"Query exceeds maximum join depth ({patternCount} patterns, limit is {_maxJoinDepth})");
+
         // Execute patterns using nested loop join
         ExecuteNestedLoopJoin(patterns, patternCount, 0, ref bindingTable, graph, results);
     }
@@ -1209,14 +1299,21 @@ public class QueryExecutor : IDisposable
         var tp = patterns[patternIndex];
         var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graph.AsSpan(),
             _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
-
-        while (scan.MoveNext(ref bindingTable))
+        try
         {
-            // Recursively match remaining patterns with current bindings
-            ExecuteNestedLoopJoin(patterns, patternCount, patternIndex + 1, ref bindingTable, graph, results);
-        }
+            while (scan.MoveNext(ref bindingTable))
+            {
+                // Check for cancellation periodically (on each row)
+                ThrowIfCancellationRequested();
 
-        scan.Dispose();
+                // Recursively match remaining patterns with current bindings
+                ExecuteNestedLoopJoin(patterns, patternCount, patternIndex + 1, ref bindingTable, graph, results);
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
     }
 
     /// <summary>
@@ -1473,12 +1570,18 @@ public class QueryExecutor : IDisposable
 
             var scan = new MultiPatternScan(store, source, graphPattern, false, graphIri);
             results = new List<MaterializedRow>();
-            while (scan.MoveNext(ref bindingTable))
+            try
             {
-                results.Add(new MaterializedRow(bindingTable));
-                bindingTable.Clear();
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    results.Add(new MaterializedRow(bindingTable));
+                    bindingTable.Clear();
+                }
             }
-            scan.Dispose();
+            finally
+            {
+                scan.Dispose();
+            }
         }, 4 * 1024 * 1024); // 4MB stack
 
         thread.Start();
@@ -1501,13 +1604,19 @@ public class QueryExecutor : IDisposable
 
         var scan = new TriplePatternScan(store, source, tp, bindingTable, graphIri);
         var results = new List<MaterializedRow>();
-        while (scan.MoveNext(ref bindingTable))
+        try
         {
-            results.Add(new MaterializedRow(bindingTable));
-            bindingTable.Clear();
+            while (scan.MoveNext(ref bindingTable))
+            {
+                results.Add(new MaterializedRow(bindingTable));
+                bindingTable.Clear();
+            }
         }
-        scan.Dispose();
-        PooledBufferManager.Shared.Return(stringBuffer);
+        finally
+        {
+            scan.Dispose();
+            PooledBufferManager.Shared.Return(stringBuffer);
+        }
 
         return results;
     }
@@ -1650,13 +1759,19 @@ public class QueryExecutor : IDisposable
 
         var results = new List<MaterializedRow>();
         var subQueryScan = new SubQueryScan(_store, _source, subSelect);
-
-        while (subQueryScan.MoveNext(ref bindingTable))
+        try
         {
-            results.Add(new MaterializedRow(bindingTable));
-            bindingTable.Clear();
+            while (subQueryScan.MoveNext(ref bindingTable))
+            {
+                ThrowIfCancellationRequested();
+                results.Add(new MaterializedRow(bindingTable));
+                bindingTable.Clear();
+            }
         }
-        subQueryScan.Dispose();
+        finally
+        {
+            subQueryScan.Dispose();
+        }
 
         return results;
     }
@@ -1679,6 +1794,7 @@ public class QueryExecutor : IDisposable
             var tp = pattern.GetPattern(0);
             foreach (var subRow in subQueryResults)
             {
+                ThrowIfCancellationRequested();
                 // Load subquery bindings
                 bindingTable.Clear();
                 for (int i = 0; i < subRow.BindingCount; i++)
@@ -1728,6 +1844,7 @@ public class QueryExecutor : IDisposable
             // Multiple outer patterns - use MultiPatternScan per subquery result
             foreach (var subRow in subQueryResults)
             {
+                ThrowIfCancellationRequested();
                 // Load subquery bindings
                 bindingTable.Clear();
                 for (int i = 0; i < subRow.BindingCount; i++)
@@ -1748,13 +1865,19 @@ public class QueryExecutor : IDisposable
                 var scan = new MultiPatternScan(_store, _source, outerPattern, false);
                 // Reset binding table but keep subquery bindings
                 var savedCount = bindingTable.Count;
-
-                while (scan.MoveNext(ref bindingTable))
+                try
                 {
-                    results.Add(new MaterializedRow(bindingTable));
-                    bindingTable.TruncateTo(savedCount);
+                    while (scan.MoveNext(ref bindingTable))
+                    {
+                        ThrowIfCancellationRequested();
+                        results.Add(new MaterializedRow(bindingTable));
+                        bindingTable.TruncateTo(savedCount);
+                    }
                 }
-                scan.Dispose();
+                finally
+                {
+                    scan.Dispose();
+                }
             }
         }
 
@@ -1832,35 +1955,42 @@ public class QueryExecutor : IDisposable
         // Note: SubQueryJoinScan still takes pattern by value.
         // This is acceptable since we're only copying once (not recursively).
         var joinScan = new SubQueryJoinScan(_store, _source, pattern, subSelect);
-        while (joinScan.MoveNext(ref bindingTable))
+        try
         {
-            // Apply outer FILTER clauses
-            if (hasFilters)
+            while (joinScan.MoveNext(ref bindingTable))
             {
-                bool passesFilters = true;
-                for (int i = 0; i < pattern.FilterCount; i++)
+                ThrowIfCancellationRequested();
+                // Apply outer FILTER clauses
+                if (hasFilters)
                 {
-                    var filter = pattern.GetFilter(i);
-                    var filterExpr = _source.AsSpan(filter.Start, filter.Length);
-                    var evaluator = new FilterEvaluator(filterExpr);
-                    if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                    bool passesFilters = true;
+                    for (int i = 0; i < pattern.FilterCount; i++)
                     {
-                        passesFilters = false;
-                        break;
+                        var filter = pattern.GetFilter(i);
+                        var filterExpr = _source.AsSpan(filter.Start, filter.Length);
+                        var evaluator = new FilterEvaluator(filterExpr);
+                        if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                        {
+                            passesFilters = false;
+                            break;
+                        }
+                    }
+                    if (!passesFilters)
+                    {
+                        bindingTable.Clear();
+                        continue;
                     }
                 }
-                if (!passesFilters)
-                {
-                    bindingTable.Clear();
-                    continue;
-                }
-            }
 
-            // Materialize this row
-            results.Add(new MaterializedRow(bindingTable));
-            bindingTable.Clear();
+                // Materialize this row
+                results.Add(new MaterializedRow(bindingTable));
+                bindingTable.Clear();
+            }
         }
-        joinScan.Dispose();
+        finally
+        {
+            joinScan.Dispose();
+        }
 
         return results;
     }

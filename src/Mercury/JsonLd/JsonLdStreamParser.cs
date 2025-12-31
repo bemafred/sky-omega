@@ -34,6 +34,14 @@ namespace SkyOmega.Mercury.JsonLd;
 /// For zero-GC parsing, use ParseAsync(QuadHandler).
 /// The IAsyncEnumerable overload allocates strings for compatibility.
 /// </summary>
+/// <remarks>
+/// <para><b>Thread Safety:</b> This class is NOT thread-safe. Each instance
+/// maintains internal parsing state, context dictionaries, and buffers that cannot
+/// be shared across threads. Create a separate instance per thread or serialize
+/// access with locking.</para>
+/// <para><b>Usage Pattern:</b> Create one instance per JSON-LD document. Dispose
+/// when done to return pooled buffers.</para>
+/// </remarks>
 public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;

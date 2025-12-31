@@ -501,6 +501,19 @@ public ref partial struct SparqlParser
     /// </summary>
     private SubSelect ParseSubSelect()
     {
+        IncrementDepth("Subquery");
+        try
+        {
+            return ParseSubSelectCore();
+        }
+        finally
+        {
+            DecrementDepth();
+        }
+    }
+
+    private SubSelect ParseSubSelectCore()
+    {
         var subSelect = new SubSelect();
 
         // Parse SELECT keyword
