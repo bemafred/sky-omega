@@ -16,7 +16,9 @@ public class QuadStoreTests : IDisposable
 
     public QuadStoreTests()
     {
-        _testPath = TempPath.Test("store");
+        var tempPath = TempPath.Test("store");
+        tempPath.MarkOwnership();
+        _testPath = tempPath;
     }
 
     public void Dispose()

@@ -20,9 +20,9 @@ public class TemporalWriteBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("temporal-write");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("temporal-write");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
     }
@@ -71,9 +71,9 @@ public class TemporalQueryBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("temporal-query");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("temporal-query");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
         _baseTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);

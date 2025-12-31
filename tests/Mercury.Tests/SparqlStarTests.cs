@@ -25,8 +25,9 @@ public class SparqlStarTests : IDisposable
 
     public SparqlStarTests()
     {
-        _tempDir = TempPath.Test("sparqlstar");
-        Directory.CreateDirectory(_tempDir);
+        var tempPath = TempPath.Test("sparqlstar");
+        tempPath.MarkOwnership();
+        _tempDir = tempPath;
         _store = new QuadStore(_tempDir);
     }
 

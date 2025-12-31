@@ -20,8 +20,9 @@ public class TemporalSparqlTests : IDisposable
 
     public TemporalSparqlTests()
     {
-        _tempDir = TempPath.Test("temporal-sparql");
-        Directory.CreateDirectory(_tempDir);
+        var tempPath = TempPath.Test("temporal-sparql");
+        tempPath.MarkOwnership();
+        _tempDir = tempPath;
         _store = new QuadStore(_tempDir);
 
         // Add test data with different valid times

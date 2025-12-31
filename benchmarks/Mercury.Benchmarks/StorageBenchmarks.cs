@@ -20,9 +20,9 @@ public class BatchWriteBenchmarks
     [IterationSetup]
     public void IterationSetup()
     {
-        _dbPath = TempPath.Benchmark("batch");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("batch");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
     }
 
     [IterationCleanup]
@@ -85,9 +85,9 @@ public class QueryBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("query");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("query");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
 
@@ -204,9 +204,9 @@ public class IndexSelectionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("index");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("index");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
 

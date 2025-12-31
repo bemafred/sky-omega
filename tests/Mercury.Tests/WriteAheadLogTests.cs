@@ -11,19 +11,23 @@ namespace SkyOmega.Mercury.Tests;
 /// </summary>
 public class WriteAheadLogTests : IDisposable
 {
+    private readonly string _testDir;
     private readonly string _testPath;
     private WriteAheadLog? _wal;
 
     public WriteAheadLogTests()
     {
-        _testPath = TempPath.Test("wal").WithExtension(".log");
+        var tempPath = TempPath.Test("wal");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
+        _testPath = Path.Combine(_testDir, "test.log");
     }
 
     public void Dispose()
     {
         _wal?.Dispose();
-        if (File.Exists(_testPath))
-            File.Delete(_testPath);
+        if (Directory.Exists(_testDir))
+            Directory.Delete(_testDir, recursive: true);
     }
 
     private WriteAheadLog CreateWal(long sizeThreshold = 16 * 1024 * 1024, int timeSeconds = 60)

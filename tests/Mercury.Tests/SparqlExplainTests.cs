@@ -19,8 +19,9 @@ public class SparqlExplainTests : IDisposable
 
     public SparqlExplainTests()
     {
-        _testDir = TempPath.Test("explain");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("explain");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
         _store = new QuadStore(_testDir);
 
         // Add some test data

@@ -11,32 +11,23 @@ namespace SkyOmega.Mercury.Tests;
 /// </summary>
 public class QuadIndexTests : IDisposable
 {
+    private readonly string _testDir;
     private readonly string _testPath;
     private QuadIndex? _index;
 
     public QuadIndexTests()
     {
-        _testPath = TempPath.Test("index").WithExtension(".tdb");
+        var tempPath = TempPath.Test("index");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
+        _testPath = Path.Combine(_testDir, "test.tdb");
     }
 
     public void Dispose()
     {
         _index?.Dispose();
-        CleanupFiles();
-    }
-
-    private void CleanupFiles()
-    {
-        if (File.Exists(_testPath))
-            File.Delete(_testPath);
-
-        var atomsPath = _testPath + ".atoms";
-        foreach (var ext in new[] { ".atoms", ".atomidx", ".offsets" })
-        {
-            var path = atomsPath.Replace(".atoms", ext);
-            if (File.Exists(path))
-                File.Delete(path);
-        }
+        if (Directory.Exists(_testDir))
+            Directory.Delete(_testDir, recursive: true);
     }
 
     private QuadIndex CreateIndex()

@@ -18,8 +18,9 @@ public class UpdateExecutorTests : IDisposable
 
     public UpdateExecutorTests()
     {
-        _testDir = TempPath.Test("update");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("update");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
         _store = new QuadStore(_testDir);
     }
 

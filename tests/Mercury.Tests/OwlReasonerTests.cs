@@ -30,8 +30,9 @@ public class OwlReasonerTests : IDisposable
 
     public OwlReasonerTests()
     {
-        _testDir = TempPath.Test("owl");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("owl");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
         _store = new QuadStore(_testDir);
     }
 

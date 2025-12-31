@@ -103,9 +103,9 @@ public class SparqlExecutionBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("sparql-exec");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("sparql-exec");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
 
@@ -314,9 +314,9 @@ public class JoinBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("join");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("join");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
 
@@ -515,9 +515,9 @@ public class FilterBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _dbPath = TempPath.Benchmark("filter");
-        if (Directory.Exists(_dbPath))
-            Directory.Delete(_dbPath, true);
+        var tempPath = TempPath.Benchmark("filter");
+        tempPath.MarkOwnership();
+        _dbPath = tempPath;
 
         _store = new QuadStore(_dbPath);
 

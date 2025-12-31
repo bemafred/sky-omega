@@ -25,8 +25,9 @@ public class SparqlHttpServerTests : IDisposable
 
     public SparqlHttpServerTests()
     {
-        _testDir = TempPath.Test("http");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("http");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
         _store = new QuadStore(_testDir);
 
         // Add test data

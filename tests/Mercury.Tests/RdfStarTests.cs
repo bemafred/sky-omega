@@ -32,8 +32,9 @@ public class RdfStarTests : IDisposable
 
     public RdfStarTests()
     {
-        _tempDir = TempPath.Test("rdfstar");
-        Directory.CreateDirectory(_tempDir);
+        var tempPath = TempPath.Test("rdfstar");
+        tempPath.MarkOwnership();
+        _tempDir = tempPath;
         _store = new QuadStore(_tempDir);
     }
 
