@@ -216,6 +216,7 @@ public class QueryExecutor : IDisposable
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _query = default;  // Not used when buffer is provided directly
         _serviceExecutor = serviceExecutor;
+        _maxJoinDepth = DefaultMaxJoinDepth;  // Use default join depth limit
 
         // Extract datasets from buffer
         if (buffer.Datasets != null && buffer.Datasets.Length > 0)

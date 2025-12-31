@@ -31,22 +31,24 @@ public sealed class QuadStore : IDisposable
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private readonly ILogger _logger;
     private readonly IBufferManager _bufferManager;
+    private readonly long _minimumFreeDiskSpace;
     private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
     private bool _disposed;
+    private bool _diskSpaceLow; // Set when disk space drops below threshold
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory.
     /// </summary>
     /// <param name="baseDirectory">Directory for store files.</param>
-    public QuadStore(string baseDirectory) : this(baseDirectory, null, null) { }
+    public QuadStore(string baseDirectory) : this(baseDirectory, null, null, null) { }
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory with logging.
     /// </summary>
     /// <param name="baseDirectory">Directory for store files.</param>
     /// <param name="logger">Logger for diagnostics (null for no logging).</param>
-    public QuadStore(string baseDirectory, ILogger? logger) : this(baseDirectory, logger, null) { }
+    public QuadStore(string baseDirectory, ILogger? logger) : this(baseDirectory, logger, null, null) { }
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory with logging and buffer management.
@@ -55,10 +57,21 @@ public sealed class QuadStore : IDisposable
     /// <param name="logger">Logger for diagnostics (null for no logging).</param>
     /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
     public QuadStore(string baseDirectory, ILogger? logger, IBufferManager? bufferManager)
+        : this(baseDirectory, logger, bufferManager, null) { }
+
+    /// <summary>
+    /// Creates a new QuadStore at the specified directory with full configuration.
+    /// </summary>
+    /// <param name="baseDirectory">Directory for store files.</param>
+    /// <param name="logger">Logger for diagnostics (null for no logging).</param>
+    /// <param name="bufferManager">Buffer manager for allocations (null for default pooled manager).</param>
+    /// <param name="storageOptions">Storage options including disk space limits (null for defaults).</param>
+    public QuadStore(string baseDirectory, ILogger? logger, IBufferManager? bufferManager, StorageOptions? storageOptions)
     {
         _baseDirectory = baseDirectory;
         _logger = logger ?? NullLogger.Instance;
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _minimumFreeDiskSpace = (storageOptions ?? StorageOptions.Default).MinimumFreeDiskSpace;
 
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
@@ -102,6 +115,54 @@ public sealed class QuadStore : IDisposable
     public AtomStore Atoms => _atoms;
 
     /// <summary>
+    /// Returns true if disk space is below the configured minimum threshold.
+    /// When true, write operations will fail until space is freed.
+    /// </summary>
+    public bool IsDiskSpaceLow => _diskSpaceLow;
+
+    /// <summary>
+    /// Throws if disk space was detected as low after a previous operation.
+    /// Call this at the start of any write operation.
+    /// </summary>
+    private void ThrowIfDiskSpaceLow()
+    {
+        if (_diskSpaceLow)
+        {
+            var available = DiskSpaceChecker.GetAvailableSpace(_baseDirectory);
+            if (available >= _minimumFreeDiskSpace)
+            {
+                // Space has been freed, clear the flag
+                _diskSpaceLow = false;
+            }
+            else
+            {
+                throw new InsufficientDiskSpaceException(
+                    _baseDirectory,
+                    0, // No specific request, just refusing new writes
+                    available,
+                    _minimumFreeDiskSpace);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks disk space after a write operation and sets the low-space flag if needed.
+    /// The current operation has already succeeded; this prevents the NEXT operation.
+    /// </summary>
+    private void CheckDiskSpaceAfterWrite()
+    {
+        if (_minimumFreeDiskSpace <= 0)
+            return;
+
+        var available = DiskSpaceChecker.GetAvailableSpace(_baseDirectory);
+        if (available >= 0 && available < _minimumFreeDiskSpace)
+        {
+            _diskSpaceLow = true;
+            _logger.Warning($"Disk space low: {available} bytes available, minimum is {_minimumFreeDiskSpace} bytes. Further writes will be refused.".AsSpan());
+        }
+    }
+
+    /// <summary>
     /// Add a temporal quad to all indexes with WAL durability.
     /// Thread-safe: acquires write lock.
     /// </summary>
@@ -114,6 +175,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
+        ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
         {
@@ -132,6 +194,9 @@ public sealed class QuadStore : IDisposable
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
+
+            // 5. Check disk space AFTER write (current op succeeds, next may be refused)
+            CheckDiskSpaceAfterWrite();
         }
         finally
         {
@@ -166,6 +231,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
+        ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
         {
@@ -189,6 +255,9 @@ public sealed class QuadStore : IDisposable
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
+
+            // 5. Check disk space AFTER write (current op succeeds, next may be refused)
+            CheckDiskSpaceAfterWrite();
 
             return deleted;
         }
@@ -233,6 +302,7 @@ public sealed class QuadStore : IDisposable
     public void BeginBatch()
     {
         ThrowIfDisposed();
+        ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
         {
@@ -353,6 +423,9 @@ public sealed class QuadStore : IDisposable
             _activeBatchTxId = -1;
 
             CheckpointIfNeeded();
+
+            // Check disk space AFTER commit (batch succeeds, next operation may be refused)
+            CheckDiskSpaceAfterWrite();
         }
         finally
         {
