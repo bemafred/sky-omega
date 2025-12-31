@@ -49,7 +49,7 @@ public class BatchWriteBenchmarks
     [Benchmark(Description = "Batch writes (single fsync)")]
     public void BatchWrites()
     {
-        using var store = new QuadStore(_dbPath + "_batch");
+        using var store = new QuadStore(_dbPath);
         store.BeginBatch();
         try
         {
