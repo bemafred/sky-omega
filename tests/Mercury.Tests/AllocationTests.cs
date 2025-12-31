@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Rdf.Turtle;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -57,7 +58,9 @@ public class AllocationTests
     [Fact]
     public void QuadStore_QueryIteration_ZeroAllocations()
     {
-        var dbPath = Path.Combine(Path.GetTempPath(), $"alloc_test_{Guid.NewGuid():N}");
+        var tempPath = TempPath.Test("alloc");
+        tempPath.MarkOwnership();
+        var dbPath = tempPath.FullPath;
 
         try
         {

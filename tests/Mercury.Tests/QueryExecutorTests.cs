@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -17,8 +18,9 @@ public class QueryExecutorTests : IDisposable
 
     public QueryExecutorTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), $"QueryExecutorTests_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("queryexec");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
         _store = new QuadStore(_testDir);
 
         // Populate with test data

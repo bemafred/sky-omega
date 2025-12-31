@@ -12,6 +12,7 @@ using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.TriG;
+using SkyOmega.Mercury.Runtime;
 using Xunit;
 using RdfFormat = SkyOmega.Mercury.Rdf.RdfFormat;
 using RdfFormatNegotiator = SkyOmega.Mercury.Rdf.RdfFormatNegotiator;
@@ -94,8 +95,9 @@ public class BufferManagerTests : IDisposable
 
     public BufferManagerTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-bufmgr-test-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_tempDir);
+        var tempPath = TempPath.Test("bufmgr");
+        tempPath.MarkOwnership();
+        _tempDir = tempPath;
     }
 
     public void Dispose()
