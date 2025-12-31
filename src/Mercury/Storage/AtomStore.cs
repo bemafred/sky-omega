@@ -44,6 +44,9 @@ public sealed unsafe class AtomStore : IDisposable
     private readonly MemoryMappedViewAccessor _indexAccessor;
     private MemoryMappedViewAccessor _offsetAccessor;
 
+    // Cached pointers acquired once during construction/resize (avoids repeated AcquirePointer calls)
+    private byte* _dataPtr;
+
     // Current write position in data file
     private long _dataPosition;
     private long _nextAtomId;
@@ -158,6 +161,9 @@ public sealed unsafe class AtomStore : IDisposable
         _dataAccessor = _dataMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
         _indexAccessor = _indexMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
         _offsetAccessor = _offsetMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+
+        // Acquire data pointer once (released in Dispose)
+        _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _dataPtr);
 
         // Get pointer to hash table
         byte* indexPtr = null;
@@ -328,11 +334,8 @@ public sealed unsafe class AtomStore : IDisposable
         // Read length (64-bit for huge blobs)
         _dataAccessor.Read(offset, out long length);
 
-        // Get pointer to UTF-8 data
-        byte* dataPtr = null;
-        _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref dataPtr);
-
-        return new ReadOnlySpan<byte>(dataPtr + offset + sizeof(long), (int)length);
+        // Use cached pointer (acquired once during construction, released in Dispose)
+        return new ReadOnlySpan<byte>(_dataPtr + offset + sizeof(long), (int)length);
     }
 
     /// <summary>
@@ -440,10 +443,8 @@ public sealed unsafe class AtomStore : IDisposable
         // Write atom data: [length:8][utf8data:N]
         _dataAccessor.Write(offset, (long)utf8Value.Length);
 
-        byte* dataPtr = null;
-        _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref dataPtr);
-
-        utf8Value.CopyTo(new Span<byte>(dataPtr + offset + sizeof(long), utf8Value.Length));
+        // Use cached pointer (acquired during construction/resize)
+        utf8Value.CopyTo(new Span<byte>(_dataPtr + offset + sizeof(long), utf8Value.Length));
 
         // Write to offset index for O(1) atomId→offset lookup
         _offsetIndex[atomId] = offset;
@@ -497,6 +498,10 @@ public sealed unsafe class AtomStore : IDisposable
 
             var newSize = Math.Max(_dataFile.Length * 2, requiredSize + InitialDataSize);
 
+            // Release old pointer before disposing accessor
+            _dataAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+            _dataPtr = null;
+
             // Dispose old accessor and map
             _dataAccessor.Dispose();
             _dataMap.Dispose();
@@ -515,6 +520,9 @@ public sealed unsafe class AtomStore : IDisposable
             );
 
             _dataAccessor = _dataMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+
+            // Acquire new pointer
+            _dataAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _dataPtr);
         }
     }
 
@@ -615,6 +623,23 @@ public sealed unsafe class AtomStore : IDisposable
     public void Dispose()
     {
         SaveMetadata();
+
+        // Release all acquired pointers before disposing accessors
+        if (_dataPtr != null)
+        {
+            _dataAccessor?.SafeMemoryMappedViewHandle.ReleasePointer();
+            _dataPtr = null;
+        }
+        if (_hashTable != null)
+        {
+            _indexAccessor?.SafeMemoryMappedViewHandle.ReleasePointer();
+            _hashTable = null;
+        }
+        if (_offsetIndex != null)
+        {
+            _offsetAccessor?.SafeMemoryMappedViewHandle.ReleasePointer();
+            _offsetIndex = null;
+        }
 
         _dataAccessor?.Dispose();
         _indexAccessor?.Dispose();

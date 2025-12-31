@@ -24,6 +24,9 @@ public sealed unsafe class QuadIndex : IDisposable
     private readonly bool _ownsAtomStore;
     private readonly PageCache _pageCache;
 
+    // Cached base pointer acquired once during construction (avoids repeated AcquirePointer calls)
+    private byte* _basePtr;
+
     private long _rootPageId;
     private long _nextPageId;
     private long _quadCount;
@@ -66,6 +69,9 @@ public sealed unsafe class QuadIndex : IDisposable
         );
 
         _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+
+        // Acquire base pointer once (released in Dispose)
+        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePtr);
 
         if (sharedAtoms != null)
         {
@@ -596,13 +602,11 @@ public sealed unsafe class QuadIndex : IDisposable
     {
         if (_pageCache.TryGet(pageId, out var cachedPtr))
             return (TemporalBTreePage*)cachedPtr;
-        
-        byte* ptr = null;
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-        
-        var pagePtr = (TemporalBTreePage*)(ptr + pageId * PageSize);
+
+        // Use cached base pointer (acquired during construction, released in Dispose)
+        var pagePtr = (TemporalBTreePage*)(_basePtr + pageId * PageSize);
         _pageCache.Add(pageId, pagePtr);
-        
+
         return pagePtr;
     }
 
@@ -1056,6 +1060,14 @@ public sealed unsafe class QuadIndex : IDisposable
     public void Dispose()
     {
         SaveMetadata();
+
+        // Release acquired pointer before disposing accessor
+        if (_basePtr != null)
+        {
+            _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
+            _basePtr = null;
+        }
+
         _accessor?.Dispose();
         _mmapFile?.Dispose();
         _fileStream?.Dispose();

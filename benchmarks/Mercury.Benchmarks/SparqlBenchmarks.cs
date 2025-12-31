@@ -158,11 +158,12 @@ public class SparqlExecutionBenchmarks
         // Store query strings
         _singlePatternSource = "SELECT * WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }";
 
+        // LIMIT 1000 for reasonable benchmark timing (full 10K iteration takes 20+ minutes)
         _threePatternSource = @"SELECT * WHERE {
             ?s <http://xmlns.com/foaf/0.1/name> ?name .
             ?s <http://xmlns.com/foaf/0.1/age> ?age .
             ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?type
-        }";
+        } LIMIT 1000";
 
         _filterSource = @"SELECT * WHERE {
             ?s <http://xmlns.com/foaf/0.1/name> ?name .
