@@ -516,7 +516,7 @@ cat BenchmarkDotNet.Artifacts/results/SkyOmega.Mercury.Benchmarks.QueryBenchmark
 - [ ] Max atom size validation (default 1MB)
 - [ ] Max query depth limits
 - [ ] try/finally for all operator disposal
-- [ ] Pointer leak fix in AtomStore
+- [x] Pointer leak fix in AtomStore
 - [ ] Thread-safety documentation for parsers
 
 ## Code Conventions

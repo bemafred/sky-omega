@@ -538,6 +538,10 @@ public sealed unsafe class AtomStore : IDisposable
 
             var newCapacity = Math.Max(_offsetCapacity * 2, requiredCapacity + InitialOffsetCapacity);
 
+            // Release old pointer before disposing accessor
+            _offsetAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+            _offsetIndex = null;
+
             // Dispose old accessor and map
             _offsetAccessor.Dispose();
             _offsetMap.Dispose();
