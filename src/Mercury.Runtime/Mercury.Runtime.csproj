@@ -8,4 +8,8 @@
         <RootNamespace>SkyOmega.Mercury.Runtime</RootNamespace>
     </PropertyGroup>
 
+    <ItemGroup>
+        <ProjectReference Include="..\Mercury.Abstractions\Mercury.Abstractions.csproj" />
+    </ItemGroup>
+
 </Project>

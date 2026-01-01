@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Mcp;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql;
@@ -9,7 +10,6 @@ using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
-using ReplUpdateResult = SkyOmega.Mercury.Runtime.IO.UpdateResult;
 
 // Parse command line arguments
 string? storePath = null;
@@ -292,7 +292,7 @@ static QueryResult ExecuteTriples(QueryExecutor executor, QueryType type, TimeSp
     };
 }
 
-static ReplUpdateResult ExecuteUpdate(QuadStore store, string sparql)
+static UpdateResult ExecuteUpdate(QuadStore store, string sparql)
 {
     var sw = Stopwatch.StartNew();
 
@@ -307,7 +307,7 @@ static ReplUpdateResult ExecuteUpdate(QuadStore store, string sparql)
         }
         catch (SparqlParseException ex)
         {
-            return new ReplUpdateResult { Success = false, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
+            return new UpdateResult { Success = false, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
         }
 
         var parseTime = sw.Elapsed;
@@ -316,7 +316,7 @@ static ReplUpdateResult ExecuteUpdate(QuadStore store, string sparql)
         var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed);
         var result = executor.Execute();
 
-        return new ReplUpdateResult
+        return new UpdateResult
         {
             Success = result.Success,
             AffectedCount = result.AffectedCount,
@@ -327,7 +327,7 @@ static ReplUpdateResult ExecuteUpdate(QuadStore store, string sparql)
     }
     catch (Exception ex)
     {
-        return new ReplUpdateResult { Success = false, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
+        return new UpdateResult { Success = false, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
     }
 }
 

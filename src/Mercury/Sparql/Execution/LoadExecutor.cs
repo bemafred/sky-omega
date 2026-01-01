@@ -9,6 +9,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.NTriples;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.RdfXml;

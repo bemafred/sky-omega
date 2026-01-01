@@ -1,4 +1,5 @@
 using System;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
@@ -1134,35 +1135,4 @@ public class UpdateExecutor
 
         return _source.AsSpan(start, length);
     }
-}
-
-/// <summary>
-/// Result of executing a SPARQL Update operation.
-/// </summary>
-public struct UpdateResult
-{
-    /// <summary>
-    /// Whether the operation completed successfully.
-    /// </summary>
-    public bool Success;
-
-    /// <summary>
-    /// Number of triples/quads affected by the operation.
-    /// </summary>
-    public int AffectedCount;
-
-    /// <summary>
-    /// Error message if Success is false.
-    /// </summary>
-    public string? ErrorMessage;
-
-    /// <summary>
-    /// Time spent parsing the query (set by caller, not executor).
-    /// </summary>
-    public TimeSpan ParseTime;
-
-    /// <summary>
-    /// Time spent executing the query (set by caller, not executor).
-    /// </summary>
-    public TimeSpan ExecutionTime;
 }

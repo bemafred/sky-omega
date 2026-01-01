@@ -3,6 +3,7 @@
 
 using System.IO.Pipes;
 using System.Text;
+using SkyOmega.Mercury.Abstractions;
 
 namespace SkyOmega.Mercury.Runtime.IO;
 
