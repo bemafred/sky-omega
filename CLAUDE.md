@@ -438,7 +438,7 @@ BCL-only trigram index for SPARQL text search:
 
 | Component | Status | Priority |
 |-----------|--------|----------|
-| REPL system | 0 tests | High |
+| REPL system | ✓ 147 tests | Done |
 | HttpSparqlServiceExecutor | ✓ 44 tests | Done |
 | LoadExecutor | ✓ tests | Done |
 | Concurrent access stress | ✓ 15 tests | Done |
