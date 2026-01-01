@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mercury\Mercury.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Runtime\Mercury.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Mercury.Pruning\Mercury.Pruning.csproj" />
   </ItemGroup>
 
 </Project>

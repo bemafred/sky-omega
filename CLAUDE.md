@@ -56,7 +56,8 @@ SkyOmega.sln
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Cli.Turtle/  # Turtle parser CLI demo
-│   └── Mercury.Cli.Sparql/  # SPARQL engine CLI demo
+│   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI demo
+│   └── Mercury.Pruning/     # Dual-instance pruning with copy-and-switch
 ├── tests/
 │   └── Mercury.Tests/       # xUnit tests
 ├── benchmarks/
@@ -129,6 +130,50 @@ QuadStore supports RDF named graphs for domain isolation. See [docs/api-usage.md
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
 - **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + ValidFrom + ValidTo + TransactionTime)
 - **WAL record**: 72 bytes (includes GraphId for crash recovery)
+
+### Pruning (`SkyOmega.Mercury.Pruning`)
+
+Dual-instance pruning system using copy-and-switch pattern. Transfers quads between QuadStore instances with filtering, enabling:
+- Soft deletes → hard deletes (physical removal)
+- History flattening or preservation
+- Graph/predicate-based filtering
+
+**Components:**
+
+| Component | Purpose |
+|-----------|---------|
+| `PruningTransfer` | Orchestrates transfer from source to target store |
+| `IPruningFilter` | Filter interface for inclusion criteria |
+| `GraphFilter` | Filter by graph IRI(s) - include/exclude modes |
+| `PredicateFilter` | Filter by predicate IRI(s) |
+| `CompositeFilter` | AND/OR composition of filters |
+| `HistoryMode` | FlattenToCurrent, PreserveVersions, PreserveAll |
+| `TransferOptions` | Batch size, progress interval, verification flags |
+
+**Basic usage:**
+```csharp
+using var target = new QuadStore("/path/to/new/store");
+var result = new PruningTransfer(source, target).Execute();
+// Soft-deleted quads are now physically gone
+```
+
+**With filtering:**
+```csharp
+var options = new TransferOptions {
+    Filter = CompositeFilter.All(
+        GraphFilter.Exclude("<http://temp.data>"),
+        PredicateFilter.Exclude("<http://internal/debug>")),
+    HistoryMode = HistoryMode.FlattenToCurrent,
+    VerifyAfterTransfer = true
+};
+var result = new PruningTransfer(source, target, options).Execute();
+```
+
+**Verification options:**
+- `DryRun` - Preview what would transfer without writing
+- `VerifyAfterTransfer` - Re-enumerate and verify counts match
+- `ComputeChecksum` - FNV-1a checksum for content verification
+- `AuditLogPath` - Write filtered-out quads to N-Quads file
 
 ### Concurrency Design
 
