@@ -94,6 +94,7 @@ For the vision, methodology (EEE), and broader context, see [docs/sky-omega-conv
 | `QuadIndex` | Single B+Tree index with bitemporal + graph support |
 | `AtomStore` | String interning with memory-mapped storage |
 | `PageCache` | LRU cache for B+Tree pages (clock algorithm) |
+| `TrigramIndex` | Full-text search via trigram inverted index (opt-in) |
 
 ### Durability Design
 
@@ -250,7 +251,7 @@ Key components:
 | Federated query | SERVICE \<uri\> { patterns }, SERVICE SILENT, SERVICE ?variable (requires ISparqlServiceExecutor) |
 | Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
-| Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm |
+| Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm, text:match |
 | Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |
 | String functions | STR, STRLEN, SUBSTR, CONTAINS, STRSTARTS, STRENDS, STRBEFORE, STRAFTER, CONCAT, UCASE, LCASE, ENCODE_FOR_URI |
 | Numeric functions | ABS, ROUND, CEIL, FLOOR |
@@ -427,12 +428,36 @@ Statistics-based join reordering for 10-100x performance improvement on multi-pa
 | Plan Caching | 2-5x | Implemented |
 | Predicate Pushdown | 5-50x | Implemented - FilterAnalyzer + MultiPatternScan |
 
-### Full-Text Search (Planned)
+### Full-Text Search
 
-BCL-only trigram index for SPARQL text search:
-- Trigram extraction and inverted index
-- Integration via `text:match(?var, "query")` filter function
-- Zero external dependencies
+BCL-only trigram index for SPARQL text search. Opt-in via `StorageOptions.EnableFullTextSearch`.
+
+**Components:**
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `TrigramIndex` | `Storage/TrigramIndex.cs` | UTF-8 trigram extraction and inverted index |
+| `text:match` | `Sparql/Execution/FilterEvaluator.Functions.cs` | SPARQL FILTER function |
+
+**Usage:**
+```csharp
+var options = new StorageOptions { EnableFullTextSearch = true };
+var store = new QuadStore(path, null, null, options);
+```
+
+```sparql
+SELECT ?city ?name WHERE {
+    ?city <http://ex.org/name> ?name .
+    FILTER(text:match(?name, "göteborg"))
+}
+```
+
+**Features:**
+- Case-insensitive matching with Unicode case-folding (supports Swedish å, ä, ö)
+- Memory-mapped two-file architecture (trigram.hash + trigram.posts)
+- FNV-1a hashing with quadratic probing
+- Alternative `match()` syntax supported
+- Works with variables, literals, negation, boolean combinations
 
 ### Test Coverage Gaps
 
