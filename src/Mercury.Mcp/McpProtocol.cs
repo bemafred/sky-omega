@@ -1,11 +1,14 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using SkyOmega.Mercury.Adapters;
 using SkyOmega.Mercury.Runtime.IO;
+using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Mcp;
@@ -260,51 +263,145 @@ public static class McpProtocol
             if (string.IsNullOrWhiteSpace(query))
                 return ("Query is required", true);
 
-            var result = StoreAdapter.ExecuteQuery(_store, query);
-
-            if (!result.Success)
-                return ($"Error: {result.ErrorMessage}", true);
-
-            var sb = new StringBuilder();
-
-            switch (result.Kind)
+            try
             {
-                case ExecutionResultKind.Select:
-                    if (result.Variables != null && result.Rows != null)
-                    {
-                        sb.AppendLine(string.Join("\t", result.Variables));
-                        foreach (var row in result.Rows)
-                        {
-                            var values = result.Variables.Select(v =>
-                                row.TryGetValue(v, out var val) ? val : "");
-                            sb.AppendLine(string.Join("\t", values));
-                        }
-                        sb.AppendLine($"\n{result.Rows.Count} result(s)");
-                    }
-                    else
-                    {
-                        sb.AppendLine("No results");
-                    }
-                    break;
+                var parser = new SparqlParser(query.AsSpan());
+                Query parsed;
 
-                case ExecutionResultKind.Ask:
-                    sb.AppendLine(result.AskResult == true ? "true" : "false");
-                    break;
+                try
+                {
+                    parsed = parser.ParseQuery();
+                }
+                catch (SparqlParseException ex)
+                {
+                    return ($"Error: {ex.Message}", true);
+                }
 
-                case ExecutionResultKind.Construct:
-                case ExecutionResultKind.Describe:
-                    if (result.Triples != null)
+                _store.AcquireReadLock();
+                try
+                {
+                    var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+                    var sb = new StringBuilder();
+
+                    switch (parsed.Type)
                     {
-                        foreach (var (s, p, o) in result.Triples)
-                        {
-                            sb.AppendLine($"{s} {p} {o} .");
-                        }
-                        sb.AppendLine($"\n{result.Triples.Count} triple(s)");
+                        case QueryType.Select:
+                            var results = executor.Execute();
+                            var rows = new List<string[]>();
+                            string[]? varNames = null;
+
+                            try
+                            {
+                                while (results.MoveNext())
+                                {
+                                    var bindings = results.Current;
+                                    varNames ??= ExtractVariableNames(bindings, query);
+                                    var row = new string[bindings.Count];
+                                    for (int i = 0; i < bindings.Count; i++)
+                                        row[i] = bindings.GetString(i).ToString();
+                                    rows.Add(row);
+                                }
+                            }
+                            finally
+                            {
+                                results.Dispose();
+                            }
+
+                            if (varNames != null && rows.Count > 0)
+                            {
+                                sb.AppendLine(string.Join("\t", varNames));
+                                foreach (var row in rows)
+                                    sb.AppendLine(string.Join("\t", row));
+                                sb.AppendLine($"\n{rows.Count} result(s)");
+                            }
+                            else
+                            {
+                                sb.AppendLine("No results");
+                            }
+                            break;
+
+                        case QueryType.Ask:
+                            sb.AppendLine(executor.ExecuteAsk() ? "true" : "false");
+                            break;
+
+                        case QueryType.Construct:
+                        case QueryType.Describe:
+                            var tripleResults = executor.Execute();
+                            var count = 0;
+                            try
+                            {
+                                while (tripleResults.MoveNext())
+                                {
+                                    var bindings = tripleResults.Current;
+                                    if (bindings.Count >= 3)
+                                    {
+                                        sb.AppendLine($"{bindings.GetString(0)} {bindings.GetString(1)} {bindings.GetString(2)} .");
+                                        count++;
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                tripleResults.Dispose();
+                            }
+                            sb.AppendLine($"\n{count} triple(s)");
+                            break;
+
+                        default:
+                            return ($"Unsupported query type: {parsed.Type}", true);
                     }
-                    break;
+
+                    return (sb.ToString().Trim(), false);
+                }
+                finally
+                {
+                    _store.ReleaseReadLock();
+                }
+            }
+            catch (Exception ex)
+            {
+                return ($"Error: {ex.Message}", true);
+            }
+        }
+
+        private static string[] ExtractVariableNames(BindingTable bindings, string source)
+        {
+            var knownVars = new List<(string Name, int Hash)>();
+            var span = source.AsSpan();
+
+            for (int i = 0; i < span.Length - 1; i++)
+            {
+                if (span[i] == '?')
+                {
+                    int start = i;
+                    int end = i + 1;
+                    while (end < span.Length && (char.IsLetterOrDigit(span[end]) || span[end] == '_'))
+                        end++;
+
+                    if (end > start + 1)
+                    {
+                        var varName = span.Slice(start, end - start).ToString();
+                        uint hash = 2166136261;
+                        foreach (var ch in varName)
+                        {
+                            hash ^= ch;
+                            hash *= 16777619;
+                        }
+                        if (!knownVars.Exists(v => v.Hash == (int)hash))
+                            knownVars.Add((varName, (int)hash));
+                    }
+                }
             }
 
-            return (sb.ToString().Trim(), false);
+            var result = new string[bindings.Count];
+            for (int i = 0; i < bindings.Count; i++)
+            {
+                var bindingHash = bindings.GetVariableHash(i);
+                var found = knownVars.Find(v => v.Hash == bindingHash);
+                result[i] = found.Name ?? $"?var{i}";
+            }
+
+            return result;
         }
 
         private (string content, bool isError) ExecuteUpdate(string? update)
@@ -312,33 +409,66 @@ public static class McpProtocol
             if (string.IsNullOrWhiteSpace(update))
                 return ("Update statement is required", true);
 
-            var result = StoreAdapter.ExecuteUpdate(_store, update);
+            try
+            {
+                var parser = new SparqlParser(update.AsSpan());
+                UpdateOperation parsed;
 
-            if (!result.Success)
-                return ($"Error: {result.ErrorMessage}", true);
+                try
+                {
+                    parsed = parser.ParseUpdate();
+                }
+                catch (SparqlParseException ex)
+                {
+                    return ($"Error: {ex.Message}", true);
+                }
 
-            return ($"OK - {result.AffectedCount} triple(s) affected", false);
+                var executor = new UpdateExecutor(_store, update.AsSpan(), parsed);
+                var result = executor.Execute();
+
+                if (!result.Success)
+                    return ($"Error: {result.ErrorMessage}", true);
+
+                return ($"OK - {result.AffectedCount} triple(s) affected", false);
+            }
+            catch (Exception ex)
+            {
+                return ($"Error: {ex.Message}", true);
+            }
         }
 
         private (string content, bool isError) GetStats()
         {
-            var stats = StoreAdapter.GetStatistics(_store);
+            var (quadCount, atomCount, totalBytes) = _store.GetStatistics();
+            var (walTxId, walCheckpoint, walSize) = _store.GetWalStatistics();
 
             var sb = new StringBuilder();
             sb.AppendLine("Mercury Store Statistics:");
-            sb.AppendLine($"  Quads: {stats.QuadCount:N0}");
-            sb.AppendLine($"  Atoms: {stats.AtomCount:N0}");
-            sb.AppendLine($"  Storage: {FormatBytes(stats.TotalBytes)}");
-            sb.AppendLine($"  WAL TxId: {stats.WalTxId:N0}");
-            sb.AppendLine($"  WAL Checkpoint: {stats.WalCheckpoint:N0}");
-            sb.AppendLine($"  WAL Size: {FormatBytes(stats.WalSize)}");
+            sb.AppendLine($"  Quads: {quadCount:N0}");
+            sb.AppendLine($"  Atoms: {atomCount:N0}");
+            sb.AppendLine($"  Storage: {FormatBytes(totalBytes)}");
+            sb.AppendLine($"  WAL TxId: {walTxId:N0}");
+            sb.AppendLine($"  WAL Checkpoint: {walCheckpoint:N0}");
+            sb.AppendLine($"  WAL Size: {FormatBytes(walSize)}");
 
             return (sb.ToString().Trim(), false);
         }
 
         private (string content, bool isError) GetGraphs()
         {
-            var graphs = StoreAdapter.GetNamedGraphs(_store).ToList();
+            var graphs = new List<string>();
+
+            _store.AcquireReadLock();
+            try
+            {
+                var enumerator = _store.GetNamedGraphs();
+                while (enumerator.MoveNext())
+                    graphs.Add(enumerator.Current.ToString());
+            }
+            finally
+            {
+                _store.ReleaseReadLock();
+            }
 
             if (graphs.Count == 0)
                 return ("No named graphs. Only the default graph exists.", false);

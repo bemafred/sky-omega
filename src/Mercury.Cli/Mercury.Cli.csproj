@@ -10,7 +10,6 @@
 
     <ItemGroup>
         <ProjectReference Include="../Mercury/Mercury.csproj" />
-        <ProjectReference Include="..\Mercury.Adapters\Mercury.Adapters.csproj" />
         <ProjectReference Include="..\Mercury.Runtime\Mercury.Runtime.csproj" />
     </ItemGroup>
 

@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.IO;
-using SkyOmega.Mercury.Adapters;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Storage;
@@ -25,7 +24,7 @@ public class ReplSessionTests : IDisposable
         tempPath.MarkOwnership();
         _testDir = tempPath;
         _store = new QuadStore(_testDir);
-        _session = StoreAdapter.CreateSession(_store);
+        _session = TestSessionHelper.CreateSession(_store);
     }
 
     public void Dispose()

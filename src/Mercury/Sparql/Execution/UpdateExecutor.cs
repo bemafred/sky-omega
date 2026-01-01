@@ -1155,4 +1155,14 @@ public struct UpdateResult
     /// Error message if Success is false.
     /// </summary>
     public string? ErrorMessage;
+
+    /// <summary>
+    /// Time spent parsing the query (set by caller, not executor).
+    /// </summary>
+    public TimeSpan ParseTime;
+
+    /// <summary>
+    /// Time spent executing the query (set by caller, not executor).
+    /// </summary>
+    public TimeSpan ExecutionTime;
 }

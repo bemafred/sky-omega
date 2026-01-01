@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.IO;
-using SkyOmega.Mercury.Adapters;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Storage;
@@ -40,7 +39,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -53,7 +52,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":exit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -65,7 +64,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":q\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -77,7 +76,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(""); // Empty = EOF
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -89,7 +88,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("\n\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -103,7 +102,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("SELECT * WHERE { ?s ?p ?o }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -118,7 +117,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("ASK { ?s ?p ?o }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -131,7 +130,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -145,7 +144,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":unknowncommand\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -158,7 +157,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":help\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -171,7 +170,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("PREFIX test: <http://test.org/>\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -192,7 +191,7 @@ public class RunInteractiveTests : IDisposable
         // Query with unclosed brace - needs continuation
         var input = new StringReader("SELECT * WHERE {\n?s ?p ?o\n}\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -205,7 +204,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("INSERT DATA {\n<http://ex.org/s> <http://ex.org/p> <http://ex.org/o>\n}\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -218,7 +217,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":help\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -231,7 +230,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("PREFIX test: <http://test.org/>\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -244,7 +243,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("BASE <http://base.org/>\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -259,7 +258,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("SELECT * WHERE { ?s ?p ?o };\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -274,7 +273,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("SELECT * WHERE {\n?s ?p ?o }\n\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -291,7 +290,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("SELECT * WHERE { ?s ?p ?o }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -305,7 +304,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -320,7 +319,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("CONSTRUCT { ?s <http://ex.org/new> ?o } WHERE { ?s ?p ?o }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -333,7 +332,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("ASK { ?s ?p ?o }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -352,7 +351,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader(":stats\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -368,7 +367,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader(":graphs\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -388,7 +387,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("SELECT * WHERE { ?s ?p ?o }\n:history\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -404,7 +403,7 @@ public class RunInteractiveTests : IDisposable
 
         var input = new StringReader("SELECT * WHERE { ?s ?p ?o }\n:clear\n:history\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
@@ -422,7 +421,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
         var options = new ReplOptions { Prompt = "custom> ", ShowBanner = false };
 
         session.RunInteractive(input, output, options);
@@ -436,7 +435,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
         var options = new ReplOptions { ShowBanner = false };
 
         session.RunInteractive(input, output, options);
@@ -450,7 +449,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader(":quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
         var options = new ReplOptions { GoodbyeMessage = "" };
 
         session.RunInteractive(input, output, options);
@@ -478,7 +477,7 @@ public class RunInteractiveTests : IDisposable
     {
         var input = new StringReader("SELECT * WHERE { }\n:quit\n");
         var output = new StringWriter();
-        using var session = StoreAdapter.CreateSession(_store);
+        using var session = TestSessionHelper.CreateSession(_store);
 
         session.RunInteractive(input, output);
 
