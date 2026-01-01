@@ -112,7 +112,11 @@ public sealed class QuadStore : IDisposable
     /// Access to atom store for looking up atom IDs.
     /// Required by QueryPlanner for cardinality estimation.
     /// </summary>
-    public AtomStore Atoms => _atoms;
+    /// <remarks>
+    /// Internal: AtomStore requires external synchronization via this QuadStore's
+    /// read/write locks. Direct access is only safe within Mercury internals.
+    /// </remarks>
+    internal AtomStore Atoms => _atoms;
 
     /// <summary>
     /// Returns true if disk space is below the configured minimum threshold.

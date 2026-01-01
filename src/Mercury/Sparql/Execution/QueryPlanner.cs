@@ -9,6 +9,10 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// SPARQL query planner that determines optimal pattern execution order
 /// using predicate cardinality statistics.
 /// </summary>
+/// <remarks>
+/// Internal constructor: AtomStore requires external synchronization via QuadStore's
+/// read/write locks. QueryPlanner is created by QueryExecutor which holds appropriate locks.
+/// </remarks>
 public sealed class QueryPlanner
 {
     private readonly StatisticsStore _statistics;
@@ -19,7 +23,7 @@ public sealed class QueryPlanner
     private const double DefaultSelectiveScanCardinality = 100.0;
     private const double DefaultPointLookupCardinality = 1.0;
 
-    public QueryPlanner(StatisticsStore statistics, AtomStore atoms)
+    internal QueryPlanner(StatisticsStore statistics, AtomStore atoms)
     {
         _statistics = statistics ?? throw new ArgumentNullException(nameof(statistics));
         _atoms = atoms ?? throw new ArgumentNullException(nameof(atoms));

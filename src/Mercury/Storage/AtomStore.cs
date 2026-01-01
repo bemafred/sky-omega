@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Diagnostics;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
@@ -17,15 +18,34 @@ namespace SkyOmega.Mercury.Storage;
 /// Supports zero-copy access via memory-mapped files.
 /// </summary>
 /// <remarks>
-/// <para>Storage format supports 64-bit blob lengths (exabyte-scale).
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it relies on
+/// external synchronization (via <see cref="QuadStore"/>'s ReaderWriterLockSlim) for
+/// thread safety. Direct use without proper locking can cause undefined behavior.</para>
+///
+/// <para><strong>Threading Contract:</strong></para>
+/// <list type="bullet">
+/// <item><description>All write operations (Intern, InternUtf8) must occur under the caller's
+/// exclusive write lock.</description></item>
+/// <item><description>All read operations (GetAtomSpan, GetAtomString, GetAtomId) must occur
+/// under the caller's shared read lock.</description></item>
+/// <item><description>The lock must be held for the entire duration of span usage - spans point
+/// directly into memory-mapped memory and become invalid after resize operations.</description></item>
+/// </list>
+///
+/// <para><strong>Why Not Epoch-Based Retirement:</strong> The external locking model was chosen
+/// over epoch-based retirement because: (1) QuadStore already requires ReaderWriterLockSlim for
+/// index consistency, (2) AtomStore is always accessed through QuadStore, (3) epoch tracking
+/// adds complexity and overhead that provides no benefit when external locking is mandatory.</para>
+///
+/// <para><strong>Resize Safety:</strong> EnsureDataCapacity and EnsureOffsetCapacity perform
+/// atomic pointer swaps with memory barriers. Under proper external locking, readers never
+/// observe a resize in progress because writers hold exclusive locks.</para>
+///
+/// <para><strong>Storage Format:</strong> Supports 64-bit blob lengths (exabyte-scale).
 /// Single-span retrieval is limited to 2GB by .NET Span&lt;T&gt; constraint.
 /// For larger blobs, implement chunked access pattern (see GetAtomSpan remarks).</para>
-///
-/// <para>Thread safety: AtomStore uses append-only semantics with atomic operations
-/// for allocation (Interlocked). Thread safety is ensured by QuadStore's
-/// ReaderWriterLockSlim - writes occur under write lock, reads under read lock.</para>
 /// </remarks>
-public sealed unsafe class AtomStore : IDisposable
+internal sealed unsafe class AtomStore : IDisposable
 {
     private const int PageSize = 4096; // 4KB pages
     private const long HashTableSize = 1L << 24; // 16M buckets for TB-scale
@@ -53,6 +73,12 @@ public sealed unsafe class AtomStore : IDisposable
     // Cached pointers acquired once during construction/resize (avoids repeated AcquirePointer calls)
     private byte* _dataPtr;
     private readonly object _resizeLock = new();
+
+#if DEBUG
+    // Debug-only field to detect threading violations
+    // Set to 1 when a resize is in progress; reads during this time indicate missing locks
+    private volatile int _resizeInProgress;
+#endif
 
     // Current write position in data file
     private long _dataPosition;
@@ -358,6 +384,17 @@ public sealed unsafe class AtomStore : IDisposable
         if (offset < 0)
             return ReadOnlySpan<byte>.Empty;
 
+#if DEBUG
+        // Debug assertion: detect missing external lock during resize
+        // If this fires, the caller is reading without holding a read lock while a write
+        // (which triggers resize) is in progress. This is a threading contract violation.
+        Debug.Assert(_resizeInProgress == 0,
+            "AtomStore.GetAtomSpan called during resize operation. " +
+            "This indicates a threading contract violation - caller must hold read lock " +
+            "which would block until write lock (held during resize) is released. " +
+            "See AtomStore class remarks for threading requirements.");
+#endif
+
         // Read pointer with memory barrier to ensure visibility across threads
         Thread.MemoryBarrier();
         byte* currentPtr = _dataPtr;
@@ -526,42 +563,56 @@ public sealed unsafe class AtomStore : IDisposable
             if (requiredSize <= _dataFile.Length)
                 return;
 
-            var newSize = Math.Max(_dataFile.Length * 2, requiredSize + InitialDataSize);
+#if DEBUG
+            // Mark resize in progress - any concurrent GetAtomSpan calls will trigger assertion
+            // This should NEVER happen if external locking is correctly implemented
+            Interlocked.Exchange(ref _resizeInProgress, 1);
+#endif
+            try
+            {
+                var newSize = Math.Max(_dataFile.Length * 2, requiredSize + InitialDataSize);
 
-            // 1. Create new map and accessor
-            var newMap = MemoryMappedFile.CreateFromFile(
-                _dataFile,
-                mapName: null,
-                capacity: newSize,
-                MemoryMappedFileAccess.ReadWrite,
-                HandleInheritability.None,
-                leaveOpen: true
-            );
+                // 1. Create new map and accessor
+                var newMap = MemoryMappedFile.CreateFromFile(
+                    _dataFile,
+                    mapName: null,
+                    capacity: newSize,
+                    MemoryMappedFileAccess.ReadWrite,
+                    HandleInheritability.None,
+                    leaveOpen: true
+                );
 
-            var newAccessor = newMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+                var newAccessor = newMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
 
-            byte* newPtr = null;
-            newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref newPtr);
+                byte* newPtr = null;
+                newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref newPtr);
 
-            // 2. Atomic Swap - Readers now use the new pointer
-            // Pointer assignment is atomic on x64, memory barrier ensures visibility
-            _dataPtr = newPtr;
-            Thread.MemoryBarrier();
+                // 2. Atomic Swap - Readers now use the new pointer
+                // Pointer assignment is atomic on x64, memory barrier ensures visibility
+                _dataPtr = newPtr;
+                Thread.MemoryBarrier();
 
-            // 3. Extend File
-            _dataFile.SetLength(newSize);
+                // 3. Extend File
+                _dataFile.SetLength(newSize);
 
-            // 4. Cleanup the OLD accessor/map
-            // Note: In a TRULY hostile environment, we'd wait for an Epoch check here
-            // but since it's append-only and the file only GROWS, the old pointers
-            // into the same file are technically still valid at the OS level
-            // until the ViewAccessor is unmapped.
-            _dataAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-            _dataAccessor.Dispose();
-            _dataMap.Dispose();
+                // 4. Cleanup the OLD accessor/map
+                // Note: External locking prevents readers from using old pointers.
+                // The write lock holder (caller) blocks all readers until this completes.
+                _dataAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                _dataAccessor.Dispose();
+                _dataMap.Dispose();
 
-            _dataMap = newMap;
-            _dataAccessor = newAccessor;
+                _dataMap = newMap;
+                _dataAccessor = newAccessor;
+            }
+#if DEBUG
+            finally
+            {
+                Interlocked.Exchange(ref _resizeInProgress, 0);
+            }
+#else
+            finally { }
+#endif
         }
     }
 
@@ -575,40 +626,56 @@ public sealed unsafe class AtomStore : IDisposable
             if (requiredCapacity <= _offsetCapacity)
                 return;
 
-            var newCapacity = Math.Max(_offsetCapacity * 2, requiredCapacity + InitialOffsetCapacity);
+#if DEBUG
+            // Mark resize in progress - any concurrent GetAtomOffset calls will trigger assertion
+            Interlocked.Exchange(ref _resizeInProgress, 1);
+#endif
+            try
+            {
+                var newCapacity = Math.Max(_offsetCapacity * 2, requiredCapacity + InitialOffsetCapacity);
 
-            // 1. Create new map and accessor
-            var newMap = MemoryMappedFile.CreateFromFile(
-                _offsetFile,
-                mapName: null,
-                capacity: newCapacity * sizeof(long),
-                MemoryMappedFileAccess.ReadWrite,
-                HandleInheritability.None,
-                leaveOpen: true
-            );
+                // 1. Create new map and accessor
+                var newMap = MemoryMappedFile.CreateFromFile(
+                    _offsetFile,
+                    mapName: null,
+                    capacity: newCapacity * sizeof(long),
+                    MemoryMappedFileAccess.ReadWrite,
+                    HandleInheritability.None,
+                    leaveOpen: true
+                );
 
-            var newAccessor = newMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+                var newAccessor = newMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
 
-            byte* offsetPtr = null;
-            newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref offsetPtr);
-            var newPtr = (long*)offsetPtr;
+                byte* offsetPtr = null;
+                newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref offsetPtr);
+                var newPtr = (long*)offsetPtr;
 
-            // 2. Atomic Swap - Readers now use the new pointer
-            // Pointer assignment is atomic on x64, memory barrier ensures visibility
-            _offsetIndex = newPtr;
-            Thread.MemoryBarrier();
+                // 2. Atomic Swap - Readers now use the new pointer
+                // Pointer assignment is atomic on x64, memory barrier ensures visibility
+                _offsetIndex = newPtr;
+                Thread.MemoryBarrier();
 
-            // 3. Extend File
-            _offsetFile.SetLength(newCapacity * sizeof(long));
+                // 3. Extend File
+                _offsetFile.SetLength(newCapacity * sizeof(long));
 
-            // 4. Cleanup the OLD accessor/map
-            _offsetAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
-            _offsetAccessor.Dispose();
-            _offsetMap.Dispose();
+                // 4. Cleanup the OLD accessor/map
+                // Note: External locking prevents readers from using old pointers.
+                _offsetAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                _offsetAccessor.Dispose();
+                _offsetMap.Dispose();
 
-            _offsetMap = newMap;
-            _offsetAccessor = newAccessor;
-            _offsetCapacity = newCapacity;
+                _offsetMap = newMap;
+                _offsetAccessor = newAccessor;
+                _offsetCapacity = newCapacity;
+            }
+#if DEBUG
+            finally
+            {
+                Interlocked.Exchange(ref _resizeInProgress, 0);
+            }
+#else
+            finally { }
+#endif
         }
     }
 

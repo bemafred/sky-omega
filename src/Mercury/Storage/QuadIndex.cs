@@ -41,9 +41,13 @@ public sealed unsafe class QuadIndex : IDisposable
     }
 
     /// <summary>
-    /// Create a temporal quad store with a shared atom store
+    /// Create a temporal quad store with a shared atom store.
     /// </summary>
-    public QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
+    /// <remarks>
+    /// Internal: AtomStore parameter requires external synchronization.
+    /// Use this constructor only when sharing an AtomStore across indexes.
+    /// </remarks>
+    internal QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
     {
         _fileStream = new FileStream(
             filePath,
@@ -92,9 +96,13 @@ public sealed unsafe class QuadIndex : IDisposable
     }
 
     /// <summary>
-    /// Get the atom store (for shared access)
+    /// Get the atom store (for shared access).
     /// </summary>
-    public AtomStore Atoms => _atoms;
+    /// <remarks>
+    /// Internal: AtomStore requires external synchronization via the owning
+    /// QuadStore's read/write locks.
+    /// </remarks>
+    internal AtomStore Atoms => _atoms;
 
     /// <summary>
     /// Add a temporal quad with explicit time bounds
