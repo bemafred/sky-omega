@@ -496,10 +496,28 @@ public ref struct MultiPatternScan
     private int _bindingCount4, _bindingCount5, _bindingCount6, _bindingCount7;
     private int _bindingCount8, _bindingCount9, _bindingCount10, _bindingCount11;
 
+    // Pushed filter assignments: for each level (0-11), which filter indices to evaluate
+    // Using fixed arrays to avoid heap allocations in ref struct
+    private int _levelFilterCount0, _levelFilterCount1, _levelFilterCount2, _levelFilterCount3;
+    private int _levelFilterCount4, _levelFilterCount5, _levelFilterCount6, _levelFilterCount7;
+    private int _levelFilterCount8, _levelFilterCount9, _levelFilterCount10, _levelFilterCount11;
+
+    // Filter indices per level (max 4 filters per level)
+    private int _f0_0, _f0_1, _f0_2, _f0_3;  // Level 0 filters
+    private int _f1_0, _f1_1, _f1_2, _f1_3;  // Level 1 filters
+    private int _f2_0, _f2_1, _f2_2, _f2_3;  // Level 2 filters
+    private int _f3_0, _f3_1, _f3_2, _f3_3;  // Level 3 filters
+    private int _f4_0, _f4_1, _f4_2, _f4_3;  // Level 4 filters
+    private int _f5_0, _f5_1, _f5_2, _f5_3;  // Level 5 filters
+    private int _f6_0, _f6_1, _f6_2, _f6_3;  // Level 6 filters
+    private int _f7_0, _f7_1, _f7_2, _f7_3;  // Level 7 filters
+
+    private bool _hasPushedFilters;
+
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode = false, ReadOnlySpan<char> graph = default)
         : this(store, source, pattern, unionMode, graph,
-               TemporalQueryMode.Current, default, default, default, null)
+               TemporalQueryMode.Current, default, default, default, null, null)
     {
     }
 
@@ -507,7 +525,7 @@ public ref struct MultiPatternScan
         bool unionMode, ReadOnlySpan<char> graph,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
         DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
-        int[]? patternOrder = null)
+        int[]? patternOrder = null, List<int>[]? levelFilters = null)
     {
         _store = store;
         _source = source;
@@ -539,6 +557,38 @@ public ref struct MultiPatternScan
         _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
         _bindingCount4 = _bindingCount5 = _bindingCount6 = _bindingCount7 = 0;
         _bindingCount8 = _bindingCount9 = _bindingCount10 = _bindingCount11 = 0;
+
+        // Initialize pushed filter fields
+        _levelFilterCount0 = _levelFilterCount1 = _levelFilterCount2 = _levelFilterCount3 = 0;
+        _levelFilterCount4 = _levelFilterCount5 = _levelFilterCount6 = _levelFilterCount7 = 0;
+        _levelFilterCount8 = _levelFilterCount9 = _levelFilterCount10 = _levelFilterCount11 = 0;
+        _f0_0 = _f0_1 = _f0_2 = _f0_3 = 0;
+        _f1_0 = _f1_1 = _f1_2 = _f1_3 = 0;
+        _f2_0 = _f2_1 = _f2_2 = _f2_3 = 0;
+        _f3_0 = _f3_1 = _f3_2 = _f3_3 = 0;
+        _f4_0 = _f4_1 = _f4_2 = _f4_3 = 0;
+        _f5_0 = _f5_1 = _f5_2 = _f5_3 = 0;
+        _f6_0 = _f6_1 = _f6_2 = _f6_3 = 0;
+        _f7_0 = _f7_1 = _f7_2 = _f7_3 = 0;
+        _hasPushedFilters = false;
+
+        // Copy pushed filter assignments
+        if (levelFilters != null)
+        {
+            _hasPushedFilters = true;
+            for (int level = 0; level < Math.Min(levelFilters.Length, 8); level++)
+            {
+                var filters = levelFilters[level];
+                if (filters == null || filters.Count == 0)
+                    continue;
+
+                var count = Math.Min(filters.Count, 4);
+                SetLevelFilterCount(level, count);
+
+                for (int i = 0; i < count; i++)
+                    SetLevelFilter(level, i, filters[i]);
+            }
+        }
     }
 
     /// <summary>
@@ -564,6 +614,120 @@ public ref struct MultiPatternScan
     {
         return _unionMode ? _pattern.UnionBranchPatternCount : _pattern.RequiredPatternCount;
     }
+
+    #region Pushed Filter Helpers
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SetLevelFilterCount(int level, int count)
+    {
+        switch (level)
+        {
+            case 0: _levelFilterCount0 = count; break;
+            case 1: _levelFilterCount1 = count; break;
+            case 2: _levelFilterCount2 = count; break;
+            case 3: _levelFilterCount3 = count; break;
+            case 4: _levelFilterCount4 = count; break;
+            case 5: _levelFilterCount5 = count; break;
+            case 6: _levelFilterCount6 = count; break;
+            case 7: _levelFilterCount7 = count; break;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private readonly int GetLevelFilterCount(int level)
+    {
+        return level switch
+        {
+            0 => _levelFilterCount0,
+            1 => _levelFilterCount1,
+            2 => _levelFilterCount2,
+            3 => _levelFilterCount3,
+            4 => _levelFilterCount4,
+            5 => _levelFilterCount5,
+            6 => _levelFilterCount6,
+            7 => _levelFilterCount7,
+            _ => 0
+        };
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void SetLevelFilter(int level, int index, int filterIndex)
+    {
+        switch (level)
+        {
+            case 0:
+                switch (index) { case 0: _f0_0 = filterIndex; break; case 1: _f0_1 = filterIndex; break; case 2: _f0_2 = filterIndex; break; case 3: _f0_3 = filterIndex; break; }
+                break;
+            case 1:
+                switch (index) { case 0: _f1_0 = filterIndex; break; case 1: _f1_1 = filterIndex; break; case 2: _f1_2 = filterIndex; break; case 3: _f1_3 = filterIndex; break; }
+                break;
+            case 2:
+                switch (index) { case 0: _f2_0 = filterIndex; break; case 1: _f2_1 = filterIndex; break; case 2: _f2_2 = filterIndex; break; case 3: _f2_3 = filterIndex; break; }
+                break;
+            case 3:
+                switch (index) { case 0: _f3_0 = filterIndex; break; case 1: _f3_1 = filterIndex; break; case 2: _f3_2 = filterIndex; break; case 3: _f3_3 = filterIndex; break; }
+                break;
+            case 4:
+                switch (index) { case 0: _f4_0 = filterIndex; break; case 1: _f4_1 = filterIndex; break; case 2: _f4_2 = filterIndex; break; case 3: _f4_3 = filterIndex; break; }
+                break;
+            case 5:
+                switch (index) { case 0: _f5_0 = filterIndex; break; case 1: _f5_1 = filterIndex; break; case 2: _f5_2 = filterIndex; break; case 3: _f5_3 = filterIndex; break; }
+                break;
+            case 6:
+                switch (index) { case 0: _f6_0 = filterIndex; break; case 1: _f6_1 = filterIndex; break; case 2: _f6_2 = filterIndex; break; case 3: _f6_3 = filterIndex; break; }
+                break;
+            case 7:
+                switch (index) { case 0: _f7_0 = filterIndex; break; case 1: _f7_1 = filterIndex; break; case 2: _f7_2 = filterIndex; break; case 3: _f7_3 = filterIndex; break; }
+                break;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private readonly int GetLevelFilter(int level, int index)
+    {
+        return level switch
+        {
+            0 => index switch { 0 => _f0_0, 1 => _f0_1, 2 => _f0_2, 3 => _f0_3, _ => 0 },
+            1 => index switch { 0 => _f1_0, 1 => _f1_1, 2 => _f1_2, 3 => _f1_3, _ => 0 },
+            2 => index switch { 0 => _f2_0, 1 => _f2_1, 2 => _f2_2, 3 => _f2_3, _ => 0 },
+            3 => index switch { 0 => _f3_0, 1 => _f3_1, 2 => _f3_2, 3 => _f3_3, _ => 0 },
+            4 => index switch { 0 => _f4_0, 1 => _f4_1, 2 => _f4_2, 3 => _f4_3, _ => 0 },
+            5 => index switch { 0 => _f5_0, 1 => _f5_1, 2 => _f5_2, 3 => _f5_3, _ => 0 },
+            6 => index switch { 0 => _f6_0, 1 => _f6_1, 2 => _f6_2, 3 => _f6_3, _ => 0 },
+            7 => index switch { 0 => _f7_0, 1 => _f7_1, 2 => _f7_2, 3 => _f7_3, _ => 0 },
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Evaluate pushed filters at the given level.
+    /// Returns true if all filters pass, false if any filter fails.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool PassesLevelFilters(int level, ref BindingTable bindings)
+    {
+        if (!_hasPushedFilters)
+            return true;
+
+        var count = GetLevelFilterCount(level);
+        if (count == 0)
+            return true;
+
+        for (int i = 0; i < count; i++)
+        {
+            var filterIndex = GetLevelFilter(level, i);
+            var filter = _pattern.GetFilter(filterIndex);
+            var filterExpr = _source.Slice(filter.Start, filter.Length);
+            var evaluator = new FilterEvaluator(filterExpr);
+            if (!evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    #endregion
 
     public bool MoveNext(ref BindingTable bindings)
     {
@@ -597,6 +761,13 @@ public ref struct MultiPatternScan
 
             if (advanced)
             {
+                // Check pushed filters at this level before proceeding
+                if (!PassesLevelFilters(_currentLevel, ref bindings))
+                {
+                    // Filters failed - continue trying next match at this level
+                    continue;
+                }
+
                 if (_currentLevel == patternCount - 1)
                 {
                     // At deepest level - we have a complete result

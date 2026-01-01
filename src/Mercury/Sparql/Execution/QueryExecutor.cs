@@ -352,15 +352,25 @@ public class QueryExecutor : IDisposable
             }
             else
             {
-                // Multiple patterns - use MultiPatternScan with graph
+                // Multiple patterns - use MultiPatternScan with graph and pushed filters
+                // Analyze filters for pushdown
+                var patternCount = pattern.RequiredPatternCount;
+                var levelFilters = patternCount > 0 && pattern.FilterCount > 0
+                    ? FilterAnalyzer.BuildLevelFilters(in pattern, _source, patternCount, null)
+                    : null;
+                var unpushableFilters = levelFilters != null
+                    ? FilterAnalyzer.GetUnpushableFilters(in pattern, _source, null)
+                    : null;
+
                 var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri.AsSpan(),
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters);
                 try
                 {
                     while (multiScan.MoveNext(ref bindingTable))
                     {
                         ThrowIfCancellationRequested();
-                        if (!PassesFilters(in pattern, ref bindingTable))
+                        // Only evaluate unpushable filters - pushed ones were checked in MoveNext
+                        if (!PassesUnpushableFilters(in pattern, ref bindingTable, unpushableFilters))
                         {
                             bindingTable.Clear();
                             continue;
@@ -2008,6 +2018,34 @@ public class QueryExecutor : IDisposable
         for (int i = 0; i < pattern.FilterCount; i++)
         {
             var filter = pattern.GetFilter(i);
+            var filterExpr = _source.AsSpan(filter.Start, filter.Length);
+            var evaluator = new FilterEvaluator(filterExpr);
+            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Evaluates only the unpushable filter expressions that weren't pushed to MultiPatternScan.
+    /// Used with filter pushdown optimization to avoid evaluating filters twice.
+    /// </summary>
+    private bool PassesUnpushableFilters(in GraphPattern pattern, ref BindingTable bindingTable, List<int>? unpushableFilters)
+    {
+        // If no filter analysis was done, fall back to checking all filters
+        if (unpushableFilters == null)
+            return PassesFilters(in pattern, ref bindingTable);
+
+        // No unpushable filters - all were pushed
+        if (unpushableFilters.Count == 0)
+            return true;
+
+        // Check only unpushable filters
+        foreach (var filterIndex in unpushableFilters)
+        {
+            var filter = pattern.GetFilter(filterIndex);
             var filterExpr = _source.AsSpan(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
             if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))

@@ -425,7 +425,7 @@ Statistics-based join reordering for 10-100x performance improvement on multi-pa
 | Join Reordering | 10-100x | Implemented |
 | Statistics Collection | 2-10x | Implemented |
 | Plan Caching | 2-5x | Implemented |
-| Predicate Pushdown | 5-50x | Planned - push FILTERs to leaf patterns |
+| Predicate Pushdown | 5-50x | Implemented - FilterAnalyzer + MultiPatternScan |
 
 ### Full-Text Search (Planned)
 
@@ -456,6 +456,7 @@ BCL-only trigram index for SPARQL text search:
 | Temporal queries | ✓ TemporalQueryBenchmarks | Done |
 | Concurrent access | ✓ ConcurrentBenchmarks | Done |
 | RDF parser throughput | ✓ NTriples/Turtle/FormatComparison | Done |
+| Filter pushdown | ✓ FilterPushdownBenchmarks | Done |
 
 ### Running Benchmarks via Claude Code
 
