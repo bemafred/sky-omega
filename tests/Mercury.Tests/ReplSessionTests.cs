@@ -2,8 +2,9 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.IO;
-using SkyOmega.Mercury.Repl;
+using SkyOmega.Mercury.Adapters;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Storage;
 using Xunit;
 
@@ -24,7 +25,7 @@ public class ReplSessionTests : IDisposable
         tempPath.MarkOwnership();
         _testDir = tempPath;
         _store = new QuadStore(_testDir);
-        _session = new ReplSession(_store);
+        _session = StoreAdapter.CreateSession(_store);
     }
 
     public void Dispose()
@@ -127,14 +128,6 @@ public class ReplSessionTests : IDisposable
 
         Assert.Contains("custom", _session.Prefixes.Keys);
         Assert.Equal("http://custom.org/", _session.Prefixes["custom"]);
-    }
-
-    [Fact]
-    public void ClearPrefixes_RemovesAllPrefixes()
-    {
-        _session.ClearPrefixes();
-
-        Assert.Empty(_session.Prefixes);
     }
 
     #endregion
@@ -365,7 +358,8 @@ public class ReplSessionTests : IDisposable
     {
         var result = _session.Execute("INSERT DATA { invalid syntax }");
 
-        Assert.Equal(ExecutionResultKind.Error, result.Kind);
+        // Invalid updates return Update kind with Success=false
+        Assert.Equal(ExecutionResultKind.Update, result.Kind);
         Assert.False(result.Success);
     }
 
@@ -425,14 +419,13 @@ public class ReplSessionTests : IDisposable
     }
 
     [Fact]
-    public void Execute_PrefixesCommand_NoPrefixes_ShowsMessage()
+    public void Execute_PrefixesCommand_ShowsPrefixCount()
     {
-        _session.ClearPrefixes();
-
+        // New ReplSession always has well-known prefixes
         var result = _session.Execute(":prefixes");
 
         Assert.Equal(ExecutionResultKind.Command, result.Kind);
-        Assert.Contains("No prefixes", result.Message);
+        Assert.Contains("Registered prefixes", result.Message);
     }
 
     [Fact]
@@ -593,24 +586,6 @@ public class ReplSessionTests : IDisposable
     }
 
     [Fact]
-    public void Execute_LoadCommand_NoPath_ReturnsError()
-    {
-        var result = _session.Execute(":load");
-
-        Assert.Equal(ExecutionResultKind.Error, result.Kind);
-        Assert.Contains("Usage:", result.Message);
-    }
-
-    [Fact]
-    public void Execute_LoadCommand_WithPath_ReturnsNotImplemented()
-    {
-        var result = _session.Execute(":load /path/to/file.ttl");
-
-        Assert.Equal(ExecutionResultKind.Error, result.Kind);
-        Assert.Contains("not yet implemented", result.Message);
-    }
-
-    [Fact]
     public void Execute_UnknownCommand_ReturnsError()
     {
         var result = _session.Execute(":unknowncommand");
@@ -687,13 +662,15 @@ public class ReplSessionTests : IDisposable
     [Fact]
     public void Reset_RestoresWellKnownPrefixes()
     {
-        _session.ClearPrefixes();
-        Assert.Empty(_session.Prefixes);
+        // Add a custom prefix, then reset - custom should be gone, well-known should remain
+        _session.RegisterPrefix("custom", "http://custom.org/");
+        Assert.Contains("custom", _session.Prefixes.Keys);
 
         _session.Reset();
 
         Assert.Contains("rdf", _session.Prefixes.Keys);
         Assert.Contains("rdfs", _session.Prefixes.Keys);
+        Assert.DoesNotContain("custom", _session.Prefixes.Keys);
     }
 
     [Fact]

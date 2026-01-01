@@ -1,8 +1,7 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using SkyOmega.Mercury.Diagnostics;
-using SkyOmega.Mercury.Repl;
+using SkyOmega.Mercury.Runtime.IO;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -22,7 +21,6 @@ public class ExecutionResultTests
         Assert.Equal(ExecutionResultKind.Empty, result.Kind);
         Assert.True(result.Success);
         Assert.Null(result.Message);
-        Assert.Null(result.Diagnostics);
     }
 
     [Fact]
@@ -33,26 +31,6 @@ public class ExecutionResultTests
         Assert.Equal(ExecutionResultKind.Error, result.Kind);
         Assert.False(result.Success);
         Assert.Equal("Something went wrong", result.Message);
-    }
-
-    [Fact]
-    public void Error_WithDiagnostics_IncludesDiagnostics()
-    {
-        var diagnostics = new List<MaterializedDiagnostic>
-        {
-            new MaterializedDiagnostic(
-                DiagnosticCode.UnexpectedToken,
-                DiagnosticSeverity.Error,
-                "Parse error",
-                default)
-        };
-
-        var result = ExecutionResult.Error("Parse failed", diagnostics);
-
-        Assert.Equal(ExecutionResultKind.Error, result.Kind);
-        Assert.False(result.Success);
-        Assert.NotNull(result.Diagnostics);
-        Assert.Single(result.Diagnostics);
     }
 
     [Fact]
@@ -84,111 +62,6 @@ public class ExecutionResultTests
         Assert.Equal(ExecutionResultKind.BaseSet, result.Kind);
         Assert.True(result.Success);
         Assert.Contains("http://base.org/", result.Message);
-    }
-
-    #endregion
-
-    #region HasDiagnostics Property
-
-    [Fact]
-    public void HasDiagnostics_NullDiagnostics_ReturnsFalse()
-    {
-        var result = new ExecutionResult { Kind = ExecutionResultKind.Select, Diagnostics = null };
-
-        Assert.False(result.HasDiagnostics);
-    }
-
-    [Fact]
-    public void HasDiagnostics_EmptyDiagnostics_ReturnsFalse()
-    {
-        var result = new ExecutionResult
-        {
-            Kind = ExecutionResultKind.Select,
-            Diagnostics = new List<MaterializedDiagnostic>()
-        };
-
-        Assert.False(result.HasDiagnostics);
-    }
-
-    [Fact]
-    public void HasDiagnostics_WithDiagnostics_ReturnsTrue()
-    {
-        var result = new ExecutionResult
-        {
-            Kind = ExecutionResultKind.Select,
-            Diagnostics = new List<MaterializedDiagnostic>
-            {
-                new MaterializedDiagnostic(
-                    DiagnosticCode.UnexpectedToken,
-                    DiagnosticSeverity.Error,
-                    "Test",
-                    default)
-            }
-        };
-
-        Assert.True(result.HasDiagnostics);
-    }
-
-    #endregion
-
-    #region HasErrors Property
-
-    [Fact]
-    public void HasErrors_NullDiagnostics_ReturnsFalse()
-    {
-        var result = new ExecutionResult { Kind = ExecutionResultKind.Select, Diagnostics = null };
-
-        Assert.False(result.HasErrors);
-    }
-
-    [Fact]
-    public void HasErrors_EmptyDiagnostics_ReturnsFalse()
-    {
-        var result = new ExecutionResult
-        {
-            Kind = ExecutionResultKind.Select,
-            Diagnostics = new List<MaterializedDiagnostic>()
-        };
-
-        Assert.False(result.HasErrors);
-    }
-
-    [Fact]
-    public void HasErrors_WarningsOnly_ReturnsFalse()
-    {
-        var result = new ExecutionResult
-        {
-            Kind = ExecutionResultKind.Select,
-            Diagnostics = new List<MaterializedDiagnostic>
-            {
-                new MaterializedDiagnostic(
-                    DiagnosticCode.DeprecatedSyntax,
-                    DiagnosticSeverity.Warning,
-                    "Warning message",
-                    default)
-            }
-        };
-
-        Assert.False(result.HasErrors);
-    }
-
-    [Fact]
-    public void HasErrors_WithError_ReturnsTrue()
-    {
-        var result = new ExecutionResult
-        {
-            Kind = ExecutionResultKind.Select,
-            Diagnostics = new List<MaterializedDiagnostic>
-            {
-                new MaterializedDiagnostic(
-                    DiagnosticCode.UnexpectedToken,
-                    DiagnosticSeverity.Error,
-                    "Error message",
-                    default)
-            }
-        };
-
-        Assert.True(result.HasErrors);
     }
 
     #endregion

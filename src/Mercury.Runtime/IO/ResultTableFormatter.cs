@@ -1,12 +1,11 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Text;
-
-namespace SkyOmega.Mercury.Repl;
+namespace SkyOmega.Mercury.Runtime.IO;
 
 /// <summary>
 /// Formats query results as ASCII tables for terminal display.
+/// Transport-agnostic - no dependencies on Mercury core.
 /// </summary>
 public sealed class ResultTableFormatter
 {
@@ -23,6 +22,7 @@ public sealed class ResultTableFormatter
     private const string Yellow = "\x1b[33m";
     private const string Gray = "\x1b[90m";
     private const string Magenta = "\x1b[35m";
+    private const string Red = "\x1b[91m";
 
     // Box drawing characters
     private const char TopLeft = '┌';
@@ -40,10 +40,6 @@ public sealed class ResultTableFormatter
     /// <summary>
     /// Creates a table formatter.
     /// </summary>
-    /// <param name="writer">Output writer.</param>
-    /// <param name="useColor">Whether to use ANSI colors.</param>
-    /// <param name="maxColumnWidth">Maximum width for any column (values are truncated).</param>
-    /// <param name="maxRows">Maximum rows to display (0 for unlimited).</param>
     public ResultTableFormatter(
         TextWriter writer,
         bool useColor = true,
@@ -141,11 +137,11 @@ public sealed class ResultTableFormatter
         for (int i = 0; i < displayCount; i++)
         {
             var (s, p, o) = result.Triples[i];
-            WriteColored(Cyan, FormatTerm(s));
+            WriteColored(Cyan, s);
             _writer.Write(' ');
-            WriteColored(Magenta, FormatTerm(p));
+            WriteColored(Magenta, p);
             _writer.Write(' ');
-            WriteColored(Reset, FormatTerm(o));
+            WriteColored(Reset, o);
             _writer.WriteLine(" .");
         }
 
@@ -182,6 +178,15 @@ public sealed class ResultTableFormatter
         _writer.WriteLine();
 
         WriteTimingSummary(result);
+    }
+
+    /// <summary>
+    /// Formats an error result.
+    /// </summary>
+    public void FormatError(ExecutionResult result)
+    {
+        WriteColored(Red, "Error: ");
+        _writer.WriteLine(result.Message ?? "Unknown error");
     }
 
     private int[] CalculateColumnWidths(string[] variables, List<Dictionary<string, string>> rows)
@@ -319,7 +324,6 @@ public sealed class ResultTableFormatter
         if (value.StartsWith('<') && value.EndsWith('>'))
         {
             var iri = value[1..^1];
-            // Show just the local name for common namespaces
             var lastSlash = iri.LastIndexOf('/');
             var lastHash = iri.LastIndexOf('#');
             var splitPos = Math.Max(lastSlash, lastHash);
@@ -332,12 +336,6 @@ public sealed class ResultTableFormatter
         }
 
         return value;
-    }
-
-    private static string FormatTerm(string term)
-    {
-        // Keep as-is for display
-        return term;
     }
 
     private static string GetValueColor(string value)

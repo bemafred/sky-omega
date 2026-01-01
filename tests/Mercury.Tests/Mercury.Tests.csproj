@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mercury\Mercury.csproj" />
+    <ProjectReference Include="..\..\src\Mercury.Adapters\Mercury.Adapters.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Runtime\Mercury.Runtime.csproj" />
   </ItemGroup>
 
