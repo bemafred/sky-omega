@@ -7,7 +7,11 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// <summary>
 /// Cached execution plan data.
 /// </summary>
-public sealed class CachedPlan
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
+/// implementation detail of query optimization. Query planning is transparent to users.</para>
+/// </remarks>
+internal sealed class CachedPlan
 {
     /// <summary>Pattern execution order.</summary>
     public required int[] PatternOrder { get; init; }
@@ -23,7 +27,11 @@ public sealed class CachedPlan
 /// LRU cache for query execution plans.
 /// Thread-safe with lock-free reads via copy-on-write.
 /// </summary>
-public sealed class QueryPlanCache
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
+/// implementation detail of query optimization. Query planning is transparent to users.</para>
+/// </remarks>
+internal sealed class QueryPlanCache
 {
     private readonly int _capacity;
     private volatile Dictionary<long, CachedPlan> _cache = new();

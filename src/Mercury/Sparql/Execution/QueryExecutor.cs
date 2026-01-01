@@ -199,14 +199,14 @@ public class QueryExecutor : IDisposable
     /// Alternative constructor that takes a pre-allocated QueryBuffer directly.
     /// The caller transfers ownership of the buffer to the executor.
     /// </summary>
-    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer)
+    internal QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer)
         : this(store, source, buffer, null, null) { }
 
-    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
+    internal QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
         ISparqlServiceExecutor? serviceExecutor)
         : this(store, source, buffer, serviceExecutor, null) { }
 
-    public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
+    internal QueryExecutor(QuadStore store, ReadOnlySpan<char> source, QueryBuffer buffer,
         ISparqlServiceExecutor? serviceExecutor, IBufferManager? bufferManager)
     {
         _store = store;
@@ -254,7 +254,7 @@ public class QueryExecutor : IDisposable
     /// Caller must hold read lock on store.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    public MaterializedQueryResults ExecuteGraphToMaterialized()
+    internal MaterializedQueryResults ExecuteGraphToMaterialized()
     {
         if (!_buffer.HasGraph || _buffer.TriplePatternCount != 0)
         {
@@ -296,7 +296,7 @@ public class QueryExecutor : IDisposable
     /// Caller must hold read lock on store.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    public MaterializedQueryResults ExecuteFromToMaterialized()
+    internal MaterializedQueryResults ExecuteFromToMaterialized()
     {
         if (_defaultGraphs == null || _defaultGraphs.Length == 0)
         {
@@ -420,7 +420,7 @@ public class QueryExecutor : IDisposable
     /// Caller must hold read lock on store.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    public MaterializedQueryResults ExecuteSubQueryToMaterialized()
+    internal MaterializedQueryResults ExecuteSubQueryToMaterialized()
     {
         if (!_buffer.HasSubQueries)
         {
@@ -504,7 +504,7 @@ public class QueryExecutor : IDisposable
     /// Caller must hold read lock on store.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    public MaterializedQueryResults ExecuteServiceToMaterialized()
+    internal MaterializedQueryResults ExecuteServiceToMaterialized()
     {
         if (!_buffer.HasService)
         {
@@ -776,7 +776,7 @@ public class QueryExecutor : IDisposable
     /// Execute a CONSTRUCT query and return constructed triples.
     /// Caller must hold read lock on store and call Dispose on results.
     /// </summary>
-    public ConstructResults ExecuteConstruct()
+    internal ConstructResults ExecuteConstruct()
     {
         var pattern = _query.WhereClause.Pattern;
         var template = _query.ConstructTemplate;
@@ -825,7 +825,7 @@ public class QueryExecutor : IDisposable
     /// Returns all triples where described resources appear as subject or object.
     /// Caller must hold read lock on store.
     /// </summary>
-    public DescribeResults ExecuteDescribe()
+    internal DescribeResults ExecuteDescribe()
     {
         var pattern = _query.WhereClause.Pattern;
         var describeAll = _query.DescribeAll;

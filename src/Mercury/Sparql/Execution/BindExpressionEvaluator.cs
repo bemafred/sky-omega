@@ -4,7 +4,11 @@ using SkyOmega.Mercury.Sparql;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
-public ref struct BindExpressionEvaluator
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an
+/// implementation detail of BIND expression evaluation in query execution.</para>
+/// </remarks>
+internal ref struct BindExpressionEvaluator
 {
     private ReadOnlySpan<char> _expression;
     private int _position;

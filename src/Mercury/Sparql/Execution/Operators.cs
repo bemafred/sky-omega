@@ -89,7 +89,7 @@ internal static class SyntheticTermHelper
     public static int GetSeqVarOffset(int index) => -(200 + index);
 }
 
-public ref struct TriplePatternScan
+internal ref struct TriplePatternScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -456,7 +456,7 @@ public ref struct TriplePatternScan
 /// Due to ref struct limitations, we store resolved term strings in fixed buffers
 /// to avoid span scoping issues with enumerator initialization.
 /// </summary>
-public ref struct MultiPatternScan
+internal ref struct MultiPatternScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -1248,7 +1248,7 @@ public ref struct MultiPatternScan
 /// For queries like: SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }
 /// Supports FROM NAMED restriction: only iterate specified named graphs.
 /// </summary>
-public ref struct VariableGraphScan
+internal ref struct VariableGraphScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -1363,7 +1363,7 @@ public ref struct VariableGraphScan
 /// Executes a subquery and yields only projected variable bindings.
 /// Handles variable scoping: only SELECT-ed variables are visible to outer query.
 /// </summary>
-public ref struct SubQueryScan
+internal ref struct SubQueryScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -1586,7 +1586,7 @@ public ref struct SubQueryScan
 /// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
 /// Subquery is the driving (outer) relation; outer patterns are filtered using bound variables.
 /// </summary>
-public ref struct SubQueryJoinScan
+internal ref struct SubQueryJoinScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -1737,7 +1737,7 @@ public ref struct SubQueryJoinScan
 /// Scans triple patterns across multiple default graphs (FROM clauses), unioning results.
 /// This is a streaming operator that avoids materializing all results upfront.
 /// </summary>
-public ref struct DefaultGraphUnionScan
+internal ref struct DefaultGraphUnionScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -1849,7 +1849,7 @@ public ref struct DefaultGraphUnionScan
 /// - For each match, second pattern also queries both graph1 and graph2
 /// This allows joining ?s=Alice from graph1's name with ?s=Alice from graph2's age.
 /// </summary>
-public ref struct CrossGraphMultiPatternScan
+internal ref struct CrossGraphMultiPatternScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -2193,7 +2193,7 @@ public ref struct CrossGraphMultiPatternScan
 /// Executes a SERVICE clause by sending patterns to a remote SPARQL endpoint.
 /// Materializes results and iterates through them.
 /// </summary>
-public ref struct ServiceScan
+internal ref struct ServiceScan
 {
     private readonly ISparqlServiceExecutor _executor;
     private readonly ReadOnlySpan<char> _source;

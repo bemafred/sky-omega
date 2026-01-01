@@ -9,7 +9,11 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// This struct is ~200 bytes vs ~22KB for full QueryResults.
 /// Use this for GRAPH, subquery, and other paths that materialize results.
 /// </summary>
-public ref struct MaterializedQueryResults
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an
+/// implementation detail of query result materialization for subqueries and GRAPH clauses.</para>
+/// </remarks>
+internal ref struct MaterializedQueryResults
 {
     private readonly List<MaterializedRow> _rows;
     private readonly Binding[] _bindings;

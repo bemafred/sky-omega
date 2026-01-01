@@ -18,7 +18,11 @@ namespace SkyOmega.Mercury.Sparql.Patterns;
 /// <summary>
 /// Pattern element discriminator
 /// </summary>
-public enum PatternKind : byte
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This enum is internal because it is an
+/// implementation detail of the query buffer pattern system.</para>
+/// </remarks>
+internal enum PatternKind : byte
 {
     Empty = 0,
     Triple = 1,
@@ -36,7 +40,11 @@ public enum PatternKind : byte
 /// Fixed-size pattern element slot (64 bytes)
 /// Provides typed view over raw bytes.
 /// </summary>
-public ref struct PatternSlot
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an
+/// implementation detail of the zero-GC query buffer pattern system.</para>
+/// </remarks>
+internal ref struct PatternSlot
 {
     public const int Size = 64;
     
@@ -155,7 +163,7 @@ public ref struct PatternSlot
 /// <summary>
 /// Array of pattern slots - view over contiguous byte buffer
 /// </summary>
-public ref struct PatternArray
+internal ref struct PatternArray
 {
     private readonly Span<byte> _buffer;
     private readonly int _capacity;
@@ -391,7 +399,7 @@ public ref struct PatternArray
 /// <summary>
 /// Slice of a pattern array (for children)
 /// </summary>
-public ref struct PatternArraySlice
+internal ref struct PatternArraySlice
 {
     private readonly Span<byte> _buffer;
     private readonly int _start;
@@ -424,7 +432,7 @@ public ref struct PatternArraySlice
 /// <summary>
 /// Enumerator over all pattern slots
 /// </summary>
-public ref struct PatternEnumerator
+internal ref struct PatternEnumerator
 {
     private readonly Span<byte> _buffer;
     private readonly int _count;
@@ -447,7 +455,7 @@ public ref struct PatternEnumerator
 /// <summary>
 /// Enumerator over triple patterns only
 /// </summary>
-public ref struct TripleEnumerator
+internal ref struct TripleEnumerator
 {
     private readonly Span<byte> _buffer;
     private readonly int _count;
@@ -479,7 +487,7 @@ public ref struct TripleEnumerator
 /// <summary>
 /// Enumerator over filter expressions only
 /// </summary>
-public ref struct FilterEnumerator
+internal ref struct FilterEnumerator
 {
     private readonly Span<byte> _buffer;
     private readonly int _count;
@@ -511,7 +519,7 @@ public ref struct FilterEnumerator
 /// <summary>
 /// Enumerator over graph header patterns only
 /// </summary>
-public ref struct GraphHeaderEnumerator
+internal ref struct GraphHeaderEnumerator
 {
     private readonly Span<byte> _buffer;
     private readonly int _count;
@@ -559,7 +567,7 @@ public ref struct GraphHeaderEnumerator
 // Extension methods for ergonomic creation
 // ═══════════════════════════════════════════════════════════════════════════
 
-public static class PatternArrayExtensions
+internal static class PatternArrayExtensions
 {
     /// <summary>
     /// Create pattern array from byte array
@@ -664,7 +672,7 @@ finally
 /// - Pooled memory = zero-GC
 /// - No stack overflow on nested calls
 /// </remarks>
-public sealed class QueryBuffer : IDisposable
+internal sealed class QueryBuffer : IDisposable
 {
     /// <summary>Default capacity in pattern slots (64 bytes each)</summary>
     public const int DefaultCapacity = 128;  // 8KB buffer - handles most queries
@@ -797,7 +805,7 @@ public sealed class QueryBuffer : IDisposable
 /// <summary>
 /// Prefix mapping (prefix -> IRI)
 /// </summary>
-public struct PrefixMapping
+internal struct PrefixMapping
 {
     public int PrefixStart;
     public int PrefixLength;
@@ -808,7 +816,7 @@ public struct PrefixMapping
 /// <summary>
 /// ORDER BY entry
 /// </summary>
-public struct OrderByEntry
+internal struct OrderByEntry
 {
     public int VariableStart;
     public int VariableLength;
@@ -818,7 +826,7 @@ public struct OrderByEntry
 /// <summary>
 /// GROUP BY entry
 /// </summary>
-public struct GroupByEntry
+internal struct GroupByEntry
 {
     public int VariableStart;
     public int VariableLength;
@@ -827,7 +835,7 @@ public struct GroupByEntry
 /// <summary>
 /// Aggregate expression entry
 /// </summary>
-public struct AggregateEntry
+internal struct AggregateEntry
 {
     public AggregateFunction Function;
     public int VariableStart;
@@ -848,7 +856,7 @@ public struct AggregateEntry
 /// This enables incremental migration: executor can use QueryBuffer while
 /// parser still produces Query struct.
 /// </summary>
-public static class QueryBufferAdapter
+internal static class QueryBufferAdapter
 {
     /// <summary>
     /// Create a QueryBuffer from an existing Query struct.

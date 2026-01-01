@@ -16,7 +16,12 @@ namespace SkyOmega.Mercury.Storage;
 /// - Recovery replays uncommitted entries after last checkpoint
 /// - Hybrid checkpointing: size-based (16MB) OR time-based (60s)
 /// </summary>
-public sealed class WriteAheadLog : IDisposable
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
+/// implementation detail of <see cref="QuadStore"/>. WAL operations are managed
+/// automatically by the storage layer for crash safety.</para>
+/// </remarks>
+internal sealed class WriteAheadLog : IDisposable
 {
     public const int RecordSize = 72; // Fixed size for predictable I/O (includes GraphId)
     public const long DefaultCheckpointSizeThreshold = 16 * 1024 * 1024; // 16MB
@@ -274,7 +279,7 @@ public sealed class WriteAheadLog : IDisposable
 /// <summary>
 /// Log operation types.
 /// </summary>
-public enum LogOperation : byte
+internal enum LogOperation : byte
 {
     Add = 1,
     Delete = 2,
@@ -297,7 +302,7 @@ public enum LogOperation : byte
 /// [64-71] Checksum (8 bytes)
 /// </summary>
 [StructLayout(LayoutKind.Explicit, Size = 72)]
-public struct LogRecord
+internal struct LogRecord
 {
     [FieldOffset(0)] public long TxId;
     [FieldOffset(8)] public LogOperation Operation;
@@ -417,7 +422,7 @@ public struct LogRecord
 /// Uses pooled buffer to avoid allocations.
 /// Call Dispose() when done to return buffer to pool.
 /// </summary>
-public ref struct LogRecordEnumerator
+internal ref struct LogRecordEnumerator
 {
     private readonly FileStream _logFile;
     private readonly long _afterTxId;

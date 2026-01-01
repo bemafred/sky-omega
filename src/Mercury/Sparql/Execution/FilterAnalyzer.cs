@@ -9,7 +9,12 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// Used for predicate pushdown optimization - pushing filter evaluation
 /// earlier in query execution.
 /// </summary>
-public static class FilterAnalyzer
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
+/// implementation detail of predicate pushdown optimization. Filter analysis is
+/// transparent to users - it happens automatically during query execution.</para>
+/// </remarks>
+internal static class FilterAnalyzer
 {
     /// <summary>
     /// Maximum number of variables that can be tracked per filter.

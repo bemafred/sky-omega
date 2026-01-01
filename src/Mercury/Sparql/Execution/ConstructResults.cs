@@ -4,7 +4,11 @@ using SkyOmega.Mercury.Sparql;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
-public ref struct ConstructResults
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an
+/// implementation detail of CONSTRUCT query execution.</para>
+/// </remarks>
+internal ref struct ConstructResults
 {
     private QueryResults _queryResults;
     private ConstructTemplate _template;

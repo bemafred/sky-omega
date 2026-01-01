@@ -12,7 +12,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// Triple pattern scan that reads from PatternSlot instead of TriplePattern struct.
 /// This eliminates the need to copy large structs through method calls.
 /// </summary>
-public ref struct SlotTriplePatternScan
+internal ref struct SlotTriplePatternScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
@@ -353,7 +353,7 @@ public ref struct SlotTriplePatternScan
 /// Multi-pattern scan that reads from PatternArray instead of GraphPattern struct.
 /// Uses nested loop join for up to 4 patterns.
 /// </summary>
-public ref struct SlotMultiPatternScan
+internal ref struct SlotMultiPatternScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;

@@ -8,7 +8,12 @@ namespace SkyOmega.Mercury.Storage;
 /// Uses hash table for O(1) lookup and clock algorithm for eviction.
 /// Zero-allocation design using fixed-size arrays.
 /// </summary>
-public sealed unsafe class PageCache : IDisposable
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
+/// implementation detail of <see cref="QuadIndex"/>. The page cache is managed
+/// automatically by the storage layer.</para>
+/// </remarks>
+internal sealed unsafe class PageCache : IDisposable
 {
     private readonly int _capacity;
     private readonly CacheEntry[] _entries;

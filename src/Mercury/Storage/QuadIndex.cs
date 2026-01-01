@@ -12,7 +12,12 @@ namespace SkyOmega.Mercury.Storage;
 /// Valid Time (VT): When the fact is true in the real world
 /// Transaction Time (TT): When the fact was recorded in the database
 /// </summary>
-public sealed unsafe class QuadIndex : IDisposable
+/// <remarks>
+/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
+/// implementation detail of <see cref="QuadStore"/>. Users should access storage
+/// through QuadStore's public API, not directly through QuadIndex.</para>
+/// </remarks>
+internal sealed unsafe class QuadIndex : IDisposable
 {
     private const int PageSize = 16384;
     private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry (with GraphAtom)
