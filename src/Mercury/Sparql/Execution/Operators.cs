@@ -498,9 +498,9 @@ internal ref struct MultiPatternScan
 
     // Pushed filter assignments: for each level (0-11), which filter indices to evaluate
     // Using fixed arrays to avoid heap allocations in ref struct
+    // Supports up to 8 levels of filter pushing (levels 0-7)
     private int _levelFilterCount0, _levelFilterCount1, _levelFilterCount2, _levelFilterCount3;
     private int _levelFilterCount4, _levelFilterCount5, _levelFilterCount6, _levelFilterCount7;
-    private int _levelFilterCount8, _levelFilterCount9, _levelFilterCount10, _levelFilterCount11;
 
     // Filter indices per level (max 4 filters per level)
     private int _f0_0, _f0_1, _f0_2, _f0_3;  // Level 0 filters
@@ -558,10 +558,9 @@ internal ref struct MultiPatternScan
         _bindingCount4 = _bindingCount5 = _bindingCount6 = _bindingCount7 = 0;
         _bindingCount8 = _bindingCount9 = _bindingCount10 = _bindingCount11 = 0;
 
-        // Initialize pushed filter fields
+        // Initialize pushed filter fields (levels 0-7)
         _levelFilterCount0 = _levelFilterCount1 = _levelFilterCount2 = _levelFilterCount3 = 0;
         _levelFilterCount4 = _levelFilterCount5 = _levelFilterCount6 = _levelFilterCount7 = 0;
-        _levelFilterCount8 = _levelFilterCount9 = _levelFilterCount10 = _levelFilterCount11 = 0;
         _f0_0 = _f0_1 = _f0_2 = _f0_3 = 0;
         _f1_0 = _f1_1 = _f1_2 = _f1_3 = 0;
         _f2_0 = _f2_1 = _f2_2 = _f2_3 = 0;
