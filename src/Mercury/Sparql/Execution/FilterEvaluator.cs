@@ -454,7 +454,8 @@ public ref partial struct FilterEvaluator
     {
         var start = _position;
 
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+        // Allow letters, digits, underscore, and colon (for prefixed functions like text:match)
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
             Advance();
 
         var funcName = _expression.Slice(start, _position - start);
@@ -494,6 +495,13 @@ public ref partial struct FilterEvaluator
         if (funcName.Equals("contains", StringComparison.OrdinalIgnoreCase))
         {
             return ParseContainsFunction();
+        }
+
+        // Handle text:match - full-text search (case-insensitive contains)
+        if (funcName.Equals("text:match", StringComparison.OrdinalIgnoreCase) ||
+            funcName.Equals("match", StringComparison.OrdinalIgnoreCase))
+        {
+            return ParseTextMatchFunction();
         }
 
         // Handle STRSTARTS - two string arguments

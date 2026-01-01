@@ -35,6 +35,17 @@ public sealed class StorageOptions
     public long MaxAtomSize { get; init; } = AtomStore.DefaultMaxAtomSize;
 
     /// <summary>
+    /// Enable full-text search via trigram indexing.
+    /// When enabled, object literals are indexed for use with <c>text:match</c> SPARQL function.
+    /// Default: false (opt-in for backward compatibility).
+    /// </summary>
+    /// <remarks>
+    /// Full-text search adds overhead to write operations (trigram extraction and indexing).
+    /// Only enable if you need the <c>text:match</c> functionality.
+    /// </remarks>
+    public bool EnableFullTextSearch { get; init; } = false;
+
+    /// <summary>
     /// Default options with reasonable limits.
     /// </summary>
     public static StorageOptions Default { get; } = new();

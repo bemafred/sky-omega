@@ -271,6 +271,47 @@ public ref partial struct FilterEvaluator
     }
 
     /// <summary>
+    /// Parse text:match(text, query) - full-text search with case-insensitive matching.
+    /// Returns true if text contains query (case-insensitive).
+    /// </summary>
+    /// <remarks>
+    /// This function is designed to work with the trigram index for pre-filtering,
+    /// but the actual matching is done here with case-insensitive comparison.
+    /// The trigram index provides candidate filtering at query planning time.
+    /// </remarks>
+    private Value ParseTextMatchFunction()
+    {
+        var textArg = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            SkipToCloseParen();
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var queryArg = ParseTerm();
+        SkipWhitespace();
+        if (Peek() == ')')
+            Advance();
+
+        // Validate both arguments are strings
+        if ((textArg.Type != ValueType.String && textArg.Type != ValueType.Uri) ||
+            (queryArg.Type != ValueType.String && queryArg.Type != ValueType.Uri))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        // Case-insensitive contains check (handles Unicode including Swedish å, ä, ö)
+        // Use CurrentCultureIgnoreCase for proper Unicode case-folding
+        var matches = textArg.StringValue.Contains(queryArg.StringValue, StringComparison.CurrentCultureIgnoreCase);
+        return new Value { Type = ValueType.Boolean, BooleanValue = matches };
+    }
+
+    /// <summary>
     /// Parse CONTAINS(string, substring) - returns true if string contains substring
     /// </summary>
     private Value ParseContainsFunction()
