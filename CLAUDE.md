@@ -455,7 +455,7 @@ BCL-only trigram index for SPARQL text search:
 | Storage (batch/query) | ✓ BatchWrite/QueryBenchmarks | Done |
 | Temporal queries | ✓ TemporalQueryBenchmarks | Done |
 | Concurrent access | ✓ ConcurrentBenchmarks | Done |
-| RDF parser throughput (Turtle/N-Triples) | 0 benchmarks | Medium |
+| RDF parser throughput | ✓ NTriples/Turtle/FormatComparison | Done |
 
 ### Running Benchmarks via Claude Code
 
@@ -485,6 +485,9 @@ dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- \
 | `FilterBenchmarks` | `*FilterBenchmarks*` | FILTER expression overhead |
 | `TemporalWriteBenchmarks` | `*TemporalWrite*` | Temporal triple write performance |
 | `TemporalQueryBenchmarks` | `*TemporalQuery*` | Temporal query operations |
+| `NTriplesParserBenchmarks` | `*NTriples*` | N-Triples parsing (zero-GC vs allocating) |
+| `TurtleParserBenchmarks` | `*Turtle*` | Turtle parsing (zero-GC vs allocating) |
+| `RdfFormatComparisonBenchmarks` | `*FormatComparison*` | N-Triples vs Turtle format comparison |
 
 **Workflow for Claude Code:**
 
