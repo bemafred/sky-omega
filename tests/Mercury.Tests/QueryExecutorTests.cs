@@ -5419,6 +5419,140 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Execute_OptionalService_PreservesLocalBindingsWhenNoMatch()
+    {
+        // Test OPTIONAL { SERVICE ... } - should preserve local bindings when SERVICE returns no match
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.CommitBatch();
+
+        // Query with OPTIONAL SERVICE - item1 has price, item2 does not
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            OPTIONAL {
+                SERVICE <http://pricing.example.org/sparql> {
+                    ?item <http://ex.org/price> ?price
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify OPTIONAL SERVICE was parsed correctly
+        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
+        Assert.True(parsedQuery.WhereClause.Pattern.GetServiceClause(0).IsOptional);
+
+        // Mock executor returns price for only item1
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item1", ServiceBindingType.Uri),
+                ["price"] = ("29.99", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, bool hasPrice)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+
+                Assert.True(itemIdx >= 0);
+
+                var item = results.Current.GetString(itemIdx).ToString();
+                var hasPrice = priceIdx >= 0;
+                resultList.Add((item, hasPrice));
+            }
+            results.Dispose();
+
+            // Should get 2 results: item1 with price, item2 without price (preserved by OPTIONAL)
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item1>" && r.hasPrice);
+            Assert.Contains(resultList, r => r.item == "<http://local/item2>");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OptionalServiceSilent_CombinesBothModifiers()
+    {
+        // Test OPTIONAL { SERVICE SILENT ... } - should preserve bindings AND ignore errors
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.CommitBatch();
+
+        // Query with OPTIONAL SERVICE SILENT
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            OPTIONAL {
+                SERVICE SILENT <http://pricing.example.org/sparql> {
+                    ?item <http://ex.org/price> ?price
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify both modifiers are set
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.True(serviceClause.IsOptional);
+        Assert.True(serviceClause.Silent);
+    }
+
+    [Fact]
+    public void Parse_UnionWithService_ParsesCorrectly()
+    {
+        // Test parsing { local } UNION { SERVICE ... }
+        // Note: Execution of SERVICE-only UNION branches requires further work
+        // as SERVICE clauses are stored separately from triple patterns
+
+        // Query with UNION: local branch and SERVICE branch
+        var query = @"SELECT ?item ?source WHERE {
+            {
+                ?item <http://ex.org/type> <http://ex.org/Widget> .
+                ?item <http://ex.org/source> ?source
+            }
+            UNION
+            {
+                SERVICE <http://remote.example.org/sparql> {
+                    ?item <http://ex.org/type> <http://ex.org/Widget> .
+                    ?item <http://ex.org/source> ?source
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify UNION was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
+
+        // Verify local patterns in first branch
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.FirstBranchPatternCount);
+
+        // Verify SERVICE was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
+
+        // Verify SERVICE is NOT optional (it's in UNION, not OPTIONAL)
+        Assert.False(parsedQuery.WhereClause.Pattern.GetServiceClause(0).IsOptional);
+
+        // Verify SERVICE has the correct endpoint
+        var endpoint = parsedQuery.WhereClause.Pattern.GetServiceClause(0).Endpoint;
+        Assert.Equal(TermType.Iri, endpoint.Type);
+    }
+
     #endregion
 
     #region Property Path Sequence Tests

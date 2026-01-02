@@ -784,6 +784,7 @@ public struct ServiceClause
     public const int MaxPatterns = 8;
 
     public bool Silent;           // SILENT modifier - ignore failures
+    public bool IsOptional;       // Inside OPTIONAL block - preserve outer bindings on no match
     public Term Endpoint;         // The endpoint IRI or variable
     private int _patternCount;
 

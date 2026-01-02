@@ -1115,6 +1115,7 @@ public class QueryExecutor : IDisposable
     /// <summary>
     /// Phase 2: For each local result, execute SERVICE and collect final results.
     /// Uses cached SERVICE clause to avoid accessing large GraphPattern struct from stack.
+    /// For OPTIONAL SERVICE, preserves local bindings even when SERVICE returns no match.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteServiceJoinPhase(
@@ -1128,6 +1129,7 @@ public class QueryExecutor : IDisposable
             return finalResults;
 
         var serviceClause = _cachedFirstServiceClause.Value;
+        var isOptional = serviceClause.IsOptional;
 
         foreach (var localRow in localResults)
         {
@@ -1139,17 +1141,28 @@ public class QueryExecutor : IDisposable
 
             // Execute SERVICE with these bindings
             var serviceScan = new ServiceScan(_serviceExecutor!, _source, serviceClause, bindingTable);
+            var hasServiceMatch = false;
             try
             {
                 while (serviceScan.MoveNext(ref bindingTable))
                 {
                     ThrowIfCancellationRequested();
+                    hasServiceMatch = true;
                     finalResults.Add(new MaterializedRow(bindingTable));
                 }
             }
             finally
             {
                 serviceScan.Dispose();
+            }
+
+            // For OPTIONAL SERVICE, preserve local bindings even if no SERVICE match
+            if (isOptional && !hasServiceMatch)
+            {
+                // Re-restore local bindings (SERVICE may have modified them)
+                bindingTable.TruncateTo(0);
+                localRow.RestoreBindings(ref bindingTable);
+                finalResults.Add(new MaterializedRow(bindingTable));
             }
         }
 
