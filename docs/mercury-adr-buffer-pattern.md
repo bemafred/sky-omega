@@ -215,3 +215,136 @@ The materialization pattern introduces controlled heap allocation that:
 - Preserves zero-GC guarantees for critical index operations
 
 No further optimization needed. The Regex caching for repeated FILTER patterns would be a minor improvement but is not critical.
+
+## SERVICE + UNION Combinatorial Analysis
+
+### The Problem
+
+Attempting to implement feature-complete SERVICE with UNION support and optimization causes stack overflow due to combinatorial stack growth.
+
+### Current Execution Flow Gap
+
+In `QueryExecutor.Execute()`, SERVICE is checked before UNION:
+
+```csharp
+if (_buffer.HasService)
+{
+    var serviceResults = ExecuteWithServiceMaterialized();
+    // Returns materialized results, bypasses normal flow
+}
+```
+
+But `ExecuteWithServiceMaterialized()` only handles:
+- SERVICE alone
+- SERVICE + local patterns
+- Multiple SERVICE clauses
+
+**UNION is never handled in any SERVICE path.** A query with both `HasService` and `HasUnion` would have its UNION branches ignored.
+
+### Stack Growth Analysis
+
+Consider a complex query:
+
+```sparql
+SELECT * WHERE {
+  { SERVICE <a> { ?s ?p ?o } . ?local1 ?p1 ?o1 }
+  UNION
+  { SERVICE <b> { ?x ?y ?z } . ?local2 ?p2 ?o2 }
+  UNION
+  { ?plain ?pred ?obj }
+}
+```
+
+Without proper materialization, each branch requires:
+
+| Component | Size |
+|-----------|------|
+| QueryResults | ~22KB |
+| GraphPattern access | ~4KB |
+| MultiPatternScan (per branch) | ~1.2KB |
+| ServiceScan state | ~200B |
+
+For N UNION branches with SERVICE + local patterns:
+
+```
+Execute()                              // 22KB QueryResults
+  → ExecuteWithServiceMaterialized()   // access GraphPattern (4KB)
+    → for each UNION branch:
+      → ExecuteServiceWithLocal()      // MultiPatternScan (1.2KB)
+        → QueryPlanner optimization    // additional stack frames
+          → MultiPatternScan           // another 1.2KB
+            → ServiceScan              // join with SERVICE
+```
+
+**3 branches × ~27KB per path = 81KB+ stack usage**
+
+Add nested OPTIONAL, filter pushdown, or recursive patterns and the 1MB stack limit is exceeded.
+
+### Thread Workaround Anti-Pattern
+
+Two locations currently use threads to "buy" stack space:
+
+| Location | Purpose | Stack Size |
+|----------|---------|------------|
+| `QueryExecutor.cs:2024` | GRAPH with multiple patterns | 4MB |
+| `UpdateExecutor.cs:568` | DELETE/INSERT WHERE | 4MB |
+
+```csharp
+var thread = new Thread(() => {
+    // Execute on fresh stack
+}, 4 * 1024 * 1024); // 4MB stack
+thread.Start();
+thread.Join();
+```
+
+**This is an anti-pattern.** Threads should be used for parallelism/compute, not to circumvent stack limits. The proper fix is materialization.
+
+### Correct Implementation Pattern
+
+Each UNION branch must materialize independently:
+
+```csharp
+if (HasUnion && HasService)
+{
+    var allResults = new List<MaterializedRow>();
+
+    // Materialize each branch independently - constant stack per branch
+    foreach (var branch in unionBranches)
+    {
+        List<MaterializedRow> branchResults;
+
+        if (branch.HasService)
+            branchResults = ExecuteBranchWithService(branch);  // Materialize
+        else
+            branchResults = ExecuteLocalBranch(branch);        // Materialize
+
+        allResults.AddRange(branchResults);
+    }
+
+    return QueryResults.FromMaterializedList(allResults, ...);
+}
+```
+
+**Key insight:** Stack usage must be O(1) per branch, not O(N) for N branches. Each branch materializes to heap before the next begins.
+
+### Required Changes for Feature-Complete SERVICE
+
+1. **Detect SERVICE + UNION combination** in `Execute()`
+2. **Enumerate UNION branches** from QueryBuffer
+3. **Materialize each branch independently**:
+   - Branches with SERVICE: use existing `ExecuteServiceWithLocalPatternsInternal()`
+   - Branches without SERVICE: create new `ExecuteLocalBranchMaterialized()`
+4. **Union results on heap** before wrapping in QueryResults
+5. **Remove thread workarounds** once materialization is complete
+6. **Apply `[NoInlining]`** to all branch execution methods
+
+### Verification Checklist
+
+Before implementing SERVICE + UNION:
+
+- [ ] Each UNION branch executes in isolated method with `[NoInlining]`
+- [ ] All branch results materialize to `List<MaterializedRow>` before next branch
+- [ ] No QueryResults (~22KB) passed through branch call chain
+- [ ] No GraphPattern (~4KB) accessed in nested calls (use QueryBuffer)
+- [ ] Thread workarounds removed after proper materialization
+- [ ] Stack usage verified with complex test queries (3+ branches, SERVICE + local + optimization)
