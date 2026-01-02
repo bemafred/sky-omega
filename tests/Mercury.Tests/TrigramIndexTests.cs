@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using Xunit;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Tests;
@@ -16,21 +17,14 @@ public class TrigramIndexTests : IDisposable
 
     public TrigramIndexTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), $"TrigramTests_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("trigram");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_testDir))
-                Directory.Delete(_testDir, recursive: true);
-        }
-        catch
-        {
-            // Ignore cleanup errors in tests
-        }
+        TempPath.SafeCleanup(_testDir);
     }
 
     private string GetIndexPath() => Path.Combine(_testDir, "trigram");

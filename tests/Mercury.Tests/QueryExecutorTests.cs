@@ -38,8 +38,7 @@ public class QueryExecutorTests : IDisposable
     public void Dispose()
     {
         _store.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, true);
+        TempPath.SafeCleanup(_testDir);
     }
 
     /// <summary>

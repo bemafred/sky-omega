@@ -27,8 +27,7 @@ public class UpdateExecutorTests : IDisposable
     public void Dispose()
     {
         _store.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, true);
+        TempPath.SafeCleanup(_testDir);
     }
 
     private int CountTriples(string? graphIri = null)

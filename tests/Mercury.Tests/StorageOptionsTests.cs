@@ -25,8 +25,7 @@ public class StorageOptionsTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_testPath))
-            Directory.Delete(_testPath, true);
+        TempPath.SafeCleanup(_testPath);
     }
 
     #region StorageOptions Configuration

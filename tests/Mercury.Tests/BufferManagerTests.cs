@@ -102,11 +102,7 @@ public class BufferManagerTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(_tempDir))
-        {
-            try { Directory.Delete(_tempDir, recursive: true); }
-            catch { /* ignore cleanup errors */ }
-        }
+        TempPath.SafeCleanup(_tempDir);
     }
 
     #region Parser Injection Tests

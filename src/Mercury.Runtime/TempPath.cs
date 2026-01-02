@@ -108,6 +108,58 @@ public readonly record struct TempPath
     }
 
     /// <summary>
+    /// Safely cleans up a directory or file, handling Windows file locking issues.
+    /// Forces GC to release memory-mapped handles, then deletes with retry.
+    /// If cleanup still fails, the path is left for <see cref="CleanupStale"/> at next startup.
+    /// </summary>
+    /// <param name="path">Path to the directory or file to clean up</param>
+    /// <param name="maxRetries">Maximum retry attempts (default 3)</param>
+    /// <remarks>
+    /// This method is designed for parallel test execution where memory-mapped files
+    /// may briefly hold handles after disposal. The GC.Collect() forces handle release,
+    /// and the retry loop handles brief Windows file system delays.
+    /// </remarks>
+    public static void SafeCleanup(string path, int maxRetries = 3)
+    {
+        if (string.IsNullOrEmpty(path))
+            return;
+
+        if (!Directory.Exists(path) && !File.Exists(path))
+            return;
+
+        // Force GC to release memory-mapped file handles (critical on Windows)
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                    Directory.Delete(path, recursive: true);
+                else if (File.Exists(path))
+                    File.Delete(path);
+                return; // Success
+            }
+            catch (IOException) when (attempt < maxRetries - 1)
+            {
+                // Brief pause before retry - Windows often releases handles after short delay
+                Thread.Sleep(50 * (attempt + 1));
+            }
+            catch (IOException)
+            {
+                // Final attempt failed - leave for CleanupStale at next startup
+                // This is safe because TempPath.Test() uses unique GUIDs
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Permission issue - leave for CleanupStale
+            }
+        }
+    }
+
+    /// <summary>
     /// Creates the directory and writes a lock file marking ownership by the current process.
     /// The lock file contains the process ID and start time, enabling <see cref="CleanupStale"/>
     /// to safely identify and remove directories from terminated processes.

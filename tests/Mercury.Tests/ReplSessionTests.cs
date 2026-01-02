@@ -31,8 +31,7 @@ public class ReplSessionTests : IDisposable
     {
         _session.Dispose();
         _store.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, true);
+        TempPath.SafeCleanup(_testDir);
     }
 
     #region Empty/Whitespace Input

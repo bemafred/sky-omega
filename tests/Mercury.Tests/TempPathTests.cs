@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Storage;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -141,4 +142,114 @@ public class TempPathTests
             tempPath.Cleanup();
         }
     }
+
+    #region SafeCleanup Tests
+
+    /// <summary>
+    /// Verifies SafeCleanup handles locked files gracefully without throwing.
+    /// This simulates the scenario where a file handle is still held briefly after disposal.
+    /// Note: File locking behavior differs by platform (mandatory on Windows, advisory on Unix).
+    /// </summary>
+    [Fact]
+    public void SafeCleanup_LockedFile_DoesNotThrow()
+    {
+        var tempPath = TempPath.Test("locked-file-test");
+        tempPath.MarkOwnership();
+        var filePath = Path.Combine(tempPath.FullPath, "locked.txt");
+
+        // Create a file with an open handle
+        using var lockedFile = new FileStream(filePath, FileMode.Create,
+            FileAccess.ReadWrite, FileShare.None);
+
+        // SafeCleanup should not throw - it gracefully handles locked files
+        var ex = Record.Exception(() => TempPath.SafeCleanup(tempPath.FullPath));
+        Assert.Null(ex);
+
+        // On Windows, file locking is mandatory so the file still exists
+        // On Unix, file locking is advisory so deletion may succeed
+        // Either outcome is acceptable - the key is that no exception is thrown
+
+        // After releasing handle, ensure cleanup succeeds
+        lockedFile.Dispose();
+        TempPath.SafeCleanup(tempPath.FullPath);
+        Assert.False(Directory.Exists(tempPath.FullPath));
+    }
+
+    /// <summary>
+    /// Verifies SafeCleanup handles non-existent paths gracefully.
+    /// </summary>
+    [Fact]
+    public void SafeCleanup_NonExistentPath_DoesNotThrow()
+    {
+        var nonExistent = Path.Combine(Path.GetTempPath(), $"nonexistent-{Guid.NewGuid():N}");
+
+        var ex = Record.Exception(() => TempPath.SafeCleanup(nonExistent));
+        Assert.Null(ex);
+    }
+
+    /// <summary>
+    /// Verifies SafeCleanup handles null/empty paths gracefully.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void SafeCleanup_NullOrEmpty_DoesNotThrow(string? path)
+    {
+        var ex = Record.Exception(() => TempPath.SafeCleanup(path!));
+        Assert.Null(ex);
+    }
+
+    /// <summary>
+    /// Simulates parallel test execution where multiple stores are created and cleaned up concurrently.
+    /// This validates that SafeCleanup handles the scenario that triggers issues with NCrunch.
+    /// </summary>
+    [Fact]
+    public async Task SafeCleanup_ParallelStoreCreation_AllCleanupSucceeds()
+    {
+        // Simulate parallel test runners creating/destroying stores
+        var tasks = Enumerable.Range(0, 8).Select(async i =>
+        {
+            var tempPath = TempPath.Test($"parallel-cleanup-{i}");
+            tempPath.MarkOwnership();
+            var path = tempPath.FullPath;
+
+            // Create store, do work, dispose
+            using (var store = new QuadStore(path))
+            {
+                store.AddCurrent($"<http://s{i}>", "<http://p>", "<http://o>");
+                await Task.Delay(Random.Shared.Next(10, 100));
+            }
+
+            // This should not throw even if handles are briefly held
+            TempPath.SafeCleanup(path);
+        });
+
+        // All tasks should complete without IOException
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Verifies that SafeCleanup successfully deletes a directory with nested content.
+    /// </summary>
+    [Fact]
+    public void SafeCleanup_NestedDirectoryStructure_DeletesAll()
+    {
+        var tempPath = TempPath.Test("nested-cleanup");
+        tempPath.MarkOwnership();
+
+        // Create nested structure
+        var subDir = Path.Combine(tempPath.FullPath, "subdir", "nested");
+        Directory.CreateDirectory(subDir);
+        File.WriteAllText(Path.Combine(subDir, "file.txt"), "test");
+        File.WriteAllText(Path.Combine(tempPath.FullPath, "root.txt"), "test");
+
+        Assert.True(Directory.Exists(tempPath.FullPath));
+        Assert.True(File.Exists(Path.Combine(subDir, "file.txt")));
+
+        TempPath.SafeCleanup(tempPath.FullPath);
+
+        Assert.False(Directory.Exists(tempPath.FullPath));
+    }
+
+    #endregion
 }

@@ -34,8 +34,7 @@ public class SparqlStarTests : IDisposable
     public void Dispose()
     {
         _store.Dispose();
-        if (Directory.Exists(_tempDir))
-            Directory.Delete(_tempDir, true);
+        TempPath.SafeCleanup(_tempDir);
     }
 
     private async Task ParseTurtleIntoStore(string turtle)

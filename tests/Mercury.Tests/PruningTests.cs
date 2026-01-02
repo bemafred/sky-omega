@@ -1,5 +1,6 @@
 using SkyOmega.Mercury.Pruning;
 using SkyOmega.Mercury.Pruning.Filters;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
 
@@ -14,8 +15,13 @@ public class PruningTests : IDisposable
 
     public PruningTests()
     {
-        _sourceDir = Path.Combine(Path.GetTempPath(), $"mercury_prune_src_{Guid.NewGuid():N}");
-        _targetDir = Path.Combine(Path.GetTempPath(), $"mercury_prune_tgt_{Guid.NewGuid():N}");
+        var sourcePath = TempPath.Test("prune_src");
+        sourcePath.MarkOwnership();
+        _sourceDir = sourcePath;
+
+        var targetPath = TempPath.Test("prune_tgt");
+        targetPath.MarkOwnership();
+        _targetDir = targetPath;
     }
 
     public void Dispose()
@@ -23,10 +29,8 @@ public class PruningTests : IDisposable
         _source?.Dispose();
         _target?.Dispose();
 
-        if (Directory.Exists(_sourceDir))
-            Directory.Delete(_sourceDir, recursive: true);
-        if (Directory.Exists(_targetDir))
-            Directory.Delete(_targetDir, recursive: true);
+        TempPath.SafeCleanup(_sourceDir);
+        TempPath.SafeCleanup(_targetDir);
     }
 
     private void CreateStores()

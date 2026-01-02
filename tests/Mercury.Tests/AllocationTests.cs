@@ -150,8 +150,7 @@ public class AllocationTests
         }
         finally
         {
-            if (Directory.Exists(dbPath))
-                Directory.Delete(dbPath, true);
+            TempPath.SafeCleanup(dbPath);
         }
     }
 

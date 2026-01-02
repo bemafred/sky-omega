@@ -28,8 +28,7 @@ public class AtomStoreTests : IDisposable
     public void Dispose()
     {
         _store?.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, recursive: true);
+        TempPath.SafeCleanup(_testDir);
     }
 
     private AtomStore CreateStore()

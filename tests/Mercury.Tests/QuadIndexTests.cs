@@ -26,8 +26,7 @@ public class QuadIndexTests : IDisposable
     public void Dispose()
     {
         _index?.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, recursive: true);
+        TempPath.SafeCleanup(_testDir);
     }
 
     private QuadIndex CreateIndex()

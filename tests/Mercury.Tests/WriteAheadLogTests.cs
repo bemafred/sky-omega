@@ -26,8 +26,7 @@ public class WriteAheadLogTests : IDisposable
     public void Dispose()
     {
         _wal?.Dispose();
-        if (Directory.Exists(_testDir))
-            Directory.Delete(_testDir, recursive: true);
+        TempPath.SafeCleanup(_testDir);
     }
 
     private WriteAheadLog CreateWal(long sizeThreshold = 16 * 1024 * 1024, int timeSeconds = 60)

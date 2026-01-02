@@ -29,8 +29,7 @@ public class QuadStoreTests : IDisposable
 
     private void CleanupDirectory()
     {
-        if (Directory.Exists(_testPath))
-            Directory.Delete(_testPath, true);
+        TempPath.SafeCleanup(_testPath);
     }
 
     private QuadStore CreateStore()

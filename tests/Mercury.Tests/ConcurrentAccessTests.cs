@@ -30,8 +30,7 @@ public class ConcurrentAccessTests : IDisposable
     public void Dispose()
     {
         _store?.Dispose();
-        if (Directory.Exists(_testPath))
-            Directory.Delete(_testPath, true);
+        TempPath.SafeCleanup(_testPath);
     }
 
     private QuadStore CreateStore()

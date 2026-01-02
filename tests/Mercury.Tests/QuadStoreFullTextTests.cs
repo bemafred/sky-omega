@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using Xunit;
+using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Tests;
@@ -14,21 +15,14 @@ public class QuadStoreFullTextTests : IDisposable
 
     public QuadStoreFullTextTests()
     {
-        _testDir = Path.Combine(Path.GetTempPath(), $"QuadStoreFTS_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(_testDir);
+        var tempPath = TempPath.Test("quadstore-fts");
+        tempPath.MarkOwnership();
+        _testDir = tempPath;
     }
 
     public void Dispose()
     {
-        try
-        {
-            if (Directory.Exists(_testDir))
-                Directory.Delete(_testDir, recursive: true);
-        }
-        catch
-        {
-            // Ignore cleanup errors in tests
-        }
+        TempPath.SafeCleanup(_testDir);
     }
 
     private StorageOptions FullTextOptions => new() { EnableFullTextSearch = true };

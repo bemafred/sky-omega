@@ -43,10 +43,7 @@ public class SparqlHttpServerTests : IDisposable
     public void Dispose()
     {
         _store.Dispose();
-        if (Directory.Exists(_testDir))
-        {
-            Directory.Delete(_testDir, recursive: true);
-        }
+        TempPath.SafeCleanup(_testDir);
     }
 
     private bool TryStartServer(out SparqlHttpServer server, SparqlHttpServerOptions? options = null)
