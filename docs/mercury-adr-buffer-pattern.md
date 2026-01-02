@@ -138,3 +138,80 @@ The `[MethodImpl(NoInlining)]` attribute prevents the compiler from merging stac
 - Stack overflow eliminated for all query types
 - Clear architectural boundary: stack vs heap by query complexity
 - Consistent pattern across all complex query paths
+
+## Heap Allocation Analysis
+
+### What Allocates on Heap
+
+Query execution has several unavoidable heap allocations:
+
+| Category | Types | When |
+|----------|-------|------|
+| Result materialization | `MaterializedRow`, `List<MaterializedRow>` | ORDER BY, GROUP BY, SERVICE, subqueries |
+| Deduplication | `HashSet<int>` | DISTINCT modifier |
+| Aggregation | `Dictionary<string, GroupedRow>` | GROUP BY with aggregates |
+| String functions | String results | CONCAT, BNODE, UUID, UCASE, LCASE, hashes |
+| Property paths | `HashSet<string>`, `Queue<string>` | Transitive path traversal |
+| Regex filters | `Regex` objects | REGEX(), REPLACE() functions |
+
+### Why This Is Acceptable
+
+**1. Relative Scale**
+
+The heap allocations are negligible compared to MMF-backed storage:
+
+| Component | Size | Location |
+|-----------|------|----------|
+| QuadStore (10M triples) | 1-2 GB | Memory-mapped files |
+| AtomStore | 100s MB | Memory-mapped files |
+| TrigramIndex | 10s MB | Memory-mapped files |
+| Query results (10K rows) | ~2 MB | Heap (Gen0) |
+| DISTINCT HashSet | ~40 KB | Heap (Gen0) |
+
+Query allocations are typically <0.1% of data footprint.
+
+**2. Allocation Characteristics**
+
+- **Small objects**: MaterializedRow ~100-200 bytes each
+- **Short-lived**: Created during query, discarded after results consumed
+- **Gen0 collection**: Sub-millisecond cleanup
+- **Bounded**: Proportional to result set size, not data size
+
+**3. Critical Paths Are Zero-GC**
+
+The truly hot inner loops remain allocation-free:
+
+- `QuadIndex` B+Tree traversal (ref struct enumerators)
+- `AtomStore` string lookup (memory-mapped, no copies)
+- `SparqlParser` query parsing (ref struct, span-based)
+- `BindingTable` variable binding (caller-provided storage)
+
+Heap allocations occur at result materialization boundaries, not per-index-lookup.
+
+### GC Strategy
+
+Force GC at natural pause points when latency isn't critical:
+
+```csharp
+// After query completion
+GC.Collect(0, GCCollectionMode.Optimized, false);
+
+// During idle periods or after batch operations
+GC.Collect(1, GCCollectionMode.Optimized, true);
+```
+
+Recommended trigger points:
+- After `QueryResults.Dispose()` for large result sets
+- After batch SPARQL UPDATE completion
+- After HTTP response sent (in SparqlHttpServer)
+- During checkpoint operations (already a pause point)
+
+### Conclusion
+
+The materialization pattern introduces controlled heap allocation that:
+- Solves stack overflow for complex queries
+- Has negligible memory impact vs MMF-backed data
+- Uses short-lived Gen0 objects with fast collection
+- Preserves zero-GC guarantees for critical index operations
+
+No further optimization needed. The Regex caching for repeated FILTER patterns would be a minor improvement but is not critical.
