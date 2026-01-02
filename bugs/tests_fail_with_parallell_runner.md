@@ -1,4 +1,4 @@
-# Tests fail with parallel test runner due to file access conflict
+# Tests fail with parallell test runner due to file access conflict
 
 There are extensive tests in this solution and the test runner in Rider and Claude Code works fine but here, in Visual Studio, with ncrunch running in parallell, we get this error, do you very best, how do we fix it?
 System.IO.IOException: The process cannot access the file 'atoms.atoms' because it is being used by another process. at System.IO.FileSystem.RemoveDirectoryRecursive(String fullPath, WIN32_FIND_DATA& findData, Boolean topLevel) at System.IO.Directory.Delete(String path, Boolean recursive) at SkyOmega.Mercury.Tests.AllocationTests.QuadStore_QueryIteration_ZeroAllocations() in C:\Users\marfr175\source\repos\sky-omega\tests\Mercury.Tests\AllocationTests.cs:line 154 at System.RuntimeMethodHandle.InvokeMethod(ObjectHandleOnStack target, Void** arguments, ObjectHandleOnStack sig, BOOL isConstructor, ObjectHandleOnStack result) at System.Reflection.MethodBaseInvoker.InterpretedInvoke_Method(Object obj, IntPtr* args) at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
