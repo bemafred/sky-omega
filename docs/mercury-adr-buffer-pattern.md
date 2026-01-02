@@ -1,0 +1,140 @@
+# ADR: Buffer Pattern for Stack Safety
+
+## Status
+
+Accepted
+
+## Context
+
+Mercury uses large ref structs for zero-GC query execution:
+
+- `QueryResults` ~22KB (contains multiple scan types, binding tables)
+- `GraphPattern` ~4KB (inline storage for 32 patterns, filters)
+- `MultiPatternScan` ~1.2KB (12 TemporalResultEnumerator structs)
+
+These ref structs are designed for stack allocation to avoid GC pressure. However, complex query paths create deep call chains where nested return values exceed the 1MB default stack limit:
+
+```
+Execute()
+  → allocates 22KB for QueryResults return value
+  → ExecuteWithService()
+      → allocates local variables
+      → Internal methods create scan structs
+```
+
+This causes stack overflow in SERVICE+local pattern joins, deeply nested subqueries, and queries combining GROUP BY + ORDER BY + DISTINCT.
+
+## Options Considered
+
+### Option 1: Make ref structs classes
+
+Convert QueryResults to a class for heap allocation.
+
+**Drawbacks:**
+- Breaks zero-GC design for all queries, not just complex ones
+- Every query would allocate on heap
+- Violates the core performance principle
+
+### Option 2: Union structs with StructLayout
+
+Use `[StructLayout(LayoutKind.Explicit)]` to overlay scan types since only one is active at a time.
+
+**Drawbacks:**
+- Complex unsafe code
+- Harder to maintain
+- Potential for subtle bugs with overlapping memory
+
+### Option 3: QueryBuffer + Materialization pattern
+
+Keep ref structs for simple queries (zero-GC). For complex query paths, materialize results to `List<MaterializedRow>` early, returning only the heap pointer through the call chain.
+
+**Benefits:**
+- Zero-GC preserved for simple queries (majority of use cases)
+- Heap allocation only when necessary
+- Well-understood pattern (already used for ORDER BY, GROUP BY)
+- Clean separation: simple = stack, complex = heap
+
+## Decision
+
+**Option 3: QueryBuffer + Materialization pattern**
+
+## Implementation
+
+The pattern has three main components:
+
+### 1. IBufferManager Interface
+
+Unified buffer allocation via `ArrayPool<T>`:
+
+```csharp
+public interface IBufferManager
+{
+    BufferLease<T> Rent<T>(int minimumLength) where T : unmanaged;
+    void Return<T>(T[]? buffer, bool clearArray = false) where T : unmanaged;
+}
+```
+
+Default: `PooledBufferManager.Shared` singleton.
+
+### 2. BufferLease<T> - RAII Wrapper
+
+```csharp
+public ref struct BufferLease<T> where T : unmanaged
+{
+    private readonly IBufferManager? _manager;
+    private T[]? _array;
+
+    public Span<T> Span => _array.AsSpan();
+
+    public void Dispose() => _manager?.Return(_array);
+}
+```
+
+Stack-only lifetime, automatic return via Dispose pattern.
+
+### 3. QueryBuffer - Heap-Based Pattern Storage
+
+Replaces large inline `Query` struct (~9KB) with lightweight wrapper (~100 bytes):
+
+```csharp
+internal sealed class QueryBuffer : IDisposable
+{
+    private byte[]? _buffer;  // Pooled via ArrayPool
+    private int _patternCount;
+}
+```
+
+### 4. Materialization Pattern
+
+For complex query paths, materialize results early:
+
+```csharp
+[MethodImpl(MethodImplOptions.NoInlining)]
+private List<MaterializedRow>? ExecuteWithService()
+{
+    var results = new List<MaterializedRow>();
+    // Execute and populate results
+    return results;  // 8-byte pointer, not 22KB struct
+}
+```
+
+The `[MethodImpl(NoInlining)]` attribute prevents the compiler from merging stack frames, keeping each method's stack allocation isolated.
+
+## Application
+
+| Query Path | Strategy |
+|------------|----------|
+| Simple SELECT | Zero-GC ref structs |
+| ORDER BY | Materialize to List, sort |
+| GROUP BY | Materialize to grouped rows |
+| SERVICE clauses | Materialize results |
+| SERVICE + local joins | Materialize both, join on heap |
+| Nested subqueries | Materialize inner results |
+
+## Consequences
+
+- Zero-GC preserved for simple queries (vast majority)
+- Complex queries allocate on heap via pooled buffers
+- Stack overflow eliminated for all query types
+- Clear architectural boundary: stack vs heap by query complexity
+- Consistent pattern across all complex query paths

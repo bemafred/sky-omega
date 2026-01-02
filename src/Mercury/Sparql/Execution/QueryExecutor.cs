@@ -610,9 +610,18 @@ public class QueryExecutor : IDisposable
         }
 
         // Check for SERVICE clauses - use _buffer
+        // SERVICE execution uses materialization pattern to avoid stack overflow
+        // (see docs/mercury-adr-buffer-pattern.md)
         if (_buffer.HasService)
         {
-            return ExecuteWithService();
+            var serviceResults = ExecuteWithServiceMaterialized();
+            if (serviceResults == null || serviceResults.Count == 0)
+                return QueryResults.Empty();
+
+            var serviceBindings = new Binding[16];
+            return QueryResults.FromMaterializedList(serviceResults, serviceBindings, _stringBuffer,
+                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
+                (_query.SelectClause.Distinct || _query.SelectClause.Reduced));
         }
 
         if (_buffer.TriplePatternCount == 0)
@@ -913,11 +922,12 @@ public class QueryExecutor : IDisposable
 
     /// <summary>
     /// Execute a query with SERVICE clauses (federated queries).
+    /// Returns materialized results to avoid stack overflow from large QueryResults struct.
     /// For queries like: SELECT * WHERE { SERVICE &lt;endpoint&gt; { ?s ?p ?o } }
     /// Also supports: SERVICE SILENT &lt;endpoint&gt; { ... }
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteWithService()
+    private List<MaterializedRow>? ExecuteWithServiceMaterialized()
     {
         if (_serviceExecutor == null)
         {
@@ -956,30 +966,23 @@ public class QueryExecutor : IDisposable
                 serviceScan.Dispose();
             }
 
-            if (results.Count == 0)
-                return QueryResults.Empty();
-
-            return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
-                (_query.SelectClause.Distinct || _query.SelectClause.Reduced));
+            return results;
         }
 
         // Mixed case: SERVICE clause(s) with local patterns
-        // TODO: Fix stack overflow - temporarily returning empty
         if (pattern.PatternCount > 0 && serviceCount == 1)
         {
-            // Temporarily disabled due to stack overflow
-            return QueryResults.Empty();
+            return ExecuteServiceWithLocalPatternsInternal(bindings, stringBuffer);
         }
 
         // Multiple SERVICE clauses - execute sequentially and join
         if (serviceCount > 1)
         {
-            return ExecuteMultipleServices(pattern, bindings, stringBuffer, bindingTable);
+            return ExecuteMultipleServicesMaterialized(pattern, bindings, stringBuffer, bindingTable);
         }
 
         // Fallback for unexpected cases
-        return QueryResults.Empty();
+        return null;
     }
 
     /// <summary>
@@ -1084,10 +1087,11 @@ public class QueryExecutor : IDisposable
 
     /// <summary>
     /// Execute a query with multiple SERVICE clauses.
+    /// Returns materialized results to avoid stack overflow.
     /// Executes each SERVICE sequentially and joins results.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteMultipleServices(
+    private List<MaterializedRow>? ExecuteMultipleServicesMaterialized(
         in GraphPattern pattern,
         Binding[] bindings,
         char[] stringBuffer,
@@ -1123,7 +1127,7 @@ public class QueryExecutor : IDisposable
             }
 
             if (currentResults.Count == 0)
-                return QueryResults.Empty();
+                return null;
         }
 
         // Execute each SERVICE clause, joining with current results
@@ -1180,12 +1184,10 @@ public class QueryExecutor : IDisposable
             }
 
             if (currentResults.Count == 0)
-                return QueryResults.Empty();
+                return null;
         }
 
-        return QueryResults.FromMaterializedList(currentResults!, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
-            (_query.SelectClause.Distinct || _query.SelectClause.Reduced));
+        return currentResults;
     }
 
     /// <summary>

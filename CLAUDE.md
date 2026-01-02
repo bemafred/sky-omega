@@ -218,6 +218,8 @@ Zero-GC means **no uncontrolled allocations**, not "avoid heap entirely". Pooled
 
 Implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/PatternSlot.cs`) - a 64-byte cache-aligned slot with discriminator byte and typed views over raw bytes.
 
+**Stack safety for large ref structs:** Large ref structs like `QueryResults` (~22KB) can cause stack overflow in complex query paths. The solution is to materialize results to heap (`List<MaterializedRow>`) early, returning only the pointer through the call chain. See [ADR: Buffer Pattern for Stack Safety](docs/mercury-adr-buffer-pattern.md) for details.
+
 **Critical patterns:**
 
 1. **Parser callback API (zero-GC)** - spans valid only during callback:

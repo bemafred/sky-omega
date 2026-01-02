@@ -2237,28 +2237,52 @@ internal ref struct ServiceScan
             return false;
         }
 
-        if (_results == null || _resultIndex >= _results.Count)
+        // Loop to find a row that joins with incoming bindings
+        while (_results != null && _resultIndex < _results.Count)
         {
-            _exhausted = true;
-            return false;
+            // Clear bindings added by previous iteration, preserve incoming
+            bindings.TruncateTo(_incomingBindingsCount);
+
+            var row = _results[_resultIndex++];
+            bool compatible = true;
+
+            // Bind variables from current result row, checking for conflicts
+            foreach (var varName in row.Variables)
+            {
+                var binding = row.GetBinding(varName);
+                var rdfTerm = binding.ToRdfTerm();
+
+                // Add ? prefix to match SPARQL variable naming
+                var fullVarName = $"?{varName}";
+                var fullVarSpan = fullVarName.AsSpan();
+
+                // Check if variable is already bound (join condition)
+                var existingIdx = bindings.FindBinding(fullVarSpan);
+                if (existingIdx >= 0)
+                {
+                    // Variable already bound - check if values match
+                    var existingValue = bindings.GetString(existingIdx);
+                    if (!existingValue.SequenceEqual(rdfTerm.AsSpan()))
+                    {
+                        // Values don't match - skip this row
+                        compatible = false;
+                        break;
+                    }
+                    // Values match - no need to re-bind
+                }
+                else
+                {
+                    // Variable not yet bound - add it
+                    bindings.Bind(fullVarSpan, rdfTerm.AsSpan());
+                }
+            }
+
+            if (compatible)
+                return true;
         }
 
-        // Clear bindings added by previous iteration, preserve incoming
-        bindings.TruncateTo(_incomingBindingsCount);
-
-        // Bind variables from current result row
-        var row = _results[_resultIndex++];
-        foreach (var varName in row.Variables)
-        {
-            var binding = row.GetBinding(varName);
-            var rdfTerm = binding.ToRdfTerm();
-
-            // Add ? prefix to match SPARQL variable naming
-            var fullVarName = $"?{varName}";
-            bindings.Bind(fullVarName.AsSpan(), rdfTerm.AsSpan());
-        }
-
-        return true;
+        _exhausted = true;
+        return false;
     }
 
     private void Initialize()
@@ -2384,9 +2408,8 @@ internal ref struct ServiceScan
     }
 }
 
-// NOTE: ServiceJoinScan operator was removed due to stack overflow issues.
-// The QueryResults ref struct (~10KB) combined with the large GraphPattern (~4KB)
-// and MultiPatternScan (12 TemporalResultEnumerator structs) exceeds the 1MB stack
-// limit. SERVICE+local pattern joins need a fundamental architecture change:
-// either making QueryResults heap-allocated or reducing the size of ref structs.
-// See tests/Mercury.Tests/QueryExecutorTests.cs for skipped SERVICE+local tests.
+// NOTE: ServiceJoinScan operator was replaced with materialization pattern.
+// The QueryResults ref struct (~22KB) combined with large GraphPattern (~4KB) can
+// exceed stack limits in complex query paths. The fix is to materialize SERVICE
+// results to List<MaterializedRow> early, returning only heap pointers through the
+// call chain. See docs/mercury-adr-buffer-pattern.md for the pattern details.

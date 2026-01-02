@@ -4938,7 +4938,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    [Fact]
     public void Execute_ServiceWithLocalPatterns_JoinsResults()
     {
         // Add local data
@@ -4962,13 +4962,15 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount); // 1 SERVICE
 
         // Create mock executor that returns data for person1 only
+        // Note: Mock values are raw (no angle brackets for URIs, no quotes for literals)
+        // because ToRdfTerm() adds the RDF syntax
         var mockExecutor = new MockSparqlServiceExecutor();
         mockExecutor.AddResult("http://remote.example.org/sparql", new[]
         {
             new Dictionary<string, (string value, ServiceBindingType type)>
             {
-                ["s"] = ("<http://local/person1>", ServiceBindingType.Uri),
-                ["remoteData"] = ("\"Remote data for Alice\"", ServiceBindingType.Literal)
+                ["s"] = ("http://local/person1", ServiceBindingType.Uri),
+                ["remoteData"] = ("Remote data for Alice", ServiceBindingType.Literal)
             }
         });
 
@@ -5009,7 +5011,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    [Fact]
     public void Execute_ServiceWithLocalPatterns_MultipleLocalResults()
     {
         // Add local data with multiple results
@@ -5029,18 +5031,20 @@ public class QueryExecutorTests : IDisposable
         var parsedQuery = parser.ParseQuery();
 
         // Mock executor returns prices for items 1 and 3 (not 2)
+        // Note: Mock values are raw (no angle brackets for URIs, no quotes for literals)
+        // because ToRdfTerm() adds the RDF syntax
         var mockExecutor = new MockSparqlServiceExecutor();
         mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
         {
             new Dictionary<string, (string value, ServiceBindingType type)>
             {
-                ["item"] = ("<http://local/item1>", ServiceBindingType.Uri),
-                ["price"] = ("\"9.99\"", ServiceBindingType.Literal)
+                ["item"] = ("http://local/item1", ServiceBindingType.Uri),
+                ["price"] = ("9.99", ServiceBindingType.Literal)
             },
             new Dictionary<string, (string value, ServiceBindingType type)>
             {
-                ["item"] = ("<http://local/item3>", ServiceBindingType.Uri),
-                ["price"] = ("\"19.99\"", ServiceBindingType.Literal)
+                ["item"] = ("http://local/item3", ServiceBindingType.Uri),
+                ["price"] = ("19.99", ServiceBindingType.Literal)
             }
         });
 
@@ -5066,7 +5070,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    [Fact]
     public void Execute_MultipleServiceClauses_JoinsAllResults()
     {
         var query = @"SELECT ?s ?data1 ?data2 WHERE {
@@ -5082,6 +5086,8 @@ public class QueryExecutorTests : IDisposable
 
         Assert.Equal(2, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
 
+        // Note: Mock values are raw (no angle brackets for URIs, no quotes for literals)
+        // because ToRdfTerm() adds the RDF syntax
         var mockExecutor = new MockSparqlServiceExecutor();
 
         // First SERVICE returns data for items A and B
@@ -5089,13 +5095,13 @@ public class QueryExecutorTests : IDisposable
         {
             new Dictionary<string, (string value, ServiceBindingType type)>
             {
-                ["s"] = ("<http://ex.org/itemA>", ServiceBindingType.Uri),
-                ["data1"] = ("\"Data1-A\"", ServiceBindingType.Literal)
+                ["s"] = ("http://ex.org/itemA", ServiceBindingType.Uri),
+                ["data1"] = ("Data1-A", ServiceBindingType.Literal)
             },
             new Dictionary<string, (string value, ServiceBindingType type)>
             {
-                ["s"] = ("<http://ex.org/itemB>", ServiceBindingType.Uri),
-                ["data1"] = ("\"Data1-B\"", ServiceBindingType.Literal)
+                ["s"] = ("http://ex.org/itemB", ServiceBindingType.Uri),
+                ["data1"] = ("Data1-B", ServiceBindingType.Literal)
             }
         });
 
@@ -5104,8 +5110,8 @@ public class QueryExecutorTests : IDisposable
         {
             new Dictionary<string, (string value, ServiceBindingType type)>
             {
-                ["s"] = ("<http://ex.org/itemA>", ServiceBindingType.Uri),
-                ["data2"] = ("\"Data2-A\"", ServiceBindingType.Literal)
+                ["s"] = ("http://ex.org/itemA", ServiceBindingType.Uri),
+                ["data2"] = ("Data2-A", ServiceBindingType.Literal)
             }
         });
 
@@ -5133,7 +5139,7 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    [Fact]
     public void Execute_ServiceWithLocalPatterns_Silent_HandlesErrors()
     {
         // Add local data
