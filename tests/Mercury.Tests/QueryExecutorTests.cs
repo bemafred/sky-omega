@@ -5553,6 +5553,124 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(TermType.Iri, endpoint.Type);
     }
 
+    [Fact]
+    public void Parse_OptionalServiceWithFilter_ParsesFilterCorrectly()
+    {
+        // Test OPTIONAL { SERVICE ... FILTER(...) } - FILTER inside OPTIONAL SERVICE block
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            OPTIONAL {
+                SERVICE <http://pricing.example.org/sparql> {
+                    ?item <http://ex.org/price> ?price
+                    FILTER(?price > 10)
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify OPTIONAL SERVICE was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
+        Assert.True(parsedQuery.WhereClause.Pattern.GetServiceClause(0).IsOptional);
+
+        // Verify FILTER was parsed (added to parent pattern)
+        Assert.True(parsedQuery.WhereClause.Pattern.FilterCount > 0);
+    }
+
+    [Fact]
+    public void Parse_OptionalServiceWithVariableEndpoint_ParsesCorrectly()
+    {
+        // Test OPTIONAL { SERVICE ?endpoint { ... } } - variable endpoint inside OPTIONAL
+        var query = @"SELECT ?item ?price ?endpoint WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            ?item <http://ex.org/priceService> ?endpoint .
+            OPTIONAL {
+                SERVICE ?endpoint {
+                    ?item <http://ex.org/price> ?price
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify OPTIONAL SERVICE was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.ServiceClauseCount > 0);
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.True(serviceClause.IsOptional);
+
+        // Verify endpoint is a variable
+        Assert.Equal(TermType.Variable, serviceClause.Endpoint.Type);
+    }
+
+    [Fact]
+    public void Execute_OptionalServiceWithMultiplePatterns_JoinsAllPatterns()
+    {
+        // Test OPTIONAL SERVICE with multiple patterns inside
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.CommitBatch();
+
+        var query = @"SELECT ?item ?price ?currency WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            OPTIONAL {
+                SERVICE <http://pricing.example.org/sparql> {
+                    ?item <http://ex.org/price> ?price .
+                    ?item <http://ex.org/currency> ?currency
+                }
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify SERVICE has multiple patterns
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.True(serviceClause.IsOptional);
+        Assert.Equal(2, serviceClause.PatternCount);
+
+        // Mock executor returns price and currency for item1 only
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item1", ServiceBindingType.Uri),
+                ["price"] = ("29.99", ServiceBindingType.Literal),
+                ["currency"] = ("USD", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, bool hasPrice, bool hasCurrency)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+                var currencyIdx = results.Current.FindBinding("?currency".AsSpan());
+
+                Assert.True(itemIdx >= 0);
+
+                var item = results.Current.GetString(itemIdx).ToString();
+                resultList.Add((item, priceIdx >= 0, currencyIdx >= 0));
+            }
+            results.Dispose();
+
+            // Should get 2 results: item1 with price+currency, item2 without (preserved by OPTIONAL)
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item1>" && r.hasPrice && r.hasCurrency);
+            Assert.Contains(resultList, r => r.item == "<http://local/item2>" && !r.hasPrice && !r.hasCurrency);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 
     #region Property Path Sequence Tests
