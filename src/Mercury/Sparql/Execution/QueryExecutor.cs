@@ -1031,6 +1031,7 @@ public class QueryExecutor : IDisposable
     /// <summary>
     /// Phase 1: Execute local patterns and return materialized results.
     /// Supports single or multiple local patterns via TriplePatternScan or MultiPatternScan.
+    /// Uses filter pushdown for multi-pattern queries to evaluate filters early.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteLocalPatternsPhase(in GraphPattern pattern, BindingTable bindingTable)
@@ -1058,6 +1059,12 @@ public class QueryExecutor : IDisposable
                 while (scan.MoveNext(ref bindingTable))
                 {
                     ThrowIfCancellationRequested();
+                    // Apply filters for single pattern case
+                    if (!PassesFilters(in pattern, ref bindingTable))
+                    {
+                        bindingTable.TruncateTo(incomingBindingCount);
+                        continue;
+                    }
                     results.Add(new MaterializedRow(bindingTable));
                     bindingTable.TruncateTo(incomingBindingCount);
                 }
@@ -1069,17 +1076,25 @@ public class QueryExecutor : IDisposable
         }
         else
         {
-            // Multiple patterns - use MultiPatternScan for join
+            // Multiple patterns - use MultiPatternScan with filter pushdown
+            // Analyze filters for pushdown optimization
+            var levelFilters = pattern.FilterCount > 0
+                ? FilterAnalyzer.BuildLevelFilters(in pattern, _source, requiredCount, null)
+                : null;
+            var unpushableFilters = levelFilters != null
+                ? FilterAnalyzer.GetUnpushableFilters(in pattern, _source, null)
+                : null;
+
             var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters);
 
             try
             {
                 while (multiScan.MoveNext(ref bindingTable))
                 {
                     ThrowIfCancellationRequested();
-                    // Apply filters if any
-                    if (!PassesFilters(in pattern, ref bindingTable))
+                    // Only evaluate unpushable filters - pushed ones were checked in MoveNext
+                    if (!PassesUnpushableFilters(in pattern, ref bindingTable, unpushableFilters))
                     {
                         bindingTable.TruncateTo(incomingBindingCount);
                         continue;
@@ -1179,6 +1194,7 @@ public class QueryExecutor : IDisposable
     /// Local join phase: For each SERVICE result, execute local patterns and join.
     /// Used when QueryPlanner determines SERVICE is more selective than local patterns.
     /// Supports single or multiple local patterns via TriplePatternScan or MultiPatternScan.
+    /// Uses filter pushdown for multi-pattern queries to evaluate filters early.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteLocalJoinPhase(
@@ -1191,6 +1207,15 @@ public class QueryExecutor : IDisposable
 
         if (requiredCount == 0)
             return finalResults;
+
+        // Compute filter pushdown once before the loop (for multi-pattern case)
+        List<int>[]? levelFilters = null;
+        List<int>? unpushableFilters = null;
+        if (requiredCount > 1 && pattern.FilterCount > 0)
+        {
+            levelFilters = FilterAnalyzer.BuildLevelFilters(in pattern, _source, requiredCount, null);
+            unpushableFilters = FilterAnalyzer.GetUnpushableFilters(in pattern, _source, null);
+        }
 
         foreach (var serviceRow in serviceResults)
         {
@@ -1216,6 +1241,12 @@ public class QueryExecutor : IDisposable
                     while (scan.MoveNext(ref bindingTable))
                     {
                         ThrowIfCancellationRequested();
+                        // Apply filters for single pattern case
+                        if (!PassesFilters(in pattern, ref bindingTable))
+                        {
+                            bindingTable.TruncateTo(bindingCountAfterRestore);
+                            continue;
+                        }
                         finalResults.Add(new MaterializedRow(bindingTable));
                         bindingTable.TruncateTo(bindingCountAfterRestore);
                     }
@@ -1227,16 +1258,16 @@ public class QueryExecutor : IDisposable
             }
             else
             {
-                // Multiple patterns - use MultiPatternScan for join
+                // Multiple patterns - use MultiPatternScan with filter pushdown
                 var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters);
                 try
                 {
                     while (multiScan.MoveNext(ref bindingTable))
                     {
                         ThrowIfCancellationRequested();
-                        // Apply filters if any
-                        if (!PassesFilters(in pattern, ref bindingTable))
+                        // Only evaluate unpushable filters - pushed ones were checked in MoveNext
+                        if (!PassesUnpushableFilters(in pattern, ref bindingTable, unpushableFilters))
                         {
                             bindingTable.TruncateTo(bindingCountAfterRestore);
                             continue;
