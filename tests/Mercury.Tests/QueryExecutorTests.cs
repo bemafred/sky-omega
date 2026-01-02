@@ -5263,6 +5263,162 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Execute_ServiceWithMultipleLocalPatterns_JoinsResults()
+    {
+        // Test SERVICE+local join with MULTIPLE local patterns (uses MultiPatternScan)
+        // Query has a chain of local patterns that must be joined before SERVICE
+        _store.BeginBatch();
+        // item1 is a Widget in Electronics category
+        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/category>", "<http://ex.org/Electronics>");
+        // item2 is a Widget in Home category
+        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/category>", "<http://ex.org/Home>");
+        // item3 is a Gadget (not Widget) in Electronics - won't match
+        _store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/type>", "<http://ex.org/Gadget>");
+        _store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/category>", "<http://ex.org/Electronics>");
+        _store.CommitBatch();
+
+        // Query with TWO local patterns joined, then SERVICE
+        var query = @"SELECT ?item ?cat ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            ?item <http://ex.org/category> ?cat .
+            SERVICE <http://pricing.example.org/sparql> {
+                ?item <http://ex.org/price> ?price
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify we have 2 local patterns
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
+
+        // Mock executor returns prices for item1 only
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item1", ServiceBindingType.Uri),
+                ["price"] = ("99.99", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, string cat, string price)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var catIdx = results.Current.FindBinding("?cat".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+
+                Assert.True(itemIdx >= 0, "item binding not found");
+                Assert.True(catIdx >= 0, "cat binding not found");
+                Assert.True(priceIdx >= 0, "price binding not found");
+
+                resultList.Add((
+                    results.Current.GetString(itemIdx).ToString(),
+                    results.Current.GetString(catIdx).ToString(),
+                    results.Current.GetString(priceIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get 1 result: item1 (Widget in Electronics with price from SERVICE)
+            Assert.Single(resultList);
+            Assert.Equal("<http://local/item1>", resultList[0].item);
+            Assert.Equal("<http://ex.org/Electronics>", resultList[0].cat);
+            Assert.Equal("\"99.99\"", resultList[0].price);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ServiceWithMultipleLocalPatterns_ServiceFirstStrategy()
+    {
+        // Test SERVICE-first strategy with multiple local patterns
+        // When SERVICE is more selective, execute it first then join with local patterns
+        _store.BeginBatch();
+        // Create many items to make local patterns less selective
+        for (int i = 0; i < 50; i++)
+        {
+            _store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+            _store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/inStock>", "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>");
+        }
+        _store.CommitBatch();
+
+        // Query with TWO local patterns, SERVICE should be more selective
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            ?item <http://ex.org/inStock> ?stock .
+            SERVICE <http://pricing.example.org/sparql> {
+                ?item <http://ex.org/price> ?price
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Mock executor returns prices for only 2 specific items
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item10", ServiceBindingType.Uri),
+                ["price"] = ("29.99", ServiceBindingType.Literal)
+            },
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item25", ServiceBindingType.Uri),
+                ["price"] = ("49.99", ServiceBindingType.Literal)
+            }
+        });
+
+        var planner = new QueryPlanner(_store.Statistics, _store.Atoms);
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor, planner);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, string price)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+
+                Assert.True(itemIdx >= 0);
+                Assert.True(priceIdx >= 0);
+
+                resultList.Add((
+                    results.Current.GetString(itemIdx).ToString(),
+                    results.Current.GetString(priceIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get 2 results (items 10 and 25 that match both local patterns and SERVICE)
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item10>" && r.price == "\"29.99\"");
+            Assert.Contains(resultList, r => r.item == "<http://local/item25>" && r.price == "\"49.99\"");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 
     #region Property Path Sequence Tests

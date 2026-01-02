@@ -997,11 +997,13 @@ public class QueryExecutor : IDisposable
         // Create BindingTable locally - this method runs on thread pool thread with fresh stack
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
+        // Access pattern via ref to avoid copying large struct
+        ref readonly var pattern = ref _query.WhereClause.Pattern;
+
         // Determine optimal strategy using QueryPlanner
         bool useLocalFirst = true; // Default to local-first
-        if (_planner != null && _cachedFirstPattern.HasValue && _cachedFirstServiceClause.HasValue)
+        if (_planner != null && _cachedFirstServiceClause.HasValue)
         {
-            ref readonly var pattern = ref _query.WhereClause.Pattern;
             useLocalFirst = _planner.ShouldUseLocalFirstStrategy(
                 in pattern,
                 _cachedFirstServiceClause.Value,
@@ -1011,7 +1013,7 @@ public class QueryExecutor : IDisposable
         if (useLocalFirst)
         {
             // Local-first: Execute local patterns, then SERVICE for each result
-            var localResults = ExecuteLocalPatternsPhase(bindingTable);
+            var localResults = ExecuteLocalPatternsPhase(in pattern, bindingTable);
             if (localResults.Count == 0)
                 return new List<MaterializedRow>();
             return ExecuteServiceJoinPhase(localResults, bindingTable);
@@ -1022,41 +1024,74 @@ public class QueryExecutor : IDisposable
             var serviceResults = ExecuteServiceFirstPhase(bindingTable);
             if (serviceResults.Count == 0)
                 return new List<MaterializedRow>();
-            return ExecuteLocalJoinPhase(serviceResults, bindingTable);
+            return ExecuteLocalJoinPhase(in pattern, serviceResults, bindingTable);
         }
     }
 
     /// <summary>
     /// Phase 1: Execute local patterns and return materialized results.
-    /// Uses cached pattern to avoid accessing large GraphPattern struct from stack.
+    /// Supports single or multiple local patterns via TriplePatternScan or MultiPatternScan.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private List<MaterializedRow> ExecuteLocalPatternsPhase(BindingTable bindingTable)
+    private List<MaterializedRow> ExecuteLocalPatternsPhase(in GraphPattern pattern, BindingTable bindingTable)
     {
         var results = new List<MaterializedRow>();
         var incomingBindingCount = bindingTable.Count;
+        var requiredCount = pattern.RequiredPatternCount;
 
-        // Use cached pattern (on heap) instead of accessing GraphPattern
-        if (!_cachedFirstPattern.HasValue)
+        if (requiredCount == 0)
             return results;
 
-        var triplePattern = _cachedFirstPattern.Value;
-
-        var scan = new TriplePatternScan(_store, _source, triplePattern, bindingTable, default,
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
-
-        try
+        if (requiredCount == 1)
         {
-            while (scan.MoveNext(ref bindingTable))
+            // Single pattern - use TriplePatternScan
+            // Use cached pattern (on heap) for single-pattern case
+            if (!_cachedFirstPattern.HasValue)
+                return results;
+
+            var triplePattern = _cachedFirstPattern.Value;
+            var scan = new TriplePatternScan(_store, _source, triplePattern, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+
+            try
             {
-                ThrowIfCancellationRequested();
-                results.Add(new MaterializedRow(bindingTable));
-                bindingTable.TruncateTo(incomingBindingCount);
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                    bindingTable.TruncateTo(incomingBindingCount);
+                }
+            }
+            finally
+            {
+                scan.Dispose();
             }
         }
-        finally
+        else
         {
-            scan.Dispose();
+            // Multiple patterns - use MultiPatternScan for join
+            var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+
+            try
+            {
+                while (multiScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    // Apply filters if any
+                    if (!PassesFilters(in pattern, ref bindingTable))
+                    {
+                        bindingTable.TruncateTo(incomingBindingCount);
+                        continue;
+                    }
+                    results.Add(new MaterializedRow(bindingTable));
+                    bindingTable.TruncateTo(incomingBindingCount);
+                }
+            }
+            finally
+            {
+                multiScan.Dispose();
+            }
         }
 
         return results;
@@ -1143,19 +1178,19 @@ public class QueryExecutor : IDisposable
     /// <summary>
     /// Local join phase: For each SERVICE result, execute local patterns and join.
     /// Used when QueryPlanner determines SERVICE is more selective than local patterns.
+    /// Supports single or multiple local patterns via TriplePatternScan or MultiPatternScan.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteLocalJoinPhase(
+        in GraphPattern pattern,
         List<MaterializedRow> serviceResults,
         BindingTable bindingTable)
     {
         var finalResults = new List<MaterializedRow>();
+        var requiredCount = pattern.RequiredPatternCount;
 
-        // Use cached pattern (on heap)
-        if (!_cachedFirstPattern.HasValue)
+        if (requiredCount == 0)
             return finalResults;
-
-        var triplePattern = _cachedFirstPattern.Value;
 
         foreach (var serviceRow in serviceResults)
         {
@@ -1166,21 +1201,54 @@ public class QueryExecutor : IDisposable
             serviceRow.RestoreBindings(ref bindingTable);
             var bindingCountAfterRestore = bindingTable.Count;
 
-            // Execute local pattern with these bindings
-            var scan = new TriplePatternScan(_store, _source, triplePattern, bindingTable, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
-            try
+            if (requiredCount == 1)
             {
-                while (scan.MoveNext(ref bindingTable))
+                // Single pattern - use TriplePatternScan
+                // Use cached pattern (on heap) for single-pattern case
+                if (!_cachedFirstPattern.HasValue)
+                    continue;
+
+                var triplePattern = _cachedFirstPattern.Value;
+                var scan = new TriplePatternScan(_store, _source, triplePattern, bindingTable, default,
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                try
                 {
-                    ThrowIfCancellationRequested();
-                    finalResults.Add(new MaterializedRow(bindingTable));
-                    bindingTable.TruncateTo(bindingCountAfterRestore);
+                    while (scan.MoveNext(ref bindingTable))
+                    {
+                        ThrowIfCancellationRequested();
+                        finalResults.Add(new MaterializedRow(bindingTable));
+                        bindingTable.TruncateTo(bindingCountAfterRestore);
+                    }
+                }
+                finally
+                {
+                    scan.Dispose();
                 }
             }
-            finally
+            else
             {
-                scan.Dispose();
+                // Multiple patterns - use MultiPatternScan for join
+                var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                try
+                {
+                    while (multiScan.MoveNext(ref bindingTable))
+                    {
+                        ThrowIfCancellationRequested();
+                        // Apply filters if any
+                        if (!PassesFilters(in pattern, ref bindingTable))
+                        {
+                            bindingTable.TruncateTo(bindingCountAfterRestore);
+                            continue;
+                        }
+                        finalResults.Add(new MaterializedRow(bindingTable));
+                        bindingTable.TruncateTo(bindingCountAfterRestore);
+                    }
+                }
+                finally
+                {
+                    multiScan.Dispose();
+                }
             }
         }
 
