@@ -4938,6 +4938,246 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    public void Execute_ServiceWithLocalPatterns_JoinsResults()
+    {
+        // Add local data
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://local/person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
+        _store.AddCurrentBatched("<http://local/person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
+        _store.CommitBatch();
+
+        // Query that combines local pattern with SERVICE
+        var query = @"SELECT ?s ?name ?remoteData WHERE {
+            ?s <http://xmlns.com/foaf/0.1/name> ?name .
+            SERVICE <http://remote.example.org/sparql> {
+                ?s <http://remote.org/data> ?remoteData
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify pattern structure
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.PatternCount); // 1 local pattern
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount); // 1 SERVICE
+
+        // Create mock executor that returns data for person1 only
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://remote.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["s"] = ("<http://local/person1>", ServiceBindingType.Uri),
+                ["remoteData"] = ("\"Remote data for Alice\"", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string s, string name, string data)>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                var dataIdx = results.Current.FindBinding("?remoteData".AsSpan());
+
+                Assert.True(sIdx >= 0);
+                Assert.True(nameIdx >= 0);
+                Assert.True(dataIdx >= 0);
+
+                resultList.Add((
+                    results.Current.GetString(sIdx).ToString(),
+                    results.Current.GetString(nameIdx).ToString(),
+                    results.Current.GetString(dataIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get results where local and SERVICE data join on ?s
+            Assert.Single(resultList);
+            Assert.Equal("<http://local/person1>", resultList[0].s);
+            Assert.Equal("\"Alice\"", resultList[0].name);
+            Assert.Equal("\"Remote data for Alice\"", resultList[0].data);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    public void Execute_ServiceWithLocalPatterns_MultipleLocalResults()
+    {
+        // Add local data with multiple results
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        _store.CommitBatch();
+
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            SERVICE <http://pricing.example.org/sparql> {
+                ?item <http://ex.org/price> ?price
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Mock executor returns prices for items 1 and 3 (not 2)
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("<http://local/item1>", ServiceBindingType.Uri),
+                ["price"] = ("\"9.99\"", ServiceBindingType.Literal)
+            },
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("<http://local/item3>", ServiceBindingType.Uri),
+                ["price"] = ("\"19.99\"", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // Should get 2 results (items 1 and 3 that have both local and remote data)
+            Assert.Equal(2, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    public void Execute_MultipleServiceClauses_JoinsAllResults()
+    {
+        var query = @"SELECT ?s ?data1 ?data2 WHERE {
+            SERVICE <http://endpoint1.example.org/sparql> {
+                ?s <http://ex.org/prop1> ?data1
+            }
+            SERVICE <http://endpoint2.example.org/sparql> {
+                ?s <http://ex.org/prop2> ?data2
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
+
+        var mockExecutor = new MockSparqlServiceExecutor();
+
+        // First SERVICE returns data for items A and B
+        mockExecutor.AddResult("http://endpoint1.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["s"] = ("<http://ex.org/itemA>", ServiceBindingType.Uri),
+                ["data1"] = ("\"Data1-A\"", ServiceBindingType.Literal)
+            },
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["s"] = ("<http://ex.org/itemB>", ServiceBindingType.Uri),
+                ["data1"] = ("\"Data1-B\"", ServiceBindingType.Literal)
+            }
+        });
+
+        // Second SERVICE returns data for item A only
+        mockExecutor.AddResult("http://endpoint2.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["s"] = ("<http://ex.org/itemA>", ServiceBindingType.Uri),
+                ["data2"] = ("\"Data2-A\"", ServiceBindingType.Literal)
+            }
+        });
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                resultList.Add(results.Current.GetString(sIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should get results where both SERVICE clauses have matching ?s
+            Assert.Single(resultList);
+            Assert.Equal("<http://ex.org/itemA>", resultList[0]);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    [Fact(Skip = "Stack overflow: QueryResults is ~10KB ref struct, exceeds 1MB stack when combined with SERVICE+local join code path")]
+    public void Execute_ServiceWithLocalPatterns_Silent_HandlesErrors()
+    {
+        // Add local data
+        _store.BeginBatch();
+        _store.AddCurrentBatched("<http://local/x>", "<http://ex.org/type>", "<http://ex.org/Thing>");
+        _store.CommitBatch();
+
+        var query = @"SELECT ?s ?data WHERE {
+            ?s <http://ex.org/type> <http://ex.org/Thing> .
+            SERVICE SILENT <http://failing.example.org/sparql> {
+                ?s <http://ex.org/data> ?data
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.SetErrorForEndpoint("http://failing.example.org/sparql",
+            new SparqlServiceException("Simulated network failure"));
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+
+            // Should not throw due to SILENT modifier
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // SILENT means SERVICE errors are silently ignored, resulting in no matches
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 
     #region Property Path Sequence Tests

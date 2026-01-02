@@ -760,6 +760,18 @@ internal sealed class MaterializedRow
         return ReadOnlySpan<char>.Empty;
     }
 
+    /// <summary>
+    /// Restore this row's bindings into a BindingTable.
+    /// Used when re-executing operators with stored results.
+    /// </summary>
+    public void RestoreBindings(ref BindingTable bindings)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            bindings.BindWithHash(_hashes[i], _values[i].AsSpan());
+        }
+    }
+
     private static int ComputeHash(ReadOnlySpan<char> s)
     {
         // FNV-1a hash - must match BindingTable.ComputeHash

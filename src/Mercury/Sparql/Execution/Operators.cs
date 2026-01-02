@@ -2383,3 +2383,10 @@ internal ref struct ServiceScan
         // Nothing to dispose - results are managed by GC
     }
 }
+
+// NOTE: ServiceJoinScan operator was removed due to stack overflow issues.
+// The QueryResults ref struct (~10KB) combined with the large GraphPattern (~4KB)
+// and MultiPatternScan (12 TemporalResultEnumerator structs) exceeds the 1MB stack
+// limit. SERVICE+local pattern joins need a fundamental architecture change:
+// either making QueryResults heap-allocated or reducing the size of ref structs.
+// See tests/Mercury.Tests/QueryExecutorTests.cs for skipped SERVICE+local tests.

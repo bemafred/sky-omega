@@ -371,4 +371,162 @@ public sealed class QueryPlanner
             return hash;
         }
     }
+
+    // Default cardinality estimate for SERVICE clauses (remote endpoints)
+    // Conservative estimate: SERVICE calls are expensive, assume moderate result size
+    private const double DefaultServiceCardinality = 500.0;
+
+    // Network call overhead - penalize strategies that make multiple SERVICE calls
+    private const double NetworkCallPenalty = 10.0;
+
+    /// <summary>
+    /// Determine the optimal join strategy for SERVICE + local pattern execution.
+    /// </summary>
+    /// <param name="localPattern">The graph pattern containing local triple patterns.</param>
+    /// <param name="serviceClause">The SERVICE clause to join with.</param>
+    /// <param name="source">The source SPARQL query text.</param>
+    /// <returns>
+    /// True for LocalFirst strategy (execute local patterns first, then SERVICE for each result).
+    /// False for ServiceFirst strategy (execute SERVICE first, then local patterns for each result).
+    /// </returns>
+    /// <remarks>
+    /// Strategy selection considers:
+    /// - Estimated cardinality of local patterns vs SERVICE
+    /// - Network overhead (SERVICE calls are expensive)
+    /// - Join variable selectivity
+    ///
+    /// LocalFirst is preferred when:
+    /// - Local patterns are highly selective (few results)
+    /// - The estimated local cardinality * network penalty < SERVICE cardinality
+    ///
+    /// ServiceFirst is preferred when:
+    /// - SERVICE is highly selective (constrained by bound variables)
+    /// - Local patterns would produce many results (full scans)
+    /// </remarks>
+    public bool ShouldUseLocalFirstStrategy(
+        in GraphPattern localPattern,
+        in ServiceClause serviceClause,
+        ReadOnlySpan<char> source)
+    {
+        // Estimate local pattern cardinality
+        var localCardinality = EstimateLocalPatternCardinality(localPattern, source);
+
+        // Estimate SERVICE cardinality (heuristic since we can't query remote statistics)
+        var serviceCardinality = EstimateServiceCardinality(serviceClause, source);
+
+        // LocalFirst means N SERVICE calls where N = local results
+        // ServiceFirst means N local scans where N = SERVICE results
+        // Factor in network penalty for SERVICE calls
+
+        var localFirstCost = localCardinality * NetworkCallPenalty + localCardinality * serviceCardinality;
+        var serviceFirstCost = serviceCardinality + serviceCardinality * localCardinality;
+
+        // Prefer LocalFirst when local patterns are very selective
+        // This avoids fetching potentially large SERVICE results when only a few will match
+        if (localCardinality <= 10)
+            return true;
+
+        // Prefer ServiceFirst when SERVICE has bound variables (likely selective)
+        if (HasBoundVariablesInService(serviceClause, source))
+            return false;
+
+        // Default to cost-based decision
+        return localFirstCost < serviceFirstCost;
+    }
+
+    /// <summary>
+    /// Estimate total cardinality for all local patterns in a graph pattern.
+    /// Uses product of individual pattern cardinalities with join selectivity.
+    /// </summary>
+    private double EstimateLocalPatternCardinality(in GraphPattern pattern, ReadOnlySpan<char> source)
+    {
+        var patternCount = pattern.RequiredPatternCount;
+        if (patternCount == 0)
+            return 1.0; // No local patterns
+
+        var boundVars = new List<int>();
+        double totalCardinality = 1.0;
+
+        // Estimate cardinality considering join selectivity
+        for (int i = 0; i < patternCount; i++)
+        {
+            var tp = pattern.GetPattern(i);
+            var patternCard = EstimateCardinality(tp, source, boundVars);
+
+            // Apply join selectivity factor for subsequent patterns
+            if (i > 0)
+            {
+                // Shared variables reduce cardinality significantly
+                var sharedVars = CountSharedVariables(tp, source, boundVars);
+                var selectivity = sharedVars > 0 ? 0.1 / sharedVars : 1.0;
+                patternCard *= selectivity;
+            }
+
+            totalCardinality *= patternCard;
+            AddBoundVariables(tp, source, boundVars);
+        }
+
+        return Math.Max(1.0, totalCardinality);
+    }
+
+    /// <summary>
+    /// Estimate SERVICE cardinality using heuristics.
+    /// </summary>
+    private double EstimateServiceCardinality(in ServiceClause serviceClause, ReadOnlySpan<char> source)
+    {
+        // We can't query remote statistics, so use heuristics based on pattern structure
+        var patternCount = serviceClause.PatternCount;
+
+        if (patternCount == 0)
+            return 1.0;
+
+        // Count bound positions across all SERVICE patterns
+        int totalBoundPositions = 0;
+        for (int i = 0; i < patternCount; i++)
+        {
+            var tp = serviceClause.GetPattern(i);
+            if (!tp.Subject.IsVariable) totalBoundPositions++;
+            if (!tp.Predicate.IsVariable) totalBoundPositions++;
+            if (!tp.Object.IsVariable) totalBoundPositions++;
+        }
+
+        // More bound positions = more selective
+        var avgBoundPerPattern = (double)totalBoundPositions / patternCount;
+
+        return avgBoundPerPattern switch
+        {
+            >= 2.5 => DefaultServiceCardinality / 100,  // Very selective
+            >= 2.0 => DefaultServiceCardinality / 10,   // Selective
+            >= 1.5 => DefaultServiceCardinality / 2,    // Moderate
+            >= 1.0 => DefaultServiceCardinality,        // Low selectivity
+            _ => DefaultServiceCardinality * 10         // Nearly full scan
+        };
+    }
+
+    /// <summary>
+    /// Check if SERVICE clause patterns have variables that would be bound by local patterns.
+    /// </summary>
+    private static bool HasBoundVariablesInService(in ServiceClause serviceClause, ReadOnlySpan<char> source)
+    {
+        // This is a heuristic - we don't know at planning time which variables
+        // will be bound. Return true if SERVICE uses variables that typically
+        // appear in local patterns (like ?s subject variables).
+        // For now, return false to prefer cardinality-based decision.
+        return false;
+    }
+
+    /// <summary>
+    /// Count how many variables in a pattern are already bound.
+    /// </summary>
+    private static int CountSharedVariables(in TriplePattern pattern, ReadOnlySpan<char> source, List<int> boundVars)
+    {
+        int count = 0;
+        if (pattern.Subject.IsVariable && IsVariableBound(pattern.Subject, source, boundVars))
+            count++;
+        if (!pattern.HasPropertyPath && pattern.Predicate.IsVariable && IsVariableBound(pattern.Predicate, source, boundVars))
+            count++;
+        if (pattern.Object.IsVariable && IsVariableBound(pattern.Object, source, boundVars))
+            count++;
+        return count;
+    }
 }
