@@ -989,6 +989,7 @@ public class QueryExecutor : IDisposable
     /// Execute SERVICE+local pattern join on thread pool thread (fresh stack).
     /// Returns materialized results list for the caller to wrap in QueryResults.
     /// Creates BindingTable locally to avoid passing ref struct.
+    /// Uses QueryPlanner to select optimal strategy (local-first vs service-first).
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteServiceWithLocalPatternsInternal(Binding[] bindings, char[] stringBuffer)
@@ -996,13 +997,33 @@ public class QueryExecutor : IDisposable
         // Create BindingTable locally - this method runs on thread pool thread with fresh stack
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Phase 1: Execute local pattern(s) and materialize
-        var localResults = ExecuteLocalPatternsPhase(bindingTable);
-        if (localResults.Count == 0)
-            return new List<MaterializedRow>();
+        // Determine optimal strategy using QueryPlanner
+        bool useLocalFirst = true; // Default to local-first
+        if (_planner != null && _cachedFirstPattern.HasValue && _cachedFirstServiceClause.HasValue)
+        {
+            ref readonly var pattern = ref _query.WhereClause.Pattern;
+            useLocalFirst = _planner.ShouldUseLocalFirstStrategy(
+                in pattern,
+                _cachedFirstServiceClause.Value,
+                _source.AsSpan());
+        }
 
-        // Phase 2: Join with SERVICE
-        return ExecuteServiceJoinPhase(localResults, bindingTable);
+        if (useLocalFirst)
+        {
+            // Local-first: Execute local patterns, then SERVICE for each result
+            var localResults = ExecuteLocalPatternsPhase(bindingTable);
+            if (localResults.Count == 0)
+                return new List<MaterializedRow>();
+            return ExecuteServiceJoinPhase(localResults, bindingTable);
+        }
+        else
+        {
+            // Service-first: Execute SERVICE, then local patterns for each result
+            var serviceResults = ExecuteServiceFirstPhase(bindingTable);
+            if (serviceResults.Count == 0)
+                return new List<MaterializedRow>();
+            return ExecuteLocalJoinPhase(serviceResults, bindingTable);
+        }
     }
 
     /// <summary>
@@ -1079,6 +1100,87 @@ public class QueryExecutor : IDisposable
             finally
             {
                 serviceScan.Dispose();
+            }
+        }
+
+        return finalResults;
+    }
+
+    /// <summary>
+    /// Service-first phase: Execute SERVICE clause and return materialized results.
+    /// Used when QueryPlanner determines SERVICE is more selective than local patterns.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteServiceFirstPhase(BindingTable bindingTable)
+    {
+        var results = new List<MaterializedRow>();
+        var incomingBindingCount = bindingTable.Count;
+
+        // Use cached SERVICE clause (on heap)
+        if (!_cachedFirstServiceClause.HasValue)
+            return results;
+
+        var serviceClause = _cachedFirstServiceClause.Value;
+        var serviceScan = new ServiceScan(_serviceExecutor!, _source, serviceClause, bindingTable);
+
+        try
+        {
+            while (serviceScan.MoveNext(ref bindingTable))
+            {
+                ThrowIfCancellationRequested();
+                results.Add(new MaterializedRow(bindingTable));
+                bindingTable.TruncateTo(incomingBindingCount);
+            }
+        }
+        finally
+        {
+            serviceScan.Dispose();
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Local join phase: For each SERVICE result, execute local patterns and join.
+    /// Used when QueryPlanner determines SERVICE is more selective than local patterns.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteLocalJoinPhase(
+        List<MaterializedRow> serviceResults,
+        BindingTable bindingTable)
+    {
+        var finalResults = new List<MaterializedRow>();
+
+        // Use cached pattern (on heap)
+        if (!_cachedFirstPattern.HasValue)
+            return finalResults;
+
+        var triplePattern = _cachedFirstPattern.Value;
+
+        foreach (var serviceRow in serviceResults)
+        {
+            ThrowIfCancellationRequested();
+
+            // Restore bindings from SERVICE result
+            bindingTable.TruncateTo(0);
+            serviceRow.RestoreBindings(ref bindingTable);
+            var bindingCountAfterRestore = bindingTable.Count;
+
+            // Execute local pattern with these bindings
+            var scan = new TriplePatternScan(_store, _source, triplePattern, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    finalResults.Add(new MaterializedRow(bindingTable));
+                    bindingTable.TruncateTo(bindingCountAfterRestore);
+                }
+            }
+            finally
+            {
+                scan.Dispose();
             }
         }
 

@@ -5184,6 +5184,85 @@ public class QueryExecutorTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Execute_ServiceWithLocalPatterns_ServiceFirstStrategy()
+    {
+        // This test verifies that service-first strategy works correctly
+        // when QueryPlanner determines SERVICE is more selective than local patterns.
+        // The SERVICE has bound variables (highly selective), while local patterns
+        // would produce many results (less selective).
+
+        // Add many local items (low selectivity for local patterns)
+        _store.BeginBatch();
+        for (int i = 0; i < 100; i++)
+        {
+            _store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        }
+        _store.CommitBatch();
+
+        // Query where SERVICE has specific bound variable pattern (high selectivity)
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            SERVICE <http://pricing.example.org/sparql> {
+                ?item <http://ex.org/price> ?price
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Mock executor returns prices for only 2 specific items
+        // Note: Mock values are raw (no angle brackets for URIs, no quotes for literals)
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item5", ServiceBindingType.Uri),
+                ["price"] = ("9.99", ServiceBindingType.Literal)
+            },
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item42", ServiceBindingType.Uri),
+                ["price"] = ("19.99", ServiceBindingType.Literal)
+            }
+        });
+
+        // Create a QueryPlanner with statistics to influence strategy selection
+        var planner = new QueryPlanner(_store.Statistics, _store.Atoms);
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor, planner);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, string price)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+
+                Assert.True(itemIdx >= 0);
+                Assert.True(priceIdx >= 0);
+
+                resultList.Add((
+                    results.Current.GetString(itemIdx).ToString(),
+                    results.Current.GetString(priceIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get 2 results (items 5 and 42 that have both local and remote data)
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item5>" && r.price == "\"9.99\"");
+            Assert.Contains(resultList, r => r.item == "<http://local/item42>" && r.price == "\"19.99\"");
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 
     #region Property Path Sequence Tests
