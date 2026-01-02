@@ -1836,27 +1836,32 @@ public class QueryExecutor : IDisposable
         // Create a binding table with all bindings from both rows
         var bindings = new Binding[32];
         var stringBuffer = PooledBufferManager.Shared.Rent<char>(2048).Array!;
-        var table = new BindingTable(bindings, stringBuffer);
-
-        // Add all bindings from left
-        for (int i = 0; i < left.BindingCount; i++)
+        try
         {
-            table.BindWithHash(left.GetHash(i), left.GetValue(i));
-        }
+            var table = new BindingTable(bindings, stringBuffer);
 
-        // Add bindings from right that aren't already present
-        for (int i = 0; i < right.BindingCount; i++)
-        {
-            var hash = right.GetHash(i);
-            if (table.FindBindingByHash(hash) < 0)
+            // Add all bindings from left
+            for (int i = 0; i < left.BindingCount; i++)
             {
-                table.BindWithHash(hash, right.GetValue(i));
+                table.BindWithHash(left.GetHash(i), left.GetValue(i));
             }
-        }
 
-        var result = new MaterializedRow(table);
-        PooledBufferManager.Shared.Return(stringBuffer);
-        return result;
+            // Add bindings from right that aren't already present
+            for (int i = 0; i < right.BindingCount; i++)
+            {
+                var hash = right.GetHash(i);
+                if (table.FindBindingByHash(hash) < 0)
+                {
+                    table.BindWithHash(hash, right.GetValue(i));
+                }
+            }
+
+            return new MaterializedRow(table);
+        }
+        finally
+        {
+            PooledBufferManager.Shared.Return(stringBuffer);
+        }
     }
 
     /// <summary>
@@ -1887,44 +1892,45 @@ public class QueryExecutor : IDisposable
     {
         var bindings = new Binding[16];
         var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
-
-        // Find the GRAPH header slot in the buffer
-        var patterns = buffer.GetPatterns();
-        int graphHeaderIdx = -1;
-        for (int i = 0; i < buffer.PatternCount; i++)
+        try
         {
-            if (patterns[i].Kind == Patterns.PatternKind.GraphHeader)
+            // Find the GRAPH header slot in the buffer
+            var patterns = buffer.GetPatterns();
+            int graphHeaderIdx = -1;
+            for (int i = 0; i < buffer.PatternCount; i++)
             {
-                graphHeaderIdx = i;
-                break;
+                if (patterns[i].Kind == Patterns.PatternKind.GraphHeader)
+                {
+                    graphHeaderIdx = i;
+                    break;
+                }
             }
-        }
 
-        if (graphHeaderIdx < 0)
+            if (graphHeaderIdx < 0)
+                return null;
+
+            var graphHeader = patterns[graphHeaderIdx];
+
+            var config = new VariableGraphExecutor.BufferExecutionConfig
+            {
+                Store = store,
+                Source = source,
+                Buffer = buffer,
+                NamedGraphs = namedGraphs,
+                Bindings = bindings,
+                StringBuffer = stringBuffer,
+                GraphTermType = graphHeader.GraphTermType,
+                GraphTermStart = graphHeader.GraphTermStart,
+                GraphTermLength = graphHeader.GraphTermLength,
+                GraphHeaderIndex = graphHeaderIdx
+            };
+
+            return VariableGraphExecutor.ExecuteFromBuffer(config);
+        }
+        finally
         {
             PooledBufferManager.Shared.Return(stringBuffer);
-            return null;
         }
-
-        var graphHeader = patterns[graphHeaderIdx];
-
-        var config = new VariableGraphExecutor.BufferExecutionConfig
-        {
-            Store = store,
-            Source = source,
-            Buffer = buffer,
-            NamedGraphs = namedGraphs,
-            Bindings = bindings,
-            StringBuffer = stringBuffer,
-            GraphTermType = graphHeader.GraphTermType,
-            GraphTermStart = graphHeader.GraphTermStart,
-            GraphTermLength = graphHeader.GraphTermLength,
-            GraphHeaderIndex = graphHeaderIdx
-        };
-
-        var result = VariableGraphExecutor.ExecuteFromBuffer(config);
-        PooledBufferManager.Shared.Return(stringBuffer);
-        return result;
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array
@@ -2276,22 +2282,28 @@ public class QueryExecutor : IDisposable
                         var triple = enumerator.Current;
                         var rowBindings = new Binding[16];
                         var rowStringBuffer = _bufferManager.Rent<char>(1024).Array!;
-                        var rowTable = new BindingTable(rowBindings, rowStringBuffer);
-
-                        // Copy subquery bindings
-                        for (int i = 0; i < subRow.BindingCount; i++)
+                        try
                         {
-                            rowTable.BindWithHash(subRow.GetHash(i), subRow.GetValue(i));
-                        }
+                            var rowTable = new BindingTable(rowBindings, rowStringBuffer);
 
-                        // Bind new variables from triple
-                        if (TryBindTermFromTriple(tp.Subject, triple.Subject, ref rowTable) &&
-                            TryBindTermFromTriple(tp.Predicate, triple.Predicate, ref rowTable) &&
-                            TryBindTermFromTriple(tp.Object, triple.Object, ref rowTable))
-                        {
-                            results.Add(new MaterializedRow(rowTable));
+                            // Copy subquery bindings
+                            for (int i = 0; i < subRow.BindingCount; i++)
+                            {
+                                rowTable.BindWithHash(subRow.GetHash(i), subRow.GetValue(i));
+                            }
+
+                            // Bind new variables from triple
+                            if (TryBindTermFromTriple(tp.Subject, triple.Subject, ref rowTable) &&
+                                TryBindTermFromTriple(tp.Predicate, triple.Predicate, ref rowTable) &&
+                                TryBindTermFromTriple(tp.Object, triple.Object, ref rowTable))
+                            {
+                                results.Add(new MaterializedRow(rowTable));
+                            }
                         }
-                        _bufferManager.Return(rowStringBuffer);
+                        finally
+                        {
+                            _bufferManager.Return(rowStringBuffer);
+                        }
                     }
                 }
                 finally
