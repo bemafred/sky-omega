@@ -343,48 +343,81 @@ for (int i = 0; i < pattern.ServiceClauseCount; i++)
 | Pool starvation under load | Pool blocks on Rent(); queries queue rather than fail |
 | Pool dependency in QueryExecutor | Optional injection; fallback to ServiceStore if needed |
 
-## Future Optimization: In-Memory Store
+## Dual-Path Implementation (Implemented 2026-01-03)
 
-Once the `IScan` abstraction is in place, adding an in-memory path for small result sets is **trivial** (~50 lines):
+SERVICE results use threshold-based routing between in-memory and indexed paths:
+
+### ServiceMaterializerOptions
 
 ```csharp
-internal ref struct InMemoryServiceScan
+public sealed class ServiceMaterializerOptions
 {
-    private readonly List<MaterializedRow> _rows;
-    private int _index;
+    /// <summary>
+    /// Result count threshold for in-memory vs indexed path.
+    /// Default: 500 (B+Tree indexing pays off for joins at this scale).
+    /// </summary>
+    public int IndexedThreshold { get; set; } = 500;
+}
+```
 
-    public bool MoveNext(ref BindingTable bindings)
+### ServiceMaterializer.Fetch()
+
+The decision point that routes based on result count:
+
+```csharp
+public ServiceFetchResult Fetch(ServiceClause clause, ...)
+{
+    var results = _executor.ExecuteSelectAsync(endpoint, query)...;
+
+    // Threshold-based routing
+    if (results.Count < _options.IndexedThreshold)
     {
-        while (_index < _rows.Count)
-        {
-            if (TryBindRow(_rows[_index++], ref bindings))
-                return true;
-        }
-        return false;
+        // Small result set - use in-memory path
+        return ServiceFetchResult.InMemory(results);
     }
 
-    public void Dispose() { } // GC handles List<T>
+    // Large result set - materialize to indexed QuadStore
+    var store = _pool.Rent();
+    LoadResultsToStore(store, results, clause, source);
+    return ServiceFetchResult.Indexed(store, variableNames, results.Count);
+}
+```
+
+### ServicePatternScan (In-Memory Path)
+
+For small result sets (< threshold), linear scan over `List<ServiceResultRow>`:
+- No disk I/O
+- O(N) iteration per local result
+- Best for < 500 rows
+
+### IndexedServicePatternScan (Indexed Path)
+
+For large result sets (>= threshold), B+Tree-backed QuadStore:
+- Uses synthetic triples: `<_:row{N}> <_:var:{varName}> value`
+- O(log N) lookups for join compatibility checks
+- Pooled stores via `QuadStorePool` for reuse
+
+### ServiceFetchResult
+
+Discriminated result type returned by `Fetch()`:
+
+```csharp
+public readonly struct ServiceFetchResult
+{
+    public bool IsIndexed { get; }
+    public List<ServiceResultRow>? Results { get; }  // In-memory path
+    public QuadStore? Store { get; }                  // Indexed path
+    public List<string>? VariableNames { get; }
+    public int RowCount { get; }
 }
 ```
 
 **Threshold selection:**
 
-| Result Count | Recommended Path |
-|--------------|-----------------|
-| < 100 | In-memory (linear scan acceptable) |
-| 100-500 | Configurable threshold |
-| > 500 | Temp QuadStore (B+Tree index pays off for joins) |
-
-The `ServiceMaterializer` becomes the decision point:
-
-```csharp
-if (results.Count < options.InMemoryThreshold)
-    return new InMemoryServiceScan(results);
-else
-    return new ServicePatternScan(CreateTempStore(results), ...);
-```
-
-**Why defer this?** The temp store approach is correct for all sizes; in-memory is a performance optimization. Implementing temp stores first ensures correctness, then in-memory can be added without architectural changes.
+| Result Count | Path | Characteristics |
+|--------------|------|-----------------|
+| < 500 | In-memory | No disk I/O, linear scan |
+| >= 500 | Indexed | B+Tree lookup, pooled stores |
 
 ## Success Criteria
 
