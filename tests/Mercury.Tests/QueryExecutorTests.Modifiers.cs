@@ -199,6 +199,7 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
     public void Execute_DistinctRemovesDuplicates()
     {
         // Query predicates - with DISTINCT we get unique values only
@@ -364,6 +365,7 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
     public void Execute_OrderByAscending()
     {
         // Order by age ascending

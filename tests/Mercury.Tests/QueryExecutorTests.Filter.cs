@@ -10,6 +10,7 @@ namespace SkyOmega.Mercury.Tests;
 
 public partial class QueryExecutorTests
 {
+    [Fact]
     public void Execute_ExistsFilter_ReturnsMatchingRows()
     {
         // Find people who know someone

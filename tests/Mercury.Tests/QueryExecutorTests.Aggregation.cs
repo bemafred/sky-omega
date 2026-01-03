@@ -10,6 +10,7 @@ namespace SkyOmega.Mercury.Tests;
 
 public partial class QueryExecutorTests
 {
+    [Fact]
     public void Execute_GroupByWithCount()
     {
         // Count how many triples each person has

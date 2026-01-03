@@ -10,6 +10,7 @@ namespace SkyOmega.Mercury.Tests;
 
 public partial class QueryExecutorTests
 {
+    [Fact]
     public void Execute_OptionalMatches_ExtendsBindings()
     {
         // Alice has both name and age, so OPTIONAL should match
@@ -153,6 +154,7 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
     public void Execute_UnionCombinesBranches()
     {
         // Find people who have name OR age
@@ -380,6 +382,7 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
     public void Execute_BindConstant()
     {
         // BIND a constant value
@@ -597,6 +600,7 @@ public partial class QueryExecutorTests
     }
 
     // ========== MINUS Tests ==========
+    [Fact]
     public void Execute_MinusBasic()
     {
         // Find people who have a name but don't have a "knows" relationship

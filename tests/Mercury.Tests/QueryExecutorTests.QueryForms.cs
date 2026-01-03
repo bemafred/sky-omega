@@ -10,6 +10,7 @@ namespace SkyOmega.Mercury.Tests;
 
 public partial class QueryExecutorTests
 {
+    [Fact]
     public void ExecuteAsk_ReturnsTrue_WhenMatchExists()
     {
         // ASK if Alice exists
@@ -148,6 +149,7 @@ public partial class QueryExecutorTests
     }
 
     // ========== VALUES Tests ==========
+    [Fact]
     public void Execute_ValuesBasic()
     {
         // VALUES constraining age to 25 or 30
@@ -344,6 +346,7 @@ public partial class QueryExecutorTests
     }
 
     // ========== CONSTRUCT Tests ==========
+    [Fact]
     public void ExecuteConstruct_BasicTemplate()
     {
         // CONSTRUCT a new predicate from existing data
