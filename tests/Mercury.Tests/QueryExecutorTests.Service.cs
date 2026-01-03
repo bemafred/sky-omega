@@ -846,6 +846,371 @@ public partial class QueryExecutorTests
     }
 
     [Fact]
+    public void Parse_UnionWithService_TracksUnionBranch()
+    {
+        // Test that SERVICE in second UNION branch has UnionBranch = 1
+        var query = @"SELECT ?item WHERE {
+            { ?item <http://ex.org/type> <http://ex.org/Local> }
+            UNION
+            { SERVICE <http://remote.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Remote> } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
+
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.Equal(1, serviceClause.UnionBranch); // SERVICE in second UNION branch
+    }
+
+    [Fact]
+    public void Parse_ServiceInFirstUnionBranch_TracksUnionBranch()
+    {
+        // Test that SERVICE in first UNION branch has UnionBranch = 0
+        var query = @"SELECT ?item WHERE {
+            { SERVICE <http://remote.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Remote> } }
+            UNION
+            { ?item <http://ex.org/type> <http://ex.org/Local> }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
+
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.Equal(0, serviceClause.UnionBranch); // SERVICE in first UNION branch
+    }
+
+    [Fact]
+    public void Execute_UnionLocalAndService_ExecutesBothBranches()
+    {
+        // Test { local } UNION { SERVICE ... } - should return results from both branches
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/source>", "\"Local Store\"");
+        Store.CommitBatch();
+
+        var query = @"SELECT ?item ?source WHERE {
+            { ?item <http://ex.org/type> <http://ex.org/Widget> . ?item <http://ex.org/source> ?source }
+            UNION
+            { SERVICE <http://remote.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Widget> . ?item <http://ex.org/source> ?source } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Mock executor returns remote items
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://remote.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://remote/item2", ServiceBindingType.Uri),
+                ["source"] = ("Remote Endpoint", ServiceBindingType.Literal)
+            }
+        });
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, string source)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var sourceIdx = results.Current.FindBinding("?source".AsSpan());
+
+                Assert.True(itemIdx >= 0, "item binding not found");
+                Assert.True(sourceIdx >= 0, "source binding not found");
+
+                resultList.Add((
+                    results.Current.GetString(itemIdx).ToString(),
+                    results.Current.GetString(sourceIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get 2 results: one from local, one from SERVICE
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item1>" && r.source == "\"Local Store\"");
+            Assert.Contains(resultList, r => r.item == "<http://remote/item2>" && r.source == "\"Remote Endpoint\"");
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionServiceAndLocal_ExecutesBothBranches()
+    {
+        // Test { SERVICE ... } UNION { local } - should return results from both branches
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.CommitBatch();
+
+        var query = @"SELECT ?item WHERE {
+            { SERVICE <http://remote.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Widget> } }
+            UNION
+            { ?item <http://ex.org/type> <http://ex.org/Widget> }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify SERVICE is in first branch (UnionBranch = 0)
+        Assert.Equal(0, parsedQuery.WhereClause.Pattern.GetServiceClause(0).UnionBranch);
+
+        // Mock executor returns remote item
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://remote.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://remote/item2", ServiceBindingType.Uri)
+            }
+        });
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<string>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                Assert.True(itemIdx >= 0);
+                resultList.Add(results.Current.GetString(itemIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should get 2 results: one from SERVICE, one from local
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains("<http://remote/item2>", resultList);
+            Assert.Contains("<http://local/item1>", resultList);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionServiceAndService_ExecutesBothServices()
+    {
+        // Test { SERVICE <a> ... } UNION { SERVICE <b> ... } - should return results from both SERVICE clauses
+        var query = @"SELECT ?item WHERE {
+            { SERVICE <http://endpoint1.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Widget> } }
+            UNION
+            { SERVICE <http://endpoint2.example.org/sparql> { ?item <http://ex.org/type> <http://ex.org/Widget> } }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify we have 2 SERVICE clauses in different union branches
+        Assert.Equal(2, parsedQuery.WhereClause.Pattern.ServiceClauseCount);
+        Assert.Equal(0, parsedQuery.WhereClause.Pattern.GetServiceClause(0).UnionBranch); // First SERVICE
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.GetServiceClause(1).UnionBranch); // Second SERVICE
+
+        // Mock executor returns different items from each endpoint
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://endpoint1.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://endpoint1/itemA", ServiceBindingType.Uri)
+            }
+        });
+        mockExecutor.AddResult("http://endpoint2.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://endpoint2/itemB", ServiceBindingType.Uri)
+            }
+        });
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<string>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                Assert.True(itemIdx >= 0);
+                resultList.Add(results.Current.GetString(itemIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should get 2 results: one from each SERVICE
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains("<http://endpoint1/itemA>", resultList);
+            Assert.Contains("<http://endpoint2/itemB>", resultList);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_UnionLocalWithServiceAndLocal_ExecutesBothBranches()
+    {
+        // Test { local + SERVICE } UNION { local } - join within first branch plus second branch
+        Store.BeginBatch();
+        // Local items for first branch join
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        // Local items for second branch
+        Store.AddCurrentBatched("<http://local/itemX>", "<http://ex.org/type>", "<http://ex.org/Gadget>");
+        Store.CommitBatch();
+
+        var query = @"SELECT ?item ?price WHERE {
+            {
+                ?item <http://ex.org/type> <http://ex.org/Widget> .
+                SERVICE <http://pricing.example.org/sparql> {
+                    ?item <http://ex.org/price> ?price
+                }
+            }
+            UNION
+            {
+                ?item <http://ex.org/type> <http://ex.org/Gadget>
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Mock executor returns prices for item1 only
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item1", ServiceBindingType.Uri),
+                ["price"] = ("29.99", ServiceBindingType.Literal)
+            }
+        });
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, bool hasPrice)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+
+                Assert.True(itemIdx >= 0);
+
+                resultList.Add((
+                    results.Current.GetString(itemIdx).ToString(),
+                    priceIdx >= 0
+                ));
+            }
+            results.Dispose();
+
+            // Should get 2 results:
+            // - item1 from first branch (local + SERVICE join has price from SERVICE)
+            // - itemX from second branch (local only, no price)
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item1>" && r.hasPrice);
+            Assert.Contains(resultList, r => r.item == "<http://local/itemX>" && !r.hasPrice);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ServiceWithVariableEndpoint_ResolvesFromBindings()
+    {
+        // Test SERVICE ?endpoint { ... } where endpoint is bound from outer pattern
+        Store.BeginBatch();
+        // Local items with their SERVICE endpoint references
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/priceService>", "<http://pricing-us.example.org/sparql>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/priceService>", "<http://pricing-eu.example.org/sparql>");
+        Store.CommitBatch();
+
+        var query = @"SELECT ?item ?price WHERE {
+            ?item <http://ex.org/type> <http://ex.org/Widget> .
+            ?item <http://ex.org/priceService> ?endpoint .
+            SERVICE ?endpoint {
+                ?item <http://ex.org/price> ?price
+            }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify SERVICE has variable endpoint
+        var serviceClause = parsedQuery.WhereClause.Pattern.GetServiceClause(0);
+        Assert.True(serviceClause.IsVariable);
+        Assert.Equal(TermType.Variable, serviceClause.Endpoint.Type);
+
+        // Mock executor returns different prices from different endpoints
+        var mockExecutor = new MockSparqlServiceExecutor();
+        mockExecutor.AddResult("http://pricing-us.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item1", ServiceBindingType.Uri),
+                ["price"] = ("19.99 USD", ServiceBindingType.Literal)
+            }
+        });
+        mockExecutor.AddResult("http://pricing-eu.example.org/sparql", new[]
+        {
+            new Dictionary<string, (string value, ServiceBindingType type)>
+            {
+                ["item"] = ("http://local/item2", ServiceBindingType.Uri),
+                ["price"] = ("17.99 EUR", ServiceBindingType.Literal)
+            }
+        });
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
+            var results = executor.Execute();
+
+            var resultList = new List<(string item, string price)>();
+            while (results.MoveNext())
+            {
+                var itemIdx = results.Current.FindBinding("?item".AsSpan());
+                var priceIdx = results.Current.FindBinding("?price".AsSpan());
+
+                Assert.True(itemIdx >= 0, "item binding not found");
+                Assert.True(priceIdx >= 0, "price binding not found");
+
+                resultList.Add((
+                    results.Current.GetString(itemIdx).ToString(),
+                    results.Current.GetString(priceIdx).ToString()
+                ));
+            }
+            results.Dispose();
+
+            // Should get 2 results: each item with price from its respective endpoint
+            Assert.Equal(2, resultList.Count);
+            Assert.Contains(resultList, r => r.item == "<http://local/item1>" && r.price.Contains("USD"));
+            Assert.Contains(resultList, r => r.item == "<http://local/item2>" && r.price.Contains("EUR"));
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void Execute_OptionalServiceWithMultiplePatterns_JoinsAllPatterns()
     {
         // Test OPTIONAL SERVICE with multiple patterns inside

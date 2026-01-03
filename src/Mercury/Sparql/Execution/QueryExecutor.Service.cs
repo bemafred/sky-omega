@@ -228,6 +228,12 @@ public partial class QueryExecutor
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
+        // Check for UNION with SERVICE in second branch
+        if (pattern.HasUnion && serviceCount > 0)
+        {
+            return ExecuteUnionWithServiceMaterialized(pattern, bindings, stringBuffer, bindingTable);
+        }
+
         // Simple case: SERVICE clause only, no local patterns
         if (pattern.PatternCount == 0 && serviceCount == 1)
         {
@@ -269,6 +275,258 @@ public partial class QueryExecutor
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Execute UNION query where one or both branches contain SERVICE clauses.
+    /// { local patterns } UNION { SERVICE ... } or { SERVICE ... } UNION { SERVICE ... }
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteUnionWithServiceMaterialized(
+        in GraphPattern pattern,
+        Binding[] bindings,
+        char[] stringBuffer,
+        BindingTable bindingTable)
+    {
+        var results = new List<MaterializedRow>();
+
+        // Separate SERVICE clauses by branch
+        ServiceClause? firstBranchService = null;
+        ServiceClause? secondBranchService = null;
+        for (int i = 0; i < pattern.ServiceClauseCount; i++)
+        {
+            var svc = pattern.GetServiceClause(i);
+            if (svc.UnionBranch == 0)
+                firstBranchService = svc;
+            else
+                secondBranchService = svc;
+        }
+
+        // Execute first branch (patterns before _unionStartIndex)
+        var firstBranchPatternCount = pattern.FirstBranchPatternCount;
+        if (firstBranchPatternCount > 0 && firstBranchService.HasValue)
+        {
+            // First branch has both local patterns AND SERVICE - join them
+            var localResults = ExecuteFirstBranchPatterns(in pattern, bindings, stringBuffer);
+            foreach (var localRow in localResults)
+            {
+                ThrowIfCancellationRequested();
+                bindingTable.TruncateTo(0);
+                localRow.RestoreBindings(ref bindingTable);
+
+                var serviceResults = FetchServiceResults(firstBranchService.Value, bindingTable);
+                var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
+                try
+                {
+                    while (serviceScan.MoveNext(ref bindingTable))
+                    {
+                        results.Add(new MaterializedRow(bindingTable));
+                    }
+                }
+                finally
+                {
+                    serviceScan.Dispose();
+                }
+            }
+        }
+        else if (firstBranchPatternCount > 0)
+        {
+            // Execute local patterns in first branch (no SERVICE)
+            var firstBranchResults = ExecuteFirstBranchPatterns(in pattern, bindings, stringBuffer);
+            results.AddRange(firstBranchResults);
+        }
+        else if (firstBranchService.HasValue)
+        {
+            // First branch is SERVICE-only
+            var serviceResults = FetchServiceResults(firstBranchService.Value, bindingTable);
+            var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
+            try
+            {
+                while (serviceScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                serviceScan.Dispose();
+            }
+        }
+
+        // Execute second branch (patterns from _unionStartIndex onwards, or SERVICE)
+        var secondBranchPatternCount = pattern.UnionBranchPatternCount;
+        if (secondBranchPatternCount > 0 && secondBranchService.HasValue)
+        {
+            // Second branch has both local patterns and SERVICE - join them
+            bindingTable.Clear();
+            var localResults = ExecuteSecondBranchPatterns(in pattern, bindings, stringBuffer);
+            foreach (var localRow in localResults)
+            {
+                ThrowIfCancellationRequested();
+                bindingTable.TruncateTo(0);
+                localRow.RestoreBindings(ref bindingTable);
+
+                var serviceResults = FetchServiceResults(secondBranchService.Value, bindingTable);
+                var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
+                try
+                {
+                    while (serviceScan.MoveNext(ref bindingTable))
+                    {
+                        results.Add(new MaterializedRow(bindingTable));
+                    }
+                }
+                finally
+                {
+                    serviceScan.Dispose();
+                }
+            }
+        }
+        else if (secondBranchPatternCount > 0)
+        {
+            // Second branch has only local patterns
+            var secondBranchResults = ExecuteSecondBranchPatterns(in pattern, bindings, stringBuffer);
+            results.AddRange(secondBranchResults);
+        }
+        else if (secondBranchService.HasValue)
+        {
+            // Second branch is SERVICE-only
+            bindingTable.Clear();
+            var serviceResults = FetchServiceResults(secondBranchService.Value, bindingTable);
+            var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
+            try
+            {
+                while (serviceScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                serviceScan.Dispose();
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Execute patterns in the first UNION branch (before _unionStartIndex).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteFirstBranchPatterns(
+        in GraphPattern pattern,
+        Binding[] bindings,
+        char[] stringBuffer)
+    {
+        var results = new List<MaterializedRow>();
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+        var patternCount = pattern.FirstBranchPatternCount;
+
+        if (patternCount == 1)
+        {
+            var tp = pattern.GetPattern(0);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+        else if (patternCount > 1)
+        {
+            // Create a temporary pattern with just the first branch patterns
+            var branchPattern = new GraphPattern();
+            for (int i = 0; i < patternCount; i++)
+            {
+                branchPattern.AddPattern(pattern.GetPattern(i));
+            }
+            var multiScan = new MultiPatternScan(_store, _source, branchPattern, false, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null);
+            try
+            {
+                while (multiScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                multiScan.Dispose();
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Execute patterns in the second UNION branch (from _unionStartIndex onwards).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteSecondBranchPatterns(
+        in GraphPattern pattern,
+        Binding[] bindings,
+        char[] stringBuffer)
+    {
+        var results = new List<MaterializedRow>();
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+        var firstBranchCount = pattern.FirstBranchPatternCount;
+        var totalCount = pattern.PatternCount;
+        var secondBranchCount = totalCount - firstBranchCount;
+
+        if (secondBranchCount == 1)
+        {
+            var tp = pattern.GetPattern(firstBranchCount);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+        else if (secondBranchCount > 1)
+        {
+            // Create a temporary pattern with just the second branch patterns
+            var branchPattern = new GraphPattern();
+            for (int i = firstBranchCount; i < totalCount; i++)
+            {
+                branchPattern.AddPattern(pattern.GetPattern(i));
+            }
+            var multiScan = new MultiPatternScan(_store, _source, branchPattern, false, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null);
+            try
+            {
+                while (multiScan.MoveNext(ref bindingTable))
+                {
+                    ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                multiScan.Dispose();
+            }
+        }
+
+        return results;
     }
 
     /// <summary>
@@ -389,9 +647,8 @@ public partial class QueryExecutor
     /// Uses cached SERVICE clause to avoid accessing large GraphPattern struct from stack.
     /// For OPTIONAL SERVICE, preserves local bindings even when SERVICE returns no match.
     ///
-    /// OPTIMIZATION: Fetches SERVICE results ONCE and reuses for all local rows.
-    /// Previous implementation made an HTTP request per local row (O(N) requests).
-    /// Now makes exactly 1 request and uses ServicePatternScan for efficient iteration.
+    /// OPTIMIZATION: Fetches SERVICE results ONCE and reuses for all local rows (when endpoint is fixed).
+    /// For variable endpoints, must fetch per local result (different endpoints possible).
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteServiceJoinPhase(
@@ -407,15 +664,20 @@ public partial class QueryExecutor
 
         var serviceClause = _cachedFirstServiceClause.Value;
         var isOptional = serviceClause.IsOptional;
+        var isVariableEndpoint = serviceClause.IsVariable;
 
-        // Fetch SERVICE results ONCE (key optimization)
-        var emptyBindingTable = new BindingTable(bindings, stringBuffer);
-        var serviceResults = FetchServiceResults(serviceClause, emptyBindingTable);
-
-        if (serviceResults.Count == 0 && !isOptional)
+        // For fixed endpoints, fetch SERVICE results ONCE (key optimization)
+        List<ServiceResultRow>? cachedServiceResults = null;
+        if (!isVariableEndpoint)
         {
-            // No SERVICE results and not optional - no final results possible
-            return finalResults;
+            var emptyBindingTable = new BindingTable(bindings, stringBuffer);
+            cachedServiceResults = FetchServiceResults(serviceClause, emptyBindingTable);
+
+            if (cachedServiceResults.Count == 0 && !isOptional)
+            {
+                // No SERVICE results and not optional - no final results possible
+                return finalResults;
+            }
         }
 
         foreach (var localRow in localResults)
@@ -427,7 +689,12 @@ public partial class QueryExecutor
             bindingTable.TruncateTo(0);
             localRow.RestoreBindings(ref bindingTable);
 
-            // Use ServicePatternScan to iterate through cached results
+            // For variable endpoints, fetch per local result (endpoint may differ)
+            var serviceResults = isVariableEndpoint
+                ? FetchServiceResults(serviceClause, bindingTable)
+                : cachedServiceResults!;
+
+            // Use ServicePatternScan to iterate through results
             // Note: ServicePatternScan.MoveNext handles TruncateTo internally
             var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
             var hasServiceMatch = false;

@@ -1092,10 +1092,10 @@ public class QueryBufferTests
     {
         using var buffer = new QueryBuffer();
 
-        buffer.UnionStartIndex = 0;
+        buffer.HasUnionFlag = false;
         Assert.False(buffer.HasUnion);
 
-        buffer.UnionStartIndex = 5;
+        buffer.HasUnionFlag = true;
         Assert.True(buffer.HasUnion);
     }
 
@@ -1117,9 +1117,11 @@ public class QueryBufferTests
         using var buffer = new QueryBuffer();
 
         buffer.PatternCount = 10;
+        buffer.HasUnionFlag = false;
         buffer.UnionStartIndex = 0;
         Assert.Equal(0, buffer.UnionBranchPatternCount);
 
+        buffer.HasUnionFlag = true;
         buffer.UnionStartIndex = 3;
         Assert.Equal(7, buffer.UnionBranchPatternCount);
     }

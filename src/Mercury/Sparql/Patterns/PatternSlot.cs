@@ -715,7 +715,8 @@ internal sealed class QueryBuffer : IDisposable
     public int BindCount { get; set; }
     public int MinusPatternCount { get; set; }
     public int ExistsFilterCount { get; set; }
-    public int UnionStartIndex { get; set; }  // > 0 means has union
+    public int UnionStartIndex { get; set; }  // Index where UNION branch starts
+    public bool HasUnionFlag { get; set; }    // True if UNION was encountered
     public uint OptionalFlags { get; set; }   // Bitmask for optional patterns
     public bool HasValues { get; set; }
 
@@ -732,7 +733,7 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasBinds => BindCount > 0;
     public bool HasMinus => MinusPatternCount > 0;
     public bool HasExists => ExistsFilterCount > 0;
-    public bool HasUnion => UnionStartIndex > 0;
+    public bool HasUnion => HasUnionFlag;
     public bool HasOptionalPatterns => OptionalFlags != 0;
     public int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
     public bool HasGraph => GraphClauseCount > 0;
@@ -967,6 +968,7 @@ internal static class QueryBufferAdapter
         buffer.MinusPatternCount = gp.MinusPatternCount;
         buffer.ExistsFilterCount = gp.ExistsFilterCount;
         buffer.UnionStartIndex = gp.HasUnion ? gp.FirstBranchPatternCount : 0;
+        buffer.HasUnionFlag = gp.HasUnion;
         buffer.HasValues = gp.HasValues;
         // Copy OptionalFlags - build bitmask from GraphPattern's IsOptional checks
         uint optFlags = 0;

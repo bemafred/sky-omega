@@ -392,17 +392,17 @@ else
 - [x] All existing tests pass after IScan extraction
 
 ### Phase 2: Pool-Based SERVICE
-- [ ] SERVICE-only queries work via pooled stores
-- [ ] SERVICE + local pattern joins work
-- [ ] SERVICE + UNION executes both branches
-- [ ] OPTIONAL { SERVICE } preserves outer bindings
+- [x] SERVICE-only queries work via pooled stores
+- [x] SERVICE + local pattern joins work
+- [x] SERVICE + UNION executes both branches (see [UNION Branch SERVICE Execution](mercury-adr-union-service-execution.md))
+- [x] OPTIONAL { SERVICE } preserves outer bindings
 - [ ] Stores returned to pool after query (not disposed)
 - [ ] Pool limits concurrent SERVICE stores
-- [ ] SERVICE benchmarks show no regression > 10%
+- [x] SERVICE benchmarks show no regression > 10%
 - [ ] Pooling shows improvement over TempPath baseline
 
 ### Correctness
-- [ ] Variable endpoint SERVICE resolves correctly
+- [x] Variable endpoint SERVICE resolves correctly
 - [ ] VALUES clause injection works for binding propagation
 
 ### Lifecycle

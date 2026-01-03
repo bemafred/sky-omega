@@ -170,7 +170,9 @@ public struct GraphPattern
     private int _subQueryCount;
     private int _serviceClauseCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
-    private int _unionStartIndex; // If > 0, patterns from this index are the UNION branch
+    private int _unionStartIndex; // Patterns from this index are the UNION branch
+    private bool _hasUnion;       // True if UNION keyword was encountered
+    private bool _inUnionBranch;  // True when parsing second UNION branch
 
     // Inline storage for triple patterns (32 * 24 bytes = 768 bytes)
     private TriplePattern _p0, _p1, _p2, _p3, _p4, _p5, _p6, _p7;
@@ -219,7 +221,7 @@ public struct GraphPattern
     public readonly bool HasService => _serviceClauseCount > 0;
     public readonly bool HasValues => _values.HasValues;
     public readonly bool HasOptionalPatterns => _optionalFlags != 0;
-    public readonly bool HasUnion => _unionStartIndex > 0;
+    public readonly bool HasUnion => _hasUnion;
 
     public readonly ValuesClause Values => _values;
 
@@ -258,10 +260,13 @@ public struct GraphPattern
 
     /// <summary>
     /// Mark the start of UNION patterns.
+    /// Sets flag so SERVICE clauses added after this point are tagged with UnionBranch = 1.
     /// </summary>
     public void StartUnionBranch()
     {
+        _hasUnion = true;
         _unionStartIndex = _patternCount;
+        _inUnionBranch = true;
     }
 
     public void AddPattern(TriplePattern pattern)
@@ -534,6 +539,7 @@ public struct GraphPattern
     public void AddServiceClause(ServiceClause clause)
     {
         if (_serviceClauseCount >= MaxServiceClauses) return;
+        clause.UnionBranch = _inUnionBranch ? 1 : 0;
         SetServiceClause(_serviceClauseCount++, clause);
     }
 
@@ -785,6 +791,7 @@ public struct ServiceClause
 
     public bool Silent;           // SILENT modifier - ignore failures
     public bool IsOptional;       // Inside OPTIONAL block - preserve outer bindings on no match
+    public int UnionBranch;       // 0 = not in UNION or first branch, 1 = second branch
     public Term Endpoint;         // The endpoint IRI or variable
     private int _patternCount;
 
