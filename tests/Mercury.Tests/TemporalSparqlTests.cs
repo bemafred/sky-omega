@@ -6,28 +6,21 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 
 namespace Mercury.Tests;
 
 /// <summary>
 /// Tests for Temporal SPARQL extensions: AS OF, DURING, ALL VERSIONS
 /// </summary>
-public class TemporalSparqlTests : IDisposable
+[Collection("QuadStore")]
+public class TemporalSparqlTests : PooledStoreTestBase
 {
-    private readonly string _tempDir;
-    private readonly QuadStore _store;
-
-    public TemporalSparqlTests()
+    public TemporalSparqlTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("temporal-sparql");
-        tempPath.MarkOwnership();
-        _tempDir = tempPath;
-        _store = new QuadStore(_tempDir);
-
         // Add test data with different valid times
         // Alice worked at Acme from 2020-01-01 to 2023-06-30
-        _store.Add(
+        Store.Add(
             "<http://ex.org/alice>",
             "<http://ex.org/worksFor>",
             "<http://ex.org/Acme>",
@@ -35,7 +28,7 @@ public class TemporalSparqlTests : IDisposable
             new DateTimeOffset(2023, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
         // Alice works at Anthropic from 2023-07-01 to infinity
-        _store.Add(
+        Store.Add(
             "<http://ex.org/alice>",
             "<http://ex.org/worksFor>",
             "<http://ex.org/Anthropic>",
@@ -43,18 +36,12 @@ public class TemporalSparqlTests : IDisposable
             DateTimeOffset.MaxValue);
 
         // Bob worked at Acme from 2019-01-01 to 2022-12-31
-        _store.Add(
+        Store.Add(
             "<http://ex.org/bob>",
             "<http://ex.org/worksFor>",
             "<http://ex.org/Acme>",
             new DateTimeOffset(2019, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2022, 12, 31, 0, 0, 0, TimeSpan.Zero));
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_tempDir);
     }
 
     [Fact]
@@ -125,10 +112,10 @@ public class TemporalSparqlTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
 
             var bindings = new List<(string person, string company)>();
@@ -150,7 +137,7 @@ public class TemporalSparqlTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -163,10 +150,10 @@ public class TemporalSparqlTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
 
             var bindings = new List<(string person, string company)>();
@@ -187,7 +174,7 @@ public class TemporalSparqlTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -200,10 +187,10 @@ public class TemporalSparqlTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
 
             var companies = new List<string>();
@@ -224,7 +211,7 @@ public class TemporalSparqlTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -237,10 +224,10 @@ public class TemporalSparqlTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
             var results = executor.Execute();
 
             var bindings = new List<(string person, string company)>();
@@ -262,7 +249,7 @@ public class TemporalSparqlTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 

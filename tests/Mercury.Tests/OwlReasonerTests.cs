@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using SkyOmega.Mercury.Owl;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -10,11 +10,9 @@ namespace SkyOmega.Mercury.Tests;
 /// <summary>
 /// Tests for OWL/RDFS reasoning.
 /// </summary>
-public class OwlReasonerTests : IDisposable
+[Collection("QuadStore")]
+public class OwlReasonerTests : PooledStoreTestBase
 {
-    private readonly string _testDir;
-    private readonly QuadStore _store;
-
     // RDF/RDFS/OWL vocabulary
     private const string RdfType = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
     private const string RdfsSubClassOf = "<http://www.w3.org/2000/01/rdf-schema#subClassOf>";
@@ -28,18 +26,8 @@ public class OwlReasonerTests : IDisposable
     private const string OwlEquivalentClass = "<http://www.w3.org/2002/07/owl#equivalentClass>";
     private const string OwlEquivalentProperty = "<http://www.w3.org/2002/07/owl#equivalentProperty>";
 
-    public OwlReasonerTests()
+    public OwlReasonerTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("owl");
-        tempPath.MarkOwnership();
-        _testDir = tempPath;
-        _store = new QuadStore(_testDir);
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_testDir);
     }
 
     #region RDFS SubClass Tests
@@ -48,10 +36,10 @@ public class OwlReasonerTests : IDisposable
     public void RdfsSubClassOf_Transitivity_InfersIndirectSubClass()
     {
         // Animal > Mammal > Dog
-        _store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
-        _store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
+        Store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
+        Store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsSubClass);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsSubClass);
         int inferred = reasoner.Materialize();
 
         Assert.True(inferred > 0);
@@ -62,11 +50,11 @@ public class OwlReasonerTests : IDisposable
     public void RdfsSubClassOf_TypeInference_InfersSuperclassType()
     {
         // Dog subClassOf Mammal
-        _store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
+        Store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
         // Fido is a Dog
-        _store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
+        Store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsSubClass);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsSubClass);
         reasoner.Materialize();
 
         // Fido should also be a Mammal
@@ -77,12 +65,12 @@ public class OwlReasonerTests : IDisposable
     public void RdfsSubClassOf_ChainedTypeInference_InfersAllSuperclasses()
     {
         // Dog subClassOf Mammal subClassOf Animal
-        _store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
-        _store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
+        Store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
+        Store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
         // Fido is a Dog
-        _store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
+        Store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsSubClass);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsSubClass);
         reasoner.Materialize();
 
         // Fido should be Dog, Mammal, and Animal
@@ -98,10 +86,10 @@ public class OwlReasonerTests : IDisposable
     public void RdfsSubPropertyOf_Transitivity_InfersIndirectSubProperty()
     {
         // hasFather subPropertyOf hasParent subPropertyOf hasAncestor
-        _store.AddCurrent("<http://ex.org/hasFather>", RdfsSubPropertyOf, "<http://ex.org/hasParent>");
-        _store.AddCurrent("<http://ex.org/hasParent>", RdfsSubPropertyOf, "<http://ex.org/hasAncestor>");
+        Store.AddCurrent("<http://ex.org/hasFather>", RdfsSubPropertyOf, "<http://ex.org/hasParent>");
+        Store.AddCurrent("<http://ex.org/hasParent>", RdfsSubPropertyOf, "<http://ex.org/hasAncestor>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsSubProperty);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsSubProperty);
         reasoner.Materialize();
 
         Assert.True(TripleExists("<http://ex.org/hasFather>", RdfsSubPropertyOf, "<http://ex.org/hasAncestor>"));
@@ -111,11 +99,11 @@ public class OwlReasonerTests : IDisposable
     public void RdfsSubPropertyOf_PropertyInheritance_InfersSuperProperty()
     {
         // hasFather subPropertyOf hasParent
-        _store.AddCurrent("<http://ex.org/hasFather>", RdfsSubPropertyOf, "<http://ex.org/hasParent>");
+        Store.AddCurrent("<http://ex.org/hasFather>", RdfsSubPropertyOf, "<http://ex.org/hasParent>");
         // John hasFather Bob
-        _store.AddCurrent("<http://ex.org/John>", "<http://ex.org/hasFather>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/John>", "<http://ex.org/hasFather>", "<http://ex.org/Bob>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsSubProperty);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsSubProperty);
         reasoner.Materialize();
 
         // John should also hasParent Bob
@@ -130,11 +118,11 @@ public class OwlReasonerTests : IDisposable
     public void RdfsDomain_InfersSubjectType()
     {
         // teaches has domain Teacher
-        _store.AddCurrent("<http://ex.org/teaches>", RdfsDomain, "<http://ex.org/Teacher>");
+        Store.AddCurrent("<http://ex.org/teaches>", RdfsDomain, "<http://ex.org/Teacher>");
         // Alice teaches Math
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/teaches>", "<http://ex.org/Math>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/teaches>", "<http://ex.org/Math>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsDomain);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsDomain);
         reasoner.Materialize();
 
         // Alice should be a Teacher
@@ -145,11 +133,11 @@ public class OwlReasonerTests : IDisposable
     public void RdfsRange_InfersObjectType()
     {
         // teaches has range Subject
-        _store.AddCurrent("<http://ex.org/teaches>", RdfsRange, "<http://ex.org/Subject>");
+        Store.AddCurrent("<http://ex.org/teaches>", RdfsRange, "<http://ex.org/Subject>");
         // Alice teaches Math
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/teaches>", "<http://ex.org/Math>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/teaches>", "<http://ex.org/Math>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsRange);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsRange);
         reasoner.Materialize();
 
         // Math should be a Subject
@@ -160,11 +148,11 @@ public class OwlReasonerTests : IDisposable
     public void RdfsRange_SkipsLiterals()
     {
         // age has range Integer
-        _store.AddCurrent("<http://ex.org/age>", RdfsRange, "<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/age>", RdfsRange, "<http://www.w3.org/2001/XMLSchema#integer>");
         // Alice age 30 (literal)
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsRange);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsRange);
         int inferred = reasoner.Materialize();
 
         // Should not infer type for literal
@@ -179,12 +167,12 @@ public class OwlReasonerTests : IDisposable
     public void OwlTransitive_InfersTransitiveClosure()
     {
         // ancestor is transitive
-        _store.AddCurrent("<http://ex.org/ancestor>", RdfType, OwlTransitiveProperty);
+        Store.AddCurrent("<http://ex.org/ancestor>", RdfType, OwlTransitiveProperty);
         // A ancestor B, B ancestor C
-        _store.AddCurrent("<http://ex.org/A>", "<http://ex.org/ancestor>", "<http://ex.org/B>");
-        _store.AddCurrent("<http://ex.org/B>", "<http://ex.org/ancestor>", "<http://ex.org/C>");
+        Store.AddCurrent("<http://ex.org/A>", "<http://ex.org/ancestor>", "<http://ex.org/B>");
+        Store.AddCurrent("<http://ex.org/B>", "<http://ex.org/ancestor>", "<http://ex.org/C>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlTransitive);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlTransitive);
         reasoner.Materialize();
 
         // A should be ancestor of C
@@ -195,13 +183,13 @@ public class OwlReasonerTests : IDisposable
     public void OwlTransitive_LongChain_InfersAllConnections()
     {
         // partOf is transitive
-        _store.AddCurrent("<http://ex.org/partOf>", RdfType, OwlTransitiveProperty);
+        Store.AddCurrent("<http://ex.org/partOf>", RdfType, OwlTransitiveProperty);
         // A partOf B partOf C partOf D
-        _store.AddCurrent("<http://ex.org/A>", "<http://ex.org/partOf>", "<http://ex.org/B>");
-        _store.AddCurrent("<http://ex.org/B>", "<http://ex.org/partOf>", "<http://ex.org/C>");
-        _store.AddCurrent("<http://ex.org/C>", "<http://ex.org/partOf>", "<http://ex.org/D>");
+        Store.AddCurrent("<http://ex.org/A>", "<http://ex.org/partOf>", "<http://ex.org/B>");
+        Store.AddCurrent("<http://ex.org/B>", "<http://ex.org/partOf>", "<http://ex.org/C>");
+        Store.AddCurrent("<http://ex.org/C>", "<http://ex.org/partOf>", "<http://ex.org/D>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlTransitive);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlTransitive);
         reasoner.Materialize();
 
         // Should infer all transitive connections
@@ -218,11 +206,11 @@ public class OwlReasonerTests : IDisposable
     public void OwlSymmetric_InfersReverseTriple()
     {
         // knows is symmetric
-        _store.AddCurrent("<http://ex.org/knows>", RdfType, OwlSymmetricProperty);
+        Store.AddCurrent("<http://ex.org/knows>", RdfType, OwlSymmetricProperty);
         // Alice knows Bob
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlSymmetric);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlSymmetric);
         reasoner.Materialize();
 
         // Bob should also know Alice
@@ -233,11 +221,11 @@ public class OwlReasonerTests : IDisposable
     public void OwlSymmetric_MultipleStatements_InfersAll()
     {
         // sibling is symmetric
-        _store.AddCurrent("<http://ex.org/sibling>", RdfType, OwlSymmetricProperty);
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/sibling>", "<http://ex.org/Bob>");
-        _store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/sibling>", "<http://ex.org/Carol>");
+        Store.AddCurrent("<http://ex.org/sibling>", RdfType, OwlSymmetricProperty);
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/sibling>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/sibling>", "<http://ex.org/Carol>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlSymmetric);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlSymmetric);
         reasoner.Materialize();
 
         Assert.True(TripleExists("<http://ex.org/Bob>", "<http://ex.org/sibling>", "<http://ex.org/Alice>"));
@@ -252,11 +240,11 @@ public class OwlReasonerTests : IDisposable
     public void OwlInverse_InfersInverseTriple()
     {
         // hasChild inverseOf hasParent
-        _store.AddCurrent("<http://ex.org/hasChild>", OwlInverseOf, "<http://ex.org/hasParent>");
+        Store.AddCurrent("<http://ex.org/hasChild>", OwlInverseOf, "<http://ex.org/hasParent>");
         // Alice hasChild Bob
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/hasChild>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/hasChild>", "<http://ex.org/Bob>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlInverse);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlInverse);
         reasoner.Materialize();
 
         // Bob should hasParent Alice
@@ -267,13 +255,13 @@ public class OwlReasonerTests : IDisposable
     public void OwlInverse_BidirectionalInference()
     {
         // employs inverseOf worksFor
-        _store.AddCurrent("<http://ex.org/employs>", OwlInverseOf, "<http://ex.org/worksFor>");
+        Store.AddCurrent("<http://ex.org/employs>", OwlInverseOf, "<http://ex.org/worksFor>");
         // Acme employs Alice
-        _store.AddCurrent("<http://ex.org/Acme>", "<http://ex.org/employs>", "<http://ex.org/Alice>");
+        Store.AddCurrent("<http://ex.org/Acme>", "<http://ex.org/employs>", "<http://ex.org/Alice>");
         // Bob worksFor Acme
-        _store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/worksFor>", "<http://ex.org/Acme>");
+        Store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/worksFor>", "<http://ex.org/Acme>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlInverse);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlInverse);
         reasoner.Materialize();
 
         // Alice should worksFor Acme
@@ -289,9 +277,9 @@ public class OwlReasonerTests : IDisposable
     [Fact]
     public void OwlSameAs_IsSymmetric()
     {
-        _store.AddCurrent("<http://ex.org/Alice>", OwlSameAs, "<http://ex.org/AliceSmith>");
+        Store.AddCurrent("<http://ex.org/Alice>", OwlSameAs, "<http://ex.org/AliceSmith>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlSameAs);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlSameAs);
         reasoner.Materialize();
 
         Assert.True(TripleExists("<http://ex.org/AliceSmith>", OwlSameAs, "<http://ex.org/Alice>"));
@@ -301,13 +289,13 @@ public class OwlReasonerTests : IDisposable
     public void OwlSameAs_CopiesTriples()
     {
         // Alice sameAs AliceSmith
-        _store.AddCurrent("<http://ex.org/Alice>", OwlSameAs, "<http://ex.org/AliceSmith>");
+        Store.AddCurrent("<http://ex.org/Alice>", OwlSameAs, "<http://ex.org/AliceSmith>");
         // Alice knows Bob
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
         // Carol knows Alice
-        _store.AddCurrent("<http://ex.org/Carol>", "<http://ex.org/knows>", "<http://ex.org/Alice>");
+        Store.AddCurrent("<http://ex.org/Carol>", "<http://ex.org/knows>", "<http://ex.org/Alice>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlSameAs);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlSameAs);
         reasoner.Materialize();
 
         // AliceSmith should also know Bob
@@ -323,9 +311,9 @@ public class OwlReasonerTests : IDisposable
     [Fact]
     public void OwlEquivalentClass_InfersMutualSubClass()
     {
-        _store.AddCurrent("<http://ex.org/Person>", OwlEquivalentClass, "<http://ex.org/Human>");
+        Store.AddCurrent("<http://ex.org/Person>", OwlEquivalentClass, "<http://ex.org/Human>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlEquivalentClass);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlEquivalentClass);
         reasoner.Materialize();
 
         Assert.True(TripleExists("<http://ex.org/Person>", RdfsSubClassOf, "<http://ex.org/Human>"));
@@ -335,9 +323,9 @@ public class OwlReasonerTests : IDisposable
     [Fact]
     public void OwlEquivalentClass_IsSymmetric()
     {
-        _store.AddCurrent("<http://ex.org/Person>", OwlEquivalentClass, "<http://ex.org/Human>");
+        Store.AddCurrent("<http://ex.org/Person>", OwlEquivalentClass, "<http://ex.org/Human>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlEquivalentClass);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlEquivalentClass);
         reasoner.Materialize();
 
         Assert.True(TripleExists("<http://ex.org/Human>", OwlEquivalentClass, "<http://ex.org/Person>"));
@@ -346,9 +334,9 @@ public class OwlReasonerTests : IDisposable
     [Fact]
     public void OwlEquivalentProperty_InfersMutualSubProperty()
     {
-        _store.AddCurrent("<http://ex.org/author>", OwlEquivalentProperty, "<http://ex.org/creator>");
+        Store.AddCurrent("<http://ex.org/author>", OwlEquivalentProperty, "<http://ex.org/creator>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlEquivalentProperty);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlEquivalentProperty);
         reasoner.Materialize();
 
         Assert.True(TripleExists("<http://ex.org/author>", RdfsSubPropertyOf, "<http://ex.org/creator>"));
@@ -363,16 +351,16 @@ public class OwlReasonerTests : IDisposable
     public void AllRdfs_CombinesRules()
     {
         // Setup ontology
-        _store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
-        _store.AddCurrent("<http://ex.org/hasPet>", RdfsDomain, "<http://ex.org/Person>");
-        _store.AddCurrent("<http://ex.org/hasPet>", RdfsRange, "<http://ex.org/Animal>");
-        _store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
+        Store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
+        Store.AddCurrent("<http://ex.org/hasPet>", RdfsDomain, "<http://ex.org/Person>");
+        Store.AddCurrent("<http://ex.org/hasPet>", RdfsRange, "<http://ex.org/Animal>");
+        Store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
 
         // Data
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/hasPet>", "<http://ex.org/Fido>");
-        _store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/hasPet>", "<http://ex.org/Fido>");
+        Store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.AllRdfs);
+        var reasoner = new OwlReasoner(Store, InferenceRules.AllRdfs);
         reasoner.Materialize();
 
         // Alice should be a Person (domain inference)
@@ -387,21 +375,21 @@ public class OwlReasonerTests : IDisposable
     public void AllRules_ComplexOntology()
     {
         // Class hierarchy
-        _store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
-        _store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
+        Store.AddCurrent("<http://ex.org/Dog>", RdfsSubClassOf, "<http://ex.org/Mammal>");
+        Store.AddCurrent("<http://ex.org/Mammal>", RdfsSubClassOf, "<http://ex.org/Animal>");
 
         // Symmetric property
-        _store.AddCurrent("<http://ex.org/knows>", RdfType, OwlSymmetricProperty);
+        Store.AddCurrent("<http://ex.org/knows>", RdfType, OwlSymmetricProperty);
 
         // Inverse properties
-        _store.AddCurrent("<http://ex.org/hasOwner>", OwlInverseOf, "<http://ex.org/owns>");
+        Store.AddCurrent("<http://ex.org/hasOwner>", OwlInverseOf, "<http://ex.org/owns>");
 
         // Data
-        _store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
-        _store.AddCurrent("<http://ex.org/Fido>", "<http://ex.org/hasOwner>", "<http://ex.org/Alice>");
+        Store.AddCurrent("<http://ex.org/Fido>", RdfType, "<http://ex.org/Dog>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/Fido>", "<http://ex.org/hasOwner>", "<http://ex.org/Alice>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.All);
+        var reasoner = new OwlReasoner(Store, InferenceRules.All);
         reasoner.Materialize();
 
         // Fido should be Animal
@@ -415,10 +403,10 @@ public class OwlReasonerTests : IDisposable
     [Fact]
     public void Materialize_ReturnsInferredCount()
     {
-        _store.AddCurrent("<http://ex.org/knows>", RdfType, OwlSymmetricProperty);
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/knows>", RdfType, OwlSymmetricProperty);
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.OwlSymmetric);
+        var reasoner = new OwlReasoner(Store, InferenceRules.OwlSymmetric);
         int inferred = reasoner.Materialize();
 
         Assert.True(inferred >= 1);
@@ -427,11 +415,11 @@ public class OwlReasonerTests : IDisposable
     [Fact]
     public void Materialize_FixedPoint_StopsWhenNoNewFacts()
     {
-        _store.AddCurrent("<http://ex.org/A>", RdfsSubClassOf, "<http://ex.org/B>");
-        _store.AddCurrent("<http://ex.org/B>", RdfsSubClassOf, "<http://ex.org/C>");
-        _store.AddCurrent("<http://ex.org/C>", RdfsSubClassOf, "<http://ex.org/D>");
+        Store.AddCurrent("<http://ex.org/A>", RdfsSubClassOf, "<http://ex.org/B>");
+        Store.AddCurrent("<http://ex.org/B>", RdfsSubClassOf, "<http://ex.org/C>");
+        Store.AddCurrent("<http://ex.org/C>", RdfsSubClassOf, "<http://ex.org/D>");
 
-        var reasoner = new OwlReasoner(_store, InferenceRules.RdfsSubClass);
+        var reasoner = new OwlReasoner(Store, InferenceRules.RdfsSubClass);
         int inferred = reasoner.Materialize(maxIterations: 100);
 
         // Should complete and infer transitive subclass relations
@@ -445,10 +433,10 @@ public class OwlReasonerTests : IDisposable
 
     private bool TripleExists(string subject, string predicate, string obj)
     {
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var results = _store.QueryCurrent(subject.AsSpan(), predicate.AsSpan(), obj.AsSpan());
+            var results = Store.QueryCurrent(subject.AsSpan(), predicate.AsSpan(), obj.AsSpan());
             try
             {
                 return results.MoveNext();
@@ -460,7 +448,7 @@ public class OwlReasonerTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 

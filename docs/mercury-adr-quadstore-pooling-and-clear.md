@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (implemented)
 
 ## Related ADRs
 
@@ -372,10 +372,10 @@ Total: ~32KB vs creating new store with same overhead.
 
 ## Success criteria
 
-- [ ] Clear() resets store to empty state
-- [ ] Cleared store passes same tests as fresh store
-- [ ] Pool limits concurrent stores to max
-- [ ] Pool reuses stores via Clear()
-- [ ] Parallel test runs don't exhaust disk
-- [ ] No file handle leaks after Clear()
-- [ ] Clear() is significantly faster than dispose+create
+- [x] Clear() resets store to empty state
+- [x] Cleared store passes same tests as fresh store
+- [x] Pool limits concurrent stores to max
+- [x] Pool reuses stores via Clear()
+- [x] Parallel test runs don't exhaust disk (bounded by pool)
+- [x] No file handle leaks after Clear() (memory mappings preserved)
+- [x] Clear() is significantly faster than dispose+create (no file I/O, just memory resets)

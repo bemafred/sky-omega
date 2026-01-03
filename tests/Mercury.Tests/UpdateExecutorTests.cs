@@ -3,7 +3,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -11,33 +11,21 @@ namespace SkyOmega.Mercury.Tests;
 /// <summary>
 /// Tests for SPARQL Update execution
 /// </summary>
-public class UpdateExecutorTests : IDisposable
+[Collection("QuadStore")]
+public class UpdateExecutorTests : PooledStoreTestBase
 {
-    private readonly string _testDir;
-    private readonly QuadStore _store;
-
-    public UpdateExecutorTests()
+    public UpdateExecutorTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("update");
-        tempPath.MarkOwnership();
-        _testDir = tempPath;
-        _store = new QuadStore(_testDir);
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_testDir);
     }
 
     private int CountTriples(string? graphIri = null)
     {
         int count = 0;
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             var graphSpan = graphIri != null ? graphIri.AsSpan() : System.ReadOnlySpan<char>.Empty;
-            var results = _store.QueryCurrent(
+            var results = Store.QueryCurrent(
                 System.ReadOnlySpan<char>.Empty,
                 System.ReadOnlySpan<char>.Empty,
                 System.ReadOnlySpan<char>.Empty,
@@ -61,7 +49,7 @@ public class UpdateExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
         return count;
     }
@@ -75,7 +63,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -94,7 +82,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -113,7 +101,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -129,7 +117,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -144,14 +132,14 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteData_ExistingTriple_DeletesSuccessfully()
     {
         // First insert a triple
-        _store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         Assert.Equal(1, CountTriples());
 
         var update = "DELETE DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -166,7 +154,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -177,7 +165,7 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteData_FromNamedGraph_DeletesFromCorrectGraph()
     {
         // Insert into named graph
-        _store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
+        Store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
         Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
 
         var update = @"DELETE DATA {
@@ -188,7 +176,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -204,11 +192,11 @@ public class UpdateExecutorTests : IDisposable
     public void Clear_Default_ClearsDefaultGraph()
     {
         // Add triples to default and named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>");
-        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", "<http://ex.org/g1>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>");
+        Store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", "<http://ex.org/g1>");
+        Store.CommitBatch();
 
         Assert.Equal(2, CountTriples());
         Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
@@ -217,7 +205,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -230,11 +218,11 @@ public class UpdateExecutorTests : IDisposable
     public void Clear_SpecificGraph_ClearsOnlyThatGraph()
     {
         // Add triples to default and named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/g1>");
-        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", "<http://ex.org/g1>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", "<http://ex.org/g1>");
+        Store.CommitBatch();
 
         Assert.Equal(1, CountTriples());
         Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
@@ -243,7 +231,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -256,17 +244,17 @@ public class UpdateExecutorTests : IDisposable
     public void Clear_All_ClearsEverything()
     {
         // Add triples to default and named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/g1>");
-        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", "<http://ex.org/g2>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>", "<http://ex.org/g2>");
+        Store.CommitBatch();
 
         var update = "CLEAR ALL";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -283,14 +271,14 @@ public class UpdateExecutorTests : IDisposable
     [Fact]
     public void Drop_Graph_SameAsClear()
     {
-        _store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
+        Store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
         Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
 
         var update = "DROP GRAPH <http://ex.org/g1>";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -308,7 +296,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -323,16 +311,16 @@ public class UpdateExecutorTests : IDisposable
     public void Copy_GraphToGraph_CopiesTriples()
     {
         // Add triples to source graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/src>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/src>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/src>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/src>");
+        Store.CommitBatch();
 
         var update = "COPY <http://ex.org/src> TO <http://ex.org/dst>";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -345,16 +333,16 @@ public class UpdateExecutorTests : IDisposable
     public void Copy_DefaultToGraph_CopiesFromDefaultGraph()
     {
         // Add triples to default graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>");
+        Store.CommitBatch();
 
         var update = "COPY DEFAULT TO <http://ex.org/dst>";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -371,16 +359,16 @@ public class UpdateExecutorTests : IDisposable
     public void Move_GraphToGraph_MovesTriples()
     {
         // Add triples to source graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/src>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/src>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/src>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/src>");
+        Store.CommitBatch();
 
         var update = "MOVE <http://ex.org/src> TO <http://ex.org/dst>";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -397,16 +385,16 @@ public class UpdateExecutorTests : IDisposable
     public void Add_GraphToGraph_AddsWithoutClearing()
     {
         // Add triples to both graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/src>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/dst>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/src>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/dst>");
+        Store.CommitBatch();
 
         var update = "ADD <http://ex.org/src> TO <http://ex.org/dst>";
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -445,11 +433,11 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteWhere_SingleVariable_DeletesAllMatching()
     {
         // Add triples with same predicate but different subjects/objects
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/type>", "<http://ex.org/Person>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/type>", "<http://ex.org/Person>");
-        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/type>", "<http://ex.org/Animal>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/type>", "<http://ex.org/Person>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/type>", "<http://ex.org/Person>");
+        Store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/type>", "<http://ex.org/Animal>");
+        Store.CommitBatch();
 
         Assert.Equal(3, CountTriples());
 
@@ -458,7 +446,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -470,11 +458,11 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteWhere_MultipleVariables_DeletesMatching()
     {
         // Add triples with various values
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
-        _store.AddCurrentBatched("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Charlie>");
-        _store.AddCurrentBatched("<http://ex.org/Bob>", "<http://ex.org/knows>", "<http://ex.org/Alice>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        Store.AddCurrentBatched("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Charlie>");
+        Store.AddCurrentBatched("<http://ex.org/Bob>", "<http://ex.org/knows>", "<http://ex.org/Alice>");
+        Store.CommitBatch();
 
         Assert.Equal(3, CountTriples());
 
@@ -483,7 +471,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -495,7 +483,7 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteWhere_NoMatches_ReturnsZeroAffected()
     {
         // Add some triples
-        _store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         Assert.Equal(1, CountTriples());
 
         // DELETE WHERE with no matches
@@ -503,7 +491,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -515,11 +503,11 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteWhere_AllVariables_DeletesEverything()
     {
         // Add multiple triples
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p1>", "<http://ex.org/o1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p2>", "<http://ex.org/o2>");
-        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p3>", "<http://ex.org/o3>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p1>", "<http://ex.org/o1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p2>", "<http://ex.org/o2>");
+        Store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/p3>", "<http://ex.org/o3>");
+        Store.CommitBatch();
 
         Assert.Equal(3, CountTriples());
 
@@ -528,7 +516,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -544,7 +532,7 @@ public class UpdateExecutorTests : IDisposable
     public void Modify_DeleteAndInsert_ModifiesTriples()
     {
         // Add a triple to be modified
-        _store.AddCurrent("<http://ex.org/person1>", "<http://ex.org/status>", "\"active\"");
+        Store.AddCurrent("<http://ex.org/person1>", "<http://ex.org/status>", "\"active\"");
         Assert.Equal(1, CountTriples());
 
         // Modify: change status from "active" to "inactive"
@@ -554,7 +542,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -566,10 +554,10 @@ public class UpdateExecutorTests : IDisposable
     public void Modify_InsertOnly_InsertsNewTriples()
     {
         // Add existing triples
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/name>", "\"Alice\"");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/name>", "\"Bob\"");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/name>", "\"Alice\"");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/name>", "\"Bob\"");
+        Store.CommitBatch();
 
         Assert.Equal(2, CountTriples());
 
@@ -579,7 +567,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -591,11 +579,11 @@ public class UpdateExecutorTests : IDisposable
     public void Modify_DeleteOnly_DeletesMatchingTriples()
     {
         // Add triples
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value1\"");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/temp>", "\"value2\"");
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/perm>", "\"keep\"");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value1\"");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/temp>", "\"value2\"");
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/perm>", "\"keep\"");
+        Store.CommitBatch();
 
         Assert.Equal(3, CountTriples());
 
@@ -605,7 +593,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -621,12 +609,12 @@ public class UpdateExecutorTests : IDisposable
     public void With_DeleteInsert_ScopesToSpecifiedGraph()
     {
         // Add data to named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
         // Also add same pattern to default graph - should NOT be affected
-        _store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/status>", "\"active\"");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://ex.org/s3>", "<http://ex.org/status>", "\"active\"");
+        Store.CommitBatch();
 
         Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
         Assert.Equal(1, CountTriples());
@@ -639,7 +627,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -652,10 +640,10 @@ public class UpdateExecutorTests : IDisposable
         Assert.Equal(1, CountTriples());
 
         // Verify the content in the named graph was changed
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var results = _store.QueryCurrent(
+            var results = Store.QueryCurrent(
                 System.ReadOnlySpan<char>.Empty,
                 "<http://ex.org/status>".AsSpan(),
                 "\"inactive\"".AsSpan(),
@@ -667,7 +655,7 @@ public class UpdateExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -675,7 +663,7 @@ public class UpdateExecutorTests : IDisposable
     public void With_InsertOnly_InsertsIntoSpecifiedGraph()
     {
         // Add data to named graph
-        _store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"", "<http://ex.org/g1>");
+        Store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"", "<http://ex.org/g1>");
 
         Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
         Assert.Equal(0, CountTriples());
@@ -687,7 +675,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -703,12 +691,12 @@ public class UpdateExecutorTests : IDisposable
     public void With_DeleteOnly_DeletesFromSpecifiedGraph()
     {
         // Add data to named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value\"", "<http://ex.org/g1>");
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/perm>", "\"keep\"", "<http://ex.org/g1>");
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value\"", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/perm>", "\"keep\"", "<http://ex.org/g1>");
         // Also add same pattern to default graph
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value\"");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/temp>", "\"value\"");
+        Store.CommitBatch();
 
         Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
         Assert.Equal(1, CountTriples());
@@ -720,7 +708,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -736,7 +724,7 @@ public class UpdateExecutorTests : IDisposable
     public void With_ExplicitGraphInTemplate_OverridesWithGraph()
     {
         // Add data to named graph g1
-        _store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"", "<http://ex.org/g1>");
+        Store.AddCurrent("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"", "<http://ex.org/g1>");
 
         Assert.Equal(1, CountTriples("<http://ex.org/g1>"));
         Assert.Equal(0, CountTriples("<http://ex.org/g2>"));
@@ -748,7 +736,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -763,10 +751,10 @@ public class UpdateExecutorTests : IDisposable
     public void With_MixedTemplates_UsesCorrectGraphs()
     {
         // Add data to named graph g1
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
-        _store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/status>", "\"active\"", "<http://ex.org/g1>");
+        Store.CommitBatch();
 
         Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
 
@@ -778,7 +766,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -794,7 +782,7 @@ public class UpdateExecutorTests : IDisposable
     public void With_NoMatchingData_ReturnsZeroAffected()
     {
         // Add data to default graph only
-        _store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
 
         Assert.Equal(1, CountTriples());
         Assert.Equal(0, CountTriples("<http://ex.org/g1>"));
@@ -806,7 +794,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);
@@ -841,12 +829,12 @@ public class UpdateExecutorTests : IDisposable
     public void DeleteWhere_WithGraphClause_DeletesFromSpecifiedGraph()
     {
         // Add data to named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
-        _store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/g1>");
         // Also in default graph
-        _store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o>");
+        Store.CommitBatch();
 
         Assert.Equal(2, CountTriples("<http://ex.org/g1>"));
         Assert.Equal(1, CountTriples());
@@ -856,7 +844,7 @@ public class UpdateExecutorTests : IDisposable
         var parser = new SparqlParser(update.AsSpan());
         var operation = parser.ParseUpdate();
 
-        var executor = new UpdateExecutor(_store, update.AsSpan(), operation);
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
         var result = executor.Execute();
 
         Assert.True(result.Success);

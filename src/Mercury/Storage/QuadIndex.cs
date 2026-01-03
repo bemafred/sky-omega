@@ -1090,6 +1090,36 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     public long QuadCount => _quadCount;
+
+    /// <summary>
+    /// Resets the index to empty state. All data is logically discarded.
+    /// File size is preserved (memory mapping stays valid).
+    /// </summary>
+    /// <remarks>
+    /// Must be called from QuadStore.Clear() which holds the write lock.
+    /// </remarks>
+    public void Clear()
+    {
+        // Clear page cache first (contains pointers to old pages)
+        _pageCache.Clear();
+
+        // Reset to initial state: root at page 1, next allocation at page 2
+        _rootPageId = 1;
+        _nextPageId = 2;
+        _quadCount = 0;
+        _currentTransactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        // Reinitialize root page as empty leaf
+        var root = GetPage(_rootPageId);
+        root->PageId = _rootPageId;
+        root->IsLeaf = true;
+        root->EntryCount = 0;
+        root->ParentPageId = 0;
+        root->NextLeaf = 0;
+
+        FlushPage(root);
+        SaveMetadata();
+    }
 }
 
 /// <summary>

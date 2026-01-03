@@ -692,6 +692,32 @@ internal sealed unsafe class TrigramIndex : IDisposable
         _postingAccessor.Write(32, MagicNumber);
     }
 
+    /// <summary>
+    /// Resets the trigram index to empty state. All indexed data is logically discarded.
+    /// File sizes are preserved (memory mappings stay valid).
+    /// </summary>
+    /// <remarks>
+    /// Must be called from QuadStore.Clear() which holds the write lock.
+    /// </remarks>
+    public void Clear()
+    {
+        lock (_resizeLock)
+        {
+            // Zero the entire hash table
+            var hashTableBytes = HashTableBuckets * sizeof(HashBucket);
+            new Span<byte>(_hashTable, hashTableBytes).Clear();
+
+            // Reset posting position to after header
+            _postingPosition = 64;
+
+            // Reset counters
+            _indexedAtomCount = 0;
+            _totalTrigrams = 0;
+
+            SaveMetadata();
+        }
+    }
+
     public void Dispose()
     {
         SaveMetadata();

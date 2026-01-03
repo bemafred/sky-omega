@@ -10,7 +10,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 
 namespace Mercury.Tests;
 
@@ -18,11 +18,9 @@ namespace Mercury.Tests;
 /// Tests for RDF-star reification support.
 /// RDF-star triples are converted to standard RDF reification for storage and query.
 /// </summary>
-public class RdfStarTests : IDisposable
+[Collection("QuadStore")]
+public class RdfStarTests : PooledStoreTestBase
 {
-    private readonly string _tempDir;
-    private readonly QuadStore _store;
-
     // RDF namespace constants (with angle brackets to match Turtle parser output)
     private const string RdfType = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
     private const string RdfStatement = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement>";
@@ -30,18 +28,8 @@ public class RdfStarTests : IDisposable
     private const string RdfPredicate = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate>";
     private const string RdfObject = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#object>";
 
-    public RdfStarTests()
+    public RdfStarTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("rdfstar");
-        tempPath.MarkOwnership();
-        _tempDir = tempPath;
-        _store = new QuadStore(_tempDir);
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_tempDir);
     }
 
     private async Task<List<RdfTriple>> ParseTurtle(string turtle)
@@ -62,7 +50,7 @@ public class RdfStarTests : IDisposable
         using var parser = new TurtleStreamParser(stream);
         await parser.ParseAsync((subject, predicate, obj) =>
         {
-            _store.AddCurrent(subject, predicate, obj);
+            Store.AddCurrent(subject, predicate, obj);
         });
     }
 
@@ -175,10 +163,10 @@ public class RdfStarTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var statements = new List<string>();
@@ -198,7 +186,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -223,10 +211,10 @@ public class RdfStarTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var bindings = new List<(string stmt, string subj)>();
@@ -248,7 +236,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -274,10 +262,10 @@ public class RdfStarTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var bindings = new List<(string stmt, string pred)>();
@@ -298,7 +286,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -325,10 +313,10 @@ public class RdfStarTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var statements = new List<string>();
@@ -348,7 +336,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -405,12 +393,12 @@ public class RdfStarTests : IDisposable
 
         string? stmtBlankNode = null;
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             var parser4 = new SparqlParser(query4.AsSpan());
             var parsedQuery4 = parser4.ParseQuery();
-            using var executor4 = new QueryExecutor(_store, query4.AsSpan(), parsedQuery4);
+            using var executor4 = new QueryExecutor(Store, query4.AsSpan(), parsedQuery4);
             var results4 = executor4.Execute();
 
             if (results4.MoveNext())
@@ -426,7 +414,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
 
         Assert.NotNull(stmtBlankNode);
@@ -440,12 +428,12 @@ public class RdfStarTests : IDisposable
             }}
         ";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             var parser5 = new SparqlParser(query5.AsSpan());
             var parsedQuery5 = parser5.ParseQuery();
-            using var executor5 = new QueryExecutor(_store, query5.AsSpan(), parsedQuery5);
+            using var executor5 = new QueryExecutor(Store, query5.AsSpan(), parsedQuery5);
             var results5 = executor5.Execute();
 
             var confidences = new List<string>();
@@ -465,7 +453,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -489,10 +477,10 @@ public class RdfStarTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var people = new List<string>();
@@ -512,7 +500,7 @@ public class RdfStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 

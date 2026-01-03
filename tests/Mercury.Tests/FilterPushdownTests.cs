@@ -2,11 +2,11 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Collections.Generic;
-using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -16,46 +16,33 @@ namespace SkyOmega.Mercury.Tests;
 /// Verifies that filters are correctly analyzed and pushed to
 /// the earliest possible pattern level during query execution.
 /// </summary>
-public class FilterPushdownTests : IDisposable
+[Collection("QuadStore")]
+public class FilterPushdownTests : PooledStoreTestBase
 {
-    private readonly string _testDir;
-    private readonly QuadStore _store;
-
-    public FilterPushdownTests()
+    public FilterPushdownTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("filter_pushdown");
-        tempPath.MarkOwnership();
-        _testDir = tempPath;
-        _store = new QuadStore(_testDir);
-
         SetupTestData();
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_testDir);
     }
 
     private void SetupTestData()
     {
-        _store.BeginBatch();
+        Store.BeginBatch();
         // Use numeric literals for age comparisons
-        _store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"");
-        _store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/age>", "30");
-        _store.AddCurrentBatched("<http://ex.org/alice>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
+        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"");
+        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/age>", "30");
+        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
 
-        _store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/name>", "\"Bob\"");
-        _store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/age>", "25");
-        _store.AddCurrentBatched("<http://ex.org/bob>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
+        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/name>", "\"Bob\"");
+        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/age>", "25");
+        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
 
-        _store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/name>", "\"Charlie\"");
-        _store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/age>", "35");
-        _store.AddCurrentBatched("<http://ex.org/charlie>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
+        Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/name>", "\"Charlie\"");
+        Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/age>", "35");
+        Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
 
-        _store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/knows>", "<http://ex.org/bob>");
-        _store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/knows>", "<http://ex.org/charlie>");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/knows>", "<http://ex.org/bob>");
+        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/knows>", "<http://ex.org/charlie>");
+        Store.CommitBatch();
     }
 
     #region FilterAnalyzer Tests
@@ -230,7 +217,7 @@ public class FilterPushdownTests : IDisposable
     {
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
-        var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+        var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
         var results = executor.Execute();
 
         int count = 0;
@@ -248,14 +235,14 @@ public class FilterPushdownTests : IDisposable
         // Query without filter - should return all 3 names
         var query = "SELECT ?s WHERE { ?s <http://ex.org/name> ?name }";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             Assert.Equal(3, CountResults(query));
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -265,14 +252,14 @@ public class FilterPushdownTests : IDisposable
         // Query with single pattern - uses TriplePatternScan, not MultiPatternScan
         var query = "SELECT ?s WHERE { ?s <http://ex.org/name> \"Alice\" }";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             Assert.Equal(1, CountResults(query));
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -282,14 +269,14 @@ public class FilterPushdownTests : IDisposable
         // Filter that eliminates all results (age stored as plain integers)
         var query = "SELECT ?s WHERE { ?s <http://ex.org/age> ?age . FILTER(?age > 100) }";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             Assert.Equal(0, CountResults(query));
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -299,7 +286,7 @@ public class FilterPushdownTests : IDisposable
         // Query with string comparison filter - CONTAINS
         var query = "SELECT ?s WHERE { ?s <http://ex.org/name> ?name . FILTER(CONTAINS(?name, \"li\")) }";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             // Alice and Charlie contain "li"
@@ -308,7 +295,7 @@ public class FilterPushdownTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -318,14 +305,14 @@ public class FilterPushdownTests : IDisposable
         // Query with two patterns - tests MultiPatternScan
         var query = "SELECT ?s ?name ?age WHERE { ?s <http://ex.org/name> ?name . ?s <http://ex.org/age> ?age }";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             Assert.Equal(3, CountResults(query));
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -335,7 +322,7 @@ public class FilterPushdownTests : IDisposable
         // Simple age comparison
         var query = "SELECT ?s WHERE { ?s <http://ex.org/age> ?age . FILTER(?age > 27) }";
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             // Alice (30) and Charlie (35) have age > 27
@@ -344,7 +331,7 @@ public class FilterPushdownTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 

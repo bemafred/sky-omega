@@ -10,7 +10,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 
 namespace Mercury.Tests;
 
@@ -18,23 +18,11 @@ namespace Mercury.Tests;
 /// Tests for SPARQL-star syntax support.
 /// SPARQL-star quoted triples (<< s p o >>) are expanded at parse time to reification patterns.
 /// </summary>
-public class SparqlStarTests : IDisposable
+[Collection("QuadStore")]
+public class SparqlStarTests : PooledStoreTestBase
 {
-    private readonly string _tempDir;
-    private readonly QuadStore _store;
-
-    public SparqlStarTests()
+    public SparqlStarTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("sparqlstar");
-        tempPath.MarkOwnership();
-        _tempDir = tempPath;
-        _store = new QuadStore(_tempDir);
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_tempDir);
     }
 
     private async Task ParseTurtleIntoStore(string turtle)
@@ -43,7 +31,7 @@ public class SparqlStarTests : IDisposable
         using var parser = new TurtleStreamParser(stream);
         await parser.ParseAsync((subject, predicate, obj) =>
         {
-            _store.AddCurrent(subject, predicate, obj);
+            Store.AddCurrent(subject, predicate, obj);
         });
     }
 
@@ -53,10 +41,10 @@ public class SparqlStarTests : IDisposable
         var parsed = parser.ParseQuery();
 
         var values = new List<string>();
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, sparql.AsSpan(), parsed);
+            using var executor = new QueryExecutor(Store, sparql.AsSpan(), parsed);
             var resultEnum = executor.Execute();
 
             while (resultEnum.MoveNext())
@@ -70,7 +58,7 @@ public class SparqlStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
         return (values, values.Count);
     }
@@ -81,10 +69,10 @@ public class SparqlStarTests : IDisposable
         var parsed = parser.ParseQuery();
 
         var results = new List<(string, string)>();
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, sparql.AsSpan(), parsed);
+            using var executor = new QueryExecutor(Store, sparql.AsSpan(), parsed);
             var resultEnum = executor.Execute();
 
             while (resultEnum.MoveNext())
@@ -100,7 +88,7 @@ public class SparqlStarTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
         return results;
     }

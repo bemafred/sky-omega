@@ -1,9 +1,9 @@
 using System.Collections.Generic;
-using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -11,34 +11,21 @@ namespace SkyOmega.Mercury.Tests;
 /// <summary>
 /// Tests for SPARQL query execution
 /// </summary>
-public class QueryExecutorTests : IDisposable
+[Collection("QuadStore")]
+public class QueryExecutorTests : PooledStoreTestBase
 {
-    private readonly string _testDir;
-    private readonly QuadStore _store;
-
-    public QueryExecutorTests()
+    public QueryExecutorTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("queryexec");
-        tempPath.MarkOwnership();
-        _testDir = tempPath;
-        _store = new QuadStore(_testDir);
-
         // Populate with test data
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
-        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/age>", "30");
-        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Bob>");
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/age>", "25");
-        _store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/name>", "\"Charlie\"");
-        _store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/age>", "35");
-        _store.CommitBatch();
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_testDir);
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
+        Store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/age>", "30");
+        Store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Bob>");
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/age>", "25");
+        Store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/name>", "\"Charlie\"");
+        Store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/age>", "35");
+        Store.CommitBatch();
     }
 
     /// <summary>
@@ -60,10 +47,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -80,7 +67,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -91,10 +78,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -109,7 +96,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -130,10 +117,10 @@ public class QueryExecutorTests : IDisposable
         var predicateText = query.AsSpan().Slice(pattern.Predicate.Start, pattern.Predicate.Length).ToString();
         Assert.Equal("<http://xmlns.com/foaf/0.1/name>", predicateText);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -148,7 +135,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -160,10 +147,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -181,7 +168,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -193,10 +180,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -211,7 +198,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -219,10 +206,10 @@ public class QueryExecutorTests : IDisposable
     public void StoreDirectQuery_WithPredicate_FiltersCorrectly()
     {
         // Test the store directly to verify it filters by predicate
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var results = _store.QueryCurrent(
+            var results = Store.QueryCurrent(
                 ReadOnlySpan<char>.Empty,
                 "<http://xmlns.com/foaf/0.1/name>".AsSpan(),
                 ReadOnlySpan<char>.Empty);
@@ -239,7 +226,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -251,10 +238,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -268,7 +255,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -281,10 +268,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -298,7 +285,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -309,10 +296,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             Assert.True(results.MoveNext());
@@ -328,7 +315,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -342,10 +329,10 @@ public class QueryExecutorTests : IDisposable
         // Verify LIMIT was parsed
         Assert.Equal(3, parsedQuery.SolutionModifier.Limit);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -360,7 +347,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -374,10 +361,10 @@ public class QueryExecutorTests : IDisposable
         // Verify OFFSET was parsed
         Assert.Equal(5, parsedQuery.SolutionModifier.Offset);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -392,7 +379,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -407,10 +394,10 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(2, parsedQuery.SolutionModifier.Limit);
         Assert.Equal(3, parsedQuery.SolutionModifier.Offset);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -425,7 +412,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -436,10 +423,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -454,7 +441,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -466,10 +453,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -484,7 +471,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -499,10 +486,10 @@ public class QueryExecutorTests : IDisposable
         // Verify no limit was set
         Assert.Equal(0, parsedQuery.SolutionModifier.Limit);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -517,7 +504,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -532,10 +519,10 @@ public class QueryExecutorTests : IDisposable
         // Verify OPTIONAL was parsed
         Assert.True(parsedQuery.WhereClause.Pattern.HasOptionalPatterns);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -562,7 +549,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -575,10 +562,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -605,7 +592,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -636,10 +623,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var foundPeople = new List<string>();
@@ -661,7 +648,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -676,10 +663,10 @@ public class QueryExecutorTests : IDisposable
         // Verify DISTINCT was parsed
         Assert.True(parsedQuery.SelectClause.Distinct);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var predicates = new HashSet<string>();
@@ -703,7 +690,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -716,10 +703,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -734,7 +721,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -749,10 +736,10 @@ public class QueryExecutorTests : IDisposable
         // Verify DISTINCT was not set
         Assert.False(parsedQuery.SelectClause.Distinct);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -767,7 +754,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -779,10 +766,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -797,7 +784,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -809,10 +796,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -827,7 +814,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -843,10 +830,10 @@ public class QueryExecutorTests : IDisposable
         // Verify UNION was parsed
         Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -871,7 +858,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -883,10 +870,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -901,7 +888,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -913,10 +900,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -931,7 +918,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -948,10 +935,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(parsedQuery.SelectClause.Reduced);
         Assert.False(parsedQuery.SelectClause.Distinct);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -966,7 +953,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -978,10 +965,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -996,7 +983,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1008,10 +995,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -1026,7 +1013,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1038,10 +1025,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -1055,7 +1042,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1071,10 +1058,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(parsedQuery.SolutionModifier.OrderBy.HasOrderBy);
         Assert.Equal(1, parsedQuery.SolutionModifier.OrderBy.Count);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1097,7 +1084,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1109,10 +1096,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1135,7 +1122,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1147,10 +1134,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1172,7 +1159,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1184,10 +1171,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1209,7 +1196,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1221,10 +1208,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -1247,7 +1234,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1259,10 +1246,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1284,7 +1271,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1298,10 +1285,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var answers = new List<string>();
@@ -1319,7 +1306,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1331,10 +1318,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var computed = new Dictionary<string, string>();
@@ -1358,7 +1345,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1370,10 +1357,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var computed = new Dictionary<string, string>();
@@ -1397,7 +1384,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1409,10 +1396,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var computed = new Dictionary<string, string>();
@@ -1438,7 +1425,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1450,10 +1437,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var messages = new List<string>();
@@ -1470,7 +1457,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1482,10 +1469,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1503,7 +1490,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1517,10 +1504,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -1540,7 +1527,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1552,10 +1539,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -1572,7 +1559,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1584,10 +1571,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var count = 0;
@@ -1602,7 +1589,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1614,10 +1601,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -1637,7 +1624,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1649,10 +1636,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1673,7 +1660,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1689,17 +1676,17 @@ public class QueryExecutorTests : IDisposable
 
         Assert.Equal(QueryType.Ask, parsedQuery.Type);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var result = executor.ExecuteAsk();
 
             Assert.True(result);
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1711,17 +1698,17 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var result = executor.ExecuteAsk();
 
             Assert.False(result);
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1733,10 +1720,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var result = executor.ExecuteAsk();
 
             // Alice knows Bob, and Bob has a name
@@ -1744,7 +1731,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1756,10 +1743,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var result = executor.ExecuteAsk();
 
             // Charlie is 35
@@ -1767,7 +1754,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1779,10 +1766,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var result = executor.ExecuteAsk();
 
             // No one is older than 100
@@ -1790,7 +1777,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1802,10 +1789,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var result = executor.ExecuteAsk();
 
             // Store has triples
@@ -1813,7 +1800,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1830,10 +1817,10 @@ public class QueryExecutorTests : IDisposable
         // Verify VALUES was parsed
         Assert.True(parsedQuery.WhereClause.Pattern.Values.HasValues);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1852,7 +1839,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1864,10 +1851,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1885,7 +1872,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1897,10 +1884,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var count = 0;
@@ -1915,7 +1902,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1927,10 +1914,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -1947,7 +1934,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1959,10 +1946,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var count = 0;
@@ -1977,7 +1964,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -1989,10 +1976,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -2011,7 +1998,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2029,10 +2016,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(parsedQuery.ConstructTemplate.HasPatterns);
         Assert.Equal(1, parsedQuery.ConstructTemplate.PatternCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteConstruct();
 
             var triples = new List<(string s, string p, string o)>();
@@ -2049,7 +2036,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2063,10 +2050,10 @@ public class QueryExecutorTests : IDisposable
 
         Assert.Equal(2, parsedQuery.ConstructTemplate.PatternCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteConstruct();
 
             var triples = new List<(string s, string p, string o)>();
@@ -2088,7 +2075,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2100,10 +2087,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteConstruct();
 
             var triples = new List<(string s, string p, string o)>();
@@ -2124,7 +2111,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2136,10 +2123,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteConstruct();
 
             var triples = new List<(string s, string p, string o)>();
@@ -2155,7 +2142,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2167,10 +2154,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteConstruct();
 
             var count = 0;
@@ -2184,7 +2171,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2196,10 +2183,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteConstruct();
 
             var triples = new List<(string s, string p, string o)>();
@@ -2216,7 +2203,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2238,10 +2225,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(parsedQuery.SelectClause.HasAggregates);
         Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var groups = new Dictionary<string, string>();
@@ -2266,7 +2253,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2278,10 +2265,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             Assert.True(results.MoveNext());
@@ -2296,7 +2283,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2308,10 +2295,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             Assert.True(results.MoveNext());
@@ -2331,7 +2318,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2343,10 +2330,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             Assert.True(results.MoveNext());
@@ -2362,7 +2349,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2374,10 +2361,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var groups = new Dictionary<string, string>();
@@ -2402,7 +2389,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2440,10 +2427,10 @@ public class QueryExecutorTests : IDisposable
         // Verify HAVING was parsed
         Assert.True(parsedQuery.SolutionModifier.Having.HasHaving);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var groups = new Dictionary<string, string>();
@@ -2467,7 +2454,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2479,10 +2466,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var groups = new Dictionary<string, string>();
@@ -2507,7 +2494,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2519,10 +2506,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -2537,7 +2524,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2549,10 +2536,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var persons = new List<string>();
@@ -2571,7 +2558,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2590,10 +2577,10 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
         Assert.Equal(AggregateFunction.GroupConcat, parsedQuery.SelectClause.GetAggregate(0).Function);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var groups = new Dictionary<string, string>();
@@ -2618,7 +2605,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2635,10 +2622,10 @@ public class QueryExecutorTests : IDisposable
         var agg = parsedQuery.SelectClause.GetAggregate(0);
         Assert.True(agg.SeparatorLength > 0);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             Assert.True(results.MoveNext());
@@ -2657,7 +2644,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2674,10 +2661,10 @@ public class QueryExecutorTests : IDisposable
         var agg = parsedQuery.SelectClause.GetAggregate(0);
         Assert.True(agg.Distinct);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -2699,7 +2686,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2741,10 +2728,10 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
         Assert.Equal(AggregateFunction.Sample, parsedQuery.SelectClause.GetAggregate(0).Function);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var samples = new Dictionary<string, string>();
@@ -2772,7 +2759,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2789,10 +2776,10 @@ public class QueryExecutorTests : IDisposable
         Assert.Equal(AggregateFunction.Sample, agg.Function);
         Assert.True(agg.Distinct);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -2810,7 +2797,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2845,10 +2832,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
         Assert.Equal(1, parsedQuery.WhereClause.Pattern.ExistsFilterCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var persons = new List<string>();
@@ -2866,7 +2853,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2883,10 +2870,10 @@ public class QueryExecutorTests : IDisposable
         var existsFilter = parsedQuery.WhereClause.Pattern.GetExistsFilter(0);
         Assert.True(existsFilter.Negated);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var persons = new List<string>();
@@ -2905,7 +2892,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2917,10 +2904,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -2940,7 +2927,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2952,10 +2939,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -2970,7 +2957,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -2982,10 +2969,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var persons = new List<string>();
@@ -3003,7 +2990,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3017,10 +3004,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -3040,7 +3027,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3052,10 +3039,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -3073,7 +3060,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3085,10 +3072,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -3107,7 +3094,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3121,10 +3108,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var persons = new List<string>();
@@ -3142,7 +3129,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3154,10 +3141,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var persons = new List<string>();
@@ -3176,7 +3163,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3188,10 +3175,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var ages = new List<string>();
@@ -3210,7 +3197,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3222,10 +3209,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             // Since ?age is not bound in the pattern, COALESCE returns 0
@@ -3241,7 +3228,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3253,10 +3240,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -3274,7 +3261,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3286,10 +3273,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new List<string>();
@@ -3307,7 +3294,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3317,20 +3304,20 @@ public class QueryExecutorTests : IDisposable
     public void Execute_GraphClause_QueriesNamedGraph()
     {
         // Add data to a named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/name>", "\"David\"", "<http://example.org/graph1>");
-        _store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/graph1>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/name>", "\"David\"", "<http://example.org/graph1>");
+        Store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/graph1>");
+        Store.CommitBatch();
 
         var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
 
         // Use buffer-based constructor to avoid storing large Query struct
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             // Use ExecuteGraphToMaterialized() to avoid stack overflow from large QueryResults struct
             var results = executor.ExecuteGraphToMaterialized();
 
@@ -3346,7 +3333,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3354,18 +3341,18 @@ public class QueryExecutorTests : IDisposable
     public void Execute_GraphClause_DoesNotQueryDefaultGraph()
     {
         // Add data to a named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Eve>", "<http://xmlns.com/foaf/0.1/name>", "\"Eve\"", "<http://example.org/graph2>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Eve>", "<http://xmlns.com/foaf/0.1/name>", "\"Eve\"", "<http://example.org/graph2>");
+        Store.CommitBatch();
 
         // Query default graph - should NOT find Eve
         var query = "SELECT * WHERE { <http://example.org/Eve> ?p ?o }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.Execute();
 
             int count = 0;
@@ -3380,7 +3367,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3388,17 +3375,17 @@ public class QueryExecutorTests : IDisposable
     public void Execute_GraphClause_BindsVariables()
     {
         // Add data to a named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Frank>", "<http://xmlns.com/foaf/0.1/name>", "\"Frank\"", "<http://example.org/graph3>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Frank>", "<http://xmlns.com/foaf/0.1/name>", "\"Frank\"", "<http://example.org/graph3>");
+        Store.CommitBatch();
 
         var query = "SELECT ?name WHERE { GRAPH <http://example.org/graph3> { <http://example.org/Frank> <http://xmlns.com/foaf/0.1/name> ?name } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var names = new List<string>();
@@ -3415,7 +3402,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3423,18 +3410,18 @@ public class QueryExecutorTests : IDisposable
     public void Execute_GraphClause_MultiplePatterns()
     {
         // Add data to a named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/name>", "\"Grace\"", "<http://example.org/graph4>");
-        _store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/age>", "28", "<http://example.org/graph4>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/name>", "\"Grace\"", "<http://example.org/graph4>");
+        Store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/age>", "28", "<http://example.org/graph4>");
+        Store.CommitBatch();
 
         var query = "SELECT ?name ?age WHERE { GRAPH <http://example.org/graph4> { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
@@ -3454,7 +3441,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3464,10 +3451,10 @@ public class QueryExecutorTests : IDisposable
         var query = "SELECT * WHERE { GRAPH <http://example.org/nonexistent> { ?s ?p ?o } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
@@ -3481,7 +3468,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3489,19 +3476,19 @@ public class QueryExecutorTests : IDisposable
     public void Execute_VariableGraph_IteratesAllNamedGraphs()
     {
         // Add data to multiple named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Henry>", "<http://xmlns.com/foaf/0.1/name>", "\"Henry\"", "<http://example.org/graphA>");
-        _store.AddCurrentBatched("<http://example.org/Irene>", "<http://xmlns.com/foaf/0.1/name>", "\"Irene\"", "<http://example.org/graphB>");
-        _store.AddCurrentBatched("<http://example.org/Jack>", "<http://xmlns.com/foaf/0.1/name>", "\"Jack\"", "<http://example.org/graphC>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Henry>", "<http://xmlns.com/foaf/0.1/name>", "\"Henry\"", "<http://example.org/graphA>");
+        Store.AddCurrentBatched("<http://example.org/Irene>", "<http://xmlns.com/foaf/0.1/name>", "\"Irene\"", "<http://example.org/graphB>");
+        Store.AddCurrentBatched("<http://example.org/Jack>", "<http://xmlns.com/foaf/0.1/name>", "\"Jack\"", "<http://example.org/graphC>");
+        Store.CommitBatch();
 
         var query = "SELECT ?g ?s ?name WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> ?name } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var foundGraphs = new HashSet<string>();
@@ -3528,7 +3515,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3536,17 +3523,17 @@ public class QueryExecutorTests : IDisposable
     public void Execute_VariableGraph_BindsGraphVariable()
     {
         // Add data to a named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Kate>", "<http://xmlns.com/foaf/0.1/name>", "\"Kate\"", "<http://example.org/graphK>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Kate>", "<http://xmlns.com/foaf/0.1/name>", "\"Kate\"", "<http://example.org/graphK>");
+        Store.CommitBatch();
 
         var query = "SELECT ?g WHERE { GRAPH ?g { ?s <http://xmlns.com/foaf/0.1/name> \"Kate\" } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var graphs = new List<string>();
@@ -3563,7 +3550,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3571,18 +3558,18 @@ public class QueryExecutorTests : IDisposable
     public void Execute_VariableGraph_ExcludesDefaultGraph()
     {
         // Add data to default graph and named graph
-        _store.BeginBatch();
+        Store.BeginBatch();
         // Default graph data is already there from constructor
-        _store.AddCurrentBatched("<http://example.org/Leo>", "<http://xmlns.com/foaf/0.1/name>", "\"Leo\"", "<http://example.org/graphL>");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://example.org/Leo>", "<http://xmlns.com/foaf/0.1/name>", "\"Leo\"", "<http://example.org/graphL>");
+        Store.CommitBatch();
 
         var query = "SELECT ?g ?s WHERE { GRAPH ?g { ?s ?p ?o } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var foundGraphs = new HashSet<string>();
@@ -3601,7 +3588,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3609,18 +3596,18 @@ public class QueryExecutorTests : IDisposable
     public void Execute_VariableGraph_MultiplePatterns()
     {
         // Add person with name and age to named graph
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/name>", "\"Mary\"", "<http://example.org/graphM>");
-        _store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/age>", "32", "<http://example.org/graphM>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/name>", "\"Mary\"", "<http://example.org/graphM>");
+        Store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/age>", "32", "<http://example.org/graphM>");
+        Store.CommitBatch();
 
         var query = "SELECT ?g ?name ?age WHERE { GRAPH ?g { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
@@ -3643,7 +3630,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3651,12 +3638,12 @@ public class QueryExecutorTests : IDisposable
     public void Execute_MultipleGraphClauses_JoinsResults()
     {
         // Add data to two different named graphs with a shared subject
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"", "<http://example.org/namesGraph>");
-        _store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/age>", "30", "<http://example.org/agesGraph>");
-        _store.AddCurrentBatched("<http://example.org/Person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"", "<http://example.org/namesGraph>");
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"", "<http://example.org/namesGraph>");
+        Store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/age>", "30", "<http://example.org/agesGraph>");
+        Store.AddCurrentBatched("<http://example.org/Person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"", "<http://example.org/namesGraph>");
         // Person2 has no age in agesGraph - should not appear in join
-        _store.CommitBatch();
+        Store.CommitBatch();
 
         // Query with two GRAPH clauses - should join on ?person
         var query = @"SELECT ?name ?age WHERE {
@@ -3665,10 +3652,10 @@ public class QueryExecutorTests : IDisposable
         }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var found = new List<(string name, string age)>();
@@ -3689,7 +3676,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3697,10 +3684,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_MultipleGraphClauses_WithVariableGraph()
     {
         // Add data with variable graph pattern
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/label>", "\"Widget\"", "<http://example.org/labelsGraph>");
-        _store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/price>", "100", "<http://example.org/pricesGraph>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/label>", "\"Widget\"", "<http://example.org/labelsGraph>");
+        Store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/price>", "100", "<http://example.org/pricesGraph>");
+        Store.CommitBatch();
 
         // Mix of fixed and variable GRAPH clauses
         var query = @"SELECT ?g ?label ?price WHERE {
@@ -3709,10 +3696,10 @@ public class QueryExecutorTests : IDisposable
         }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var found = new List<(string g, string label, string price)>();
@@ -3738,7 +3725,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3746,10 +3733,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_MultipleGraphClauses_NoMatch_ReturnsEmpty()
     {
         // Add data with no shared subjects between graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/A>", "<http://example.org/p>", "\"ValueA\"", "<http://example.org/graphA>");
-        _store.AddCurrentBatched("<http://example.org/B>", "<http://example.org/q>", "\"ValueB\"", "<http://example.org/graphB>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/A>", "<http://example.org/p>", "\"ValueA\"", "<http://example.org/graphA>");
+        Store.AddCurrentBatched("<http://example.org/B>", "<http://example.org/q>", "\"ValueB\"", "<http://example.org/graphB>");
+        Store.CommitBatch();
 
         // Query with two GRAPH clauses - join on ?s should return no results
         var query = @"SELECT * WHERE {
@@ -3758,10 +3745,10 @@ public class QueryExecutorTests : IDisposable
         }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             int count = 0;
@@ -3775,7 +3762,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3787,20 +3774,20 @@ public class QueryExecutorTests : IDisposable
     public void Execute_SingleFromClause_QueriesSpecifiedGraph()
     {
         // Add data to named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Person1\"", "<http://example.org/fromGraph1>");
-        _store.AddCurrentBatched("<http://example.org/Person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Person2\"", "<http://example.org/fromGraph2>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Person1\"", "<http://example.org/fromGraph1>");
+        Store.AddCurrentBatched("<http://example.org/Person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Person2\"", "<http://example.org/fromGraph2>");
+        Store.CommitBatch();
 
         // Query with FROM clause - should only get data from fromGraph1
         var query = "SELECT * FROM <http://example.org/fromGraph1> WHERE { ?s ?p ?o }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteFromToMaterialized();
 
             var subjects = new List<string>();
@@ -3818,7 +3805,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3826,21 +3813,21 @@ public class QueryExecutorTests : IDisposable
     public void Execute_MultipleFromClauses_UnionsResults()
     {
         // Add data to multiple named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/PersonA>", "<http://xmlns.com/foaf/0.1/name>", "\"PersonA\"", "<http://example.org/unionGraph1>");
-        _store.AddCurrentBatched("<http://example.org/PersonB>", "<http://xmlns.com/foaf/0.1/name>", "\"PersonB\"", "<http://example.org/unionGraph2>");
-        _store.AddCurrentBatched("<http://example.org/PersonC>", "<http://xmlns.com/foaf/0.1/name>", "\"PersonC\"", "<http://example.org/unionGraph3>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/PersonA>", "<http://xmlns.com/foaf/0.1/name>", "\"PersonA\"", "<http://example.org/unionGraph1>");
+        Store.AddCurrentBatched("<http://example.org/PersonB>", "<http://xmlns.com/foaf/0.1/name>", "\"PersonB\"", "<http://example.org/unionGraph2>");
+        Store.AddCurrentBatched("<http://example.org/PersonC>", "<http://xmlns.com/foaf/0.1/name>", "\"PersonC\"", "<http://example.org/unionGraph3>");
+        Store.CommitBatch();
 
         // Query with multiple FROM clauses - should union graph1 and graph2
         var query = "SELECT * FROM <http://example.org/unionGraph1> FROM <http://example.org/unionGraph2> WHERE { ?s ?p ?o }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteFromToMaterialized();
 
             var subjects = new HashSet<string>();
@@ -3860,7 +3847,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3890,11 +3877,11 @@ public class QueryExecutorTests : IDisposable
     public void Execute_FromNamedClause_RestrictsGraphVariable()
     {
         // Add data to multiple named graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/type>", "\"TypeA\"", "<http://example.org/restrictGraph1>");
-        _store.AddCurrentBatched("<http://example.org/Item2>", "<http://example.org/type>", "\"TypeB\"", "<http://example.org/restrictGraph2>");
-        _store.AddCurrentBatched("<http://example.org/Item3>", "<http://example.org/type>", "\"TypeC\"", "<http://example.org/restrictGraph3>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Item1>", "<http://example.org/type>", "\"TypeA\"", "<http://example.org/restrictGraph1>");
+        Store.AddCurrentBatched("<http://example.org/Item2>", "<http://example.org/type>", "\"TypeB\"", "<http://example.org/restrictGraph2>");
+        Store.AddCurrentBatched("<http://example.org/Item3>", "<http://example.org/type>", "\"TypeC\"", "<http://example.org/restrictGraph3>");
+        Store.CommitBatch();
 
         // Query with FROM NAMED - should only see restrictGraph1 and restrictGraph2
         var query = @"SELECT ?g ?s ?type
@@ -3903,10 +3890,10 @@ public class QueryExecutorTests : IDisposable
                       WHERE { GRAPH ?g { ?s <http://example.org/type> ?type } }";
         var buffer = ParseToBuffer(query);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), buffer);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
             var results = executor.ExecuteGraphToMaterialized();
 
             var graphs = new HashSet<string>();
@@ -3934,7 +3921,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3949,10 +3936,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -3967,7 +3954,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -3975,12 +3962,12 @@ public class QueryExecutorTests : IDisposable
     public void Execute_FromWithFilter_AppliesFilterToUnionedResults()
     {
         // Add data with varying ages to graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/FilterPerson1>", "<http://xmlns.com/foaf/0.1/age>", "20", "<http://example.org/filterGraph1>");
-        _store.AddCurrentBatched("<http://example.org/FilterPerson2>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/filterGraph1>");
-        _store.AddCurrentBatched("<http://example.org/FilterPerson3>", "<http://xmlns.com/foaf/0.1/age>", "15", "<http://example.org/filterGraph2>");
-        _store.AddCurrentBatched("<http://example.org/FilterPerson4>", "<http://xmlns.com/foaf/0.1/age>", "50", "<http://example.org/filterGraph2>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/FilterPerson1>", "<http://xmlns.com/foaf/0.1/age>", "20", "<http://example.org/filterGraph1>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson2>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/filterGraph1>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson3>", "<http://xmlns.com/foaf/0.1/age>", "15", "<http://example.org/filterGraph2>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson4>", "<http://xmlns.com/foaf/0.1/age>", "50", "<http://example.org/filterGraph2>");
+        Store.CommitBatch();
 
         // Query with FROM and FILTER
         var query = @"SELECT ?s ?age
@@ -3990,10 +3977,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteFromToMaterialized();
 
             var subjects = new HashSet<string>();
@@ -4011,7 +3998,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4019,10 +4006,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_FromWithJoin_JoinsAcrossGraphs()
     {
         // Add related data across graphs
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/name>", "\"JoinPerson\"", "<http://example.org/joinGraph1>");
-        _store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/age>", "35", "<http://example.org/joinGraph2>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/name>", "\"JoinPerson\"", "<http://example.org/joinGraph1>");
+        Store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/age>", "35", "<http://example.org/joinGraph2>");
+        Store.CommitBatch();
 
         // Query joining data from both graphs
         var query = @"SELECT ?name ?age
@@ -4032,10 +4019,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteFromToMaterialized();
 
             var foundJoin = false;
@@ -4058,7 +4045,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4111,10 +4098,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var persons = new List<string>();
@@ -4136,7 +4123,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4148,10 +4135,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
@@ -4169,7 +4156,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4181,10 +4168,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
@@ -4198,7 +4185,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4210,10 +4197,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
@@ -4227,7 +4214,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4239,10 +4226,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             while (results.MoveNext())
@@ -4257,7 +4244,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4276,10 +4263,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var names = new List<string>();
@@ -4298,7 +4285,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4317,10 +4304,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var persons = new List<string>();
@@ -4341,7 +4328,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4349,9 +4336,9 @@ public class QueryExecutorTests : IDisposable
     public void SubQuery_WithDistinct_RemovesDuplicates()
     {
         // Add duplicate entries for this test
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
+        Store.CommitBatch();
 
         // Test DISTINCT in subquery - Alice knows both Bob and Charlie
         var query = @"SELECT ?knower WHERE {
@@ -4364,10 +4351,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var knowers = new List<string>();
@@ -4387,7 +4374,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4403,10 +4390,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<(string person, string age)>();
@@ -4432,7 +4419,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4448,10 +4435,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<(string person, string age)>();
@@ -4475,7 +4462,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4493,10 +4480,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<string>();
@@ -4513,7 +4500,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4530,10 +4517,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
@@ -4547,7 +4534,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4563,10 +4550,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var resultList = new List<(string person, string name, string age)>();
@@ -4592,7 +4579,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4601,13 +4588,13 @@ public class QueryExecutorTests : IDisposable
     {
         // Add data where two subqueries will join on a shared variable
         // Use unique predicates to avoid conflicts with test fixture data
-        _store.BeginBatch();
+        Store.BeginBatch();
         // First subquery: employees with nicknames
-        _store.AddCurrentBatched("<http://example.org/emp100>", "<http://example.org/nickname>", "\"EmpAlice\"");
-        _store.AddCurrentBatched("<http://example.org/emp200>", "<http://example.org/nickname>", "\"EmpBob\"");
+        Store.AddCurrentBatched("<http://example.org/emp100>", "<http://example.org/nickname>", "\"EmpAlice\"");
+        Store.AddCurrentBatched("<http://example.org/emp200>", "<http://example.org/nickname>", "\"EmpBob\"");
         // Second subquery: employees with salaries (only emp100)
-        _store.AddCurrentBatched("<http://example.org/emp100>", "<http://example.org/salary>", "50000");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://example.org/emp100>", "<http://example.org/salary>", "50000");
+        Store.CommitBatch();
 
         // Query with two subqueries - should join on ?employee
         var query = @"SELECT ?employee ?nick ?sal WHERE {
@@ -4617,10 +4604,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var found = new List<(string employee, string nick, string sal)>();
@@ -4650,7 +4637,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4658,16 +4645,16 @@ public class QueryExecutorTests : IDisposable
     public void Execute_MultipleSubqueries_WithOuterPattern()
     {
         // Add data for subqueries plus outer pattern
-        _store.BeginBatch();
+        Store.BeginBatch();
         // Subquery 1: employees with departments
-        _store.AddCurrentBatched("<http://example.org/emp1>", "<http://example.org/dept>", "<http://example.org/engineering>");
-        _store.AddCurrentBatched("<http://example.org/emp2>", "<http://example.org/dept>", "<http://example.org/sales>");
+        Store.AddCurrentBatched("<http://example.org/emp1>", "<http://example.org/dept>", "<http://example.org/engineering>");
+        Store.AddCurrentBatched("<http://example.org/emp2>", "<http://example.org/dept>", "<http://example.org/sales>");
         // Subquery 2: employees with names
-        _store.AddCurrentBatched("<http://example.org/emp1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
-        _store.AddCurrentBatched("<http://example.org/emp2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
+        Store.AddCurrentBatched("<http://example.org/emp1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
+        Store.AddCurrentBatched("<http://example.org/emp2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
         // Outer pattern: department labels (only engineering has label)
-        _store.AddCurrentBatched("<http://example.org/engineering>", "<http://www.w3.org/2000/01/rdf-schema#label>", "\"Engineering Dept\"");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://example.org/engineering>", "<http://www.w3.org/2000/01/rdf-schema#label>", "\"Engineering Dept\"");
+        Store.CommitBatch();
 
         // Query with two subqueries and an outer pattern
         var query = @"SELECT ?emp ?name ?deptLabel WHERE {
@@ -4678,10 +4665,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             var found = new List<(string emp, string name, string label)>();
@@ -4708,7 +4695,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4716,10 +4703,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_MultipleSubqueries_NoMatch_ReturnsEmpty()
     {
         // Add data with no shared values between subqueries
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/A>", "<http://example.org/typeA>", "\"Value1\"");
-        _store.AddCurrentBatched("<http://example.org/B>", "<http://example.org/typeB>", "\"Value2\"");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/A>", "<http://example.org/typeA>", "\"Value1\"");
+        Store.AddCurrentBatched("<http://example.org/B>", "<http://example.org/typeB>", "\"Value2\"");
+        Store.CommitBatch();
 
         // Query with two subqueries that have same variable but different subjects
         var query = @"SELECT ?s ?v1 ?v2 WHERE {
@@ -4732,10 +4719,10 @@ public class QueryExecutorTests : IDisposable
         // Debug: Check how many subqueries were parsed
         var subQueryCount = parsedQuery.WhereClause.Pattern.SubQueryCount;
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.ExecuteSubQueryToMaterialized();
 
             int count = 0;
@@ -4763,7 +4750,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4852,10 +4839,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.ExecuteServiceToMaterialized();
 
             int count = 0;
@@ -4876,7 +4863,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4891,10 +4878,10 @@ public class QueryExecutorTests : IDisposable
         var mockExecutor = new MockSparqlServiceExecutor();
         mockExecutor.SetErrorForEndpoint("http://failing.example.org/sparql", new SparqlServiceException("Simulated failure"));
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.ExecuteServiceToMaterialized();
 
             // SILENT should return empty results, not throw
@@ -4909,7 +4896,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4920,11 +4907,11 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
             // Don't provide a service executor
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
 
             Assert.Throws<InvalidOperationException>(() =>
             {
@@ -4934,7 +4921,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -4942,10 +4929,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_ServiceWithLocalPatterns_JoinsResults()
     {
         // Add local data
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://local/person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
-        _store.AddCurrentBatched("<http://local/person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");
+        Store.AddCurrentBatched("<http://local/person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"");
+        Store.CommitBatch();
 
         // Query that combines local pattern with SERVICE
         var query = @"SELECT ?s ?name ?remoteData WHERE {
@@ -4974,10 +4961,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
             var resultList = new List<(string s, string name, string data)>();
@@ -5007,7 +4994,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5015,11 +5002,11 @@ public class QueryExecutorTests : IDisposable
     public void Execute_ServiceWithLocalPatterns_MultipleLocalResults()
     {
         // Add local data with multiple results
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.CommitBatch();
 
         var query = @"SELECT ?item ?price WHERE {
             ?item <http://ex.org/type> <http://ex.org/Widget> .
@@ -5048,10 +5035,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
             int count = 0;
@@ -5066,7 +5053,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5115,10 +5102,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
             var resultList = new List<string>();
@@ -5135,7 +5122,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5143,9 +5130,9 @@ public class QueryExecutorTests : IDisposable
     public void Execute_ServiceWithLocalPatterns_Silent_HandlesErrors()
     {
         // Add local data
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://local/x>", "<http://ex.org/type>", "<http://ex.org/Thing>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/x>", "<http://ex.org/type>", "<http://ex.org/Thing>");
+        Store.CommitBatch();
 
         var query = @"SELECT ?s ?data WHERE {
             ?s <http://ex.org/type> <http://ex.org/Thing> .
@@ -5160,10 +5147,10 @@ public class QueryExecutorTests : IDisposable
         mockExecutor.SetErrorForEndpoint("http://failing.example.org/sparql",
             new SparqlServiceException("Simulated network failure"));
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
 
             // Should not throw due to SILENT modifier
             var results = executor.Execute();
@@ -5180,7 +5167,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5193,12 +5180,12 @@ public class QueryExecutorTests : IDisposable
         // would produce many results (less selective).
 
         // Add many local items (low selectivity for local patterns)
-        _store.BeginBatch();
+        Store.BeginBatch();
         for (int i = 0; i < 100; i++)
         {
-            _store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+            Store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/type>", "<http://ex.org/Widget>");
         }
-        _store.CommitBatch();
+        Store.CommitBatch();
 
         // Query where SERVICE has specific bound variable pattern (high selectivity)
         var query = @"SELECT ?item ?price WHERE {
@@ -5228,12 +5215,12 @@ public class QueryExecutorTests : IDisposable
         });
 
         // Create a QueryPlanner with statistics to influence strategy selection
-        var planner = new QueryPlanner(_store.Statistics, _store.Atoms);
+        var planner = new QueryPlanner(Store.Statistics, Store.Atoms);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor, planner);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor, planner);
             var results = executor.Execute();
 
             var resultList = new List<(string item, string price)>();
@@ -5259,7 +5246,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5268,17 +5255,17 @@ public class QueryExecutorTests : IDisposable
     {
         // Test SERVICE+local join with MULTIPLE local patterns (uses MultiPatternScan)
         // Query has a chain of local patterns that must be joined before SERVICE
-        _store.BeginBatch();
+        Store.BeginBatch();
         // item1 is a Widget in Electronics category
-        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/category>", "<http://ex.org/Electronics>");
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/category>", "<http://ex.org/Electronics>");
         // item2 is a Widget in Home category
-        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/category>", "<http://ex.org/Home>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/category>", "<http://ex.org/Home>");
         // item3 is a Gadget (not Widget) in Electronics - won't match
-        _store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/type>", "<http://ex.org/Gadget>");
-        _store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/category>", "<http://ex.org/Electronics>");
-        _store.CommitBatch();
+        Store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/type>", "<http://ex.org/Gadget>");
+        Store.AddCurrentBatched("<http://local/item3>", "<http://ex.org/category>", "<http://ex.org/Electronics>");
+        Store.CommitBatch();
 
         // Query with TWO local patterns joined, then SERVICE
         var query = @"SELECT ?item ?cat ?price WHERE {
@@ -5306,10 +5293,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
             var resultList = new List<(string item, string cat, string price)>();
@@ -5339,7 +5326,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5348,14 +5335,14 @@ public class QueryExecutorTests : IDisposable
     {
         // Test SERVICE-first strategy with multiple local patterns
         // When SERVICE is more selective, execute it first then join with local patterns
-        _store.BeginBatch();
+        Store.BeginBatch();
         // Create many items to make local patterns less selective
         for (int i = 0; i < 50; i++)
         {
-            _store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-            _store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/inStock>", "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>");
+            Store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+            Store.AddCurrentBatched($"<http://local/item{i}>", "<http://ex.org/inStock>", "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>");
         }
-        _store.CommitBatch();
+        Store.CommitBatch();
 
         // Query with TWO local patterns, SERVICE should be more selective
         var query = @"SELECT ?item ?price WHERE {
@@ -5384,12 +5371,12 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        var planner = new QueryPlanner(_store.Statistics, _store.Atoms);
+        var planner = new QueryPlanner(Store.Statistics, Store.Atoms);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor, planner);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor, planner);
             var results = executor.Execute();
 
             var resultList = new List<(string item, string price)>();
@@ -5415,7 +5402,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5423,10 +5410,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_OptionalService_PreservesLocalBindingsWhenNoMatch()
     {
         // Test OPTIONAL { SERVICE ... } - should preserve local bindings when SERVICE returns no match
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.CommitBatch();
 
         // Query with OPTIONAL SERVICE - item1 has price, item2 does not
         var query = @"SELECT ?item ?price WHERE {
@@ -5455,10 +5442,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
             var resultList = new List<(string item, bool hasPrice)>();
@@ -5482,7 +5469,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5490,9 +5477,9 @@ public class QueryExecutorTests : IDisposable
     public void Execute_OptionalServiceSilent_CombinesBothModifiers()
     {
         // Test OPTIONAL { SERVICE SILENT ... } - should preserve bindings AND ignore errors
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.CommitBatch();
 
         // Query with OPTIONAL SERVICE SILENT
         var query = @"SELECT ?item ?price WHERE {
@@ -5606,10 +5593,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_OptionalServiceWithMultiplePatterns_JoinsAllPatterns()
     {
         // Test OPTIONAL SERVICE with multiple patterns inside
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://local/item1>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.AddCurrentBatched("<http://local/item2>", "<http://ex.org/type>", "<http://ex.org/Widget>");
+        Store.CommitBatch();
 
         var query = @"SELECT ?item ?price ?currency WHERE {
             ?item <http://ex.org/type> <http://ex.org/Widget> .
@@ -5640,10 +5627,10 @@ public class QueryExecutorTests : IDisposable
             }
         });
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery, mockExecutor);
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
             var results = executor.Execute();
 
             var resultList = new List<(string item, bool hasPrice, bool hasCurrency)>();
@@ -5667,7 +5654,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5679,9 +5666,9 @@ public class QueryExecutorTests : IDisposable
     public void Execute_SequencePath_BasicTwoStep()
     {
         // Add data for a 2-step path: Alice knows Bob, Bob worksAt AcmeCorp
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
+        Store.CommitBatch();
 
         // Query: ?s knows/worksAt ?company - find companies where someone Alice knows works
         var query = "SELECT ?s ?company WHERE { ?s <http://xmlns.com/foaf/0.1/knows>/<http://example.org/worksAt> ?company }";
@@ -5691,10 +5678,10 @@ public class QueryExecutorTests : IDisposable
         // Verify sequence path was expanded to 2 patterns
         Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -5719,7 +5706,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5734,10 +5721,10 @@ public class QueryExecutorTests : IDisposable
         // Verify sequence path was expanded to 2 patterns
         Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -5752,7 +5739,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5760,10 +5747,10 @@ public class QueryExecutorTests : IDisposable
     public void Execute_SequencePath_WithBoundSubject()
     {
         // Add data for a 2-step path
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
-        _store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Bob>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
+        Store.AddCurrentBatched("<http://example.org/Charlie>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Bob>");
+        Store.CommitBatch();
 
         // Query starting from specific subject: Alice knows/worksAt ?company
         var query = "SELECT ?company WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>/<http://example.org/worksAt> ?company }";
@@ -5773,10 +5760,10 @@ public class QueryExecutorTests : IDisposable
         // Verify sequence path was expanded to 2 patterns
         Assert.Equal(2, parsedQuery.WhereClause.Pattern.PatternCount);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -5796,7 +5783,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5804,22 +5791,22 @@ public class QueryExecutorTests : IDisposable
     public void Execute_SequencePath_MultipleResults()
     {
         // Add data where multiple paths exist
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
-        _store.AddCurrentBatched("<http://example.org/Dave>", "<http://xmlns.com/foaf/0.1/name>", "\"Dave\"");
-        _store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Dave>");
-        _store.AddCurrentBatched("<http://example.org/Dave>", "<http://example.org/worksAt>", "<http://example.org/TechCorp>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://example.org/worksAt>", "<http://example.org/AcmeCorp>");
+        Store.AddCurrentBatched("<http://example.org/Dave>", "<http://xmlns.com/foaf/0.1/name>", "\"Dave\"");
+        Store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Dave>");
+        Store.AddCurrentBatched("<http://example.org/Dave>", "<http://example.org/worksAt>", "<http://example.org/TechCorp>");
+        Store.CommitBatch();
 
         // Query: ?s knows/worksAt ?company
         var query = "SELECT ?s ?company WHERE { ?s <http://xmlns.com/foaf/0.1/knows>/<http://example.org/worksAt> ?company }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var foundResults = new List<(string subject, string company)>();
@@ -5841,7 +5828,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5863,10 +5850,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(pattern.HasPropertyPath);
         Assert.Equal(PathType.Alternative, pattern.Path.Type);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var foundResults = new List<(string subject, string obj)>();
@@ -5892,7 +5879,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5904,10 +5891,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var foundValues = new List<string>();
@@ -5925,7 +5912,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5937,10 +5924,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -5954,7 +5941,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5966,10 +5953,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -5984,7 +5971,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -5996,10 +5983,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -6014,7 +6001,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6037,10 +6024,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(pattern.HasPropertyPath);
         Assert.Equal(PathType.Inverse, pattern.Path.Type);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var subjects = new List<string>();
@@ -6061,7 +6048,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6076,10 +6063,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var known = new List<string>();
@@ -6100,7 +6087,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6113,10 +6100,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -6131,7 +6118,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6144,10 +6131,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var names = new HashSet<string>();
@@ -6170,7 +6157,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6185,10 +6172,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var pairs = new List<(string friend, string knower)>();
@@ -6211,7 +6198,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6232,10 +6219,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(pattern.HasPropertyPath);
         Assert.Equal(PathType.ZeroOrMore, pattern.Path.Type);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6257,7 +6244,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6274,10 +6261,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(pattern.HasPropertyPath);
         Assert.Equal(PathType.OneOrMore, pattern.Path.Type);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6299,7 +6286,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6308,18 +6295,18 @@ public class QueryExecutorTests : IDisposable
     {
         // Test multi-hop transitive closure with a chain: Alice -> Bob -> Charlie
         // First add the extra triple
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
+        Store.CommitBatch();
 
         var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>* ?x }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6342,7 +6329,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6350,18 +6337,18 @@ public class QueryExecutorTests : IDisposable
     public void Execute_OneOrMorePath_MultiHop()
     {
         // Test multi-hop with p+ (no reflexive): Alice -> Bob -> Charlie
-        _store.BeginBatch();
-        _store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
-        _store.CommitBatch();
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://example.org/Bob>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/Charlie>");
+        Store.CommitBatch();
 
         var query = "SELECT ?x WHERE { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows>+ ?x }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6384,7 +6371,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6396,10 +6383,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6420,7 +6407,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6432,10 +6419,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             int count = 0;
@@ -6450,7 +6437,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6466,10 +6453,10 @@ public class QueryExecutorTests : IDisposable
         Assert.True(pattern.HasPropertyPath);
         Assert.Equal(PathType.ZeroOrOne, pattern.Path.Type);
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6491,7 +6478,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 
@@ -6503,10 +6490,10 @@ public class QueryExecutorTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
-        _store.AcquireReadLock();
+        Store.AcquireReadLock();
         try
         {
-            var executor = new QueryExecutor(_store, query.AsSpan(), parsedQuery);
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
             var results = executor.Execute();
 
             var found = new HashSet<string>();
@@ -6527,7 +6514,7 @@ public class QueryExecutorTests : IDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            Store.ReleaseReadLock();
         }
     }
 

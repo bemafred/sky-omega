@@ -4,7 +4,7 @@ using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests;
@@ -12,28 +12,15 @@ namespace SkyOmega.Mercury.Tests;
 /// <summary>
 /// Tests for SPARQL EXPLAIN functionality.
 /// </summary>
-public class SparqlExplainTests : IDisposable
+[Collection("QuadStore")]
+public class SparqlExplainTests : PooledStoreTestBase
 {
-    private readonly string _testDir;
-    private readonly QuadStore _store;
-
-    public SparqlExplainTests()
+    public SparqlExplainTests(QuadStorePoolFixture fixture) : base(fixture)
     {
-        var tempPath = TempPath.Test("explain");
-        tempPath.MarkOwnership();
-        _testDir = tempPath;
-        _store = new QuadStore(_testDir);
-
         // Add some test data
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
-        _store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>");
-        _store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/knows>", "<http://ex.org/Carol>");
-    }
-
-    public void Dispose()
-    {
-        _store.Dispose();
-        TempPath.SafeCleanup(_testDir);
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/knows>", "<http://ex.org/Bob>");
+        Store.AddCurrent("<http://ex.org/Alice>", "<http://ex.org/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/Bob>", "<http://ex.org/knows>", "<http://ex.org/Carol>");
     }
 
     #region Basic Plan Generation Tests
@@ -220,7 +207,7 @@ public class SparqlExplainTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        var plan = parsed.ExplainAnalyze(query.AsSpan(), _store);
+        var plan = parsed.ExplainAnalyze(query.AsSpan(), Store);
 
         Assert.True(plan.IsAnalyzed);
         Assert.NotNull(plan.TotalExecutionTimeMs);
@@ -236,7 +223,7 @@ public class SparqlExplainTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        var plan = parsed.ExplainAnalyze(query.AsSpan(), _store);
+        var plan = parsed.ExplainAnalyze(query.AsSpan(), Store);
 
         // We added 2 "knows" triples in setup
         Assert.Equal(2, plan.TotalRows);
@@ -249,7 +236,7 @@ public class SparqlExplainTests : IDisposable
         var parser = new SparqlParser(query.AsSpan());
         var parsed = parser.ParseQuery();
 
-        var plan = parsed.ExplainAnalyze(query.AsSpan(), _store);
+        var plan = parsed.ExplainAnalyze(query.AsSpan(), Store);
 
         Assert.True(plan.IsAnalyzed);
         Assert.Equal(1, plan.TotalRows); // ASK returns true (1 row)
@@ -350,7 +337,7 @@ public class SparqlExplainTests : IDisposable
         var parsed = parser.ParseQuery();
 
         // Use extension method
-        var plan = parsed.ExplainAnalyze(query.AsSpan(), _store);
+        var plan = parsed.ExplainAnalyze(query.AsSpan(), Store);
 
         Assert.True(plan.IsAnalyzed);
     }

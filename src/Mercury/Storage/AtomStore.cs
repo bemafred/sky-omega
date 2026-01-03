@@ -769,6 +769,37 @@ internal sealed unsafe class AtomStore : IDisposable
     }
 
     /// <summary>
+    /// Resets the atom store to empty state. All atoms are logically discarded.
+    /// File sizes are preserved (memory mappings stay valid).
+    /// </summary>
+    /// <remarks>
+    /// Must be called from QuadStore.Clear() which holds the write lock.
+    /// </remarks>
+    public void Clear()
+    {
+        lock (_resizeLock)
+        {
+            // Reset data position to after header (header is first 1KB)
+            _dataPosition = 1024;
+
+            // Reset counters
+            _nextAtomId = 0;  // 0 is reserved for empty/default
+            _atomCount = 0;
+            _totalBytes = 0;
+
+            // Zero the entire hash table (16M buckets × 32 bytes each)
+            // Note: sizeof(HashBucket) is 32 bytes (4 × 8-byte longs)
+            var hashTableBytes = (int)(HashTableSize * sizeof(HashBucket));
+            new Span<byte>(_hashTable, hashTableBytes).Clear();
+
+            // Offset index doesn't need clearing - stale entries are ignored
+            // since lookups check atomId <= _nextAtomId
+
+            SaveMetadata();
+        }
+    }
+
+    /// <summary>
     /// Hash bucket entry (40 bytes for 64-bit IDs, offsets, and lengths)
     /// </summary>
     /// <remarks>

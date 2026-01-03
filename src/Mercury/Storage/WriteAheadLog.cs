@@ -219,6 +219,25 @@ internal sealed class WriteAheadLog : IDisposable
     }
 
     /// <summary>
+    /// Resets the WAL to empty state. All records are discarded.
+    /// File is truncated in place - cheaper than delete + recreate.
+    /// </summary>
+    /// <remarks>
+    /// Must be called from QuadStore.Clear() which holds the write lock.
+    /// </remarks>
+    public void Clear()
+    {
+        _logFile.SetLength(0);
+        _logFile.Flush(flushToDisk: true);
+        _logFile.Position = 0;
+
+        _currentTxId = 0;
+        _lastCheckpointTxId = 0;
+        _lastCheckpointPosition = 0;
+        _lastCheckpointTime = Environment.TickCount64;
+    }
+
+    /// <summary>
     /// Get the file position of the last checkpoint.
     /// Returns the position immediately after the checkpoint record (where new records start).
     /// </summary>

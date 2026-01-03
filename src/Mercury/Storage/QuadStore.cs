@@ -911,6 +911,53 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
+    /// Resets the store to empty state. All data is discarded.
+    /// Files are preserved (memory mappings stay valid) - only logical content is reset.
+    /// Thread-safe: acquires write lock.
+    /// </summary>
+    /// <remarks>
+    /// This operation is designed for store pooling scenarios where recreating
+    /// files is more expensive than clearing in-place. The store can be reused
+    /// immediately after Clear() returns.
+    /// </remarks>
+    public void Clear()
+    {
+        ThrowIfDisposed();
+        _lock.EnterWriteLock();
+        try
+        {
+            _logger.Info("Clearing store".AsSpan());
+
+            // Clear WAL first (durability layer)
+            _wal.Clear();
+
+            // Clear all indexes
+            _gspoIndex.Clear();
+            _gposIndex.Clear();
+            _gospIndex.Clear();
+            _tgspIndex.Clear();
+
+            // Clear atom store
+            _atoms.Clear();
+
+            // Clear trigram index if enabled
+            _trigramIndex?.Clear();
+
+            // Clear cached statistics
+            _statistics.Clear();
+
+            // Reset disk space flag (fresh start)
+            _diskSpaceLow = false;
+
+            _logger.Info("Store cleared".AsSpan());
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
     /// Get storage statistics
     /// </summary>
     public (long QuadCount, long AtomCount, long TotalBytes) GetStatistics()

@@ -1849,4 +1849,185 @@ public class QuadStoreTests : IDisposable
     }
 
     #endregion
+
+    #region Clear Tests
+
+    [Fact]
+    public void Clear_EmptyStore_Succeeds()
+    {
+        var store = CreateStore();
+
+        // Clear an empty store should not throw
+        store.Clear();
+
+        var (quadCount, atomCount, _) = store.GetStatistics();
+        Assert.Equal(0, quadCount);
+        Assert.Equal(0, atomCount);
+    }
+
+    [Fact]
+    public void Clear_StoreWithData_RemovesAllQuads()
+    {
+        var store = CreateStore();
+
+        // Add some data
+        store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        store.AddCurrent("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>");
+        store.AddCurrent("<http://ex.org/s3>", "<http://ex.org/p>", "<http://ex.org/o3>");
+
+        var (quadCountBefore, _, _) = store.GetStatistics();
+        Assert.Equal(3, quadCountBefore);
+
+        // Clear the store
+        store.Clear();
+
+        // Verify empty
+        var (quadCount, atomCount, _) = store.GetStatistics();
+        Assert.Equal(0, quadCount);
+        Assert.Equal(0, atomCount);
+
+        // Query should return nothing
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent(
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty);
+            try
+            {
+                Assert.False(results.MoveNext());
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Clear_StoreCanBeReusedAfterClear()
+    {
+        var store = CreateStore();
+
+        // Add initial data
+        store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+
+        // Clear
+        store.Clear();
+
+        // Add new data
+        store.AddCurrent("<http://ex.org/new>", "<http://ex.org/newp>", "<http://ex.org/newo>");
+
+        // Verify new data is queryable
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent("<http://ex.org/new>", "<http://ex.org/newp>", "<http://ex.org/newo>");
+            try
+            {
+                Assert.True(results.MoveNext());
+                Assert.Equal("<http://ex.org/new>", results.Current.Subject.ToString());
+            }
+            finally
+            {
+                results.Dispose();
+            }
+
+            // Old data should not exist
+            var oldResults = store.QueryCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+            try
+            {
+                Assert.False(oldResults.MoveNext());
+            }
+            finally
+            {
+                oldResults.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Clear_NamedGraphs_AlsoCleared()
+    {
+        var store = CreateStore();
+
+        // Add data to named graph
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/graph1>");
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>", "<http://ex.org/graph2>");
+
+        // Clear
+        store.Clear();
+
+        // Verify named graphs are empty
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent(
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty,
+                "<http://ex.org/graph1>");
+            try
+            {
+                Assert.False(results.MoveNext());
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Clear_MultipleTimes_Succeeds()
+    {
+        var store = CreateStore();
+
+        // Clear multiple times should not throw
+        store.Clear();
+        store.Clear();
+        store.Clear();
+
+        // Add data after multiple clears
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+
+        var (quadCount, _, _) = store.GetStatistics();
+        Assert.Equal(1, quadCount);
+    }
+
+    [Fact]
+    public void Clear_StatisticsReset()
+    {
+        var store = CreateStore();
+
+        // Add data and checkpoint to generate statistics
+        store.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.Checkpoint();
+
+        // Verify statistics exist
+        Assert.True(store.Statistics.HasStats);
+        Assert.Equal(1, store.Statistics.TotalTripleCount);
+
+        // Clear
+        store.Clear();
+
+        // Statistics should be cleared
+        Assert.False(store.Statistics.HasStats);
+        Assert.Equal(0, store.Statistics.TotalTripleCount);
+    }
+
+    #endregion
 }
