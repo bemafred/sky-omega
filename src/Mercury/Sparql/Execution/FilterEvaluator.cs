@@ -643,6 +643,19 @@ public ref partial struct FilterEvaluator
             };
         }
 
+        // RAND - return random double between 0.0 (inclusive) and 1.0 (exclusive)
+        if (funcName.Equals("rand", StringComparison.OrdinalIgnoreCase))
+        {
+            SkipWhitespace();
+            if (Peek() == ')')
+                Advance();
+            return new Value
+            {
+                Type = ValueType.Double,
+                DoubleValue = Random.Shared.NextDouble()
+            };
+        }
+
         // Parse first argument for single-arg functions
         var arg1 = ParseTerm();
 

@@ -313,7 +313,7 @@ Key components:
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm, text:match |
 | Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |
 | String functions | STR, STRLEN, SUBSTR, CONTAINS, STRSTARTS, STRENDS, STRBEFORE, STRAFTER, CONCAT, UCASE, LCASE, ENCODE_FOR_URI |
-| Numeric functions | ABS, ROUND, CEIL, FLOOR |
+| Numeric functions | ABS, ROUND, CEIL, FLOOR, RAND |
 | RDF term functions | LANG, DATATYPE, LANGMATCHES, IRI, URI, STRDT, STRLANG, BNODE |
 | Hash functions | MD5, SHA1, SHA256, SHA384, SHA512 |
 | UUID functions | UUID, STRUUID (uses time-ordered UUID v7) |

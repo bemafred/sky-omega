@@ -2001,6 +2001,37 @@ public class FilterEvaluatorTests
 
     #endregion
 
+    #region RAND Function
+
+    [Fact]
+    public void Rand_ReturnsDouble()
+    {
+        // RAND() returns a double - can be compared with numeric literals
+        Assert.True(Evaluate("RAND() >= 0.0"));
+        Assert.True(Evaluate("RAND() < 1.0"));
+    }
+
+    [Fact]
+    public void Rand_ReturnsValuesInRange()
+    {
+        // RAND() returns values between 0.0 (inclusive) and 1.0 (exclusive)
+        // Run multiple times to increase confidence
+        for (int i = 0; i < 10; i++)
+        {
+            Assert.True(Evaluate("RAND() >= 0.0 && RAND() < 1.0"));
+        }
+    }
+
+    [Fact]
+    public void Rand_CanBeUsedInArithmetic()
+    {
+        // RAND() can be used in arithmetic expressions
+        Assert.True(Evaluate("RAND() * 100 >= 0"));
+        Assert.True(Evaluate("RAND() + 1 >= 1"));
+    }
+
+    #endregion
+
     #region DateTime Functions
 
     [Fact]
