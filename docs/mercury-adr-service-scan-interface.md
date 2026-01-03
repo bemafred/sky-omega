@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (Reviewed 2026-01-03, Updated for QuadStorePool integration)
+Accepted (Implemented 2026-01-03)
 
 ## Related ADRs
 
