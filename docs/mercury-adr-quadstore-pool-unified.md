@@ -4,6 +4,10 @@
 
 Proposed (2026-01-03)
 
+## Notes regarding test
+
+This ADR does not yet address the current use of [Fixture] used by many tests. This must be analyzed before any implementation is initiated. This ADR must be updated according to what is found when analyzing the current tests.
+
 ## Related ADRs
 
 - [QuadStore Pooling and Clear()](mercury-adr-quadstore-pooling-and-clear.md) - Foundation for pooled stores
