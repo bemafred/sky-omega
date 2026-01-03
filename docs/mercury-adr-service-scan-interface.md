@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed (Reviewed 2026-01-03)
+Proposed (Reviewed 2026-01-03, Updated for QuadStorePool integration)
+
+## Related ADRs
+
+- [QuadStore Pooling and Clear()](mercury-adr-quadstore-pooling-and-clear.md) - Enables efficient temp store reuse
 
 ## Problem
 
@@ -117,9 +121,33 @@ SERVICE becomes a **materialization boundary**:
 
 ## New Components
 
-### ServiceStore
+### Pool-Based Temp Store (Preferred)
 
-Temporary `QuadStore` with `TempPath` lifecycle management:
+With `QuadStorePool` (see [QuadStore Pooling ADR](mercury-adr-quadstore-pooling-and-clear.md)), SERVICE temp stores become simple pool rentals:
+
+```csharp
+// Shared pool for SERVICE materialization
+public static class ServiceStorePool
+{
+    public static readonly QuadStorePool Instance = new(
+        maxConcurrent: Environment.ProcessorCount * 2,
+        purpose: "service");
+}
+```
+
+**Why pooling is better than TempPath per-query:**
+
+| Aspect | TempPath (Original) | QuadStorePool (New) |
+|--------|---------------------|---------------------|
+| Creation cost | Create files | Rent (instant) |
+| Cleanup cost | Delete files | Return + Clear() (truncate) |
+| Concurrent limit | Unbounded (disk exhaustion) | Bounded by pool size |
+| Crash recovery | CleanupStale scans | Pool owns all stores |
+| Code complexity | ServiceStore class | Direct pool usage |
+
+### ServiceStore (Legacy/Fallback)
+
+Retained for scenarios where pool is unavailable. Uses `TempPath` lifecycle:
 
 ```csharp
 public sealed class ServiceStore : IDisposable
@@ -170,42 +198,52 @@ internal ref struct ServicePatternScan : IScan
 
 ### ServiceMaterializer
 
-Orchestrates SERVICE materialization before query execution:
+Orchestrates SERVICE materialization before query execution. **Pool-based implementation (preferred):**
 
 ```csharp
 public sealed class ServiceMaterializer : IDisposable
 {
     private readonly ISparqlServiceExecutor _executor;
-    private readonly List<ServiceStore> _stores = new();
+    private readonly QuadStorePool _pool;
+    private readonly List<QuadStore> _rentedStores = new();
 
-    static ServiceMaterializer()
+    public ServiceMaterializer(ISparqlServiceExecutor executor, QuadStorePool? pool = null)
     {
-        // Clean orphaned stores from crashes
-        TempPath.CleanupStale("service");
+        _executor = executor;
+        _pool = pool ?? ServiceStorePool.Instance;
     }
 
-    public ServiceStore Materialize(ServiceClause clause, ReadOnlySpan<char> source,
+    public QuadStore Materialize(ServiceClause clause, ReadOnlySpan<char> source,
         BindingTable? incomingBindings = null)
     {
         var endpoint = ResolveEndpoint(clause, source, incomingBindings);
-        var store = new ServiceStore(ComputeHash(endpoint));
-        _stores.Add(store);
+
+        // Rent from pool - store is already Clear()'d
+        var store = _pool.Rent();
+        _rentedStores.Add(store);
 
         var query = BuildSparqlQuery(clause, source, incomingBindings);
         var results = _executor.ExecuteSelectAsync(endpoint, query)
             .AsTask().GetAwaiter().GetResult();
 
-        LoadResultsToStore(store.Store, results, clause, source);
+        LoadResultsToStore(store, results, clause, source);
         return store;
     }
 
     public void Dispose()
     {
-        foreach (var store in _stores)
-            store.Dispose();
+        // Return all stores to pool for reuse
+        foreach (var store in _rentedStores)
+            _pool.Return(store);
     }
 }
 ```
+
+**Key differences from TempPath approach:**
+- No file creation/deletion per query
+- Pool handles concurrency limiting
+- `Clear()` is called by pool on next `Rent()`, not on `Return()`
+- Crash safety via pool ownership (pool disposes all stores on shutdown)
 
 **Variable Endpoint Handling:** When `ServiceClause.Endpoint.IsVariable` is true, `ResolveEndpoint` must look up the endpoint URI from `incomingBindings`. This may result in different endpoints for different binding rows, requiring multiple temp stores.
 
@@ -250,43 +288,60 @@ for (int i = 0; i < pattern.ServiceClauseCount; i++)
 
 ## Implementation Order
 
+### Prerequisites (from QuadStore Pooling ADR)
+
+0. **Implement QuadStore.Clear() and QuadStorePool**
+    - See [QuadStore Pooling ADR](mercury-adr-quadstore-pooling-and-clear.md)
+    - Must complete before Phase 2 (temp store pattern)
+
+### Phase 1: Interface Extraction
+
 1. **Extract IScan interface** from TriplePatternScan
     - Run all tests → must pass unchanged
 
-2. **Implement ServiceStore** using TempPath
-    - Unit test: create, write triples, query, dispose, verify cleanup
+### Phase 2: Pool-Based SERVICE
 
-3. **Add ServiceBenchmarks** to establish baseline
+2. **Add ServiceBenchmarks** to establish baseline
     - Measure current SERVICE execution overhead
     - Include: SERVICE-only, SERVICE+local join, multiple SERVICE clauses
 
-4. **Implement ServicePatternScan** wrapping TriplePatternScan
+3. **Implement ServicePatternScan** wrapping TriplePatternScan
     - Unit test: materialize mock results, scan, verify bindings
 
-5. **Implement ServiceMaterializer**
-    - Integration test: HTTP mock → temp store → query results
+4. **Implement ServiceMaterializer** using QuadStorePool
+    - Inject pool dependency
+    - Integration test: HTTP mock → pooled store → query results
 
-6. **Integrate into QueryExecutor**
+5. **Integrate into QueryExecutor**
+    - Create shared ServiceStorePool
     - Existing SERVICE tests must pass
     - Add SERVICE + UNION tests
 
-7. **Verify benchmark results**
+6. **Verify benchmark results**
     - No regression beyond 10% for SERVICE-only queries
-    - Document any performance changes
+    - Document performance improvements from pooling
 
-8. **Remove ServiceScan** (old implementation)
+7. **Remove ServiceScan** (old implementation)
     - Dead code elimination
+
+### Optional: Legacy Fallback
+
+8. **Keep ServiceStore** (TempPath-based) for edge cases
+    - Non-pooled execution contexts
+    - Single-use scenarios where pooling overhead not justified
 
 ## Risks and Mitigations
 
 | Risk | Mitigation |
 |------|------------|
 | ref struct can't implement interface | Duck typing with consistent method signatures; IScan as documentation contract; C# 13 `allows ref struct` for generic constraints |
-| Temp store overhead | Only for SERVICE queries; simple queries unchanged |
-| Disk I/O for temp stores | Future optimization: in-memory path for small result sets (see below) |
+| Temp store overhead | Pooling eliminates create/delete; Clear() is cheap truncate |
+| Disk I/O for temp stores | Pool reuses stores; future in-memory path for small results |
 | HTTP blocking in materializer | Already blocked in current ServiceScan; no regression |
 | Variable endpoint multiplicity | Track per-endpoint stores; hash by resolved URI |
-| Memory pressure under concurrent queries | TempPath ownership tracking prevents leaks; SafeCleanup handles stragglers |
+| Concurrent query disk exhaustion | **Solved by pool** - bounded by `maxConcurrent` |
+| Pool starvation under load | Pool blocks on Rent(); queries queue rather than fail |
+| Pool dependency in QueryExecutor | Optional injection; fallback to ServiceStore if needed |
 
 ## Future Optimization: In-Memory Store
 
@@ -333,13 +388,23 @@ else
 
 ## Success Criteria
 
-- [ ] All existing tests pass after Phase 1
-- [ ] SERVICE-only queries work via temp stores
+### Phase 1: Interface Extraction
+- [ ] All existing tests pass after IScan extraction
+
+### Phase 2: Pool-Based SERVICE
+- [ ] SERVICE-only queries work via pooled stores
 - [ ] SERVICE + local pattern joins work
 - [ ] SERVICE + UNION executes both branches
 - [ ] OPTIONAL { SERVICE } preserves outer bindings
-- [ ] Temp stores cleaned up after query
-- [ ] Orphan cleanup works after crash simulation
+- [ ] Stores returned to pool after query (not disposed)
+- [ ] Pool limits concurrent SERVICE stores
 - [ ] SERVICE benchmarks show no regression > 10%
+- [ ] Pooling shows improvement over TempPath baseline
+
+### Correctness
 - [ ] Variable endpoint SERVICE resolves correctly
 - [ ] VALUES clause injection works for binding propagation
+
+### Lifecycle
+- [ ] Pool disposes all stores on shutdown
+- [ ] No file handle leaks after concurrent SERVICE queries
