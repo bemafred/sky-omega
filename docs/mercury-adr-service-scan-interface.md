@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Proposed (Reviewed 2026-01-03)
 
 ## Problem
 
@@ -43,16 +43,31 @@ internal interface IScan : IDisposable
 }
 ```
 
-Implementation:
+**C# ref struct Limitation:** `ref struct` types cannot implement interfaces directly. We use **duck typing** - all scan operators conform to the same method signatures without formal interface implementation:
 
 ```csharp
-internal ref struct TriplePatternScan : IScan
+// All scan operators share this contract (duck typing):
+internal ref struct TriplePatternScan
 {
-    // Existing implementation unchanged
     public bool MoveNext(ref BindingTable bindings) { ... }
     public void Dispose() { ... }
 }
+
+internal ref struct ServicePatternScan
+{
+    public bool MoveNext(ref BindingTable bindings) { ... }
+    public void Dispose() { ... }
+}
+
+// Generic methods can accept any scan via constraint (C# 13+):
+void ProcessScan<TScan>(ref TScan scan, ref BindingTable bindings)
+    where TScan : struct, IDisposable, allows ref struct
+{
+    while (scan.MoveNext(ref bindings)) { /* process */ }
+}
 ```
+
+The `IScan` interface serves as **documentation contract** - it defines the expected shape, even though `ref struct` operators use duck typing rather than formal implementation.
 
 **Verification:** All existing tests pass. No behavior change.
 
@@ -169,13 +184,14 @@ public sealed class ServiceMaterializer : IDisposable
         TempPath.CleanupStale("service");
     }
 
-    public ServiceStore Materialize(ServiceClause clause, ReadOnlySpan<char> source)
+    public ServiceStore Materialize(ServiceClause clause, ReadOnlySpan<char> source,
+        BindingTable? incomingBindings = null)
     {
-        var endpoint = ResolveEndpoint(clause, source);
+        var endpoint = ResolveEndpoint(clause, source, incomingBindings);
         var store = new ServiceStore(ComputeHash(endpoint));
         _stores.Add(store);
 
-        var query = BuildSparqlQuery(clause, source);
+        var query = BuildSparqlQuery(clause, source, incomingBindings);
         var results = _executor.ExecuteSelectAsync(endpoint, query)
             .AsTask().GetAwaiter().GetResult();
 
@@ -188,6 +204,19 @@ public sealed class ServiceMaterializer : IDisposable
         foreach (var store in _stores)
             store.Dispose();
     }
+}
+```
+
+**Variable Endpoint Handling:** When `ServiceClause.Endpoint.IsVariable` is true, `ResolveEndpoint` must look up the endpoint URI from `incomingBindings`. This may result in different endpoints for different binding rows, requiring multiple temp stores.
+
+**Binding Propagation:** `BuildSparqlQuery` should inject bound variables via VALUES clause for proper SPARQL 1.1 Federated Query semantics:
+
+```sparql
+# Instead of substituting directly: ?s <p> <bound-value>
+# Use VALUES for cleaner semantics:
+SELECT * WHERE {
+  VALUES ?x { <bound-value1> <bound-value2> }
+  ?s <p> ?x .
 }
 ```
 
@@ -227,27 +256,80 @@ for (int i = 0; i < pattern.ServiceClauseCount; i++)
 2. **Implement ServiceStore** using TempPath
     - Unit test: create, write triples, query, dispose, verify cleanup
 
-3. **Implement ServicePatternScan** wrapping TriplePatternScan
+3. **Add ServiceBenchmarks** to establish baseline
+    - Measure current SERVICE execution overhead
+    - Include: SERVICE-only, SERVICE+local join, multiple SERVICE clauses
+
+4. **Implement ServicePatternScan** wrapping TriplePatternScan
     - Unit test: materialize mock results, scan, verify bindings
 
-4. **Implement ServiceMaterializer**
+5. **Implement ServiceMaterializer**
     - Integration test: HTTP mock → temp store → query results
 
-5. **Integrate into QueryExecutor**
+6. **Integrate into QueryExecutor**
     - Existing SERVICE tests must pass
     - Add SERVICE + UNION tests
 
-6. **Remove ServiceScan** (old implementation)
+7. **Verify benchmark results**
+    - No regression beyond 10% for SERVICE-only queries
+    - Document any performance changes
+
+8. **Remove ServiceScan** (old implementation)
     - Dead code elimination
 
 ## Risks and Mitigations
 
 | Risk | Mitigation |
 |------|------------|
-| ref struct can't implement interface | Use duck typing or wrapper; IScan as documentation contract |
+| ref struct can't implement interface | Duck typing with consistent method signatures; IScan as documentation contract; C# 13 `allows ref struct` for generic constraints |
 | Temp store overhead | Only for SERVICE queries; simple queries unchanged |
-| Disk I/O for temp stores | Consider in-memory option for small result sets |
+| Disk I/O for temp stores | Future optimization: in-memory path for small result sets (see below) |
 | HTTP blocking in materializer | Already blocked in current ServiceScan; no regression |
+| Variable endpoint multiplicity | Track per-endpoint stores; hash by resolved URI |
+| Memory pressure under concurrent queries | TempPath ownership tracking prevents leaks; SafeCleanup handles stragglers |
+
+## Future Optimization: In-Memory Store
+
+Once the `IScan` abstraction is in place, adding an in-memory path for small result sets is **trivial** (~50 lines):
+
+```csharp
+internal ref struct InMemoryServiceScan
+{
+    private readonly List<MaterializedRow> _rows;
+    private int _index;
+
+    public bool MoveNext(ref BindingTable bindings)
+    {
+        while (_index < _rows.Count)
+        {
+            if (TryBindRow(_rows[_index++], ref bindings))
+                return true;
+        }
+        return false;
+    }
+
+    public void Dispose() { } // GC handles List<T>
+}
+```
+
+**Threshold selection:**
+
+| Result Count | Recommended Path |
+|--------------|-----------------|
+| < 100 | In-memory (linear scan acceptable) |
+| 100-500 | Configurable threshold |
+| > 500 | Temp QuadStore (B+Tree index pays off for joins) |
+
+The `ServiceMaterializer` becomes the decision point:
+
+```csharp
+if (results.Count < options.InMemoryThreshold)
+    return new InMemoryServiceScan(results);
+else
+    return new ServicePatternScan(CreateTempStore(results), ...);
+```
+
+**Why defer this?** The temp store approach is correct for all sizes; in-memory is a performance optimization. Implementing temp stores first ensures correctness, then in-memory can be added without architectural changes.
 
 ## Success Criteria
 
@@ -258,3 +340,6 @@ for (int i = 0; i < pattern.ServiceClauseCount; i++)
 - [ ] OPTIONAL { SERVICE } preserves outer bindings
 - [ ] Temp stores cleaned up after query
 - [ ] Orphan cleanup works after crash simulation
+- [ ] SERVICE benchmarks show no regression > 10%
+- [ ] Variable endpoint SERVICE resolves correctly
+- [ ] VALUES clause injection works for binding propagation
