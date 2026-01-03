@@ -475,6 +475,19 @@ Statistics-based join reordering for 10-100x performance improvement on multi-pa
 | Plan Caching | 2-5x | Implemented |
 | Predicate Pushdown | 5-50x | Implemented - FilterAnalyzer + MultiPatternScan |
 
+### SERVICE Clause Architecture
+
+SERVICE clauses (federated queries) require special handling due to fundamentally different access semantics vs local patterns. See **[docs/mercury-adr-service-scan-interface.md](docs/mercury-adr-service-scan-interface.md)** for the architectural decision record.
+
+**Key principle:** SERVICE is a materialization boundary, not an iterator. Implementation uses:
+- `IScan` interface for uniform operator handling
+- `ServiceStore` with `TempPath` lifecycle (crash-safe temp QuadStore)
+- `ServicePatternScan` wrapping `TriplePatternScan` against temp store
+
+**Implementation phases:**
+1. Extract `IScan` interface (mechanical refactor, tests must pass unchanged)
+2. Implement temp store pattern (SERVICE results become local triples)
+
 ### Full-Text Search
 
 BCL-only trigram index for SPARQL text search. Opt-in via `StorageOptions.EnableFullTextSearch`.
