@@ -419,6 +419,37 @@ public readonly struct ServiceFetchResult
 | < 500 | In-memory | No disk I/O, linear scan |
 | >= 500 | Indexed | B+Tree lookup, pooled stores |
 
+**Benchmark findings (2026-01-03):**
+
+SERVICE-only queries always use in-memory path (indexed has no join benefit):
+
+| Rows | Time | Allocated | Gen2 Collections |
+|-----:|-----:|----------:|-----------------:|
+| 1K | 184 μs | 623 KB | 0 |
+| 5K | 902 μs | 3.1 MB | 0 |
+| 10K | 2.2 ms | 6.3 MB | 1 |
+| 50K | 11.9 ms | 31 MB | 3 |
+| 100K | 23.3 ms | 62 MB | 1 |
+
+Direct path comparison (5K rows, pure iteration):
+
+| Path | Time | Ratio |
+|------|-----:|------:|
+| In-memory | 743 μs | 1x |
+| Indexed | 7.5 s | 10,000x |
+
+**Key insight:** Indexed path overhead is massive for pure iteration (includes B+Tree materialization). It only pays off when join selectivity amortizes materialization cost across multiple lookups.
+
+**Memory considerations:**
+- ~600 bytes/row for `ServiceResultRow` with bindings
+- Gen2 GC starts at ~10K rows
+- Significant GC pressure at 50K+ rows (31+ MB allocation)
+
+For SERVICE-only with extreme result counts (50K+), consider:
+- Streaming/pagination from remote endpoint
+- Lazy materialization (only if joined later)
+- Memory-based threshold for GC relief
+
 ## Success Criteria
 
 ### Phase 1: Interface Extraction

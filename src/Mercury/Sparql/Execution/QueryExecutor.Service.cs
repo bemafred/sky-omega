@@ -30,6 +30,161 @@ public partial class QueryExecutor
     }
 
     /// <summary>
+    /// Fetches SERVICE results using dual-path routing (in-memory for small, indexed for large).
+    /// Uses ServiceMaterializer.Fetch() with threshold-based routing.
+    /// </summary>
+    private ServiceFetchResult FetchServiceWithDualPath(ServiceClause serviceClause, BindingTable incomingBindings)
+    {
+        var materializer = GetServiceMaterializer();
+        return materializer.Fetch(serviceClause, _source.AsSpan(), incomingBindings, incomingBindings.Count > 0);
+    }
+
+    /// <summary>
+    /// Iterates through SERVICE results using the appropriate scan operator based on IsIndexed.
+    /// Returns materialized rows from the SERVICE results.
+    /// </summary>
+    private List<MaterializedRow> IterateServiceResults(
+        ServiceFetchResult fetchResult,
+        BindingTable bindingTable,
+        bool checkCancellation = true)
+    {
+        var results = new List<MaterializedRow>();
+        var initialBindingsCount = bindingTable.Count;
+
+        if (fetchResult.IsIndexed)
+        {
+            // Large result set - use indexed B+Tree scan
+            var scan = new IndexedServicePatternScan(
+                fetchResult.Store!,
+                fetchResult.VariableNames!,
+                fetchResult.RowCount,
+                bindingTable);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (checkCancellation) ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                    bindingTable.TruncateTo(initialBindingsCount);
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+        else
+        {
+            // Small result set - use in-memory linear scan
+            var scan = new ServicePatternScan(fetchResult.Results!, bindingTable);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (checkCancellation) ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                    bindingTable.TruncateTo(initialBindingsCount);
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Iterates through SERVICE results and adds matching rows to provided results list.
+    /// Used for join scenarios where we need to preserve/restore bindings per iteration.
+    /// </summary>
+    private void IterateServiceResultsWithJoin(
+        ServiceFetchResult fetchResult,
+        ref BindingTable bindingTable,
+        List<MaterializedRow> results,
+        int bindingsToPreserve,
+        bool checkCancellation = true)
+    {
+        if (fetchResult.IsIndexed)
+        {
+            // Large result set - use indexed B+Tree scan
+            var scan = new IndexedServicePatternScan(
+                fetchResult.Store!,
+                fetchResult.VariableNames!,
+                fetchResult.RowCount,
+                bindingTable);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (checkCancellation) ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+        else
+        {
+            // Small result set - use in-memory linear scan
+            var scan = new ServicePatternScan(fetchResult.Results!, bindingTable);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (checkCancellation) ThrowIfCancellationRequested();
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks if SERVICE results contain any match for the given bindings.
+    /// Used for OPTIONAL SERVICE to determine if local bindings should be preserved.
+    /// </summary>
+    private bool HasServiceMatch(
+        ServiceFetchResult fetchResult,
+        ref BindingTable bindingTable)
+    {
+        if (fetchResult.IsIndexed)
+        {
+            var scan = new IndexedServicePatternScan(
+                fetchResult.Store!,
+                fetchResult.VariableNames!,
+                fetchResult.RowCount,
+                bindingTable);
+            try
+            {
+                return scan.MoveNext(ref bindingTable);
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+        else
+        {
+            var scan = new ServicePatternScan(fetchResult.Results!, bindingTable);
+            try
+            {
+                return scan.MoveNext(ref bindingTable);
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
     /// Fetches SERVICE results once and returns them for iteration.
     /// Uses ServiceMaterializer's executor to handle errors and SILENT.
     /// </summary>
@@ -168,14 +323,13 @@ public partial class QueryExecutor
         // For now, only handle the simple case: SERVICE clause only, no local patterns
         if (pattern.PatternCount == 0 && serviceCount == 1)
         {
-            // Execute single SERVICE clause
+            // Execute single SERVICE clause - use in-memory path (no join benefit from indexing)
             var serviceClause = pattern.GetServiceClause(0);
 
-            // Fetch SERVICE results once
+            // For SERVICE-only (no local join), always use in-memory - indexed path has no benefit
             var serviceResults = FetchServiceResults(serviceClause, bindingTable);
             var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
 
-            // Materialize results
             var results = new List<MaterializedRow>();
             try
             {
@@ -237,14 +391,13 @@ public partial class QueryExecutor
         // Simple case: SERVICE clause only, no local patterns
         if (pattern.PatternCount == 0 && serviceCount == 1)
         {
-            // Execute single SERVICE clause
+            // Execute single SERVICE clause - use in-memory path (no join benefit from indexing)
             var serviceClause = pattern.GetServiceClause(0);
 
-            // Fetch SERVICE results once
+            // For SERVICE-only (no local join), always use in-memory - indexed path has no benefit
             var serviceResults = FetchServiceResults(serviceClause, bindingTable);
             var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
 
-            // Materialize results and return
             var results = new List<MaterializedRow>();
             try
             {
@@ -314,19 +467,8 @@ public partial class QueryExecutor
                 bindingTable.TruncateTo(0);
                 localRow.RestoreBindings(ref bindingTable);
 
-                var serviceResults = FetchServiceResults(firstBranchService.Value, bindingTable);
-                var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
-                try
-                {
-                    while (serviceScan.MoveNext(ref bindingTable))
-                    {
-                        results.Add(new MaterializedRow(bindingTable));
-                    }
-                }
-                finally
-                {
-                    serviceScan.Dispose();
-                }
+                var fetchResult = FetchServiceWithDualPath(firstBranchService.Value, bindingTable);
+                IterateServiceResultsWithJoin(fetchResult, ref bindingTable, results, bindingTable.Count, checkCancellation: false);
             }
         }
         else if (firstBranchPatternCount > 0)
@@ -337,7 +479,7 @@ public partial class QueryExecutor
         }
         else if (firstBranchService.HasValue)
         {
-            // First branch is SERVICE-only
+            // First branch is SERVICE-only - use in-memory path (no join benefit)
             var serviceResults = FetchServiceResults(firstBranchService.Value, bindingTable);
             var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
             try
@@ -367,19 +509,8 @@ public partial class QueryExecutor
                 bindingTable.TruncateTo(0);
                 localRow.RestoreBindings(ref bindingTable);
 
-                var serviceResults = FetchServiceResults(secondBranchService.Value, bindingTable);
-                var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
-                try
-                {
-                    while (serviceScan.MoveNext(ref bindingTable))
-                    {
-                        results.Add(new MaterializedRow(bindingTable));
-                    }
-                }
-                finally
-                {
-                    serviceScan.Dispose();
-                }
+                var fetchResult = FetchServiceWithDualPath(secondBranchService.Value, bindingTable);
+                IterateServiceResultsWithJoin(fetchResult, ref bindingTable, results, bindingTable.Count, checkCancellation: false);
             }
         }
         else if (secondBranchPatternCount > 0)
@@ -390,7 +521,7 @@ public partial class QueryExecutor
         }
         else if (secondBranchService.HasValue)
         {
-            // Second branch is SERVICE-only
+            // Second branch is SERVICE-only - use in-memory path (no join benefit)
             bindingTable.Clear();
             var serviceResults = FetchServiceResults(secondBranchService.Value, bindingTable);
             var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
@@ -649,6 +780,7 @@ public partial class QueryExecutor
     ///
     /// OPTIMIZATION: Fetches SERVICE results ONCE and reuses for all local rows (when endpoint is fixed).
     /// For variable endpoints, must fetch per local result (different endpoints possible).
+    /// Uses dual-path routing: in-memory for small result sets, indexed for large.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteServiceJoinPhase(
@@ -666,14 +798,14 @@ public partial class QueryExecutor
         var isOptional = serviceClause.IsOptional;
         var isVariableEndpoint = serviceClause.IsVariable;
 
-        // For fixed endpoints, fetch SERVICE results ONCE (key optimization)
-        List<ServiceResultRow>? cachedServiceResults = null;
+        // For fixed endpoints, fetch SERVICE results ONCE with dual-path routing
+        ServiceFetchResult? cachedFetchResult = null;
         if (!isVariableEndpoint)
         {
             var emptyBindingTable = new BindingTable(bindings, stringBuffer);
-            cachedServiceResults = FetchServiceResults(serviceClause, emptyBindingTable);
+            cachedFetchResult = FetchServiceWithDualPath(serviceClause, emptyBindingTable);
 
-            if (cachedServiceResults.Count == 0 && !isOptional)
+            if (cachedFetchResult.Value.RowCount == 0 && !isOptional)
             {
                 // No SERVICE results and not optional - no final results possible
                 return finalResults;
@@ -688,27 +820,50 @@ public partial class QueryExecutor
             var bindingTable = new BindingTable(bindings, stringBuffer);
             bindingTable.TruncateTo(0);
             localRow.RestoreBindings(ref bindingTable);
+            var bindingsAfterRestore = bindingTable.Count;
 
             // For variable endpoints, fetch per local result (endpoint may differ)
-            var serviceResults = isVariableEndpoint
-                ? FetchServiceResults(serviceClause, bindingTable)
-                : cachedServiceResults!;
+            var fetchResult = isVariableEndpoint
+                ? FetchServiceWithDualPath(serviceClause, bindingTable)
+                : cachedFetchResult!.Value;
 
-            // Use ServicePatternScan to iterate through results
-            // Note: ServicePatternScan.MoveNext handles TruncateTo internally
-            var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
+            // Iterate through SERVICE results using appropriate scan
             var hasServiceMatch = false;
-            try
+            if (fetchResult.IsIndexed)
             {
-                while (serviceScan.MoveNext(ref bindingTable))
+                var scan = new IndexedServicePatternScan(
+                    fetchResult.Store!,
+                    fetchResult.VariableNames!,
+                    fetchResult.RowCount,
+                    bindingTable);
+                try
                 {
-                    hasServiceMatch = true;
-                    finalResults.Add(new MaterializedRow(bindingTable));
+                    while (scan.MoveNext(ref bindingTable))
+                    {
+                        hasServiceMatch = true;
+                        finalResults.Add(new MaterializedRow(bindingTable));
+                    }
+                }
+                finally
+                {
+                    scan.Dispose();
                 }
             }
-            finally
+            else
             {
-                serviceScan.Dispose();
+                var scan = new ServicePatternScan(fetchResult.Results!, bindingTable);
+                try
+                {
+                    while (scan.MoveNext(ref bindingTable))
+                    {
+                        hasServiceMatch = true;
+                        finalResults.Add(new MaterializedRow(bindingTable));
+                    }
+                }
+                finally
+                {
+                    scan.Dispose();
+                }
             }
 
             // For OPTIONAL SERVICE, preserve local bindings even if no SERVICE match
@@ -726,39 +881,22 @@ public partial class QueryExecutor
     /// <summary>
     /// Service-first phase: Execute SERVICE clause and return materialized results.
     /// Used when QueryPlanner determines SERVICE is more selective than local patterns.
-    /// Uses ServicePatternScan for efficient iteration over cached results.
+    /// Uses dual-path routing: in-memory for small result sets, indexed for large.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteServiceFirstPhase(BindingTable bindingTable)
     {
-        var results = new List<MaterializedRow>();
-        var incomingBindingCount = bindingTable.Count;
-
         // Use cached SERVICE clause (on heap)
         if (!_cachedFirstServiceClause.HasValue)
-            return results;
+            return new List<MaterializedRow>();
 
         var serviceClause = _cachedFirstServiceClause.Value;
 
-        // Fetch SERVICE results once
-        var serviceResults = FetchServiceResults(serviceClause, bindingTable);
-        var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
+        // Fetch SERVICE results with dual-path routing
+        var fetchResult = FetchServiceWithDualPath(serviceClause, bindingTable);
 
-        try
-        {
-            while (serviceScan.MoveNext(ref bindingTable))
-            {
-                ThrowIfCancellationRequested();
-                results.Add(new MaterializedRow(bindingTable));
-                bindingTable.TruncateTo(incomingBindingCount);
-            }
-        }
-        finally
-        {
-            serviceScan.Dispose();
-        }
-
-        return results;
+        // Iterate using appropriate scan
+        return IterateServiceResults(fetchResult, bindingTable);
     }
 
     /// <summary>
@@ -893,6 +1031,7 @@ public partial class QueryExecutor
             if (currentResults == null)
             {
                 // First SERVICE clause - no prior results to join with
+                // Use in-memory path since no join yet
                 var serviceResults = FetchServiceResults(serviceClause, bindingTable);
                 var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
 
@@ -923,19 +1062,8 @@ public partial class QueryExecutor
                     row.RestoreBindings(ref bindingTable);
 
                     // Fetch SERVICE with current bindings - allows remote filtering
-                    var serviceResults = FetchServiceResults(serviceClause, bindingTable);
-                    var serviceScan = new ServicePatternScan(serviceResults, bindingTable);
-                    try
-                    {
-                        while (serviceScan.MoveNext(ref bindingTable))
-                        {
-                            newResults.Add(new MaterializedRow(bindingTable));
-                        }
-                    }
-                    finally
-                    {
-                        serviceScan.Dispose();
-                    }
+                    var fetchResult = FetchServiceWithDualPath(serviceClause, bindingTable);
+                    IterateServiceResultsWithJoin(fetchResult, ref bindingTable, newResults, bindingTable.Count, checkCancellation: false);
                 }
 
                 currentResults = newResults;
