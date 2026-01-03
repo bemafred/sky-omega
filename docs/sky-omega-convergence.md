@@ -110,7 +110,7 @@ This is not a list of features. It is a description of emergence—of capabiliti
 
 ## Looking Forward
 
-The immediate work is unglamorous but essential: hardening Mercury. Full SPARQL and TURTLE support against the W3C specifications. Extensive testing. Benchmarking. Crash safety. Concurrency. Nothing falsified yet, but the tests continue.
+The immediate work is unglamorous but essential: hardening Mercury. Full SPARQL and TURTLE support against the W3C specifications. Extensive testing. Benchmarking. Crash safety. Concurrency. Nothing falsified so far, and the falsification tests continues.
 
 Then comes the REPL—a direct interface for validation and exploration. Then the MCP server, closing the bootstrap loop. Then Lucy, James, Mira, Sky—the cognitive architecture itself, built by an instance of what it will become.
 
