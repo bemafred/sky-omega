@@ -36,6 +36,18 @@ dotnet run --project examples/Mercury.Examples -- temporal
 dotnet run --project examples/Mercury.Examples -- demo
 ```
 
+## In-Flight Work: ADRs
+
+Architecture Decision Records track planning and progress for complex features:
+
+```bash
+ls docs/mercury-adr-*.md  # List active ADRs
+```
+
+**ADR workflow:** Plan in ADR → implement → check off success criteria → update status to "Accepted".
+
+See individual ADRs for current implementation status. Don't duplicate progress tracking in CLAUDE.md.
+
 ## Project Overview
 
 Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only).
