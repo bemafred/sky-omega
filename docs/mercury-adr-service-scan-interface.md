@@ -389,7 +389,7 @@ else
 ## Success Criteria
 
 ### Phase 1: Interface Extraction
-- [ ] All existing tests pass after IScan extraction
+- [x] All existing tests pass after IScan extraction
 
 ### Phase 2: Pool-Based SERVICE
 - [ ] SERVICE-only queries work via pooled stores

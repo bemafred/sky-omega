@@ -89,6 +89,10 @@ internal static class SyntheticTermHelper
     public static int GetSeqVarOffset(int index) => -(200 + index);
 }
 
+/// <summary>
+/// Scans a single triple pattern against the QuadStore.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
+/// </summary>
 internal ref struct TriplePatternScan
 {
     private readonly QuadStore _store;
@@ -453,6 +457,7 @@ internal ref struct TriplePatternScan
 
 /// <summary>
 /// Executes multiple triple patterns using nested loop join.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// Due to ref struct limitations, we store resolved term strings in fixed buffers
 /// to avoid span scoping issues with enumerator initialization.
 /// </summary>
@@ -1244,6 +1249,7 @@ internal ref struct MultiPatternScan
 
 /// <summary>
 /// Scans triple patterns across all named graphs, binding a graph variable.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// For queries like: SELECT ?g ?s ?p ?o WHERE { GRAPH ?g { ?s ?p ?o } }
 /// Supports FROM NAMED restriction: only iterate specified named graphs.
 /// </summary>
@@ -1360,6 +1366,7 @@ internal ref struct VariableGraphScan
 
 /// <summary>
 /// Executes a subquery and yields only projected variable bindings.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// Handles variable scoping: only SELECT-ed variables are visible to outer query.
 /// </summary>
 internal ref struct SubQueryScan
@@ -1582,6 +1589,7 @@ internal ref struct SubQueryScan
 
 /// <summary>
 /// Joins subquery results with outer triple patterns using nested loop join.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
 /// Subquery is the driving (outer) relation; outer patterns are filtered using bound variables.
 /// </summary>
@@ -1734,6 +1742,7 @@ internal ref struct SubQueryJoinScan
 
 /// <summary>
 /// Scans triple patterns across multiple default graphs (FROM clauses), unioning results.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// This is a streaming operator that avoids materializing all results upfront.
 /// </summary>
 internal ref struct DefaultGraphUnionScan
@@ -1840,6 +1849,7 @@ internal ref struct DefaultGraphUnionScan
 
 /// <summary>
 /// Scans triple patterns across multiple graphs with cross-graph joins.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// Unlike DefaultGraphUnionScan which runs each complete pattern against each graph independently,
 /// this operator allows joins where one pattern matches in graph1 and another in graph2.
 ///
@@ -2190,6 +2200,7 @@ internal ref struct CrossGraphMultiPatternScan
 
 /// <summary>
 /// Executes a SERVICE clause by sending patterns to a remote SPARQL endpoint.
+/// Conforms to <see cref="IScan"/> contract (duck typing).
 /// Materializes results and iterates through them.
 /// </summary>
 internal ref struct ServiceScan
