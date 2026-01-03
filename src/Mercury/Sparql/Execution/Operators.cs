@@ -116,6 +116,7 @@ internal ref struct TriplePatternScan
     private readonly bool _isOneOrMore;
     private readonly bool _isZeroOrOne;
     private readonly bool _isAlternative;
+    private readonly bool _isNegatedSet;
 
     // State for transitive path traversal
     private HashSet<string>? _visited;
@@ -160,6 +161,7 @@ internal ref struct TriplePatternScan
         _isOneOrMore = pattern.Path.Type == PathType.OneOrMore;
         _isZeroOrOne = pattern.Path.Type == PathType.ZeroOrOne;
         _isAlternative = pattern.Path.Type == PathType.Alternative;
+        _isNegatedSet = pattern.Path.Type == PathType.NegatedSet;
 
         _visited = null;
         _frontier = null;
@@ -198,6 +200,18 @@ internal ref struct TriplePatternScan
                     if (!TryBindVariable(_pattern.Subject, triple.Object, ref bindings))
                         continue;
                     if (!TryBindVariable(_pattern.Object, triple.Subject, ref bindings))
+                        continue;
+                }
+                else if (_isNegatedSet)
+                {
+                    // For negated property set, filter out predicates that ARE in the negated set
+                    if (IsPredicateInNegatedSet(triple.Predicate))
+                        continue;
+
+                    // Bind subject and object (no predicate binding for negated sets)
+                    if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
+                        continue;
+                    if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
                         continue;
                 }
                 else
@@ -337,6 +351,12 @@ internal ref struct TriplePatternScan
             predicate = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
             _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
         }
+        else if (_isNegatedSet)
+        {
+            // For negated property set !(p1|p2|...), query all predicates (wildcard)
+            // and filter in MoveNext
+            _enumerator = ExecuteTemporalQuery(subject, ReadOnlySpan<char>.Empty, obj);
+        }
         else
         {
             predicate = ResolveTermForQuery(_pattern.Predicate);
@@ -417,6 +437,41 @@ internal ref struct TriplePatternScan
 
         // IRIs and literals use their source text
         return _source.Slice(term.Start, term.Length);
+    }
+
+    /// <summary>
+    /// Check if a predicate is in the negated property set.
+    /// The negated set content is stored as IRIs separated by '|'.
+    /// </summary>
+    private bool IsPredicateInNegatedSet(ReadOnlySpan<char> predicate)
+    {
+        var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+
+        // Parse the content looking for IRIs separated by '|'
+        var remaining = content;
+        while (!remaining.IsEmpty)
+        {
+            // Find next separator or end
+            var sepIndex = remaining.IndexOf('|');
+            ReadOnlySpan<char> current;
+
+            if (sepIndex < 0)
+            {
+                current = remaining.Trim();
+                remaining = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                current = remaining[..sepIndex].Trim();
+                remaining = remaining[(sepIndex + 1)..];
+            }
+
+            // Compare with predicate (exact match)
+            if (current.SequenceEqual(predicate))
+                return true;
+        }
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -308,7 +308,7 @@ Key components:
 | Query types | SELECT, ASK, CONSTRUCT, DESCRIBE |
 | Graph patterns | Basic patterns, OPTIONAL, UNION, MINUS, GRAPH (IRI and variable, multiple), Subqueries (single and multiple), SERVICE |
 | Federated query | SERVICE \<uri\> { patterns }, SERVICE SILENT, SERVICE ?variable (requires ISparqlServiceExecutor) |
-| Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path |
+| Property paths | ^iri (inverse), iri* (zero+), iri+ (one+), iri? (optional), path/path, path\|path, !(iri\|iri) (negated set) |
 | Filtering | FILTER, VALUES, EXISTS, NOT EXISTS, IN, NOT IN |
 | Filter functions | BOUND, IF, COALESCE, REGEX, REPLACE, sameTerm, text:match |
 | Type checking | isIRI, isURI, isBlank, isLiteral, isNumeric |

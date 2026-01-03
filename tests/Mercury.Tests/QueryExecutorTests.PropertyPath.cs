@@ -869,4 +869,192 @@ public partial class QueryExecutorTests
     }
 
     #endregion
+
+    #region Negated Property Set Tests
+
+    [Fact]
+    public void Execute_NegatedPropertySet_ExcludesSinglePredicate()
+    {
+        // Add data with different predicates for a unique subject
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/negset/single/s1>", "<http://ex.org/negset/likes>", "<http://ex.org/negset/single/o1>");
+        Store.AddCurrentBatched("<http://ex.org/negset/single/s1>", "<http://ex.org/negset/hates>", "<http://ex.org/negset/single/o2>");
+        Store.AddCurrentBatched("<http://ex.org/negset/single/s1>", "<http://ex.org/negset/knows>", "<http://ex.org/negset/single/o3>");
+        Store.CommitBatch();
+
+        // Query: find triples with predicate NOT equal to 'likes' for this subject
+        var query = "SELECT ?o WHERE { <http://ex.org/negset/single/s1> !<http://ex.org/negset/likes> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<string>();
+            while (results.MoveNext())
+            {
+                var objIdx = results.Current.FindBinding("?o".AsSpan());
+                if (objIdx >= 0)
+                    found.Add(results.Current.GetString(objIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should find o2 (hates) and o3 (knows), but NOT o1 (likes)
+            Assert.Contains("<http://ex.org/negset/single/o2>", found);
+            Assert.Contains("<http://ex.org/negset/single/o3>", found);
+            Assert.DoesNotContain("<http://ex.org/negset/single/o1>", found);
+            Assert.Equal(2, found.Count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NegatedPropertySet_ExcludesMultiplePredicates()
+    {
+        // Add data with different predicates for a unique subject
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/negset/multi/s1>", "<http://ex.org/negset/likes>", "<http://ex.org/negset/multi/o1>");
+        Store.AddCurrentBatched("<http://ex.org/negset/multi/s1>", "<http://ex.org/negset/hates>", "<http://ex.org/negset/multi/o2>");
+        Store.AddCurrentBatched("<http://ex.org/negset/multi/s1>", "<http://ex.org/negset/knows>", "<http://ex.org/negset/multi/o3>");
+        Store.AddCurrentBatched("<http://ex.org/negset/multi/s1>", "<http://ex.org/negset/follows>", "<http://ex.org/negset/multi/o4>");
+        Store.CommitBatch();
+
+        // Query: find triples with predicate NOT in (likes, hates) for this subject
+        var query = "SELECT ?o WHERE { <http://ex.org/negset/multi/s1> !(<http://ex.org/negset/likes>|<http://ex.org/negset/hates>) ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<string>();
+            while (results.MoveNext())
+            {
+                var objIdx = results.Current.FindBinding("?o".AsSpan());
+                if (objIdx >= 0)
+                    found.Add(results.Current.GetString(objIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should find o3 (knows) and o4 (follows), but NOT o1 (likes) or o2 (hates)
+            Assert.Contains("<http://ex.org/negset/multi/o3>", found);
+            Assert.Contains("<http://ex.org/negset/multi/o4>", found);
+            Assert.DoesNotContain("<http://ex.org/negset/multi/o1>", found);
+            Assert.DoesNotContain("<http://ex.org/negset/multi/o2>", found);
+            Assert.Equal(2, found.Count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NegatedPropertySet_WithBoundSubject()
+    {
+        // Add data with different subjects using unique URIs
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/negset/bound/Alice>", "<http://ex.org/negset/likes>", "<http://ex.org/negset/bound/o1>");
+        Store.AddCurrentBatched("<http://ex.org/negset/bound/Alice>", "<http://ex.org/negset/hates>", "<http://ex.org/negset/bound/o2>");
+        Store.AddCurrentBatched("<http://ex.org/negset/bound/Bob>", "<http://ex.org/negset/likes>", "<http://ex.org/negset/bound/o3>");
+        Store.AddCurrentBatched("<http://ex.org/negset/bound/Bob>", "<http://ex.org/negset/knows>", "<http://ex.org/negset/bound/o4>");
+        Store.CommitBatch();
+
+        // Query: find triples with specific subject and predicate NOT equal to 'likes'
+        var query = "SELECT ?o WHERE { <http://ex.org/negset/bound/Alice> !<http://ex.org/negset/likes> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new List<string>();
+            while (results.MoveNext())
+            {
+                var objIdx = results.Current.FindBinding("?o".AsSpan());
+                if (objIdx >= 0)
+                    found.Add(results.Current.GetString(objIdx).ToString());
+            }
+            results.Dispose();
+
+            // Should only find o2 (Alice hates o2), not o1 (Alice likes)
+            Assert.Single(found);
+            Assert.Contains("<http://ex.org/negset/bound/o2>", found);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NegatedPropertySet_NoMatches()
+    {
+        // Add only one predicate for a specific subject
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/negset/onlysubject>", "<http://ex.org/negset/only>", "<http://ex.org/negset/o1>");
+        Store.CommitBatch();
+
+        // Query: exclude the only predicate that exists for this specific subject
+        var query = "SELECT ?o WHERE { <http://ex.org/negset/onlysubject> !<http://ex.org/negset/only> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            while (results.MoveNext())
+                count++;
+            results.Dispose();
+
+            // Should find nothing - this subject only has the excluded predicate
+            Assert.Equal(0, count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Parse_NegatedPropertySet_RecognizesPathType()
+    {
+        var query = "SELECT ?s ?o WHERE { ?s !(<http://ex.org/a>|<http://ex.org/b>) ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Check that the pattern has the negated set path type
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void Parse_NegatedPropertySet_SinglePredicate()
+    {
+        var query = "SELECT ?s ?o WHERE { ?s !<http://ex.org/a> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Check that the pattern has the negated set path type
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
+    }
+
+    #endregion
 }

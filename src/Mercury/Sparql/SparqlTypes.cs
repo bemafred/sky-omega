@@ -580,14 +580,15 @@ public struct TriplePattern
 /// <summary>
 /// A property path expression for SPARQL 1.1 property paths.
 /// Supports: ^iri (inverse), iri+ (one or more), iri* (zero or more),
-/// iri? (zero or one), path1/path2 (sequence), path1|path2 (alternative)
+/// iri? (zero or one), path1/path2 (sequence), path1|path2 (alternative),
+/// !(iri1|iri2|...) (negated property set)
 /// </summary>
 public struct PropertyPath
 {
     public PathType Type;
     public Term Iri;           // The IRI for simple paths
-    public int LeftStart;      // For sequence/alternative: offset of left operand
-    public int LeftLength;
+    public int LeftStart;      // For sequence/alternative: offset of left operand; for NegatedSet: offset of content
+    public int LeftLength;     // For sequence/alternative: length of left operand; for NegatedSet: length of content
     public int RightStart;     // For sequence/alternative: offset of right operand
     public int RightLength;
 
@@ -611,6 +612,13 @@ public struct PropertyPath
 
     public static PropertyPath Alternative(int leftStart, int leftLength, int rightStart, int rightLength) =>
         new() { Type = PathType.Alternative, LeftStart = leftStart, LeftLength = leftLength, RightStart = rightStart, RightLength = rightLength };
+
+    /// <summary>
+    /// Creates a negated property set path that matches any predicate EXCEPT those listed.
+    /// The content span contains the IRIs separated by | (e.g., "rdf:type|rdfs:label").
+    /// </summary>
+    public static PropertyPath NegatedSet(int contentStart, int contentLength) =>
+        new() { Type = PathType.NegatedSet, LeftStart = contentStart, LeftLength = contentLength };
 }
 
 /// <summary>
@@ -624,7 +632,8 @@ public enum PathType : byte
     OneOrMore,       // iri+ - one or more hops
     ZeroOrOne,       // iri? - zero or one hop
     Sequence,        // path1/path2 - sequence of paths
-    Alternative      // path1|path2 - alternative paths
+    Alternative,     // path1|path2 - alternative paths
+    NegatedSet       // !(iri1|iri2|...) - matches any predicate except those listed
 }
 
 /// <summary>

@@ -621,6 +621,58 @@ public ref partial struct SparqlParser
             return (iri, PropertyPath.Inverse(iri));
         }
 
+        // Check for negated property set: !(iri1|iri2|...) or !iri
+        if (ch == '!')
+        {
+            Advance(); // Skip '!'
+            SkipWhitespace();
+            ch = Peek();
+
+            if (ch == '(')
+            {
+                // Parse !(iri1|iri2|...)
+                Advance(); // Skip '('
+                SkipWhitespace();
+
+                // Record start of negated set content
+                var contentStart = _position;
+
+                // Parse first IRI
+                var firstIri = ParseTerm();
+
+                // Parse additional IRIs separated by |
+                while (true)
+                {
+                    SkipWhitespace();
+                    ch = Peek();
+                    if (ch == ')')
+                    {
+                        var contentLength = _position - contentStart;
+                        Advance(); // Skip ')'
+                        return (firstIri, PropertyPath.NegatedSet(contentStart, contentLength));
+                    }
+                    if (ch == '|')
+                    {
+                        Advance(); // Skip '|'
+                        SkipWhitespace();
+                        ParseTerm(); // Parse next IRI (we just need to advance past it)
+                    }
+                    else
+                    {
+                        throw new SparqlParseException("Expected '|' or ')' in negated property set");
+                    }
+                }
+            }
+            else
+            {
+                // Parse !iri (single negated predicate)
+                var contentStart = _position;
+                var iri = ParseTerm();
+                var contentLength = _position - contentStart;
+                return (iri, PropertyPath.NegatedSet(contentStart, contentLength));
+            }
+        }
+
         // Parse the base term
         var term = ParseTerm();
 
