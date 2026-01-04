@@ -6,7 +6,7 @@ Accepted (implemented)
 
 ## Related ADRs
 
-- [SERVICE Execution via IScan Interface](mercury-adr-service-scan-interface.md) - Primary consumer of QuadStorePool for federated queries
+- [SERVICE Execution via IScan Interface](ADR-004-service-scan-interface.md) - Primary consumer of QuadStorePool for federated queries
 
 ## Problem
 

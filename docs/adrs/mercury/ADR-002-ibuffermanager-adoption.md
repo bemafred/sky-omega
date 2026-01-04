@@ -1,4 +1,4 @@
-# ADR-008: IBufferManager Adoption
+# ADR-002: IBufferManager Adoption
 
 ## Status
 

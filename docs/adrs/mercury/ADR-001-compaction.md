@@ -1,4 +1,4 @@
-# ADR-002: Mercury Compaction Strategy
+# ADR-001: Mercury Compaction Strategy
 
 ## Status
 

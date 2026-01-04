@@ -251,7 +251,7 @@ Zero-GC means **no uncontrolled allocations**, not "avoid heap entirely". Pooled
 
 Implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/PatternSlot.cs`) - a 64-byte cache-aligned slot with discriminator byte and typed views over raw bytes.
 
-**Stack safety for large ref structs:** Large ref structs like `QueryResults` (~22KB) can cause stack overflow in complex query paths. The solution is to materialize results to heap (`List<MaterializedRow>`) early, returning only the pointer through the call chain. See [ADR: Buffer Pattern for Stack Safety](docs/adrs/mercury/ADR-001-buffer-pattern.md) for details.
+**Stack safety for large ref structs:** Large ref structs like `QueryResults` (~22KB) can cause stack overflow in complex query paths. The solution is to materialize results to heap (`List<MaterializedRow>`) early, returning only the pointer through the call chain. See [ADR-003: Buffer Pattern for Stack Safety](docs/adrs/mercury/ADR-003-buffer-pattern.md) for details.
 
 **Critical patterns:**
 
@@ -510,7 +510,7 @@ Statistics-based join reordering for 10-100x performance improvement on multi-pa
 
 ### SERVICE Clause Architecture
 
-SERVICE clauses (federated queries) require special handling due to fundamentally different access semantics vs local patterns. See **[docs/adrs/mercury/ADR-006-service-scan-interface.md](docs/adrs/mercury/ADR-006-service-scan-interface.md)** for the architectural decision record.
+SERVICE clauses (federated queries) require special handling due to fundamentally different access semantics vs local patterns. See **[docs/adrs/mercury/ADR-004-service-scan-interface.md](docs/adrs/mercury/ADR-004-service-scan-interface.md)** for the architectural decision record.
 
 **Key principle:** SERVICE is a materialization boundary, not an iterator. Implementation uses:
 - `IScan` interface for uniform operator handling

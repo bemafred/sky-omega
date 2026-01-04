@@ -1,4 +1,4 @@
-# ADR-004: Unified QuadStorePool for Lifecycle Management
+# ADR-008: Unified QuadStorePool for Lifecycle Management
 
 ## Status
 
@@ -10,8 +10,8 @@ This ADR does not yet address the current use of [Fixture] used by many tests. T
 
 ## Related ADRs
 
-- [QuadStore Pooling and Clear()](mercury-adr-quadstore-pooling-and-clear.md) - Foundation for pooled stores
-- [SERVICE Execution via IScan Interface](mercury-adr-service-scan-interface.md) - Consumer of pooled stores
+- [QuadStore Pooling and Clear()](ADR-005-quadstore-pooling-and-clear.md) - Foundation for pooled stores
+- [SERVICE Execution via IScan Interface](ADR-004-service-scan-interface.md) - Consumer of pooled stores
 
 ## Problem
 

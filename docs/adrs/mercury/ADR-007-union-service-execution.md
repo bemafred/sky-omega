@@ -6,7 +6,7 @@ Accepted (Implemented 2026-01-03)
 
 ## Related ADRs
 
-- [SERVICE Execution via IScan Interface](mercury-adr-service-scan-interface.md) - Foundation for SERVICE execution
+- [SERVICE Execution via IScan Interface](ADR-004-service-scan-interface.md) - Foundation for SERVICE execution
 
 ## Problem
 

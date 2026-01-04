@@ -1,4 +1,4 @@
-# ADR-006: SERVICE Execution via IScan Interface and Temp Stores
+# ADR-004: SERVICE Execution via IScan Interface and Temp Stores
 
 ## Status
 
@@ -6,7 +6,7 @@ Accepted (Implemented 2026-01-03)
 
 ## Related ADRs
 
-- [QuadStore Pooling and Clear()](mercury-adr-quadstore-pooling-and-clear.md) - Enables efficient temp store reuse
+- [QuadStore Pooling and Clear()](ADR-005-quadstore-pooling-and-clear.md) - Enables efficient temp store reuse
 
 ## Problem
 
@@ -123,7 +123,7 @@ SERVICE becomes a **materialization boundary**:
 
 ### Pool-Based Temp Store (Preferred)
 
-With `QuadStorePool` (see [QuadStore Pooling ADR](mercury-adr-quadstore-pooling-and-clear.md)), SERVICE temp stores become simple pool rentals:
+With `QuadStorePool` (see [QuadStore Pooling ADR](ADR-005-quadstore-pooling-and-clear.md)), SERVICE temp stores become simple pool rentals:
 
 ```csharp
 // Shared pool for SERVICE materialization
@@ -291,7 +291,7 @@ for (int i = 0; i < pattern.ServiceClauseCount; i++)
 ### Prerequisites (from QuadStore Pooling ADR)
 
 0. **Implement QuadStore.Clear() and QuadStorePool**
-    - See [QuadStore Pooling ADR](mercury-adr-quadstore-pooling-and-clear.md)
+    - See [QuadStore Pooling ADR](ADR-005-quadstore-pooling-and-clear.md)
     - Must complete before Phase 2 (temp store pattern)
 
 ### Phase 1: Interface Extraction
@@ -458,7 +458,7 @@ For SERVICE-only with extreme result counts (50K+), consider:
 ### Phase 2: Pool-Based SERVICE
 - [x] SERVICE-only queries work via pooled stores
 - [x] SERVICE + local pattern joins work
-- [x] SERVICE + UNION executes both branches (see [UNION Branch SERVICE Execution](mercury-adr-union-service-execution.md))
+- [x] SERVICE + UNION executes both branches (see [UNION Branch SERVICE Execution](ADR-007-union-service-execution.md))
 - [x] OPTIONAL { SERVICE } preserves outer bindings
 - [ ] Stores returned to pool after query (not disposed)
 - [ ] Pool limits concurrent SERVICE stores

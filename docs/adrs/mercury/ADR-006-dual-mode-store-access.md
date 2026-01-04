@@ -1,4 +1,4 @@
-# ADR-003: Dual-Mode Store Access (Local Pool + Remote Connection)
+# ADR-006: Dual-Mode Store Access (Local Pool + Remote Connection)
 
 ## Status
 
