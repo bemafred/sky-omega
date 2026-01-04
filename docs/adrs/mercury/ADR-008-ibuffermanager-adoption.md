@@ -1,4 +1,4 @@
-# IBufferManager Adoption Plan
+# ADR-008: IBufferManager Adoption
 
 ## Background
 

@@ -1,4 +1,4 @@
-# ADR: Buffer Pattern for Stack Safety
+# ADR-001: Buffer Pattern for Stack Safety
 
 ## Status
 

@@ -1,4 +1,4 @@
-# ADR: Unified QuadStorePool for Lifecycle Management
+# ADR-004: Unified QuadStorePool for Lifecycle Management
 
 ## Status
 

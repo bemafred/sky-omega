@@ -1,4 +1,4 @@
-# ADR: SERVICE Execution via IScan Interface and Temp Stores
+# ADR-006: SERVICE Execution via IScan Interface and Temp Stores
 
 ## Status
 

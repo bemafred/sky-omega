@@ -1,4 +1,4 @@
-# ADR: QuadStore Pooling and Clear() Operation
+# ADR-005: QuadStore Pooling and Clear() Operation
 
 ## Status
 
