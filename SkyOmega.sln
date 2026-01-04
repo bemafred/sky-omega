@@ -39,13 +39,44 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastru
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Architecture", "Architecture", "{F1A2B3C4-D5E6-7890-ABCD-111111111111}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Canonical Concepts", "Canonical Concepts", "{F5B6C7D8-E9F0-1234-5678-AAAAAAAAAAAA}"
 	ProjectSection(SolutionItems) = preProject
-		docs\architecture\sky-omega-convergence.md = docs\architecture\sky-omega-convergence.md
-		docs\architecture\sky-omega-identity.md = docs\architecture\sky-omega-identity.md
-		docs\architecture\eee-manifesto.md = docs\architecture\eee-manifesto.md
-		docs\architecture\eee-lexicon.md = docs\architecture\eee-lexicon.md
-		docs\architecture\temporal-rdf.md = docs\architecture\temporal-rdf.md
-		docs\architecture\conclusions.md = docs\architecture\conclusions.md
+		docs\architecture\concepts\canonical\README.md = docs\architecture\concepts\canonical\README.md
+		docs\architecture\concepts\canonical-authoring-queue.md = docs\architecture\concepts\canonical-authoring-queue.md
+		docs\architecture\concepts\canonical\sky-omega.md = docs\architecture\concepts\canonical\sky-omega.md
+		docs\architecture\concepts\canonical\lucy.md = docs\architecture\concepts\canonical\lucy.md
+		docs\architecture\concepts\canonical\james.md = docs\architecture\concepts\canonical\james.md
+		docs\architecture\concepts\canonical\mira.md = docs\architecture\concepts\canonical\mira.md
+		docs\architecture\concepts\canonical\eee-emergence-epistemic-engineering.md = docs\architecture\concepts\canonical\eee-emergence-epistemic-engineering.md
+		docs\architecture\concepts\canonical\e-clean.md = docs\architecture\concepts\canonical\e-clean.md
+		docs\architecture\concepts\canonical\semantic-architecture.md = docs\architecture\concepts\canonical\semantic-architecture.md
+		docs\architecture\concepts\canonical\epistemic-cleanliness.md = docs\architecture\concepts\canonical\epistemic-cleanliness.md
+		docs\architecture\concepts\canonical\epistemic-consolidation-protocol-ecp.md = docs\architecture\concepts\canonical\epistemic-consolidation-protocol-ecp.md
+		docs\architecture\concepts\canonical\semantic-core.md = docs\architecture\concepts\canonical\semantic-core.md
+		docs\architecture\concepts\canonical\structured-intelligence.md = docs\architecture\concepts\canonical\structured-intelligence.md
+		docs\architecture\concepts\canonical\technical-domain.md = docs\architecture\concepts\canonical\technical-domain.md
+		docs\architecture\concepts\canonical\domain-catalog.md = docs\architecture\concepts\canonical\domain-catalog.md
+		docs\architecture\concepts\canonical\semantic-registry.md = docs\architecture\concepts\canonical\semantic-registry.md
+		docs\architecture\concepts\canonical\inspect-adapt.md = docs\architecture\concepts\canonical\inspect-adapt.md
+		docs\architecture\concepts\canonical\rdf.md = docs\architecture\concepts\canonical\rdf.md
+		docs\architecture\concepts\canonical\turtle.md = docs\architecture\concepts\canonical\turtle.md
+		docs\architecture\concepts\canonical\sparql.md = docs\architecture\concepts\canonical\sparql.md
+		docs\architecture\concepts\canonical\semantic-drift.md = docs\architecture\concepts\canonical\semantic-drift.md
+		docs\architecture\concepts\canonical\canonical-definition.md = docs\architecture\concepts\canonical\canonical-definition.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Narratives", "Narratives", "{F6C7D8E9-F0A1-2345-6789-BBBBBBBBBBBB}"
+	ProjectSection(SolutionItems) = preProject
+		docs\architecture\narratives\sky-omega-convergence.md = docs\architecture\narratives\sky-omega-convergence.md
+		docs\architecture\narratives\sky-omega-identity.md = docs\architecture\narratives\sky-omega-identity.md
+		docs\architecture\narratives\eee-manifesto.md = docs\architecture\narratives\eee-manifesto.md
+		docs\architecture\narratives\conclusions.md = docs\architecture\narratives\conclusions.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Technical", "Technical", "{F7D8E9F0-A1B2-3456-789A-CCCCCCCCCCCC}"
+	ProjectSection(SolutionItems) = preProject
+		docs\architecture\technical\temporal-rdf.md = docs\architecture\technical\temporal-rdf.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{F2A3B4C5-D6E7-8901-BCDE-222222222222}"
@@ -290,6 +321,11 @@ Global
 		# Architecture and API under Documentation
 		{F1A2B3C4-D5E6-7890-ABCD-111111111111} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
 		{F2A3B4C5-D6E7-8901-BCDE-222222222222} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
+
+		# Canonical Concepts, Narratives, and Technical under Architecture
+		{F5B6C7D8-E9F0-1234-5678-AAAAAAAAAAAA} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
+		{F6C7D8E9-F0A1-2345-6789-BBBBBBBBBBBB} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
+		{F7D8E9F0-A1B2-3456-789A-CCCCCCCCCCCC} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
 
 		# Mercury projects and ADRs nested under Mercury folder
 		{F3A4B5C6-D7E8-9012-CDEF-333333333333} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
