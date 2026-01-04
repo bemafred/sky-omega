@@ -9,13 +9,13 @@ MinimumVisualStudioVersion = 10.0.40219.1
 # =============================================================================
 
 # Top-level organizational folders
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Substrates", "Substrates", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "2 Substrates", "2 Substrates", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Cognition", "Cognition", "{B2C3D4E5-F6A7-8901-BCDE-F23456789012}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3 Cognition", "3 Cognition", "{B2C3D4E5-F6A7-8901-BCDE-F23456789012}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Surfaces", "Surfaces", "{C3D4E5F6-A7B8-9012-CDEF-345678901234}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "4 Surfaces", "4 Surfaces", "{C3D4E5F6-A7B8-9012-CDEF-345678901234}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Meta", "Meta", "{D4E5F6A7-B8C9-0123-DEF1-456789012345}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "1 Meta", "1 Meta", "{D4E5F6A7-B8C9-0123-DEF1-456789012345}"
 EndProject
 
 # Substrate folders
