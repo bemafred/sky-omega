@@ -104,6 +104,12 @@ public static class McpProtocol
             // Notifications (no id) don't get responses
             var isNotification = id == null;
 
+            // MCP protocol requires initialization before handling tools
+            if (!_initialized && method != "initialize")
+            {
+                return CreateErrorResponse(id, -32002, "Server not initialized");
+            }
+
             var result = method switch
             {
                 "initialize" => HandleInitialize(parameters),
