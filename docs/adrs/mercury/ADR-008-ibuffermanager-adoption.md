@@ -1,5 +1,9 @@
 # ADR-008: IBufferManager Adoption
 
+## Status
+
+Accepted (Implemented)
+
 ## Background
 
 We introduced `IBufferManager` in `Mercury.Runtime/Buffers` after struggling with stack overflows from aggressive `stackalloc` usage. This plan systematically adopts the pattern across Mercury.
