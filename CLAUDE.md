@@ -41,7 +41,8 @@ dotnet run --project examples/Mercury.Examples -- demo
 Architecture Decision Records track planning and progress for complex features:
 
 ```bash
-ls docs/mercury-adr-*.md  # List active ADRs
+ls docs/adrs/mercury/   # Mercury ADRs
+ls docs/adrs/minerva/   # Minerva ADRs
 ```
 
 **ADR workflow:** Plan in ADR → implement → check off success criteria → update status to "Accepted".
@@ -56,8 +57,17 @@ Sky Omega is a semantic-aware cognitive assistant with zero-GC performance desig
 
 ```
 SkyOmega.sln
+├── docs/
+│   ├── adrs/                # Architecture Decision Records
+│   │   ├── mercury/         # Mercury-specific ADRs
+│   │   └── minerva/         # Minerva-specific ADRs
+│   ├── specs/               # External format specifications
+│   │   ├── rdf/             # RDF specs (future: SPARQL, Turtle, etc.)
+│   │   └── llm/             # LLM specs (GGUF, SafeTensors, Tokenizers)
+│   ├── architecture/        # Conceptual documentation
+│   └── api/                 # API documentation
 ├── src/
-│   ├── Mercury/             # Core library - storage and query engine (BCL only)
+│   ├── Mercury/             # Knowledge substrate - RDF storage and SPARQL (BCL only)
 │   │   ├── NTriples/        # Streaming N-Triples parser
 │   │   ├── Rdf/             # Triple data structures
 │   │   ├── RdfXml/          # Streaming RDF/XML parser
@@ -69,18 +79,29 @@ SkyOmega.sln
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Cli.Turtle/  # Turtle parser CLI demo
 │   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI demo
-│   └── Mercury.Pruning/     # Dual-instance pruning with copy-and-switch
+│   ├── Mercury.Pruning/     # Dual-instance pruning with copy-and-switch
+│   │
+│   ├── Minerva/             # Thought substrate - tensor inference (BCL only)
+│   │   ├── Weights/         # GGUF and SafeTensors readers
+│   │   ├── Tokenizers/      # BPE, SentencePiece tokenizers
+│   │   ├── Tensors/         # Tensor operations
+│   │   └── Inference/       # Model inference
+│   ├── Minerva.Cli/         # Minerva CLI (future)
+│   └── Minerva.Mcp/         # Minerva MCP server (future)
 ├── tests/
-│   └── Mercury.Tests/       # xUnit tests
+│   ├── Mercury.Tests/       # Mercury xUnit tests
+│   └── Minerva.Tests/       # Minerva xUnit tests (future)
 ├── benchmarks/
-│   └── Mercury.Benchmarks/  # BenchmarkDotNet performance tests
+│   ├── Mercury.Benchmarks/  # Mercury BenchmarkDotNet tests
+│   └── Minerva.Benchmarks/  # Minerva benchmarks (future)
 └── examples/
-    └── Mercury.Examples/    # Usage examples and demos
+    ├── Mercury.Examples/    # Mercury usage examples
+    └── Minerva.Examples/    # Minerva usage examples (future)
 ```
 
 ## API Usage Examples
 
-For detailed code examples of all APIs, see **[docs/api-usage.md](docs/api-usage.md)**.
+For detailed code examples of all APIs, see **[docs/api/api-usage.md](docs/api/api-usage.md)**.
 
 ## Architecture
 
@@ -97,7 +118,7 @@ Sky (Agent) → James (Orchestration) → Lucy (Semantic Memory) → Mercury (St
 - **Mira** - Presentation surfaces (CLI, chat, IDE extensions)
 - **Mercury** - B+Tree indexes, append-only stores, memory-mapped files
 
-For the vision, methodology (EEE), and broader context, see [docs/sky-omega-convergence.md](docs/sky-omega-convergence.md).
+For the vision, methodology (EEE), and broader context, see [docs/architecture/sky-omega-convergence.md](docs/architecture/sky-omega-convergence.md).
 
 ### Storage Layer (`SkyOmega.Mercury.Storage`)
 
@@ -126,7 +147,7 @@ Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 
 ### Batch Write API
 
-Use the batch API for high-throughput bulk loading (~100,000 triples/sec vs ~300/sec for single writes). See [docs/api-usage.md#batch-write-api](docs/api-usage.md#batch-write-api).
+Use the batch API for high-throughput bulk loading (~100,000 triples/sec vs ~300/sec for single writes). See [docs/api/api-usage.md#batch-write-api](docs/api/api-usage.md#batch-write-api).
 
 **Performance characteristics:**
 - Single writes: ~250-300/sec (fsync per write)
@@ -135,7 +156,7 @@ Use the batch API for high-throughput bulk loading (~100,000 triples/sec vs ~300
 
 ### Named Graphs (Quads)
 
-QuadStore supports RDF named graphs for domain isolation. See [docs/api-usage.md#named-graphs-quads](docs/api-usage.md#named-graphs-quads).
+QuadStore supports RDF named graphs for domain isolation. See [docs/api/api-usage.md#named-graphs-quads](docs/api/api-usage.md#named-graphs-quads).
 
 **Design notes:**
 - **GSPO ordering**: B+Tree keys ordered by Graph first for efficient graph-scoped queries
@@ -230,7 +251,7 @@ Zero-GC means **no uncontrolled allocations**, not "avoid heap entirely". Pooled
 
 Implemented in `PatternSlot` (`src/Mercury/Sparql/Patterns/PatternSlot.cs`) - a 64-byte cache-aligned slot with discriminator byte and typed views over raw bytes.
 
-**Stack safety for large ref structs:** Large ref structs like `QueryResults` (~22KB) can cause stack overflow in complex query paths. The solution is to materialize results to heap (`List<MaterializedRow>`) early, returning only the pointer through the call chain. See [ADR: Buffer Pattern for Stack Safety](docs/mercury-adr-buffer-pattern.md) for details.
+**Stack safety for large ref structs:** Large ref structs like `QueryResults` (~22KB) can cause stack overflow in complex query paths. The solution is to materialize results to heap (`List<MaterializedRow>`) early, returning only the pointer through the call chain. See [ADR: Buffer Pattern for Stack Safety](docs/adrs/mercury/ADR-001-buffer-pattern.md) for details.
 
 **Critical patterns:**
 
@@ -489,7 +510,7 @@ Statistics-based join reordering for 10-100x performance improvement on multi-pa
 
 ### SERVICE Clause Architecture
 
-SERVICE clauses (federated queries) require special handling due to fundamentally different access semantics vs local patterns. See **[docs/mercury-adr-service-scan-interface.md](docs/mercury-adr-service-scan-interface.md)** for the architectural decision record.
+SERVICE clauses (federated queries) require special handling due to fundamentally different access semantics vs local patterns. See **[docs/adrs/mercury/ADR-006-service-scan-interface.md](docs/adrs/mercury/ADR-006-service-scan-interface.md)** for the architectural decision record.
 
 **Key principle:** SERVICE is a materialization boundary, not an iterator. Implementation uses:
 - `IScan` interface for uniform operator handling
