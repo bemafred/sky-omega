@@ -38,6 +38,21 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastru
 		Directory.Build.props = Directory.Build.props
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Architecture", "Architecture", "{F1A2B3C4-D5E6-7890-ABCD-111111111111}"
+	ProjectSection(SolutionItems) = preProject
+		docs\architecture\sky-omega-convergence.md = docs\architecture\sky-omega-convergence.md
+		docs\architecture\sky-omega-identity.md = docs\architecture\sky-omega-identity.md
+		docs\architecture\eee-manifesto.md = docs\architecture\eee-manifesto.md
+		docs\architecture\eee-lexicon.md = docs\architecture\eee-lexicon.md
+		docs\architecture\temporal-rdf.md = docs\architecture\temporal-rdf.md
+		docs\architecture\conclusions.md = docs\architecture\conclusions.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{F2A3B4C5-D6E7-8901-BCDE-222222222222}"
+	ProjectSection(SolutionItems) = preProject
+		docs\api\api-usage.md = docs\api\api-usage.md
+	EndProjectSection
+EndProject
 
 # =============================================================================
 # Mercury Projects
@@ -71,11 +86,34 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Examples", "examples\Mercury.Examples\Mercury.Examples.csproj", "{D3E4F5A6-B7C8-9012-DEF1-234567890123}"
 EndProject
 
+# Mercury - ADRs
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D7E8-9012-CDEF-333333333333}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
+		docs\adrs\mercury\ADR-001-compaction.md = docs\adrs\mercury\ADR-001-compaction.md
+		docs\adrs\mercury\ADR-002-ibuffermanager-adoption.md = docs\adrs\mercury\ADR-002-ibuffermanager-adoption.md
+		docs\adrs\mercury\ADR-003-buffer-pattern.md = docs\adrs\mercury\ADR-003-buffer-pattern.md
+		docs\adrs\mercury\ADR-004-service-scan-interface.md = docs\adrs\mercury\ADR-004-service-scan-interface.md
+		docs\adrs\mercury\ADR-005-quadstore-pooling-and-clear.md = docs\adrs\mercury\ADR-005-quadstore-pooling-and-clear.md
+		docs\adrs\mercury\ADR-006-dual-mode-store-access.md = docs\adrs\mercury\ADR-006-dual-mode-store-access.md
+		docs\adrs\mercury\ADR-007-union-service-execution.md = docs\adrs\mercury\ADR-007-union-service-execution.md
+		docs\adrs\mercury\ADR-008-quadstore-pool-unified.md = docs\adrs\mercury\ADR-008-quadstore-pool-unified.md
+	EndProjectSection
+EndProject
+
 # =============================================================================
 # Minerva Projects
 # =============================================================================
 
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Minerva", "src\Minerva\Minerva.csproj", "{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}"
+EndProject
+
+# Minerva - ADRs
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D8E9-0123-DEF0-444444444444}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
+		docs\adrs\minerva\ADR-001-weight-formats.md = docs\adrs\minerva\ADR-001-weight-formats.md
+	EndProjectSection
 EndProject
 
 # =============================================================================
@@ -249,7 +287,12 @@ Global
 		{7FA0A47B-7556-4F7D-869D-744000F071D0} = {D4E5F6A7-B8C9-0123-DEF1-456789012345}
 		{6A048219-87B6-4063-9E6B-D76490244A39} = {D4E5F6A7-B8C9-0123-DEF1-456789012345}
 
-		# Mercury projects nested under Mercury folder
+		# Architecture and API under Documentation
+		{F1A2B3C4-D5E6-7890-ABCD-111111111111} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
+		{F2A3B4C5-D6E7-8901-BCDE-222222222222} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
+
+		# Mercury projects and ADRs nested under Mercury folder
+		{F3A4B5C6-D7E8-9012-CDEF-333333333333} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
@@ -262,7 +305,8 @@ Global
 		{C2D3E4F5-A6B7-8901-CDEF-123456789012} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{D3E4F5A6-B7C8-9012-DEF1-234567890123} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 
-		# Minerva projects nested under Minerva folder
+		# Minerva projects and ADRs nested under Minerva folder
+		{F4A5B6C7-D8E9-0123-DEF0-444444444444} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
 	EndGlobalSection
 EndGlobal
