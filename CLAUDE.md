@@ -55,6 +55,13 @@ Sky Omega is a semantic-aware cognitive assistant with zero-GC performance desig
 
 ### Solution Structure
 
+**IDE Views:** Visual Studio, Rider, and VS Code support both *Solution View* (virtual folders defined in `.sln`) and *Filesystem View* (actual directory structure). This solution uses virtual folders to provide logical grouping for developers:
+
+- **Solution View**: ADRs appear under their substrate (Mercury/Minerva), architecture docs under Documentation
+- **Filesystem View**: All docs live in `docs/` with consistent paths for linking
+
+Both views are valid and useful. Solution View is optimized for browsing by role (architect, developer), while Filesystem View reflects the actual repository structure.
+
 ```
 SkyOmega.sln
 ├── docs/

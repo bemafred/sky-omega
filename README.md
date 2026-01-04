@@ -42,4 +42,17 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 - **Recursion as structure**
 - **Code as a mirror of cognition**
 
+---
+
+## 🗂️ Navigating the Codebase
+
+Modern IDEs (Visual Studio, Rider, VS Code) offer two views of this repository:
+
+| View | What you see | Best for |
+|------|--------------|----------|
+| **Solution View** | Virtual folders from `SkyOmega.sln` | Browsing by component (Mercury ADRs under Mercury, etc.) |
+| **Filesystem View** | Actual directory structure | Finding files by path, understanding repository layout |
+
+Both are valid. The solution file organizes content logically for architects and developers, while the filesystem maintains consistent paths for documentation links.
+
 
