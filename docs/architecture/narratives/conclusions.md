@@ -81,6 +81,8 @@ The BCL provides everything needed for a production-quality RDF store.
 
 ## E-Clean & Semantic Architecture
 
+> *For canonical definitions, see [E-Clean](../concepts/canonical/e-clean.md), [Semantic Architecture](../concepts/canonical/semantic-architecture.md), and [Semantic Drift](../concepts/canonical/semantic-drift.md).*
+
 E-Clean (Epistemic Clean) is the foundational discipline ensuring software systems remain epistemically sound - that software *means what it says* and keeps meaning it as systems evolve.
 
 ### The Problem: Semantic Drift
@@ -179,6 +181,8 @@ With Claude Code:
 Building parsers from W3C specs became faster than researching how third-party libraries handle edge cases.
 
 ## Validation: EEE Methodology
+
+> *For canonical definition, see [EEE (Emergence, Epistemics, Engineering)](../concepts/canonical/eee-emergence-epistemic-engineering.md).*
 
 EEE is a methodology that emerged from Sky Omega practice rather than inherited tradition. It comprises three interconnected elements that support a cyclical flow: *Thought → Dialogue → Pattern → Structure → Reflection → Thought*.
 
