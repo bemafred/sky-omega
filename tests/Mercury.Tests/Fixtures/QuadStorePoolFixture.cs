@@ -45,11 +45,16 @@ public sealed class QuadStorePoolFixture : IDisposable
         // - 64MB atom data (vs 1GB default)
         // - 64K atom capacity (vs 1M default)
         // Pool size is min(ProcessorCount, diskBudget / estimatedStoreSize)
+        //
+        // Cross-process gate enabled: coordinates with other test runner processes
+        // (e.g., NCrunch parallel execution) to prevent disk exhaustion when multiple
+        // processes create pools simultaneously.
         Pool = new QuadStorePool(
             storageOptions: StorageOptions.ForTesting,
             diskBudgetFraction: QuadStorePool.DefaultDiskBudgetFraction,
             maxConcurrent: Environment.ProcessorCount,
-            purpose: "test");
+            purpose: "test",
+            useCrossProcessGate: true);
     }
 
     /// <summary>
