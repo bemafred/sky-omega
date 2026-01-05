@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NCrunch Solution Configuration for Sky Omega
+
+  This file controls solution-level NCrunch behavior. For disk-constrained environments,
+  also configure GLOBAL settings (NCrunch -> Configuration -> Global):
+
+    - Max Number Of Processing Threads: 4-8 (limits concurrent test processes)
+    - Max Test Runners To Pool: 2-4 (limits pooled inactive processes)
+
+  Each NCrunch test runner process creates its own QuadStorePool. With StorageOptions.ForTesting,
+  each store uses ~320MB (vs ~5.5GB default). Limiting processes prevents disk exhaustion.
+
+  Example: 4 processes × 5 stores × 320MB = 6.4GB disk usage (safe)
+           20 processes × 5 stores × 320MB = 32GB disk usage (may be problematic)
+-->
+<SolutionConfiguration>
+  <Settings>
+    <!-- Allow parallel test execution across separate processes -->
+    <AllowParallelTestExecution>True</AllowParallelTestExecution>
+
+    <!-- Prevent the same test from running multiple times concurrently -->
+    <AllowTestsInParallelWithThemselves>False</AllowTestsInParallelWithThemselves>
+
+    <!-- Test timeout: 2 minutes (120000ms) - generous for storage-heavy tests -->
+    <DefaultTestTimeout>120000</DefaultTestTimeout>
+
+    <!-- Store NCrunch cache in solution directory for easy cleanup -->
+    <NCrunchCacheStoragePath>.ncrunch\cache</NCrunchCacheStoragePath>
+
+    <!-- Store project configs in .ncrunch folder (gitignored) -->
+    <ProjectConfigStoragePathRelativeToSolutionDir>.ncrunch</ProjectConfigStoragePathRelativeToSolutionDir>
+
+    <!-- Disable Runtime Data Inspector to reduce overhead -->
+    <EnableRDI>False</EnableRDI>
+    <RdiConfigured>True</RdiConfigured>
+
+    <!-- Mark solution as configured to prevent setup wizard -->
+    <SolutionConfigured>True</SolutionConfigured>
+  </Settings>
+</SolutionConfiguration>
