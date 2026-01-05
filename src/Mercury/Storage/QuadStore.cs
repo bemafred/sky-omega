@@ -84,21 +84,23 @@ public sealed class QuadStore : IDisposable
         var atomPath = Path.Combine(baseDirectory, "atoms");
         var walPath = Path.Combine(baseDirectory, "wal.log");
 
+        var options = storageOptions ?? StorageOptions.Default;
+
         // Create shared atom store for all indexes
-        _atoms = new AtomStore(atomPath, _bufferManager);
+        _atoms = new AtomStore(atomPath, _bufferManager, options.MaxAtomSize,
+            options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity);
 
         // Create WAL for durability
         _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
             WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager);
 
         // Create indexes with shared atom store
-        _gspoIndex = new QuadIndex(gspoPath, _atoms);
-        _gposIndex = new QuadIndex(gposPath, _atoms);
-        _gospIndex = new QuadIndex(gospPath, _atoms);
-        _tgspIndex = new QuadIndex(tgspPath, _atoms);
+        _gspoIndex = new QuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes);
+        _gposIndex = new QuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes);
+        _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes);
+        _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes);
 
         // Create trigram index for full-text search if enabled
-        var options = storageOptions ?? StorageOptions.Default;
         if (options.EnableFullTextSearch)
         {
             var trigramPath = Path.Combine(baseDirectory, "trigram");

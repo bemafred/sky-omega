@@ -33,14 +33,21 @@ namespace SkyOmega.Mercury.Tests.Fixtures;
 public sealed class QuadStorePoolFixture : IDisposable
 {
     /// <summary>
-    /// The shared pool. Bounded to ProcessorCount concurrent stores.
+    /// The shared pool. Bounded by disk budget and ProcessorCount.
+    /// Uses StorageOptions.ForTesting for minimal disk footprint (~320MB per store vs ~5.5GB).
     /// </summary>
     public QuadStorePool Pool { get; }
 
     public QuadStorePoolFixture()
     {
-        // Use ProcessorCount as default - balances parallelism with disk usage
+        // Use ForTesting options for minimal disk footprint:
+        // - 64MB per index file (vs 1GB default) = 256MB for 4 indexes
+        // - 64MB atom data (vs 1GB default)
+        // - 64K atom capacity (vs 1M default)
+        // Pool size is min(ProcessorCount, diskBudget / estimatedStoreSize)
         Pool = new QuadStorePool(
+            storageOptions: StorageOptions.ForTesting,
+            diskBudgetFraction: QuadStorePool.DefaultDiskBudgetFraction,
             maxConcurrent: Environment.ProcessorCount,
             purpose: "test");
     }

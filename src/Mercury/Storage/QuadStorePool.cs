@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using SkyOmega.Mercury.Runtime;
 
@@ -39,11 +40,22 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 public sealed class QuadStorePool : IDisposable
 {
+    /// <summary>
+    /// Default fraction of available disk space to use as budget (33%).
+    /// </summary>
+    public const double DefaultDiskBudgetFraction = 0.33;
+
+    /// <summary>
+    /// Fixed hash table size in bytes (512MB) - not configurable, included in estimates.
+    /// </summary>
+    private const long HashTableSizeBytes = 512L << 20;
+
     private readonly ConcurrentBag<QuadStore> _available = new();
     private readonly List<(TempPath path, QuadStore store)> _all = new();
     private readonly SemaphoreSlim _gate;
     private readonly object _createLock = new();
     private readonly string _purpose;
+    private readonly StorageOptions _storageOptions;
     private bool _disposed;
 
     /// <summary>
@@ -52,10 +64,74 @@ public sealed class QuadStorePool : IDisposable
     /// <param name="maxConcurrent">Maximum concurrent stores. Defaults to ProcessorCount.</param>
     /// <param name="purpose">Category for TempPath naming (e.g., "test", "service").</param>
     public QuadStorePool(int maxConcurrent = 0, string purpose = "pooled")
+        : this(null, DefaultDiskBudgetFraction, maxConcurrent, purpose)
     {
-        var max = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
-        _gate = new SemaphoreSlim(max, max);
+    }
+
+    /// <summary>
+    /// Creates a pool with disk-budget-aware concurrency limiting.
+    /// The pool size is calculated as the minimum of:
+    /// - CPU count (or explicit maxConcurrent)
+    /// - Available disk space × diskBudgetFraction ÷ estimated per-store size
+    /// </summary>
+    /// <param name="storageOptions">Storage options including initial sizes. Use StorageOptions.ForTesting for minimal footprint.</param>
+    /// <param name="diskBudgetFraction">Fraction of available disk space to use as budget (0.0-1.0). Default: 0.33 (33%).</param>
+    /// <param name="maxConcurrent">Maximum concurrent stores (0 = ProcessorCount). Disk budget may reduce this further.</param>
+    /// <param name="purpose">Category for TempPath naming (e.g., "test", "service").</param>
+    public QuadStorePool(StorageOptions? storageOptions,
+                         double diskBudgetFraction = DefaultDiskBudgetFraction,
+                         int maxConcurrent = 0,
+                         string purpose = "pooled")
+    {
+        if (diskBudgetFraction <= 0 || diskBudgetFraction > 1.0)
+            throw new ArgumentOutOfRangeException(nameof(diskBudgetFraction),
+                "Disk budget fraction must be between 0 (exclusive) and 1.0 (inclusive)");
+
+        _storageOptions = storageOptions ?? StorageOptions.Default;
         _purpose = purpose;
+
+        var cpuLimit = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
+        var diskLimit = CalculateDiskLimit(_storageOptions, diskBudgetFraction);
+
+        var max = Math.Max(1, Math.Min(cpuLimit, diskLimit));
+        _gate = new SemaphoreSlim(max, max);
+    }
+
+    /// <summary>
+    /// Maximum number of concurrent stores this pool allows.
+    /// </summary>
+    public int MaxConcurrent => _gate.CurrentCount + (TotalCreated - AvailableCount);
+
+    /// <summary>
+    /// Calculates the maximum number of stores based on available disk space.
+    /// </summary>
+    private static int CalculateDiskLimit(StorageOptions options, double fraction)
+    {
+        var tempPath = Path.GetTempPath();
+        var available = DiskSpaceChecker.GetAvailableSpace(tempPath);
+
+        if (available < 0)
+            return int.MaxValue; // Can't determine disk space, don't limit
+
+        var budget = (long)(available * fraction);
+        var perStoreEstimate = EstimateStoreSize(options);
+
+        if (perStoreEstimate <= 0)
+            return int.MaxValue;
+
+        return (int)(budget / perStoreEstimate);
+    }
+
+    /// <summary>
+    /// Estimates the disk footprint of a single QuadStore based on options.
+    /// </summary>
+    private static long EstimateStoreSize(StorageOptions options)
+    {
+        // 4 indexes + atom data + hash table (fixed 512MB) + atom offsets
+        return (options.IndexInitialSizeBytes * 4)
+             + options.AtomDataInitialSizeBytes
+             + HashTableSizeBytes
+             + (options.AtomOffsetInitialCapacity * sizeof(long));
     }
 
     /// <summary>
@@ -81,7 +157,7 @@ public sealed class QuadStorePool : IDisposable
             var path = TempPath.Create(_purpose, Guid.NewGuid().ToString("N")[..8], unique: false);
             path.EnsureClean();
             path.MarkOwnership();
-            var newStore = new QuadStore(path);
+            var newStore = new QuadStore(path, null, null, _storageOptions);
             _all.Add((path, newStore));
             return newStore;
         }

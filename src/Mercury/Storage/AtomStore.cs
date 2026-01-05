@@ -105,15 +105,31 @@ internal sealed unsafe class AtomStore : IDisposable
     private readonly long _maxAtomSize;
 
     public AtomStore(string baseFilePath)
-        : this(baseFilePath, null, DefaultMaxAtomSize) { }
+        : this(baseFilePath, null, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity) { }
 
     public AtomStore(string baseFilePath, IBufferManager? bufferManager)
-        : this(baseFilePath, bufferManager, DefaultMaxAtomSize) { }
+        : this(baseFilePath, bufferManager, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity) { }
 
     public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize)
+        : this(baseFilePath, bufferManager, maxAtomSize, InitialDataSize, InitialOffsetCapacity) { }
+
+    /// <summary>
+    /// Creates an AtomStore with configurable initial sizes.
+    /// </summary>
+    /// <param name="baseFilePath">Base path for storage files (without extension).</param>
+    /// <param name="bufferManager">Buffer manager for pooled allocations.</param>
+    /// <param name="maxAtomSize">Maximum size of a single atom in bytes.</param>
+    /// <param name="initialDataSize">Initial size for the data file in bytes.</param>
+    /// <param name="initialOffsetCapacity">Initial capacity for the offset index (number of atoms).</param>
+    public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
+                     long initialDataSize, long initialOffsetCapacity)
     {
         if (maxAtomSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxAtomSize), "Max atom size must be positive");
+        if (initialDataSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(initialDataSize), "Initial data size must be positive");
+        if (initialOffsetCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(initialOffsetCapacity), "Initial offset capacity must be positive");
 
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _maxAtomSize = maxAtomSize;
@@ -134,7 +150,7 @@ internal sealed unsafe class AtomStore : IDisposable
 
         if (_dataFile.Length == 0)
         {
-            _dataFile.SetLength(InitialDataSize);
+            _dataFile.SetLength(initialDataSize);
         }
 
         // Open/create index file (hash table)
@@ -163,7 +179,7 @@ internal sealed unsafe class AtomStore : IDisposable
             FileOptions.RandomAccess
         );
 
-        _offsetCapacity = InitialOffsetCapacity;
+        _offsetCapacity = initialOffsetCapacity;
         if (_offsetFile.Length == 0)
         {
             _offsetFile.SetLength(_offsetCapacity * sizeof(long));

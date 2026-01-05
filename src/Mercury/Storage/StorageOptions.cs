@@ -46,6 +46,27 @@ public sealed class StorageOptions
     public bool EnableFullTextSearch { get; init; } = false;
 
     /// <summary>
+    /// Initial size for each QuadIndex file (4 indexes: GSPO, GPOS, GOSP, TGSP). Default: 1GB.
+    /// For testing, use smaller values (e.g., 64MB) to reduce disk footprint.
+    /// Files grow automatically when capacity is exceeded.
+    /// </summary>
+    public long IndexInitialSizeBytes { get; init; } = 1L << 30;
+
+    /// <summary>
+    /// Initial size for AtomStore data file. Default: 1GB.
+    /// For testing, use smaller values to reduce disk footprint.
+    /// File grows automatically when capacity is exceeded.
+    /// </summary>
+    public long AtomDataInitialSizeBytes { get; init; } = 1L << 30;
+
+    /// <summary>
+    /// Initial capacity for AtomStore offset index (number of atoms). Default: 1M.
+    /// File size is this value × 8 bytes (64-bit offsets).
+    /// For testing, use smaller values (e.g., 64K) to reduce disk footprint.
+    /// </summary>
+    public long AtomOffsetInitialCapacity { get; init; } = 1L << 20;
+
+    /// <summary>
     /// Default options with reasonable limits.
     /// </summary>
     public static StorageOptions Default { get; } = new();
@@ -56,6 +77,22 @@ public sealed class StorageOptions
     public static StorageOptions NoEnforcement { get; } = new()
     {
         MinimumFreeDiskSpace = 0
+    };
+
+    /// <summary>
+    /// Options optimized for testing with minimal disk footprint.
+    /// Uses 64MB initial sizes instead of 1GB, reducing per-store footprint from ~5.5GB to ~320MB.
+    /// </summary>
+    /// <remarks>
+    /// Suitable for parallel test execution where many QuadStore instances are created.
+    /// Files will grow automatically if tests require more capacity.
+    /// </remarks>
+    public static StorageOptions ForTesting { get; } = new()
+    {
+        IndexInitialSizeBytes = 64L << 20,        // 64 MB per index (4 indexes = 256 MB)
+        AtomDataInitialSizeBytes = 64L << 20,     // 64 MB atoms
+        AtomOffsetInitialCapacity = 64L << 10,    // 64K atoms (~512 KB)
+        MinimumFreeDiskSpace = 512L << 20         // 512 MB minimum (relaxed for testing)
     };
 
     /// <summary>
