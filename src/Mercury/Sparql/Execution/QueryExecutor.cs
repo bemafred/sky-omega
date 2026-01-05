@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
@@ -202,11 +203,11 @@ public partial class QueryExecutor : IDisposable
         var value = literal.Slice(start, end - start);
 
         // Try parse as DateTimeOffset
-        if (DateTimeOffset.TryParse(value, out var result))
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var result))
             return result;
 
         // Try parse as date only (assume start of day)
-        if (DateTime.TryParse(value.ToString(), out var dt))
+        if (DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
             return new DateTimeOffset(dt, TimeSpan.Zero);
 
         return DateTimeOffset.MinValue;

@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using SkyOmega.Mercury.Sparql;
@@ -1382,7 +1383,7 @@ public ref partial struct SparqlParser
             Advance();
         
         var span = _source.Slice(start, _position - start);
-        return int.TryParse(span, out var result) ? result : 0;
+        return int.TryParse(span, NumberStyles.Integer, CultureInfo.InvariantCulture, out var result) ? result : 0;
     }
 
     private ReadOnlySpan<char> ParseIriRef()

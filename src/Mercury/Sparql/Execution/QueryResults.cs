@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
@@ -899,7 +900,7 @@ internal sealed class GroupedRow
                 if (idx >= 0)
                 {
                     valueStr = bindings.GetString(idx).ToString();
-                    hasNumValue = double.TryParse(valueStr, out numValue);
+                    hasNumValue = double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out numValue);
                 }
                 else
                 {

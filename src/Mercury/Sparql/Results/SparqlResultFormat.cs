@@ -4,6 +4,7 @@
 // .NET 10 / C# 14
 
 using System;
+using System.Globalization;
 using System.IO;
 using SkyOmega.Mercury.Runtime.Buffers;
 
@@ -197,7 +198,7 @@ public static class SparqlResultFormatNegotiator
                     if (nextSemi >= 0)
                         qValue = qValue.Slice(0, nextSemi);
 
-                    if (double.TryParse(qValue.ToString(), out var q))
+                    if (double.TryParse(qValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var q))
                         quality = q;
                 }
             }
