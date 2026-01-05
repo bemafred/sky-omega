@@ -524,8 +524,8 @@ public partial class QueryExecutor
         var store = _store;
         var source = _source;
 
-        // Access pattern data needed for execution
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        // Access cached pattern (from buffer)
+        ref readonly var pattern = ref _cachedPattern;
         var graphClause = pattern.GetGraphClause(0);
         var patternCount = graphClause.PatternCount;
 

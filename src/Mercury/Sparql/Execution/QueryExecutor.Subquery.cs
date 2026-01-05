@@ -24,7 +24,7 @@ public partial class QueryExecutor
         }
 
         // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         List<MaterializedRow>? results;
 
         // Check for multiple subqueries
@@ -102,13 +102,13 @@ public partial class QueryExecutor
     private QueryResults ExecuteWithSubQueries()
     {
         // Check for multiple subqueries FIRST with minimal stack usage
-        // Accessing SubQueryCount directly avoids copying large pattern struct
-        if (_query.WhereClause.Pattern.SubQueryCount > 1)
+        // Accessing SubQueryCount via cached pattern avoids copying large struct
+        if (_cachedPattern.SubQueryCount > 1)
             return ExecuteMultipleSubQueries();
 
         // Single subquery with outer patterns - delegate to join method directly
         // to minimize call chain depth
-        if (_query.WhereClause.Pattern.PatternCount > 0)
+        if (_cachedPattern.PatternCount > 0)
             return ExecuteSingleSubQueryWithJoin();
 
         // Single subquery without outer patterns
@@ -122,7 +122,7 @@ public partial class QueryExecutor
     private QueryResults ExecuteSingleSubQuerySimple()
     {
         // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var subSelect = pattern.GetSubQuery(0);
 
         // Build binding storage
@@ -133,9 +133,9 @@ public partial class QueryExecutor
         var subQueryScan = new SubQueryScan(_store, _source, subSelect);
 
         return new QueryResults(subQueryScan, _buffer, _source, _store, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
-            _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
-            _query.SolutionModifier.Having);
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+            _buffer.GetHavingClause());
     }
 
     /// <summary>
@@ -146,7 +146,7 @@ public partial class QueryExecutor
     private QueryResults ExecuteSingleSubQueryWithJoin()
     {
         // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var subSelect = pattern.GetSubQuery(0);
 
         // Execute join and materialize results
@@ -172,7 +172,7 @@ public partial class QueryExecutor
             return QueryResults.Empty();
 
         // If there are outer triple patterns, join with them too
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         if (pattern.RequiredPatternCount > 0)
         {
             joinedResults = JoinWithOuterPatterns(joinedResults);
@@ -192,7 +192,7 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow>? CollectAndJoinSubQueryResults()
     {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var subQueryCount = pattern.SubQueryCount;
 
         // Execute first subquery
@@ -222,7 +222,7 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow>? ExecuteSingleSubQueryForJoin(int subQueryIndex)
     {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var subSelect = pattern.GetSubQuery(subQueryIndex);
 
         var bindings = new Binding[16];
@@ -254,7 +254,7 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow>? JoinWithOuterPatterns(List<MaterializedRow> subQueryResults)
     {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
@@ -387,7 +387,7 @@ public partial class QueryExecutor
     private List<MaterializedRow> ExecuteSubQueryJoinCore(SubSelect subSelect)
     {
         // Access pattern via ref to avoid copying ~4KB struct
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
 
         var results = new List<MaterializedRow>();
         var joinBindings = new Binding[16];
