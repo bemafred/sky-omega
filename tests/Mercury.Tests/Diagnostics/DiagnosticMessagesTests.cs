@@ -4,7 +4,7 @@
 using SkyOmega.Mercury.Diagnostics;
 using Xunit;
 
-namespace Mercury.Tests.Diagnostics;
+namespace SkyOmega.Mercury.Tests.Diagnostics;
 
 public class DiagnosticMessagesTests
 {

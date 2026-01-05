@@ -7,7 +7,7 @@ using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Runtime;
 
-namespace Mercury.Tests;
+namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
 /// End-to-end tests for SPARQL text:match function.

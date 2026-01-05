@@ -6,6 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <AssemblyName>mercury</AssemblyName>
+        <RootNamespace>SkyOmega.Mercury.Cli</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>
