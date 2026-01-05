@@ -110,7 +110,7 @@ public class StorageOptionsTests : IDisposable
 
     #region InsufficientDiskSpaceException
 
-    [Fact(Skip = "Insufficient disk space on Windows in Visual Studio 2022 - under investigation")]
+    [Fact]
     public void InsufficientDiskSpaceException_ContainsUsefulInformation()
     {
         var ex = new InsufficientDiskSpaceException(
