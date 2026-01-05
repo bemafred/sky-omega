@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
@@ -452,10 +453,10 @@ public static class McpProtocol
             sb.AppendLine("Mercury Store Statistics:");
             sb.AppendLine($"  Quads: {quadCount:N0}");
             sb.AppendLine($"  Atoms: {atomCount:N0}");
-            sb.AppendLine($"  Storage: {FormatBytes(totalBytes)}");
+            sb.AppendLine($"  Storage: {ByteFormatter.FormatCompact(totalBytes)}");
             sb.AppendLine($"  WAL TxId: {walTxId:N0}");
             sb.AppendLine($"  WAL Checkpoint: {walCheckpoint:N0}");
-            sb.AppendLine($"  WAL Size: {FormatBytes(walSize)}");
+            sb.AppendLine($"  WAL Size: {ByteFormatter.FormatCompact(walSize)}");
 
             return (sb.ToString().Trim(), false);
         }
@@ -487,21 +488,6 @@ public static class McpProtocol
             }
 
             return (sb.ToString().Trim(), false);
-        }
-
-        private static string FormatBytes(long bytes)
-        {
-            string[] units = ["B", "KB", "MB", "GB", "TB"];
-            double size = bytes;
-            int unit = 0;
-
-            while (size >= 1024 && unit < units.Length - 1)
-            {
-                size /= 1024;
-                unit++;
-            }
-
-            return unit == 0 ? $"{size:N0} {units[unit]}" : $"{size:N1} {units[unit]}";
         }
     }
 }

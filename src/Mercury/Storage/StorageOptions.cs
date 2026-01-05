@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using SkyOmega.Mercury.Abstractions;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -151,22 +152,9 @@ public sealed class InsufficientDiskSpaceException : IOException
         long minimumFreeSpace)
     {
         var afterGrowth = availableBytes - requestedBytes;
-        return $"Storage operation refused: growing '{System.IO.Path.GetFileName(path)}' by {FormatBytes(requestedBytes)} " +
-               $"would leave only {FormatBytes(afterGrowth)} free (minimum required: {FormatBytes(minimumFreeSpace)}). " +
-               $"Current available: {FormatBytes(availableBytes)}.";
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        if (bytes < 0) bytes = 0;
-        return bytes switch
-        {
-            >= 1L << 40 => $"{bytes / (double)(1L << 40):F2} TB",
-            >= 1L << 30 => $"{bytes / (double)(1L << 30):F2} GB",
-            >= 1L << 20 => $"{bytes / (double)(1L << 20):F2} MB",
-            >= 1L << 10 => $"{bytes / (double)(1L << 10):F2} KB",
-            _ => $"{bytes} bytes"
-        };
+        return $"Storage operation refused: growing '{System.IO.Path.GetFileName(path)}' by {ByteFormatter.Format(requestedBytes)} " +
+               $"would leave only {ByteFormatter.Format(afterGrowth)} free (minimum required: {ByteFormatter.Format(minimumFreeSpace)}). " +
+               $"Current available: {ByteFormatter.Format(availableBytes)}.";
     }
 }
 

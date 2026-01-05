@@ -615,33 +615,18 @@ public sealed class ReplSession : IDisposable
         sb.AppendLine("Store Statistics:");
         sb.AppendLine($"  Quads:           {stats.QuadCount:N0}");
         sb.AppendLine($"  Atoms:           {stats.AtomCount:N0}");
-        sb.AppendLine($"  Storage:         {FormatBytes(stats.TotalBytes)}");
+        sb.AppendLine($"  Storage:         {ByteFormatter.FormatCompact(stats.TotalBytes)}");
         sb.AppendLine();
         sb.AppendLine("Write-Ahead Log:");
         sb.AppendLine($"  Current TxId:    {stats.WalTxId:N0}");
         sb.AppendLine($"  Last Checkpoint: {stats.WalCheckpoint:N0}");
-        sb.AppendLine($"  Log Size:        {FormatBytes(stats.WalSize)}");
+        sb.AppendLine($"  Log Size:        {ByteFormatter.FormatCompact(stats.WalSize)}");
         sb.AppendLine();
         sb.AppendLine("Session:");
         sb.AppendLine($"  Prefixes:        {_prefixes.Count}");
         sb.AppendLine($"  History:         {_history.Count} queries");
 
         return ExecutionResult.Command(sb.ToString().TrimEnd());
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
-        double size = bytes;
-        int unit = 0;
-
-        while (size >= 1024 && unit < units.Length - 1)
-        {
-            size /= 1024;
-            unit++;
-        }
-
-        return unit == 0 ? $"{size:N0} {units[unit]}" : $"{size:N1} {units[unit]}";
     }
 
     private static string GetHelpText() => """
