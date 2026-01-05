@@ -1,7 +1,7 @@
 # ADR-000 - Repository Restructure for Multi-Substrate Architecture
 
 ## Status
-Proposed
+Implemented
 
 ## Context
 Sky Omega is evolving from a single-substrate system (Mercury for RDF/knowledge) to a multi-substrate cognitive architecture. The addition of Minerva (tensor/inference substrate) requires a harmonized repository structure that:

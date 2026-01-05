@@ -41,8 +41,9 @@ dotnet run --project examples/Mercury.Examples -- demo
 Architecture Decision Records track planning and progress for complex features:
 
 ```bash
-ls docs/adrs/mercury/   # Mercury ADRs
-ls docs/adrs/minerva/   # Minerva ADRs
+ls docs/adrs/             # Cross-cutting ADRs (e.g., ADR-000 repo structure)
+ls docs/adrs/mercury/     # Mercury ADRs
+ls docs/adrs/minerva/     # Minerva ADRs
 ```
 
 **ADR workflow:** Plan in ADR → implement → check off success criteria → update status to "Accepted".
