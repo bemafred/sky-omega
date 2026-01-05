@@ -431,10 +431,10 @@ public class UpdateExecutor
             {
                 ExecuteModifyWithSimplePattern(wherePattern, withGraph, toDelete, toInsert);
             }
-            // WITH clause with multiple patterns - run on thread with larger stack
+            // WITH clause with multiple patterns - isolated stack frame via NoInlining
             else if (withGraph != null && wherePattern.GraphClauseCount == 0 && wherePattern.PatternCount > 1)
             {
-                ExecuteModifyWithMultiPatternOnThread(query, withGraph, toDelete, toInsert);
+                ExecuteModifyWithMultiPattern(query, withGraph, toDelete, toInsert);
             }
             else
             {
@@ -552,79 +552,67 @@ public class UpdateExecutor
     }
 
     /// <summary>
-    /// Execute modify with multiple patterns on separate thread with larger stack.
+    /// Execute modify with multiple patterns - isolated stack frame via NoInlining.
     /// </summary>
-    private void ExecuteModifyWithMultiPatternOnThread(
+    /// <remarks>
+    /// ADR-009: This method replaces the previous Thread-based workaround.
+    /// The [NoInlining] attribute prevents stack frame merging, keeping
+    /// the Query struct (~8KB) and QueryResults (~22KB) isolated to this frame.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void ExecuteModifyWithMultiPattern(
         Query query,
         string withGraph,
         System.Collections.Generic.List<(string s, string p, string o, string? g)> toDelete,
         System.Collections.Generic.List<(string s, string p, string o, string? g)> toInsert)
     {
-        var store = _store;
-        var source = _source;
-        var update = _update;
+        // Add WITH graph as dataset clause
+        var modifiedQuery = query;
+        modifiedQuery.Datasets = new[] { DatasetClause.Default(_update.WithGraphStart, _update.WithGraphLength) };
 
-        // Run on thread with larger stack to handle large struct copies
-        var thread = new System.Threading.Thread(() =>
+        var executor = new QueryExecutor(_store, _source.AsSpan(), modifiedQuery);
+        var results = executor.Execute();
+        try
         {
-            // Add WITH graph as dataset clause
-            var modifiedQuery = query;
-            modifiedQuery.Datasets = new[] { DatasetClause.Default(update.WithGraphStart, update.WithGraphLength) };
-
-            var executor = new QueryExecutor(store, source.AsSpan(), modifiedQuery);
-            var results = executor.Execute();
-            try
+            while (results.MoveNext())
             {
-                while (results.MoveNext())
+                var b = results.Current;
+                var deleteTemplate = _update.DeleteTemplate;
+                var insertTemplate = _update.InsertTemplate;
+
+                // Process DELETE template - base patterns use WITH graph
+                for (int i = 0; i < deleteTemplate.PatternCount; i++)
                 {
-                    // Copy bindings since we need to use them across template processing
-                    var b = results.Current;
-                    var deleteTemplate = update.DeleteTemplate;
-                    var insertTemplate = update.InsertTemplate;
+                    var tp = deleteTemplate.GetPattern(i);
+                    var s = InstantiateTermFromSpan(tp.Subject, b, _source);
+                    var p = InstantiateTermFromSpan(tp.Predicate, b, _source);
+                    var o = InstantiateTermFromSpan(tp.Object, b, _source);
 
-                    // Process DELETE template - base patterns use WITH graph
-                    for (int i = 0; i < deleteTemplate.PatternCount; i++)
+                    if (s != null && p != null && o != null)
                     {
-                        var tp = deleteTemplate.GetPattern(i);
-                        var s = InstantiateTermFromSpan(tp.Subject, b, source);
-                        var p = InstantiateTermFromSpan(tp.Predicate, b, source);
-                        var o = InstantiateTermFromSpan(tp.Object, b, source);
-
-                        if (s != null && p != null && o != null)
-                        {
-                            lock (toDelete)
-                            {
-                                toDelete.Add((s, p, o, withGraph));
-                            }
-                        }
+                        toDelete.Add((s, p, o, withGraph));
                     }
+                }
 
-                    // Process INSERT template - base patterns use WITH graph
-                    for (int i = 0; i < insertTemplate.PatternCount; i++)
+                // Process INSERT template - base patterns use WITH graph
+                for (int i = 0; i < insertTemplate.PatternCount; i++)
+                {
+                    var tp = insertTemplate.GetPattern(i);
+                    var s = InstantiateTermFromSpan(tp.Subject, b, _source);
+                    var p = InstantiateTermFromSpan(tp.Predicate, b, _source);
+                    var o = InstantiateTermFromSpan(tp.Object, b, _source);
+
+                    if (s != null && p != null && o != null)
                     {
-                        var tp = insertTemplate.GetPattern(i);
-                        var s = InstantiateTermFromSpan(tp.Subject, b, source);
-                        var p = InstantiateTermFromSpan(tp.Predicate, b, source);
-                        var o = InstantiateTermFromSpan(tp.Object, b, source);
-
-                        if (s != null && p != null && o != null)
-                        {
-                            lock (toInsert)
-                            {
-                                toInsert.Add((s, p, o, withGraph));
-                            }
-                        }
+                        toInsert.Add((s, p, o, withGraph));
                     }
                 }
             }
-            finally
-            {
-                results.Dispose();
-            }
-        }, 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
+        }
+        finally
+        {
+            results.Dispose();
+        }
     }
 
     /// <summary>

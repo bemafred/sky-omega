@@ -371,7 +371,7 @@ public class RdfStarTests : PooledStoreTestBase
             $"Annotation triple subject should be blank node. Got: {annotationTriple.s}\nAll triples:\n{triplesLog}");
     }
 
-    [Fact(Skip = "Causes stack overflow - under investigation")]
+    [Fact(Skip = "ADR-009 Phase 2: Multiple queries in single async method exceeds stack. Requires QueryBuffer migration.")]
     public async Task QueryReifiedTriple_WithSparql()
     {
         var turtle = @"

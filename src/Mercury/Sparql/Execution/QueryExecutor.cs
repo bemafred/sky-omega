@@ -406,6 +406,10 @@ public partial class QueryExecutor : IDisposable
         return Execute();
     }
 
+    /// <remarks>
+    /// ADR-009: [NoInlining] isolates stack frame for 22KB QueryResults and large Query struct access.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public QueryResults Execute()
     {
         // Check for GRAPH clauses first - use _buffer to avoid large struct copies
@@ -705,6 +709,11 @@ public partial class QueryExecutor : IDisposable
         return new DescribeResults(_store, queryResults, bindings, stringBuffer, describeAll);
     }
 
+    /// <remarks>
+    /// ADR-009: [NoInlining] isolates the stack frame for the 22KB QueryResults return value.
+    /// Without this, stack frames merge and multiple Execute calls exhaust the 1MB Windows stack.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteWithJoins()
     {
         var bindings = new Binding[16];

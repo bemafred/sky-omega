@@ -105,6 +105,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-006-dual-mode-store-access.md = docs\adrs\mercury\ADR-006-dual-mode-store-access.md
 		docs\adrs\mercury\ADR-007-union-service-execution.md = docs\adrs\mercury\ADR-007-union-service-execution.md
 		docs\adrs\mercury\ADR-008-quadstore-pool-unified.md = docs\adrs\mercury\ADR-008-quadstore-pool-unified.md
+		docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md = docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
