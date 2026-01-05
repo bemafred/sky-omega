@@ -640,6 +640,46 @@ cat BenchmarkDotNet.Artifacts/results/SkyOmega.Mercury.Benchmarks.QueryBenchmark
 
 **Note:** Artifacts directory is gitignored. Results persist locally between runs for comparison.
 
+### NCrunch Configuration (Parallel Test Execution)
+
+NCrunch runs tests in **separate processes** (never concurrent threads within the same process). Each process creates its own `QuadStorePool`, so disk usage scales with process count.
+
+**Disk footprint per store:**
+
+| Configuration | Per-Store Size | Notes |
+|---------------|----------------|-------|
+| Default (`StorageOptions.Default`) | ~5.5 GB | 4×1GB indexes + 1GB atoms + 512MB hash |
+| Testing (`StorageOptions.ForTesting`) | ~320 MB | 4×64MB indexes + 64MB atoms + 512MB hash |
+
+The test fixture uses `StorageOptions.ForTesting` automatically.
+
+**Solution-level settings** (`SkyOmega.v3.ncrunchsolution`):
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `AllowParallelTestExecution` | True | Enable parallel execution |
+| `AllowTestsInParallelWithThemselves` | False | Prevent same-test conflicts |
+| `DefaultTestTimeout` | 120000 | 2-minute timeout for storage tests |
+
+**Global settings** (must be configured per-machine in NCrunch → Configuration → Global):
+
+| Setting | Recommended | Purpose |
+|---------|-------------|---------|
+| Max Number Of Processing Threads | 4-8 | Limits concurrent test runner processes |
+| Max Test Runners To Pool | 2-4 | Limits pooled inactive processes |
+
+**Example disk usage calculation:**
+```
+4 processes × 5 stores/process × 320 MB = 6.4 GB   ✓ Safe
+20 processes × 5 stores/process × 320 MB = 32 GB   ⚠ May exhaust disk
+```
+
+**Troubleshooting disk exhaustion:**
+
+1. Check temp folder for multiple `mercury-test-*` directories (indicates multi-process issue)
+2. Reduce `Max Number Of Processing Threads` in NCrunch global settings
+3. Verify `StorageOptions.ForTesting` is being used (check `QuadStorePoolFixture`)
+
 ### Production Hardening Checklist
 
 - [x] Query timeout via CancellationToken
