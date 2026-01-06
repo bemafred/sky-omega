@@ -9,6 +9,8 @@ Where a system begins not with code, but with a question.
 It is not inherited from tradition.  
 It is **lived into** through practice.
 
+See also: [EEE Methodology Transitions](eee-methodology-transitions.md)
+
 ---
 
 ## ✨ What Is EEE?
