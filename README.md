@@ -34,7 +34,9 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 | **Lucy**                       | The long-term memory layer. Epistemic and semantic in nature, fast, huge, queryable, and precise. |
 | **Mira**                       | The integration layer. The expression and sensory capablities, UX/UI.                             |
 | **Mercury**                    | The temporal RDF-substrate. Fast, huge, low-level, persistent and deterministic.                  |
+| **Minerva**                    | The LLM inference substrate. BCL-only, zero-GC, local-first. *[planned]*                          |
 | **Behavior & Intent Grammars** | Define what Sky *knows*, *intends*, and *verifies*.                                               |
+
 
 ---
 
