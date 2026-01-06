@@ -87,7 +87,28 @@ public sealed partial class TurtleStreamParser
                 throw ParserException($"Expected '{ch}'");
         }
     }
-    
+
+    // Consume N characters (used after case-insensitive match)
+    private void ConsumeN(int count)
+    {
+        for (var i = 0; i < count; i++)
+            Consume();
+    }
+
+    // Case-insensitive match for SPARQL-style keywords (PREFIX, BASE, VERSION)
+    private bool PeekStringIgnoreCase(string str)
+    {
+        for (var i = 0; i < str.Length; i++)
+        {
+            var ch = PeekAhead(i);
+            if (ch == -1)
+                return false;
+            if (char.ToUpperInvariant((char)ch) != char.ToUpperInvariant(str[i]))
+                return false;
+        }
+        return true;
+    }
+
     private async ValueTask FillBufferAsync(CancellationToken cancellationToken)
     {
         if (_endOfStream)

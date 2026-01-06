@@ -25,22 +25,10 @@ public sealed partial class TurtleStreamParser
             return true;
         }
         
-        // PREFIX directive (case-insensitive) - must consume the matched variant
-        if (PeekString("PREFIX"))
+        // PREFIX directive (case-insensitive per SPARQL syntax)
+        if (PeekStringIgnoreCase("PREFIX"))
         {
-            ConsumeString("PREFIX");
-            ParsePrefixDirective(requireDot: false);
-            return true;
-        }
-        if (PeekString("prefix"))
-        {
-            ConsumeString("prefix");
-            ParsePrefixDirective(requireDot: false);
-            return true;
-        }
-        if (PeekString("Prefix"))
-        {
-            ConsumeString("Prefix");
+            ConsumeN(6); // "PREFIX".Length
             ParsePrefixDirective(requireDot: false);
             return true;
         }
@@ -53,22 +41,10 @@ public sealed partial class TurtleStreamParser
             return true;
         }
         
-        // BASE directive (case-insensitive) - must consume the matched variant
-        if (PeekString("BASE"))
+        // BASE directive (case-insensitive per SPARQL syntax)
+        if (PeekStringIgnoreCase("BASE"))
         {
-            ConsumeString("BASE");
-            ParseBaseDirective(requireDot: false);
-            return true;
-        }
-        if (PeekString("base"))
-        {
-            ConsumeString("base");
-            ParseBaseDirective(requireDot: false);
-            return true;
-        }
-        if (PeekString("Base"))
-        {
-            ConsumeString("Base");
+            ConsumeN(4); // "BASE".Length
             ParseBaseDirective(requireDot: false);
             return true;
         }
@@ -81,22 +57,10 @@ public sealed partial class TurtleStreamParser
             return true;
         }
         
-        // VERSION directive (RDF 1.2, case-insensitive) - must consume the matched variant
-        if (PeekString("VERSION"))
+        // VERSION directive (RDF 1.2, case-insensitive per SPARQL syntax)
+        if (PeekStringIgnoreCase("VERSION"))
         {
-            ConsumeString("VERSION");
-            ParseVersionDirective(requireDot: false);
-            return true;
-        }
-        if (PeekString("version"))
-        {
-            ConsumeString("version");
-            ParseVersionDirective(requireDot: false);
-            return true;
-        }
-        if (PeekString("Version"))
-        {
-            ConsumeString("Version");
+            ConsumeN(7); // "VERSION".Length
             ParseVersionDirective(requireDot: false);
             return true;
         }
@@ -677,6 +641,11 @@ public sealed partial class TurtleStreamParser
             // Check for semicolon (more predicate-object pairs)
             if (!TryConsume(';'))
                 break;
+
+            // Skip any additional consecutive semicolons
+            SkipWhitespaceAndComments();
+            while (TryConsume(';'))
+                SkipWhitespaceAndComments();
         }
     }
 

@@ -573,7 +573,10 @@ public sealed partial class TurtleStreamParser : IDisposable
             if (!TryConsume(';'))
                 break;
 
+            // Skip any additional consecutive semicolons (repeated_semis grammar)
             SkipWhitespaceAndComments();
+            while (TryConsume(';'))
+                SkipWhitespaceAndComments();
 
             if (Peek() == '.' || Peek() == ']' || Peek() == '}')
                 break;

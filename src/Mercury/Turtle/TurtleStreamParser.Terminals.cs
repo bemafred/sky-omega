@@ -52,7 +52,8 @@ public sealed partial class TurtleStreamParser
             }
 
             // Check for invalid characters
-            if (ch < 0x20 || ch == '<' || ch == '"' || ch == '{' ||
+            // IRIREF disallows: #x00-#x20 (inclusive of space), < > " { } | ^ ` \
+            if (ch <= 0x20 || ch == '<' || ch == '"' || ch == '{' ||
                 ch == '}' || ch == '|' || ch == '^' || ch == '`' || ch == '\\')
             {
                 // Check if it's an escape sequence
@@ -148,6 +149,46 @@ public sealed partial class TurtleStreamParser
     {
         _sb.Clear();
 
+        // PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX))?
+        // First character has stricter rules - no '-' allowed at start
+        var firstCh = Peek();
+        if (firstCh == -1)
+            return string.Empty;
+
+        // Check if first char is valid for PN_LOCAL start
+        if (IsPnCharsU(firstCh) || firstCh == ':' || char.IsDigit((char)firstCh))
+        {
+            Consume();
+            _sb.Append((char)firstCh);
+        }
+        else if (firstCh == '%')
+        {
+            // Percent encoding at start
+            var encoded = ParsePercentEncoded();
+            _sb.Append(encoded);
+        }
+        else if (firstCh == '\\')
+        {
+            // Reserved character escape at start
+            Consume();
+            var escaped = Peek();
+            if (IsReservedCharEscape(escaped))
+            {
+                Consume();
+                _sb.Append((char)escaped);
+            }
+            else
+            {
+                throw ParserException($"Invalid escape sequence in local name: \\{(char)escaped}");
+            }
+        }
+        else
+        {
+            // Not a valid start for PN_LOCAL (e.g., '-')
+            return string.Empty;
+        }
+
+        // Subsequent characters can include '-' via IsPnChars
         while (true)
         {
             var ch = Peek();
@@ -419,6 +460,13 @@ public sealed partial class TurtleStreamParser
             }
             else if (ch == '.' && !hasDecimal && !hasExponent)
             {
+                // DECIMAL: [0-9]* '.' [0-9]+ requires digits after dot
+                // DOUBLE: [0-9]+ '.' [0-9]* EXPONENT allows empty fractional part if exponent follows
+                // Only consume '.' if followed by digit or exponent
+                var nextCh = PeekAhead(1);
+                if (!char.IsDigit((char)nextCh) && nextCh != 'e' && nextCh != 'E')
+                    break; // '.' is not part of number (e.g., statement terminator)
+
                 Consume();
                 _sb.Append('.');
                 hasDecimal = true;
@@ -435,7 +483,12 @@ public sealed partial class TurtleStreamParser
                 {
                     Consume();
                     _sb.Append((char)ch);
+                    ch = Peek();
                 }
+
+                // EXPONENT requires at least one digit: [eE] [+-]? [0-9]+
+                if (!char.IsDigit((char)ch))
+                    throw ParserException("Exponent requires at least one digit");
             }
             else
             {
@@ -686,7 +739,8 @@ public sealed partial class TurtleStreamParser
                 break;
             }
 
-            if (ch < 0x20 || ch == '<' || ch == '"' || ch == '{' ||
+            // IRIREF disallows: #x00-#x20 (inclusive of space), < > " { } | ^ ` \
+            if (ch <= 0x20 || ch == '<' || ch == '"' || ch == '{' ||
                 ch == '}' || ch == '|' || ch == '^' || ch == '`' || ch == '\\')
             {
                 if (ch == '\\')
@@ -770,6 +824,7 @@ public sealed partial class TurtleStreamParser
     private ReadOnlySpan<char> ParsePrefixedNameSpan()
     {
         int prefixStart = _outputOffset;
+        int savedBufferPos = _bufferPosition;  // Save position for rollback
 
         // First character must be PN_CHARS_BASE or we have a just-colon prefix
         var firstCh = Peek();
@@ -811,7 +866,13 @@ public sealed partial class TurtleStreamParser
                 }
 
                 if (ch == -1 || !IsPnChars(ch))
+                {
+                    // Failed to find colon - not a prefixed name
+                    // Rollback consumed characters
+                    _bufferPosition = savedBufferPos;
+                    _outputOffset = prefixStart;
                     return ReadOnlySpan<char>.Empty;
+                }
 
                 Consume();
                 AppendToOutput((char)ch);
@@ -854,9 +915,48 @@ public sealed partial class TurtleStreamParser
 
     /// <summary>
     /// Parse PN_LOCAL directly into output buffer.
+    /// PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX))?
     /// </summary>
     private void ParsePnLocalSpan()
     {
+        // First character has stricter rules - no '-' allowed at start
+        var firstCh = Peek();
+        if (firstCh == -1)
+            return;
+
+        // Check if first char is valid for PN_LOCAL start
+        if (IsPnCharsU(firstCh) || firstCh == ':' || char.IsDigit((char)firstCh))
+        {
+            Consume();
+            AppendToOutput((char)firstCh);
+        }
+        else if (firstCh == '%')
+        {
+            // Percent encoding at start
+            ParsePercentEncodedSpan();
+        }
+        else if (firstCh == '\\')
+        {
+            // Reserved character escape at start
+            Consume();
+            var escaped = Peek();
+            if (IsReservedCharEscape(escaped))
+            {
+                Consume();
+                AppendToOutput((char)escaped);
+            }
+            else
+            {
+                throw ParserException($"Invalid escape sequence in local name: \\{(char)escaped}");
+            }
+        }
+        else
+        {
+            // Not a valid start for PN_LOCAL (e.g., '-')
+            return;
+        }
+
+        // Subsequent characters can include '-' via IsPnChars
         while (true)
         {
             var ch = Peek();
@@ -1141,6 +1241,13 @@ public sealed partial class TurtleStreamParser
             }
             else if (ch == '.' && !hasDecimal && !hasExponent)
             {
+                // DECIMAL: [0-9]* '.' [0-9]+ requires digits after dot
+                // DOUBLE: [0-9]+ '.' [0-9]* EXPONENT allows empty fractional part if exponent follows
+                // Only consume '.' if followed by digit or exponent
+                var nextCh = PeekAhead(1);
+                if (!char.IsDigit((char)nextCh) && nextCh != 'e' && nextCh != 'E')
+                    break; // '.' is not part of number (e.g., statement terminator)
+
                 Consume();
                 AppendToOutput('.');
                 hasDecimal = true;
@@ -1156,7 +1263,12 @@ public sealed partial class TurtleStreamParser
                 {
                     Consume();
                     AppendToOutput((char)ch);
+                    ch = Peek();
                 }
+
+                // EXPONENT requires at least one digit: [eE] [+-]? [0-9]+
+                if (!char.IsDigit((char)ch))
+                    throw ParserException("Exponent requires at least one digit");
             }
             else
             {
