@@ -113,7 +113,16 @@ public sealed partial class TurtleStreamParser
         // Parse local name
         var localName = ParsePnLocal();
 
-        return namespaceUri + localName;
+        // namespaceUri includes angle brackets like <http://...#>
+        // We need to insert local name BEFORE the closing bracket
+        if (namespaceUri.StartsWith('<') && namespaceUri.EndsWith('>'))
+        {
+            // Insert local name before closing bracket
+            return string.Concat(namespaceUri.AsSpan(0, namespaceUri.Length - 1), localName, ">");
+        }
+
+        // Fallback: namespace doesn't have brackets, wrap everything
+        return string.Concat("<", namespaceUri, localName, ">");
     }
     
     /// <summary>
@@ -131,8 +140,8 @@ public sealed partial class TurtleStreamParser
             if (ch == -1)
                 break;
 
-            // Check if valid PN_LOCAL character
-            if (IsPnCharsU(ch) || ch == ':' || char.IsDigit((char)ch))
+            // PN_LOCAL grammar: IsPnChars includes PN_CHARS_U, '-', digits, and combining chars
+            if (IsPnChars(ch) || ch == ':')
             {
                 Consume();
                 _sb.Append((char)ch);
@@ -573,7 +582,8 @@ public sealed partial class TurtleStreamParser
         {
             Consume();
             int start = _outputOffset;
-            AppendToOutput("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".AsSpan());
+            // Include angle brackets for consistency with other IRIs
+            AppendToOutput("<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>".AsSpan());
             return GetOutputSpan(start);
         }
 
@@ -734,11 +744,29 @@ public sealed partial class TurtleStreamParser
             throw ParserException($"Undefined prefix: {prefix}");
 
         // Replace prefix with namespace URI
+        // namespaceUri includes angle brackets like <http://...#>
+        // We need to insert local name BEFORE the closing bracket
         _outputOffset = prefixStart;
-        AppendToOutput(namespaceUri.AsSpan());
 
-        // Parse and append local name
-        ParsePnLocalSpan();
+        if (namespaceUri.StartsWith('<') && namespaceUri.EndsWith('>'))
+        {
+            // Append namespace without closing bracket
+            AppendToOutput(namespaceUri.AsSpan(0, namespaceUri.Length - 1));
+
+            // Parse and append local name
+            ParsePnLocalSpan();
+
+            // Append closing bracket
+            AppendToOutput('>');
+        }
+        else
+        {
+            // Fallback: namespace doesn't have brackets, wrap everything
+            AppendToOutput('<');
+            AppendToOutput(namespaceUri.AsSpan());
+            ParsePnLocalSpan();
+            AppendToOutput('>');
+        }
 
         return GetOutputSpan(prefixStart);
     }
@@ -755,7 +783,8 @@ public sealed partial class TurtleStreamParser
             if (ch == -1)
                 break;
 
-            if (IsPnCharsU(ch) || ch == ':' || char.IsDigit((char)ch))
+            // PN_LOCAL grammar: IsPnChars includes PN_CHARS_U, '-', digits, and combining chars
+            if (IsPnChars(ch) || ch == ':')
             {
                 Consume();
                 AppendToOutput((char)ch);

@@ -25,10 +25,22 @@ public sealed partial class TurtleStreamParser
             return true;
         }
         
-        // PREFIX directive (case-insensitive)
-        if (PeekString("PREFIX") || PeekString("prefix") || PeekString("Prefix"))
+        // PREFIX directive (case-insensitive) - must consume the matched variant
+        if (PeekString("PREFIX"))
         {
             ConsumeString("PREFIX");
+            ParsePrefixDirective(requireDot: false);
+            return true;
+        }
+        if (PeekString("prefix"))
+        {
+            ConsumeString("prefix");
+            ParsePrefixDirective(requireDot: false);
+            return true;
+        }
+        if (PeekString("Prefix"))
+        {
+            ConsumeString("Prefix");
             ParsePrefixDirective(requireDot: false);
             return true;
         }
@@ -41,10 +53,22 @@ public sealed partial class TurtleStreamParser
             return true;
         }
         
-        // BASE directive (case-insensitive)
-        if (PeekString("BASE") || PeekString("base") || PeekString("Base"))
+        // BASE directive (case-insensitive) - must consume the matched variant
+        if (PeekString("BASE"))
         {
             ConsumeString("BASE");
+            ParseBaseDirective(requireDot: false);
+            return true;
+        }
+        if (PeekString("base"))
+        {
+            ConsumeString("base");
+            ParseBaseDirective(requireDot: false);
+            return true;
+        }
+        if (PeekString("Base"))
+        {
+            ConsumeString("Base");
             ParseBaseDirective(requireDot: false);
             return true;
         }
@@ -57,10 +81,22 @@ public sealed partial class TurtleStreamParser
             return true;
         }
         
-        // VERSION directive (RDF 1.2, case-insensitive)
-        if (PeekString("VERSION") || PeekString("version") || PeekString("Version"))
+        // VERSION directive (RDF 1.2, case-insensitive) - must consume the matched variant
+        if (PeekString("VERSION"))
         {
             ConsumeString("VERSION");
+            ParseVersionDirective(requireDot: false);
+            return true;
+        }
+        if (PeekString("version"))
+        {
+            ConsumeString("version");
+            ParseVersionDirective(requireDot: false);
+            return true;
+        }
+        if (PeekString("Version"))
+        {
+            ConsumeString("Version");
             ParseVersionDirective(requireDot: false);
             return true;
         }
@@ -165,9 +201,9 @@ public sealed partial class TurtleStreamParser
     {
         if (!TryConsume('['))
             return string.Empty;
-        
+
         SkipWhitespaceAndComments();
-        
+
         // Check for anonymous blank node: []
         if (TryConsume(']'))
         {
@@ -176,84 +212,131 @@ public sealed partial class TurtleStreamParser
 
         // Generate blank node ID
         var blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString());
-        
-        // Parse predicate-object list
-        // (This would emit triples with blankNodeId as subject)
-        // For simplicity, we'll skip the recursive parsing here
-        
-        // Find matching ']'
-        var depth = 1;
-        while (depth > 0)
-        {
-            var ch = Peek();
 
-            switch (ch)
-            {
-                case -1:
-                    throw ParserException("Unexpected end of input in blank node property list");
-                case '[':
-                    depth++;
-                    break;
-                case ']':
-                    depth--;
-                    break;
-            }
+        // Parse predicate-object list with blank node as subject
+        ParsePredicateObjectList(blankNodeId);
 
-            Consume();
-        }
-        
+        SkipWhitespaceAndComments();
+
+        if (!TryConsume(']'))
+            throw ParserException("Expected ']' at end of blank node property list");
+
         return blankNodeId;
     }
+
+    /// <summary>
+    /// Parse predicate-object list and emit triples with given subject.
+    /// [8] predicateObjectList ::= verb objectList (';' (verb objectList)?)*
+    /// </summary>
+    private void ParsePredicateObjectList(string subject)
+    {
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            // Check for end
+            var ch = Peek();
+            if (ch == ']' || ch == '.' || ch == -1)
+                break;
+
+            // Parse verb (predicate)
+            var predicate = ParseVerb();
+            if (string.IsNullOrEmpty(predicate))
+                break;
+
+            // Parse object list
+            ParseObjectList(subject, predicate);
+
+            SkipWhitespaceAndComments();
+
+            // Check for semicolon (more predicate-object pairs)
+            if (!TryConsume(';'))
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Parse object list and emit triples.
+    /// [9] objectList ::= object (',' object)*
+    /// </summary>
+    private void ParseObjectList(string subject, string predicate)
+    {
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            var obj = ParseObject();
+            if (string.IsNullOrEmpty(obj))
+                break;
+
+            // Emit triple
+            _pendingTriples.Add(new RdfTriple(subject, predicate, obj));
+
+            SkipWhitespaceAndComments();
+
+            // Check for comma (more objects)
+            if (!TryConsume(','))
+                break;
+        }
+    }
     
+    // RDF collection constants (with angle brackets)
+    private const string RdfFirst = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#first>";
+    private const string RdfRest = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#rest>";
+    private const string RdfNil = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>";
+
     /// <summary>
     /// [20] collection ::= '(' object* ')'
+    /// Emits rdf:first and rdf:rest triples for the collection.
     /// </summary>
     private string ParseCollection()
     {
         if (!TryConsume('('))
             return string.Empty;
-        
+
         SkipWhitespaceAndComments();
-        
+
         // Empty collection is rdf:nil
         if (TryConsume(')'))
         {
-            return "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+            return RdfNil;
         }
-        
+
         // Generate first blank node for collection
         var firstNode = string.Concat("_:b", _blankNodeCounter++.ToString());
         var currentNode = firstNode;
-        
+
         // Parse collection items
         while (true)
         {
             SkipWhitespaceAndComments();
-            
+
             if (TryConsume(')'))
                 break;
-            
+
             var obj = ParseObject();
             if (string.IsNullOrEmpty(obj))
                 throw ParserException("Expected object in collection");
-            
-            // Emit triples for this collection item
-            // currentNode rdf:first obj
-            // currentNode rdf:rest nextNode (or rdf:nil if last)
-            
+
+            // Emit rdf:first triple: currentNode rdf:first obj
+            _pendingTriples.Add(new RdfTriple(currentNode, RdfFirst, obj));
+
             SkipWhitespaceAndComments();
-            
+
             if (Peek() == ')')
             {
                 // Last item - rest is rdf:nil
-                continue;
+                _pendingTriples.Add(new RdfTriple(currentNode, RdfRest, RdfNil));
             }
-            
-            // Create next node
-            var nextNode = string.Concat("_:b", _blankNodeCounter++.ToString());
-            currentNode = nextNode;
+            else
+            {
+                // Create next node and link
+                var nextNode = string.Concat("_:b", _blankNodeCounter++.ToString());
+                _pendingTriples.Add(new RdfTriple(currentNode, RdfRest, nextNode));
+                currentNode = nextNode;
+            }
         }
-        
+
         return firstNode;
     }
     
@@ -517,34 +600,84 @@ public sealed partial class TurtleStreamParser
         // Generate blank node ID
         AppendToOutput("_:b".AsSpan());
         AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
-        var blankNodeId = GetOutputSpan(start);
+        var blankNodeIdSpan = GetOutputSpan(start);
+        // Convert to string for use as subject (triples need string subject)
+        var blankNodeId = blankNodeIdSpan.ToString();
 
-        // Skip to matching ']' - simplified, doesn't emit nested triples
-        var depth = 1;
-        while (depth > 0)
-        {
-            var ch = Peek();
+        // Parse predicate-object list with blank node as subject
+        ParsePredicateObjectListZeroGCForBlankNode(blankNodeId);
 
-            switch (ch)
-            {
-                case -1:
-                    throw ParserException("Unexpected end of input in blank node property list");
-                case '[':
-                    depth++;
-                    break;
-                case ']':
-                    depth--;
-                    break;
-            }
+        SkipWhitespaceAndComments();
 
-            Consume();
-        }
+        if (!TryConsume(']'))
+            throw ParserException("Expected ']' at end of blank node property list");
 
-        return blankNodeId;
+        return blankNodeIdSpan;
     }
 
     /// <summary>
+    /// Parse predicate-object list for blank node and emit triples via handler.
+    /// </summary>
+    private void ParsePredicateObjectListZeroGCForBlankNode(string subject)
+    {
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            // Check for end
+            var ch = Peek();
+            if (ch == ']' || ch == '.' || ch == -1)
+                break;
+
+            // Parse verb (predicate)
+            var predicate = ParseVerbSpan();
+            if (predicate.IsEmpty)
+                break;
+            var predicateStr = predicate.ToString();
+
+            // Parse object list
+            ParseObjectListZeroGCForBlankNode(subject, predicateStr);
+
+            SkipWhitespaceAndComments();
+
+            // Check for semicolon (more predicate-object pairs)
+            if (!TryConsume(';'))
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Parse object list for blank node and emit triples via handler.
+    /// </summary>
+    private void ParseObjectListZeroGCForBlankNode(string subject, string predicate)
+    {
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            var obj = ParseObjectSpan();
+            if (obj.IsEmpty)
+                break;
+
+            // Emit triple via handler
+            _zeroGcHandler?.Invoke(subject.AsSpan(), predicate.AsSpan(), obj);
+
+            SkipWhitespaceAndComments();
+
+            // Check for comma (more objects)
+            if (!TryConsume(','))
+                break;
+        }
+    }
+
+    // Span-based RDF collection constants (with angle brackets)
+    private static ReadOnlySpan<char> RdfFirstSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#first>".AsSpan();
+    private static ReadOnlySpan<char> RdfRestSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#rest>".AsSpan();
+    private static ReadOnlySpan<char> RdfNilSpan => "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>".AsSpan();
+
+    /// <summary>
     /// Parse collection and return span with first node ID.
+    /// Emits rdf:first and rdf:rest triples via the handler.
     /// </summary>
     private ReadOnlySpan<char> ParseCollectionSpan()
     {
@@ -557,39 +690,62 @@ public sealed partial class TurtleStreamParser
         if (TryConsume(')'))
         {
             int nilStart = _outputOffset;
-            AppendToOutput("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil".AsSpan());
+            AppendToOutput(RdfNilSpan);
             return GetOutputSpan(nilStart);
         }
 
-        int start = _outputOffset;
+        // Generate first blank node ID
+        var firstNodeId = _blankNodeCounter++;
+        var currentNodeId = firstNodeId;
 
-        // Generate first blank node
-        AppendToOutput("_:b".AsSpan());
-        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
-        var firstNode = GetOutputSpan(start);
-
-        // Skip collection content - simplified
-        var depth = 1;
-        while (depth > 0)
+        // Parse collection items
+        while (true)
         {
-            var ch = Peek();
+            SkipWhitespaceAndComments();
 
-            switch (ch)
+            if (TryConsume(')'))
+                break;
+
+            var obj = ParseObjectSpan();
+            if (obj.IsEmpty)
+                throw ParserException("Expected object in collection");
+
+            // Build current node span
+            int emitNodeStart = _outputOffset;
+            AppendToOutput("_:b".AsSpan());
+            AppendToOutput(currentNodeId.ToString().AsSpan());
+            var currentNodeSpan = GetOutputSpan(emitNodeStart);
+
+            // Emit rdf:first triple: currentNode rdf:first obj
+            _zeroGcHandler?.Invoke(currentNodeSpan, RdfFirstSpan, obj);
+
+            SkipWhitespaceAndComments();
+
+            if (Peek() == ')')
             {
-                case -1:
-                    throw ParserException("Unexpected end of input in collection");
-                case '(':
-                    depth++;
-                    break;
-                case ')':
-                    depth--;
-                    break;
+                // Last item - rest is rdf:nil
+                _zeroGcHandler?.Invoke(currentNodeSpan, RdfRestSpan, RdfNilSpan);
             }
+            else
+            {
+                // Create next node and link
+                var nextNodeId = _blankNodeCounter++;
+                int nextNodeStart = _outputOffset;
+                AppendToOutput("_:b".AsSpan());
+                AppendToOutput(nextNodeId.ToString().AsSpan());
+                var nextNode = GetOutputSpan(nextNodeStart);
 
-            Consume();
+                _zeroGcHandler?.Invoke(currentNodeSpan, RdfRestSpan, nextNode);
+
+                currentNodeId = nextNodeId;
+            }
         }
 
-        return firstNode;
+        // Return the first node
+        int returnStart = _outputOffset;
+        AppendToOutput("_:b".AsSpan());
+        AppendToOutput(firstNodeId.ToString().AsSpan());
+        return GetOutputSpan(returnStart);
     }
 
     // Span-based RDF namespace constants for zero-GC reification (with angle brackets)

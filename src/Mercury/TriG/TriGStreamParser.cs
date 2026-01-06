@@ -86,9 +86,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     private void InitializeStandardPrefixes()
     {
-        _namespaces["rdf"] = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-        _namespaces["rdfs"] = "http://www.w3.org/2000/01/rdf-schema#";
-        _namespaces["xsd"] = "http://www.w3.org/2001/XMLSchema#";
+        // Include angle brackets for consistency with parsed prefixes
+        _namespaces["rdf"] = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#>";
+        _namespaces["rdfs"] = "<http://www.w3.org/2000/01/rdf-schema#>";
+        _namespaces["xsd"] = "<http://www.w3.org/2001/XMLSchema#>";
     }
 
     /// <summary>
@@ -541,9 +542,20 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             throw ParserException($"Unknown prefix: {prefix}");
 
         // Build full IRI
-        AppendToOutput('<');
-        foreach (var c in ns)
-            AppendToOutput(c);
+        // Namespace may have angle brackets (from @prefix parsing) or not (pre-initialized)
+        if (ns.StartsWith('<') && ns.EndsWith('>'))
+        {
+            // Namespace has brackets - append without closing bracket
+            foreach (var c in ns.AsSpan(0, ns.Length - 1))
+                AppendToOutput(c);
+        }
+        else
+        {
+            // Namespace lacks brackets - add opening bracket
+            AppendToOutput('<');
+            foreach (var c in ns)
+                AppendToOutput(c);
+        }
 
         // Parse local part
         while (true)
