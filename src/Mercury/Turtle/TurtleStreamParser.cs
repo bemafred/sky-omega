@@ -102,10 +102,10 @@ public sealed partial class TurtleStreamParser : IDisposable
     
     private void InitializeStandardPrefixes()
     {
-        // RDF and common standard prefixes
-        _namespaces["rdf"] = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
-        _namespaces["rdfs"] = "http://www.w3.org/2000/01/rdf-schema#";
-        _namespaces["xsd"] = "http://www.w3.org/2001/XMLSchema#";
+        // RDF and common standard prefixes (include angle brackets for consistency with parsed prefixes)
+        _namespaces["rdf"] = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#>";
+        _namespaces["rdfs"] = "<http://www.w3.org/2000/01/rdf-schema#>";
+        _namespaces["xsd"] = "<http://www.w3.org/2001/XMLSchema#>";
     }
     
     /// <summary>
@@ -288,14 +288,14 @@ public sealed partial class TurtleStreamParser : IDisposable
     private string ParseVerb()
     {
         SkipWhitespaceAndComments();
-        
-        // Check for 'a' shorthand
+
+        // Check for 'a' shorthand - include angle brackets for consistency
         if (Peek() == 'a' && IsWhitespaceOrTerminator(PeekAhead(1)))
         {
             Consume();
-            return "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+            return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
         }
-        
+
         return ParseIri();
     }
     

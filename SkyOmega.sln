@@ -106,6 +106,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-007-union-service-execution.md = docs\adrs\mercury\ADR-007-union-service-execution.md
 		docs\adrs\mercury\ADR-008-quadstore-pool-unified.md = docs\adrs\mercury\ADR-008-quadstore-pool-unified.md
 		docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md = docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md
+		docs\adrs\mercury\ADR-010-w3c-test-suite-integration.md = docs\adrs\mercury\ADR-010-w3c-test-suite-integration.md
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
@@ -116,6 +117,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D
 		docs\adrs\minerva\ADR-001-weight-formats.md = docs\adrs\minerva\ADR-001-weight-formats.md
 		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
 	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "5 Tools", "5 Tools", "{323748F7-28B7-4B8A-A5E6-A6D1B2745CDF}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Tools", "Tools", "{34F2C870-6653-488D-9AD4-7968BED44481}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemaphoreTest", "tools\SemaphoreTest\SemaphoreTest.csproj", "{D0532747-C200-4434-B247-B4AF9314DC9C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -271,6 +278,18 @@ Global
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}.Release|x64.Build.0 = Release|Any CPU
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}.Release|x86.ActiveCfg = Release|Any CPU
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}.Release|x86.Build.0 = Release|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Debug|x64.Build.0 = Debug|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Debug|x86.Build.0 = Debug|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x64.ActiveCfg = Release|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x64.Build.0 = Release|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x86.ActiveCfg = Release|Any CPU
+		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -299,5 +318,7 @@ Global
 		{F3A4B5C6-D7E8-9012-CDEF-333333333333} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
 		{F4A5B6C7-D8E9-0123-DEF0-444444444444} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
+		{34F2C870-6653-488D-9AD4-7968BED44481} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
+		{D0532747-C200-4434-B247-B4AF9314DC9C} = {34F2C870-6653-488D-9AD4-7968BED44481}
 	EndGlobalSection
 EndGlobal
