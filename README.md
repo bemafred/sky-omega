@@ -1,5 +1,9 @@
 # 🌌 Sky Omega
 
+*Make sense - intelligently - together.*
+
+EEE, E-Clean & Semantic Architecture
+
 **Sky Omega** is a co-evolving, semantic-aware cognitive assistant — born from the intersection of grammar, memory, and intentional software design.  
 
 ---
