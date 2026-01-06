@@ -7,6 +7,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -534,13 +535,13 @@ public sealed class JsonLdStreamWriter : IDisposable, IAsyncDisposable
         else if (!string.IsNullOrEmpty(datatype) && datatype != "http://www.w3.org/2001/XMLSchema#string")
         {
             // Check for native JSON types
-            if (datatype == "http://www.w3.org/2001/XMLSchema#integer" && int.TryParse(value, out var intVal))
+            if (datatype == "http://www.w3.org/2001/XMLSchema#integer" && int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
             {
                 writer.WriteNumberValue(intVal);
             }
             else if ((datatype == "http://www.w3.org/2001/XMLSchema#double" ||
                       datatype == "http://www.w3.org/2001/XMLSchema#decimal") &&
-                     double.TryParse(value, out var doubleVal))
+                     double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
             {
                 writer.WriteNumberValue(doubleVal);
             }

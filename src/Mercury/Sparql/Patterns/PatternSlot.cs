@@ -728,6 +728,26 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasSubQueries { get; set; }
     public bool HasService { get; set; }
 
+    // HAVING clause (expression offsets into source)
+    public int HavingStart { get; set; }
+    public int HavingLength { get; set; }
+
+    // DESCRIBE query metadata
+    public bool DescribeAll { get; set; }
+
+    // Temporal query parameters (ADR-009 Phase 2)
+    public TemporalQueryMode TemporalMode { get; set; }
+    public int TimeStartStart { get; set; }
+    public int TimeStartLength { get; set; }
+    public int TimeEndStart { get; set; }
+    public int TimeEndLength { get; set; }
+
+    // CONSTRUCT template patterns (heap-allocated for simplicity)
+    public TriplePattern[]? ConstructPatterns { get; set; }
+
+    // SelectClause data needed for QueryResults (stored on heap to avoid 8KB Query struct)
+    public SelectClauseData? SelectData { get; set; }
+
     // Computed properties
     public bool HasFilters => FilterCount > 0;
     public bool HasBinds => BindCount > 0;
@@ -737,6 +757,8 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasOptionalPatterns => OptionalFlags != 0;
     public int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
     public bool HasGraph => GraphClauseCount > 0;
+    public bool HasHaving => HavingLength > 0;
+    public bool HasConstruct => ConstructPatterns != null && ConstructPatterns.Length > 0;
 
     /// <summary>
     /// Create a new query buffer with default capacity
@@ -783,6 +805,150 @@ internal sealed class QueryBuffer : IDisposable
     /// Capacity in pattern slots
     /// </summary>
     public int Capacity => _buffer?.Length / PatternSlot.Size ?? 0;
+
+    /// <summary>
+    /// Get HavingClause from stored offsets.
+    /// </summary>
+    public HavingClause GetHavingClause()
+    {
+        return new HavingClause
+        {
+            ExpressionStart = HavingStart,
+            ExpressionLength = HavingLength
+        };
+    }
+
+    /// <summary>
+    /// Get SelectClause from stored data.
+    /// Returns a lightweight copy since QueryResults needs it for aggregate processing.
+    /// </summary>
+    public SelectClause GetSelectClause()
+    {
+        return SelectData?.ToSelectClause() ?? default;
+    }
+
+    /// <summary>
+    /// Get OrderByClause from stored entries.
+    /// </summary>
+    public OrderByClause GetOrderByClause()
+    {
+        var clause = new OrderByClause();
+        if (OrderBy != null)
+        {
+            foreach (var entry in OrderBy)
+            {
+                clause.AddCondition(entry.VariableStart, entry.VariableLength,
+                    entry.Descending ? OrderDirection.Descending : OrderDirection.Ascending);
+            }
+        }
+        return clause;
+    }
+
+    /// <summary>
+    /// Get GroupByClause from stored entries.
+    /// </summary>
+    public GroupByClause GetGroupByClause()
+    {
+        var clause = new GroupByClause();
+        if (GroupBy != null)
+        {
+            foreach (var entry in GroupBy)
+            {
+                clause.AddVariable(entry.VariableStart, entry.VariableLength);
+            }
+        }
+        return clause;
+    }
+
+    /// <summary>
+    /// Extract triple patterns to a heap-allocated array.
+    /// Used by MultiPatternScan to avoid copying the entire GraphPattern struct.
+    /// </summary>
+    public TriplePattern[] GetTriplePatternsArray()
+    {
+        ThrowIfDisposed();
+        var patterns = GetPatterns();
+        var tripleList = new System.Collections.Generic.List<TriplePattern>();
+
+        foreach (var slot in patterns.EnumerateTriples())
+        {
+            var tp = new TriplePattern
+            {
+                Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
+                Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
+                Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
+                Path = new PropertyPath { Type = slot.PathKind, Iri = new Term { Start = slot.PathIriStart, Length = slot.PathIriLength } }
+            };
+            tripleList.Add(tp);
+        }
+
+        return tripleList.ToArray();
+    }
+
+    /// <summary>
+    /// Get ConstructTemplate from stored patterns.
+    /// </summary>
+    public ConstructTemplate GetConstructTemplate()
+    {
+        var template = new ConstructTemplate();
+        if (ConstructPatterns != null)
+        {
+            foreach (var tp in ConstructPatterns)
+            {
+                template.AddPattern(tp);
+            }
+        }
+        return template;
+    }
+
+    /// <summary>
+    /// Build a GraphPattern from stored data.
+    /// This creates a copy on the heap for operators that still need GraphPattern.
+    /// </summary>
+    public GraphPattern BuildGraphPattern()
+    {
+        ThrowIfDisposed();
+        var gp = new GraphPattern();
+        var patterns = GetPatterns();
+        int tripleIndex = 0;
+
+        for (int i = 0; i < patterns.Count; i++)
+        {
+            var slot = patterns[i];
+            switch (slot.Kind)
+            {
+                case PatternKind.Triple:
+                    var tp = new TriplePattern
+                    {
+                        Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
+                        Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
+                        Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
+                        Path = new PropertyPath { Type = slot.PathKind, Iri = new Term { Start = slot.PathIriStart, Length = slot.PathIriLength } }
+                    };
+                    // Check if this pattern should be optional
+                    if ((OptionalFlags & (1u << tripleIndex)) != 0)
+                        gp.AddOptionalPattern(tp);
+                    else
+                        gp.AddPattern(tp);
+                    tripleIndex++;
+                    break;
+                case PatternKind.Filter:
+                    gp.AddFilter(new FilterExpr { Start = slot.FilterStart, Length = slot.FilterLength });
+                    break;
+                case PatternKind.Bind:
+                    gp.AddBind(new BindExpr
+                    {
+                        ExprStart = slot.BindExprStart,
+                        ExprLength = slot.BindExprLength,
+                        VarStart = slot.BindVarStart,
+                        VarLength = slot.BindVarLength
+                    });
+                    break;
+            }
+        }
+
+        return gp;
+    }
 
     public void Dispose()
     {
@@ -846,6 +1012,88 @@ internal struct AggregateEntry
     public bool Distinct;
     public int SeparatorStart;  // For GROUP_CONCAT
     public int SeparatorLength;
+}
+
+/// <summary>
+/// Heap-allocated SelectClause data to avoid storing the full 8KB Query struct.
+/// Used by QueryResults for aggregate processing.
+/// </summary>
+internal sealed class SelectClauseData
+{
+    public bool Distinct { get; init; }
+    public bool Reduced { get; init; }
+    public bool SelectAll { get; init; }
+    public bool HasAggregates { get; init; }
+    public AggregateEntry[]? Aggregates { get; init; }
+
+    /// <summary>
+    /// Create SelectClauseData from a SelectClause struct.
+    /// </summary>
+    public static SelectClauseData FromSelectClause(in SelectClause clause)
+    {
+        AggregateEntry[]? aggs = null;
+        if (clause.HasAggregates)
+        {
+            aggs = new AggregateEntry[clause.AggregateCount];
+            for (int i = 0; i < clause.AggregateCount; i++)
+            {
+                var src = clause.GetAggregate(i);
+                aggs[i] = new AggregateEntry
+                {
+                    Function = src.Function,
+                    VariableStart = src.VariableStart,
+                    VariableLength = src.VariableLength,
+                    AliasStart = src.AliasStart,
+                    AliasLength = src.AliasLength,
+                    Distinct = src.Distinct,
+                    SeparatorStart = src.SeparatorStart,
+                    SeparatorLength = src.SeparatorLength
+                };
+            }
+        }
+
+        return new SelectClauseData
+        {
+            Distinct = clause.Distinct,
+            Reduced = clause.Reduced,
+            SelectAll = clause.SelectAll,
+            HasAggregates = clause.HasAggregates,
+            Aggregates = aggs
+        };
+    }
+
+    /// <summary>
+    /// Convert back to a SelectClause struct for compatibility.
+    /// </summary>
+    public SelectClause ToSelectClause()
+    {
+        var clause = new SelectClause
+        {
+            Distinct = Distinct,
+            Reduced = Reduced,
+            SelectAll = SelectAll
+        };
+
+        if (Aggregates != null)
+        {
+            foreach (var agg in Aggregates)
+            {
+                clause.AddAggregate(new AggregateExpression
+                {
+                    Function = agg.Function,
+                    VariableStart = agg.VariableStart,
+                    VariableLength = agg.VariableLength,
+                    AliasStart = agg.AliasStart,
+                    AliasLength = agg.AliasLength,
+                    Distinct = agg.Distinct,
+                    SeparatorStart = agg.SeparatorStart,
+                    SeparatorLength = agg.SeparatorLength
+                });
+            }
+        }
+
+        return clause;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -989,6 +1237,33 @@ internal static class QueryBufferAdapter
             buffer.FirstGraphIsVariable = gp.IsGraphClauseVariable(0);
             buffer.FirstGraphPatternCount = gp.GetGraphClausePatternCount(0);
         }
+
+        // Copy HAVING clause (ADR-009 Phase 2)
+        buffer.HavingStart = query.SolutionModifier.Having.ExpressionStart;
+        buffer.HavingLength = query.SolutionModifier.Having.ExpressionLength;
+
+        // Copy DESCRIBE metadata
+        buffer.DescribeAll = query.DescribeAll;
+
+        // Copy CONSTRUCT template patterns
+        if (query.ConstructTemplate.PatternCount > 0)
+        {
+            buffer.ConstructPatterns = new TriplePattern[query.ConstructTemplate.PatternCount];
+            for (int i = 0; i < query.ConstructTemplate.PatternCount; i++)
+            {
+                buffer.ConstructPatterns[i] = query.ConstructTemplate.GetPattern(i);
+            }
+        }
+
+        // Copy SelectClause data to heap (avoids storing 8KB Query struct)
+        buffer.SelectData = SelectClauseData.FromSelectClause(in query.SelectClause);
+
+        // Copy temporal clause parameters (ADR-009 Phase 2)
+        buffer.TemporalMode = query.SolutionModifier.Temporal.Mode;
+        buffer.TimeStartStart = query.SolutionModifier.Temporal.TimeStartStart;
+        buffer.TimeStartLength = query.SolutionModifier.Temporal.TimeStartLength;
+        buffer.TimeEndStart = query.SolutionModifier.Temporal.TimeEndStart;
+        buffer.TimeEndLength = query.SolutionModifier.Temporal.TimeEndLength;
 
         // Convert patterns to slots
         var patterns = buffer.GetPatterns();

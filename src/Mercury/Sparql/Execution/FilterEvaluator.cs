@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -433,7 +434,7 @@ public ref partial struct FilterEvaluator
                 Advance();
             
             var str = _expression.Slice(start, _position - start);
-            if (double.TryParse(str, out var d))
+            if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
             {
                 return new Value { Type = ValueType.Double, DoubleValue = d };
             }
@@ -441,7 +442,7 @@ public ref partial struct FilterEvaluator
         else
         {
             var str = _expression.Slice(start, _position - start);
-            if (long.TryParse(str, out var i))
+            if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
             {
                 return new Value { Type = ValueType.Integer, IntegerValue = i };
             }
@@ -1448,7 +1449,7 @@ public ref partial struct FilterEvaluator
             str = str[1..^1];
         }
 
-        if (double.TryParse(str, out var result))
+        if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
             return result;
 
         return double.NaN;

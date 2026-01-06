@@ -312,7 +312,7 @@ public partial class QueryExecutor
                 "Use the QueryExecutor constructor that accepts ISparqlServiceExecutor.");
         }
 
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var serviceCount = pattern.ServiceClauseCount;
 
         // Build binding storage
@@ -374,7 +374,7 @@ public partial class QueryExecutor
                 "Use the QueryExecutor constructor that accepts ISparqlServiceExecutor.");
         }
 
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var serviceCount = pattern.ServiceClauseCount;
 
         // Build binding storage
@@ -669,7 +669,7 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteServiceWithLocalPatternsInternal(Binding[] bindings, char[] stringBuffer)
     {
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Determine optimal strategy using QueryPlanner
@@ -912,7 +912,7 @@ public partial class QueryExecutor
         char[] stringBuffer)
     {
         var finalResults = new List<MaterializedRow>();
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var requiredCount = pattern.RequiredPatternCount;
 
         // Pre-compute filter pushdown for multi-pattern case

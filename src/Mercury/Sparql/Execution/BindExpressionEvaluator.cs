@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql;
 
@@ -246,13 +247,13 @@ internal ref struct BindExpressionEvaluator
                 Advance();
 
             var str = _expression.Slice(start, _position - start);
-            if (double.TryParse(str, out var d))
+            if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
                 return new Value { Type = ValueType.Double, DoubleValue = d };
         }
         else
         {
             var str = _expression.Slice(start, _position - start);
-            if (long.TryParse(str, out var i))
+            if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i))
                 return new Value { Type = ValueType.Integer, IntegerValue = i };
         }
 
@@ -427,7 +428,7 @@ internal ref struct BindExpressionEvaluator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double TryParseNumber(ReadOnlySpan<char> s)
     {
-        if (double.TryParse(s, out var result))
+        if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
             return result;
         return double.NaN;
     }

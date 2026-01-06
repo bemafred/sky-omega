@@ -521,12 +521,11 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow>? ExecuteFixedGraphClauseCore()
     {
-        List<MaterializedRow>? results = null;
         var store = _store;
         var source = _source;
 
-        // Access pattern data needed for execution
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        // Access cached pattern (from buffer)
+        ref readonly var pattern = ref _cachedPattern;
         var graphClause = pattern.GetGraphClause(0);
         var patternCount = graphClause.PatternCount;
 
@@ -543,48 +542,14 @@ public partial class QueryExecutor
             return ExecuteFixedGraphSinglePattern(store, source, tp, graphStart, graphLength);
         }
 
-        // Multiple patterns - execute on thread with larger stack
-        // Copy patterns to array to pass to thread
+        // Multiple patterns - copy to heap array and execute in isolated stack frame
         var patterns = new TriplePattern[patternCount];
         for (int i = 0; i < patternCount; i++)
         {
             patterns[i] = graphClause.GetPattern(i);
         }
 
-        var thread = new System.Threading.Thread(() =>
-        {
-            var bindings = new Binding[16];
-            var stringBuffer = _stringBuffer;
-            var bindingTable = new BindingTable(bindings, stringBuffer);
-            var graphIri = source.AsSpan(graphStart, graphLength);
-
-            // Build GraphPattern from copied patterns
-            var graphPattern = new GraphPattern();
-            for (int i = 0; i < patterns.Length; i++)
-            {
-                graphPattern.AddPattern(patterns[i]);
-            }
-
-            var scan = new MultiPatternScan(store, source, graphPattern, false, graphIri);
-            results = new List<MaterializedRow>();
-            try
-            {
-                while (scan.MoveNext(ref bindingTable))
-                {
-                    results.Add(new MaterializedRow(bindingTable));
-                    bindingTable.Clear();
-                }
-            }
-            finally
-            {
-                scan.Dispose();
-            }
-        }, 4 * 1024 * 1024); // 4MB stack
-
-        thread.Start();
-        thread.Join();
-
-        return results;
+        return ExecuteFixedGraphMultiPatterns(store, source, patterns, graphStart, graphLength);
     }
 
     /// <summary>
@@ -600,6 +565,50 @@ public partial class QueryExecutor
         var graphIri = source.AsSpan(graphStart, graphLength);
 
         var scan = new TriplePatternScan(store, source, tp, bindingTable, graphIri);
+        var results = new List<MaterializedRow>();
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                results.Add(new MaterializedRow(bindingTable));
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+            PooledBufferManager.Shared.Return(stringBuffer);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Execute multiple patterns in fixed graph - isolated stack frame via NoInlining.
+    /// Patterns are passed via heap-allocated array to avoid large struct copies.
+    /// </summary>
+    /// <remarks>
+    /// ADR-009: This method replaces the previous Thread-based workaround.
+    /// The [NoInlining] attribute prevents stack frame merging, keeping
+    /// the GraphPattern (~4KB) isolated to this frame only.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static List<MaterializedRow> ExecuteFixedGraphMultiPatterns(
+        QuadStore store, string source, TriplePattern[] patterns, int graphStart, int graphLength)
+    {
+        var bindings = new Binding[16];
+        var stringBuffer = PooledBufferManager.Shared.Rent<char>(1024).Array!;
+        var bindingTable = new BindingTable(bindings, stringBuffer);
+        var graphIri = source.AsSpan(graphStart, graphLength);
+
+        // Build GraphPattern from heap-allocated patterns array
+        var graphPattern = new GraphPattern();
+        for (int i = 0; i < patterns.Length; i++)
+        {
+            graphPattern.AddPattern(patterns[i]);
+        }
+
+        var scan = new MultiPatternScan(store, source, graphPattern, false, graphIri);
         var results = new List<MaterializedRow>();
         try
         {

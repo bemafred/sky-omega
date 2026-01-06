@@ -12,7 +12,7 @@ using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Tests.Fixtures;
 
-namespace Mercury.Tests;
+namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
 /// Tests for RDF-star reification support.

@@ -500,4 +500,10 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
-*.ncrunchsolution
+
+# NCrunch
+# Cache and local user settings should be ignored
+.ncrunch/
+*.ncrunchsolution.user
+*.ncrunchproject.user
+# Team settings (*.v3.ncrunchsolution, *.v3.ncrunchproject) should be committed

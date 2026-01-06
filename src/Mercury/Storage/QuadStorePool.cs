@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using SkyOmega.Mercury.Runtime;
 
@@ -22,6 +23,13 @@ namespace SkyOmega.Mercury.Storage;
 /// <item><description>Clear() is cheap (reset counters) vs Dispose+Create (file I/O)</description></item>
 /// </list>
 ///
+/// <para><strong>Cross-process coordination:</strong></para>
+/// <para>
+/// When <c>useCrossProcessGate</c> is enabled (default for testing), the pool coordinates
+/// with other processes via <see cref="CrossProcessStoreGate"/>. This prevents disk exhaustion
+/// when multiple test runner processes (e.g., NCrunch) create pools simultaneously.
+/// </para>
+///
 /// <para><strong>Usage:</strong></para>
 /// <code>
 /// using var pool = new QuadStorePool(maxConcurrent: 4);
@@ -39,11 +47,24 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 public sealed class QuadStorePool : IDisposable
 {
+    /// <summary>
+    /// Default fraction of available disk space to use as budget (33%).
+    /// </summary>
+    public const double DefaultDiskBudgetFraction = 0.33;
+
+    /// <summary>
+    /// Fixed hash table size in bytes (512MB) - not configurable, included in estimates.
+    /// </summary>
+    private const long HashTableSizeBytes = 512L << 20;
+
     private readonly ConcurrentBag<QuadStore> _available = new();
     private readonly List<(TempPath path, QuadStore store)> _all = new();
     private readonly SemaphoreSlim _gate;
     private readonly object _createLock = new();
     private readonly string _purpose;
+    private readonly StorageOptions _storageOptions;
+    private readonly bool _useCrossProcessGate;
+    private int _globalSlotsHeld;
     private bool _disposed;
 
     /// <summary>
@@ -51,11 +72,84 @@ public sealed class QuadStorePool : IDisposable
     /// </summary>
     /// <param name="maxConcurrent">Maximum concurrent stores. Defaults to ProcessorCount.</param>
     /// <param name="purpose">Category for TempPath naming (e.g., "test", "service").</param>
-    public QuadStorePool(int maxConcurrent = 0, string purpose = "pooled")
+    /// <param name="useCrossProcessGate">Enable cross-process coordination via <see cref="CrossProcessStoreGate"/>. Default: false.</param>
+    public QuadStorePool(int maxConcurrent = 0, string purpose = "pooled", bool useCrossProcessGate = false)
+        : this(null, DefaultDiskBudgetFraction, maxConcurrent, purpose, useCrossProcessGate)
     {
-        var max = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
-        _gate = new SemaphoreSlim(max, max);
+    }
+
+    /// <summary>
+    /// Creates a pool with disk-budget-aware concurrency limiting.
+    /// The pool size is calculated as the minimum of:
+    /// - CPU count (or explicit maxConcurrent)
+    /// - Available disk space × diskBudgetFraction ÷ estimated per-store size
+    /// </summary>
+    /// <param name="storageOptions">Storage options including initial sizes. Use StorageOptions.ForTesting for minimal footprint.</param>
+    /// <param name="diskBudgetFraction">Fraction of available disk space to use as budget (0.0-1.0). Default: 0.33 (33%).</param>
+    /// <param name="maxConcurrent">Maximum concurrent stores (0 = ProcessorCount). Disk budget may reduce this further.</param>
+    /// <param name="purpose">Category for TempPath naming (e.g., "test", "service").</param>
+    /// <param name="useCrossProcessGate">
+    /// Enable cross-process coordination via <see cref="CrossProcessStoreGate"/>.
+    /// When enabled, store creation blocks until a global slot is available across ALL processes
+    /// on the machine. This prevents disk exhaustion when multiple test runners (e.g., NCrunch)
+    /// create pools simultaneously. Default: false.
+    /// </param>
+    public QuadStorePool(StorageOptions? storageOptions,
+                         double diskBudgetFraction = DefaultDiskBudgetFraction,
+                         int maxConcurrent = 0,
+                         string purpose = "pooled",
+                         bool useCrossProcessGate = false)
+    {
+        if (diskBudgetFraction <= 0 || diskBudgetFraction > 1.0)
+            throw new ArgumentOutOfRangeException(nameof(diskBudgetFraction),
+                "Disk budget fraction must be between 0 (exclusive) and 1.0 (inclusive)");
+
+        _storageOptions = storageOptions ?? StorageOptions.Default;
         _purpose = purpose;
+        _useCrossProcessGate = useCrossProcessGate;
+
+        var cpuLimit = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
+        var diskLimit = CalculateDiskLimit(_storageOptions, diskBudgetFraction);
+
+        var max = Math.Max(1, Math.Min(cpuLimit, diskLimit));
+        _gate = new SemaphoreSlim(max, max);
+    }
+
+    /// <summary>
+    /// Maximum number of concurrent stores this pool allows.
+    /// </summary>
+    public int MaxConcurrent => _gate.CurrentCount + (TotalCreated - AvailableCount);
+
+    /// <summary>
+    /// Calculates the maximum number of stores based on available disk space.
+    /// </summary>
+    private static int CalculateDiskLimit(StorageOptions options, double fraction)
+    {
+        var tempPath = Path.GetTempPath();
+        var available = DiskSpaceChecker.GetAvailableSpace(tempPath);
+
+        if (available < 0)
+            return int.MaxValue; // Can't determine disk space, don't limit
+
+        var budget = (long)(available * fraction);
+        var perStoreEstimate = EstimateStoreSize(options);
+
+        if (perStoreEstimate <= 0)
+            return int.MaxValue;
+
+        return (int)(budget / perStoreEstimate);
+    }
+
+    /// <summary>
+    /// Estimates the disk footprint of a single QuadStore based on options.
+    /// </summary>
+    private static long EstimateStoreSize(StorageOptions options)
+    {
+        // 4 indexes + atom data + hash table (fixed 512MB) + atom offsets
+        return (options.IndexInitialSizeBytes * 4)
+             + options.AtomDataInitialSizeBytes
+             + HashTableSizeBytes
+             + (options.AtomOffsetInitialCapacity * sizeof(long));
     }
 
     /// <summary>
@@ -63,6 +157,7 @@ public sealed class QuadStorePool : IDisposable
     /// Store is cleared before return - guaranteed empty.
     /// </summary>
     /// <exception cref="ObjectDisposedException">Thrown if pool is disposed.</exception>
+    /// <exception cref="TimeoutException">Thrown if cross-process gate acquisition times out.</exception>
     public QuadStore Rent()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -75,15 +170,42 @@ public sealed class QuadStorePool : IDisposable
             return store;
         }
 
-        // Create new store
-        lock (_createLock)
+        // Create new store - need global slot if cross-process gate is enabled
+        if (_useCrossProcessGate)
         {
-            var path = TempPath.Create(_purpose, Guid.NewGuid().ToString("N")[..8], unique: false);
-            path.EnsureClean();
-            path.MarkOwnership();
-            var newStore = new QuadStore(path);
-            _all.Add((path, newStore));
-            return newStore;
+            if (!CrossProcessStoreGate.Instance.Acquire(TimeSpan.FromSeconds(60)))
+            {
+                _gate.Release(); // Release local slot since we failed
+                throw new TimeoutException(
+                    $"Timed out waiting for cross-process store slot. " +
+                    $"Max global stores: {CrossProcessStoreGate.Instance.MaxGlobalStores}. " +
+                    $"This usually means too many test processes are running in parallel.");
+            }
+
+            Interlocked.Increment(ref _globalSlotsHeld);
+        }
+
+        try
+        {
+            lock (_createLock)
+            {
+                var path = TempPath.Create(_purpose, Guid.NewGuid().ToString("N")[..8], unique: false);
+                path.EnsureClean();
+                path.MarkOwnership();
+                var newStore = new QuadStore(path, null, null, _storageOptions);
+                _all.Add((path, newStore));
+                return newStore;
+            }
+        }
+        catch
+        {
+            // Store creation failed - release global slot
+            if (_useCrossProcessGate)
+            {
+                CrossProcessStoreGate.Instance.Release();
+                Interlocked.Decrement(ref _globalSlotsHeld);
+            }
+            throw;
         }
     }
 
@@ -134,6 +256,12 @@ public sealed class QuadStorePool : IDisposable
         }
     }
 
+    /// <summary>
+    /// Number of cross-process slots currently held by this pool.
+    /// Only non-zero when <c>useCrossProcessGate</c> was enabled.
+    /// </summary>
+    public int GlobalSlotsHeld => _globalSlotsHeld;
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -151,6 +279,16 @@ public sealed class QuadStorePool : IDisposable
                 TempPath.SafeCleanup(path);
             }
             _all.Clear();
+        }
+
+        // Release global slots
+        if (_useCrossProcessGate)
+        {
+            var slotsToRelease = Interlocked.Exchange(ref _globalSlotsHeld, 0);
+            for (int i = 0; i < slotsToRelease; i++)
+            {
+                CrossProcessStoreGate.Instance.Release();
+            }
         }
 
         _gate.Dispose();

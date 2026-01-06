@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using SkyOmega.Mercury.Abstractions;
 
 namespace SkyOmega.Mercury.Runtime;
 
@@ -150,20 +151,8 @@ public sealed class InsufficientDiskSpaceException : IOException
     private static string FormatMessage(string path, long required, long available, string operation)
     {
         return $"Insufficient disk space for {operation}. " +
-               $"Required: {FormatBytes(required)}, Available: {FormatBytes(available)}. " +
+               $"Required: {ByteFormatter.Format(required)}, Available: {ByteFormatter.Format(available)}. " +
                $"Path: {path}";
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        return bytes switch
-        {
-            >= 1L << 40 => $"{bytes / (double)(1L << 40):F2} TB",
-            >= 1L << 30 => $"{bytes / (double)(1L << 30):F2} GB",
-            >= 1L << 20 => $"{bytes / (double)(1L << 20):F2} MB",
-            >= 1L << 10 => $"{bytes / (double)(1L << 10):F2} KB",
-            _ => $"{bytes} bytes"
-        };
     }
 }
 
@@ -242,22 +231,10 @@ public sealed class DiskSpaceLimitExceededException : IOException
 
     public DiskSpaceLimitExceededException(string operationName, long limitBytes, long consumedBytes)
         : base($"Disk space limit exceeded for {operationName}. " +
-               $"Limit: {FormatBytes(limitBytes)}, Consumed: {FormatBytes(consumedBytes)}")
+               $"Limit: {ByteFormatter.Format(limitBytes)}, Consumed: {ByteFormatter.Format(consumedBytes)}")
     {
         OperationName = operationName;
         LimitBytes = limitBytes;
         ConsumedBytes = consumedBytes;
-    }
-
-    private static string FormatBytes(long bytes)
-    {
-        return bytes switch
-        {
-            >= 1L << 40 => $"{bytes / (double)(1L << 40):F2} TB",
-            >= 1L << 30 => $"{bytes / (double)(1L << 30):F2} GB",
-            >= 1L << 20 => $"{bytes / (double)(1L << 20):F2} MB",
-            >= 1L << 10 => $"{bytes / (double)(1L << 10):F2} KB",
-            _ => $"{bytes} bytes"
-        };
     }
 }

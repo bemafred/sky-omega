@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Threading;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
@@ -38,8 +39,8 @@ public partial class QueryExecutor : IDisposable
 
     private readonly QuadStore _store;
     private readonly string _source;
-    private readonly Query _query;
-    private readonly QueryBuffer _buffer;  // New: heap-allocated pattern storage
+    private readonly QueryBuffer _buffer;  // Heap-allocated pattern storage (ADR-009 Phase 2)
+    private readonly GraphPattern _cachedPattern;  // Cached from buffer for scans
     private readonly IBufferManager _bufferManager;
     private readonly char[] _stringBuffer; // Pooled buffer for string operations (replaces scattered new char[1024])
     private readonly int _maxJoinDepth;
@@ -103,26 +104,29 @@ public partial class QueryExecutor : IDisposable
 
         _store = store;
         _source = source.ToString();  // Copy to heap - enables class-based execution
-        _query = query;  // Copy here is unavoidable since we store it
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _planner = planner;
         _maxJoinDepth = maxJoinDepth;
 
-        // Convert Query to QueryBuffer for heap-based pattern storage
+        // ADR-009 Phase 2: Convert Query to QueryBuffer for heap-based storage
         // This avoids stack overflow when accessing patterns in nested calls
+        // The Query struct is NOT stored - only the buffer is kept
         _buffer = QueryBufferAdapter.FromQuery(in query, source);
+        // Cache the original GraphPattern (has all complex structures like subqueries, service clauses)
+        // Building from buffer would lose this info, so we copy directly
+        _cachedPattern = query.WhereClause.Pattern;
 
         _defaultGraphs = null;
         _namedGraphs = null;
 
-        // Extract dataset clauses into arrays
-        if (query.Datasets != null && query.Datasets.Length > 0)
+        // Extract dataset clauses into arrays (using buffer instead of query)
+        if (_buffer.Datasets != null && _buffer.Datasets.Length > 0)
         {
             var defaultList = new List<string>();
             var namedList = new List<string>();
 
-            foreach (var ds in query.Datasets)
+            foreach (var ds in _buffer.Datasets)
             {
                 var iri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length).ToString();
                 if (ds.IsNamed)
@@ -138,43 +142,36 @@ public partial class QueryExecutor : IDisposable
         _serviceExecutor = serviceExecutor;
 
         // Cache first pattern and service clause for SERVICE+local joins
-        // This avoids accessing large GraphPattern struct from stack during execution
-        ref readonly var pattern = ref query.WhereClause.Pattern;
-        if (pattern.PatternCount > 0)
+        // Now using _cachedPattern instead of query.WhereClause.Pattern
+        if (_cachedPattern.PatternCount > 0)
         {
-            _cachedFirstPattern = pattern.GetPattern(0);
+            _cachedFirstPattern = _cachedPattern.GetPattern(0);
         }
-        if (pattern.ServiceClauseCount > 0)
+        if (_cachedPattern.ServiceClauseCount > 0)
         {
-            _cachedFirstServiceClause = pattern.GetServiceClause(0);
+            _cachedFirstServiceClause = _cachedPattern.GetServiceClause(0);
         }
 
-        // Extract temporal clause parameters
-        _temporalMode = query.SolutionModifier.Temporal.Mode;
+        // Extract temporal clause parameters (from buffer instead of query)
+        _temporalMode = _buffer.TemporalMode;
         if (_temporalMode == TemporalQueryMode.AsOf)
         {
-            var timeStr = source.Slice(
-                query.SolutionModifier.Temporal.TimeStartStart,
-                query.SolutionModifier.Temporal.TimeStartLength);
+            var timeStr = source.Slice(_buffer.TimeStartStart, _buffer.TimeStartLength);
             _asOfTime = ParseDateTimeOffset(timeStr);
         }
         else if (_temporalMode == TemporalQueryMode.During)
         {
-            var startStr = source.Slice(
-                query.SolutionModifier.Temporal.TimeStartStart,
-                query.SolutionModifier.Temporal.TimeStartLength);
-            var endStr = source.Slice(
-                query.SolutionModifier.Temporal.TimeEndStart,
-                query.SolutionModifier.Temporal.TimeEndLength);
+            var startStr = source.Slice(_buffer.TimeStartStart, _buffer.TimeStartLength);
+            var endStr = source.Slice(_buffer.TimeEndStart, _buffer.TimeEndLength);
             _rangeStart = ParseDateTimeOffset(startStr);
             _rangeEnd = ParseDateTimeOffset(endStr);
         }
 
         // Compute optimized pattern order if planner is available and we have multiple patterns
-        if (_planner != null && query.WhereClause.Pattern.RequiredPatternCount > 1)
+        if (_planner != null && _cachedPattern.RequiredPatternCount > 1)
         {
             _optimizedPatternOrder = _planner.OptimizePatternOrder(
-                in query.WhereClause.Pattern, source);
+                in _cachedPattern, source);
         }
     }
 
@@ -202,11 +199,11 @@ public partial class QueryExecutor : IDisposable
         var value = literal.Slice(start, end - start);
 
         // Try parse as DateTimeOffset
-        if (DateTimeOffset.TryParse(value, out var result))
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var result))
             return result;
 
         // Try parse as date only (assume start of day)
-        if (DateTime.TryParse(value.ToString(), out var dt))
+        if (DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
             return new DateTimeOffset(dt, TimeSpan.Zero);
 
         return DateTimeOffset.MinValue;
@@ -229,11 +226,36 @@ public partial class QueryExecutor : IDisposable
         _store = store;
         _source = source.ToString();
         _buffer = buffer;
+        _cachedPattern = buffer.BuildGraphPattern();  // Cache for scans
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
-        _query = default;  // Not used when buffer is provided directly
         _serviceExecutor = serviceExecutor;
         _maxJoinDepth = DefaultMaxJoinDepth;  // Use default join depth limit
+
+        // Cache first pattern and service clause for SERVICE+local joins
+        if (_cachedPattern.PatternCount > 0)
+        {
+            _cachedFirstPattern = _cachedPattern.GetPattern(0);
+        }
+        if (_cachedPattern.ServiceClauseCount > 0)
+        {
+            _cachedFirstServiceClause = _cachedPattern.GetServiceClause(0);
+        }
+
+        // Extract temporal parameters from buffer
+        _temporalMode = buffer.TemporalMode;
+        if (_temporalMode == TemporalQueryMode.AsOf)
+        {
+            var timeStr = source.Slice(buffer.TimeStartStart, buffer.TimeStartLength);
+            _asOfTime = ParseDateTimeOffset(timeStr);
+        }
+        else if (_temporalMode == TemporalQueryMode.During)
+        {
+            var startStr = source.Slice(buffer.TimeStartStart, buffer.TimeStartLength);
+            var endStr = source.Slice(buffer.TimeEndStart, buffer.TimeEndLength);
+            _rangeStart = ParseDateTimeOffset(startStr);
+            _rangeEnd = ParseDateTimeOffset(endStr);
+        }
 
         // Extract datasets from buffer
         if (buffer.Datasets != null && buffer.Datasets.Length > 0)
@@ -285,7 +307,7 @@ public partial class QueryExecutor : IDisposable
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var requiredCount = pattern.RequiredPatternCount;
 
         if (requiredCount == 0)
@@ -405,6 +427,10 @@ public partial class QueryExecutor : IDisposable
         return Execute();
     }
 
+    /// <remarks>
+    /// ADR-009: [NoInlining] isolates stack frame for 22KB QueryResults and large Query struct access.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public QueryResults Execute()
     {
         // Check for GRAPH clauses first - use _buffer to avoid large struct copies
@@ -431,8 +457,7 @@ public partial class QueryExecutor : IDisposable
 
             var serviceBindings = new Binding[16];
             return QueryResults.FromMaterializedList(serviceResults, serviceBindings, _stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset,
-                (_query.SelectClause.Distinct || _query.SelectClause.Reduced));
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
 
         if (_buffer.TriplePatternCount == 0)
@@ -444,14 +469,14 @@ public partial class QueryExecutor : IDisposable
             return ExecuteWithDefaultGraphs();
         }
 
-        // For regular queries, access _query fields directly to build result
+        // For regular queries, use cached pattern from buffer
         // Build binding storage
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Access pattern directly from _query
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        // Access cached pattern (from buffer)
+        ref readonly var pattern = ref _cachedPattern;
         var requiredCount = pattern.RequiredPatternCount;
 
         // Single required pattern - just scan
@@ -469,9 +494,9 @@ public partial class QueryExecutor : IDisposable
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
 
             return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
-                _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
-                _query.SolutionModifier.Having);
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+                _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+                _buffer.GetHavingClause());
         }
 
         // No required patterns but have optional - need special handling
@@ -498,7 +523,7 @@ public partial class QueryExecutor : IDisposable
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
         var requiredCount = pattern.RequiredPatternCount;
 
         // Single FROM clause - query that specific graph
@@ -519,9 +544,9 @@ public partial class QueryExecutor : IDisposable
                     _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
 
                 return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                    _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
-                    _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
-                    _query.SolutionModifier.Having);
+                    _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+                    _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+                    _buffer.GetHavingClause());
             }
 
             if (requiredCount == 0)
@@ -532,18 +557,18 @@ public partial class QueryExecutor : IDisposable
                 new MultiPatternScan(_store, _source, pattern, false, graphIri,
                     _temporalMode, _asOfTime, _rangeStart, _rangeEnd),
                 _buffer, _source, _store, bindings, stringBuffer,
-                _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
-                _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
-                _query.SolutionModifier.Having);
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+                _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+                _buffer.GetHavingClause());
         }
 
         // Multiple FROM clauses - use CrossGraphMultiPatternScan for cross-graph joins
         // This allows joins where pattern1 matches in graph1 and pattern2 matches in graph2
         var crossGraphScan = new CrossGraphMultiPatternScan(_store, _source, pattern, _defaultGraphs);
         return new QueryResults(crossGraphScan, _buffer, _source, _store, bindings, stringBuffer,
-            _query.SolutionModifier.Limit, _query.SolutionModifier.Offset, (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
-            _query.SolutionModifier.OrderBy, _query.SolutionModifier.GroupBy, _query.SelectClause,
-            _query.SolutionModifier.Having);
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+            _buffer.GetHavingClause());
     }
 
     /// <summary>
@@ -552,7 +577,7 @@ public partial class QueryExecutor : IDisposable
     /// </summary>
     public bool ExecuteAsk()
     {
-        var pattern = _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
 
         if (pattern.PatternCount == 0)
             return false;
@@ -614,8 +639,8 @@ public partial class QueryExecutor : IDisposable
     /// </summary>
     internal ConstructResults ExecuteConstruct()
     {
-        var pattern = _query.WhereClause.Pattern;
-        var template = _query.ConstructTemplate;
+        ref readonly var pattern = ref _cachedPattern;
+        var template = _buffer.GetConstructTemplate();
 
         if (pattern.PatternCount == 0 || !template.HasPatterns)
             return ConstructResults.Empty();
@@ -663,8 +688,8 @@ public partial class QueryExecutor : IDisposable
     /// </summary>
     internal DescribeResults ExecuteDescribe()
     {
-        var pattern = _query.WhereClause.Pattern;
-        var describeAll = _query.DescribeAll;
+        ref readonly var pattern = ref _cachedPattern;
+        var describeAll = _buffer.DescribeAll;
 
         // Build binding storage
         var bindings = new Binding[16];
@@ -704,13 +729,18 @@ public partial class QueryExecutor : IDisposable
         return new DescribeResults(_store, queryResults, bindings, stringBuffer, describeAll);
     }
 
+    /// <remarks>
+    /// ADR-009: [NoInlining] isolates the stack frame for the 22KB QueryResults return value.
+    /// Without this, stack frames merge and multiple Execute calls exhaust the 1MB Windows stack.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteWithJoins()
     {
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
 
         // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _query.WhereClause.Pattern;
+        ref readonly var pattern = ref _cachedPattern;
 
         // Use nested loop join for required patterns only
         // Pass optimized pattern order if available for join reordering
@@ -722,13 +752,13 @@ public partial class QueryExecutor : IDisposable
             _store,
             bindings,
             stringBuffer,
-            _query.SolutionModifier.Limit,
-            _query.SolutionModifier.Offset,
-            (_query.SelectClause.Distinct || _query.SelectClause.Reduced),
-            _query.SolutionModifier.OrderBy,
-            _query.SolutionModifier.GroupBy,
-            _query.SelectClause,
-            _query.SolutionModifier.Having);
+            _buffer.Limit,
+            _buffer.Offset,
+            _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(),
+            _buffer.GetGroupByClause(),
+            _buffer.GetSelectClause(),
+            _buffer.GetHavingClause());
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array

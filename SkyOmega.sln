@@ -1,14 +1,7 @@
-
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.0.31903.59
+# Visual Studio Version 18
+VisualStudioVersion = 18.1.11312.151 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
-
-# =============================================================================
-# Solution Folders
-# =============================================================================
-
-# Top-level organizational folders
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "2 Substrates", "2 Substrates", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "3 Cognition", "3 Cognition", "{B2C3D4E5-F6A7-8901-BCDE-F23456789012}"
@@ -17,19 +10,15 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "4 Surfaces", "4 Surfaces", 
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "1 Meta", "1 Meta", "{D4E5F6A7-B8C9-0123-DEF1-456789012345}"
 EndProject
-
-# Substrate folders
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Mercury", "Mercury", "{ADF68131-EC39-4648-B640-E4F2C09EE3D2}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Minerva", "Minerva", "{E5F6A7B8-C9D0-1234-EF12-567890123456}"
 EndProject
-
-# Meta folders
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentation", "Documentation", "{7FA0A47B-7556-4F7D-869D-744000F071D0}"
 	ProjectSection(SolutionItems) = preProject
+		CHANGELOG.md = CHANGELOG.md
 		CLAUDE.md = CLAUDE.md
 		README.md = README.md
-		CHANGELOG.md = CHANGELOG.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{6A048219-87B6-4063-9E6B-D76490244A39}"
@@ -42,36 +31,36 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Architecture", "Architectur
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Canonical Concepts", "Canonical Concepts", "{F5B6C7D8-E9F0-1234-5678-AAAAAAAAAAAA}"
 	ProjectSection(SolutionItems) = preProject
-		docs\architecture\concepts\canonical\README.md = docs\architecture\concepts\canonical\README.md
 		docs\architecture\concepts\canonical-authoring-queue.md = docs\architecture\concepts\canonical-authoring-queue.md
-		docs\architecture\concepts\canonical\sky-omega.md = docs\architecture\concepts\canonical\sky-omega.md
-		docs\architecture\concepts\canonical\lucy.md = docs\architecture\concepts\canonical\lucy.md
-		docs\architecture\concepts\canonical\james.md = docs\architecture\concepts\canonical\james.md
-		docs\architecture\concepts\canonical\mira.md = docs\architecture\concepts\canonical\mira.md
-		docs\architecture\concepts\canonical\eee-emergence-epistemic-engineering.md = docs\architecture\concepts\canonical\eee-emergence-epistemic-engineering.md
+		docs\architecture\concepts\canonical\canonical-definition.md = docs\architecture\concepts\canonical\canonical-definition.md
+		docs\architecture\concepts\canonical\domain-catalog.md = docs\architecture\concepts\canonical\domain-catalog.md
 		docs\architecture\concepts\canonical\e-clean.md = docs\architecture\concepts\canonical\e-clean.md
-		docs\architecture\concepts\canonical\semantic-architecture.md = docs\architecture\concepts\canonical\semantic-architecture.md
+		docs\architecture\concepts\canonical\eee-emergence-epistemic-engineering.md = docs\architecture\concepts\canonical\eee-emergence-epistemic-engineering.md
 		docs\architecture\concepts\canonical\epistemic-cleanliness.md = docs\architecture\concepts\canonical\epistemic-cleanliness.md
 		docs\architecture\concepts\canonical\epistemic-consolidation-protocol-ecp.md = docs\architecture\concepts\canonical\epistemic-consolidation-protocol-ecp.md
+		docs\architecture\concepts\canonical\inspect-adapt.md = docs\architecture\concepts\canonical\inspect-adapt.md
+		docs\architecture\concepts\canonical\james.md = docs\architecture\concepts\canonical\james.md
+		docs\architecture\concepts\canonical\lucy.md = docs\architecture\concepts\canonical\lucy.md
+		docs\architecture\concepts\canonical\mira.md = docs\architecture\concepts\canonical\mira.md
+		docs\architecture\concepts\canonical\rdf.md = docs\architecture\concepts\canonical\rdf.md
+		docs\architecture\concepts\canonical\README.md = docs\architecture\concepts\canonical\README.md
+		docs\architecture\concepts\canonical\semantic-architecture.md = docs\architecture\concepts\canonical\semantic-architecture.md
 		docs\architecture\concepts\canonical\semantic-core.md = docs\architecture\concepts\canonical\semantic-core.md
+		docs\architecture\concepts\canonical\semantic-drift.md = docs\architecture\concepts\canonical\semantic-drift.md
+		docs\architecture\concepts\canonical\semantic-registry.md = docs\architecture\concepts\canonical\semantic-registry.md
+		docs\architecture\concepts\canonical\sky-omega.md = docs\architecture\concepts\canonical\sky-omega.md
+		docs\architecture\concepts\canonical\sparql.md = docs\architecture\concepts\canonical\sparql.md
 		docs\architecture\concepts\canonical\structured-intelligence.md = docs\architecture\concepts\canonical\structured-intelligence.md
 		docs\architecture\concepts\canonical\technical-domain.md = docs\architecture\concepts\canonical\technical-domain.md
-		docs\architecture\concepts\canonical\domain-catalog.md = docs\architecture\concepts\canonical\domain-catalog.md
-		docs\architecture\concepts\canonical\semantic-registry.md = docs\architecture\concepts\canonical\semantic-registry.md
-		docs\architecture\concepts\canonical\inspect-adapt.md = docs\architecture\concepts\canonical\inspect-adapt.md
-		docs\architecture\concepts\canonical\rdf.md = docs\architecture\concepts\canonical\rdf.md
 		docs\architecture\concepts\canonical\turtle.md = docs\architecture\concepts\canonical\turtle.md
-		docs\architecture\concepts\canonical\sparql.md = docs\architecture\concepts\canonical\sparql.md
-		docs\architecture\concepts\canonical\semantic-drift.md = docs\architecture\concepts\canonical\semantic-drift.md
-		docs\architecture\concepts\canonical\canonical-definition.md = docs\architecture\concepts\canonical\canonical-definition.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Narratives", "Narratives", "{F6C7D8E9-F0A1-2345-6789-BBBBBBBBBBBB}"
 	ProjectSection(SolutionItems) = preProject
+		docs\architecture\narratives\conclusions.md = docs\architecture\narratives\conclusions.md
+		docs\architecture\narratives\eee-manifesto.md = docs\architecture\narratives\eee-manifesto.md
 		docs\architecture\narratives\sky-omega-convergence.md = docs\architecture\narratives\sky-omega-convergence.md
 		docs\architecture\narratives\sky-omega-identity.md = docs\architecture\narratives\sky-omega-identity.md
-		docs\architecture\narratives\eee-manifesto.md = docs\architecture\narratives\eee-manifesto.md
-		docs\architecture\narratives\conclusions.md = docs\architecture\narratives\conclusions.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Technical", "Technical", "{F7D8E9F0-A1B2-3456-789A-CCCCCCCCCCCC}"
@@ -84,12 +73,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{F2A3B4C5-D6E
 		docs\api\api-usage.md = docs\api\api-usage.md
 	EndProjectSection
 EndProject
-
-# =============================================================================
-# Mercury Projects
-# =============================================================================
-
-# Mercury - Core Libraries
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury", "src\Mercury\Mercury.csproj", "{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Abstractions", "src\Mercury.Abstractions\Mercury.Abstractions.csproj", "{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}"
@@ -98,8 +81,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Runtime", "src\Merc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Pruning", "src\Mercury.Pruning\Mercury.Pruning.csproj", "{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}"
 EndProject
-
-# Mercury - Tools
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Cli", "src\Mercury.Cli\Mercury.Cli.csproj", "{D2FFD511-9E72-4A03-A197-5C8B01F771C9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Cli.Turtle", "src\Mercury.Cli.Turtle\Mercury.Cli.Turtle.csproj", "{49B3D608-8699-4B71-A57B-CDB5CD63B052}"
@@ -108,19 +89,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Cli.Sparql", "src\M
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Mcp", "src\Mercury.Mcp\Mercury.Mcp.csproj", "{EE0D67DE-27C9-4905-897C-86C705C82C11}"
 EndProject
-
-# Mercury - Tests, Benchmarks, Examples
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Tests", "tests\Mercury.Tests\Mercury.Tests.csproj", "{B1C2D3E4-F5A6-7890-BCDE-F12345678901}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Benchmarks", "benchmarks\Mercury.Benchmarks\Mercury.Benchmarks.csproj", "{C2D3E4F5-A6B7-8901-CDEF-123456789012}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Examples", "examples\Mercury.Examples\Mercury.Examples.csproj", "{D3E4F5A6-B7C8-9012-DEF1-234567890123}"
 EndProject
-
-# Mercury - ADRs
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D7E8-9012-CDEF-333333333333}"
 	ProjectSection(SolutionItems) = preProject
-		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 		docs\adrs\mercury\ADR-001-compaction.md = docs\adrs\mercury\ADR-001-compaction.md
 		docs\adrs\mercury\ADR-002-ibuffermanager-adoption.md = docs\adrs\mercury\ADR-002-ibuffermanager-adoption.md
 		docs\adrs\mercury\ADR-003-buffer-pattern.md = docs\adrs\mercury\ADR-003-buffer-pattern.md
@@ -129,28 +105,18 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-006-dual-mode-store-access.md = docs\adrs\mercury\ADR-006-dual-mode-store-access.md
 		docs\adrs\mercury\ADR-007-union-service-execution.md = docs\adrs\mercury\ADR-007-union-service-execution.md
 		docs\adrs\mercury\ADR-008-quadstore-pool-unified.md = docs\adrs\mercury\ADR-008-quadstore-pool-unified.md
+		docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md = docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md
+		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
-
-# =============================================================================
-# Minerva Projects
-# =============================================================================
-
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Minerva", "src\Minerva\Minerva.csproj", "{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}"
 EndProject
-
-# Minerva - ADRs
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D8E9-0123-DEF0-444444444444}"
 	ProjectSection(SolutionItems) = preProject
-		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
 		docs\adrs\minerva\ADR-001-weight-formats.md = docs\adrs\minerva\ADR-001-weight-formats.md
+		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
 	EndProjectSection
 EndProject
-
-# =============================================================================
-# Build Configurations
-# =============================================================================
-
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -161,6 +127,66 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x64.Build.0 = Debug|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x86.Build.0 = Debug|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x64.ActiveCfg = Release|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x64.Build.0 = Release|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x86.ActiveCfg = Release|Any CPU
+		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x86.Build.0 = Release|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x64.Build.0 = Debug|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x86.Build.0 = Debug|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x64.ActiveCfg = Release|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x64.Build.0 = Release|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x86.ActiveCfg = Release|Any CPU
+		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x86.Build.0 = Release|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x64.Build.0 = Debug|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x86.Build.0 = Debug|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x64.ActiveCfg = Release|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x64.Build.0 = Release|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x86.ActiveCfg = Release|Any CPU
+		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x86.Build.0 = Release|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x64.Build.0 = Debug|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x86.Build.0 = Debug|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x64.ActiveCfg = Release|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x64.Build.0 = Release|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x86.ActiveCfg = Release|Any CPU
+		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x86.Build.0 = Release|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x64.Build.0 = Debug|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x86.Build.0 = Debug|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x64.ActiveCfg = Release|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x64.Build.0 = Release|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x86.ActiveCfg = Release|Any CPU
+		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x86.Build.0 = Release|Any CPU
 		{49B3D608-8699-4B71-A57B-CDB5CD63B052}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{49B3D608-8699-4B71-A57B-CDB5CD63B052}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{49B3D608-8699-4B71-A57B-CDB5CD63B052}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -181,22 +207,22 @@ Global
 		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Debug|x86.Build.0 = Debug|Any CPU
 		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{300F163C-C0DC-4216-B0B2-1F26FD1-756A}.Release|x64.ActiveCfg = Release|Any CPU
+		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Release|x64.ActiveCfg = Release|Any CPU
 		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Release|x64.Build.0 = Release|Any CPU
 		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Release|x86.ActiveCfg = Release|Any CPU
 		{300F163C-C0DC-4216-B0B2-1F26FD1F756A}.Release|x86.Build.0 = Release|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x64.Build.0 = Debug|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Debug|x86.Build.0 = Debug|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x64.ActiveCfg = Release|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x64.Build.0 = Release|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x86.ActiveCfg = Release|Any CPU
-		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E}.Release|x86.Build.0 = Release|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x64.Build.0 = Debug|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x86.Build.0 = Debug|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x64.ActiveCfg = Release|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x64.Build.0 = Release|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x86.ActiveCfg = Release|Any CPU
+		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x86.Build.0 = Release|Any CPU
 		{B1C2D3E4-F5A6-7890-BCDE-F12345678901}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{B1C2D3E4-F5A6-7890-BCDE-F12345678901}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B1C2D3E4-F5A6-7890-BCDE-F12345678901}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -233,66 +259,6 @@ Global
 		{D3E4F5A6-B7C8-9012-DEF1-234567890123}.Release|x64.Build.0 = Release|Any CPU
 		{D3E4F5A6-B7C8-9012-DEF1-234567890123}.Release|x86.ActiveCfg = Release|Any CPU
 		{D3E4F5A6-B7C8-9012-DEF1-234567890123}.Release|x86.Build.0 = Release|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x64.Build.0 = Debug|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Debug|x86.Build.0 = Debug|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x64.ActiveCfg = Release|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x64.Build.0 = Release|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x86.ActiveCfg = Release|Any CPU
-		{D2FFD511-9E72-4A03-A197-5C8B01F771C9}.Release|x86.Build.0 = Release|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x64.Build.0 = Debug|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Debug|x86.Build.0 = Debug|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|Any CPU.Build.0 = Release|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x64.ActiveCfg = Release|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x64.Build.0 = Release|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x86.ActiveCfg = Release|Any CPU
-		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B}.Release|x86.Build.0 = Release|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x64.Build.0 = Debug|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Debug|x86.Build.0 = Debug|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|Any CPU.Build.0 = Release|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x64.ActiveCfg = Release|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x64.Build.0 = Release|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x86.ActiveCfg = Release|Any CPU
-		{EE0D67DE-27C9-4905-897C-86C705C82C11}.Release|x86.Build.0 = Release|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x64.Build.0 = Debug|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Debug|x86.Build.0 = Debug|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|Any CPU.Build.0 = Release|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x64.ActiveCfg = Release|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x64.Build.0 = Release|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x86.ActiveCfg = Release|Any CPU
-		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B}.Release|x86.Build.0 = Release|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x64.Build.0 = Debug|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Debug|x86.Build.0 = Debug|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x64.ActiveCfg = Release|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x64.Build.0 = Release|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x86.ActiveCfg = Release|Any CPU
-		{6C606A9D-5C85-4F6A-814A-4A2DF0DDFFBD}.Release|x86.Build.0 = Release|Any CPU
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -310,25 +276,15 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		# Substrates folder contains Mercury and Minerva folders
 		{ADF68131-EC39-4648-B640-E4F2C09EE3D2} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 		{E5F6A7B8-C9D0-1234-EF12-567890123456} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
-
-		# Meta folder contains Documentation and Infrastructure
 		{7FA0A47B-7556-4F7D-869D-744000F071D0} = {D4E5F6A7-B8C9-0123-DEF1-456789012345}
 		{6A048219-87B6-4063-9E6B-D76490244A39} = {D4E5F6A7-B8C9-0123-DEF1-456789012345}
-
-		# Architecture and API under Documentation
 		{F1A2B3C4-D5E6-7890-ABCD-111111111111} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
-		{F2A3B4C5-D6E7-8901-BCDE-222222222222} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
-
-		# Canonical Concepts, Narratives, and Technical under Architecture
 		{F5B6C7D8-E9F0-1234-5678-AAAAAAAAAAAA} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
 		{F6C7D8E9-F0A1-2345-6789-BBBBBBBBBBBB} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
 		{F7D8E9F0-A1B2-3456-789A-CCCCCCCCCCCC} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
-
-		# Mercury projects and ADRs nested under Mercury folder
-		{F3A4B5C6-D7E8-9012-CDEF-333333333333} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
+		{F2A3B4C5-D6E7-8901-BCDE-222222222222} = {7FA0A47B-7556-4F7D-869D-744000F071D0}
 		{78DA4240-610F-4DE8-A6E0-6E188C2BD45E} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{D7EF052B-113D-4E93-AA47-51BCA51B2A8B} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{3112A9F3-24EA-42E6-83DE-9F0FD07A853B} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
@@ -340,9 +296,8 @@ Global
 		{B1C2D3E4-F5A6-7890-BCDE-F12345678901} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{C2D3E4F5-A6B7-8901-CDEF-123456789012} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{D3E4F5A6-B7C8-9012-DEF1-234567890123} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
-
-		# Minerva projects and ADRs nested under Minerva folder
-		{F4A5B6C7-D8E9-0123-DEF0-444444444444} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
+		{F3A4B5C6-D7E8-9012-CDEF-333333333333} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 		{23A7B38F-AFE8-46A2-8737-1F32AE67AA78} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
+		{F4A5B6C7-D8E9-0123-DEF0-444444444444} = {E5F6A7B8-C9D0-1234-EF12-567890123456}
 	EndGlobalSection
 EndGlobal

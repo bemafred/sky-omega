@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using SkyOmega.Mercury.Sparql;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -111,7 +112,7 @@ public ref partial struct QueryResults
 
     private static bool TryParseNumber(ReadOnlySpan<char> s, out double result)
     {
-        return double.TryParse(s, out result);
+        return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
     }
 
     /// <summary>
@@ -378,7 +379,8 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
 
     private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
     {
-        if (double.TryParse(a, out var aNum) && double.TryParse(b, out var bNum))
+        if (double.TryParse(a, NumberStyles.Float, CultureInfo.InvariantCulture, out var aNum) &&
+            double.TryParse(b, NumberStyles.Float, CultureInfo.InvariantCulture, out var bNum))
         {
             return aNum.CompareTo(bNum);
         }

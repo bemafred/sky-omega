@@ -8,7 +8,7 @@ using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Tests.Fixtures;
 
-namespace Mercury.Tests;
+namespace SkyOmega.Mercury.Tests;
 
 /// <summary>
 /// Tests for Temporal SPARQL extensions: AS OF, DURING, ALL VERSIONS

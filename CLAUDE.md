@@ -640,6 +640,103 @@ cat BenchmarkDotNet.Artifacts/results/SkyOmega.Mercury.Benchmarks.QueryBenchmark
 
 **Note:** Artifacts directory is gitignored. Results persist locally between runs for comparison.
 
+### NCrunch Configuration (Parallel Test Execution)
+
+NCrunch runs tests in **separate processes** (never concurrent threads within the same process). Each process creates its own `QuadStorePool`, so disk usage scales with process count.
+
+**Disk footprint per store:**
+
+| Configuration | Per-Store Size | Notes |
+|---------------|----------------|-------|
+| Default (`StorageOptions.Default`) | ~5.5 GB | 4×1GB indexes + 1GB atoms + 512MB hash |
+| Testing (`StorageOptions.ForTesting`) | ~320 MB | 4×64MB indexes + 64MB atoms + 512MB hash |
+
+The test fixture uses `StorageOptions.ForTesting` automatically.
+
+### Cross-Process Store Coordination
+
+**Problem:** Multiple NCrunch test runner processes can each create stores, potentially exhausting disk space even with `StorageOptions.ForTesting`.
+
+**Solution:** `CrossProcessStoreGate` provides machine-wide coordination using a hybrid approach:
+
+1. **Primary: Named system semaphore** - Fast, kernel-level coordination across processes
+2. **Fallback: File-based slot locking** - Universal cross-platform support if semaphores fail
+
+**Components:**
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `CrossProcessStoreGate` | `Mercury.Runtime/CrossProcessStoreGate.cs` | Global store slot coordination |
+| `QuadStorePool` (updated) | `Mercury/Storage/QuadStorePool.cs` | Uses gate when `useCrossProcessGate: true` |
+| `QuadStorePoolFixture` | `Mercury.Tests/Fixtures/QuadStorePoolFixture.cs` | Enables gate for all tests |
+
+**How it works:**
+```csharp
+// Test fixture enables cross-process coordination
+Pool = new QuadStorePool(
+    storageOptions: StorageOptions.ForTesting,
+    useCrossProcessGate: true);  // <-- Key parameter
+
+// When Rent() creates a NEW store:
+// 1. Acquires global slot via CrossProcessStoreGate.Instance
+// 2. Creates store
+// 3. Slot held until pool is disposed
+```
+
+**Global slot calculation:**
+- Available disk × 33% ÷ 320MB per store
+- Clamped to 2-12 slots
+- Example: 10GB available → 10GB × 0.33 ÷ 320MB ≈ 10 slots max globally
+
+**Cross-platform behavior:**
+
+| Platform | Primary Strategy | Fallback |
+|----------|------------------|----------|
+| Windows | Named Semaphore (`Global\SkyOmega-...`) | File-based |
+| Linux | POSIX semaphore via .NET | File-based |
+| macOS | POSIX semaphore via .NET | File-based |
+
+**File-based fallback details:**
+- Lock directory: `/tmp/.sky-omega-pool-locks/` (or `%TEMP%` on Windows)
+- Files: `slot-0.lock` through `slot-N.lock`
+- Uses `FileShare.None` for exclusive locking
+- `DeleteOnClose` for automatic cleanup
+- Stale lock detection via PID check
+
+**Solution-level settings** (`SkyOmega.v3.ncrunchsolution`):
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `AllowParallelTestExecution` | True | Enable parallel execution |
+| `AllowTestsInParallelWithThemselves` | False | Prevent same-test conflicts |
+| `DefaultTestTimeout` | 120000 | 2-minute timeout for storage tests |
+
+**Global settings** (optional - gate handles coordination, but can still be tuned):
+
+| Setting | Recommended | Purpose |
+|---------|-------------|---------|
+| Max Number Of Processing Threads | 4-8 | Optional - gate provides safety regardless |
+| Max Test Runners To Pool | 2-4 | Optional - reduces memory usage |
+
+**Example with cross-process gate:**
+```
+Machine: 10GB available disk
+Global slots: 10 (calculated from disk budget)
+
+NCrunch Process A: Creates 3 stores → holds 3 global slots
+NCrunch Process B: Creates 3 stores → holds 3 global slots
+NCrunch Process C: Tries to create 5 stores → gets 4, blocks on 5th
+NCrunch Process D: Blocks waiting for global slot
+
+Total: 10 stores × 320MB = 3.2GB ✓ Safe (within 33% budget)
+```
+
+**Troubleshooting:**
+
+1. **Timeout waiting for slot**: Check `CrossProcessStoreGate.Instance.MaxGlobalStores` - may need more disk space
+2. **Lock files accumulating**: Check `/tmp/.sky-omega-pool-locks/` for stale files from crashed processes
+3. **Semaphore issues on Linux**: Ensure `/dev/shm` is mounted and writable
+
 ### Production Hardening Checklist
 
 - [x] Query timeout via CancellationToken
