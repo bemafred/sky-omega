@@ -24,7 +24,7 @@ Why now? Why not a decade ago, or a decade hence? Because several independent de
 
 **The standards are stable.** RDF, SPARQL, and TURTLE have evolved from research curiosities to mature W3C specifications with precise EBNF grammars. These are no longer moving targets. They are bedrock on which to build.
 
-**The hardware has arrived.** Memory-mapped storage, modern CPU architectures, and decades of database research make it possible to build a zero-garbage-collection RDF substrate with sub-millisecond query times. What was once a performance curiosity is now a practical foundation.
+**The hardware has arrived.** Memory-mapped storage, modern CPU architectures, and decades of database research make it possible to build a zero-garbage-collection RDF substrate with sub-millisecond query times. What was once a theoretical possibility is now a practical foundation.
 
 **The LLMs have crossed a threshold.** Language models can now reason coherently, follow complex instructions, and translate fluently between natural language and structured formats. They are not perfect reasoners, but they are good enough to be the human-machine bridge the Semantic Web always needed.
 
