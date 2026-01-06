@@ -116,6 +116,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D
 	ProjectSection(SolutionItems) = preProject
 		docs\adrs\minerva\ADR-001-weight-formats.md = docs\adrs\minerva\ADR-001-weight-formats.md
 		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
+		docs\adrs\minerva\ADR-002-hardware-acceleration-strategy.md = docs\adrs\minerva\ADR-002-hardware-acceleration-strategy.md
+		docs\adrs\minerva\ADR-003-metal-compute-architecture.md = docs\adrs\minerva\ADR-003-metal-compute-architecture.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "5 Tools", "5 Tools", "{323748F7-28B7-4B8A-A5E6-A6D1B2745CDF}"
