@@ -135,17 +135,44 @@ public sealed partial class TurtleStreamParser
     {
         _sb.Clear();
 
+        // PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)?
+        // First character must be PN_CHARS_BASE
+        var firstCh = Peek();
+        if (firstCh == ':')
+        {
+            // Empty prefix (just ":")
+            Consume();
+            return string.Empty;
+        }
+
+        if (!IsPnCharsBase(firstCh))
+            throw ParserException("Invalid prefix name");
+
+        Consume();
+        _sb.Append((char)firstCh);
+
         while (true)
         {
             var ch = Peek();
 
             if (ch == ':')
             {
+                // Prefix cannot end with dot
+                if (_sb.Length > 0 && _sb[_sb.Length - 1] == '.')
+                    throw ParserException("Prefix name cannot end with '.'");
                 Consume();
                 return _sb.ToString();
             }
 
-            if (ch == -1 || !IsPnCharsBase(ch) && !IsPnChars(ch))
+            // Allow PN_CHARS or '.' in the middle
+            if (ch == '.')
+            {
+                Consume();
+                _sb.Append('.');
+                continue;
+            }
+
+            if (ch == -1 || !IsPnChars(ch))
                 throw ParserException("Invalid prefix name");
 
             Consume();
@@ -160,9 +187,16 @@ public sealed partial class TurtleStreamParser
     private void ParseBaseDirective(bool requireDot = true)
     {
         SkipWhitespaceAndComments();
-        
-        _baseUri = ParseIriRef();
-        
+
+        var iriRef = ParseIriRef();
+
+        // Strip angle brackets for internal storage - _baseUri is used with Uri class
+        // which expects plain URI strings, not RDF IRI references
+        if (iriRef.StartsWith('<') && iriRef.EndsWith('>'))
+            _baseUri = iriRef[1..^1];
+        else
+            _baseUri = iriRef;
+
         if (requireDot)
         {
             SkipWhitespaceAndComments();

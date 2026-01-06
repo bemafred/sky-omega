@@ -58,9 +58,24 @@ public sealed partial class TurtleStreamParser
                 // Check if it's an escape sequence
                 if (ch == '\\')
                 {
-                    Consume();
-                    var escaped = ParseUnicodeEscape();
-                    _sb.Append(escaped);
+                    Consume(); // Consume backslash
+                    var escapeType = Peek();
+                    if (escapeType == 'u')
+                    {
+                        Consume();
+                        var escaped = ParseUnicodeEscape(4);
+                        _sb.Append(escaped);
+                    }
+                    else if (escapeType == 'U')
+                    {
+                        Consume();
+                        var codePoint = ParseUnicodeCodePoint(8);
+                        AppendCodePointToSb(codePoint);
+                    }
+                    else
+                    {
+                        throw ParserException($"Invalid escape in IRI: \\{(char)escapeType}");
+                    }
                     continue;
                 }
 
@@ -148,15 +163,26 @@ public sealed partial class TurtleStreamParser
             }
             else if (ch == '.')
             {
-                // Period is allowed in middle
-                var next = PeekAhead(1);
-                if (IsPnChars(next) || next == ':')
+                // Period(s) allowed in middle - count consecutive dots
+                // and check if there's a valid continuation after them
+                int dotCount = 0;
+                while (PeekAhead(dotCount) == '.')
+                    dotCount++;
+
+                // Check what comes after all the dots
+                var afterDots = PeekAhead(dotCount);
+                if (IsPnChars(afterDots) || afterDots == ':' || afterDots == '%' || afterDots == '\\')
                 {
-                    Consume();
-                    _sb.Append('.');
+                    // Valid continuation - consume all dots
+                    for (int i = 0; i < dotCount; i++)
+                    {
+                        Consume();
+                        _sb.Append('.');
+                    }
                 }
                 else
                 {
+                    // No valid continuation - dots are statement terminators
                     break;
                 }
             }
@@ -665,9 +691,24 @@ public sealed partial class TurtleStreamParser
             {
                 if (ch == '\\')
                 {
-                    Consume();
-                    var escaped = ParseUnicodeEscape();
-                    AppendToOutput(escaped);
+                    Consume(); // Consume backslash
+                    var escapeType = Peek();
+                    if (escapeType == 'u')
+                    {
+                        Consume();
+                        var escaped = ParseUnicodeEscape(4);
+                        AppendToOutput(escaped);
+                    }
+                    else if (escapeType == 'U')
+                    {
+                        Consume();
+                        var codePoint = ParseUnicodeCodePoint(8);
+                        AppendCodePoint(codePoint);
+                    }
+                    else
+                    {
+                        throw ParserException($"Invalid escape in IRI: \\{(char)escapeType}");
+                    }
                     continue;
                 }
 
@@ -689,8 +730,16 @@ public sealed partial class TurtleStreamParser
     /// </summary>
     private ReadOnlySpan<char> ResolveIriSpan(ReadOnlySpan<char> iri, int iriStart)
     {
-        // If absolute IRI, return as-is
-        if (iri.Contains("://".AsSpan(), StringComparison.Ordinal))
+        // IRIs come in with angle brackets, e.g. "<s>" or "<http://example.org/>"
+        // Strip brackets for checking and resolution
+
+        if (iri.Length < 2 || iri[0] != '<' || iri[^1] != '>')
+            return iri;
+
+        var innerIri = iri[1..^1]; // Strip angle brackets
+
+        // If absolute IRI, return as-is (with brackets)
+        if (innerIri.Contains("://".AsSpan(), StringComparison.Ordinal))
             return iri;
 
         // No base URI, return as-is
@@ -701,9 +750,11 @@ public sealed partial class TurtleStreamParser
         try
         {
             var baseUri = new Uri(_baseUri, UriKind.Absolute);
-            var resolved = new Uri(baseUri, iri.ToString()); // Unavoidable allocation for Uri
+            var resolved = new Uri(baseUri, innerIri.ToString()); // Unavoidable allocation for Uri
             _outputOffset = iriStart; // Reset to overwrite
+            AppendToOutput('<');
             AppendToOutput(resolved.ToString().AsSpan());
+            AppendToOutput('>');
             return GetOutputSpan(iriStart);
         }
         catch
@@ -714,27 +765,57 @@ public sealed partial class TurtleStreamParser
 
     /// <summary>
     /// Parse prefixed name and return span.
+    /// PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)?
     /// </summary>
     private ReadOnlySpan<char> ParsePrefixedNameSpan()
     {
         int prefixStart = _outputOffset;
 
-        // Parse prefix
-        while (true)
+        // First character must be PN_CHARS_BASE or we have a just-colon prefix
+        var firstCh = Peek();
+        if (firstCh == ':')
         {
-            var ch = Peek();
-
-            if (ch == ':')
-            {
-                Consume();
-                break;
-            }
-
-            if (ch == -1 || !IsPnCharsBase(ch) && !IsPnChars(ch) && ch != '.')
-                return ReadOnlySpan<char>.Empty;
-
             Consume();
-            AppendToOutput((char)ch);
+            // Empty prefix (just ":")
+        }
+        else if (!IsPnCharsBase(firstCh))
+        {
+            // Not a valid prefix start - could be '.', digit, etc.
+            return ReadOnlySpan<char>.Empty;
+        }
+        else
+        {
+            // Parse prefix name
+            Consume();
+            AppendToOutput((char)firstCh);
+
+            while (true)
+            {
+                var ch = Peek();
+
+                if (ch == ':')
+                {
+                    // Prefix cannot end with dot
+                    if (_outputOffset > prefixStart && _outputBuffer[_outputOffset - 1] == '.')
+                        throw ParserException("Prefix name cannot end with '.'");
+                    Consume();
+                    break;
+                }
+
+                // Allow PN_CHARS or '.' in the middle
+                if (ch == '.')
+                {
+                    Consume();
+                    AppendToOutput('.');
+                    continue;
+                }
+
+                if (ch == -1 || !IsPnChars(ch))
+                    return ReadOnlySpan<char>.Empty;
+
+                Consume();
+                AppendToOutput((char)ch);
+            }
         }
 
         var prefixSpan = GetOutputSpan(prefixStart);
@@ -791,14 +872,26 @@ public sealed partial class TurtleStreamParser
             }
             else if (ch == '.')
             {
-                var next = PeekAhead(1);
-                if (IsPnChars(next) || next == ':')
+                // Period(s) allowed in middle - count consecutive dots
+                // and check if there's a valid continuation after them
+                int dotCount = 0;
+                while (PeekAhead(dotCount) == '.')
+                    dotCount++;
+
+                // Check what comes after all the dots
+                var afterDots = PeekAhead(dotCount);
+                if (IsPnChars(afterDots) || afterDots == ':' || afterDots == '%' || afterDots == '\\')
                 {
-                    Consume();
-                    AppendToOutput('.');
+                    // Valid continuation - consume all dots
+                    for (int i = 0; i < dotCount; i++)
+                    {
+                        Consume();
+                        AppendToOutput('.');
+                    }
                 }
                 else
                 {
+                    // No valid continuation - dots are statement terminators
                     break;
                 }
             }

@@ -491,10 +491,14 @@ public sealed partial class TurtleStreamParser : IDisposable
         ResetOutputBuffer();
 
         ReadOnlySpan<char> subject;
+        bool blankNodePropertyListEmittedTriples = false;
 
         if (Peek() == '[')
         {
             subject = ParseBlankNodePropertyListSpan();
+            // blankNodePropertyList already emitted triples inside via ParsePredicateObjectListZeroGCForBlankNode
+            // Even if there's no additional predicate-object list after ']', we've processed content
+            blankNodePropertyListEmittedTriples = !subject.IsEmpty;
         }
         else if (PeekString("<<"))
         {
@@ -508,7 +512,11 @@ public sealed partial class TurtleStreamParser : IDisposable
         if (subject.IsEmpty)
             return false;
 
-        return ParsePredicateObjectListZeroGC(subject, handler);
+        // Parse optional predicate-object list after the subject
+        // For blankNodePropertyList, this is the OPTIONAL predicateObjectList after ']'
+        var additionalTriples = ParsePredicateObjectListZeroGC(subject, handler);
+
+        return blankNodePropertyListEmittedTriples || additionalTriples;
     }
 
     /// <summary>

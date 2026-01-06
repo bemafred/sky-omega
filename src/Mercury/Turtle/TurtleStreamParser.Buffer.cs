@@ -266,10 +266,87 @@ public sealed partial class TurtleStreamParser
         // Check for surrogate code points (not allowed)
         if (value >= 0xD800 && value <= 0xDFFF)
             throw ParserException($"Invalid unicode escape: surrogate code point U+{value:X4}");
-        
+
         return (char)value;
     }
-    
+
+    /// <summary>
+    /// Parse unicode escape and return the code point as int (for \U escapes that may be > 0xFFFF).
+    /// </summary>
+    private int ParseUnicodeCodePoint(int digits)
+    {
+        var value = 0;
+
+        for (int i = 0; i < digits; i++)
+        {
+            var ch = Peek();
+
+            if (ch == -1)
+                throw ParserException("Unexpected end of input in unicode escape");
+
+            var hexValue = ch switch
+            {
+                >= '0' and <= '9' => ch - '0',
+                >= 'A' and <= 'F' => ch - 'A' + 10,
+                >= 'a' and <= 'f' => ch - 'a' + 10,
+                _ => throw ParserException($"Invalid hex digit in unicode escape: {(char)ch}")
+            };
+
+            Consume();
+            value = (value << 4) | hexValue;
+        }
+
+        // Check for surrogate code points (not allowed)
+        if (value >= 0xD800 && value <= 0xDFFF)
+            throw ParserException($"Invalid unicode escape: surrogate code point U+{value:X4}");
+
+        // Check for valid Unicode range
+        if (value > 0x10FFFF)
+            throw ParserException($"Invalid unicode escape: code point U+{value:X} exceeds maximum");
+
+        return value;
+    }
+
+    /// <summary>
+    /// Append a Unicode code point to the output buffer, handling surrogate pairs for code points > 0xFFFF.
+    /// </summary>
+    private void AppendCodePoint(int codePoint)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            AppendToOutput((char)codePoint);
+        }
+        else
+        {
+            // Encode as surrogate pair
+            codePoint -= 0x10000;
+            var highSurrogate = (char)(0xD800 + (codePoint >> 10));
+            var lowSurrogate = (char)(0xDC00 + (codePoint & 0x3FF));
+            AppendToOutput(highSurrogate);
+            AppendToOutput(lowSurrogate);
+        }
+    }
+
+    /// <summary>
+    /// Append a Unicode code point to StringBuilder, handling surrogate pairs for code points > 0xFFFF.
+    /// </summary>
+    private void AppendCodePointToSb(int codePoint)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            _sb.Append((char)codePoint);
+        }
+        else
+        {
+            // Encode as surrogate pair
+            codePoint -= 0x10000;
+            var highSurrogate = (char)(0xD800 + (codePoint >> 10));
+            var lowSurrogate = (char)(0xDC00 + (codePoint & 0x3FF));
+            _sb.Append(highSurrogate);
+            _sb.Append(lowSurrogate);
+        }
+    }
+
     private string ParsePercentEncoded()
     {
         if (!TryConsume('%'))
@@ -301,19 +378,27 @@ public sealed partial class TurtleStreamParser
     
     private string ResolveIri(string iri)
     {
-        // If absolute IRI, return as-is
-        if (Uri.IsWellFormedUriString(iri, UriKind.Absolute))
+        // IRIs come in with angle brackets, e.g. "<s>" or "<http://example.org/>"
+        // We need to strip brackets for resolution, then re-add them
+
+        if (!iri.StartsWith('<') || !iri.EndsWith('>'))
             return iri;
-        
+
+        var innerIri = iri[1..^1]; // Strip angle brackets
+
+        // If absolute IRI, return as-is (with brackets)
+        if (Uri.IsWellFormedUriString(innerIri, UriKind.Absolute))
+            return iri;
+
         // Resolve relative IRI against base
         if (string.IsNullOrEmpty(_baseUri))
             return iri;
-        
+
         try
         {
             var baseUri = new Uri(_baseUri, UriKind.Absolute);
-            var resolved = new Uri(baseUri, iri);
-            return resolved.ToString();
+            var resolved = new Uri(baseUri, innerIri);
+            return $"<{resolved}>";
         }
         catch
         {
