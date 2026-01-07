@@ -3,16 +3,17 @@
 ##
 ## Get latest from `dotnet new gitignore`
 
-# Default ignored files
-/shelf/
-/workspace.xml
-/prototypes/
-
-# Rider ignored files
+# JetBrains Rider
+/.idea/*
 /contentModel.xml
 /modules.xml
 /.idea.SkyOmega.iml
 /projectSettingsUpdater.xml
+
+# Default ignored files
+/shelf/
+/workspace.xml
+/prototypes/
 
 # Editor-based HTTP Client requests
 /httpRequests/
