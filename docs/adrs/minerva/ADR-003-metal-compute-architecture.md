@@ -15,26 +15,26 @@ ADR-002 established the multi-backend architecture with Apple Silicon support vi
 
 ### Target Hardware: M4 Max
 
-|Resource          |Specification|Implication                      |
-|——————|-————|———————————|
-|GPU Cores         |40           |Massive parallelism for attention|
-|Unified Memory    |128 GB       |Full model + KV-cache in-memory  |
-|Memory Bandwidth  |546 GB/s     |Memory-bound ops bottleneck here |
-|Threadgroup Memory|32 KB        |Constrains tile sizes            |
-|SIMD Width        |32 threads   |Natural tile dimension           |
+| Resource            | Specification | Implication                       |
+|---------------------|---------------|-----------------------------------|
+| GPU Cores           | 40            | Massive parallelism for attention |
+| Unified Memory      | 128 GB        | Full model + KV-cache in-memory   |
+| Memory Bandwidth    | 546 GB/s      | Memory-bound ops bottleneck here  |
+| Threadgroup Memory  | 32 KB         | Constrains tile sizes             |
+| SIMD Width          | 32 threads    | Natural tile dimension            |
 
 ### Transformer Inference Profile
 
-|Operation       |Characteristic|Optimal Backend             |
-|-—————|—————|-—————————|
-|Embedding Lookup|Memory-bound  |Metal (coalesced reads)     |
-|RMSNorm         |Memory-bound  |Metal (elementwise)         |
-|QKV Projection  |Compute-bound |AMX via Accelerate          |
-|RoPE            |Compute-bound |Metal (parallel)            |
-|Attention (QK^T)|Memory-bound  |Metal (Flash Attention)     |
-|Softmax         |Memory-bound  |Metal (fused with attention)|
-|FFN MatMul      |Compute-bound |AMX via Accelerate          |
-|SiLU/GELU       |Compute-bound |Metal (elementwise)         |
+| Operation        | Characteristic | Optimal Backend             |
+|------------------|---------------|------------------------------|
+| Embedding Lookup | Memory-bound  | Metal (coalesced reads)      |
+| RMSNorm          | Memory-bound  | Metal (elementwise)          |
+| QKV Projection   | Compute-bound | AMX via Accelerate           |
+| RoPE             | Compute-bound | Metal (parallel)             |
+| Attention (QK^T) | Memory-bound  | Metal (Flash Attention)      |
+| Softmax          | Memory-bound  | Metal (fused with attention) |
+| FFN MatMul       | Compute-bound | AMX via Accelerate           |
+| SiLU/GELU        | Compute-bound | Metal (elementwise)          |
 
 **Decision principle**: Large matrix multiplications → AMX. Everything else → Metal GPU.
 
@@ -713,12 +713,12 @@ public sealed class KVCache : IDisposable
 
 ### Risks and Mitigations
 
-|Risk                     |Mitigation                                 |
-|-————————|-——————————————|
-|Metal API changes        |Pin to stable macOS SDK version            |
-|Numerical precision      |Compare outputs against llama.cpp reference|
-|Threadgroup memory limits|Tile sizes tuned for 32 KB shared memory   |
-|KV-cache overflow        |Explicit max_seq_len, sliding window option|
+| Risk                      | Mitigation                                  |
+|---------------------------|---------------------------------------------|
+| Metal API changes         | Pin to stable macOS SDK version             |
+| Numerical precision       | Compare outputs against llama.cpp reference |
+| Threadgroup memory limits | Tile sizes tuned for 32 KB shared memory    |
+| KV-cache overflow         | Explicit max_seq_len, sliding window option |
 
 ## Implementation Order
 
