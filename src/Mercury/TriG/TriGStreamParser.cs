@@ -345,7 +345,13 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
             var predicate = ParsePredicate();
             if (predicate.IsEmpty)
+            {
+                // Check if there's a blank node in predicate position (not allowed)
+                var ch = Peek();
+                if (ch == '[' || ch == '_')
+                    throw ParserException("Blank nodes cannot be used as predicates");
                 break;
+            }
 
             SkipWhitespaceAndComments();
 
@@ -379,12 +385,18 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     private void ParseObjectList(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> graph, QuadHandler handler)
     {
+        bool hasObject = false;
         while (true)
         {
             var obj = ParseObjectWithHandler(graph, handler);
             if (obj.IsEmpty)
+            {
+                if (!hasObject)
+                    throw ParserException("Expected object after predicate");
                 break;
+            }
 
+            hasObject = true;
             handler(subject, predicate, obj, graph);
 
             SkipWhitespaceAndComments();
@@ -1264,6 +1276,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         var iri = ParseIriRef();
         var ns = iri.Slice(1, iri.Length - 2).ToString();
         _namespaces[prefix] = ns;
+        // SPARQL-style PREFIX must not end with '.'
+        SkipWhitespaceAndComments();
+        if (Peek() == '.')
+            throw ParserException("SPARQL-style PREFIX must not end with '.'");
     }
 
     private void ParseSparqlBaseDirective()
@@ -1271,6 +1287,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         SkipWhitespaceAndComments();
         var iri = ParseIriRef();
         _baseUri = iri.Slice(1, iri.Length - 2).ToString();
+        // SPARQL-style BASE must not end with '.'
+        SkipWhitespaceAndComments();
+        if (Peek() == '.')
+            throw ParserException("SPARQL-style BASE must not end with '.'");
     }
 
     private string ParsePrefixName()
@@ -1338,6 +1358,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             Consume();
             value = (value << 4) | hexValue;
         }
+
+        // Reject surrogate code points (U+D800-U+DFFF)
+        if (value >= 0xD800 && value <= 0xDFFF)
+            throw ParserException($"Surrogate code points are not allowed: U+{value:X4}");
 
         return (char)value;
     }
