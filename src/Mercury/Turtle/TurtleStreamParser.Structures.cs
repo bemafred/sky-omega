@@ -80,10 +80,12 @@ public sealed partial class TurtleStreamParser
         var prefix = ParsePrefixName();
         
         SkipWhitespaceAndComments();
-        
-        // Parse namespace IRI
+
+        // Parse namespace IRI - must be present
         var namespaceIri = ParseIriRef();
-        
+        if (string.IsNullOrEmpty(namespaceIri))
+            throw ParserException("Expected IRI after prefix name in @prefix directive");
+
         // Store in namespace map
         _namespaces[prefix] = namespaceIri;
         
@@ -153,6 +155,8 @@ public sealed partial class TurtleStreamParser
         SkipWhitespaceAndComments();
 
         var iriRef = ParseIriRef();
+        if (string.IsNullOrEmpty(iriRef))
+            throw ParserException("Expected IRI after @base directive");
 
         // Strip angle brackets for internal storage - _baseUri is used with Uri class
         // which expects plain URI strings, not RDF IRI references

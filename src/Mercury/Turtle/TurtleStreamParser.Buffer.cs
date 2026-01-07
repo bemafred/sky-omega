@@ -18,33 +18,106 @@ public sealed partial class TurtleStreamParser
         {
             if (_endOfStream)
                 return -1;
-            
+
             // Buffer exhausted during sync parsing - main loop handles refills at statement boundaries
             return -1;
         }
-        
-        return _inputBuffer[_bufferPosition];
+
+        // Decode UTF-8 to get Unicode code point
+        return PeekUtf8CodePoint(out _);
     }
-    
+
+    /// <summary>
+    /// Peek the current UTF-8 code point and return its byte length.
+    /// Returns -1 if at end of input.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int PeekUtf8CodePoint(out int byteLength)
+    {
+        if (_bufferPosition >= _bufferLength)
+        {
+            byteLength = 0;
+            return -1;
+        }
+
+        var b0 = _inputBuffer[_bufferPosition];
+
+        // ASCII (0x00-0x7F): single byte
+        if (b0 < 0x80)
+        {
+            byteLength = 1;
+            return b0;
+        }
+
+        // 2-byte sequence (0xC0-0xDF)
+        if ((b0 & 0xE0) == 0xC0)
+        {
+            if (_bufferPosition + 1 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0; // Incomplete sequence, return first byte
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            byteLength = 2;
+            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
+        }
+
+        // 3-byte sequence (0xE0-0xEF)
+        if ((b0 & 0xF0) == 0xE0)
+        {
+            if (_bufferPosition + 2 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0; // Incomplete sequence
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            var b2 = _inputBuffer[_bufferPosition + 2];
+            byteLength = 3;
+            return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+        }
+
+        // 4-byte sequence (0xF0-0xF7)
+        if ((b0 & 0xF8) == 0xF0)
+        {
+            if (_bufferPosition + 3 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0; // Incomplete sequence
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            var b2 = _inputBuffer[_bufferPosition + 2];
+            var b3 = _inputBuffer[_bufferPosition + 3];
+            byteLength = 4;
+            return ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+        }
+
+        // Invalid UTF-8 lead byte, return as-is
+        byteLength = 1;
+        return b0;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int PeekAhead(int offset)
     {
         var pos = _bufferPosition + offset;
         if (pos >= _bufferLength)
             return -1;
-        
+
         return _inputBuffer[pos];
     }
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Consume()
     {
-        if (_bufferPosition >= _bufferLength) 
+        if (_bufferPosition >= _bufferLength)
             return;
-        
+
+        // Get the byte length of the current UTF-8 code point
+        PeekUtf8CodePoint(out var byteLength);
+
         var ch = _inputBuffer[_bufferPosition];
-        _bufferPosition++;
-            
+        _bufferPosition += byteLength;
+
         if (ch == '\n')
         {
             _line++;
@@ -183,25 +256,28 @@ public sealed partial class TurtleStreamParser
     }
     
     // Character classification per Turtle grammar
-    
+    // PN_CHARS_BASE includes code points beyond the BMP (U+10000-U+EFFFF)
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsPnCharsBase(int ch)
     {
         if (ch == -1) return false;
-        var c = (char)ch;
-        return (c >= 'A' && c <= 'Z') ||
-               (c >= 'a' && c <= 'z') ||
-               (c >= '\u00C0' && c <= '\u00D6') ||
-               (c >= '\u00D8' && c <= '\u00F6') ||
-               (c >= '\u00F8' && c <= '\u02FF') ||
-               (c >= '\u0370' && c <= '\u037D') ||
-               (c >= '\u037F' && c <= '\u1FFF') ||
-               (c >= '\u200C' && c <= '\u200D') ||
-               (c >= '\u2070' && c <= '\u218F') ||
-               (c >= '\u2C00' && c <= '\u2FEF') ||
-               (c >= '\u3001' && c <= '\uD7FF') ||
-               (c >= '\uF900' && c <= '\uFDCF') ||
-               (c >= '\uFDF0' && c <= '\uFFFD');
+
+        // Check code point ranges per W3C Turtle grammar [163s]
+        return (ch >= 'A' && ch <= 'Z') ||
+               (ch >= 'a' && ch <= 'z') ||
+               (ch >= 0x00C0 && ch <= 0x00D6) ||
+               (ch >= 0x00D8 && ch <= 0x00F6) ||
+               (ch >= 0x00F8 && ch <= 0x02FF) ||
+               (ch >= 0x0370 && ch <= 0x037D) ||
+               (ch >= 0x037F && ch <= 0x1FFF) ||
+               (ch >= 0x200C && ch <= 0x200D) ||
+               (ch >= 0x2070 && ch <= 0x218F) ||
+               (ch >= 0x2C00 && ch <= 0x2FEF) ||
+               (ch >= 0x3001 && ch <= 0xD7FF) ||
+               (ch >= 0xF900 && ch <= 0xFDCF) ||
+               (ch >= 0xFDF0 && ch <= 0xFFFD) ||
+               (ch >= 0x10000 && ch <= 0xEFFFF);  // Beyond BMP
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -214,13 +290,13 @@ public sealed partial class TurtleStreamParser
     private static bool IsPnChars(int ch)
     {
         if (ch == -1) return false;
-        var c = (char)ch;
-        return IsPnCharsU(ch) || 
-               c == '-' || 
-               char.IsDigit(c) ||
-               c == '\u00B7' ||
-               (c >= '\u0300' && c <= '\u036F') ||
-               (c >= '\u203F' && c <= '\u2040');
+        // PN_CHARS per W3C Turtle grammar [166s]
+        return IsPnCharsU(ch) ||
+               ch == '-' ||
+               (ch >= '0' && ch <= '9') ||
+               ch == 0x00B7 ||
+               (ch >= 0x0300 && ch <= 0x036F) ||
+               (ch >= 0x203F && ch <= 0x2040);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

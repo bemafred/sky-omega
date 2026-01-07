@@ -304,8 +304,8 @@ public sealed partial class TurtleStreamParser
         {
             Consume(); // ^
             Consume(); // ^
-            var datatype = ParseIri();
-            return string.Concat("\"", lexicalForm, "\"^^<", datatype, ">");
+            var datatype = ParseIri();  // Already includes angle brackets
+            return string.Concat("\"", lexicalForm, "\"^^", datatype);
         }
 
         // Plain string (implicit xsd:string)
@@ -518,7 +518,7 @@ public sealed partial class TurtleStreamParser
     {
         _sb.Clear();
 
-        // Parse language tag
+        // Parse language tag (preserve original case per W3C test suite)
         while (true)
         {
             var ch = Peek();
@@ -526,7 +526,7 @@ public sealed partial class TurtleStreamParser
             if (char.IsLetter((char)ch))
             {
                 Consume();
-                _sb.Append(char.ToLowerInvariant((char)ch));
+                _sb.Append((char)ch);
             }
             else if (ch == '-')
             {
@@ -543,7 +543,7 @@ public sealed partial class TurtleStreamParser
                     {
                         ch = Peek();
                         Consume();
-                        _sb.Append(char.ToLowerInvariant((char)ch));
+                        _sb.Append((char)ch);
                     }
 
                     break;
@@ -1117,11 +1117,8 @@ public sealed partial class TurtleStreamParser
         else if (ch == '^' && PeekAhead(1) == '^')
         {
             Consume(); Consume();
-            AppendToOutput("^^<".AsSpan());
-            int dtStart = _outputOffset;
-            var dtSpan = ParseIriSpan();
-            // The IRI is already in the buffer, just close with >
-            AppendToOutput('>');
+            AppendToOutput("^^".AsSpan());
+            var dtSpan = ParseIriSpan();  // Already includes angle brackets
         }
 
         return GetOutputSpan(start);
@@ -1297,6 +1294,7 @@ public sealed partial class TurtleStreamParser
     /// </summary>
     private void ParseLangDirSpan()
     {
+        // Parse language tag (preserve original case per W3C test suite)
         while (true)
         {
             var ch = Peek();
@@ -1304,7 +1302,7 @@ public sealed partial class TurtleStreamParser
             if (char.IsLetter((char)ch))
             {
                 Consume();
-                AppendToOutput(char.ToLowerInvariant((char)ch));
+                AppendToOutput((char)ch);
             }
             else if (ch == '-')
             {
@@ -1320,7 +1318,7 @@ public sealed partial class TurtleStreamParser
                     {
                         ch = Peek();
                         Consume();
-                        AppendToOutput(char.ToLowerInvariant((char)ch));
+                        AppendToOutput((char)ch);
                     }
 
                     break;

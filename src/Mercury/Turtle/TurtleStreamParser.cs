@@ -512,9 +512,14 @@ public sealed partial class TurtleStreamParser : IDisposable
         if (subject.IsEmpty)
             return false;
 
-        // Parse optional predicate-object list after the subject
-        // For blankNodePropertyList, this is the OPTIONAL predicateObjectList after ']'
+        // Parse predicate-object list after the subject
+        // For blankNodePropertyList, predicateObjectList is OPTIONAL
+        // For regular subjects (IRI, blank node), predicateObjectList is REQUIRED
         var additionalTriples = ParsePredicateObjectListZeroGC(subject, handler);
+
+        // If subject is NOT a blankNodePropertyList, predicateObjectList is REQUIRED
+        if (!blankNodePropertyListEmittedTriples && !additionalTriples)
+            throw ParserException("Expected predicate after subject");
 
         return blankNodePropertyListEmittedTriples || additionalTriples;
     }
