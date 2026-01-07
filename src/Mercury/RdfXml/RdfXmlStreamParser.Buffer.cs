@@ -111,6 +111,79 @@ public sealed partial class RdfXmlStreamParser
         return _endOfStream && _bufferPosition >= _bufferLength;
     }
 
+    /// <summary>
+    /// Read and decode a UTF-8 character, which may be 1-4 bytes.
+    /// Returns the Unicode code point, or -1 for end of input.
+    /// </summary>
+    private int ReadUtf8Char()
+    {
+        var b1 = Peek();
+        if (b1 == -1) return -1;
+        Consume();
+
+        // Single byte (ASCII): 0xxxxxxx
+        if ((b1 & 0x80) == 0)
+            return b1;
+
+        // Two bytes: 110xxxxx 10xxxxxx
+        if ((b1 & 0xE0) == 0xC0)
+        {
+            var b2 = Peek();
+            if (b2 == -1) return b1; // Incomplete sequence
+            Consume();
+            return ((b1 & 0x1F) << 6) | (b2 & 0x3F);
+        }
+
+        // Three bytes: 1110xxxx 10xxxxxx 10xxxxxx
+        if ((b1 & 0xF0) == 0xE0)
+        {
+            var b2 = Peek();
+            if (b2 == -1) return b1;
+            Consume();
+            var b3 = Peek();
+            if (b3 == -1) return ((b1 & 0x0F) << 6) | (b2 & 0x3F);
+            Consume();
+            return ((b1 & 0x0F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+        }
+
+        // Four bytes: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+        if ((b1 & 0xF8) == 0xF0)
+        {
+            var b2 = Peek();
+            if (b2 == -1) return b1;
+            Consume();
+            var b3 = Peek();
+            if (b3 == -1) return ((b1 & 0x07) << 6) | (b2 & 0x3F);
+            Consume();
+            var b4 = Peek();
+            if (b4 == -1) return ((b1 & 0x07) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+            Consume();
+            return ((b1 & 0x07) << 18) | ((b2 & 0x3F) << 12) | ((b3 & 0x3F) << 6) | (b4 & 0x3F);
+        }
+
+        // Invalid UTF-8 start byte - return as-is
+        return b1;
+    }
+
+    /// <summary>
+    /// Append a Unicode code point to the output buffer.
+    /// Handles supplementary characters (> 0xFFFF) as surrogate pairs.
+    /// </summary>
+    private void AppendCodePoint(int codePoint)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            AppendToOutput((char)codePoint);
+        }
+        else
+        {
+            // Supplementary character - emit as surrogate pair
+            codePoint -= 0x10000;
+            AppendToOutput((char)(0xD800 | (codePoint >> 10)));
+            AppendToOutput((char)(0xDC00 | (codePoint & 0x3FF)));
+        }
+    }
+
     #endregion
 
     #region Output Buffer
@@ -436,12 +509,15 @@ public sealed partial class RdfXmlStreamParser
                 {
                     // Entity reference
                     var entity = ParseEntityReference();
-                    AppendToOutput(entity);
+                    AppendCodePoint(entity);
                 }
                 else
                 {
-                    AppendToOutput((char)ch);
-                    Consume();
+                    // Read UTF-8 character (may be 1-4 bytes)
+                    var codePoint = ReadUtf8Char();
+                    if (codePoint == -1)
+                        break;
+                    AppendCodePoint(codePoint);
                 }
             }
 
@@ -465,6 +541,7 @@ public sealed partial class RdfXmlStreamParser
 
     /// <summary>
     /// Parse text content until &lt;.
+    /// Uses proper UTF-8 decoding for non-ASCII characters.
     /// </summary>
     private ReadOnlySpan<char> ParseTextContent()
     {
@@ -479,12 +556,15 @@ public sealed partial class RdfXmlStreamParser
             if (ch == '&')
             {
                 var entity = ParseEntityReference();
-                AppendToOutput(entity);
+                AppendCodePoint(entity);
             }
             else
             {
-                AppendToOutput((char)ch);
-                Consume();
+                // Read UTF-8 character (may be 1-4 bytes)
+                var codePoint = ReadUtf8Char();
+                if (codePoint == -1)
+                    break;
+                AppendCodePoint(codePoint);
             }
         }
 
@@ -493,6 +573,7 @@ public sealed partial class RdfXmlStreamParser
 
     /// <summary>
     /// Parse XML literal content (preserves XML structure).
+    /// Uses proper UTF-8 decoding for non-ASCII characters.
     /// </summary>
     private ReadOnlySpan<char> ParseXmlLiteralContent(ReadOnlySpan<char> elementName)
     {
@@ -529,8 +610,11 @@ public sealed partial class RdfXmlStreamParser
                         var c = Peek();
                         if (c == '/')
                             selfClosing = true;
-                        AppendToOutput((char)c);
-                        Consume();
+                        // UTF-8 decode tag content
+                        var codePoint = ReadUtf8Char();
+                        if (codePoint == -1)
+                            break;
+                        AppendCodePoint(codePoint);
                     }
                     if (Peek() == '>')
                     {
@@ -546,8 +630,10 @@ public sealed partial class RdfXmlStreamParser
                     // Comment or PI - include as-is
                     while (Peek() != '>' && !IsEndOfInput())
                     {
-                        AppendToOutput((char)Peek());
-                        Consume();
+                        var codePoint = ReadUtf8Char();
+                        if (codePoint == -1)
+                            break;
+                        AppendCodePoint(codePoint);
                     }
                     if (Peek() == '>')
                     {
@@ -558,8 +644,11 @@ public sealed partial class RdfXmlStreamParser
             }
             else
             {
-                AppendToOutput((char)ch);
-                Consume();
+                // UTF-8 decode regular content
+                var codePoint = ReadUtf8Char();
+                if (codePoint == -1)
+                    break;
+                AppendCodePoint(codePoint);
             }
         }
 
@@ -567,9 +656,10 @@ public sealed partial class RdfXmlStreamParser
     }
 
     /// <summary>
-    /// Parse entity reference (&amp;name;) and return decoded character.
+    /// Parse entity reference (&amp;name;) and return decoded code point.
+    /// Returns an int to support supplementary characters (> 0xFFFF).
     /// </summary>
-    private char ParseEntityReference()
+    private int ParseEntityReference()
     {
         Consume(); // '&'
 
@@ -608,7 +698,7 @@ public sealed partial class RdfXmlStreamParser
             }
 
             TryConsume(';');
-            return (char)value;
+            return value;
         }
         else
         {

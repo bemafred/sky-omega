@@ -80,16 +80,20 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     private int _line;
     private int _column;
 
+    // Base URI for resolving relative URIs
+    private string _baseUri = string.Empty;
+
     // Standard RDF namespace
     private const string RdfNamespace = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
     private const string XmlNamespace = "http://www.w3.org/XML/1998/namespace";
 
     private const int DefaultBufferSize = 16384;
 
-    public RdfXmlStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+    public RdfXmlStreamParser(Stream stream, string? baseUri = null, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
+        _baseUri = baseUri ?? string.Empty;
 
         _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
@@ -217,6 +221,12 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         {
             if (localName == "RDF")
             {
+                // Capture xml:base from rdf:RDF element
+                if (attributes.TryGetValue("xml:base", out var xmlBase))
+                {
+                    _baseUri = ResolveUri(xmlBase);
+                }
+
                 // Root rdf:RDF element - parse children
                 if (!selfClosing)
                 {
@@ -331,6 +341,9 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         string subjectStr,
         CancellationToken cancellationToken)
     {
+        // Counter for rdf:li elements (starts at 1 per W3C spec)
+        int liCounter = 1;
+
         while (!IsEndOfInput())
         {
             await RefillIfNeededAsync(cancellationToken);
@@ -358,6 +371,12 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 SplitQName(propNameStr, out var propPrefix, out var propLocal);
                 var propNamespace = ResolveNamespace(propPrefix);
 
+                // Handle rdf:li expansion to rdf:_1, rdf:_2, etc.
+                if (propNamespace == RdfNamespace && propLocal == "li")
+                {
+                    propLocal = $"_{liCounter++}";
+                }
+
                 ResetOutputBuffer();
                 var predicate = BuildIri(propNamespace.AsSpan(), propLocal.AsSpan());
                 var predicateStr = predicate.ToString();
@@ -368,12 +387,34 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 
                 if (propSelfClosing)
                 {
+                    // Check for rdf:parseType first
+                    if (propAttributes.TryGetValue("rdf:parseType", out var selfParseType) ||
+                        propAttributes.TryGetValue("parseType", out selfParseType))
+                    {
+                        if (selfParseType == "Resource")
+                        {
+                            // Self-closing parseType="Resource" creates empty blank node
+                            ResetOutputBuffer();
+                            var blankNode = GenerateBlankNode();
+                            handler(subjectStr.AsSpan(), predicateStr.AsSpan(), blankNode);
+                        }
+                        // Other parseTypes on self-closing produce empty literal
+                        else
+                        {
+                            ResetOutputBuffer();
+                            var obj = BuildPlainLiteral(ReadOnlySpan<char>.Empty);
+                            handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                        }
+                        continue;
+                    }
+
                     // Self-closing property - check for rdf:resource
                     if (propAttributes.TryGetValue("rdf:resource", out var resourceUri) ||
                         propAttributes.TryGetValue("resource", out resourceUri))
                     {
                         ResetOutputBuffer();
-                        var obj = WrapIri(resourceUri.AsSpan());
+                        var resolvedUri = ResolveUri(resourceUri);
+                        var obj = WrapIri(resolvedUri.AsSpan());
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
                     }
                     else if (propAttributes.TryGetValue("rdf:nodeID", out var nodeId) ||
@@ -381,6 +422,23 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                     {
                         ResetOutputBuffer();
                         var obj = BuildBlankNode(nodeId.AsSpan());
+                        handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                    }
+                    else if (HasPropertyAttributes(propAttributes))
+                    {
+                        // Property element with property attributes but no rdf:resource/nodeID
+                        // Creates an implicit blank node as the object
+                        ResetOutputBuffer();
+                        var blankNode = GenerateBlankNode();
+                        var blankNodeStr = blankNode.ToString();
+                        handler(subjectStr.AsSpan(), predicateStr.AsSpan(), blankNode);
+                        EmitPropertyAttributes(handler, blankNodeStr, propAttributes);
+                    }
+                    else
+                    {
+                        // Empty self-closing property element produces empty literal
+                        ResetOutputBuffer();
+                        var obj = BuildPlainLiteral(ReadOnlySpan<char>.Empty);
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
                     }
                     continue;
@@ -391,7 +449,8 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                     propAttributes.TryGetValue("resource", out resUri))
                 {
                     ResetOutputBuffer();
-                    var obj = WrapIri(resUri.AsSpan());
+                    var resolvedUri = ResolveUri(resUri);
+                    var obj = WrapIri(resolvedUri.AsSpan());
                     handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
                     SkipToClosingTag(propNameStr);
                     continue;
@@ -605,16 +664,24 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private string DetermineSubjectString(Dictionary<string, string> attributes)
     {
+        // Check for xml:base override
+        if (attributes.TryGetValue("xml:base", out var xmlBase))
+        {
+            _baseUri = ResolveUri(xmlBase);
+        }
+
         if (attributes.TryGetValue("rdf:about", out var aboutUri) ||
             attributes.TryGetValue("about", out aboutUri))
         {
-            return $"<{aboutUri}>";
+            return $"<{ResolveUri(aboutUri)}>";
         }
 
         if (attributes.TryGetValue("rdf:ID", out var id) ||
             attributes.TryGetValue("ID", out id))
         {
-            return $"<#{id}>"; // Simplified - should use base URI
+            // rdf:ID creates URI by appending #id to base URI
+            var resolvedBase = string.IsNullOrEmpty(_baseUri) ? "" : _baseUri;
+            return $"<{resolvedBase}#{id}>";
         }
 
         if (attributes.TryGetValue("rdf:nodeID", out var nodeId) ||
@@ -628,6 +695,74 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Resolve a URI reference against the base URI.
+    /// </summary>
+    private string ResolveUri(string uri)
+    {
+        if (string.IsNullOrEmpty(uri))
+            return _baseUri;
+
+        // Already absolute URI
+        if (uri.Contains("://") || uri.StartsWith("urn:"))
+            return uri;
+
+        if (string.IsNullOrEmpty(_baseUri))
+            return uri;
+
+        // Fragment reference
+        if (uri.StartsWith('#'))
+        {
+            // Remove any existing fragment from base
+            var hashIdx = _baseUri.IndexOf('#');
+            var baseWithoutFragment = hashIdx >= 0 ? _baseUri[..hashIdx] : _baseUri;
+            return baseWithoutFragment + uri;
+        }
+
+        // Relative URI - resolve against base
+        try
+        {
+            var baseUriObj = new Uri(_baseUri, UriKind.Absolute);
+            var resolved = new Uri(baseUriObj, uri);
+            return resolved.AbsoluteUri;
+        }
+        catch
+        {
+            // Fallback: simple concatenation
+            return _baseUri + uri;
+        }
+    }
+
+    /// <summary>
+    /// Check if attributes dictionary contains any property attributes (non-RDF/XML namespace).
+    /// </summary>
+    private static bool HasPropertyAttributes(Dictionary<string, string> attributes)
+    {
+        foreach (var name in attributes.Keys)
+        {
+            // rdf:type is a property attribute
+            if (name == "rdf:type" || name == "type")
+                return true;
+
+            // Skip other RDF/XML control attributes
+            if (name.StartsWith("rdf:") || name.StartsWith("xml:") || name.StartsWith("xmlns"))
+                continue;
+
+            // Skip namespace declarations
+            if (name.Contains(':'))
+            {
+                var colonIdx = name.IndexOf(':');
+                var prefix = name[..colonIdx];
+                if (prefix == "xmlns")
+                    continue;
+
+                // Found a property attribute
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Emit triples for property attributes (shorthand syntax).
     /// </summary>
     private void EmitPropertyAttributes(
@@ -637,7 +772,18 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     {
         foreach (var (name, value) in attributes)
         {
-            // Skip RDF attributes
+            // Handle rdf:type specially - value is a URI, not a literal
+            if (name == "rdf:type" || name == "type")
+            {
+                ResetOutputBuffer();
+                var predicate = $"<{RdfNamespace}type>".AsSpan();
+                var resolvedUri = ResolveUri(value);
+                var obj = WrapIri(resolvedUri.AsSpan());
+                handler(subjectStr.AsSpan(), predicate, obj);
+                continue;
+            }
+
+            // Skip other RDF control attributes
             if (name.StartsWith("rdf:") || name.StartsWith("xml:") || name.StartsWith("xmlns"))
                 continue;
 
@@ -782,10 +928,10 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private string ResolveNamespace(string prefix)
     {
-        if (string.IsNullOrEmpty(prefix))
-            return string.Empty;
+        // For elements without prefix, look up default namespace (empty key)
+        var key = prefix ?? string.Empty;
 
-        if (_namespaces.TryGetValue(prefix, out var uri))
+        if (_namespaces.TryGetValue(key, out var uri))
             return uri;
 
         return string.Empty;
