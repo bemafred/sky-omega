@@ -205,11 +205,56 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         }
         else
         {
+            // Check for collection - not allowed as graph label
+            if (Peek() == '(')
+            {
+                // This could be a collection in a triple, but not as graph name
+                // We need to check if it's followed by '{' - that would be invalid
+                // Parse collection and check what follows
+                var coll = ParseCollectionWithHandler(ReadOnlySpan<char>.Empty, null);
+                SkipWhitespaceAndComments();
+                if (Peek() == '{')
+                {
+                    throw ParserException("A graph may not be named with a collection");
+                }
+                // Otherwise this is a collection as subject in default graph
+                ParsePredicateObjectList(coll, ReadOnlySpan<char>.Empty, handler);
+                SkipWhitespaceAndComments();
+                TryConsume('.');
+                return;
+            }
+
             // Could be: IRI { } (shorthand graph) or triples in default graph
             var term = ParseSubjectOrGraphLabel();
 
             if (term.IsEmpty)
             {
+                // Check if it's a blankNodePropertyList [...] which can't be a graph label
+                if (Peek() == '[')
+                {
+                    // Parse as subject in default graph
+                    term = ParseSubjectWithHandler(ReadOnlySpan<char>.Empty, handler);
+                    if (term.IsEmpty)
+                    {
+                        SkipToEndOfStatement();
+                        return;
+                    }
+                    SkipWhitespaceAndComments();
+                    // Check if followed by '{' - that's an error
+                    if (Peek() == '{')
+                    {
+                        throw ParserException("A graph may not be named with a blankNodePropertyList");
+                    }
+                    // Parse rest of predicate-object list if any
+                    var ch = Peek();
+                    if (ch != '.' && ch != '}' && ch != -1)
+                    {
+                        ParsePredicateObjectList(term, ReadOnlySpan<char>.Empty, handler);
+                    }
+                    SkipWhitespaceAndComments();
+                    TryConsume('.');
+                    return;
+                }
                 SkipToEndOfStatement();
                 return;
             }
@@ -366,10 +411,42 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (ch == '_')
             return ParseBlankNode();
 
+        // For graph labels, only labeled blank nodes (_:b1) and empty anonymous [] are valid
+        // Non-empty [...] is NOT a valid graph label
+        // But we can't determine that here - we need to check if followed by '{'
+        // So return empty and let caller handle it
+        if (ch == '[')
+        {
+            // Check if it's an empty blank node [] (possibly with whitespace inside)
+            if (IsEmptyBlankNode())
+            {
+                Consume(); // [
+                SkipWhitespaceAndComments();
+                Consume(); // ]
+                return GenerateBlankNode();
+            }
+            // Non-empty [...] - return empty, caller will parse as subject
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        // Collection () cannot be a graph label - only accept if it's followed by a predicate
+        // This will be validated at the block level
+
         if (IsPnCharsBase(ch) || ch == ':')
             return ParsePrefixedName();
 
         return ReadOnlySpan<char>.Empty;
+    }
+
+    private bool IsEmptyBlankNode()
+    {
+        // Check if we have [] (possibly with whitespace inside)
+        if (Peek() != '[')
+            return false;
+        int offset = 1;
+        while (IsWhitespace(PeekAhead(offset)))
+            offset++;
+        return PeekAhead(offset) == ']';
     }
 
     private ReadOnlySpan<char> ParseSubject()
@@ -446,6 +523,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (ch == '+' || ch == '-' || char.IsDigit((char)ch))
             return ParseNumericLiteral();
 
+        // Decimal without leading digits: .5 -> 0.5
+        if (ch == '.' && char.IsDigit((char)PeekAhead(1)))
+            return ParseNumericLiteral();
+
         if (IsPnCharsBase(ch) || ch == ':')
         {
             // Could be prefixed name or boolean
@@ -471,6 +552,21 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
         if (ch == '_')
             return ParseBlankNode();
+
+        // Anonymous blank node: [] for GRAPH [] { ... }
+        // But non-empty [...] cannot be used as graph name
+        if (ch == '[')
+        {
+            if (IsEmptyBlankNode())
+            {
+                Consume(); // [
+                SkipWhitespaceAndComments();
+                Consume(); // ]
+                return GenerateBlankNode();
+            }
+            // Non-empty [...] cannot be graph name - throw error
+            throw ParserException("A graph may not be named with a blankNodePropertyList");
+        }
 
         if (IsPnCharsBase(ch) || ch == ':')
             return ParsePrefixedName();
@@ -521,6 +617,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                     throw ParserException($"Invalid escape in IRI: \\{(char)next}");
                 }
             }
+            else if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
+            {
+                throw ParserException("Invalid character in IRI: whitespace not allowed");
+            }
             else
             {
                 AppendToOutput((char)ch);
@@ -564,17 +664,27 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         int start = _outputOffset;
 
-        // Parse prefix part
+        // Parse prefix part - can include dots, dashes, digits (but not as first char)
+        // e.g: "e.g:" is a valid prefix
         var prefixStart = _outputOffset;
         while (true)
         {
             var ch = Peek();
             if (ch == ':')
                 break;
-            if (!IsPnCharsBase(ch) && ch != '-' && !char.IsDigit((char)ch))
+            // Allow dots in prefix names (but not as the last character before ':')
+            if (!IsPnCharsBase(ch) && ch != '-' && ch != '.' && !char.IsDigit((char)ch))
                 break;
             AppendToOutput((char)ch);
             Consume();
+        }
+
+        // Check for trailing dots in prefix and remove them (they're not part of prefix)
+        while (_outputOffset > prefixStart && _outputBuffer[_outputOffset - 1] == '.')
+        {
+            _outputOffset--;
+            // We need to "un-consume" the dots - but we can't, so error if this happens
+            // Actually, in TriG grammar dots in prefix are allowed, so this shouldn't happen
         }
 
         if (!TryConsume(':'))
@@ -603,13 +713,30 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 AppendToOutput(c);
         }
 
-        // Parse local part
+        // Parse local part - dots allowed but not as the last character
         while (true)
         {
             var ch = Peek();
-            if (ch == -1 || IsWhitespace(ch) || ch == '.' || ch == ';' || ch == ',' ||
-                ch == ')' || ch == ']' || ch == '}' || ch == '{')
+            // Stop at whitespace, punctuation (except '.'), comment start, block delimiters, or quote chars
+            // Include '(' and '[' which start collections/blank nodes
+            // Include '"' and '\'' which start literals
+            if (ch == -1 || IsWhitespace(ch) || ch == ';' || ch == ',' ||
+                ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '}' || ch == '{' || ch == '#' ||
+                ch == '"' || ch == '\'')
                 break;
+
+            // Handle '.' specially - only include if followed by valid local name char
+            if (ch == '.')
+            {
+                var next = PeekAhead(1);
+                // Dot followed by valid PN_CHARS is part of local name
+                // Otherwise it's the statement terminator
+                if (!IsPnChars(next) && next != '.')
+                    break;
+                AppendToOutput((char)ch);
+                Consume();
+                continue;
+            }
 
             if (ch == '\\')
             {
@@ -981,10 +1108,19 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         {
             AppendToOutput((char)ch);
             Consume();
+            ch = Peek();
         }
 
         bool hasDecimal = false;
         bool hasExponent = false;
+
+        // Handle decimal starting with '.' (e.g., .5)
+        if (ch == '.' && char.IsDigit((char)PeekAhead(1)))
+        {
+            hasDecimal = true;
+            AppendToOutput((char)ch);
+            Consume();
+        }
 
         while (true)
         {
@@ -1053,19 +1189,21 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (ch == '@')
         {
             Consume();
-            if (MatchKeyword("prefix"))
+            // Turtle directives @prefix and @base are case-sensitive (must be lowercase)
+            if (MatchKeyword("prefix", caseSensitive: true))
             {
                 ParsePrefixDirective();
                 return true;
             }
-            if (MatchKeyword("base"))
+            if (MatchKeyword("base", caseSensitive: true))
             {
                 ParseBaseDirective();
                 return true;
             }
-            throw ParserException("Unknown directive");
+            throw ParserException("Unknown directive (note: @prefix and @base are case-sensitive)");
         }
 
+        // SPARQL-style PREFIX and BASE are case-insensitive
         if (MatchKeyword("PREFIX"))
         {
             ParseSparqlPrefixDirective();
