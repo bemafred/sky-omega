@@ -199,6 +199,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             if (!TryConsume('}'))
                 throw ParserException("Expected '}' to close graph block");
 
+            // GRAPH blocks should NOT be followed by '.'
+            SkipWhitespaceAndComments();
+            if (Peek() == '.')
+                throw ParserException("GRAPH block must not be followed by '.'");
+
             // Clear graph context
             _currentGraphStart = 0;
             _currentGraphLength = 0;
@@ -216,6 +221,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 if (Peek() == '{')
                 {
                     throw ParserException("A graph may not be named with a collection");
+                }
+                // Check for free-standing list (list followed by just '.' is invalid)
+                if (Peek() == '.')
+                {
+                    throw ParserException("Collection used as subject requires a predicate-object list");
                 }
                 // Otherwise this is a collection as subject in default graph
                 ParsePredicateObjectList(coll, ReadOnlySpan<char>.Empty, handler);
@@ -282,6 +292,12 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             else
             {
                 // This is triples in default graph
+                // Check if subject has no predicate (like N-Quads graph IRI without braces)
+                SkipWhitespaceAndComments();
+                var nextCh = Peek();
+                if (nextCh == '.' || nextCh == -1)
+                    throw ParserException("Subject requires a predicate-object list (TriG requires {} for graphs, not N-Quads syntax)");
+
                 // term is the subject, continue parsing predicate-object list
                 ParsePredicateObjectList(term, ReadOnlySpan<char>.Empty, handler);
 
@@ -310,6 +326,22 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             // Get graph span (may need to reconstruct from string)
             var graphSpan = graphStr != null ? graphStr.AsSpan() : ReadOnlySpan<char>.Empty;
 
+            // Check for free-standing collection (not allowed without predicate-object)
+            if (Peek() == '(')
+            {
+                // Parse the collection
+                var coll = ParseCollectionWithHandler(graphSpan, handler);
+                SkipWhitespaceAndComments();
+                var ch = Peek();
+                if (ch == '.' || ch == '}' || ch == -1)
+                    throw ParserException("Collection used as subject requires a predicate-object list");
+                // Parse predicate-object list
+                ParsePredicateObjectList(coll, graphSpan, handler);
+                SkipWhitespaceAndComments();
+                TryConsume('.');
+                continue;
+            }
+
             var subject = ParseSubjectWithHandler(graphSpan, handler);
             if (subject.IsEmpty)
                 break;
@@ -317,10 +349,18 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             SkipWhitespaceAndComments();
 
             // Check for sole blankNodePropertyList (just [ ... ] without predicate-object)
-            var ch = Peek();
-            if (ch == '.' || ch == '}' || ch == -1)
+            // Only allowed for non-empty blank nodes that have internal predicates
+            var ch2 = Peek();
+            if (ch2 == '.' || ch2 == '}' || ch2 == -1)
             {
-                // Sole blankNodePropertyList - already emitted triples
+                // If subject is a blank node from [...] with internal predicates, that's OK
+                // But if it's just an IRI or labeled blank node, it needs a predicate
+                // The way to tell is: blank node property lists start with '[' and have internal triples
+                // But we've already parsed it. We need to track if it was a bnode property list.
+                // For now, check if subject starts with '_:b' (generated) - those are from property lists
+                // Other subjects (IRIs, labeled bnodes) need predicates
+                if (!subject.StartsWith("_:b".AsSpan()))
+                    throw ParserException("Subject requires a predicate-object list");
                 TryConsume('.');
                 continue;
             }
@@ -491,6 +531,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     private ReadOnlySpan<char> ParsePredicate()
     {
         var ch = Peek();
+
+        // N3 '=' is not valid in TriG
+        if (ch == '=')
+            throw ParserException("'=' is not a valid predicate in TriG (N3 syntax not supported)");
 
         // 'a' shorthand for rdf:type
         if (ch == 'a' && !IsPnChars(PeekAhead(1)))
@@ -726,6 +770,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Parse local part - dots allowed but not as the last character
+        bool isFirstLocalChar = true;
         while (true)
         {
             var ch = Peek();
@@ -737,6 +782,16 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 ch == '"' || ch == '\'')
                 break;
 
+            // Local name cannot start with '-'
+            if (isFirstLocalChar && ch == '-')
+                throw ParserException("Local name must not begin with '-'");
+
+            // Unescaped ~ and ^ are not allowed in local names
+            if (ch == '~')
+                throw ParserException("'~' must be escaped in local name");
+            if (ch == '^')
+                throw ParserException("'^' is not allowed in local name");
+
             // Handle '.' specially - only include if followed by valid local name char
             if (ch == '.')
             {
@@ -747,6 +802,24 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                     break;
                 AppendToOutput((char)ch);
                 Consume();
+                isFirstLocalChar = false;
+                continue;
+            }
+
+            // Handle percent escapes - must be %HH where H is hex digit
+            if (ch == '%')
+            {
+                var h1 = PeekAhead(1);
+                var h2 = PeekAhead(2);
+                if (!IsHexDigit(h1) || !IsHexDigit(h2))
+                    throw ParserException("Invalid percent escape in local name (requires two hex digits)");
+                AppendToOutput((char)ch);
+                Consume();
+                AppendToOutput((char)h1);
+                Consume();
+                AppendToOutput((char)h2);
+                Consume();
+                isFirstLocalChar = false;
                 continue;
             }
 
@@ -756,6 +829,13 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 var next = Peek();
                 if (next == -1)
                     throw ParserException("Unexpected end in escape");
+                // Only certain characters can be escaped in local names
+                // \u escapes are NOT allowed in prefixed names (unlike IRIs)
+                if (next == 'u' || next == 'U')
+                    throw ParserException("Unicode escapes (\\u, \\U) are not allowed in prefixed names");
+                // Only PN_LOCAL_ESC characters can be escaped: _~.-!$&'()*+,;=/?#@%
+                if (!IsPnLocalEsc(next))
+                    throw ParserException($"Invalid escape in local name: \\{(char)next}");
                 AppendToOutput((char)next);
                 Consume();
             }
@@ -764,10 +844,29 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 AppendToOutput((char)ch);
                 Consume();
             }
+            isFirstLocalChar = false;
         }
 
         AppendToOutput('>');
         return GetOutputSpan(start);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsHexDigit(int ch)
+    {
+        return (ch >= '0' && ch <= '9') ||
+               (ch >= 'A' && ch <= 'F') ||
+               (ch >= 'a' && ch <= 'f');
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsPnLocalEsc(int ch)
+    {
+        // PN_LOCAL_ESC ::= '\' ('_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%')
+        return ch == '_' || ch == '~' || ch == '.' || ch == '-' || ch == '!' ||
+               ch == '$' || ch == '&' || ch == '\'' || ch == '(' || ch == ')' ||
+               ch == '*' || ch == '+' || ch == ',' || ch == ';' || ch == '=' ||
+               ch == '/' || ch == '?' || ch == '#' || ch == '@' || ch == '%';
     }
 
     private ReadOnlySpan<char> ParseBlankNode()
@@ -793,19 +892,53 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             ch = Peek();
             if (!IsPnChars(ch) && ch != '.')
                 break;
+
+            // Handle '.' specially
+            // BLANK_NODE_LABEL ::= '_:' ( PN_CHARS_U | [0-9] ) ((PN_CHARS | '.')* PN_CHARS)?
+            // Dots are allowed but not as the last character
+            if (ch == '.')
+            {
+                var next = PeekAhead(1);
+                // Dot followed by PN_CHARS is part of label - continue
+                if (IsPnChars(next))
+                {
+                    AppendToOutput((char)ch);
+                    Consume();
+                    continue;
+                }
+                // Dot followed by dot is part of label (might have more dots)
+                if (next == '.')
+                {
+                    AppendToOutput((char)ch);
+                    Consume();
+                    continue;
+                }
+                // Dot followed by non-PN_CHARS: this is a statement terminator
+                // BUT if what follows looks like it could be predicate (IRI, prefixed name),
+                // then the user likely intended _:label. as a blank node ending in dot, which is illegal
+                if (next == ' ' || next == '\t')
+                {
+                    // Look ahead past whitespace to see what comes next
+                    int offset = 2;
+                    while (IsWhitespace(PeekAhead(offset)))
+                        offset++;
+                    var afterWs = PeekAhead(offset);
+                    // If followed by something that could be a predicate, the user likely meant
+                    // to include the dot in the label
+                    if (afterWs == '<' || afterWs == ':' || IsPnCharsBase(afterWs) || afterWs == 'a')
+                    {
+                        throw ParserException("Blank node label must not end with '.'");
+                    }
+                }
+                // Otherwise, dot is statement terminator - stop here
+                break;
+            }
+
             AppendToOutput((char)ch);
             Consume();
         }
 
-        // Remove trailing dots
-        var span = GetOutputSpan(start);
-        while (span.Length > 2 && span[span.Length - 1] == '.')
-        {
-            _outputOffset--;
-            span = GetOutputSpan(start);
-        }
-
-        return span;
+        return GetOutputSpan(start);
     }
 
     private ReadOnlySpan<char> ParseBlankNodePropertyListWithHandler(ReadOnlySpan<char> graph, QuadHandler? handler)
@@ -1034,6 +1167,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         {
             AppendToOutput('@');
             Consume();
+            // Language tag must start with a letter (RFC 5646)
+            ch = Peek();
+            if (ch == -1 || !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')))
+                throw ParserException("Language tag must start with a letter");
             while (true)
             {
                 ch = Peek();
@@ -1144,6 +1281,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             }
             else if (ch == '.' && !hasDecimal && !hasExponent)
             {
+                // Decimal point must be followed by at least one digit or exponent
+                // Otherwise it's a statement terminator, not part of the number
+                var afterDot = PeekAhead(1);
+                if (!char.IsDigit((char)afterDot) && afterDot != 'e' && afterDot != 'E')
+                    break; // Don't consume the dot - it's a statement terminator
                 hasDecimal = true;
                 AppendToOutput((char)ch);
                 Consume();
@@ -1158,7 +1300,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 {
                     AppendToOutput((char)ch);
                     Consume();
+                    ch = Peek();
                 }
+                // Exponent must be followed by at least one digit
+                if (!char.IsDigit((char)ch))
+                    throw ParserException("Exponent must have at least one digit");
             }
             else
             {
