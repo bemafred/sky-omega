@@ -142,12 +142,8 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            // Try to parse a quad
-            if (!ParseQuadZeroGC(handler))
-            {
-                // Skip to next line on parse failure
-                SkipToEndOfLine();
-            }
+            // Parse a quad - N-Quads must be strictly valid
+            ParseQuadZeroGC(handler);
         }
     }
 
@@ -176,102 +172,141 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            var quad = ParseQuadAllocating();
-            if (quad.HasValue)
-            {
-                yield return quad.Value;
-            }
-            else
-            {
-                SkipToEndOfLine();
-            }
+            // Parse quad - throws on invalid input per W3C N-Quads spec
+            yield return ParseQuadAllocating();
         }
     }
 
     /// <summary>
     /// Parse a single quad with zero allocations.
+    /// Strict W3C N-Quads validation - throws on invalid input.
     /// </summary>
-    private bool ParseQuadZeroGC(QuadHandler handler)
+    private void ParseQuadZeroGC(QuadHandler handler)
     {
         ResetOutputBuffer();
 
-        // Parse subject
+        // Parse subject (must be IRIREF or BLANK_NODE_LABEL)
+        var ch = Peek();
+        if (ch != '<' && ch != '_')
+            throw ParserException($"Expected '<' or '_:' at start of subject, got '{(char)ch}'");
+
         var subject = ParseSubjectSpan();
         if (subject.IsEmpty)
-            return false;
+            throw ParserException("Failed to parse subject");
 
         SkipWhitespace();
 
-        // Parse predicate
+        // Parse predicate (must be IRIREF)
+        if (Peek() != '<')
+            throw ParserException($"Expected '<' at start of predicate, got '{(char)Peek()}'");
+
         var predicate = ParsePredicateSpan();
         if (predicate.IsEmpty)
-            return false;
+            throw ParserException("Failed to parse predicate");
 
         SkipWhitespace();
 
-        // Parse object
+        // Parse object (must be IRIREF, BLANK_NODE_LABEL, or literal)
+        ch = Peek();
+        if (ch != '<' && ch != '_' && ch != '"')
+            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got '{(char)ch}'");
+
         var obj = ParseObjectSpan();
         if (obj.IsEmpty)
-            return false;
+            throw ParserException("Failed to parse object");
 
         SkipWhitespace();
 
         // Parse optional graph label
         ReadOnlySpan<char> graph = ReadOnlySpan<char>.Empty;
-        var ch = Peek();
+        ch = Peek();
         if (ch != '.' && ch != '\n' && ch != -1)
         {
+            if (ch != '<' && ch != '_')
+                throw ParserException($"Expected graph label '<' or '_:', got '{(char)ch}'");
             graph = ParseGraphLabelSpan();
+            if (graph.IsEmpty)
+                throw ParserException("Failed to parse graph label");
             SkipWhitespace();
         }
 
         // Expect '.'
-        if (!TryConsume('.'))
-            return false;
+        if (Peek() != '.')
+            throw ParserException($"Expected '.' to terminate quad, got '{(char)Peek()}'");
+        Consume();
+
+        // Check for trailing characters (only whitespace and comments allowed)
+        ch = Peek();
+        if (ch != -1 && ch != '\n' && ch != '\r' && ch != ' ' && ch != '\t' && ch != '#')
+            throw ParserException($"Unexpected character after '.': '{(char)ch}'");
 
         // Emit quad
         handler(subject, predicate, obj, graph);
-        return true;
     }
 
     /// <summary>
     /// Parse a single quad (allocating strings).
+    /// Strict W3C N-Quads validation - throws on invalid input.
     /// </summary>
-    private RdfQuad? ParseQuadAllocating()
+    private RdfQuad ParseQuadAllocating()
     {
         ResetOutputBuffer();
 
+        // Parse subject (must be IRIREF or BLANK_NODE_LABEL)
+        var ch = Peek();
+        if (ch != '<' && ch != '_')
+            throw ParserException($"Expected '<' or '_:' at start of subject, got '{(char)ch}'");
+
         var subject = ParseSubjectSpan();
         if (subject.IsEmpty)
-            return null;
+            throw ParserException("Failed to parse subject");
 
         SkipWhitespace();
+
+        // Parse predicate (must be IRIREF)
+        if (Peek() != '<')
+            throw ParserException($"Expected '<' at start of predicate, got '{(char)Peek()}'");
 
         var predicate = ParsePredicateSpan();
         if (predicate.IsEmpty)
-            return null;
+            throw ParserException("Failed to parse predicate");
 
         SkipWhitespace();
 
+        // Parse object (must be IRIREF, BLANK_NODE_LABEL, or literal)
+        ch = Peek();
+        if (ch != '<' && ch != '_' && ch != '"')
+            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got '{(char)ch}'");
+
         var obj = ParseObjectSpan();
         if (obj.IsEmpty)
-            return null;
+            throw ParserException("Failed to parse object");
 
         SkipWhitespace();
 
         // Parse optional graph label
         string? graph = null;
-        var ch = Peek();
+        ch = Peek();
         if (ch != '.' && ch != '\n' && ch != -1)
         {
+            if (ch != '<' && ch != '_')
+                throw ParserException($"Expected graph label '<' or '_:', got '{(char)ch}'");
             var graphSpan = ParseGraphLabelSpan();
-            if (!graphSpan.IsEmpty)
-                graph = graphSpan.ToString();
+            if (graphSpan.IsEmpty)
+                throw ParserException("Failed to parse graph label");
+            graph = graphSpan.ToString();
             SkipWhitespace();
         }
 
-        if (!TryConsume('.'))
-            return null;
+        // Expect '.'
+        if (Peek() != '.')
+            throw ParserException($"Expected '.' to terminate quad, got '{(char)Peek()}'");
+        Consume();
+
+        // Check for trailing characters (only whitespace and comments allowed)
+        ch = Peek();
+        if (ch != -1 && ch != '\n' && ch != '\r' && ch != ' ' && ch != '\t' && ch != '#')
+            throw ParserException($"Unexpected character after '.': '{(char)ch}'");
 
         return new RdfQuad(subject.ToString(), predicate.ToString(), obj.ToString(), graph);
     }
@@ -343,6 +378,7 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     /// <summary>
     /// IRIREF ::= '&lt;' ([^#x00-#x20&lt;&gt;"{}|^`\] | UCHAR)* '&gt;'
     /// Returns IRI with angle brackets included.
+    /// Validates IRI per N-Quads spec: no control chars, disallowed chars, absolute IRI required.
     /// </summary>
     private ReadOnlySpan<char> ParseIriRefSpan()
     {
@@ -352,6 +388,9 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         int start = _outputOffset;
         AppendToOutput('<');
         Consume();
+
+        bool hasScheme = false;
+        int colonPos = -1;
 
         while (true)
         {
@@ -366,6 +405,13 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                 Consume();
                 break;
             }
+
+            // Validate disallowed characters per N-Quads spec
+            // IRIREF ::= '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>'
+            if (ch <= 0x20) // Control chars and space
+                throw ParserException($"Invalid character in IRI: U+{ch:X4}");
+            if (ch == '"' || ch == '{' || ch == '}' || ch == '|' || ch == '^' || ch == '`')
+                throw ParserException($"Invalid character in IRI: '{(char)ch}'");
 
             if (ch == '\\')
             {
@@ -390,16 +436,46 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
+                // Track scheme detection
+                if (ch == ':' && colonPos == -1)
+                {
+                    colonPos = _outputOffset - start;
+                    // Check if we have valid scheme chars before the colon
+                    // Scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+                    if (colonPos > 1) // At least one char after '<'
+                    {
+                        var schemeSpan = GetOutputSpan(start + 1); // Skip '<'
+                        if (schemeSpan.Length > 0 && char.IsLetter(schemeSpan[0]))
+                        {
+                            hasScheme = true;
+                            for (int i = 1; i < schemeSpan.Length; i++)
+                            {
+                                var sc = schemeSpan[i];
+                                if (!char.IsLetterOrDigit(sc) && sc != '+' && sc != '-' && sc != '.')
+                                {
+                                    hasScheme = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
                 AppendToOutput((char)ch);
                 Consume();
             }
         }
+
+        // N-Quads requires absolute IRIs (relative IRIs not allowed)
+        if (!hasScheme)
+            throw ParserException("N-Quads requires absolute IRIs (relative IRI not allowed)");
 
         return GetOutputSpan(start);
     }
 
     /// <summary>
     /// BLANK_NODE_LABEL ::= '_:' (PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?
+    /// Per grammar, label cannot end with '.', so '.' followed by non-PN_CHARS is the terminator.
     /// </summary>
     private ReadOnlySpan<char> ParseBlankNodeSpan()
     {
@@ -420,26 +496,43 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         AppendToOutput((char)ch);
         Consume();
 
-        // Rest of label
+        // Rest of label: ((PN_CHARS | '.')* PN_CHARS)?
+        // Key insight: '.' can appear in label but cannot be the last character
+        // So if we see '.', we need to look ahead to see if it's followed by PN_CHARS
         while (true)
         {
             ch = Peek();
-            if (ch == -1 || (!IsPnChars(ch) && ch != '.'))
+            if (ch == -1)
                 break;
 
-            AppendToOutput((char)ch);
-            Consume();
+            if (IsPnChars(ch))
+            {
+                AppendToOutput((char)ch);
+                Consume();
+            }
+            else if (ch == '.')
+            {
+                // Look ahead: is '.' followed by valid PN_CHARS?
+                var next = PeekAhead(1);
+                if (next != -1 && IsPnChars(next))
+                {
+                    // '.' is part of the label
+                    AppendToOutput((char)ch);
+                    Consume();
+                }
+                else
+                {
+                    // '.' is the statement terminator, not part of label
+                    break;
+                }
+            }
+            else
+            {
+                break;
+            }
         }
 
-        // Remove trailing dots (not part of label)
-        var span = GetOutputSpan(start);
-        while (span.Length > 2 && span[span.Length - 1] == '.')
-        {
-            _outputOffset--;
-            span = GetOutputSpan(start);
-        }
-
-        return span;
+        return GetOutputSpan(start);
     }
 
     /// <summary>
@@ -486,18 +579,54 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         var next = Peek();
         if (next == '@')
         {
-            // Language tag
+            // Language tag: LANGTAG ::= '@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*
             AppendToOutput('@');
             Consume();
 
+            // First character must be a letter
+            var firstChar = Peek();
+            if (firstChar == -1 || !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z')))
+                throw ParserException("Language tag must start with a letter");
+
+            // Parse the language tag
+            bool afterHyphen = false;
             while (true)
             {
                 var ch = Peek();
                 if (ch == -1 || IsWhitespace(ch) || ch == '.')
                     break;
 
-                AppendToOutput((char)ch);
-                Consume();
+                if (ch == '-')
+                {
+                    AppendToOutput((char)ch);
+                    Consume();
+                    afterHyphen = true;
+                }
+                else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))
+                {
+                    AppendToOutput((char)ch);
+                    Consume();
+                    afterHyphen = false;
+                }
+                else if (ch >= '0' && ch <= '9')
+                {
+                    // Digits only allowed after hyphen
+                    if (!afterHyphen && _outputOffset > start + 1)
+                    {
+                        // Check if we've had a hyphen in this subtag
+                        var tagSpan = GetOutputSpan(start);
+                        var lastHyphenIdx = tagSpan.LastIndexOf('-');
+                        if (lastHyphenIdx == -1)
+                            throw ParserException("Language tag: digits only allowed after hyphen");
+                    }
+                    AppendToOutput((char)ch);
+                    Consume();
+                    afterHyphen = false;
+                }
+                else
+                {
+                    throw ParserException($"Invalid character in language tag: '{(char)ch}'");
+                }
             }
         }
         else if (next == '^' && PeekAhead(1) == '^')
