@@ -596,7 +596,10 @@ public sealed partial class RdfXmlStreamParser
                     {
                         // Don't include closing tag in content
                         _outputOffset--; // Remove the '<'
-                        SkipToClosingTag(elementName);
+                        // Skip the rest of the closing tag (we've already consumed '<')
+                        while (Peek() != '>' && !IsEndOfInput())
+                            Consume();
+                        TryConsume('>');
                         break;
                     }
                 }

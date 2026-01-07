@@ -79,8 +79,11 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     // Current parse state
     private int _line;
     private int _column;
+    private bool _insideRdfRoot; // Track if we're inside rdf:RDF for validation
+    private readonly HashSet<string> _usedIds = new(StringComparer.Ordinal); // Track rdf:ID values for uniqueness
 
-    // Base URI for resolving relative URIs
+    // Base URI for resolving relative URIs (stack for scoping)
+    private readonly Stack<string> _baseUriStack = new();
     private string _baseUri = string.Empty;
 
     // Standard RDF namespace
@@ -221,16 +224,30 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         {
             if (localName == "RDF")
             {
-                // Capture xml:base from rdf:RDF element
+                // Nested rdf:RDF is not allowed
+                if (_insideRdfRoot)
+                    throw ParserException("rdf:RDF is forbidden as a node element name");
+
+                // Capture xml:base from rdf:RDF element (strip fragment per RFC 3986)
                 if (attributes.TryGetValue("xml:base", out var xmlBase))
                 {
-                    _baseUri = ResolveUri(xmlBase);
+                    var resolved = ResolveUri(xmlBase);
+                    var hashIdx = resolved.IndexOf('#');
+                    _baseUri = hashIdx >= 0 ? resolved[..hashIdx] : resolved;
                 }
 
                 // Root rdf:RDF element - parse children
-                if (!selfClosing)
+                _insideRdfRoot = true;
+                try
                 {
-                    await ParseRdfRootContentAsync(handler, cancellationToken);
+                    if (!selfClosing)
+                    {
+                        await ParseRdfRootContentAsync(handler, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    _insideRdfRoot = false;
                 }
             }
             else if (localName == "Description")
@@ -291,17 +308,30 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         bool selfClosing,
         CancellationToken cancellationToken)
     {
+        // Validate node element attributes
+        ValidateNodeElementAttributes(attributes);
+
+        // Push xml:base scope if present
+        bool pushedBase = PushBaseIfPresent(attributes);
+
         // Determine subject (as string for async boundary crossing)
         var subjectStr = DetermineSubjectString(attributes);
 
+        // Get current xml:lang for property attributes
+        attributes.TryGetValue("xml:lang", out var xmlLang);
+
         // Process property attributes (shorthand properties)
-        EmitPropertyAttributes(handler, subjectStr, attributes);
+        EmitPropertyAttributes(handler, subjectStr, attributes, xmlLang);
 
-        if (selfClosing)
-            return;
+        if (!selfClosing)
+        {
+            // Parse property elements
+            await ParsePropertyElementsAsync(handler, subjectStr, xmlLang, cancellationToken);
+        }
 
-        // Parse property elements
-        await ParsePropertyElementsAsync(handler, subjectStr, cancellationToken);
+        // Pop xml:base scope if we pushed one
+        if (pushedBase)
+            PopBase();
     }
 
     /// <summary>
@@ -315,6 +345,15 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         bool selfClosing,
         CancellationToken cancellationToken)
     {
+        // Validate node element name
+        ValidateNodeElementName(namespaceUri, localName);
+
+        // Validate node element attributes
+        ValidateNodeElementAttributes(attributes);
+
+        // Push xml:base scope if present
+        bool pushedBase = PushBaseIfPresent(attributes);
+
         // Determine subject (as string)
         var subjectStr = DetermineSubjectString(attributes);
 
@@ -323,14 +362,21 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         var typeUri = BuildIri(namespaceUri.AsSpan(), localName.AsSpan());
         handler(subjectStr.AsSpan(), $"<{RdfNamespace}type>".AsSpan(), typeUri);
 
+        // Get current xml:lang for property attributes
+        attributes.TryGetValue("xml:lang", out var xmlLang);
+
         // Process property attributes
-        EmitPropertyAttributes(handler, subjectStr, attributes);
+        EmitPropertyAttributes(handler, subjectStr, attributes, xmlLang);
 
-        if (selfClosing)
-            return;
+        if (!selfClosing)
+        {
+            // Parse property elements
+            await ParsePropertyElementsAsync(handler, subjectStr, xmlLang, cancellationToken);
+        }
 
-        // Parse property elements
-        await ParsePropertyElementsAsync(handler, subjectStr, cancellationToken);
+        // Pop xml:base scope if we pushed one
+        if (pushedBase)
+            PopBase();
     }
 
     /// <summary>
@@ -339,6 +385,7 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     private async Task ParsePropertyElementsAsync(
         TripleHandler handler,
         string subjectStr,
+        string? inheritedLang,
         CancellationToken cancellationToken)
     {
         // Counter for rdf:li elements (starts at 1 per W3C spec)
@@ -367,9 +414,15 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 var propNameStr = propName.ToString();
                 var propAttributes = ParseAttributes();
 
+                // Validate property element attributes
+                ValidatePropertyElementAttributes(propAttributes);
+
                 // Build predicate IRI
                 SplitQName(propNameStr, out var propPrefix, out var propLocal);
                 var propNamespace = ResolveNamespace(propPrefix);
+
+                // Validate property element name
+                ValidatePropertyElementName(propNamespace, propLocal);
 
                 // Handle rdf:li expansion to rdf:_1, rdf:_2, etc.
                 if (propNamespace == RdfNamespace && propLocal == "li")
@@ -387,6 +440,14 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 
                 if (propSelfClosing)
                 {
+                    // Check for rdf:ID for reification
+                    string? reifyId = null;
+                    if (propAttributes.TryGetValue("rdf:ID", out reifyId) ||
+                        propAttributes.TryGetValue("ID", out reifyId))
+                    {
+                        // Will emit reification triples after the main triple
+                    }
+
                     // Check for rdf:parseType first
                     if (propAttributes.TryGetValue("rdf:parseType", out var selfParseType) ||
                         propAttributes.TryGetValue("parseType", out selfParseType))
@@ -396,17 +457,27 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                             // Self-closing parseType="Resource" creates empty blank node
                             ResetOutputBuffer();
                             var blankNode = GenerateBlankNode();
+                            var objStr = blankNode.ToString();
                             handler(subjectStr.AsSpan(), predicateStr.AsSpan(), blankNode);
+                            if (reifyId != null)
+                                EmitReification(handler, reifyId, subjectStr, predicateStr, objStr);
                         }
                         // Other parseTypes on self-closing produce empty literal
                         else
                         {
                             ResetOutputBuffer();
                             var obj = BuildPlainLiteral(ReadOnlySpan<char>.Empty);
+                            var objStr = obj.ToString();
                             handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                            if (reifyId != null)
+                                EmitReification(handler, reifyId, subjectStr, predicateStr, objStr);
                         }
                         continue;
                     }
+
+                    // Get effective xml:lang for this property element
+                    propAttributes.TryGetValue("xml:lang", out var propLang);
+                    var effectiveLang = propLang ?? inheritedLang;
 
                     // Self-closing property - check for rdf:resource
                     if (propAttributes.TryGetValue("rdf:resource", out var resourceUri) ||
@@ -415,14 +486,23 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                         ResetOutputBuffer();
                         var resolvedUri = ResolveUri(resourceUri);
                         var obj = WrapIri(resolvedUri.AsSpan());
+                        var objStr = obj.ToString();
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                        // Property attributes apply to the resource URI as subject
+                        if (HasPropertyAttributes(propAttributes))
+                            EmitPropertyAttributes(handler, objStr, propAttributes, effectiveLang);
+                        if (reifyId != null)
+                            EmitReification(handler, reifyId, subjectStr, predicateStr, objStr);
                     }
                     else if (propAttributes.TryGetValue("rdf:nodeID", out var nodeId) ||
                              propAttributes.TryGetValue("nodeID", out nodeId))
                     {
                         ResetOutputBuffer();
                         var obj = BuildBlankNode(nodeId.AsSpan());
+                        var objStr = obj.ToString();
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                        if (reifyId != null)
+                            EmitReification(handler, reifyId, subjectStr, predicateStr, objStr);
                     }
                     else if (HasPropertyAttributes(propAttributes))
                     {
@@ -432,17 +512,34 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                         var blankNode = GenerateBlankNode();
                         var blankNodeStr = blankNode.ToString();
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), blankNode);
-                        EmitPropertyAttributes(handler, blankNodeStr, propAttributes);
+                        EmitPropertyAttributes(handler, blankNodeStr, propAttributes, effectiveLang);
+                        if (reifyId != null)
+                            EmitReification(handler, reifyId, subjectStr, predicateStr, blankNodeStr);
                     }
                     else
                     {
                         // Empty self-closing property element produces empty literal
                         ResetOutputBuffer();
                         var obj = BuildPlainLiteral(ReadOnlySpan<char>.Empty);
+                        var objStr = obj.ToString();
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                        if (reifyId != null)
+                            EmitReification(handler, reifyId, subjectStr, predicateStr, objStr);
                     }
                     continue;
                 }
+
+                // Check for rdf:ID for reification (non-self-closing)
+                string? reifyIdNonSelf = null;
+                if (propAttributes.TryGetValue("rdf:ID", out reifyIdNonSelf) ||
+                    propAttributes.TryGetValue("ID", out reifyIdNonSelf))
+                {
+                    // Will emit reification triples after the main triple
+                }
+
+                // Get effective xml:lang for non-self-closing property
+                propAttributes.TryGetValue("xml:lang", out var propLangNonSelf);
+                var effectiveLangNonSelf = propLangNonSelf ?? inheritedLang;
 
                 // Check for rdf:resource attribute
                 if (propAttributes.TryGetValue("rdf:resource", out var resUri) ||
@@ -451,7 +548,13 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                     ResetOutputBuffer();
                     var resolvedUri = ResolveUri(resUri);
                     var obj = WrapIri(resolvedUri.AsSpan());
+                    var objStr = obj.ToString();
                     handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj);
+                    // Property attributes apply to the resource URI as subject
+                    if (HasPropertyAttributes(propAttributes))
+                        EmitPropertyAttributes(handler, objStr, propAttributes, effectiveLangNonSelf);
+                    if (reifyIdNonSelf != null)
+                        EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, objStr);
                     SkipToClosingTag(propNameStr);
                     continue;
                 }
@@ -467,7 +570,9 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                         var blankNode = GenerateBlankNode();
                         var blankNodeStr = blankNode.ToString();
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), blankNode);
-                        await ParsePropertyElementsAsync(handler, blankNodeStr, cancellationToken);
+                        if (reifyIdNonSelf != null)
+                            EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, blankNodeStr);
+                        await ParsePropertyElementsAsync(handler, blankNodeStr, effectiveLangNonSelf, cancellationToken);
                         continue;
                     }
                     else if (parseType == "Literal")
@@ -476,27 +581,59 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                         ResetOutputBuffer();
                         var xmlContent = ParseXmlLiteralContent(propNameStr);
                         var literal = BuildTypedLiteral(xmlContent, $"{RdfNamespace}XMLLiteral".AsSpan());
+                        var literalStr = literal.ToString();
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), literal);
+                        if (reifyIdNonSelf != null)
+                            EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, literalStr);
                         continue;
                     }
                     else if (parseType == "Collection")
                     {
-                        // RDF collection
-                        await ParseCollectionAsync(handler, subjectStr, predicateStr, cancellationToken);
+                        // RDF collection - returns the list head (or rdf:nil for empty)
+                        var listObjStr = await ParseCollectionAsync(handler, subjectStr, predicateStr, effectiveLangNonSelf, cancellationToken);
+                        if (reifyIdNonSelf != null && !string.IsNullOrEmpty(listObjStr))
+                            EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, listObjStr);
                         continue;
                     }
                 }
 
-                // Check for nested description
+                // Check for nested description (skip comments/PIs first)
                 SkipWhitespace();
+                while (Peek() == '<' && (PeekAhead(1) == '!' || PeekAhead(1) == '?'))
+                {
+                    TryConsume('<');
+                    if (Peek() == '!')
+                        SkipCommentOrCData();
+                    else if (Peek() == '?')
+                        SkipProcessingInstruction();
+                    SkipWhitespace();
+                }
+
                 if (Peek() == '<' && PeekAhead(1) != '/')
                 {
                     // Nested element - could be nested description
-                    var nestedObjStr = await ParseNestedObjectAsync(handler, cancellationToken);
+                    var nestedObjStr = await ParseNestedObjectAsync(handler, effectiveLangNonSelf, cancellationToken);
                     if (!string.IsNullOrEmpty(nestedObjStr))
                     {
                         handler(subjectStr.AsSpan(), predicateStr.AsSpan(), nestedObjStr.AsSpan());
+                        if (reifyIdNonSelf != null)
+                            EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, nestedObjStr);
                     }
+                    SkipToClosingTag(propNameStr);
+                    continue;
+                }
+
+                // Non-self-closing property element with property attributes (but no nested element)
+                // Creates an implicit blank node as the object
+                if (HasPropertyAttributes(propAttributes))
+                {
+                    ResetOutputBuffer();
+                    var blankNode = GenerateBlankNode();
+                    var blankNodeStr = blankNode.ToString();
+                    handler(subjectStr.AsSpan(), predicateStr.AsSpan(), blankNode);
+                    EmitPropertyAttributes(handler, blankNodeStr, propAttributes, effectiveLangNonSelf);
+                    if (reifyIdNonSelf != null)
+                        EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, blankNodeStr);
                     SkipToClosingTag(propNameStr);
                     continue;
                 }
@@ -505,23 +642,26 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 ResetOutputBuffer();
                 var literalContent = ParseTextContent();
 
-                // Check for datatype or language
+                // Check for datatype or language (inherit xml:lang if not specified)
                 ReadOnlySpan<char> obj2;
                 if (propAttributes.TryGetValue("rdf:datatype", out var datatype) ||
                     propAttributes.TryGetValue("datatype", out datatype))
                 {
                     obj2 = BuildTypedLiteral(literalContent, datatype.AsSpan());
                 }
-                else if (propAttributes.TryGetValue("xml:lang", out var lang))
+                else if (!string.IsNullOrEmpty(effectiveLangNonSelf))
                 {
-                    obj2 = BuildLangLiteral(literalContent, lang.AsSpan());
+                    obj2 = BuildLangLiteral(literalContent, effectiveLangNonSelf.AsSpan());
                 }
                 else
                 {
                     obj2 = BuildPlainLiteral(literalContent);
                 }
 
+                var obj2Str = obj2.ToString();
                 handler(subjectStr.AsSpan(), predicateStr.AsSpan(), obj2);
+                if (reifyIdNonSelf != null)
+                    EmitReification(handler, reifyIdNonSelf, subjectStr, predicateStr, obj2Str);
                 SkipToClosingTag(propNameStr);
             }
             else if (IsEndOfInput())
@@ -540,6 +680,7 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private async Task<string> ParseNestedObjectAsync(
         TripleHandler handler,
+        string? inheritedLang,
         CancellationToken cancellationToken)
     {
         if (!TryConsume('<'))
@@ -552,12 +693,24 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         var elementNameStr = elementName.ToString();
         var attributes = ParseAttributes();
 
+        SplitQName(elementNameStr, out var prefix, out var localName);
+        var namespaceUri = ResolveNamespace(prefix);
+
+        // Validate node element name (unless it's rdf:Description)
+        if (namespaceUri != RdfNamespace || localName != "Description")
+        {
+            ValidateNodeElementName(namespaceUri, localName);
+        }
+
+        // Validate node element attributes
+        ValidateNodeElementAttributes(attributes);
+
         SkipWhitespace();
         bool selfClosing = TryConsume('/');
         TryConsume('>');
 
-        SplitQName(elementNameStr, out var prefix, out var localName);
-        var namespaceUri = ResolveNamespace(prefix);
+        // Push xml:base scope if present
+        bool pushedBase = PushBaseIfPresent(attributes);
 
         // Get subject for nested element
         var subjectStr = DetermineSubjectString(attributes);
@@ -570,25 +723,35 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
             handler(subjectStr.AsSpan(), $"<{RdfNamespace}type>".AsSpan(), typeUri);
         }
 
+        // Get xml:lang (inherit from parent if not specified)
+        attributes.TryGetValue("xml:lang", out var xmlLang);
+        var effectiveLang = xmlLang ?? inheritedLang;
+
         // Process property attributes
-        EmitPropertyAttributes(handler, subjectStr, attributes);
+        EmitPropertyAttributes(handler, subjectStr, attributes, effectiveLang);
 
         if (!selfClosing)
         {
             // Parse nested properties
-            await ParsePropertyElementsAsync(handler, subjectStr, cancellationToken);
+            await ParsePropertyElementsAsync(handler, subjectStr, effectiveLang, cancellationToken);
         }
+
+        // Pop xml:base scope if we pushed one
+        if (pushedBase)
+            PopBase();
 
         return subjectStr;
     }
 
     /// <summary>
     /// Parse rdf:parseType="Collection" content.
+    /// Returns the list head blank node (or rdf:nil for empty collections) for reification.
     /// </summary>
-    private async Task ParseCollectionAsync(
+    private async Task<string> ParseCollectionAsync(
         TripleHandler handler,
         string subjectStr,
         string predicateStr,
+        string? inheritedLang,
         CancellationToken cancellationToken)
     {
         var rdfFirst = $"<{RdfNamespace}first>";
@@ -596,6 +759,7 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         var rdfNil = $"<{RdfNamespace}nil>";
 
         string currentNodeStr = string.Empty;
+        string? firstNodeStr = null;  // Track first node for reification
         bool isFirst = true;
 
         while (!IsEndOfInput())
@@ -619,6 +783,7 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 if (isFirst)
                 {
                     handler(subjectStr.AsSpan(), predicateStr.AsSpan(), listNode);
+                    firstNodeStr = listNodeStr;  // Remember first node for reification
                     isFirst = false;
                 }
                 else
@@ -627,7 +792,7 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 }
 
                 // Parse collection item
-                var itemStr = await ParseNestedObjectAsync(handler, cancellationToken);
+                var itemStr = await ParseNestedObjectAsync(handler, inheritedLang, cancellationToken);
                 handler(listNodeStr.AsSpan(), rdfFirst.AsSpan(), itemStr.AsSpan());
 
                 currentNodeStr = listNodeStr;
@@ -651,25 +816,50 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         {
             // Empty collection
             handler(subjectStr.AsSpan(), predicateStr.AsSpan(), rdfNil.AsSpan());
+            firstNodeStr = rdfNil;  // Empty collection - object is rdf:nil
         }
 
         // Skip closing tag
         SkipClosingTag();
+
+        return firstNodeStr ?? rdfNil;
     }
 
     #region Subject Determination
 
     /// <summary>
+    /// Push a new xml:base scope if the attribute is present.
+    /// Returns true if a scope was pushed (caller must pop later).
+    /// </summary>
+    private bool PushBaseIfPresent(Dictionary<string, string> attributes)
+    {
+        if (attributes.TryGetValue("xml:base", out var xmlBase))
+        {
+            _baseUriStack.Push(_baseUri);
+            // Resolve and store base, stripping any fragment per RFC 3986
+            var resolved = ResolveUri(xmlBase);
+            var hashIdx = resolved.IndexOf('#');
+            _baseUri = hashIdx >= 0 ? resolved[..hashIdx] : resolved;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Pop the xml:base scope, restoring the previous base URI.
+    /// </summary>
+    private void PopBase()
+    {
+        if (_baseUriStack.Count > 0)
+            _baseUri = _baseUriStack.Pop();
+    }
+
+    /// <summary>
     /// Determine subject from attributes (returns string for async boundary crossing).
+    /// Note: xml:base is handled separately via PushBaseIfPresent.
     /// </summary>
     private string DetermineSubjectString(Dictionary<string, string> attributes)
     {
-        // Check for xml:base override
-        if (attributes.TryGetValue("xml:base", out var xmlBase))
-        {
-            _baseUri = ResolveUri(xmlBase);
-        }
-
         if (attributes.TryGetValue("rdf:about", out var aboutUri) ||
             attributes.TryGetValue("about", out aboutUri))
         {
@@ -733,6 +923,45 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Emit reification triples for a statement with rdf:ID.
+    /// Creates: statementUri rdf:type rdf:Statement
+    ///          statementUri rdf:subject subject
+    ///          statementUri rdf:predicate predicate
+    ///          statementUri rdf:object object
+    /// </summary>
+    private void EmitReification(
+        TripleHandler handler,
+        string statementId,
+        string subjectStr,
+        string predicateStr,
+        string objectStr)
+    {
+        // Build statement URI from rdf:ID
+        var statementUri = $"<{_baseUri}#{statementId}>";
+
+        // rdf:type rdf:Statement
+        ResetOutputBuffer();
+        handler(statementUri.AsSpan(),
+            $"<{RdfNamespace}type>".AsSpan(),
+            $"<{RdfNamespace}Statement>".AsSpan());
+
+        // rdf:subject
+        handler(statementUri.AsSpan(),
+            $"<{RdfNamespace}subject>".AsSpan(),
+            subjectStr.AsSpan());
+
+        // rdf:predicate
+        handler(statementUri.AsSpan(),
+            $"<{RdfNamespace}predicate>".AsSpan(),
+            predicateStr.AsSpan());
+
+        // rdf:object
+        handler(statementUri.AsSpan(),
+            $"<{RdfNamespace}object>".AsSpan(),
+            objectStr.AsSpan());
+    }
+
+    /// <summary>
     /// Check if attributes dictionary contains any property attributes (non-RDF/XML namespace).
     /// </summary>
     private static bool HasPropertyAttributes(Dictionary<string, string> attributes)
@@ -768,8 +997,15 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     private void EmitPropertyAttributes(
         TripleHandler handler,
         string subjectStr,
-        Dictionary<string, string> attributes)
+        Dictionary<string, string> attributes,
+        string? xmlLang = null)
     {
+        // RDF control attributes that are NOT property attributes
+        var rdfControlAttrs = new HashSet<string>
+        {
+            "about", "ID", "nodeID", "resource", "parseType", "datatype"
+        };
+
         foreach (var (name, value) in attributes)
         {
             // Handle rdf:type specially - value is a URI, not a literal
@@ -783,8 +1019,8 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 continue;
             }
 
-            // Skip other RDF control attributes
-            if (name.StartsWith("rdf:") || name.StartsWith("xml:") || name.StartsWith("xmlns"))
+            // Skip XML/namespace control attributes
+            if (name.StartsWith("xml:") || name.StartsWith("xmlns"))
                 continue;
 
             // Skip if it's a namespace declaration
@@ -795,13 +1031,27 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
                 if (prefix == "xmlns")
                     continue;
 
-                // Property attribute
+                // Check if this is an RDF control attribute (not a property attribute)
+                if (prefix == "rdf")
+                {
+                    var local = name[(colonIdx + 1)..];
+                    if (rdfControlAttrs.Contains(local))
+                        continue;
+                }
+
+                // Property attribute (including rdf:Seq, rdf:Bag, rdf:Alt, rdf:value, etc.)
                 var ns = ResolveNamespace(prefix);
-                var local = name[(colonIdx + 1)..];
+                var localName = name[(colonIdx + 1)..];
 
                 ResetOutputBuffer();
-                var predicate = BuildIri(ns.AsSpan(), local.AsSpan());
-                var literal = BuildPlainLiteral(value.AsSpan());
+                var predicate = BuildIri(ns.AsSpan(), localName.AsSpan());
+
+                // Use xml:lang if present
+                ReadOnlySpan<char> literal;
+                if (!string.IsNullOrEmpty(xmlLang))
+                    literal = BuildLangLiteral(value.AsSpan(), xmlLang.AsSpan());
+                else
+                    literal = BuildPlainLiteral(value.AsSpan());
 
                 handler(subjectStr.AsSpan(), predicate, literal);
             }
@@ -953,6 +1203,203 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
             prefix = qname[..colonIdx];
             localName = qname[(colonIdx + 1)..];
         }
+    }
+
+    #endregion
+
+    #region Validation
+
+    /// <summary>
+    /// Validate that a value is a valid XML NCName (for rdf:ID and rdf:nodeID).
+    /// NCName must start with a letter or underscore, followed by letters, digits,
+    /// hyphens, underscores, or periods. It must NOT contain colons.
+    /// </summary>
+    private void ValidateNCName(string value, string attributeName)
+    {
+        if (string.IsNullOrEmpty(value))
+            throw ParserException($"{attributeName} cannot be empty");
+
+        var firstChar = value[0];
+        // NCName starts with Letter or '_'
+        if (!IsNCNameStartChar(firstChar))
+            throw ParserException($"{attributeName} value '{value}' is not a valid NCName: must start with a letter or underscore");
+
+        for (int i = 1; i < value.Length; i++)
+        {
+            if (!IsNCNameChar(value[i]))
+                throw ParserException($"{attributeName} value '{value}' is not a valid NCName: invalid character '{value[i]}' at position {i}");
+        }
+    }
+
+    private static bool IsNCNameStartChar(char ch)
+    {
+        // Letters and underscore (no colon for NCName)
+        return ch == '_' ||
+               (ch >= 'A' && ch <= 'Z') ||
+               (ch >= 'a' && ch <= 'z') ||
+               (ch >= 0xC0 && ch <= 0xD6) ||
+               (ch >= 0xD8 && ch <= 0xF6) ||
+               (ch >= 0xF8 && ch <= 0x2FF) ||
+               (ch >= 0x370 && ch <= 0x37D) ||
+               (ch >= 0x37F && ch <= 0x1FFF) ||
+               (ch >= 0x200C && ch <= 0x200D) ||
+               (ch >= 0x2070 && ch <= 0x218F) ||
+               (ch >= 0x2C00 && ch <= 0x2FEF) ||
+               (ch >= 0x3001 && ch <= 0xD7FF) ||
+               (ch >= 0xF900 && ch <= 0xFDCF) ||
+               (ch >= 0xFDF0 && ch <= 0xFFFD);
+    }
+
+    private static bool IsNCNameChar(char ch)
+    {
+        return IsNCNameStartChar(ch) ||
+               ch == '-' || ch == '.' ||
+               (ch >= '0' && ch <= '9') ||
+               ch == 0xB7 ||
+               (ch >= 0x300 && ch <= 0x36F) ||
+               (ch >= 0x203F && ch <= 0x2040);
+    }
+
+    /// <summary>
+    /// Validate node element attributes for conflicts and prohibited attributes.
+    /// </summary>
+    private void ValidateNodeElementAttributes(Dictionary<string, string> attributes)
+    {
+        // Check for deprecated/removed attributes
+        if (attributes.ContainsKey("rdf:aboutEach") || attributes.ContainsKey("aboutEach"))
+            throw ParserException("rdf:aboutEach is not allowed (removed from RDF 1.0)");
+
+        if (attributes.ContainsKey("rdf:aboutEachPrefix") || attributes.ContainsKey("aboutEachPrefix"))
+            throw ParserException("rdf:aboutEachPrefix is not allowed (removed from RDF 1.0)");
+
+        if (attributes.ContainsKey("rdf:bagID") || attributes.ContainsKey("bagID"))
+            throw ParserException("rdf:bagID is not allowed (removed from RDF 1.0)");
+
+        // Check for rdf:li as attribute (only allowed as element)
+        if (attributes.ContainsKey("rdf:li") || attributes.ContainsKey("li"))
+            throw ParserException("rdf:li is not allowed as an attribute");
+
+        // Validate rdf:ID if present
+        if (attributes.TryGetValue("rdf:ID", out var id) || attributes.TryGetValue("ID", out id))
+        {
+            ValidateNCName(id, "rdf:ID");
+            // Check for duplicate IDs (uniqueness based on resolved URI, not just ID value)
+            // Two identical rdf:ID values are allowed if xml:base makes them resolve to different URIs
+            // Need to consider this element's xml:base if present
+            var effectiveBase = _baseUri;
+            if (attributes.TryGetValue("xml:base", out var xmlBase))
+            {
+                // Resolve the element's xml:base against current base
+                effectiveBase = ResolveUri(xmlBase);
+                var hashIdx = effectiveBase.IndexOf('#');
+                effectiveBase = hashIdx >= 0 ? effectiveBase[..hashIdx] : effectiveBase;
+            }
+            var fullUri = $"{effectiveBase}#{id}";
+            if (!_usedIds.Add(fullUri))
+                throw ParserException($"Duplicate rdf:ID '{id}' - resolves to same URI '{fullUri}'");
+        }
+
+        // Validate rdf:nodeID if present
+        if (attributes.TryGetValue("rdf:nodeID", out var nodeId) || attributes.TryGetValue("nodeID", out nodeId))
+            ValidateNCName(nodeId, "rdf:nodeID");
+
+        // Check for conflicting subject attributes
+        bool hasAbout = attributes.ContainsKey("rdf:about") || attributes.ContainsKey("about");
+        bool hasID = attributes.ContainsKey("rdf:ID") || attributes.ContainsKey("ID");
+        bool hasNodeID = attributes.ContainsKey("rdf:nodeID") || attributes.ContainsKey("nodeID");
+
+        int subjectAttrs = (hasAbout ? 1 : 0) + (hasID ? 1 : 0) + (hasNodeID ? 1 : 0);
+        if (subjectAttrs > 1)
+            throw ParserException("Cannot have more than one of rdf:about, rdf:ID, or rdf:nodeID on a node element");
+    }
+
+    // RDF terms that are NEVER allowed as node element names (inside rdf:RDF)
+    private static readonly HashSet<string> ForbiddenNodeElementNames = new(StringComparer.Ordinal)
+    {
+        "RDF", "ID", "about", "bagID", "parseType", "resource", "nodeID",
+        "datatype", "aboutEach", "aboutEachPrefix", "li"
+    };
+
+    // RDF terms that are NEVER allowed as property element names
+    private static readonly HashSet<string> ForbiddenPropertyElementNames = new(StringComparer.Ordinal)
+    {
+        "RDF", "Description", "ID", "about", "bagID", "parseType", "resource", "nodeID",
+        "datatype", "aboutEach", "aboutEachPrefix"
+        // Note: rdf:li IS allowed as property element (becomes rdf:_1, rdf:_2, etc.)
+    };
+
+    /// <summary>
+    /// Validate that a node element name is allowed.
+    /// Called when parsing typed node elements (not rdf:Description).
+    /// </summary>
+    private void ValidateNodeElementName(string namespaceUri, string localName)
+    {
+        if (namespaceUri == RdfNamespace && ForbiddenNodeElementNames.Contains(localName))
+        {
+            throw ParserException($"rdf:{localName} is forbidden as a node element name");
+        }
+    }
+
+    /// <summary>
+    /// Validate that a property element name is allowed.
+    /// </summary>
+    private void ValidatePropertyElementName(string namespaceUri, string localName)
+    {
+        if (namespaceUri == RdfNamespace && ForbiddenPropertyElementNames.Contains(localName))
+        {
+            throw ParserException($"rdf:{localName} is forbidden as a property element name");
+        }
+    }
+
+    /// <summary>
+    /// Validate property element attributes for conflicts.
+    /// </summary>
+    private void ValidatePropertyElementAttributes(Dictionary<string, string> attributes)
+    {
+        // rdf:bagID is not allowed (deprecated)
+        if (attributes.ContainsKey("rdf:bagID") || attributes.ContainsKey("bagID"))
+            throw ParserException("rdf:bagID is not allowed (removed from RDF 1.0)");
+
+        bool hasResource = attributes.ContainsKey("rdf:resource") || attributes.ContainsKey("resource");
+        bool hasNodeID = attributes.ContainsKey("rdf:nodeID") || attributes.ContainsKey("nodeID");
+        bool hasParseType = attributes.ContainsKey("rdf:parseType") || attributes.ContainsKey("parseType");
+        bool hasDatatype = attributes.ContainsKey("rdf:datatype") || attributes.ContainsKey("datatype");
+
+        // Validate rdf:ID if present (also used for reification on property elements)
+        if (attributes.TryGetValue("rdf:ID", out var id) || attributes.TryGetValue("ID", out id))
+        {
+            ValidateNCName(id, "rdf:ID");
+            // Check for duplicate IDs (uniqueness based on resolved URI, not just ID value)
+            var resolvedBase = string.IsNullOrEmpty(_baseUri) ? "" : _baseUri;
+            var fullUri = $"{resolvedBase}#{id}";
+            if (!_usedIds.Add(fullUri))
+                throw ParserException($"Duplicate rdf:ID '{id}' - resolves to same URI '{fullUri}'");
+        }
+
+        // Validate rdf:nodeID if present
+        if (attributes.TryGetValue("rdf:nodeID", out var nodeId) || attributes.TryGetValue("nodeID", out nodeId))
+            ValidateNCName(nodeId, "rdf:nodeID");
+
+        // rdf:resource and rdf:nodeID are mutually exclusive
+        if (hasResource && hasNodeID)
+            throw ParserException("Cannot have both rdf:resource and rdf:nodeID on a property element");
+
+        // rdf:parseType conflicts with rdf:resource, rdf:nodeID, and rdf:datatype
+        if (hasParseType && hasResource)
+            throw ParserException("Cannot have both rdf:parseType and rdf:resource on a property element");
+
+        if (hasParseType && hasNodeID)
+            throw ParserException("Cannot have both rdf:parseType and rdf:nodeID on a property element");
+
+        if (hasParseType && hasDatatype)
+            throw ParserException("Cannot have both rdf:parseType and rdf:datatype on a property element");
+
+        // rdf:datatype conflicts with rdf:resource and rdf:nodeID
+        if (hasDatatype && hasResource)
+            throw ParserException("Cannot have both rdf:datatype and rdf:resource on a property element");
+
+        if (hasDatatype && hasNodeID)
+            throw ParserException("Cannot have both rdf:datatype and rdf:nodeID on a property element");
     }
 
     #endregion
