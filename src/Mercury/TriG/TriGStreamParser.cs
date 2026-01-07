@@ -66,7 +66,23 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     private const int DefaultBufferSize = 8192;
 
+    /// <summary>
+    /// Creates a TriG parser for the given stream.
+    /// </summary>
     public TriGStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+        : this(stream, null, bufferSize, bufferManager)
+    {
+    }
+
+    /// <summary>
+    /// Creates a TriG parser with a document base URI for resolving relative IRIs.
+    /// </summary>
+    /// <param name="stream">The input stream containing TriG content.</param>
+    /// <param name="documentBaseUri">The base URI for the document (typically the document URL).
+    /// Used for resolving relative IRIs per RFC3986. Can be overridden by @base directives.</param>
+    /// <param name="bufferSize">Buffer size for reading the stream.</param>
+    /// <param name="bufferManager">Optional buffer manager for pooling.</param>
+    public TriGStreamParser(Stream stream, string? documentBaseUri, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
@@ -75,7 +91,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
 
         _namespaces = new Dictionary<string, string>();
-        _baseUri = string.Empty;
+        _baseUri = documentBaseUri ?? string.Empty;
         _blankNodeCounter = 0;
 
         _line = 1;
@@ -537,7 +553,9 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             throw ParserException("'=' is not a valid predicate in TriG (N3 syntax not supported)");
 
         // 'a' shorthand for rdf:type
-        if (ch == 'a' && !IsPnChars(PeekAhead(1)))
+        // Must not be followed by ':' (which would make it a prefix like 'a:b')
+        // and must not be followed by PN_CHARS (which would make it part of a prefixed name)
+        if (ch == 'a' && PeekAhead(1) != ':' && !IsPnChars(PeekAhead(1)))
         {
             Consume();
             return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>".AsSpan();
@@ -661,12 +679,12 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 if (next == 'u')
                 {
                     Consume();
-                    AppendToOutput(ParseUnicodeEscape(4));
+                    AppendCodePoint(ParseUnicodeEscape(4));
                 }
                 else if (next == 'U')
                 {
                     Consume();
-                    AppendToOutput(ParseUnicodeEscape(8));
+                    AppendCodePoint(ParseUnicodeEscape(8));
                 }
                 else
                 {
@@ -679,7 +697,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);  // Handle Unicode code points including supplementary planes
                 Consume();
             }
         }
@@ -687,29 +705,43 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         int contentEnd = _outputOffset;
         int contentLen = contentEnd - contentStart;
 
-        // Check if this is a relative IRI (no scheme like "http://")
+        // Get the IRI content for analysis
         var iriContent = _outputBuffer.AsSpan(contentStart, contentLen);
-        bool isRelative = contentLen > 0 &&
-                          !iriContent.Contains("://".AsSpan(), StringComparison.Ordinal) &&
-                          !iriContent.StartsWith("#".AsSpan(), StringComparison.Ordinal);
 
-        if (isRelative && !string.IsNullOrEmpty(_baseUri))
+        // Check if this is an absolute IRI (has scheme like "http:" or "urn:")
+        bool hasScheme = false;
+        for (int i = 0; i < iriContent.Length; i++)
         {
-            // Need to resolve against base URI - copy content first since we'll overwrite buffer
-            var iriContentCopy = iriContent.ToString();
+            var c = iriContent[i];
+            if (c == ':')
+            {
+                hasScheme = i > 0; // scheme must have at least one char before ':'
+                break;
+            }
+            if (c == '/' || c == '?' || c == '#')
+                break; // These chars before ':' mean no scheme
+            if (i == 0 && !char.IsLetter(c))
+                break; // Scheme must start with letter
+            if (i > 0 && !char.IsLetterOrDigit(c) && c != '+' && c != '-' && c != '.')
+                break; // Scheme can only contain these chars
+        }
 
-            // Reset and build resolved IRI
-            _outputOffset = start;
-            AppendToOutput('<');
-            foreach (var c in _baseUri)
-                AppendToOutput(c);
-            foreach (var c in iriContentCopy)
-                AppendToOutput(c);
+        if (hasScheme || string.IsNullOrEmpty(_baseUri))
+        {
+            // Absolute IRI or no base - just close with >
             AppendToOutput('>');
         }
         else
         {
-            // Just close with >
+            // Resolve relative IRI against base URI per RFC3986
+            var iriContentCopy = iriContent.ToString();
+            var resolved = ResolveIri(_baseUri, iriContentCopy);
+
+            // Reset and build resolved IRI
+            _outputOffset = start;
+            AppendToOutput('<');
+            foreach (var c in resolved)
+                AppendToOutput(c);
             AppendToOutput('>');
         }
 
@@ -720,19 +752,33 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         int start = _outputOffset;
 
-        // Parse prefix part - can include dots, dashes, digits (but not as first char)
-        // e.g: "e.g:" is a valid prefix
+        // Parse prefix part - can include dots, dashes, underscores, digits (but not as first char)
+        // PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)?
+        // PN_CHARS includes PN_CHARS_U (which has '_') plus '-' and digits
+        // e.g: "e.g:", "ex_2:", "ex-2:" are all valid prefixes
         var prefixStart = _outputOffset;
+        bool isFirstPrefixChar = true;
         while (true)
         {
             var ch = Peek();
             if (ch == ':')
                 break;
-            // Allow dots in prefix names (but not as the last character before ':')
-            if (!IsPnCharsBase(ch) && ch != '-' && ch != '.' && !char.IsDigit((char)ch))
-                break;
-            AppendToOutput((char)ch);
+            // First char must be PN_CHARS_BASE, subsequent chars can be PN_CHARS or '.'
+            if (isFirstPrefixChar)
+            {
+                if (!IsPnCharsBase(ch))
+                    break;
+            }
+            else
+            {
+                // PN_CHARS = PN_CHARS_U | '-' | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040]
+                // Use IsPnChars() which includes all these ranges, plus allow '.' between chars
+                if (!IsPnChars(ch) && ch != '.')
+                    break;
+            }
+            AppendCodePoint(ch);
             Consume();
+            isFirstPrefixChar = false;
         }
 
         // Check for trailing dots in prefix and remove them (they're not part of prefix)
@@ -800,7 +846,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 // Otherwise it's the statement terminator
                 if (!IsPnChars(next) && next != '.')
                     break;
-                AppendToOutput((char)ch);
+                AppendToOutput('.');  // '.' is ASCII, no surrogate pair needed
                 Consume();
                 isFirstLocalChar = false;
                 continue;
@@ -841,7 +887,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);  // Handle Unicode code points including supplementary planes
                 Consume();
             }
             isFirstLocalChar = false;
@@ -884,7 +930,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (!IsPnCharsU(ch) && !char.IsDigit((char)ch))
             throw ParserException("Invalid blank node label");
 
-        AppendToOutput((char)ch);
+        AppendCodePoint(ch);  // Handle Unicode code points including supplementary planes
         Consume();
 
         while (true)
@@ -902,14 +948,14 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 // Dot followed by PN_CHARS is part of label - continue
                 if (IsPnChars(next))
                 {
-                    AppendToOutput((char)ch);
+                    AppendToOutput('.');  // '.' is ASCII
                     Consume();
                     continue;
                 }
                 // Dot followed by dot is part of label (might have more dots)
                 if (next == '.')
                 {
-                    AppendToOutput((char)ch);
+                    AppendToOutput('.');  // '.' is ASCII
                     Consume();
                     continue;
                 }
@@ -934,7 +980,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
                 break;
             }
 
-            AppendToOutput((char)ch);
+            AppendCodePoint(ch);  // Handle Unicode code points including supplementary planes
             Consume();
         }
 
@@ -1208,11 +1254,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             if (ch == '\\')
             {
                 Consume();
-                AppendToOutput(ParseEscapeSequence());
+                ParseEscapeSequenceAndAppend();
             }
             else
             {
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);
                 Consume();
             }
         }
@@ -1237,11 +1283,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             if (ch == '\\')
             {
                 Consume();
-                AppendToOutput(ParseEscapeSequence());
+                ParseEscapeSequenceAndAppend();
             }
             else
             {
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);
                 Consume();
             }
         }
@@ -1447,7 +1493,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             var ch = Peek();
             if (ch == ':' || ch == -1 || IsWhitespace(ch))
                 break;
-            AppendToOutput((char)ch);
+            AppendCodePoint(ch);  // Handle Unicode code points including supplementary planes
             Consume();
         }
         var span = GetOutputSpan(start);
@@ -1460,7 +1506,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     #region Escape Handling
 
-    private char ParseEscapeSequence()
+    /// <summary>
+    /// Parse string escape sequence and append to output.
+    /// Handles both BMP and supplementary Unicode code points.
+    /// </summary>
+    private void ParseEscapeSequenceAndAppend()
     {
         var ch = Peek();
         if (ch == -1)
@@ -1468,23 +1518,34 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
         Consume();
 
-        return (char)ch switch
+        switch ((char)ch)
         {
-            't' => '\t',
-            'b' => '\b',
-            'n' => '\n',
-            'r' => '\r',
-            'f' => '\f',
-            '"' => '"',
-            '\'' => '\'',
-            '\\' => '\\',
-            'u' => ParseUnicodeEscape(4),
-            'U' => ParseUnicodeEscape(8),
-            _ => throw ParserException($"Invalid escape: \\{(char)ch}")
-        };
+            case 't': AppendToOutput('\t'); break;
+            case 'b': AppendToOutput('\b'); break;
+            case 'n': AppendToOutput('\n'); break;
+            case 'r': AppendToOutput('\r'); break;
+            case 'f': AppendToOutput('\f'); break;
+            case '"': AppendToOutput('"'); break;
+            case '\'': AppendToOutput('\''); break;
+            case '\\': AppendToOutput('\\'); break;
+            case 'u':
+                var codePoint4 = ParseUnicodeEscape(4);
+                AppendCodePoint(codePoint4);
+                break;
+            case 'U':
+                var codePoint8 = ParseUnicodeEscape(8);
+                AppendCodePoint(codePoint8);
+                break;
+            default:
+                throw ParserException($"Invalid escape: \\{(char)ch}");
+        }
     }
 
-    private char ParseUnicodeEscape(int digits)
+    /// <summary>
+    /// Parse unicode escape (\uXXXX or \UXXXXXXXX).
+    /// Returns the full code point (may be > 0xFFFF for supplementary planes).
+    /// </summary>
+    private int ParseUnicodeEscape(int digits)
     {
         var value = 0;
         for (int i = 0; i < digits; i++)
@@ -1509,7 +1570,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (value >= 0xD800 && value <= 0xDFFF)
             throw ParserException($"Surrogate code points are not allowed: U+{value:X4}");
 
-        return (char)value;
+        return value;
     }
 
     #endregion
@@ -1521,7 +1582,78 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         if (_bufferPosition >= _bufferLength)
             return _endOfStream ? -1 : -1;
-        return _inputBuffer[_bufferPosition];
+
+        // Decode UTF-8 to get Unicode code point
+        return PeekUtf8CodePoint(out _);
+    }
+
+    /// <summary>
+    /// Peek the current UTF-8 code point and return its byte length.
+    /// Returns -1 if at end of input.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int PeekUtf8CodePoint(out int byteLength)
+    {
+        if (_bufferPosition >= _bufferLength)
+        {
+            byteLength = 0;
+            return -1;
+        }
+
+        var b0 = _inputBuffer[_bufferPosition];
+
+        // ASCII (0x00-0x7F): single byte
+        if (b0 < 0x80)
+        {
+            byteLength = 1;
+            return b0;
+        }
+
+        // 2-byte sequence (0xC0-0xDF)
+        if ((b0 & 0xE0) == 0xC0)
+        {
+            if (_bufferPosition + 1 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0; // Incomplete sequence, return first byte
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            byteLength = 2;
+            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
+        }
+
+        // 3-byte sequence (0xE0-0xEF)
+        if ((b0 & 0xF0) == 0xE0)
+        {
+            if (_bufferPosition + 2 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0; // Incomplete sequence
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            var b2 = _inputBuffer[_bufferPosition + 2];
+            byteLength = 3;
+            return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+        }
+
+        // 4-byte sequence (0xF0-0xF7)
+        if ((b0 & 0xF8) == 0xF0)
+        {
+            if (_bufferPosition + 3 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0; // Incomplete sequence
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            var b2 = _inputBuffer[_bufferPosition + 2];
+            var b3 = _inputBuffer[_bufferPosition + 3];
+            byteLength = 4;
+            return ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+        }
+
+        // Invalid UTF-8 lead byte, return as-is
+        byteLength = 1;
+        return b0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1539,8 +1671,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (_bufferPosition >= _bufferLength)
             return;
 
+        // Get the byte length of the current UTF-8 code point
+        PeekUtf8CodePoint(out var byteLength);
+
         var ch = _inputBuffer[_bufferPosition];
-        _bufferPosition++;
+        _bufferPosition += byteLength;
 
         if (ch == '\n')
         {
@@ -1686,6 +1821,24 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         _outputBuffer[_outputOffset++] = c;
     }
 
+    /// <summary>
+    /// Append a Unicode code point to the output buffer, handling surrogate pairs for code points > 0xFFFF.
+    /// </summary>
+    private void AppendCodePoint(int codePoint)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            AppendToOutput((char)codePoint);
+        }
+        else
+        {
+            // Encode as surrogate pair
+            var adjusted = codePoint - 0x10000;
+            AppendToOutput((char)(0xD800 + (adjusted >> 10)));
+            AppendToOutput((char)(0xDC00 + (adjusted & 0x3FF)));
+        }
+    }
+
     private void AppendString(string s)
     {
         foreach (var c in s)
@@ -1706,26 +1859,374 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     #endregion
 
+    #region IRI Resolution (RFC3986)
+
+    /// <summary>
+    /// Resolves a relative IRI reference against a base IRI per RFC3986.
+    /// </summary>
+    private static string ResolveIri(string baseUri, string reference)
+    {
+        if (string.IsNullOrEmpty(reference))
+            return baseUri;
+
+        // Parse base URI components
+        ParseUri(baseUri, out var baseScheme, out var baseAuthority, out var basePath, out var baseQuery, out _);
+
+        // Use null to indicate "no fragment" vs "" for "empty fragment" (e.g., bar#)
+        string scheme;
+        string? authority, query, fragment;
+        string path;
+
+        // Check if reference has its own scheme
+        int colonPos = reference.IndexOf(':');
+        int slashPos = reference.IndexOf('/');
+        int queryPos = reference.IndexOf('?');
+        int fragPos = reference.IndexOf('#');
+
+        bool refHasScheme = colonPos > 0 &&
+                            (slashPos < 0 || colonPos < slashPos) &&
+                            (queryPos < 0 || colonPos < queryPos) &&
+                            (fragPos < 0 || colonPos < fragPos);
+
+        if (refHasScheme)
+        {
+            // Reference has scheme - use it as-is (with path normalization)
+            ParseUri(reference, out scheme, out authority, out path, out query, out fragment);
+            path = RemoveDotSegments(path);
+        }
+        else if (reference.StartsWith("//"))
+        {
+            // Reference has authority
+            scheme = baseScheme;
+            ParseUri("x:" + reference, out _, out authority, out path, out query, out fragment);
+            path = RemoveDotSegments(path);
+        }
+        else if (reference.Length == 0)
+        {
+            // Empty reference - use base
+            scheme = baseScheme;
+            authority = baseAuthority;
+            path = basePath;
+            query = baseQuery;
+            fragment = null;
+        }
+        else if (reference[0] == '?')
+        {
+            // Reference is query
+            scheme = baseScheme;
+            authority = baseAuthority;
+            path = basePath;
+            query = reference.Substring(1);
+            fragPos = query.IndexOf('#');
+            if (fragPos >= 0)
+            {
+                fragment = query.Substring(fragPos + 1);  // "" for empty fragment is OK
+                query = query.Substring(0, fragPos);
+            }
+            else
+            {
+                fragment = null;  // No fragment present
+            }
+        }
+        else if (reference[0] == '#')
+        {
+            // Reference is fragment - include the # even if fragment is empty
+            // For empty fragment (#), we still want to output the #
+            var fragResult = new System.Text.StringBuilder();
+            fragResult.Append(baseScheme);
+            fragResult.Append(':');
+            if (baseAuthority != null)
+            {
+                fragResult.Append("//");
+                fragResult.Append(baseAuthority);
+            }
+            fragResult.Append(basePath);
+            if (!string.IsNullOrEmpty(baseQuery))
+            {
+                fragResult.Append('?');
+                fragResult.Append(baseQuery);
+            }
+            fragResult.Append('#');
+            fragResult.Append(reference.Substring(1));
+            return fragResult.ToString();
+        }
+        else if (reference[0] == '/')
+        {
+            // Reference has absolute path
+            scheme = baseScheme;
+            authority = baseAuthority;
+            ParseUri(baseScheme + "://" + (baseAuthority ?? "") + reference,
+                out _, out _, out path, out query, out fragment);
+            path = RemoveDotSegments(path);
+        }
+        else
+        {
+            // Reference has relative path - merge with base
+            scheme = baseScheme;
+            authority = baseAuthority;
+
+            // Merge paths
+            if (string.IsNullOrEmpty(baseAuthority) && string.IsNullOrEmpty(basePath))
+            {
+                path = "/" + reference;
+            }
+            else
+            {
+                int lastSlash = basePath.LastIndexOf('/');
+                if (lastSlash >= 0)
+                    path = basePath.Substring(0, lastSlash + 1) + reference;
+                else
+                    path = reference;
+            }
+
+            // Extract query and fragment from merged path
+            fragPos = path.IndexOf('#');
+            if (fragPos >= 0)
+            {
+                fragment = path.Substring(fragPos + 1);  // "" for empty fragment is OK
+                path = path.Substring(0, fragPos);
+            }
+            else
+            {
+                fragment = null;  // No fragment present
+            }
+
+            queryPos = path.IndexOf('?');
+            if (queryPos >= 0)
+            {
+                query = path.Substring(queryPos + 1);
+                path = path.Substring(0, queryPos);
+            }
+            else
+            {
+                query = null;  // No query present
+            }
+
+            path = RemoveDotSegments(path);
+        }
+
+        // Recompose the URI
+        var result = new System.Text.StringBuilder();
+        result.Append(scheme);
+        result.Append(':');
+
+        if (authority != null)
+        {
+            result.Append("//");
+            result.Append(authority);
+        }
+
+        result.Append(path);
+
+        if (query != null)
+        {
+            result.Append('?');
+            result.Append(query);
+        }
+
+        if (fragment != null)
+        {
+            result.Append('#');
+            result.Append(fragment);
+        }
+
+        return result.ToString();
+    }
+
+    /// <summary>
+    /// Parses a URI into its components.
+    /// Returns null for query/fragment when the delimiter is not present (vs "" when present but empty).
+    /// </summary>
+    private static void ParseUri(string uri, out string scheme, out string? authority,
+        out string path, out string? query, out string? fragment)
+    {
+        scheme = "";
+        authority = null;
+        path = "";
+        query = null;     // null = no ? in URI
+        fragment = null;  // null = no # in URI
+
+        if (string.IsNullOrEmpty(uri))
+            return;
+
+        int pos = 0;
+
+        // Extract scheme
+        int colonPos = uri.IndexOf(':');
+        if (colonPos > 0)
+        {
+            scheme = uri.Substring(0, colonPos);
+            pos = colonPos + 1;
+        }
+
+        // Extract fragment (# present means fragment, even if empty)
+        int fragPos = uri.IndexOf('#', pos);
+        string remaining;
+        if (fragPos >= 0)
+        {
+            fragment = uri.Substring(fragPos + 1);  // "" if nothing after #
+            remaining = uri.Substring(pos, fragPos - pos);
+        }
+        else
+        {
+            fragment = null;  // No # in URI
+            remaining = uri.Substring(pos);
+        }
+
+        // Extract query (? present means query, even if empty)
+        int queryPos = remaining.IndexOf('?');
+        if (queryPos >= 0)
+        {
+            query = remaining.Substring(queryPos + 1);  // "" if nothing after ?
+            remaining = remaining.Substring(0, queryPos);
+        }
+        else
+        {
+            query = null;  // No ? in URI
+        }
+
+        // Extract authority and path
+        if (remaining.StartsWith("//"))
+        {
+            int pathStart = remaining.IndexOf('/', 2);
+            if (pathStart >= 0)
+            {
+                authority = remaining.Substring(2, pathStart - 2);
+                path = remaining.Substring(pathStart);
+            }
+            else
+            {
+                authority = remaining.Substring(2);
+                path = "";
+            }
+        }
+        else
+        {
+            path = remaining;
+        }
+    }
+
+    /// <summary>
+    /// Removes dot segments from a path per RFC3986 section 5.2.4.
+    /// </summary>
+    private static string RemoveDotSegments(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return path;
+
+        var output = new System.Text.StringBuilder();
+        int i = 0;
+
+        while (i < path.Length)
+        {
+            // A: If the input buffer begins with a prefix of "../" or "./"
+            if (path.Length - i >= 3 && path[i] == '.' && path[i + 1] == '.' && path[i + 2] == '/')
+            {
+                i += 3;
+                continue;
+            }
+            if (path.Length - i >= 2 && path[i] == '.' && path[i + 1] == '/')
+            {
+                i += 2;
+                continue;
+            }
+
+            // B: If the input buffer begins with a prefix of "/./" or "/."
+            if (path.Length - i >= 3 && path[i] == '/' && path[i + 1] == '.' && path[i + 2] == '/')
+            {
+                i += 2;
+                continue;
+            }
+            if (path.Length - i == 2 && path[i] == '/' && path[i + 1] == '.')
+            {
+                output.Append('/');
+                i += 2;
+                continue;
+            }
+
+            // C: If the input buffer begins with a prefix of "/../" or "/.."
+            if (path.Length - i >= 4 && path[i] == '/' && path[i + 1] == '.' && path[i + 2] == '.' && path[i + 3] == '/')
+            {
+                i += 3;
+                RemoveLastSegment(output);
+                continue;
+            }
+            if (path.Length - i == 3 && path[i] == '/' && path[i + 1] == '.' && path[i + 2] == '.')
+            {
+                RemoveLastSegment(output);
+                output.Append('/');
+                i += 3;
+                continue;
+            }
+
+            // D: if the input buffer consists only of "." or ".."
+            if ((path.Length - i == 1 && path[i] == '.') ||
+                (path.Length - i == 2 && path[i] == '.' && path[i + 1] == '.'))
+            {
+                break;
+            }
+
+            // E: move the first path segment (including initial "/" if any) to output
+            if (path[i] == '/')
+            {
+                output.Append('/');
+                i++;
+            }
+
+            while (i < path.Length && path[i] != '/')
+            {
+                output.Append(path[i]);
+                i++;
+            }
+        }
+
+        return output.ToString();
+    }
+
+    /// <summary>
+    /// Removes the last segment from the output buffer.
+    /// </summary>
+    private static void RemoveLastSegment(System.Text.StringBuilder output)
+    {
+        int lastSlash = -1;
+        for (int i = output.Length - 1; i >= 0; i--)
+        {
+            if (output[i] == '/')
+            {
+                lastSlash = i;
+                break;
+            }
+        }
+
+        if (lastSlash >= 0)
+            output.Length = lastSlash;
+        else
+            output.Clear();
+    }
+
+    #endregion
+
     #region Character Classification
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsPnCharsBase(int ch)
     {
         if (ch == -1) return false;
-        var c = (char)ch;
-        return (c >= 'A' && c <= 'Z') ||
-               (c >= 'a' && c <= 'z') ||
-               (c >= '\u00C0' && c <= '\u00D6') ||
-               (c >= '\u00D8' && c <= '\u00F6') ||
-               (c >= '\u00F8' && c <= '\u02FF') ||
-               (c >= '\u0370' && c <= '\u037D') ||
-               (c >= '\u037F' && c <= '\u1FFF') ||
-               (c >= '\u200C' && c <= '\u200D') ||
-               (c >= '\u2070' && c <= '\u218F') ||
-               (c >= '\u2C00' && c <= '\u2FEF') ||
-               (c >= '\u3001' && c <= '\uD7FF') ||
-               (c >= '\uF900' && c <= '\uFDCF') ||
-               (c >= '\uFDF0' && c <= '\uFFFD');
+        // Check code point ranges per W3C TriG grammar
+        return (ch >= 'A' && ch <= 'Z') ||
+               (ch >= 'a' && ch <= 'z') ||
+               (ch >= 0x00C0 && ch <= 0x00D6) ||
+               (ch >= 0x00D8 && ch <= 0x00F6) ||
+               (ch >= 0x00F8 && ch <= 0x02FF) ||
+               (ch >= 0x0370 && ch <= 0x037D) ||
+               (ch >= 0x037F && ch <= 0x1FFF) ||
+               (ch >= 0x200C && ch <= 0x200D) ||
+               (ch >= 0x2070 && ch <= 0x218F) ||
+               (ch >= 0x2C00 && ch <= 0x2FEF) ||
+               (ch >= 0x3001 && ch <= 0xD7FF) ||
+               (ch >= 0xF900 && ch <= 0xFDCF) ||
+               (ch >= 0xFDF0 && ch <= 0xFFFD) ||
+               (ch >= 0x10000 && ch <= 0xEFFFF);  // Supplementary planes
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1735,13 +2236,13 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     private static bool IsPnChars(int ch)
     {
         if (ch == -1) return false;
-        var c = (char)ch;
+        // PN_CHARS per W3C grammar - includes PN_CHARS_U plus combining chars and digits
         return IsPnCharsU(ch) ||
-               c == '-' ||
-               char.IsDigit(c) ||
-               c == '\u00B7' ||
-               (c >= '\u0300' && c <= '\u036F') ||
-               (c >= '\u203F' && c <= '\u2040');
+               ch == '-' ||
+               (ch >= '0' && ch <= '9') ||
+               ch == 0x00B7 ||
+               (ch >= 0x0300 && ch <= 0x036F) ||
+               (ch >= 0x203F && ch <= 0x2040);
     }
 
     #endregion

@@ -30,11 +30,14 @@ public class TriGConformanceTests
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
 
+        // Compute document base URI from test ID
+        var documentBaseUri = GetDocumentBaseUri(test);
+
         // Positive syntax test: should parse without error
         var quads = new List<(string s, string p, string o, string g)>();
 
         await using var stream = File.OpenRead(test.ActionPath);
-        using var parser = new TriGStreamParser(stream);
+        using var parser = new TriGStreamParser(stream, documentBaseUri);
 
         await parser.ParseAsync((s, p, o, g) =>
         {
@@ -54,9 +57,12 @@ public class TriGConformanceTests
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"File: {test.ActionPath}");
 
+        // Compute document base URI from test ID
+        var documentBaseUri = GetDocumentBaseUri(test);
+
         // Negative syntax test: should throw an exception
         await using var stream = File.OpenRead(test.ActionPath);
-        using var parser = new TriGStreamParser(stream);
+        using var parser = new TriGStreamParser(stream, documentBaseUri);
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
@@ -79,11 +85,15 @@ public class TriGConformanceTests
         _output.WriteLine($"Input: {test.ActionPath}");
         _output.WriteLine($"Expected: {test.ResultPath}");
 
+        // Compute document base URI from test ID
+        var documentBaseUri = GetDocumentBaseUri(test);
+        _output.WriteLine($"Base URI: {documentBaseUri}");
+
         // Parse the TriG input
         var actualQuads = new List<(string s, string p, string o, string g)>();
 
         await using (var stream = File.OpenRead(test.ActionPath))
-        using (var parser = new TriGStreamParser(stream))
+        using (var parser = new TriGStreamParser(stream, documentBaseUri))
         {
             await parser.ParseAsync((s, p, o, g) =>
             {
@@ -203,6 +213,19 @@ public class TriGConformanceTests
             Canonicalize(q.o),
             Canonicalize(q.g)
         )).ToList();
+    }
+
+    /// <summary>
+    /// Computes the document base URI from the test case.
+    /// The W3C test suite uses URIs like https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-trig/file.trig
+    /// </summary>
+    private static string GetDocumentBaseUri(W3CTestCase test)
+    {
+        // The test ID contains the manifest URI path
+        // e.g., file:///Users/.../manifest.ttl#test-name
+        // We need to derive the W3C public URL from the action file name
+        var fileName = Path.GetFileName(test.ActionPath);
+        return $"https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-trig/{fileName}";
     }
 
     public static IEnumerable<object[]> GetTriG11PositiveSyntaxTests()

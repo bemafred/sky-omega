@@ -421,13 +421,13 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(4);
-                    AppendToOutput(escaped);
+                    AppendCodePoint(escaped);
                 }
                 else if (next == 'U')
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(8);
-                    AppendToOutput(escaped);
+                    AppendCodePoint(escaped);
                 }
                 else
                 {
@@ -461,7 +461,7 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
                     }
                 }
 
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);  // Handle Unicode code points including supplementary planes
                 Consume();
             }
         }
@@ -565,8 +565,7 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             if (ch == '\\')
             {
                 Consume();
-                var escaped = ParseEscapeSequence();
-                AppendToOutput(escaped);
+                ParseEscapeSequenceAndAppend();
             }
             else
             {
@@ -653,9 +652,10 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     #region Escape Handling
 
     /// <summary>
-    /// Parse string escape sequence (N-Quads escapes).
+    /// Parse string escape sequence (N-Quads escapes) and append to output.
+    /// Handles both BMP and supplementary Unicode code points.
     /// </summary>
-    private char ParseEscapeSequence()
+    private void ParseEscapeSequenceAndAppend()
     {
         var ch = Peek();
 
@@ -664,26 +664,34 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 
         Consume();
 
-        return (char)ch switch
+        switch ((char)ch)
         {
-            't' => '\t',
-            'b' => '\b',
-            'n' => '\n',
-            'r' => '\r',
-            'f' => '\f',
-            '"' => '"',
-            '\'' => '\'',
-            '\\' => '\\',
-            'u' => ParseUnicodeEscape(4),
-            'U' => ParseUnicodeEscape(8),
-            _ => throw ParserException($"Invalid escape sequence: \\{(char)ch}")
-        };
+            case 't': AppendToOutput('\t'); break;
+            case 'b': AppendToOutput('\b'); break;
+            case 'n': AppendToOutput('\n'); break;
+            case 'r': AppendToOutput('\r'); break;
+            case 'f': AppendToOutput('\f'); break;
+            case '"': AppendToOutput('"'); break;
+            case '\'': AppendToOutput('\''); break;
+            case '\\': AppendToOutput('\\'); break;
+            case 'u':
+                var codePoint4 = ParseUnicodeEscape(4);
+                AppendCodePoint(codePoint4);
+                break;
+            case 'U':
+                var codePoint8 = ParseUnicodeEscape(8);
+                AppendCodePoint(codePoint8);
+                break;
+            default:
+                throw ParserException($"Invalid escape sequence: \\{(char)ch}");
+        }
     }
 
     /// <summary>
     /// Parse unicode escape (\uXXXX or \UXXXXXXXX).
+    /// Returns the full code point (may be > 0xFFFF for supplementary planes).
     /// </summary>
-    private char ParseUnicodeEscape(int digits = 4)
+    private int ParseUnicodeEscape(int digits = 4)
     {
         var value = 0;
 
@@ -710,7 +718,7 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         if (value >= 0xD800 && value <= 0xDFFF)
             throw ParserException($"Invalid unicode: surrogate U+{value:X4}");
 
-        return (char)value;
+        return value;
     }
 
     #endregion
@@ -723,7 +731,77 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         if (_bufferPosition >= _bufferLength)
             return _endOfStream ? -1 : -1;
 
-        return _inputBuffer[_bufferPosition];
+        // Decode UTF-8 to get Unicode code point
+        return PeekUtf8CodePoint(out _);
+    }
+
+    /// <summary>
+    /// Peek the current UTF-8 code point and return its byte length.
+    /// Returns -1 if at end of input.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int PeekUtf8CodePoint(out int byteLength)
+    {
+        if (_bufferPosition >= _bufferLength)
+        {
+            byteLength = 0;
+            return -1;
+        }
+
+        var b0 = _inputBuffer[_bufferPosition];
+
+        // ASCII (0x00-0x7F): single byte
+        if (b0 < 0x80)
+        {
+            byteLength = 1;
+            return b0;
+        }
+
+        // 2-byte sequence (0xC0-0xDF)
+        if ((b0 & 0xE0) == 0xC0)
+        {
+            if (_bufferPosition + 1 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0;
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            byteLength = 2;
+            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
+        }
+
+        // 3-byte sequence (0xE0-0xEF)
+        if ((b0 & 0xF0) == 0xE0)
+        {
+            if (_bufferPosition + 2 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0;
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            var b2 = _inputBuffer[_bufferPosition + 2];
+            byteLength = 3;
+            return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+        }
+
+        // 4-byte sequence (0xF0-0xF7)
+        if ((b0 & 0xF8) == 0xF0)
+        {
+            if (_bufferPosition + 3 >= _bufferLength)
+            {
+                byteLength = 1;
+                return b0;
+            }
+            var b1 = _inputBuffer[_bufferPosition + 1];
+            var b2 = _inputBuffer[_bufferPosition + 2];
+            var b3 = _inputBuffer[_bufferPosition + 3];
+            byteLength = 4;
+            return ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+        }
+
+        // Invalid UTF-8 lead byte, return as-is
+        byteLength = 1;
+        return b0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -742,8 +820,11 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         if (_bufferPosition >= _bufferLength)
             return;
 
+        // Get the byte length of the current UTF-8 code point
+        PeekUtf8CodePoint(out var byteLength);
+
         var ch = _inputBuffer[_bufferPosition];
-        _bufferPosition++;
+        _bufferPosition += byteLength;
 
         if (ch == '\n')
         {
@@ -876,6 +957,24 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
         if (_outputOffset >= _outputBuffer.Length)
             GrowOutputBuffer();
         _outputBuffer[_outputOffset++] = c;
+    }
+
+    /// <summary>
+    /// Append a Unicode code point to the output buffer, handling surrogate pairs for code points > 0xFFFF.
+    /// </summary>
+    private void AppendCodePoint(int codePoint)
+    {
+        if (codePoint <= 0xFFFF)
+        {
+            AppendToOutput((char)codePoint);
+        }
+        else
+        {
+            // Encode as surrogate pair
+            var adjusted = codePoint - 0x10000;
+            AppendToOutput((char)(0xD800 + (adjusted >> 10)));
+            AppendToOutput((char)(0xDC00 + (adjusted & 0x3FF)));
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
