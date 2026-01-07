@@ -154,6 +154,22 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         ResetOutputBuffer();
 
+        // Check if this is an anonymous/default graph block: { ... }
+        if (Peek() == '{')
+        {
+            Consume();
+            _currentGraphStart = 0;
+            _currentGraphLength = 0;
+
+            ParseTriplesBlock(handler);
+
+            SkipWhitespaceAndComments();
+            if (!TryConsume('}'))
+                throw ParserException("Expected '}' to close graph block");
+
+            return;
+        }
+
         // Check if this is a GRAPH keyword
         if (MatchKeyword("GRAPH"))
         {
