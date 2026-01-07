@@ -101,12 +101,8 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            // Try to parse a triple
-            if (!ParseTripleZeroGC(handler))
-            {
-                // Skip to next line on parse failure
-                SkipToEndOfLine();
-            }
+            // Parse a triple - N-Triples must be strictly valid
+            ParseTripleZeroGC(handler);
         }
     }
 
@@ -135,82 +131,133 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput())
                 break;
 
-            var triple = ParseTripleAllocating();
-            if (triple.HasValue)
-            {
-                yield return triple.Value;
-            }
-            else
-            {
-                SkipToEndOfLine();
-            }
+            yield return ParseTripleAllocating();
         }
     }
 
     /// <summary>
     /// Parse a single triple with zero allocations.
+    /// Throws on invalid input per N-Triples specification.
     /// </summary>
-    private bool ParseTripleZeroGC(TripleHandler handler)
+    private void ParseTripleZeroGC(TripleHandler handler)
     {
         ResetOutputBuffer();
 
-        // Parse subject
+        // Parse subject (must be IRIREF or BLANK_NODE_LABEL)
+        var ch = Peek();
+        if (ch != '<' && ch != '_')
+            throw ParserException($"Expected '<' or '_:' at start of subject, got '{(char)ch}'");
+
         var subject = ParseSubjectSpan();
         if (subject.IsEmpty)
-            return false;
+            throw ParserException("Invalid subject");
 
-        SkipWhitespace();
+        SkipWhitespace(); // Optional in N-Triples
 
-        // Parse predicate
+        // Parse predicate (must be IRIREF)
+        if (Peek() != '<')
+            throw ParserException("Expected '<' at start of predicate");
+
         var predicate = ParsePredicateSpan();
         if (predicate.IsEmpty)
-            return false;
+            throw ParserException("Invalid predicate");
 
-        SkipWhitespace();
+        SkipWhitespace(); // Optional in N-Triples
 
-        // Parse object
+        // Parse object (must be IRIREF, BLANK_NODE_LABEL, or literal)
+        ch = Peek();
+        if (ch != '<' && ch != '_' && ch != '"')
+            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got '{(char)ch}'");
+
         var obj = ParseObjectSpan();
         if (obj.IsEmpty)
-            return false;
+            throw ParserException("Invalid object");
 
-        SkipWhitespace();
+        SkipWhitespace(); // Optional in N-Triples
 
         // Expect '.'
         if (!TryConsume('.'))
-            return false;
+            throw ParserException("Expected '.' after object");
+
+        // Skip any trailing spaces/tabs (not newlines) and check for garbage before EOL
+        while (true)
+        {
+            ch = Peek();
+            if (ch == ' ' || ch == '\t')
+            {
+                Consume();
+                continue;
+            }
+            break;
+        }
+
+        // Only newline, comment, or EOF allowed after '.'
+        if (ch != -1 && ch != '\n' && ch != '\r' && ch != '#')
+            throw ParserException($"Unexpected character after '.': '{(char)ch}'");
 
         // Emit triple
         handler(subject, predicate, obj);
-        return true;
     }
 
     /// <summary>
     /// Parse a single triple (allocating strings).
+    /// Throws on invalid input per N-Triples specification.
     /// </summary>
-    private RdfTriple? ParseTripleAllocating()
+    private RdfTriple ParseTripleAllocating()
     {
         ResetOutputBuffer();
 
+        // Parse subject (must be IRIREF or BLANK_NODE_LABEL)
+        var ch = Peek();
+        if (ch != '<' && ch != '_')
+            throw ParserException($"Expected '<' or '_:' at start of subject, got '{(char)ch}'");
+
         var subject = ParseSubjectSpan();
         if (subject.IsEmpty)
-            return null;
+            throw ParserException("Invalid subject");
 
         SkipWhitespace();
+
+        // Parse predicate (must be IRIREF)
+        if (Peek() != '<')
+            throw ParserException("Expected '<' at start of predicate");
 
         var predicate = ParsePredicateSpan();
         if (predicate.IsEmpty)
-            return null;
+            throw ParserException("Invalid predicate");
 
         SkipWhitespace();
+
+        // Parse object (must be IRIREF, BLANK_NODE_LABEL, or literal)
+        ch = Peek();
+        if (ch != '<' && ch != '_' && ch != '"')
+            throw ParserException($"Expected '<', '_:', or '\"' at start of object, got '{(char)ch}'");
 
         var obj = ParseObjectSpan();
         if (obj.IsEmpty)
-            return null;
+            throw ParserException("Invalid object");
 
-        SkipWhitespace();
+        SkipWhitespace(); // Optional in N-Triples
 
+        // Expect '.'
         if (!TryConsume('.'))
-            return null;
+            throw ParserException("Expected '.' after object");
+
+        // Skip any trailing spaces/tabs (not newlines) and check for garbage before EOL
+        while (true)
+        {
+            ch = Peek();
+            if (ch == ' ' || ch == '\t')
+            {
+                Consume();
+                continue;
+            }
+            break;
+        }
+
+        // Only newline, comment, or EOF allowed after '.'
+        if (ch != -1 && ch != '\n' && ch != '\r' && ch != '#')
+            throw ParserException($"Unexpected character after '.': '{(char)ch}'");
 
         return new RdfTriple(subject.ToString(), predicate.ToString(), obj.ToString());
     }
@@ -266,6 +313,7 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
     /// <summary>
     /// [6] IRIREF ::= '&lt;' ([^#x00-#x20&lt;&gt;"{}|^`\] | UCHAR)* '&gt;'
     /// Returns IRI with angle brackets included.
+    /// N-Triples requires absolute IRIs (must have a scheme).
     /// </summary>
     private ReadOnlySpan<char> ParseIriRefSpan()
     {
@@ -275,6 +323,9 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
         int start = _outputOffset;
         AppendToOutput('<');
         Consume();
+
+        bool hasScheme = false;
+        bool colonSeen = false;
 
         while (true)
         {
@@ -288,6 +339,24 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
                 AppendToOutput('>');
                 Consume();
                 break;
+            }
+
+            // Reject disallowed characters per N-Triples spec
+            // [^#x00-#x20<>"{}|^`\]
+            if (ch <= 0x20) // Control chars and space
+                throw ParserException($"Invalid character in IRI: U+{ch:X4}");
+            if (ch == '<' || ch == '"' || ch == '{' || ch == '}' ||
+                ch == '|' || ch == '^' || ch == '`')
+                throw ParserException($"Invalid character in IRI: '{(char)ch}'");
+
+            // Track scheme detection: scheme starts with letter, contains letters/digits/+/-/.
+            // followed by ':'
+            if (!colonSeen && ch == ':')
+            {
+                colonSeen = true;
+                // Check if we have at least one character before colon for scheme
+                if (_outputOffset > start + 1)
+                    hasScheme = true;
             }
 
             if (ch == '\\')
@@ -318,6 +387,10 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
+        // N-Triples requires absolute IRIs
+        if (!hasScheme)
+            throw ParserException("N-Triples requires absolute IRIs (relative IRI not allowed)");
+
         return GetOutputSpan(start);
     }
 
@@ -343,26 +416,41 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
         AppendToOutput((char)ch);
         Consume();
 
-        // Rest of label
+        // Rest of label: ((PN_CHARS | '.')* PN_CHARS)?
+        // The label cannot end with '.', so we need to look ahead
         while (true)
         {
             ch = Peek();
-            if (ch == -1 || (!IsPnChars(ch) && ch != '.'))
+            if (ch == -1)
                 break;
 
-            AppendToOutput((char)ch);
-            Consume();
+            if (IsPnChars(ch))
+            {
+                AppendToOutput((char)ch);
+                Consume();
+            }
+            else if (ch == '.')
+            {
+                // Only consume '.' if followed by another PN_CHARS (not end of label)
+                var next = PeekAhead(1);
+                if (next != -1 && IsPnChars(next))
+                {
+                    AppendToOutput((char)ch);
+                    Consume();
+                }
+                else
+                {
+                    // '.' is statement terminator, not part of label
+                    break;
+                }
+            }
+            else
+            {
+                break;
+            }
         }
 
-        // Remove trailing dots (not part of label)
-        var span = GetOutputSpan(start);
-        while (span.Length > 2 && span[span.Length - 1] == '.')
-        {
-            _outputOffset--;
-            span = GetOutputSpan(start);
-        }
-
-        return span;
+        return GetOutputSpan(start);
     }
 
     /// <summary>
@@ -409,15 +497,25 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
         var next = Peek();
         if (next == '@')
         {
-            // Language tag
+            // Language tag - must match [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*
             AppendToOutput('@');
             Consume();
+
+            // First character must be a letter
+            var firstChar = Peek();
+            if (firstChar == -1 || !((firstChar >= 'a' && firstChar <= 'z') || (firstChar >= 'A' && firstChar <= 'Z')))
+                throw ParserException("Language tag must start with a letter");
 
             while (true)
             {
                 var ch = Peek();
                 if (ch == -1 || IsWhitespace(ch) || ch == '.')
                     break;
+
+                // Valid lang tag chars: [a-zA-Z0-9] or '-'
+                if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                      (ch >= '0' && ch <= '9') || ch == '-'))
+                    throw ParserException($"Invalid character in language tag: '{(char)ch}'");
 
                 AppendToOutput((char)ch);
                 Consume();
