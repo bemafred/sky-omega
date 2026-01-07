@@ -252,6 +252,9 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             ? _outputBuffer.AsSpan(_currentGraphStart, _currentGraphLength)
             : ReadOnlySpan<char>.Empty;
 
+        // Copy graph to stable storage since output buffer will be reused
+        var graphStr = graph.IsEmpty ? null : graph.ToString();
+
         while (true)
         {
             SkipWhitespaceAndComments();
@@ -259,16 +262,25 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             if (IsEndOfInput() || Peek() == '}')
                 break;
 
-            // Save output offset for subject parsing (graph is at start)
-            var subjectStart = _outputOffset;
+            // Get graph span (may need to reconstruct from string)
+            var graphSpan = graphStr != null ? graphStr.AsSpan() : ReadOnlySpan<char>.Empty;
 
-            var subject = ParseSubject();
+            var subject = ParseSubjectWithHandler(graphSpan, handler);
             if (subject.IsEmpty)
                 break;
 
             SkipWhitespaceAndComments();
 
-            ParsePredicateObjectList(subject, graph, handler);
+            // Check for sole blankNodePropertyList (just [ ... ] without predicate-object)
+            var ch = Peek();
+            if (ch == '.' || ch == '}' || ch == -1)
+            {
+                // Sole blankNodePropertyList - already emitted triples
+                TryConsume('.');
+                continue;
+            }
+
+            ParsePredicateObjectList(subject, graphSpan, handler);
 
             SkipWhitespaceAndComments();
 
@@ -298,9 +310,16 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             SkipWhitespaceAndComments();
 
             // Check for ';' (more predicates for same subject)
-            if (TryConsume(';'))
+            // Handle multiple consecutive semicolons: s p o ;; p2 o2
+            bool hasSemi = false;
+            while (TryConsume(';'))
             {
+                hasSemi = true;
                 SkipWhitespaceAndComments();
+            }
+
+            if (hasSemi)
+            {
                 // Check if there's actually another predicate (could be trailing ';')
                 var ch = Peek();
                 if (ch == '.' || ch == '}' || ch == -1)
@@ -317,7 +336,7 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     {
         while (true)
         {
-            var obj = ParseObject();
+            var obj = ParseObjectWithHandler(graph, handler);
             if (obj.IsEmpty)
                 break;
 
@@ -355,6 +374,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     private ReadOnlySpan<char> ParseSubject()
     {
+        return ParseSubjectWithHandler(ReadOnlySpan<char>.Empty, null);
+    }
+
+    private ReadOnlySpan<char> ParseSubjectWithHandler(ReadOnlySpan<char> graph, QuadHandler? handler)
+    {
         var ch = Peek();
 
         if (ch == '<')
@@ -364,10 +388,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             return ParseBlankNode();
 
         if (ch == '[')
-            return ParseBlankNodePropertyList();
+            return ParseBlankNodePropertyListWithHandler(graph, handler);
 
         if (ch == '(')
-            return ParseCollection();
+            return ParseCollectionWithHandler(graph, handler);
 
         if (IsPnCharsBase(ch) || ch == ':')
             return ParsePrefixedName();
@@ -397,6 +421,11 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
     private ReadOnlySpan<char> ParseObject()
     {
+        return ParseObjectWithHandler(ReadOnlySpan<char>.Empty, null);
+    }
+
+    private ReadOnlySpan<char> ParseObjectWithHandler(ReadOnlySpan<char> graph, QuadHandler? handler)
+    {
         var ch = Peek();
 
         if (ch == '<')
@@ -406,10 +435,10 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             return ParseBlankNode();
 
         if (ch == '[')
-            return ParseBlankNodePropertyList();
+            return ParseBlankNodePropertyListWithHandler(graph, handler);
 
         if (ch == '(')
-            return ParseCollection();
+            return ParseCollectionWithHandler(graph, handler);
 
         if (ch == '"' || ch == '\'')
             return ParseLiteral();
@@ -420,7 +449,8 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         if (IsPnCharsBase(ch) || ch == ':')
         {
             // Could be prefixed name or boolean
-            if (MatchKeyword("true") || MatchKeyword("false"))
+            // Boolean literals must be lowercase (case-sensitive)
+            if (MatchKeyword("true", caseSensitive: true) || MatchKeyword("false", caseSensitive: true))
             {
                 return ch == 't'
                     ? "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan()
@@ -639,47 +669,196 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         return span;
     }
 
-    private ReadOnlySpan<char> ParseBlankNodePropertyList()
+    private ReadOnlySpan<char> ParseBlankNodePropertyListWithHandler(ReadOnlySpan<char> graph, QuadHandler? handler)
     {
         // [ predicate object ; ... ]
-        // Returns a generated blank node ID
+        // Returns a generated blank node ID and emits triples for the content
         if (!TryConsume('['))
             return ReadOnlySpan<char>.Empty;
 
-        var blankId = GenerateBlankNode();
+        // Generate blank node - need to copy to stable storage since output buffer will be reused
+        var blankIdSpan = GenerateBlankNode();
+        var blankId = blankIdSpan.ToString();
 
-        // For now, skip the content (simplified implementation)
-        // Full implementation would parse predicates and emit triples
-        int depth = 1;
-        while (depth > 0 && !IsEndOfInput())
+        SkipWhitespaceAndComments();
+
+        // Check for empty blank node: []
+        if (Peek() == ']')
         {
-            var ch = Peek();
-            if (ch == '[') depth++;
-            else if (ch == ']') depth--;
             Consume();
+            // Return the blank node ID in output buffer
+            int start = _outputOffset;
+            AppendString(blankId);
+            return GetOutputSpan(start);
         }
 
-        return blankId;
+        // Parse predicate-object list with blank node as subject
+        if (handler != null)
+        {
+            ParseBlankNodePredicateObjectList(blankId, graph, handler);
+        }
+        else
+        {
+            // No handler - skip content (shouldn't happen in practice)
+            int depth = 1;
+            while (depth > 0 && !IsEndOfInput())
+            {
+                var ch = Peek();
+                if (ch == '[') depth++;
+                else if (ch == ']') depth--;
+                Consume();
+            }
+        }
+
+        SkipWhitespaceAndComments();
+
+        if (!TryConsume(']'))
+            throw ParserException("Expected ']' to close blank node property list");
+
+        // Return the blank node ID in output buffer
+        int resultStart = _outputOffset;
+        AppendString(blankId);
+        return GetOutputSpan(resultStart);
     }
 
-    private ReadOnlySpan<char> ParseCollection()
+    private void ParseBlankNodePredicateObjectList(string blankNodeSubject, ReadOnlySpan<char> graph, QuadHandler handler)
+    {
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            if (Peek() == ']')
+                break;
+
+            var predicate = ParsePredicate();
+            if (predicate.IsEmpty)
+                break;
+
+            // Copy predicate since we'll reuse the buffer
+            var predicateStr = predicate.ToString();
+
+            SkipWhitespaceAndComments();
+
+            // Parse object list for this predicate
+            while (true)
+            {
+                var obj = ParseObjectWithHandler(graph, handler);
+                if (obj.IsEmpty)
+                    break;
+
+                // Emit triple: blankNode predicate object
+                handler(blankNodeSubject.AsSpan(), predicateStr.AsSpan(), obj, graph);
+
+                SkipWhitespaceAndComments();
+
+                // Check for ',' (more objects)
+                if (!TryConsume(','))
+                    break;
+
+                SkipWhitespaceAndComments();
+            }
+
+            SkipWhitespaceAndComments();
+
+            // Check for ';' (more predicates)
+            // Handle multiple consecutive semicolons
+            bool hasSemi = false;
+            while (TryConsume(';'))
+            {
+                hasSemi = true;
+                SkipWhitespaceAndComments();
+            }
+
+            if (hasSemi)
+            {
+                // Check if there's actually another predicate (could be trailing ';')
+                if (Peek() == ']')
+                    break;
+                continue;
+            }
+
+            break;
+        }
+    }
+
+    private ReadOnlySpan<char> ParseCollectionWithHandler(ReadOnlySpan<char> graph, QuadHandler? handler)
     {
         // ( item1 item2 ... )
+        // Returns first node of the list (or rdf:nil for empty)
+        // Emits triples: node rdf:first item; node rdf:rest nextNode
         if (!TryConsume('('))
             return ReadOnlySpan<char>.Empty;
 
-        // Skip content (simplified)
-        int depth = 1;
-        while (depth > 0 && !IsEndOfInput())
+        SkipWhitespaceAndComments();
+
+        // Check for empty collection: ()
+        if (Peek() == ')')
         {
-            var ch = Peek();
-            if (ch == '(') depth++;
-            else if (ch == ')') depth--;
             Consume();
+            return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>".AsSpan();
         }
 
-        // Return rdf:nil for empty or simplified
-        return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>".AsSpan();
+        const string rdfFirst = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#first>";
+        const string rdfRest = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#rest>";
+        const string rdfNil = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>";
+
+        string? firstNode = null;
+        string? currentNode = null;
+
+        while (true)
+        {
+            SkipWhitespaceAndComments();
+
+            if (Peek() == ')')
+            {
+                Consume();
+                break;
+            }
+
+            // Parse item
+            var item = ParseObjectWithHandler(graph, handler);
+            if (item.IsEmpty)
+                break;
+
+            // Generate a new blank node for this list cell
+            var nodeSpan = GenerateBlankNode();
+            var node = nodeSpan.ToString();
+
+            if (firstNode == null)
+                firstNode = node;
+
+            // Link previous node to this one
+            if (currentNode != null && handler != null)
+            {
+                handler(currentNode.AsSpan(), rdfRest.AsSpan(), node.AsSpan(), graph);
+            }
+
+            // Emit: node rdf:first item
+            if (handler != null)
+            {
+                handler(node.AsSpan(), rdfFirst.AsSpan(), item, graph);
+            }
+
+            currentNode = node;
+
+            SkipWhitespaceAndComments();
+        }
+
+        // Close the list with rdf:nil
+        if (currentNode != null && handler != null)
+        {
+            handler(currentNode.AsSpan(), rdfRest.AsSpan(), rdfNil.AsSpan(), graph);
+        }
+
+        // Return the first node (or nil if empty)
+        if (firstNode != null)
+        {
+            int start = _outputOffset;
+            AppendString(firstNode);
+            return GetOutputSpan(start);
+        }
+
+        return rdfNil.AsSpan();
     }
 
     private ReadOnlySpan<char> ParseLiteral()
@@ -1075,12 +1254,22 @@ public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         return true;
     }
 
-    private bool MatchKeyword(string keyword)
+    private bool MatchKeyword(string keyword, bool caseSensitive = false)
     {
         for (int i = 0; i < keyword.Length; i++)
         {
-            if (PeekAhead(i) != keyword[i])
-                return false;
+            var ch = PeekAhead(i);
+            if (caseSensitive)
+            {
+                if (ch != keyword[i])
+                    return false;
+            }
+            else
+            {
+                // Case-insensitive comparison for SPARQL keywords
+                if (char.ToUpperInvariant((char)ch) != char.ToUpperInvariant(keyword[i]))
+                    return false;
+            }
         }
 
         // Ensure not part of larger word
