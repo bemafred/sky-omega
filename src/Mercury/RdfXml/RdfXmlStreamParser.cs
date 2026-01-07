@@ -1110,25 +1110,25 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Build plain literal.
+    /// Build plain literal. Value is NOT escaped - internal representation uses actual characters.
     /// </summary>
     private ReadOnlySpan<char> BuildPlainLiteral(ReadOnlySpan<char> value)
     {
         int start = _outputOffset;
         AppendToOutput('"');
-        AppendEscapedString(value);
+        AppendToOutput(value);  // No escaping - internal representation uses actual characters
         AppendToOutput('"');
         return GetOutputSpan(start);
     }
 
     /// <summary>
-    /// Build language-tagged literal.
+    /// Build language-tagged literal. Value is NOT escaped - internal representation uses actual characters.
     /// </summary>
     private ReadOnlySpan<char> BuildLangLiteral(ReadOnlySpan<char> value, ReadOnlySpan<char> lang)
     {
         int start = _outputOffset;
         AppendToOutput('"');
-        AppendEscapedString(value);
+        AppendToOutput(value);  // No escaping - internal representation uses actual characters
         AppendToOutput('"');
         AppendToOutput('@');
         AppendToOutput(lang);
@@ -1136,13 +1136,14 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Build typed literal.
+    /// Build typed literal. Value is NOT escaped - internal representation uses actual characters.
+    /// N-Triples escaping is only for serialization, not internal representation.
     /// </summary>
     private ReadOnlySpan<char> BuildTypedLiteral(ReadOnlySpan<char> value, ReadOnlySpan<char> datatype)
     {
         int start = _outputOffset;
         AppendToOutput('"');
-        AppendEscapedString(value);
+        AppendToOutput(value);  // No escaping - internal representation uses actual characters
         AppendToOutput('"');
         AppendToOutput("^^<".AsSpan());
         AppendToOutput(datatype);

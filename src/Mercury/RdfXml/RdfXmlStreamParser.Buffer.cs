@@ -572,13 +572,25 @@ public sealed partial class RdfXmlStreamParser
     }
 
     /// <summary>
-    /// Parse XML literal content (preserves XML structure).
-    /// Uses proper UTF-8 decoding for non-ASCII characters.
+    /// Parse XML literal content with Exclusive XML Canonicalization (C14N).
+    /// - Includes in-scope namespace declarations on each element
+    /// - Converts self-closing tags to start/end tag pairs
+    /// - Sorts namespace declarations by prefix
     /// </summary>
     private ReadOnlySpan<char> ParseXmlLiteralContent(ReadOnlySpan<char> elementName)
     {
         int start = _outputOffset;
         int depth = 1;
+
+        // Collect in-scope namespaces for canonicalization (sorted by prefix)
+        var inScopeNamespaces = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var kvp in _namespaces)
+        {
+            if (!string.IsNullOrEmpty(kvp.Key) && kvp.Key != "xml" && kvp.Key != "xmlns")
+            {
+                inScopeNamespaces[kvp.Key] = kvp.Value;
+            }
+        }
 
         while (!IsEndOfInput() && depth > 0)
         {
@@ -586,37 +598,27 @@ public sealed partial class RdfXmlStreamParser
 
             if (ch == '<')
             {
-                AppendToOutput('<');
-                Consume();
+                Consume(); // consume '<'
 
                 if (Peek() == '/')
                 {
+                    // Closing tag
                     depth--;
                     if (depth == 0)
                     {
-                        // Don't include closing tag in content
-                        _outputOffset--; // Remove the '<'
-                        // Skip the rest of the closing tag (we've already consumed '<')
+                        // Don't include closing tag of wrapper element
                         while (Peek() != '>' && !IsEndOfInput())
                             Consume();
                         TryConsume('>');
                         break;
                     }
-                }
-                else if (Peek() != '!' && Peek() != '?')
-                {
-                    // Opening tag
-                    // Check for self-closing
-                    bool selfClosing = false;
+                    // Include closing tag
+                    AppendToOutput('<');
+                    AppendToOutput('/');
                     while (Peek() != '>' && !IsEndOfInput())
                     {
-                        var c = Peek();
-                        if (c == '/')
-                            selfClosing = true;
-                        // UTF-8 decode tag content
                         var codePoint = ReadUtf8Char();
-                        if (codePoint == -1)
-                            break;
+                        if (codePoint == -1) break;
                         AppendCodePoint(codePoint);
                     }
                     if (Peek() == '>')
@@ -624,38 +626,210 @@ public sealed partial class RdfXmlStreamParser
                         AppendToOutput('>');
                         Consume();
                     }
-
-                    if (!selfClosing)
-                        depth++;
+                }
+                else if (Peek() == '!')
+                {
+                    // Comment or CDATA - include as-is
+                    AppendToOutput('<');
+                    AppendToOutput('!');
+                    Consume();
+                    while (Peek() != '>' && !IsEndOfInput())
+                    {
+                        var codePoint = ReadUtf8Char();
+                        if (codePoint == -1) break;
+                        AppendCodePoint(codePoint);
+                    }
+                    if (Peek() == '>')
+                    {
+                        AppendToOutput('>');
+                        Consume();
+                    }
+                }
+                else if (Peek() == '?')
+                {
+                    // PI - skip entirely per C14N (PIs in XMLLiteral are excluded)
+                    while (!(Peek() == '?' && PeekAhead(1) == '>') && !IsEndOfInput())
+                        Consume();
+                    TryConsume('?');
+                    TryConsume('>');
                 }
                 else
                 {
-                    // Comment or PI - include as-is
-                    while (Peek() != '>' && !IsEndOfInput())
-                    {
-                        var codePoint = ReadUtf8Char();
-                        if (codePoint == -1)
-                            break;
-                        AppendCodePoint(codePoint);
-                    }
-                    if (Peek() == '>')
-                    {
-                        AppendToOutput('>');
-                        Consume();
-                    }
+                    // Opening tag - apply canonicalization
+                    ParseCanonicalElement(inScopeNamespaces, ref depth);
                 }
             }
             else
             {
-                // UTF-8 decode regular content
+                // Text content - UTF-8 decode
                 var codePoint = ReadUtf8Char();
-                if (codePoint == -1)
-                    break;
+                if (codePoint == -1) break;
                 AppendCodePoint(codePoint);
             }
         }
 
         return GetOutputSpan(start);
+    }
+
+    /// <summary>
+    /// Parse and canonicalize an XML element for XMLLiteral.
+    /// </summary>
+    private void ParseCanonicalElement(SortedDictionary<string, string> inScopeNamespaces, ref int depth)
+    {
+        // Parse element name
+        int nameStart = _outputOffset;
+        while (IsNameChar(Peek()))
+        {
+            var codePoint = ReadUtf8Char();
+            if (codePoint == -1) break;
+            AppendCodePoint(codePoint);
+        }
+        var tagName = GetOutputSpan(nameStart).ToString();
+        _outputOffset = nameStart; // Reset - we'll output canonicalized form
+
+        // Parse attributes (we need to collect them for sorting)
+        var elementAttrs = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var elementNsDecls = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        bool selfClosing = false;
+
+        SkipWhitespace();
+        while (Peek() != '>' && Peek() != '/' && !IsEndOfInput())
+        {
+            // Parse attribute name
+            int attrNameStart = _outputOffset;
+            while (IsNameChar(Peek()))
+            {
+                var codePoint = ReadUtf8Char();
+                if (codePoint == -1) break;
+                AppendCodePoint(codePoint);
+            }
+            var attrName = GetOutputSpan(attrNameStart).ToString();
+            _outputOffset = attrNameStart;
+
+            SkipWhitespace();
+            if (!TryConsume('='))
+            {
+                SkipWhitespace();
+                continue;
+            }
+            SkipWhitespace();
+
+            // Parse attribute value
+            var quote = Peek();
+            if (quote != '"' && quote != '\'')
+                continue;
+            Consume();
+
+            int valueStart = _outputOffset;
+            while (Peek() != quote && !IsEndOfInput())
+            {
+                if (Peek() == '&')
+                {
+                    var entity = ParseEntityReference();
+                    AppendCodePoint(entity);
+                }
+                else
+                {
+                    var codePoint = ReadUtf8Char();
+                    if (codePoint == -1) break;
+                    AppendCodePoint(codePoint);
+                }
+            }
+            var attrValue = GetOutputSpan(valueStart).ToString();
+            _outputOffset = valueStart;
+            TryConsume((char)quote);
+
+            // Classify as namespace declaration or regular attribute
+            if (attrName.StartsWith("xmlns:"))
+            {
+                var prefix = attrName[6..];
+                elementNsDecls[prefix] = attrValue;
+            }
+            else if (attrName == "xmlns")
+            {
+                // Default namespace - skip for Exclusive C14N unless used
+            }
+            else
+            {
+                elementAttrs[attrName] = attrValue;
+            }
+
+            SkipWhitespace();
+        }
+
+        // Check for self-closing
+        if (Peek() == '/')
+        {
+            selfClosing = true;
+            Consume();
+        }
+        TryConsume('>');
+
+        // Output canonicalized element
+        AppendToOutput('<');
+        AppendToOutput(tagName.AsSpan());
+
+        // Output namespace declarations (in-scope + element's own)
+        // Per RDF/XML XMLLiteral canonicalization, rdf namespace comes first, then others alphabetically
+        var allNsDecls = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var kvp in inScopeNamespaces)
+            allNsDecls[kvp.Key] = kvp.Value;
+        foreach (var kvp in elementNsDecls)
+            allNsDecls[kvp.Key] = kvp.Value;
+
+        // Output rdf namespace first if present
+        if (allNsDecls.TryGetValue("rdf", out var rdfNs))
+        {
+            AppendToOutput(" xmlns:rdf=\"".AsSpan());
+            AppendToOutput(rdfNs.AsSpan());
+            AppendToOutput('"');
+        }
+
+        // Then output other namespaces alphabetically
+        foreach (var kvp in allNsDecls)
+        {
+            if (kvp.Key == "rdf") continue; // Already output
+            AppendToOutput(" xmlns:".AsSpan());
+            AppendToOutput(kvp.Key.AsSpan());
+            AppendToOutput("=\"".AsSpan());
+            AppendToOutput(kvp.Value.AsSpan());
+            AppendToOutput('"');
+        }
+
+        // Output attributes (sorted)
+        foreach (var kvp in elementAttrs)
+        {
+            AppendToOutput(' ');
+            AppendToOutput(kvp.Key.AsSpan());
+            AppendToOutput("=\"".AsSpan());
+            // Escape attribute value
+            foreach (var c in kvp.Value)
+            {
+                switch (c)
+                {
+                    case '<': AppendToOutput("&lt;".AsSpan()); break;
+                    case '>': AppendToOutput("&gt;".AsSpan()); break;
+                    case '&': AppendToOutput("&amp;".AsSpan()); break;
+                    case '"': AppendToOutput("&quot;".AsSpan()); break;
+                    default: AppendToOutput(c); break;
+                }
+            }
+            AppendToOutput('"');
+        }
+
+        AppendToOutput('>');
+
+        if (selfClosing)
+        {
+            // C14N: self-closing becomes explicit close tag
+            AppendToOutput("</".AsSpan());
+            AppendToOutput(tagName.AsSpan());
+            AppendToOutput('>');
+        }
+        else
+        {
+            depth++;
+        }
     }
 
     /// <summary>
