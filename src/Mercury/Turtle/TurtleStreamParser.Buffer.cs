@@ -495,7 +495,27 @@ public sealed partial class TurtleStreamParser
         {
             var baseUri = new Uri(_baseUri, UriKind.Absolute);
             var resolved = new Uri(baseUri, innerIri);
-            return $"<{resolved}>";
+            var resolvedStr = resolved.ToString();
+
+            // .NET Uri adds trailing slash to authority-only URIs (e.g., //g becomes http://g/)
+            // RFC 3986 says path should be empty, not "/", so strip it
+            // Check: innerIri starts with // and has no path (no / after authority)
+            if (innerIri.StartsWith("//"))
+            {
+                var afterAuthority = innerIri.AsSpan(2);
+                var firstDelim = afterAuthority.IndexOfAny('/', '?', '#');
+                // If no delimiters, or first delim is not /, path was empty
+                if (firstDelim == -1 || afterAuthority[firstDelim] != '/')
+                {
+                    // Strip trailing slash that .NET added
+                    if (resolvedStr.EndsWith('/') && resolved.AbsolutePath == "/")
+                    {
+                        resolvedStr = resolvedStr[..^1];
+                    }
+                }
+            }
+
+            return $"<{resolvedStr}>";
         }
         catch
         {

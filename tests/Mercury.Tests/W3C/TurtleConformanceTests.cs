@@ -80,10 +80,14 @@ public class TurtleConformanceTests
         _output.WriteLine($"Expected: {test.ResultPath}");
 
         // Parse the Turtle input
-        var actualTriples = new HashSet<(string s, string p, string o)>();
+        // Derive the W3C base URI from the local file path
+        var baseUri = GetW3CBaseUri(test.ActionPath);
+        _output.WriteLine($"Base URI: {baseUri}");
+
+        var actualTriples = new List<(string s, string p, string o)>();
 
         await using (var stream = File.OpenRead(test.ActionPath))
-        using (var parser = new TurtleStreamParser(stream))
+        using (var parser = new TurtleStreamParser(stream, baseUri: baseUri))
         {
             await parser.ParseAsync((s, p, o) =>
             {
@@ -92,7 +96,7 @@ public class TurtleConformanceTests
         }
 
         // Parse the expected N-Triples output
-        var expectedTriples = new HashSet<(string s, string p, string o)>();
+        var expectedTriples = new List<(string s, string p, string o)>();
 
         await using (var stream = File.OpenRead(test.ResultPath))
         using (var parser = new NTriplesStreamParser(stream))
@@ -106,9 +110,16 @@ public class TurtleConformanceTests
         _output.WriteLine($"Actual: {actualTriples.Count} triples");
         _output.WriteLine($"Expected: {expectedTriples.Count} triples");
 
+        // Canonicalize blank nodes for isomorphism comparison
+        var actualCanonicalized = CanonicalizeBlankNodes(actualTriples);
+        var expectedCanonicalized = CanonicalizeBlankNodes(expectedTriples);
+
+        var actualSet = actualCanonicalized.ToHashSet();
+        var expectedSet = expectedCanonicalized.ToHashSet();
+
         // Compare sets
-        var missing = expectedTriples.Except(actualTriples).ToList();
-        var extra = actualTriples.Except(expectedTriples).ToList();
+        var missing = expectedSet.Except(actualSet).ToList();
+        var extra = actualSet.Except(expectedSet).ToList();
 
         if (missing.Count > 0)
         {
@@ -126,6 +137,87 @@ public class TurtleConformanceTests
 
         Assert.Empty(missing);
         Assert.Empty(extra);
+    }
+
+    /// <summary>
+    /// Get the W3C base URI from a local file path.
+    /// Converts paths like /path/to/w3c-rdf-tests/rdf/rdf11/rdf-turtle/test.ttl
+    /// to https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-turtle/test.ttl
+    /// </summary>
+    private static string GetW3CBaseUri(string localPath)
+    {
+        const string marker = "w3c-rdf-tests";
+        const string w3cBase = "https://w3c.github.io/rdf-tests";
+
+        var idx = localPath.IndexOf(marker, StringComparison.Ordinal);
+        if (idx == -1)
+            return localPath; // Can't derive, return as-is
+
+        var relativePath = localPath[(idx + marker.Length)..].Replace('\\', '/');
+        return w3cBase + relativePath;
+    }
+
+    /// <summary>
+    /// Canonicalize blank node IDs for graph isomorphism comparison.
+    /// Uses hash-based canonicalization: blank nodes get IDs based on their
+    /// structural context (predicates and non-blank-node neighbors).
+    /// </summary>
+    private static List<(string s, string p, string o)> CanonicalizeBlankNodes(
+        List<(string s, string p, string o)> triples)
+    {
+        // Collect all blank nodes
+        var bnodes = new HashSet<string>();
+        foreach (var t in triples)
+        {
+            if (t.s.StartsWith("_:")) bnodes.Add(t.s);
+            if (t.o.StartsWith("_:")) bnodes.Add(t.o);
+        }
+
+        if (bnodes.Count == 0)
+            return triples;
+
+        // Build signature for each blank node based on its structural context
+        var signatures = new Dictionary<string, string>();
+        foreach (var bnode in bnodes)
+        {
+            var outgoing = triples
+                .Where(t => t.s == bnode)
+                .Select(t => $"+{t.p}:{(t.o.StartsWith("_:") ? "B" : t.o)}")
+                .OrderBy(x => x);
+
+            var incoming = triples
+                .Where(t => t.o == bnode)
+                .Select(t => $"-{t.p}:{(t.s.StartsWith("_:") ? "B" : t.s)}")
+                .OrderBy(x => x);
+
+            signatures[bnode] = string.Join("|", outgoing.Concat(incoming));
+        }
+
+        // Sort blank nodes by signature, then by original ID for stability
+        var sortedBnodes = bnodes
+            .OrderBy(b => signatures[b])
+            .ThenBy(b => b)
+            .ToList();
+
+        // Create canonical mapping
+        var bnodeMap = new Dictionary<string, string>();
+        for (int i = 0; i < sortedBnodes.Count; i++)
+        {
+            bnodeMap[sortedBnodes[i]] = $"_:c{i}";
+        }
+
+        string Canonicalize(string term)
+        {
+            if (term.StartsWith("_:") && bnodeMap.TryGetValue(term, out var canonical))
+                return canonical;
+            return term;
+        }
+
+        return triples.Select(t => (
+            Canonicalize(t.s),
+            t.p,
+            Canonicalize(t.o)
+        )).ToList();
     }
 
     public static IEnumerable<object[]> GetTurtle11PositiveSyntaxTests()

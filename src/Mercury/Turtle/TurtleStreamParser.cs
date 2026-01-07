@@ -80,7 +80,7 @@ public sealed partial class TurtleStreamParser : IDisposable
 
     private const int DefaultBufferSize = 8192;
 
-    public TurtleStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+    public TurtleStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null, string? baseUri = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
@@ -91,7 +91,7 @@ public sealed partial class TurtleStreamParser : IDisposable
 
         _namespaces = new Dictionary<string, string>();
         _blankNodes = new Dictionary<string, string>();
-        _baseUri = string.Empty;
+        _baseUri = baseUri ?? string.Empty;
         _blankNodeCounter = 0;
 
         _line = 1;
