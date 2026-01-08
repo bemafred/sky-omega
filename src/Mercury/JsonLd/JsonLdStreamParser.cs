@@ -91,6 +91,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private string? _savedVocabForNested;
     private string? _savedBaseForNested;
 
+    // Track what terms/type-coercions were added by type-scoped context (to remove for nested nodes)
+    // Only type-scoped additions should be removed; property-scoped additions should propagate
+    private HashSet<string>? _typeScopedTerms;           // Terms added by type-scoped context
+    private HashSet<string>? _typeScopedTypeCoercions;   // Type coercions added by type-scoped context
+
     private const int DefaultBufferSize = 65536; // 64KB
     private const int OutputBufferSize = 16384;
 
@@ -222,6 +227,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedContextForNested = null;
         string? savedVocabForNested = null;
         string? savedBaseForNested = null;
+        HashSet<string>? typeScopedTerms = null;         // Terms added by type-scoped context
+        HashSet<string>? typeScopedTypeCoercions = null; // Type coercions added by type-scoped context
         bool hasTypeScopedContext = false;
         JsonElement typeElement = default;
         List<string>? expandedTypeIris = null; // Type IRIs expanded BEFORE applying type-scoped context
@@ -243,10 +250,23 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 savedContextForNested = new Dictionary<string, string>(_context);
                 savedVocabForNested = _vocabIri;
                 savedBaseForNested = _baseIri;
-            }
 
-            // Apply type-scoped contexts (may change @base/@vocab)
-            ApplyTypeScopedContexts(typeElement);
+                // Track what terms/coercions exist BEFORE type-scoped context
+                var termsBefore = new HashSet<string>(_context.Keys);
+                var coercionsBefore = new HashSet<string>(_typeCoercion.Keys);
+
+                // Apply type-scoped contexts (may change @base/@vocab)
+                ApplyTypeScopedContexts(typeElement);
+
+                // Track what was ADDED by type-scoped context (for removal in nested nodes)
+                typeScopedTerms = new HashSet<string>(_context.Keys.Except(termsBefore));
+                typeScopedTypeCoercions = new HashSet<string>(_typeCoercion.Keys.Except(coercionsBefore));
+            }
+            else
+            {
+                // Apply type-scoped contexts (may change @base/@vocab)
+                ApplyTypeScopedContexts(typeElement);
+            }
         }
 
         // Get @id for subject (AFTER type-scoped context is applied)
@@ -329,11 +349,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var previousSavedContext = _savedContextForNested;
         var previousSavedVocab = _savedVocabForNested;
         var previousSavedBase = _savedBaseForNested;
+        var previousTypeScopedTerms = _typeScopedTerms;
+        var previousTypeScopedTypeCoercions = _typeScopedTypeCoercions;
         if (hasTypeScopedContext)
         {
             _savedContextForNested = savedContextForNested;
             _savedVocabForNested = savedVocabForNested;
             _savedBaseForNested = savedBaseForNested;
+            _typeScopedTerms = typeScopedTerms;
+            _typeScopedTypeCoercions = typeScopedTypeCoercions;
         }
 
         // Process @reverse keyword - contains reverse properties
@@ -452,6 +476,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _savedContextForNested = previousSavedContext;
         _savedVocabForNested = previousSavedVocab;
         _savedBaseForNested = previousSavedBase;
+        _typeScopedTerms = previousTypeScopedTerms;
+        _typeScopedTypeCoercions = previousTypeScopedTypeCoercions;
 
         return subject;
     }
@@ -1892,17 +1918,29 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Nested object - create blank node
-        // Restore context to pre-type-scoped state for nested nodes (type-scoped contexts don't propagate)
-        Dictionary<string, string>? savedContext = null;
+        // Remove ONLY type-scoped additions for nested nodes (type-scoped contexts don't propagate)
+        // Property-scoped additions SHOULD propagate, so we don't restore the entire context
+        Dictionary<string, string>? removedTypeCoercions = null;
         string? savedVocab = null;
         string? savedBase = null;
+        if (_typeScopedTypeCoercions != null && _typeScopedTypeCoercions.Count > 0)
+        {
+            // Remove only the type coercions that were added by type-scoped context
+            removedTypeCoercions = new Dictionary<string, string>();
+            foreach (var term in _typeScopedTypeCoercions)
+            {
+                if (_typeCoercion.TryGetValue(term, out var coercion))
+                {
+                    removedTypeCoercions[term] = coercion;
+                    _typeCoercion.Remove(term);
+                }
+            }
+        }
+        // Also restore @vocab and @base if type-scoped context changed them
         if (_savedContextForNested != null)
         {
-            savedContext = new Dictionary<string, string>(_context);
             savedVocab = _vocabIri;
             savedBase = _baseIri;
-            _context.Clear();
-            foreach (var kv in _savedContextForNested) _context[kv.Key] = kv.Value;
             _vocabIri = _savedVocabForNested;
             _baseIri = _savedBaseForNested;
         }
@@ -1912,11 +1950,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var blankNode = ParseNode(ref tempReader, handler, subject);
         EmitQuad(handler, subject, predicate, blankNode, graphIri);
 
-        // Restore context after processing nested node
-        if (savedContext != null)
+        // Restore type-scoped additions after processing nested node
+        if (removedTypeCoercions != null)
         {
-            _context.Clear();
-            foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
+            foreach (var kv in removedTypeCoercions)
+            {
+                _typeCoercion[kv.Key] = kv.Value;
+            }
+        }
+        if (savedVocab != null || savedBase != null)
+        {
             _vocabIri = savedVocab;
             _baseIri = savedBase;
         }
