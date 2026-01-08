@@ -943,6 +943,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     {
                         _typeCoercion[term] = "@id";
                     }
+                    else if (typeVal == "@none" || _noneAliases.Contains(typeVal ?? ""))
+                    {
+                        // @type: @none means no type coercion (tn02) - don't add to _typeCoercion
+                        // This ensures values are emitted as plain literals without datatype
+                    }
                     else if (!string.IsNullOrEmpty(typeVal))
                     {
                         _typeCoercion[term] = typeVal;
@@ -1335,12 +1340,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             else if (value.ValueKind == JsonValueKind.Array)
             {
                 // Handle @json type - serialize entire array as canonical JSON literal
+                // Note: Don't escape - the canonical JSON is the literal value (js06, js07)
                 if (coercedType == "@json")
                 {
                     var canonicalJson = CanonicalizeJson(value);
-                    var escapedJson = EscapeString(canonicalJson);
                     EmitQuad(handler, subject, predicate,
-                        $"\"{escapedJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                        $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
                 }
                 else if (isListContainer)
                 {
@@ -2271,6 +2276,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     var iri = ExpandIri(strVal, expandTerms: true);
                     EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
+                else if (coercedType == "@json")
+                {
+                    // JSON literal - use canonical JSON representation for the string (js17)
+                    var canonicalJson = CanonicalizeJson(value);
+                    EmitQuad(handler, subject, predicate,
+                        $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                }
                 else if (!string.IsNullOrEmpty(coercedType))
                 {
                     // Typed literal - terms like "dateTime" should be expanded using @vocab
@@ -2313,7 +2325,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             case JsonValueKind.True:
-                if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab")
+                if (coercedType == "@json")
+                {
+                    // JSON literal for true
+                    EmitQuad(handler, subject, predicate,
+                        "\"true\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                }
+                else if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab")
                 {
                     var datatypeIri = ExpandIri(coercedType, expandTerms: true);
                     EmitQuad(handler, subject, predicate, $"\"true\"^^{datatypeIri}", graphIri);
@@ -2326,7 +2344,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             case JsonValueKind.False:
-                if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab")
+                if (coercedType == "@json")
+                {
+                    // JSON literal for false
+                    EmitQuad(handler, subject, predicate,
+                        "\"false\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                }
+                else if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab")
                 {
                     var datatypeIri = ExpandIri(coercedType, expandTerms: true);
                     EmitQuad(handler, subject, predicate, $"\"false\"^^{datatypeIri}", graphIri);
@@ -2340,12 +2364,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             case JsonValueKind.Object:
                 // Handle @json type - serialize entire object as canonical JSON literal
+                // Note: Don't escape - the canonical JSON is the literal value (js06, js07)
                 if (coercedType == "@json")
                 {
                     var canonicalJson = CanonicalizeJson(value);
-                    var escapedJson = EscapeString(canonicalJson);
                     EmitQuad(handler, subject, predicate,
-                        $"\"{escapedJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                        $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
                 }
                 else
                 {
@@ -2354,7 +2378,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             case JsonValueKind.Null:
-                // null values are ignored in JSON-LD
+                // null values are normally ignored in JSON-LD, but with @type: @json they are emitted (js18)
+                if (coercedType == "@json")
+                {
+                    EmitQuad(handler, subject, predicate,
+                        "\"null\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                }
+                // Otherwise null values are ignored
                 break;
         }
     }
@@ -2733,13 +2763,50 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         QuadHandler handler, string? graphIri, string? coercedType)
     {
         var rawText = value.GetRawText();
-        var isDouble = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
+        var hasDecimalOrExp = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
 
-        // Handle @json type - use raw JSON representation
+        // JSON-LD spec: a number that can be exactly represented as an integer should be xsd:integer (tn02)
+        // Parse the value to check if it's an exact integer even if written as a double (e.g., 10.0)
+        var isDouble = hasDecimalOrExp;
+        if (hasDecimalOrExp && double.TryParse(rawText, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var checkValue))
+        {
+            // If the value has no fractional part, treat it as an integer
+            if (Math.Floor(checkValue) == checkValue && !double.IsInfinity(checkValue) && !double.IsNaN(checkValue))
+            {
+                isDouble = false;
+            }
+        }
+
+        // Handle @json type - use canonical JSON representation (js04)
         if (coercedType == "@json")
         {
+            // Canonicalize number: integers as integers, doubles as shortest form
+            string canonicalNum;
+            if (value.TryGetInt64(out var jsonIntVal))
+            {
+                canonicalNum = jsonIntVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (double.TryParse(rawText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var jsonDblVal))
+            {
+                // If it can be exactly represented as an integer, use integer form
+                if (Math.Floor(jsonDblVal) == jsonDblVal && !double.IsInfinity(jsonDblVal) && !double.IsNaN(jsonDblVal) &&
+                    jsonDblVal >= long.MinValue && jsonDblVal <= long.MaxValue)
+                {
+                    canonicalNum = ((long)jsonDblVal).ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    canonicalNum = jsonDblVal.ToString("G17", System.Globalization.CultureInfo.InvariantCulture);
+                }
+            }
+            else
+            {
+                canonicalNum = rawText;
+            }
             EmitQuad(handler, subject, predicate,
-                $"\"{rawText}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                $"\"{canonicalNum}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
             return;
         }
 
@@ -2813,7 +2880,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             // Default: integer
             datatypeIri = "<http://www.w3.org/2001/XMLSchema#integer>";
-            lexicalValue = rawText;
+            // If rawText has decimal point (like "10.0"), convert to integer form (tn02)
+            if (hasDecimalOrExp && double.TryParse(rawText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var intLikeValue))
+            {
+                lexicalValue = ((long)intLikeValue).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                lexicalValue = rawText;
+            }
         }
 
         EmitQuad(handler, subject, predicate, $"\"{lexicalValue}\"^^{datatypeIri}", graphIri);
