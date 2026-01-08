@@ -2745,7 +2745,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
         if (hasType)
         {
-            var datatype = ExpandIri(typeProp.GetString() ?? "", expandTerms: true);
+            var typeStr = typeProp.GetString() ?? "";
+            // Handle @json type - use canonical JSON representation (js23)
+            if (typeStr == "@json")
+            {
+                var canonicalJson = CanonicalizeJson(valueProp);
+                return $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>";
+            }
+            var datatype = ExpandIri(typeStr, expandTerms: true);
             return $"\"{EscapeString(valueStr)}\"^^{datatype}";
         }
 
@@ -3660,8 +3667,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 else if (element.TryGetDouble(out var dblVal))
                 {
                     // Use "G17" for full precision, then normalize
+                    // JCS requires lowercase 'e' for exponents
                     var numStr = dblVal.ToString("G17", System.Globalization.CultureInfo.InvariantCulture);
-                    sb.Append(numStr);
+                    sb.Append(numStr.Replace('E', 'e'));
                 }
                 else
                 {
@@ -3699,7 +3707,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 default:
                     if (c < 0x20)
                     {
-                        sb.Append($"\\u{(int)c:X4}");
+                        // JCS requires lowercase hex in unicode escapes
+                        sb.Append($"\\u{(int)c:x4}");
                     }
                     else
                     {
