@@ -313,6 +313,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _currentGraph = savedGraph;
         }
 
+        // Restore context if type-scoped context was applied
+        // This ensures type-scoped modifications don't leak to subsequent properties in the parent node
+        if (hasTypeScopedContext && savedContextForNested != null)
+        {
+            _context.Clear();
+            foreach (var kv in savedContextForNested) _context[kv.Key] = kv.Value;
+            _vocabIri = savedVocabForNested;
+            _baseIri = savedBaseForNested;
+        }
+
         // Restore previous saved state
         _savedContextForNested = previousSavedContext;
         _savedVocabForNested = previousSavedVocab;
@@ -597,12 +607,24 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedContext = null;
         Dictionary<string, string>? savedTypeCoercion = null;
         Dictionary<string, bool>? savedContainerList = null;
+        Dictionary<string, bool>? savedContainerLanguage = null;
+        Dictionary<string, string>? savedReverseProperty = null;
+        Dictionary<string, string>? savedScopedContext = null;
+        HashSet<string>? savedTypeAliases = null;
+        string? savedVocabIri = null;
+        string? savedBaseIri = null;
         if (_scopedContext.TryGetValue(term, out var scopedContextJson))
         {
-            // Save current context state
+            // Save current context state (all fields that ProcessContext can modify)
             savedContext = new Dictionary<string, string>(_context);
             savedTypeCoercion = new Dictionary<string, string>(_typeCoercion);
             savedContainerList = new Dictionary<string, bool>(_containerList);
+            savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
+            savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
+            savedScopedContext = new Dictionary<string, string>(_scopedContext);
+            savedTypeAliases = new HashSet<string>(_typeAliases);
+            savedVocabIri = _vocabIri;
+            savedBaseIri = _baseIri;
 
             // Apply the scoped context
             using var scopedDoc = JsonDocument.Parse(scopedContextJson);
@@ -645,16 +667,27 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 _context.Clear();
                 foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
-            }
-            if (savedTypeCoercion != null)
-            {
+
                 _typeCoercion.Clear();
-                foreach (var kv in savedTypeCoercion) _typeCoercion[kv.Key] = kv.Value;
-            }
-            if (savedContainerList != null)
-            {
+                foreach (var kv in savedTypeCoercion!) _typeCoercion[kv.Key] = kv.Value;
+
                 _containerList.Clear();
-                foreach (var kv in savedContainerList) _containerList[kv.Key] = kv.Value;
+                foreach (var kv in savedContainerList!) _containerList[kv.Key] = kv.Value;
+
+                _containerLanguage.Clear();
+                foreach (var kv in savedContainerLanguage!) _containerLanguage[kv.Key] = kv.Value;
+
+                _reverseProperty.Clear();
+                foreach (var kv in savedReverseProperty!) _reverseProperty[kv.Key] = kv.Value;
+
+                _scopedContext.Clear();
+                foreach (var kv in savedScopedContext!) _scopedContext[kv.Key] = kv.Value;
+
+                _typeAliases.Clear();
+                foreach (var alias in savedTypeAliases!) _typeAliases.Add(alias);
+
+                _vocabIri = savedVocabIri;
+                _baseIri = savedBaseIri;
             }
         }
     }
