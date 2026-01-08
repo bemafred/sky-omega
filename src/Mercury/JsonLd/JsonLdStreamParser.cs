@@ -3033,10 +3033,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return baseScheme + "://" + baseAuthority + RemoveDotSegments(refPath) + rest;
         }
 
-        // Relative path - merge with base
+        // Relative path - merge with base per RFC 3986 Section 5.2.3
         string targetPath;
-        if (string.IsNullOrEmpty(baseAuthority) && string.IsNullOrEmpty(basePath))
+        if (!string.IsNullOrEmpty(baseAuthority) && string.IsNullOrEmpty(basePath))
         {
+            // Base has authority but empty path - prepend "/" to relative (e129)
+            targetPath = "/" + relative;
+        }
+        else if (string.IsNullOrEmpty(basePath))
+        {
+            // No authority, no path - just use relative
             targetPath = "/" + relative;
         }
         else
@@ -3049,7 +3055,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                targetPath = relative;
+                // No slash in path but path is not empty - replace it
+                targetPath = "/" + relative;
             }
         }
 
