@@ -2001,19 +2001,34 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Check if the object has @id - use that as the graph name, otherwise create a blank node
-        string namedGraphIri;
+        // Check if the object has @id - use that as the graph name
+        string? explicitId = null;
         if (value.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
         {
-            namedGraphIri = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
+            explicitId = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
+        }
+
+        // Check if value already has @graph - if so, we need different handling
+        bool hasInnerGraph = value.TryGetProperty("@graph", out var graphProp);
+
+        // Generate blank nodes for the link object and graph
+        // When value has @graph, link object and graph ID should be DIFFERENT
+        // When value doesn't have @graph, they can be the same
+        string linkObject = explicitId ?? GenerateBlankNode();
+        string namedGraphIri;
+        if (hasInnerGraph)
+        {
+            // Value already has @graph - use separate blank node for the graph
+            namedGraphIri = GenerateBlankNode();
         }
         else
         {
-            namedGraphIri = GenerateBlankNode();
+            // No inner @graph - use same ID for both
+            namedGraphIri = linkObject;
         }
 
         // Emit the link from subject to the graph node
-        EmitQuad(handler, subject, predicate, namedGraphIri, graphIri);
+        EmitQuad(handler, subject, predicate, linkObject, graphIri);
 
         // Save current graph and set to the named graph for content processing
         var savedGraph = _currentGraph;
@@ -2022,7 +2037,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         try
         {
             // Process the content - check for @graph property or process as regular node
-            if (value.TryGetProperty("@graph", out var graphProp))
+            if (hasInnerGraph)
             {
                 // Value has explicit @graph - process its contents into the named graph
                 if (graphProp.ValueKind == JsonValueKind.Array)
