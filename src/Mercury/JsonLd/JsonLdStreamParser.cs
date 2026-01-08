@@ -91,10 +91,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private string? _savedVocabForNested;
     private string? _savedBaseForNested;
 
-    // Track what terms/type-coercions were added by type-scoped context (to remove for nested nodes)
-    // Only type-scoped additions should be removed; property-scoped additions should propagate
-    private HashSet<string>? _typeScopedTerms;           // Terms added by type-scoped context
-    private HashSet<string>? _typeScopedTypeCoercions;   // Type coercions added by type-scoped context
+    // Track what terms/type-coercions were added/modified by type-scoped context (to revert for nested nodes)
+    // Value is original IRI (null if term was new). Only type-scoped changes should be reverted.
+    private Dictionary<string, string?>? _typeScopedTermChanges;     // Terms added/modified by type-scoped context
+    private Dictionary<string, string?>? _typeScopedCoercionChanges; // Coercions added/modified by type-scoped
+    private bool _typeScopedPropagate;                               // If true, type-scoped context DOES propagate
 
     private const int DefaultBufferSize = 65536; // 64KB
     private const int OutputBufferSize = 16384;
@@ -227,8 +228,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedContextForNested = null;
         string? savedVocabForNested = null;
         string? savedBaseForNested = null;
-        HashSet<string>? typeScopedTerms = null;         // Terms added by type-scoped context
-        HashSet<string>? typeScopedTypeCoercions = null; // Type coercions added by type-scoped context
+        Dictionary<string, string?>? typeScopedTermChanges = null;     // Terms added/modified by type-scoped (value = original IRI, null if new)
+        Dictionary<string, string?>? typeScopedCoercionChanges = null; // Coercions added/modified by type-scoped
         bool hasTypeScopedContext = false;
         JsonElement typeElement = default;
         List<string>? expandedTypeIris = null; // Type IRIs expanded BEFORE applying type-scoped context
@@ -251,16 +252,46 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 savedVocabForNested = _vocabIri;
                 savedBaseForNested = _baseIri;
 
-                // Track what terms/coercions exist BEFORE type-scoped context
-                var termsBefore = new HashSet<string>(_context.Keys);
-                var coercionsBefore = new HashSet<string>(_typeCoercion.Keys);
+                // Track terms and coercions BEFORE type-scoped context
+                var termsBefore = new Dictionary<string, string>(_context);
+                var coercionsBefore = new Dictionary<string, string>(_typeCoercion);
 
-                // Apply type-scoped contexts (may change @base/@vocab)
+                // Reset @propagate flag before applying type-scoped contexts
+                // It will be set to true if any type-scoped context has @propagate: true
+                _typeScopedPropagate = false;
+
+                // Apply type-scoped contexts (may change @base/@vocab and set @propagate)
                 ApplyTypeScopedContexts(typeElement);
 
-                // Track what was ADDED by type-scoped context (for removal in nested nodes)
-                typeScopedTerms = new HashSet<string>(_context.Keys.Except(termsBefore));
-                typeScopedTypeCoercions = new HashSet<string>(_typeCoercion.Keys.Except(coercionsBefore));
+                // Track what was ADDED or MODIFIED by type-scoped context
+                // Store the original value (null if term was added, original IRI if modified)
+                typeScopedTermChanges = new Dictionary<string, string?>();
+                foreach (var kv in _context)
+                {
+                    if (!termsBefore.TryGetValue(kv.Key, out var oldValue))
+                    {
+                        // New term - store null as original
+                        typeScopedTermChanges[kv.Key] = null;
+                    }
+                    else if (oldValue != kv.Value)
+                    {
+                        // Modified term - store original value
+                        typeScopedTermChanges[kv.Key] = oldValue;
+                    }
+                }
+
+                typeScopedCoercionChanges = new Dictionary<string, string?>();
+                foreach (var kv in _typeCoercion)
+                {
+                    if (!coercionsBefore.TryGetValue(kv.Key, out var oldValue))
+                    {
+                        typeScopedCoercionChanges[kv.Key] = null;
+                    }
+                    else if (oldValue != kv.Value)
+                    {
+                        typeScopedCoercionChanges[kv.Key] = oldValue;
+                    }
+                }
             }
             else
             {
@@ -349,15 +380,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var previousSavedContext = _savedContextForNested;
         var previousSavedVocab = _savedVocabForNested;
         var previousSavedBase = _savedBaseForNested;
-        var previousTypeScopedTerms = _typeScopedTerms;
-        var previousTypeScopedTypeCoercions = _typeScopedTypeCoercions;
+        var previousTypeScopedTermChanges = _typeScopedTermChanges;
+        var previousTypeScopedCoercionChanges = _typeScopedCoercionChanges;
+        var previousTypeScopedPropagate = _typeScopedPropagate;
         if (hasTypeScopedContext)
         {
             _savedContextForNested = savedContextForNested;
             _savedVocabForNested = savedVocabForNested;
             _savedBaseForNested = savedBaseForNested;
-            _typeScopedTerms = typeScopedTerms;
-            _typeScopedTypeCoercions = typeScopedTypeCoercions;
+            _typeScopedTermChanges = typeScopedTermChanges;
+            _typeScopedCoercionChanges = typeScopedCoercionChanges;
+            // Note: _typeScopedPropagate was already set during ApplyTypeScopedContexts
         }
 
         // Process @reverse keyword - contains reverse properties
@@ -476,8 +509,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _savedContextForNested = previousSavedContext;
         _savedVocabForNested = previousSavedVocab;
         _savedBaseForNested = previousSavedBase;
-        _typeScopedTerms = previousTypeScopedTerms;
-        _typeScopedTypeCoercions = previousTypeScopedTypeCoercions;
+        _typeScopedTermChanges = previousTypeScopedTermChanges;
+        _typeScopedCoercionChanges = previousTypeScopedCoercionChanges;
+        _typeScopedPropagate = previousTypeScopedPropagate;
 
         return subject;
     }
@@ -621,6 +655,19 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             else if (term == "@language")
             {
                 _defaultLanguage = value.ValueKind == JsonValueKind.Null ? null : value.GetString();
+            }
+            else if (term == "@propagate")
+            {
+                // @propagate: true means type-scoped context propagates to nested nodes
+                // Default is false for type-scoped contexts, true for property-scoped
+                if (value.ValueKind == JsonValueKind.True)
+                {
+                    _typeScopedPropagate = true;
+                }
+            }
+            else if (term == "@version" || term == "@protected" || term == "@direction" || term == "@import")
+            {
+                // Ignore other JSON-LD 1.1 keywords we don't fully implement yet
             }
             else if (value.ValueKind == JsonValueKind.Null)
             {
@@ -1501,8 +1548,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(typeValue.GetRawText()));
                 tempReader.Read();
 
-                // Parse the nested node with the specified @type
-                var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, subject);
+                // Parse the nested node with the specified @type (pass term for scoped context lookup)
+                var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, typeKey, subject);
                 EmitQuad(handler, subject, predicate, nestedId, graphIri);
             }
             else if (typeValue.ValueKind == JsonValueKind.Array)
@@ -1514,7 +1561,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     {
                         var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(item.GetRawText()));
                         tempReader.Read();
-                        var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, subject);
+                        var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, typeKey, subject);
                         EmitQuad(handler, subject, predicate, nestedId, graphIri);
                     }
                 }
@@ -1526,7 +1573,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     /// Parse a node with a pre-specified @type.
     /// Used for @type container maps where the key provides the @type.
     /// </summary>
-    private string ParseNodeWithType(ref Utf8JsonReader reader, QuadHandler handler, string? typeIri, string? parentNode)
+    private string ParseNodeWithType(ref Utf8JsonReader reader, QuadHandler handler, string? typeIri, string? typeTerm, string? parentNode)
     {
         if (reader.TokenType != JsonTokenType.StartObject)
             return GenerateBlankNode();
@@ -1534,9 +1581,88 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
-        // Process @context if present
+        // Revert parent's type-scoped changes (type-scoped contexts don't propagate to nested nodes)
+        // Save them for restoration after processing
+        Dictionary<string, string>? savedCoercions = null;
+        Dictionary<string, string>? savedTerms = null;
+        var savedVocab = _vocabIri;
+        var savedBase = _baseIri;
+
+        if (!_typeScopedPropagate && _typeScopedCoercionChanges != null && _typeScopedCoercionChanges.Count > 0)
+        {
+            savedCoercions = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedCoercionChanges)
+            {
+                if (_typeCoercion.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedCoercions[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _typeCoercion.Remove(kv.Key);
+                }
+                else
+                {
+                    _typeCoercion[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (!_typeScopedPropagate && _typeScopedTermChanges != null && _typeScopedTermChanges.Count > 0)
+        {
+            savedTerms = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedTermChanges)
+            {
+                if (_context.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedTerms[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _context.Remove(kv.Key);
+                }
+                else
+                {
+                    _context[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        // Restore @vocab/@base to pre-type-scoped state
+        if (!_typeScopedPropagate && _savedContextForNested != null)
+        {
+            _vocabIri = _savedVocabForNested;
+            _baseIri = _savedBaseForNested;
+        }
+
+        // Save context state before applying the new type's scoped context
+        // This ensures the type-scoped context doesn't leak to parent after we return
+        Dictionary<string, string>? savedContextState = null;
+        string? savedVocabBeforeType = null;
+        string? savedBaseBeforeType = null;
+
+        // Apply the new type's scoped context (if typeTerm has a scoped context)
+        if (!string.IsNullOrEmpty(typeTerm) && _scopedContext.TryGetValue(typeTerm, out var scopedJson))
+        {
+            // Save state before applying type-scoped context
+            savedContextState = new Dictionary<string, string>(_context);
+            savedVocabBeforeType = _vocabIri;
+            savedBaseBeforeType = _baseIri;
+
+            using var scopedDoc = JsonDocument.Parse(scopedJson);
+            ProcessContext(scopedDoc.RootElement);
+        }
+
+        // Process @context if present in the object itself
         if (root.TryGetProperty("@context", out var contextElement))
         {
+            // Save state if not already saved
+            if (savedContextState == null)
+            {
+                savedContextState = new Dictionary<string, string>(_context);
+                savedVocabBeforeType = _vocabIri;
+                savedBaseBeforeType = _baseIri;
+            }
             ProcessContext(contextElement);
         }
 
@@ -1579,6 +1705,37 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             ProcessProperty(nodeId, propPredicate, propName, prop.Value, handler, _currentGraph);
         }
+
+        // First, restore context state to before we applied this node's type-scoped/inline context
+        // This prevents the nested node's context from leaking to the parent
+        if (savedContextState != null)
+        {
+            _context.Clear();
+            foreach (var kv in savedContextState)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+            _vocabIri = savedVocabBeforeType;
+            _baseIri = savedBaseBeforeType;
+        }
+
+        // Then restore parent's type-scoped changes (they apply to parent's remaining properties)
+        if (savedCoercions != null)
+        {
+            foreach (var kv in savedCoercions)
+            {
+                _typeCoercion[kv.Key] = kv.Value;
+            }
+        }
+        if (savedTerms != null)
+        {
+            foreach (var kv in savedTerms)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+        }
+        _vocabIri = savedVocab;
+        _baseIri = savedBase;
 
         return nodeId;
     }
@@ -1927,20 +2084,55 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Nested object - create blank node
-        // 1. Remove type-scoped type coercions (type-scoped contexts don't propagate)
+        // 1. Revert type-scoped changes (type-scoped contexts don't propagate)
         // 2. Save/restore @vocab/@base around nested node (in case nested has inline @context)
-        // Property-scoped additions SHOULD propagate, so we only remove specific type-scoped additions
-        Dictionary<string, string>? removedTypeCoercions = null;
-        if (_typeScopedTypeCoercions != null && _typeScopedTypeCoercions.Count > 0)
+        // Property-scoped additions SHOULD propagate, so we only revert type-scoped changes
+        Dictionary<string, string>? savedCoercions = null;
+        Dictionary<string, string>? savedTerms = null;
+        // Only revert type-scoped changes if @propagate is NOT true
+        // @propagate: true means type-scoped context SHOULD propagate to nested nodes
+        if (!_typeScopedPropagate && _typeScopedCoercionChanges != null && _typeScopedCoercionChanges.Count > 0)
         {
-            // Remove only the type coercions that were added by type-scoped context
-            removedTypeCoercions = new Dictionary<string, string>();
-            foreach (var term in _typeScopedTypeCoercions)
+            // Revert type coercions to their original values (or remove if they were new)
+            savedCoercions = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedCoercionChanges)
             {
-                if (_typeCoercion.TryGetValue(term, out var coercion))
+                if (_typeCoercion.TryGetValue(kv.Key, out var currentValue))
                 {
-                    removedTypeCoercions[term] = coercion;
-                    _typeCoercion.Remove(term);
+                    savedCoercions[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    // Term was new - remove it
+                    _typeCoercion.Remove(kv.Key);
+                }
+                else
+                {
+                    // Term was modified - restore original
+                    _typeCoercion[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        // Revert type-scoped term changes
+        if (!_typeScopedPropagate && _typeScopedTermChanges != null && _typeScopedTermChanges.Count > 0)
+        {
+            savedTerms = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedTermChanges)
+            {
+                if (_context.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedTerms[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    // Term was new - remove it
+                    _context.Remove(kv.Key);
+                }
+                else
+                {
+                    // Term was modified - restore original
+                    _context[kv.Key] = kv.Value;
                 }
             }
         }
@@ -1950,7 +2142,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var savedVocab = _vocabIri;
         var savedBase = _baseIri;
         // If type-scoped context changed @vocab/@base, restore to pre-type-scoped state for nested
-        if (_savedContextForNested != null)
+        // (unless @propagate is true)
+        if (!_typeScopedPropagate && _savedContextForNested != null)
         {
             _vocabIri = _savedVocabForNested;
             _baseIri = _savedBaseForNested;
@@ -1962,13 +2155,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         EmitQuad(handler, subject, predicate, blankNode, graphIri);
 
         // Restore after processing nested node:
-        // - Restore type-scoped coercions (they apply to this node's remaining properties)
+        // - Re-apply type-scoped changes (they apply to this node's remaining properties)
         // - Restore @vocab/@base (nested node's inline @context shouldn't affect siblings)
-        if (removedTypeCoercions != null)
+        if (savedCoercions != null)
         {
-            foreach (var kv in removedTypeCoercions)
+            foreach (var kv in savedCoercions)
             {
                 _typeCoercion[kv.Key] = kv.Value;
+            }
+        }
+        if (savedTerms != null)
+        {
+            foreach (var kv in savedTerms)
+            {
+                _context[kv.Key] = kv.Value;
             }
         }
         _vocabIri = savedVocab;
