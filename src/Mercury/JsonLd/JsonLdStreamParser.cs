@@ -78,8 +78,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
 
     public JsonLdStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+        : this(stream, baseIri: null, bufferSize, bufferManager)
+    {
+    }
+
+    public JsonLdStreamParser(Stream stream, string? baseIri, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+        _baseIri = baseIri;
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
@@ -499,9 +505,25 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Determine if integer or decimal
         if (rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E'))
         {
-            // Double
-            EmitQuad(handler, subject, predicate,
-                $"\"{rawText}\"^^<http://www.w3.org/2001/XMLSchema#double>", graphIri);
+            // Double - must use canonical XSD form with exponent notation
+            // Parse and reformat to ensure canonical representation (e.g., 5.3 -> 5.3E0)
+            if (double.TryParse(rawText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var doubleValue))
+            {
+                // Format with exponent notation, uppercase E
+                var canonicalForm = doubleValue.ToString("E15", System.Globalization.CultureInfo.InvariantCulture);
+                // Trim trailing zeros in the significand but keep at least one digit after decimal
+                // E.g., 5.300000000000000E+000 -> 5.3E0
+                canonicalForm = NormalizeDoubleCanonical(canonicalForm);
+                EmitQuad(handler, subject, predicate,
+                    $"\"{canonicalForm}\"^^<http://www.w3.org/2001/XMLSchema#double>", graphIri);
+            }
+            else
+            {
+                // Fallback to raw text if parsing fails
+                EmitQuad(handler, subject, predicate,
+                    $"\"{rawText}\"^^<http://www.w3.org/2001/XMLSchema#double>", graphIri);
+            }
         }
         else
         {
@@ -509,6 +531,37 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             EmitQuad(handler, subject, predicate,
                 $"\"{rawText}\"^^<http://www.w3.org/2001/XMLSchema#integer>", graphIri);
         }
+    }
+
+    /// <summary>
+    /// Normalize a double to canonical XSD form.
+    /// E.g., "5.300000000000000E+000" -> "5.3E0"
+    /// </summary>
+    private static string NormalizeDoubleCanonical(string formatted)
+    {
+        // Split into mantissa and exponent
+        var eIndex = formatted.IndexOf('E');
+        if (eIndex < 0) return formatted;
+
+        var mantissa = formatted[..eIndex];
+        var exponent = formatted[(eIndex + 1)..];
+
+        // Trim trailing zeros from mantissa (but keep at least one digit after decimal)
+        if (mantissa.Contains('.'))
+        {
+            mantissa = mantissa.TrimEnd('0');
+            if (mantissa.EndsWith('.'))
+                mantissa += '0'; // Keep at least "X.0"
+        }
+
+        // Normalize exponent: remove leading zeros and + sign
+        // E.g., "+000" -> "0", "-002" -> "-2"
+        if (int.TryParse(exponent, out var expValue))
+        {
+            exponent = expValue.ToString();
+        }
+
+        return mantissa + "E" + exponent;
     }
 
     private string ProcessList(JsonElement listElement, QuadHandler handler, string? graphIri, string? coercedType)
@@ -589,8 +642,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ExpandIri(string value)
     {
+        // Empty string resolves to base IRI per JSON-LD spec
         if (string.IsNullOrEmpty(value))
+        {
+            if (!string.IsNullOrEmpty(_baseIri))
+                return FormatIri(_baseIri);
             return GenerateBlankNode();
+        }
 
         // Already an absolute IRI
         if (value.Contains("://"))

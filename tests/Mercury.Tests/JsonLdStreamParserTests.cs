@@ -251,7 +251,8 @@ public class JsonLdStreamParserTests
         var quads = await ParseJsonLd(jsonld);
 
         Assert.Single(quads);
-        Assert.Equal("\"3.14\"^^<http://www.w3.org/2001/XMLSchema#double>", quads[0].Object);
+        // Canonical XSD double representation uses scientific notation
+        Assert.Equal("\"3.14E0\"^^<http://www.w3.org/2001/XMLSchema#double>", quads[0].Object);
     }
 
     [Fact]
