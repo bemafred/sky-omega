@@ -72,6 +72,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _valueAliases; // terms aliased to @value
     private readonly HashSet<string> _languageAliases; // terms aliased to @language
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
+    private readonly HashSet<string> _prefixable; // terms usable as prefixes in compact IRIs
 
     // Base IRI for relative IRI resolution
     private string? _baseIri;
@@ -146,6 +147,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _valueAliases = new HashSet<string>(StringComparer.Ordinal);
         _languageAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
+        _prefixable = new HashSet<string>(StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -699,6 +701,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _graphAliases.Clear();
             _includedAliases.Clear();
             _nullTerms.Clear();
+            _prefixable.Clear();
             _vocabIri = null;
             _defaultLanguage = null;
             // Note: @base is NOT cleared by null context per JSON-LD spec
@@ -764,24 +767,33 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     // Empty @vocab means use @base as vocabulary base (e092)
                     _vocabIri = _baseIri ?? "";
                 }
-                else if (!IsAbsoluteIri(vocabValue))
+                else
                 {
-                    // Relative @vocab - first try expanding as compact IRI or term
+                    // First try to expand as compact IRI or term - this handles cases
+                    // like "ex:ns/" where "ex" is a defined prefix with @prefix: true (e124)
                     var expanded = ExpandCompactIri(vocabValue);
-                    // If not expanded, resolve against @base
-                    if (expanded == vocabValue && !string.IsNullOrEmpty(_baseIri))
+                    if (expanded != vocabValue)
                     {
-                        _vocabIri = ResolveRelativeIri(_baseIri, vocabValue);
+                        // Compact IRI was expanded
+                        _vocabIri = expanded;
+                    }
+                    else if (!IsAbsoluteIri(vocabValue))
+                    {
+                        // Not expanded and not absolute - resolve against @base
+                        if (!string.IsNullOrEmpty(_baseIri))
+                        {
+                            _vocabIri = ResolveRelativeIri(_baseIri, vocabValue);
+                        }
+                        else
+                        {
+                            _vocabIri = vocabValue;
+                        }
                     }
                     else
                     {
-                        _vocabIri = expanded;
+                        // Absolute IRI - use as-is
+                        _vocabIri = vocabValue;
                     }
-                }
-                else
-                {
-                    // Absolute IRI - use as-is
-                    _vocabIri = vocabValue;
                 }
             }
             else if (term == "@language")
@@ -844,8 +856,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    // Simple term -> IRI mapping
+                    // Simple term -> IRI mapping (always prefix-able)
                     _context[term] = mappedValue;
+                    _prefixable.Add(term);
                 }
             }
             else if (value.ValueKind == JsonValueKind.Object)
@@ -879,12 +892,38 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    // No explicit @id - term implicitly maps to @vocab + term (JSON-LD 1.1)
-                    // This is important for type-scoped contexts where term is used as @type value
-                    if (!string.IsNullOrEmpty(_vocabIri))
+                    // No explicit @id - need to derive the IRI
+                    // First check if term looks like a compact IRI (prefix:localName)
+                    // Within context definitions, compact IRIs are expanded regardless of @prefix flag (e050)
+                    var termColonIdx = term.IndexOf(':');
+                    if (termColonIdx > 0)
                     {
+                        var termPrefix = term.Substring(0, termColonIdx);
+                        var termLocalName = term.Substring(termColonIdx + 1);
+                        // In context definitions, we can use any term as a prefix, not just _prefixable ones
+                        if (!termLocalName.StartsWith("//") && termPrefix != "_" &&
+                            _context.TryGetValue(termPrefix, out var termPrefixIri))
+                        {
+                            _context[term] = termPrefixIri + termLocalName;
+                        }
+                        else if (!string.IsNullOrEmpty(_vocabIri))
+                        {
+                            _context[term] = _vocabIri + term;
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(_vocabIri))
+                    {
+                        // Simple term - use @vocab + term (JSON-LD 1.1)
+                        // This is important for type-scoped contexts where term is used as @type value
                         _context[term] = _vocabIri + term;
                     }
+                }
+
+                // Handle @prefix - marks term as usable as a prefix in compact IRIs (e124)
+                // Expanded term definitions are NOT prefix-able by default (unlike simple string mappings)
+                if (value.TryGetProperty("@prefix", out var prefixProp) && prefixProp.ValueKind == JsonValueKind.True)
+                {
+                    _prefixable.Add(term);
                 }
 
                 // Handle @reverse - the term maps to a reverse property
@@ -1130,7 +1169,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             // Key check: if localName starts with "//", this is NOT a compact IRI
             // Also, "_" as a prefix would conflict with blank nodes
-            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
+            // The prefix must be in _prefixable to be used for expansion (pr29)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
@@ -1212,6 +1253,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         HashSet<string>? savedValueAliases = null;
         HashSet<string>? savedLanguageAliases = null;
         HashSet<string>? savedNullTerms = null;
+        HashSet<string>? savedPrefixable = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
         string? savedDefaultLanguage = null;
@@ -1238,6 +1280,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedValueAliases = new HashSet<string>(_valueAliases);
             savedLanguageAliases = new HashSet<string>(_languageAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
+            savedPrefixable = new HashSet<string>(_prefixable);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
             savedDefaultLanguage = _defaultLanguage;
@@ -1399,6 +1442,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
+
+                _prefixable.Clear();
+                foreach (var t in savedPrefixable!) _prefixable.Add(t);
 
                 _vocabIri = savedVocabIri;
                 _baseIri = savedBaseIri;
@@ -2863,7 +2909,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             // Key check: if localName starts with "//", this is NOT a compact IRI
             // e.g., "http://example.org" should NOT be expanded using "http" prefix
             // Also, "_" as a prefix would conflict with blank nodes
-            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
+            // The prefix must be in _prefixable to be used for expansion (pr29)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
@@ -2946,7 +2994,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             // Key check: if localName starts with "//", this is NOT a compact IRI
             // e.g., "http://example.org" should NOT be expanded using "http" prefix
             // Also, "_" as a prefix would conflict with blank nodes ("_:...")
-            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
+            // The prefix must be in _prefixable to be used for expansion (pr29)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
@@ -3274,7 +3324,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             // Key check: if localName starts with "//", this is NOT a compact IRI
             // Also, "_" as a prefix would conflict with blank nodes
-            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
+            // The prefix must be in _prefixable (simple term mapping or expanded def with @prefix: true)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return prefixIri + localName;
             }
