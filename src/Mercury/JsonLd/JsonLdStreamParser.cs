@@ -280,6 +280,28 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Generate blank node if no @id
         subject ??= GenerateBlankNode();
 
+        // If this node has @graph and we generated a blank node for subject,
+        // update graphIri to match ONLY if the node has other properties
+        // (a node with just @graph should process content in default graph)
+        if (hasGraphKeyword && graphIri == null)
+        {
+            // Check if there are any non-keyword properties
+            bool hasOtherProperties = false;
+            foreach (var prop in root.EnumerateObject())
+            {
+                var name = prop.Name;
+                if (!name.StartsWith('@') && !_graphAliases.Contains(name))
+                {
+                    hasOtherProperties = true;
+                    break;
+                }
+            }
+            if (hasOtherProperties)
+            {
+                graphIri = subject;
+            }
+        }
+
         // Emit type triple (after we have the subject)
         if (typeElement.ValueKind != JsonValueKind.Undefined)
         {
