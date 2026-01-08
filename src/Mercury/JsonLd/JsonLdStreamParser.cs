@@ -58,6 +58,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, bool> _containerLanguage; // term -> is @language container
     private readonly Dictionary<string, bool> _containerIndex; // term -> is @index container
     private readonly Dictionary<string, bool> _containerGraph; // term -> is @graph container
+    private readonly Dictionary<string, bool> _containerId; // term -> is @id container
+    private readonly Dictionary<string, bool> _containerType; // term -> is @type container
     private readonly Dictionary<string, string> _termLanguage; // term -> @language value
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
@@ -65,7 +67,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _idAliases; // terms aliased to @id
     private readonly HashSet<string> _graphAliases; // terms aliased to @graph
     private readonly HashSet<string> _includedAliases; // terms aliased to @included
+    private readonly HashSet<string> _nestAliases; // terms aliased to @nest
+    private readonly HashSet<string> _noneAliases; // terms aliased to @none
+    private readonly HashSet<string> _valueAliases; // terms aliased to @value
+    private readonly HashSet<string> _languageAliases; // terms aliased to @language
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
+    private readonly HashSet<string> _prefixable; // terms usable as prefixes in compact IRIs
 
     // Base IRI for relative IRI resolution
     private string? _baseIri;
@@ -86,6 +93,18 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private Dictionary<string, string>? _savedContextForNested;
     private string? _savedVocabForNested;
     private string? _savedBaseForNested;
+
+    // Track what terms/type-coercions/containers were added/modified by type-scoped context (to revert for nested nodes)
+    // Value is original IRI (null if term was new). Only type-scoped changes should be reverted.
+    private Dictionary<string, string?>? _typeScopedTermChanges;     // Terms added/modified by type-scoped context
+    private Dictionary<string, string?>? _typeScopedCoercionChanges; // Coercions added/modified by type-scoped
+    private Dictionary<string, bool?>? _typeScopedContainerTypeChanges;   // @container: @type changes
+    private Dictionary<string, bool?>? _typeScopedContainerIndexChanges;  // @container: @index changes
+    private Dictionary<string, bool?>? _typeScopedContainerListChanges;   // @container: @list changes
+    private Dictionary<string, bool?>? _typeScopedContainerLangChanges;   // @container: @language changes
+    private Dictionary<string, bool?>? _typeScopedContainerGraphChanges;  // @container: @graph changes
+    private Dictionary<string, bool?>? _typeScopedContainerIdChanges;     // @container: @id changes
+    private bool _typeScopedPropagate;                               // If true, type-scoped context DOES propagate
 
     private const int DefaultBufferSize = 65536; // 64KB
     private const int OutputBufferSize = 16384;
@@ -114,6 +133,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _containerLanguage = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerIndex = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerGraph = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _containerId = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _containerType = new Dictionary<string, bool>(StringComparer.Ordinal);
         _termLanguage = new Dictionary<string, string>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -121,7 +142,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _idAliases = new HashSet<string>(StringComparer.Ordinal);
         _graphAliases = new HashSet<string>(StringComparer.Ordinal);
         _includedAliases = new HashSet<string>(StringComparer.Ordinal);
+        _nestAliases = new HashSet<string>(StringComparer.Ordinal);
+        _noneAliases = new HashSet<string>(StringComparer.Ordinal);
+        _valueAliases = new HashSet<string>(StringComparer.Ordinal);
+        _languageAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
+        _prefixable = new HashSet<string>(StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -214,15 +240,42 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedContextForNested = null;
         string? savedVocabForNested = null;
         string? savedBaseForNested = null;
+        Dictionary<string, string?>? typeScopedTermChanges = null;     // Terms added/modified by type-scoped (value = original IRI, null if new)
+        Dictionary<string, string?>? typeScopedCoercionChanges = null; // Coercions added/modified by type-scoped
         bool hasTypeScopedContext = false;
         JsonElement typeElement = default;
+        List<string>? expandedTypeIris = null; // Type IRIs expanded BEFORE applying type-scoped context
 
         // Check for @type and apply type-scoped context BEFORE expanding @id
-        // (type-scoped context may change @base which affects @id resolution)
-        if (root.TryGetProperty("@type", out typeElement))
+        // IMPORTANT: Expand type IRIs BEFORE applying type-scoped context
+        // (type-scoped context changes @vocab which should NOT affect the @type IRI itself)
+        // Check both literal @type AND ALL @type aliases (multiple properties can alias to @type)
+        List<JsonElement> typeElements = new();
+        bool foundType = root.TryGetProperty("@type", out typeElement);
+        if (foundType)
         {
-            // Check if any type has a scoped context BEFORE applying
-            hasTypeScopedContext = HasTypeScopedContext(typeElement);
+            typeElements.Add(typeElement);
+        }
+        // Also check ALL @type aliases - multiple properties can alias to @type (e.g., type1, type2)
+        foreach (var alias in _typeAliases)
+        {
+            if (root.TryGetProperty(alias, out var aliasElement))
+            {
+                typeElements.Add(aliasElement);
+                foundType = true;
+            }
+        }
+        if (foundType)
+        {
+            // Expand type IRIs using current context (BEFORE type-scoped context)
+            // Combine types from all @type and alias properties
+            expandedTypeIris = new List<string>();
+            foreach (var te in typeElements)
+            {
+                expandedTypeIris.AddRange(ExpandTypeIris(te));
+            }
+            // Check if ANY type has a scoped context BEFORE applying
+            hasTypeScopedContext = typeElements.Any(te => HasTypeScopedContext(te));
 
             if (hasTypeScopedContext)
             {
@@ -230,10 +283,114 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 savedContextForNested = new Dictionary<string, string>(_context);
                 savedVocabForNested = _vocabIri;
                 savedBaseForNested = _baseIri;
-            }
 
-            // Apply type-scoped contexts (may change @base)
-            ApplyTypeScopedContexts(typeElement);
+                // Track terms, coercions, and containers BEFORE type-scoped context
+                var termsBefore = new Dictionary<string, string>(_context);
+                var coercionsBefore = new Dictionary<string, string>(_typeCoercion);
+                var containerTypeBefore = new Dictionary<string, bool>(_containerType);
+                var containerIndexBefore = new Dictionary<string, bool>(_containerIndex);
+                var containerListBefore = new Dictionary<string, bool>(_containerList);
+                var containerLangBefore = new Dictionary<string, bool>(_containerLanguage);
+                var containerGraphBefore = new Dictionary<string, bool>(_containerGraph);
+                var containerIdBefore = new Dictionary<string, bool>(_containerId);
+
+                // Reset @propagate flag before applying type-scoped contexts
+                // It will be set to true if any type-scoped context has @propagate: true
+                _typeScopedPropagate = false;
+
+                // Apply type-scoped contexts from ALL type elements
+                foreach (var te in typeElements)
+                {
+                    ApplyTypeScopedContexts(te);
+                }
+
+                // Track what was ADDED or MODIFIED by type-scoped context
+                // Store the original value (null if term was added, original IRI if modified)
+                typeScopedTermChanges = new Dictionary<string, string?>();
+                foreach (var kv in _context)
+                {
+                    if (!termsBefore.TryGetValue(kv.Key, out var oldValue))
+                    {
+                        // New term - store null as original
+                        typeScopedTermChanges[kv.Key] = null;
+                    }
+                    else if (oldValue != kv.Value)
+                    {
+                        // Modified term - store original value
+                        typeScopedTermChanges[kv.Key] = oldValue;
+                    }
+                }
+
+                typeScopedCoercionChanges = new Dictionary<string, string?>();
+                foreach (var kv in _typeCoercion)
+                {
+                    if (!coercionsBefore.TryGetValue(kv.Key, out var oldValue))
+                    {
+                        typeScopedCoercionChanges[kv.Key] = null;
+                    }
+                    else if (oldValue != kv.Value)
+                    {
+                        typeScopedCoercionChanges[kv.Key] = oldValue;
+                    }
+                }
+
+                // Track container changes (null = newly added, true/false = original value)
+                Dictionary<string, bool?>? typeScopedContainerTypeChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerIndexChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerListChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerLangChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerGraphChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerIdChanges = null;
+
+                // Helper to track container changes
+                void TrackContainerChanges(Dictionary<string, bool> before, Dictionary<string, bool> after, ref Dictionary<string, bool?>? changes)
+                {
+                    foreach (var kv in after)
+                    {
+                        if (!before.TryGetValue(kv.Key, out var oldValue))
+                        {
+                            // New container - store null (meaning remove on revert)
+                            changes ??= new Dictionary<string, bool?>();
+                            changes[kv.Key] = null;
+                        }
+                        else if (oldValue != kv.Value)
+                        {
+                            // Modified container
+                            changes ??= new Dictionary<string, bool?>();
+                            changes[kv.Key] = oldValue;
+                        }
+                    }
+                    // Also track removed containers
+                    foreach (var kv in before)
+                    {
+                        if (!after.ContainsKey(kv.Key))
+                        {
+                            // Container was removed - store original value
+                            changes ??= new Dictionary<string, bool?>();
+                            changes[kv.Key] = kv.Value;
+                        }
+                    }
+                }
+
+                TrackContainerChanges(containerTypeBefore, _containerType, ref typeScopedContainerTypeChanges);
+                TrackContainerChanges(containerIndexBefore, _containerIndex, ref typeScopedContainerIndexChanges);
+                TrackContainerChanges(containerListBefore, _containerList, ref typeScopedContainerListChanges);
+                TrackContainerChanges(containerLangBefore, _containerLanguage, ref typeScopedContainerLangChanges);
+                TrackContainerChanges(containerGraphBefore, _containerGraph, ref typeScopedContainerGraphChanges);
+                TrackContainerChanges(containerIdBefore, _containerId, ref typeScopedContainerIdChanges);
+
+                _typeScopedContainerTypeChanges = typeScopedContainerTypeChanges;
+                _typeScopedContainerIndexChanges = typeScopedContainerIndexChanges;
+                _typeScopedContainerListChanges = typeScopedContainerListChanges;
+                _typeScopedContainerLangChanges = typeScopedContainerLangChanges;
+                _typeScopedContainerGraphChanges = typeScopedContainerGraphChanges;
+                _typeScopedContainerIdChanges = typeScopedContainerIdChanges;
+            }
+            else
+            {
+                // Apply type-scoped contexts (may change @base/@vocab)
+                ApplyTypeScopedContexts(typeElement);
+            }
         }
 
         // Get @id for subject (AFTER type-scoped context is applied)
@@ -303,26 +460,57 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Emit type triple (after we have the subject)
-        if (typeElement.ValueKind != JsonValueKind.Undefined)
+        // Use pre-expanded type IRIs (expanded BEFORE type-scoped context was applied)
+        if (expandedTypeIris != null)
         {
-            ProcessType(subject, typeElement, handler, _currentGraph);
+            foreach (var typeIri in expandedTypeIris)
+            {
+                EmitQuad(handler, subject, RdfType, typeIri, _currentGraph);
+            }
         }
 
         // Store saved state for nested node restoration (only if type-scoped context was applied)
         var previousSavedContext = _savedContextForNested;
         var previousSavedVocab = _savedVocabForNested;
         var previousSavedBase = _savedBaseForNested;
+        var previousTypeScopedTermChanges = _typeScopedTermChanges;
+        var previousTypeScopedCoercionChanges = _typeScopedCoercionChanges;
+        var previousTypeScopedPropagate = _typeScopedPropagate;
+        var previousTypeScopedContainerTypeChanges = _typeScopedContainerTypeChanges;
+        var previousTypeScopedContainerIndexChanges = _typeScopedContainerIndexChanges;
+        var previousTypeScopedContainerListChanges = _typeScopedContainerListChanges;
+        var previousTypeScopedContainerLangChanges = _typeScopedContainerLangChanges;
+        var previousTypeScopedContainerGraphChanges = _typeScopedContainerGraphChanges;
+        var previousTypeScopedContainerIdChanges = _typeScopedContainerIdChanges;
         if (hasTypeScopedContext)
         {
             _savedContextForNested = savedContextForNested;
             _savedVocabForNested = savedVocabForNested;
             _savedBaseForNested = savedBaseForNested;
+            _typeScopedTermChanges = typeScopedTermChanges;
+            _typeScopedCoercionChanges = typeScopedCoercionChanges;
+            // Note: _typeScopedPropagate was already set during ApplyTypeScopedContexts
+            // Container changes are already assigned to fields during tracking above
         }
 
         // Process @reverse keyword - contains reverse properties
         if (root.TryGetProperty("@reverse", out var reverseElement))
         {
             ProcessReverseKeyword(subject, reverseElement, handler, _currentGraph);
+        }
+
+        // Process @nest keyword and aliases - contains properties to be "un-nested" onto this node
+        if (root.TryGetProperty("@nest", out var nestElement))
+        {
+            ProcessNestKeyword(subject, nestElement, handler, _currentGraph);
+        }
+        // Also process @nest aliases
+        foreach (var alias in _nestAliases)
+        {
+            if (root.TryGetProperty(alias, out var aliasNestElement))
+            {
+                ProcessNestKeyword(subject, aliasNestElement, handler, _currentGraph);
+            }
         }
 
         // Process other properties FIRST (before @graph content)
@@ -332,17 +520,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             var propName = prop.Name;
 
             // Skip JSON-LD keywords we've already processed
-            if (propName.StartsWith('@'))
+            // Per JSON-LD 1.1: Terms that look like keywords (@ followed by only lowercase a-z) are ignored
+            // But other @ patterns (like "@", "@foo.bar") can be term definitions (e119)
+            if (propName.StartsWith('@') && IsKeywordLike(propName))
                 continue;
 
-            // Check for @type alias
+            // Check for @type alias - already processed above (type emission and scoped context)
             if (_typeAliases.Contains(propName))
-            {
-                ProcessType(subject, prop.Value, handler, _currentGraph);
-                // Also apply type-scoped contexts
-                ApplyTypeScopedContexts(prop.Value);
                 continue;
-            }
 
             // Skip @id aliases (already processed above)
             if (_idAliases.Contains(propName))
@@ -354,6 +539,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             // Skip @included aliases (processed below)
             if (_includedAliases.Contains(propName))
+                continue;
+
+            // Skip @nest aliases (already processed above)
+            if (_nestAliases.Contains(propName))
                 continue;
 
             // Check if this is a reverse property (term definition has @reverse but no @id)
@@ -417,6 +606,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _savedContextForNested = previousSavedContext;
         _savedVocabForNested = previousSavedVocab;
         _savedBaseForNested = previousSavedBase;
+        _typeScopedTermChanges = previousTypeScopedTermChanges;
+        _typeScopedCoercionChanges = previousTypeScopedCoercionChanges;
+        _typeScopedPropagate = previousTypeScopedPropagate;
+        _typeScopedContainerTypeChanges = previousTypeScopedContainerTypeChanges;
+        _typeScopedContainerIndexChanges = previousTypeScopedContainerIndexChanges;
+        _typeScopedContainerListChanges = previousTypeScopedContainerListChanges;
+        _typeScopedContainerLangChanges = previousTypeScopedContainerLangChanges;
+        _typeScopedContainerGraphChanges = previousTypeScopedContainerGraphChanges;
+        _typeScopedContainerIdChanges = previousTypeScopedContainerIdChanges;
 
         return subject;
     }
@@ -503,6 +701,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _graphAliases.Clear();
             _includedAliases.Clear();
             _nullTerms.Clear();
+            _prefixable.Clear();
             _vocabIri = null;
             _defaultLanguage = null;
             // Note: @base is NOT cleared by null context per JSON-LD spec
@@ -528,15 +727,91 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             if (term == "@base")
             {
-                _baseIri = value.GetString();
+                if (value.ValueKind == JsonValueKind.Null)
+                {
+                    // @base: null clears the base IRI
+                    _baseIri = null;
+                }
+                else
+                {
+                    var newBase = value.GetString();
+                    if (string.IsNullOrEmpty(newBase))
+                    {
+                        // @base: "" means keep current base (no change)
+                        // This is important when an empty @base is used with a base option
+                    }
+                    else if (!string.IsNullOrEmpty(_baseIri) && !IsAbsoluteIri(newBase))
+                    {
+                        // Relative @base is resolved against current base
+                        _baseIri = ResolveRelativeIri(_baseIri, newBase);
+                    }
+                    else
+                    {
+                        // Absolute @base or no current base
+                        _baseIri = newBase;
+                    }
+                }
             }
             else if (term == "@vocab")
             {
-                _vocabIri = value.GetString();
+                var vocabValue = value.GetString();
+                // @vocab can be a compact IRI like "ex:ns/" - expand it (e124)
+                // @vocab can also be a relative IRI like "/relative" - resolve against @base (e110)
+                // @vocab can be "" (empty string) meaning use @base as vocabulary (e092)
+                if (vocabValue == null)
+                {
+                    _vocabIri = null;
+                }
+                else if (vocabValue == "")
+                {
+                    // Empty @vocab means use @base as vocabulary base (e092)
+                    _vocabIri = _baseIri ?? "";
+                }
+                else
+                {
+                    // First try to expand as compact IRI or term - this handles cases
+                    // like "ex:ns/" where "ex" is a defined prefix with @prefix: true (e124)
+                    var expanded = ExpandCompactIri(vocabValue);
+                    if (expanded != vocabValue)
+                    {
+                        // Compact IRI was expanded
+                        _vocabIri = expanded;
+                    }
+                    else if (!IsAbsoluteIri(vocabValue))
+                    {
+                        // Not expanded and not absolute - resolve against @base
+                        if (!string.IsNullOrEmpty(_baseIri))
+                        {
+                            _vocabIri = ResolveRelativeIri(_baseIri, vocabValue);
+                        }
+                        else
+                        {
+                            _vocabIri = vocabValue;
+                        }
+                    }
+                    else
+                    {
+                        // Absolute IRI - use as-is
+                        _vocabIri = vocabValue;
+                    }
+                }
             }
             else if (term == "@language")
             {
                 _defaultLanguage = value.ValueKind == JsonValueKind.Null ? null : value.GetString();
+            }
+            else if (term == "@propagate")
+            {
+                // @propagate: true means type-scoped context propagates to nested nodes
+                // Default is false for type-scoped contexts, true for property-scoped
+                if (value.ValueKind == JsonValueKind.True)
+                {
+                    _typeScopedPropagate = true;
+                }
+            }
+            else if (term == "@version" || term == "@protected" || term == "@direction" || term == "@import")
+            {
+                // Ignore other JSON-LD 1.1 keywords we don't fully implement yet
             }
             else if (value.ValueKind == JsonValueKind.Null)
             {
@@ -563,10 +838,27 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 {
                     _includedAliases.Add(term);
                 }
+                else if (mappedValue == "@nest" || _nestAliases.Contains(mappedValue))
+                {
+                    _nestAliases.Add(term);
+                }
+                else if (mappedValue == "@none" || _noneAliases.Contains(mappedValue))
+                {
+                    _noneAliases.Add(term);
+                }
+                else if (mappedValue == "@value" || _valueAliases.Contains(mappedValue))
+                {
+                    _valueAliases.Add(term);
+                }
+                else if (mappedValue == "@language" || _languageAliases.Contains(mappedValue))
+                {
+                    _languageAliases.Add(term);
+                }
                 else
                 {
-                    // Simple term -> IRI mapping
+                    // Simple term -> IRI mapping (always prefix-able)
                     _context[term] = mappedValue;
+                    _prefixable.Add(term);
                 }
             }
             else if (value.ValueKind == JsonValueKind.Object)
@@ -581,8 +873,57 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     }
                     else
                     {
-                        _context[term] = idProp.GetString() ?? "";
+                        var idValue = idProp.GetString() ?? "";
+                        // Per JSON-LD 1.1: @id values that look like keywords (e.g., "@ignoreMe")
+                        // should be ignored and the term should use @vocab instead (e120)
+                        if (idValue.StartsWith('@') && IsKeywordLike(idValue))
+                        {
+                            // Ignore keyword-like @id, term uses @vocab
+                            if (!string.IsNullOrEmpty(_vocabIri))
+                            {
+                                _context[term] = _vocabIri + term;
+                            }
+                        }
+                        else
+                        {
+                            _context[term] = idValue;
+                        }
                     }
+                }
+                else
+                {
+                    // No explicit @id - need to derive the IRI
+                    // First check if term looks like a compact IRI (prefix:localName)
+                    // Within context definitions, compact IRIs are expanded regardless of @prefix flag (e050)
+                    var termColonIdx = term.IndexOf(':');
+                    if (termColonIdx > 0)
+                    {
+                        var termPrefix = term.Substring(0, termColonIdx);
+                        var termLocalName = term.Substring(termColonIdx + 1);
+                        // In context definitions, we can use any term as a prefix, not just _prefixable ones
+                        if (!termLocalName.StartsWith("//") && termPrefix != "_" &&
+                            _context.TryGetValue(termPrefix, out var termPrefixIri))
+                        {
+                            _context[term] = termPrefixIri + termLocalName;
+                        }
+                        else if (!string.IsNullOrEmpty(_vocabIri))
+                        {
+                            _context[term] = _vocabIri + term;
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(_vocabIri))
+                    {
+                        // Simple term - use @vocab + term (JSON-LD 1.1)
+                        // This is important for type-scoped contexts where term is used as @type value
+                        _context[term] = _vocabIri + term;
+                    }
+                }
+
+                // Handle @prefix - marks term as usable as a prefix in compact IRIs (e124)
+                // Expanded term definitions are NOT prefix-able by default (unlike simple string mappings)
+                if (value.TryGetProperty("@prefix", out var prefixProp) && prefixProp.ValueKind == JsonValueKind.True)
+                {
+                    _prefixable.Add(term);
                 }
 
                 // Handle @reverse - the term maps to a reverse property
@@ -610,6 +951,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 if (value.TryGetProperty("@container", out var containerProp))
                 {
+                    // Clear all existing container flags for this term before setting new ones
+                    // This ensures that redefining @container replaces the old container type
+                    _containerList.Remove(term);
+                    _containerLanguage.Remove(term);
+                    _containerIndex.Remove(term);
+                    _containerGraph.Remove(term);
+                    _containerId.Remove(term);
+                    _containerType.Remove(term);
+
                     // @container can be a string or an array in JSON-LD 1.1
                     void ProcessContainerValue(string? containerVal)
                     {
@@ -621,7 +971,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                             _containerIndex[term] = true;
                         else if (containerVal == "@graph")
                             _containerGraph[term] = true;
-                        // Note: @id, @set, @type containers not yet fully supported
+                        else if (containerVal == "@id")
+                            _containerId[term] = true;
+                        else if (containerVal == "@type")
+                            _containerType[term] = true;
+                        // Note: @set containers treated as simple containers
                     }
 
                     if (containerProp.ValueKind == JsonValueKind.String)
@@ -691,7 +1045,35 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Expand type IRIs from @type element. Called BEFORE type-scoped context is applied.
+    /// </summary>
+    private List<string> ExpandTypeIris(JsonElement typeElement)
+    {
+        var result = new List<string>();
+
+        if (typeElement.ValueKind == JsonValueKind.String)
+        {
+            var typeIri = ExpandTypeIri(typeElement.GetString() ?? "");
+            result.Add(typeIri);
+        }
+        else if (typeElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var t in typeElement.EnumerateArray())
+            {
+                if (t.ValueKind == JsonValueKind.String)
+                {
+                    var typeIri = ExpandTypeIri(t.GetString() ?? "");
+                    result.Add(typeIri);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Apply type-scoped contexts from @type values.
+    /// Per JSON-LD spec, types are processed in lexicographical order of expanded IRIs.
     /// </summary>
     private void ApplyTypeScopedContexts(JsonElement typeElement)
     {
@@ -706,6 +1088,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
         else if (typeElement.ValueKind == JsonValueKind.Array)
         {
+            // Collect types with scoped contexts AND save their context JSON
+            // IMPORTANT: We must save the JSON strings before applying any contexts because
+            // applying a context with `null` will clear _scopedContext, losing other type contexts
+            var typesWithContexts = new List<(string term, string expandedIri, string scopedJson)>();
             foreach (var t in typeElement.EnumerateArray())
             {
                 if (t.ValueKind == JsonValueKind.String)
@@ -713,10 +1099,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     var typeTerm = t.GetString() ?? "";
                     if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
                     {
-                        using var doc = JsonDocument.Parse(scopedJson);
-                        ProcessContext(doc.RootElement);
+                        // Expand the type IRI for sorting
+                        var expandedIri = ExpandTypeIri(typeTerm);
+                        typesWithContexts.Add((typeTerm, expandedIri, scopedJson));
                     }
                 }
+            }
+
+            // Sort lexicographically by expanded IRI
+            typesWithContexts.Sort((a, b) => string.Compare(a.expandedIri, b.expandedIri, StringComparison.Ordinal));
+
+            // Apply scoped contexts in sorted order using saved JSON
+            foreach (var (_, _, scopedJson) in typesWithContexts)
+            {
+                using var doc = JsonDocument.Parse(scopedJson);
+                ProcessContext(doc.RootElement);
             }
         }
     }
@@ -763,31 +1160,27 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return ExpandTypeIri(expanded);
         }
 
-        // Already an absolute IRI
-        if (IsAbsoluteIri(value))
-        {
-            // Check if the "scheme" part is a defined prefix in context
-            var colonIndex = value.IndexOf(':');
-            var prefix = value.Substring(0, colonIndex);
-            if (_context.TryGetValue(prefix, out var prefixIri))
-            {
-                var localName = value.Substring(colonIndex + 1);
-                return FormatIri(prefixIri + localName);
-            }
-            return FormatIri(value);
-        }
-
-        // Check for compact IRI (prefix:localName)
+        // Check for compact IRI (prefix:localName) before checking absolute IRI
         var colonIdx = value.IndexOf(':');
         if (colonIdx > 0)
         {
             var prefix = value.Substring(0, colonIdx);
             var localName = value.Substring(colonIdx + 1);
 
-            if (_context.TryGetValue(prefix, out var prefixIri))
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // Also, "_" as a prefix would conflict with blank nodes
+            // The prefix must be in _prefixable to be used for expansion (pr29)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
+        }
+
+        // Already an absolute IRI
+        if (IsAbsoluteIri(value))
+        {
+            return FormatIri(value);
         }
 
         // For types, resolve against @vocab (not @base)
@@ -815,7 +1208,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var isLanguageContainer = _containerLanguage.TryGetValue(term, out var isLang) && isLang;
         var isIndexContainer = _containerIndex.TryGetValue(term, out var isIdx) && isIdx;
         var isGraphContainer = _containerGraph.TryGetValue(term, out var isGraph) && isGraph;
-
+        var isIdContainer = _containerId.TryGetValue(term, out var isId) && isId;
+        var isTypeContainer = _containerType.TryGetValue(term, out var isType) && isType;
         // Check if this is a reverse property
         if (_reverseProperty.TryGetValue(term, out var reversePredicate))
         {
@@ -845,6 +1239,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, bool>? savedContainerLanguage = null;
         Dictionary<string, bool>? savedContainerIndex = null;
         Dictionary<string, bool>? savedContainerGraph = null;
+        Dictionary<string, bool>? savedContainerId = null;
+        Dictionary<string, bool>? savedContainerType = null;
         Dictionary<string, string>? savedTermLanguage = null;
         Dictionary<string, string>? savedReverseProperty = null;
         Dictionary<string, string>? savedScopedContext = null;
@@ -852,7 +1248,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         HashSet<string>? savedIdAliases = null;
         HashSet<string>? savedGraphAliases = null;
         HashSet<string>? savedIncludedAliases = null;
+        HashSet<string>? savedNestAliases = null;
+        HashSet<string>? savedNoneAliases = null;
+        HashSet<string>? savedValueAliases = null;
+        HashSet<string>? savedLanguageAliases = null;
         HashSet<string>? savedNullTerms = null;
+        HashSet<string>? savedPrefixable = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
         string? savedDefaultLanguage = null;
@@ -865,6 +1266,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
             savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
             savedContainerGraph = new Dictionary<string, bool>(_containerGraph);
+            savedContainerId = new Dictionary<string, bool>(_containerId);
+            savedContainerType = new Dictionary<string, bool>(_containerType);
             savedTermLanguage = new Dictionary<string, string>(_termLanguage);
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
@@ -872,7 +1275,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedIdAliases = new HashSet<string>(_idAliases);
             savedGraphAliases = new HashSet<string>(_graphAliases);
             savedIncludedAliases = new HashSet<string>(_includedAliases);
+            savedNestAliases = new HashSet<string>(_nestAliases);
+            savedNoneAliases = new HashSet<string>(_noneAliases);
+            savedValueAliases = new HashSet<string>(_valueAliases);
+            savedLanguageAliases = new HashSet<string>(_languageAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
+            savedPrefixable = new HashSet<string>(_prefixable);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
             savedDefaultLanguage = _defaultLanguage;
@@ -885,9 +1293,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         try
         {
             // Handle graph container - values are graph objects
+            // When combined with @index, object keys are ignored (just indexes)
+            // When combined with @id, object keys are used as graph @id
             if (isGraphContainer)
             {
-                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang, isIndexContainer, isIdContainer);
             }
             // Handle language container - object keys are language tags
             else if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
@@ -911,6 +1321,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         ProcessValue(subject, predicate, prop.Value, handler, graphIri, coercedType, termLang);
                     }
                 }
+            }
+            // Handle @id container - object keys are @id values for nested objects
+            else if (isIdContainer && value.ValueKind == JsonValueKind.Object)
+            {
+                ProcessIdMap(subject, predicate, value, handler, graphIri);
+            }
+            // Handle @type container - object keys are @type values for nested objects
+            else if (isTypeContainer && value.ValueKind == JsonValueKind.Object)
+            {
+                ProcessTypeMap(subject, predicate, value, handler, graphIri);
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
@@ -939,7 +1359,23 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                // If @container: @list with a non-array value, wrap in list
+                if (isListContainer)
+                {
+                    // If the value is an object with @list, extract the inner list
+                    // Don't double-wrap explicit @list objects
+                    JsonElement listValue = value;
+                    if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("@list", out var innerList))
+                    {
+                        listValue = innerList;
+                    }
+                    var listHead = ProcessList(listValue, handler, graphIri, coercedType);
+                    EmitQuad(handler, subject, predicate, listHead, graphIri);
+                }
+                else
+                {
+                    ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                }
             }
         }
         finally
@@ -965,6 +1401,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _containerGraph.Clear();
                 foreach (var kv in savedContainerGraph!) _containerGraph[kv.Key] = kv.Value;
 
+                _containerId.Clear();
+                foreach (var kv in savedContainerId!) _containerId[kv.Key] = kv.Value;
+
+                _containerType.Clear();
+                foreach (var kv in savedContainerType!) _containerType[kv.Key] = kv.Value;
+
                 _termLanguage.Clear();
                 foreach (var kv in savedTermLanguage!) _termLanguage[kv.Key] = kv.Value;
 
@@ -986,8 +1428,23 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _includedAliases.Clear();
                 foreach (var alias in savedIncludedAliases!) _includedAliases.Add(alias);
 
+                _nestAliases.Clear();
+                foreach (var alias in savedNestAliases!) _nestAliases.Add(alias);
+
+                _noneAliases.Clear();
+                foreach (var alias in savedNoneAliases!) _noneAliases.Add(alias);
+
+                _valueAliases.Clear();
+                foreach (var alias in savedValueAliases!) _valueAliases.Add(alias);
+
+                _languageAliases.Clear();
+                foreach (var alias in savedLanguageAliases!) _languageAliases.Add(alias);
+
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
+
+                _prefixable.Clear();
+                foreach (var t in savedPrefixable!) _prefixable.Add(t);
 
                 _vocabIri = savedVocabIri;
                 _baseIri = savedBaseIri;
@@ -1049,6 +1506,39 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             // Other types: generate blank node
             newSubject = GenerateBlankNode();
             EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
+        }
+    }
+
+    /// <summary>
+    /// Process the @nest keyword which contains properties to be "un-nested" onto the current node.
+    /// Properties inside @nest are processed as if they were direct properties of the containing node.
+    /// </summary>
+    private void ProcessNestKeyword(string currentNode, JsonElement nestElement, QuadHandler handler, string? graphIri)
+    {
+        if (nestElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in nestElement.EnumerateObject())
+            {
+                var propName = prop.Name;
+
+                // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+                if (propName.StartsWith('@') && IsKeywordLike(propName))
+                    continue;
+
+                var predicate = ExpandTerm(propName);
+                if (string.IsNullOrEmpty(predicate))
+                    continue;
+
+                ProcessProperty(currentNode, predicate, propName, prop.Value, handler, graphIri);
+            }
+        }
+        else if (nestElement.ValueKind == JsonValueKind.Array)
+        {
+            // @nest can be an array of objects
+            foreach (var item in nestElement.EnumerateArray())
+            {
+                ProcessNestKeyword(currentNode, item, handler, graphIri);
+            }
         }
     }
 
@@ -1169,10 +1659,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             var langTag = prop.Name;
             var langValue = prop.Value;
 
+            // @none means no language tag - output as plain literal
+            var isNone = langTag == "@none" || _noneAliases.Contains(langTag);
+
             if (langValue.ValueKind == JsonValueKind.String)
             {
                 var strVal = langValue.GetString() ?? "";
-                var literal = $"\"{EscapeString(strVal)}\"@{langTag}";
+                var literal = isNone
+                    ? $"\"{EscapeString(strVal)}\""
+                    : $"\"{EscapeString(strVal)}\"@{langTag}";
                 EmitQuad(handler, subject, predicate, literal, graphIri);
             }
             else if (langValue.ValueKind == JsonValueKind.Array)
@@ -1183,7 +1678,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     if (item.ValueKind == JsonValueKind.String)
                     {
                         var strVal = item.GetString() ?? "";
-                        var literal = $"\"{EscapeString(strVal)}\"@{langTag}";
+                        var literal = isNone
+                            ? $"\"{EscapeString(strVal)}\""
+                            : $"\"{EscapeString(strVal)}\"@{langTag}";
                         EmitQuad(handler, subject, predicate, literal, graphIri);
                     }
                 }
@@ -1192,14 +1689,426 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Process an @id container map (@container: @id).
+    /// Object keys become the @id of the nested objects.
+    /// @none (or alias) means generate a blank node.
+    /// </summary>
+    private void ProcessIdMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri)
+    {
+        foreach (var prop in value.EnumerateObject())
+        {
+            var idKey = prop.Name;
+            var idValue = prop.Value;
+
+            // @none or alias means no @id - generate blank node
+            var isNone = idKey == "@none" || _noneAliases.Contains(idKey);
+
+            if (idValue.ValueKind == JsonValueKind.Object)
+            {
+                // Process nested object with the key as @id
+                string nodeId;
+                if (isNone)
+                {
+                    nodeId = GenerateBlankNode();
+                }
+                else
+                {
+                    nodeId = ExpandIri(idKey);
+                }
+
+                // Create a temporary reader for the nested object
+                var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(idValue.GetRawText()));
+                tempReader.Read();
+
+                // Parse the nested node with the specified @id
+                var nestedId = ParseNodeWithId(ref tempReader, handler, nodeId, subject);
+                EmitQuad(handler, subject, predicate, nestedId, graphIri);
+            }
+            else if (idValue.ValueKind == JsonValueKind.Array)
+            {
+                // Multiple objects with same @id
+                foreach (var item in idValue.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        string nodeId;
+                        if (isNone)
+                        {
+                            nodeId = GenerateBlankNode();
+                        }
+                        else
+                        {
+                            nodeId = ExpandIri(idKey);
+                        }
+
+                        var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(item.GetRawText()));
+                        tempReader.Read();
+                        var nestedId = ParseNodeWithId(ref tempReader, handler, nodeId, subject);
+                        EmitQuad(handler, subject, predicate, nestedId, graphIri);
+                    }
+                }
+            }
+        }
+    }
+
+    private void ProcessTypeMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri)
+    {
+        foreach (var prop in value.EnumerateObject())
+        {
+            var typeKey = prop.Name;
+            var typeValue = prop.Value;
+
+            // @none or alias means no @type - don't emit rdf:type triple
+            var isNone = typeKey == "@none" || _noneAliases.Contains(typeKey);
+            var expandedTypeIri = isNone ? null : ExpandTypeIri(typeKey);
+
+            if (typeValue.ValueKind == JsonValueKind.Object)
+            {
+                // Process nested object with the key as @type
+                var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(typeValue.GetRawText()));
+                tempReader.Read();
+
+                // Parse the nested node with the specified @type (pass term for scoped context lookup)
+                var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, typeKey, subject);
+                EmitQuad(handler, subject, predicate, nestedId, graphIri);
+            }
+            else if (typeValue.ValueKind == JsonValueKind.Array)
+            {
+                // Multiple objects with same @type
+                foreach (var item in typeValue.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(item.GetRawText()));
+                        tempReader.Read();
+                        var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, typeKey, subject);
+                        EmitQuad(handler, subject, predicate, nestedId, graphIri);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parse a node with a pre-specified @type.
+    /// Used for @type container maps where the key provides the @type.
+    /// </summary>
+    private string ParseNodeWithType(ref Utf8JsonReader reader, QuadHandler handler, string? typeIri, string? typeTerm, string? parentNode)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+            return GenerateBlankNode();
+
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+
+        // Revert parent's type-scoped changes (type-scoped contexts don't propagate to nested nodes)
+        // Save them for restoration after processing
+        Dictionary<string, string>? savedCoercions = null;
+        Dictionary<string, string>? savedTerms = null;
+        var savedVocab = _vocabIri;
+        var savedBase = _baseIri;
+
+        if (!_typeScopedPropagate && _typeScopedCoercionChanges != null && _typeScopedCoercionChanges.Count > 0)
+        {
+            savedCoercions = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedCoercionChanges)
+            {
+                if (_typeCoercion.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedCoercions[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _typeCoercion.Remove(kv.Key);
+                }
+                else
+                {
+                    _typeCoercion[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (!_typeScopedPropagate && _typeScopedTermChanges != null && _typeScopedTermChanges.Count > 0)
+        {
+            savedTerms = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedTermChanges)
+            {
+                if (_context.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedTerms[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _context.Remove(kv.Key);
+                }
+                else
+                {
+                    _context[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        // Revert type-scoped container changes
+        Dictionary<string, bool>? savedContainerType = null;
+        Dictionary<string, bool>? savedContainerIndex = null;
+        Dictionary<string, bool>? savedContainerList = null;
+        Dictionary<string, bool>? savedContainerLang = null;
+        Dictionary<string, bool>? savedContainerGraph = null;
+        Dictionary<string, bool>? savedContainerId = null;
+
+        void RevertContainerChanges(Dictionary<string, bool?>? changes, Dictionary<string, bool> container, ref Dictionary<string, bool>? saved)
+        {
+            if (changes != null && changes.Count > 0)
+            {
+                saved = new Dictionary<string, bool>();
+                foreach (var kv in changes)
+                {
+                    if (container.TryGetValue(kv.Key, out var currentValue))
+                    {
+                        saved[kv.Key] = currentValue;
+                    }
+                    if (kv.Value == null)
+                    {
+                        container.Remove(kv.Key);
+                    }
+                    else
+                    {
+                        container[kv.Key] = kv.Value.Value;
+                    }
+                }
+            }
+        }
+
+        if (!_typeScopedPropagate)
+        {
+            RevertContainerChanges(_typeScopedContainerTypeChanges, _containerType, ref savedContainerType);
+            RevertContainerChanges(_typeScopedContainerIndexChanges, _containerIndex, ref savedContainerIndex);
+            RevertContainerChanges(_typeScopedContainerListChanges, _containerList, ref savedContainerList);
+            RevertContainerChanges(_typeScopedContainerLangChanges, _containerLanguage, ref savedContainerLang);
+            RevertContainerChanges(_typeScopedContainerGraphChanges, _containerGraph, ref savedContainerGraph);
+            RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
+        }
+
+        // Restore @vocab/@base to pre-type-scoped state
+        if (!_typeScopedPropagate && _savedContextForNested != null)
+        {
+            _vocabIri = _savedVocabForNested;
+            _baseIri = _savedBaseForNested;
+        }
+
+        // Save context state before applying the new type's scoped context
+        // This ensures the type-scoped context doesn't leak to parent after we return
+        Dictionary<string, string>? savedContextState = null;
+        string? savedVocabBeforeType = null;
+        string? savedBaseBeforeType = null;
+
+        // Apply the new type's scoped context (if typeTerm has a scoped context)
+        if (!string.IsNullOrEmpty(typeTerm) && _scopedContext.TryGetValue(typeTerm, out var scopedJson))
+        {
+            // Save state before applying type-scoped context
+            savedContextState = new Dictionary<string, string>(_context);
+            savedVocabBeforeType = _vocabIri;
+            savedBaseBeforeType = _baseIri;
+
+            using var scopedDoc = JsonDocument.Parse(scopedJson);
+            ProcessContext(scopedDoc.RootElement);
+        }
+
+        // Process @context if present in the object itself
+        if (root.TryGetProperty("@context", out var contextElement))
+        {
+            // Save state if not already saved
+            if (savedContextState == null)
+            {
+                savedContextState = new Dictionary<string, string>(_context);
+                savedVocabBeforeType = _vocabIri;
+                savedBaseBeforeType = _baseIri;
+            }
+            ProcessContext(contextElement);
+        }
+
+        // Get @id for subject if present, otherwise generate blank node
+        string nodeId;
+        if (root.TryGetProperty("@id", out var idElement))
+        {
+            var objId = idElement.GetString();
+            nodeId = string.IsNullOrEmpty(objId) ? GenerateBlankNode() : ExpandIri(objId);
+        }
+        else
+        {
+            nodeId = GenerateBlankNode();
+        }
+
+        // Emit @type triple if typeIri is provided (not @none)
+        if (!string.IsNullOrEmpty(typeIri))
+        {
+            EmitQuad(handler, nodeId, RdfType, typeIri, _currentGraph);
+        }
+
+        // Process additional @type if present (in addition to the key-derived type)
+        if (root.TryGetProperty("@type", out var typeElement))
+        {
+            ProcessType(nodeId, typeElement, handler, _currentGraph);
+        }
+
+        // Process properties
+        foreach (var prop in root.EnumerateObject())
+        {
+            var propName = prop.Name;
+
+            // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+            if (propName.StartsWith('@') && IsKeywordLike(propName))
+                continue;
+
+            var propPredicate = ExpandTerm(propName);
+            if (string.IsNullOrEmpty(propPredicate))
+                continue;
+
+            ProcessProperty(nodeId, propPredicate, propName, prop.Value, handler, _currentGraph);
+        }
+
+        // First, restore context state to before we applied this node's type-scoped/inline context
+        // This prevents the nested node's context from leaking to the parent
+        if (savedContextState != null)
+        {
+            _context.Clear();
+            foreach (var kv in savedContextState)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+            _vocabIri = savedVocabBeforeType;
+            _baseIri = savedBaseBeforeType;
+        }
+
+        // Then restore parent's type-scoped changes (they apply to parent's remaining properties)
+        if (savedCoercions != null)
+        {
+            foreach (var kv in savedCoercions)
+            {
+                _typeCoercion[kv.Key] = kv.Value;
+            }
+        }
+        if (savedTerms != null)
+        {
+            foreach (var kv in savedTerms)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+        }
+
+        // Restore container values
+        void RestoreContainer(Dictionary<string, bool>? saved, Dictionary<string, bool> container)
+        {
+            if (saved != null)
+            {
+                foreach (var kv in saved)
+                {
+                    container[kv.Key] = kv.Value;
+                }
+            }
+        }
+        RestoreContainer(savedContainerType, _containerType);
+        RestoreContainer(savedContainerIndex, _containerIndex);
+        RestoreContainer(savedContainerList, _containerList);
+        RestoreContainer(savedContainerLang, _containerLanguage);
+        RestoreContainer(savedContainerGraph, _containerGraph);
+        RestoreContainer(savedContainerId, _containerId);
+
+        _vocabIri = savedVocab;
+        _baseIri = savedBase;
+
+        return nodeId;
+    }
+
+    /// <summary>
+    /// Parse a node with a pre-specified @id.
+    /// Used for @id container maps where the key provides the @id.
+    /// </summary>
+    private string ParseNodeWithId(ref Utf8JsonReader reader, QuadHandler handler, string nodeId, string? parentNode)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+            return nodeId;
+
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+
+        // Process @context if present
+        if (root.TryGetProperty("@context", out var contextElement))
+        {
+            ProcessContext(contextElement);
+        }
+
+        // Use provided nodeId unless object has its own @id
+        var subject = nodeId;
+        if (root.TryGetProperty("@id", out var idElement))
+        {
+            var objId = idElement.GetString();
+            if (!string.IsNullOrEmpty(objId))
+            {
+                subject = ExpandIri(objId);
+            }
+        }
+
+        // Process @type if present
+        if (root.TryGetProperty("@type", out var typeElement))
+        {
+            ProcessType(subject, typeElement, handler, _currentGraph);
+        }
+
+        // Process properties
+        foreach (var prop in root.EnumerateObject())
+        {
+            var propName = prop.Name;
+
+            // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+            if (propName.StartsWith('@') && IsKeywordLike(propName))
+                continue;
+
+            var predicate = ExpandTerm(propName);
+            if (string.IsNullOrEmpty(predicate))
+                continue;
+
+            ProcessProperty(subject, predicate, propName, prop.Value, handler, _currentGraph);
+        }
+
+        return subject;
+    }
+
+    /// <summary>
     /// Process a graph container value.
     /// The value becomes a named graph with the property linking to the graph node.
     /// </summary>
     private void ProcessGraphContainer(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage)
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
+        bool isIndexContainer = false, bool isIdContainer = false)
     {
+        // Handle compound container [@graph, @index] or [@graph, @id]
+        if ((isIndexContainer || isIdContainer) && value.ValueKind == JsonValueKind.Object)
+        {
+            // Object keys are indexes (@index) or graph IDs (@id)
+            foreach (var prop in value.EnumerateObject())
+            {
+                var key = prop.Name;
+                var itemValue = prop.Value;
+
+                // For @id container, the key becomes the graph @id
+                string? graphIdFromKey = isIdContainer ? ExpandIri(key, expandTerms: false) : null;
+
+                if (itemValue.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in itemValue.EnumerateArray())
+                    {
+                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true);
+                    }
+                }
+                else
+                {
+                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true);
+                }
+            }
+        }
         // Handle arrays - each item is a separate graph
-        if (value.ValueKind == JsonValueKind.Array)
+        else if (value.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in value.EnumerateArray())
             {
@@ -1213,7 +2122,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     private void ProcessGraphContainerItem(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage)
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
+        string? graphIdFromKey = null, bool isCompoundContainer = false)
     {
         if (value.ValueKind != JsonValueKind.Object)
         {
@@ -1222,19 +2132,40 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Check if the object has @id - use that as the graph name, otherwise create a blank node
-        string namedGraphIri;
+        // Check if the object has @id - use that as the graph name
+        // Priority: explicit @id in object > graphIdFromKey from compound container key
+        string? explicitId = null;
         if (value.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
         {
-            namedGraphIri = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
+            explicitId = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
+        }
+        else if (graphIdFromKey != null)
+        {
+            explicitId = graphIdFromKey;
+        }
+
+        // Check if value already has @graph - if so, we need different handling
+        bool hasInnerGraph = value.TryGetProperty("@graph", out var graphProp);
+
+        // Generate blank nodes for the link object and graph
+        // - For simple @graph container with inner @graph: use DIFFERENT blank nodes (e081)
+        // - For compound container [@graph, @index] with inner @graph: use SAME blank node (e084)
+        // - When value doesn't have @graph: always use same ID for both
+        string linkObject = explicitId ?? GenerateBlankNode();
+        string namedGraphIri;
+        if (hasInnerGraph && !isCompoundContainer)
+        {
+            // Simple @graph container with inner @graph - use separate blank node
+            namedGraphIri = GenerateBlankNode();
         }
         else
         {
-            namedGraphIri = GenerateBlankNode();
+            // Compound container with inner @graph OR no inner @graph - use same ID for both
+            namedGraphIri = linkObject;
         }
 
         // Emit the link from subject to the graph node
-        EmitQuad(handler, subject, predicate, namedGraphIri, graphIri);
+        EmitQuad(handler, subject, predicate, linkObject, graphIri);
 
         // Save current graph and set to the named graph for content processing
         var savedGraph = _currentGraph;
@@ -1243,7 +2174,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         try
         {
             // Process the content - check for @graph property or process as regular node
-            if (value.TryGetProperty("@graph", out var graphProp))
+            if (hasInnerGraph)
             {
                 // Value has explicit @graph - process its contents into the named graph
                 if (graphProp.ValueKind == JsonValueKind.Array)
@@ -1372,7 +2303,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    ProcessObjectValue(subject, predicate, value, handler, graphIri);
+                    ProcessObjectValue(subject, predicate, value, handler, graphIri, coercedType);
                 }
                 break;
 
@@ -1383,10 +2314,25 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     private void ProcessObjectValue(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri)
+        QuadHandler handler, string? graphIri, string? coercedType = null)
     {
-        // Check for value object (@value)
-        if (value.TryGetProperty("@value", out var valProp))
+        // Check for value object (@value or alias)
+        JsonElement valProp = default;
+        bool hasValue = value.TryGetProperty("@value", out valProp);
+        if (!hasValue)
+        {
+            // Check for @value aliases from type-scoped or property-scoped contexts
+            foreach (var alias in _valueAliases)
+            {
+                if (value.TryGetProperty(alias, out valProp))
+                {
+                    hasValue = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasValue)
         {
             // Skip if @value is null
             if (valProp.ValueKind == JsonValueKind.Null)
@@ -1396,9 +2342,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Check for invalid value object with @language but no @value - drop it
+        // Check for invalid value object with @language (or alias) but no @value - drop it
         // Note: @type without @value is valid - it's a node object with rdf:type, not a value object
-        if (value.TryGetProperty("@language", out _))
+        bool hasLanguage = value.TryGetProperty("@language", out _);
+        if (!hasLanguage)
+        {
+            foreach (var alias in _languageAliases)
+            {
+                if (value.TryGetProperty(alias, out _))
+                {
+                    hasLanguage = true;
+                    break;
+                }
+            }
+        }
+        if (hasLanguage)
         {
             // @language requires @value - this is invalid, drop the property
             return;
@@ -1407,31 +2365,193 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check for @id only (IRI reference)
         if (value.TryGetProperty("@id", out var idProp) && value.EnumerateObject().Count() == 1)
         {
-            var iri = ExpandIri(idProp.GetString() ?? "");
+            var idValue = idProp.GetString() ?? "";
+            // Per JSON-LD 1.1: @id values that look like keywords (e.g., "@ignoreMe")
+            // should be ignored and no triple should be emitted (e122)
+            if (idValue.StartsWith('@') && IsKeywordLike(idValue))
+            {
+                return; // Ignore keyword-like @id value
+            }
+            var iri = ExpandIri(idValue);
             EmitQuad(handler, subject, predicate, iri, graphIri);
+            return;
+        }
+
+        // Check for @graph (graph object)
+        if (value.TryGetProperty("@graph", out var graphProp))
+        {
+            // Create a blank node for the named graph
+            var graphNode = GenerateBlankNode();
+
+            // Emit the relationship from subject to the graph node
+            EmitQuad(handler, subject, predicate, graphNode, graphIri);
+
+            // Save current graph and set to the new named graph
+            var savedGraph = _currentGraph;
+            _currentGraph = graphNode;
+            try
+            {
+                // Process @graph contents into that named graph
+                if (graphProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in graphProp.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.Object)
+                        {
+                            ProcessGraphNode(item, handler);
+                        }
+                    }
+                }
+                else if (graphProp.ValueKind == JsonValueKind.Object)
+                {
+                    ProcessGraphNode(graphProp, handler);
+                }
+            }
+            finally
+            {
+                _currentGraph = savedGraph;
+            }
             return;
         }
 
         // Check for @list
         if (value.TryGetProperty("@list", out var listProp))
         {
-            var listHead = ProcessList(listProp, handler, graphIri, null);
+            // Pass coercedType to list processing
+            var listHead = ProcessList(listProp, handler, graphIri, coercedType);
             EmitQuad(handler, subject, predicate, listHead, graphIri);
             return;
         }
 
-        // Nested object - create blank node
-        // Restore context to pre-type-scoped state for nested nodes (type-scoped contexts don't propagate)
-        Dictionary<string, string>? savedContext = null;
-        string? savedVocab = null;
-        string? savedBase = null;
-        if (_savedContextForNested != null)
+        // Check for @set - flatten the contents, ignore empty @set
+        if (value.TryGetProperty("@set", out var setProp))
         {
-            savedContext = new Dictionary<string, string>(_context);
-            savedVocab = _vocabIri;
-            savedBase = _baseIri;
-            _context.Clear();
-            foreach (var kv in _savedContextForNested) _context[kv.Key] = kv.Value;
+            // @set just contains values to be flattened - process each one
+            // Pass coercedType to each element
+            if (setProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in setProp.EnumerateArray())
+                {
+                    // Skip null values
+                    if (item.ValueKind == JsonValueKind.Null)
+                        continue;
+                    ProcessValue(subject, predicate, item, handler, graphIri, coercedType, null);
+                }
+            }
+            else if (setProp.ValueKind != JsonValueKind.Null)
+            {
+                // Single value
+                ProcessValue(subject, predicate, setProp, handler, graphIri, coercedType, null);
+            }
+            // Empty @set produces no output
+            return;
+        }
+
+        // Nested object - create blank node
+        // 1. Revert type-scoped changes (type-scoped contexts don't propagate)
+        // 2. Save/restore @vocab/@base around nested node (in case nested has inline @context)
+        // Property-scoped additions SHOULD propagate, so we only revert type-scoped changes
+        Dictionary<string, string>? savedCoercions = null;
+        Dictionary<string, string>? savedTerms = null;
+        // Only revert type-scoped changes if @propagate is NOT true
+        // @propagate: true means type-scoped context SHOULD propagate to nested nodes
+        if (!_typeScopedPropagate && _typeScopedCoercionChanges != null && _typeScopedCoercionChanges.Count > 0)
+        {
+            // Revert type coercions to their original values (or remove if they were new)
+            savedCoercions = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedCoercionChanges)
+            {
+                if (_typeCoercion.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedCoercions[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    // Term was new - remove it
+                    _typeCoercion.Remove(kv.Key);
+                }
+                else
+                {
+                    // Term was modified - restore original
+                    _typeCoercion[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        // Revert type-scoped term changes
+        if (!_typeScopedPropagate && _typeScopedTermChanges != null && _typeScopedTermChanges.Count > 0)
+        {
+            savedTerms = new Dictionary<string, string>();
+            foreach (var kv in _typeScopedTermChanges)
+            {
+                if (_context.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedTerms[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    // Term was new - remove it
+                    _context.Remove(kv.Key);
+                }
+                else
+                {
+                    // Term was modified - restore original
+                    _context[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        // Revert type-scoped container changes
+        Dictionary<string, bool>? savedContainerType = null;
+        Dictionary<string, bool>? savedContainerIndex = null;
+        Dictionary<string, bool>? savedContainerList = null;
+        Dictionary<string, bool>? savedContainerLang = null;
+        Dictionary<string, bool>? savedContainerGraph = null;
+        Dictionary<string, bool>? savedContainerId = null;
+
+        void RevertContainerChanges(Dictionary<string, bool?>? changes, Dictionary<string, bool> container, ref Dictionary<string, bool>? saved)
+        {
+            if (changes != null && changes.Count > 0)
+            {
+                saved = new Dictionary<string, bool>();
+                foreach (var kv in changes)
+                {
+                    if (container.TryGetValue(kv.Key, out var currentValue))
+                    {
+                        saved[kv.Key] = currentValue;
+                    }
+                    if (kv.Value == null)
+                    {
+                        // Container was new - remove it
+                        container.Remove(kv.Key);
+                    }
+                    else
+                    {
+                        // Container was modified or removed - restore original
+                        container[kv.Key] = kv.Value.Value;
+                    }
+                }
+            }
+        }
+
+        if (!_typeScopedPropagate)
+        {
+            RevertContainerChanges(_typeScopedContainerTypeChanges, _containerType, ref savedContainerType);
+            RevertContainerChanges(_typeScopedContainerIndexChanges, _containerIndex, ref savedContainerIndex);
+            RevertContainerChanges(_typeScopedContainerListChanges, _containerList, ref savedContainerList);
+            RevertContainerChanges(_typeScopedContainerLangChanges, _containerLanguage, ref savedContainerLang);
+            RevertContainerChanges(_typeScopedContainerGraphChanges, _containerGraph, ref savedContainerGraph);
+            RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
+        }
+
+        // Save @vocab and @base before processing nested node
+        // This handles both type-scoped context restoration AND nested object inline @context
+        var savedVocab = _vocabIri;
+        var savedBase = _baseIri;
+        // If type-scoped context changed @vocab/@base, restore to pre-type-scoped state for nested
+        // (unless @propagate is true)
+        if (!_typeScopedPropagate && _savedContextForNested != null)
+        {
             _vocabIri = _savedVocabForNested;
             _baseIri = _savedBaseForNested;
         }
@@ -1441,19 +2561,50 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var blankNode = ParseNode(ref tempReader, handler, subject);
         EmitQuad(handler, subject, predicate, blankNode, graphIri);
 
-        // Restore context after processing nested node
-        if (savedContext != null)
+        // Restore after processing nested node:
+        // - Re-apply type-scoped changes (they apply to this node's remaining properties)
+        // - Restore @vocab/@base (nested node's inline @context shouldn't affect siblings)
+        if (savedCoercions != null)
         {
-            _context.Clear();
-            foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
-            _vocabIri = savedVocab;
-            _baseIri = savedBase;
+            foreach (var kv in savedCoercions)
+            {
+                _typeCoercion[kv.Key] = kv.Value;
+            }
         }
+        if (savedTerms != null)
+        {
+            foreach (var kv in savedTerms)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+        }
+
+        // Restore container values
+        void RestoreContainer(Dictionary<string, bool>? saved, Dictionary<string, bool> container)
+        {
+            if (saved != null)
+            {
+                foreach (var kv in saved)
+                {
+                    container[kv.Key] = kv.Value;
+                }
+            }
+        }
+        RestoreContainer(savedContainerType, _containerType);
+        RestoreContainer(savedContainerIndex, _containerIndex);
+        RestoreContainer(savedContainerList, _containerList);
+        RestoreContainer(savedContainerLang, _containerLanguage);
+        RestoreContainer(savedContainerGraph, _containerGraph);
+        RestoreContainer(savedContainerId, _containerId);
+
+        _vocabIri = savedVocab;
+        _baseIri = savedBase;
     }
 
     private string ProcessValueObject(JsonElement obj, JsonElement valueProp)
     {
         string valueStr;
+        string? inferredType = null;  // Inferred XSD type for native JSON values
 
         switch (valueProp.ValueKind)
         {
@@ -1461,34 +2612,74 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 valueStr = valueProp.GetString() ?? "";
                 break;
             case JsonValueKind.Number:
-                valueStr = valueProp.GetRawText();
+                var rawText = valueProp.GetRawText();
+                valueStr = rawText;
+                // Infer XSD type for native JSON numbers
+                var isDouble = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
+                inferredType = isDouble
+                    ? "<http://www.w3.org/2001/XMLSchema#double>"
+                    : "<http://www.w3.org/2001/XMLSchema#integer>";
                 break;
             case JsonValueKind.True:
                 valueStr = "true";
+                inferredType = "<http://www.w3.org/2001/XMLSchema#boolean>";
                 break;
             case JsonValueKind.False:
                 valueStr = "false";
+                inferredType = "<http://www.w3.org/2001/XMLSchema#boolean>";
                 break;
             default:
                 valueStr = "";
                 break;
         }
 
-        // Check for @language
-        if (obj.TryGetProperty("@language", out var langProp))
+        // Check for @language (or alias)
+        JsonElement langProp = default;
+        bool hasLanguage = obj.TryGetProperty("@language", out langProp);
+        if (!hasLanguage)
+        {
+            foreach (var alias in _languageAliases)
+            {
+                if (obj.TryGetProperty(alias, out langProp))
+                {
+                    hasLanguage = true;
+                    break;
+                }
+            }
+        }
+        if (hasLanguage)
         {
             var lang = langProp.GetString() ?? "";
             return $"\"{EscapeString(valueStr)}\"@{lang}";
         }
 
-        // Check for @type (datatype) - terms should be expanded for datatypes
-        if (obj.TryGetProperty("@type", out var typeProp))
+        // Check for @type (datatype, or alias) - terms should be expanded for datatypes
+        JsonElement typeProp = default;
+        bool hasType = obj.TryGetProperty("@type", out typeProp);
+        if (!hasType)
+        {
+            foreach (var alias in _typeAliases)
+            {
+                if (obj.TryGetProperty(alias, out typeProp))
+                {
+                    hasType = true;
+                    break;
+                }
+            }
+        }
+        if (hasType)
         {
             var datatype = ExpandIri(typeProp.GetString() ?? "", expandTerms: true);
             return $"\"{EscapeString(valueStr)}\"^^{datatype}";
         }
 
-        // Plain literal
+        // Use inferred type for native JSON values (numbers, booleans)
+        if (inferredType != null)
+        {
+            return $"\"{EscapeString(valueStr)}\"^^{inferredType}";
+        }
+
+        // Plain literal (strings without type)
         return $"\"{EscapeString(valueStr)}\"";
     }
 
@@ -1615,7 +2806,45 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ProcessList(JsonElement listElement, QuadHandler handler, string? graphIri, string? coercedType)
     {
-        if (listElement.ValueKind != JsonValueKind.Array || listElement.GetArrayLength() == 0)
+        // Handle non-array values by treating them as single-item arrays
+        if (listElement.ValueKind != JsonValueKind.Array)
+        {
+            // Null or @value:null produces empty list
+            if (listElement.ValueKind == JsonValueKind.Null)
+                return RdfNil;
+            if (listElement.ValueKind == JsonValueKind.Object &&
+                listElement.TryGetProperty("@value", out var valProp) &&
+                valProp.ValueKind == JsonValueKind.Null)
+                return RdfNil;
+
+            // Single non-null value - wrap in list
+            var singleNode = GenerateBlankNode();
+            ProcessValue(singleNode, RdfFirst, listElement, handler, graphIri, coercedType);
+            EmitQuad(handler, singleNode, RdfRest, RdfNil, graphIri);
+            return singleNode;
+        }
+
+        // Empty array
+        if (listElement.GetArrayLength() == 0)
+        {
+            return RdfNil;
+        }
+
+        // Filter out null values and @value:null objects
+        var validItems = new List<JsonElement>();
+        foreach (var item in listElement.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Null)
+                continue;
+            if (item.ValueKind == JsonValueKind.Object &&
+                item.TryGetProperty("@value", out var vp) &&
+                vp.ValueKind == JsonValueKind.Null)
+                continue;
+            validItems.Add(item);
+        }
+
+        // All items were null
+        if (validItems.Count == 0)
         {
             return RdfNil;
         }
@@ -1623,7 +2852,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         string? firstNode = null;
         string? previousNode = null;
 
-        foreach (var item in listElement.EnumerateArray())
+        foreach (var item in validItems)
         {
             var currentNode = GenerateBlankNode();
 
@@ -1670,33 +2899,28 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ExpandTermValue(string value)
     {
-        // Already an absolute IRI (has scheme like http:, urn:, etc.)
-        if (IsAbsoluteIri(value))
-        {
-            // But still check if the "scheme" part is a defined prefix in context
-            var colonIndex = value.IndexOf(':');
-            var prefix = value.Substring(0, colonIndex);
-            if (_context.TryGetValue(prefix, out var prefixIri))
-            {
-                // It's actually a compact IRI using a defined prefix
-                var localName = value.Substring(colonIndex + 1);
-                return FormatIri(prefixIri + localName);
-            }
-            // It's a real absolute IRI
-            return FormatIri(value);
-        }
-
-        // Check for compact IRI (prefix:localName) - prefix not a valid scheme
+        // Check for compact IRI (prefix:localName) before checking absolute IRI
         var colonIdx = value.IndexOf(':');
         if (colonIdx > 0)
         {
             var prefix = value.Substring(0, colonIdx);
             var localName = value.Substring(colonIdx + 1);
 
-            if (_context.TryGetValue(prefix, out var prefixIri))
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // e.g., "http://example.org" should NOT be expanded using "http" prefix
+            // Also, "_" as a prefix would conflict with blank nodes
+            // The prefix must be in _prefixable to be used for expansion (pr29)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
+        }
+
+        // Already an absolute IRI (has scheme like http:, urn:, etc.)
+        if (IsAbsoluteIri(value))
+        {
+            return FormatIri(value);
         }
 
         // Use @vocab if defined
@@ -1758,33 +2982,31 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
-        // Already an absolute IRI (has scheme like http:, urn:, etc.)
-        if (IsAbsoluteIri(value))
-        {
-            // Check if the "scheme" part is a defined prefix in context
-            var colonIndex = value.IndexOf(':');
-            var prefix = value.Substring(0, colonIndex);
-            if (_context.TryGetValue(prefix, out var prefixIri))
-            {
-                // It's actually a compact IRI using a defined prefix
-                var localName = value.Substring(colonIndex + 1);
-                return FormatIri(prefixIri + localName);
-            }
-            // It's a real absolute IRI
-            return FormatIri(value);
-        }
-
-        // Check for compact IRI (prefix:localName) - colon present but not a valid scheme
+        // Check for compact IRI (prefix:localName) before checking absolute IRI
+        // A compact IRI is "prefix:localName" where prefix is defined in context and
+        // the localName does NOT start with "//" (which would make it a scheme://authority pattern)
         var colonIdx = value.IndexOf(':');
         if (colonIdx > 0)
         {
             var prefix = value.Substring(0, colonIdx);
             var localName = value.Substring(colonIdx + 1);
 
-            if (_context.TryGetValue(prefix, out var prefixIri))
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // e.g., "http://example.org" should NOT be expanded using "http" prefix
+            // Also, "_" as a prefix would conflict with blank nodes ("_:...")
+            // The prefix must be in _prefixable to be used for expansion (pr29)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
+        }
+
+        // Already an absolute IRI (has scheme like http:, urn:, etc.)
+        // At this point we've already checked for compact IRIs, so this is a real absolute IRI
+        if (IsAbsoluteIri(value))
+        {
+            return FormatIri(value);
         }
 
         // Resolve against @base
@@ -1883,10 +3105,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return baseScheme + "://" + baseAuthority + RemoveDotSegments(refPath) + rest;
         }
 
-        // Relative path - merge with base
+        // Relative path - merge with base per RFC 3986 Section 5.2.3
         string targetPath;
-        if (string.IsNullOrEmpty(baseAuthority) && string.IsNullOrEmpty(basePath))
+        if (!string.IsNullOrEmpty(baseAuthority) && string.IsNullOrEmpty(basePath))
         {
+            // Base has authority but empty path - prepend "/" to relative (e129)
+            targetPath = "/" + relative;
+        }
+        else if (string.IsNullOrEmpty(basePath))
+        {
+            // No authority, no path - just use relative
             targetPath = "/" + relative;
         }
         else
@@ -1899,7 +3127,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                targetPath = relative;
+                // No slash in path but path is not empty - replace it
+                targetPath = "/" + relative;
             }
         }
 
@@ -2069,6 +3298,66 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 return false;
             }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Expand a compact IRI (prefix:localName) or term using the context.
+    /// Used for @vocab values which can be compact IRIs (e124) or terms (e125).
+    /// </summary>
+    private string ExpandCompactIri(string value)
+    {
+        // First, check if value is a term that resolves to an IRI
+        if (_context.TryGetValue(value, out var termIri))
+        {
+            return termIri;
+        }
+
+        // Check for compact IRI (prefix:localName)
+        var colonIdx = value.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            var prefix = value.Substring(0, colonIdx);
+            var localName = value.Substring(colonIdx + 1);
+
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // Also, "_" as a prefix would conflict with blank nodes
+            // The prefix must be in _prefixable (simple term mapping or expanded def with @prefix: true)
+            if (!localName.StartsWith("//") && prefix != "_" &&
+                _prefixable.Contains(prefix) && _context.TryGetValue(prefix, out var prefixIri))
+            {
+                return prefixIri + localName;
+            }
+        }
+
+        // Not a compact IRI or prefix not defined - return as-is
+        return value;
+    }
+
+    /// <summary>
+    /// Check if a string looks like a JSON-LD keyword.
+    /// Per JSON-LD 1.1, keywords match the regex @[A-Za-z]+ (@ followed by one or more ASCII letters).
+    /// Examples: @type, @id, @context, @ignoreMe are keyword-like.
+    /// Non-examples: @, @foo.bar, @123 are NOT keyword-like and can be term definitions.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsKeywordLike(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value[0] != '@')
+            return false;
+
+        // Must have at least one character after @
+        if (value.Length == 1)
+            return false;
+
+        // All characters after @ must be ASCII letters (A-Z or a-z)
+        for (int i = 1; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+                return false;
         }
 
         return true;

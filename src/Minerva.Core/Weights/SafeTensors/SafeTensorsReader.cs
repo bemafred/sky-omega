@@ -1,4 +1,4 @@
-namespace SkyOmega.Minerva.Weights.SafeTensors;
+namespace SkyOmega.Minerva.Core.Weights.SafeTensors;
 
 /// <summary>
 /// Zero-copy SafeTensors file reader with memory-mapped access.

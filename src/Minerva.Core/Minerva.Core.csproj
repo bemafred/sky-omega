@@ -5,6 +5,6 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>14.0</LangVersion>
-    <RootNamespace>SkyOmega.Minerva</RootNamespace>
+    <RootNamespace>SkyOmega.Minerva.Core</RootNamespace>
   </PropertyGroup>
 </Project>

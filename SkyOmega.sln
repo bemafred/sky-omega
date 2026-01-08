@@ -110,7 +110,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Minerva", "src\Minerva\Minerva.csproj", "{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Minerva.Core", "src\Minerva.Core\Minerva.Core.csproj", "{23A7B38F-AFE8-46A2-8737-1F32AE67AA78}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D8E9-0123-DEF0-444444444444}"
 	ProjectSection(SolutionItems) = preProject
