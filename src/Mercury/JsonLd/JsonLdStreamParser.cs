@@ -2151,7 +2151,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    ProcessObjectValue(subject, predicate, value, handler, graphIri);
+                    ProcessObjectValue(subject, predicate, value, handler, graphIri, coercedType);
                 }
                 break;
 
@@ -2162,7 +2162,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     private void ProcessObjectValue(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri)
+        QuadHandler handler, string? graphIri, string? coercedType = null)
     {
         // Check for value object (@value or alias)
         JsonElement valProp = default;
@@ -2258,7 +2258,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check for @list
         if (value.TryGetProperty("@list", out var listProp))
         {
-            var listHead = ProcessList(listProp, handler, graphIri, null);
+            // Pass coercedType to list processing
+            var listHead = ProcessList(listProp, handler, graphIri, coercedType);
             EmitQuad(handler, subject, predicate, listHead, graphIri);
             return;
         }
@@ -2267,6 +2268,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         if (value.TryGetProperty("@set", out var setProp))
         {
             // @set just contains values to be flattened - process each one
+            // Pass coercedType to each element
             if (setProp.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in setProp.EnumerateArray())
@@ -2274,13 +2276,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     // Skip null values
                     if (item.ValueKind == JsonValueKind.Null)
                         continue;
-                    ProcessValue(subject, predicate, item, handler, graphIri, null, null);
+                    ProcessValue(subject, predicate, item, handler, graphIri, coercedType, null);
                 }
             }
             else if (setProp.ValueKind != JsonValueKind.Null)
             {
                 // Single value
-                ProcessValue(subject, predicate, setProp, handler, graphIri, null, null);
+                ProcessValue(subject, predicate, setProp, handler, graphIri, coercedType, null);
             }
             // Empty @set produces no output
             return;
