@@ -676,6 +676,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         _context[term] = idProp.GetString() ?? "";
                     }
                 }
+                else
+                {
+                    // No explicit @id - term implicitly maps to @vocab + term (JSON-LD 1.1)
+                    // This is important for type-scoped contexts where term is used as @type value
+                    if (!string.IsNullOrEmpty(_vocabIri))
+                    {
+                        _context[term] = _vocabIri + term;
+                    }
+                }
 
                 // Handle @reverse - the term maps to a reverse property
                 if (value.TryGetProperty("@reverse", out var reverseProp))
@@ -1918,11 +1927,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Nested object - create blank node
-        // Remove ONLY type-scoped additions for nested nodes (type-scoped contexts don't propagate)
-        // Property-scoped additions SHOULD propagate, so we don't restore the entire context
+        // 1. Remove type-scoped type coercions (type-scoped contexts don't propagate)
+        // 2. Save/restore @vocab/@base around nested node (in case nested has inline @context)
+        // Property-scoped additions SHOULD propagate, so we only remove specific type-scoped additions
         Dictionary<string, string>? removedTypeCoercions = null;
-        string? savedVocab = null;
-        string? savedBase = null;
         if (_typeScopedTypeCoercions != null && _typeScopedTypeCoercions.Count > 0)
         {
             // Remove only the type coercions that were added by type-scoped context
@@ -1936,11 +1944,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
             }
         }
-        // Also restore @vocab and @base if type-scoped context changed them
+
+        // Save @vocab and @base before processing nested node
+        // This handles both type-scoped context restoration AND nested object inline @context
+        var savedVocab = _vocabIri;
+        var savedBase = _baseIri;
+        // If type-scoped context changed @vocab/@base, restore to pre-type-scoped state for nested
         if (_savedContextForNested != null)
         {
-            savedVocab = _vocabIri;
-            savedBase = _baseIri;
             _vocabIri = _savedVocabForNested;
             _baseIri = _savedBaseForNested;
         }
@@ -1950,7 +1961,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var blankNode = ParseNode(ref tempReader, handler, subject);
         EmitQuad(handler, subject, predicate, blankNode, graphIri);
 
-        // Restore type-scoped additions after processing nested node
+        // Restore after processing nested node:
+        // - Restore type-scoped coercions (they apply to this node's remaining properties)
+        // - Restore @vocab/@base (nested node's inline @context shouldn't affect siblings)
         if (removedTypeCoercions != null)
         {
             foreach (var kv in removedTypeCoercions)
@@ -1958,11 +1971,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _typeCoercion[kv.Key] = kv.Value;
             }
         }
-        if (savedVocab != null || savedBase != null)
-        {
-            _vocabIri = savedVocab;
-            _baseIri = savedBase;
-        }
+        _vocabIri = savedVocab;
+        _baseIri = savedBase;
     }
 
     private string ProcessValueObject(JsonElement obj, JsonElement valueProp)
