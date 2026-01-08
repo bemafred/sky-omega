@@ -754,12 +754,22 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 var vocabValue = value.GetString();
                 // @vocab can be a compact IRI like "ex:ns/" - expand it (e124)
                 // @vocab can also be a relative IRI like "/relative" - resolve against @base (e110)
-                if (!string.IsNullOrEmpty(vocabValue))
+                // @vocab can be "" (empty string) meaning use @base as vocabulary (e092)
+                if (vocabValue == null)
                 {
-                    // First try expanding as compact IRI or term
+                    _vocabIri = null;
+                }
+                else if (vocabValue == "")
+                {
+                    // Empty @vocab means use @base as vocabulary base (e092)
+                    _vocabIri = _baseIri ?? "";
+                }
+                else if (!IsAbsoluteIri(vocabValue))
+                {
+                    // Relative @vocab - first try expanding as compact IRI or term
                     var expanded = ExpandCompactIri(vocabValue);
-                    // If not expanded and not absolute, resolve against @base
-                    if (expanded == vocabValue && !IsAbsoluteIri(vocabValue) && !string.IsNullOrEmpty(_baseIri))
+                    // If not expanded, resolve against @base
+                    if (expanded == vocabValue && !string.IsNullOrEmpty(_baseIri))
                     {
                         _vocabIri = ResolveRelativeIri(_baseIri, vocabValue);
                     }
@@ -770,6 +780,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
+                    // Absolute IRI - use as-is
                     _vocabIri = vocabValue;
                 }
             }
