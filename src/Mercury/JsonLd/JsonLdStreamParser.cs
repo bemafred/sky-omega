@@ -2995,8 +2995,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 EmitQuad(handler, previousNode, RdfRest, currentNode, graphIri);
             }
 
-            // Process list item
-            ProcessValue(currentNode, RdfFirst, item, handler, graphIri, coercedType);
+            // Process list item - nested arrays become sublists (li05)
+            if (item.ValueKind == JsonValueKind.Array)
+            {
+                // Nested array - recursively create a sublist
+                var sublistHead = ProcessList(item, handler, graphIri, coercedType);
+                EmitQuad(handler, currentNode, RdfFirst, sublistHead, graphIri);
+            }
+            else
+            {
+                ProcessValue(currentNode, RdfFirst, item, handler, graphIri, coercedType);
+            }
 
             previousNode = currentNode;
         }
