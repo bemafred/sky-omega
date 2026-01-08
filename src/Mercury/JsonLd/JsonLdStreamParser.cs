@@ -55,6 +55,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, string> _context;
     private readonly Dictionary<string, string> _typeCoercion; // term -> @type IRI
     private readonly Dictionary<string, bool> _containerList; // term -> is @list container
+    private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
+    private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
+    private readonly HashSet<string> _typeAliases; // terms aliased to @type
 
     // Base IRI for relative IRI resolution
     private string? _baseIri;
@@ -92,6 +95,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _context = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeCoercion = new Dictionary<string, string>(StringComparer.Ordinal);
         _containerList = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
+        _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        _typeAliases = new HashSet<string>(StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -195,15 +201,43 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Generate blank node if no @id
         subject ??= GenerateBlankNode();
 
-        // Process @type
+        // Process @type - properties on the containing node go in the current graph, not the named graph
         if (root.TryGetProperty("@type", out var typeElement))
         {
-            ProcessType(subject, typeElement, handler, graphIri);
+            ProcessType(subject, typeElement, handler, _currentGraph);
+            // Apply type-scoped contexts
+            ApplyTypeScopedContexts(typeElement);
+        }
+
+        // Process other properties FIRST (before @graph content)
+        // Properties on the containing node go in the current graph, not the named graph
+        foreach (var prop in root.EnumerateObject())
+        {
+            var propName = prop.Name;
+
+            // Skip JSON-LD keywords we've already processed
+            if (propName.StartsWith('@'))
+                continue;
+
+            // Check for @type alias
+            if (_typeAliases.Contains(propName))
+            {
+                ProcessType(subject, prop.Value, handler, _currentGraph);
+                // Also apply type-scoped contexts
+                ApplyTypeScopedContexts(prop.Value);
+                continue;
+            }
+
+            var predicate = ExpandTerm(propName);
+            if (string.IsNullOrEmpty(predicate))
+                continue;
+
+            ProcessProperty(subject, predicate, propName, prop.Value, handler, _currentGraph);
         }
 
         if (hasGraphKeyword)
         {
-            // Process @graph contents
+            // Process @graph contents - these go in the named graph
             var savedGraph = _currentGraph;
             _currentGraph = graphIri;
 
@@ -227,22 +261,6 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
 
             _currentGraph = savedGraph;
-        }
-
-        // Process other properties
-        foreach (var prop in root.EnumerateObject())
-        {
-            var propName = prop.Name;
-
-            // Skip JSON-LD keywords we've already processed
-            if (propName.StartsWith('@'))
-                continue;
-
-            var predicate = ExpandTerm(propName);
-            if (string.IsNullOrEmpty(predicate))
-                continue;
-
-            ProcessProperty(subject, predicate, propName, prop.Value, handler, graphIri ?? _currentGraph);
         }
 
         return subject;
@@ -283,8 +301,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else if (value.ValueKind == JsonValueKind.String)
             {
-                // Simple term -> IRI mapping
-                _context[term] = value.GetString() ?? "";
+                var mappedValue = value.GetString() ?? "";
+                // Check for keyword alias
+                if (mappedValue == "@type")
+                {
+                    _typeAliases.Add(term);
+                }
+                else
+                {
+                    // Simple term -> IRI mapping
+                    _context[term] = mappedValue;
+                }
             }
             else if (value.ValueKind == JsonValueKind.Object)
             {
@@ -292,6 +319,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 if (value.TryGetProperty("@id", out var idProp))
                 {
                     _context[term] = idProp.GetString() ?? "";
+                }
+
+                // Handle @reverse - the term maps to a reverse property
+                if (value.TryGetProperty("@reverse", out var reverseProp))
+                {
+                    var reverseIri = reverseProp.GetString();
+                    if (!string.IsNullOrEmpty(reverseIri))
+                    {
+                        _reverseProperty[term] = reverseIri;
+                    }
                 }
 
                 if (value.TryGetProperty("@type", out var typeProp))
@@ -314,6 +351,43 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         _containerList[term] = true;
                     }
                 }
+
+                // Handle scoped context - nested @context for this term
+                if (value.TryGetProperty("@context", out var scopedContextProp))
+                {
+                    _scopedContext[term] = scopedContextProp.GetRawText();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Apply type-scoped contexts from @type values.
+    /// </summary>
+    private void ApplyTypeScopedContexts(JsonElement typeElement)
+    {
+        if (typeElement.ValueKind == JsonValueKind.String)
+        {
+            var typeTerm = typeElement.GetString() ?? "";
+            if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
+            {
+                using var doc = JsonDocument.Parse(scopedJson);
+                ProcessContext(doc.RootElement);
+            }
+        }
+        else if (typeElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var t in typeElement.EnumerateArray())
+            {
+                if (t.ValueKind == JsonValueKind.String)
+                {
+                    var typeTerm = t.GetString() ?? "";
+                    if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
+                    {
+                        using var doc = JsonDocument.Parse(scopedJson);
+                        ProcessContext(doc.RootElement);
+                    }
+                }
             }
         }
     }
@@ -324,7 +398,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
         if (typeElement.ValueKind == JsonValueKind.String)
         {
-            var typeIri = ExpandIri(typeElement.GetString() ?? "");
+            var typeIri = ExpandTypeIri(typeElement.GetString() ?? "");
             EmitQuad(handler, subject, RdfType, typeIri, graph);
         }
         else if (typeElement.ValueKind == JsonValueKind.Array)
@@ -333,11 +407,73 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 if (t.ValueKind == JsonValueKind.String)
                 {
-                    var typeIri = ExpandIri(t.GetString() ?? "");
+                    var typeIri = ExpandTypeIri(t.GetString() ?? "");
                     EmitQuad(handler, subject, RdfType, typeIri, graph);
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Expand a type IRI using @vocab for relative IRIs (not @base).
+    /// </summary>
+    private string ExpandTypeIri(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return GenerateBlankNode();
+
+        // Blank node
+        if (value.StartsWith("_:"))
+            return value;
+
+        // Check context first (exact term match)
+        if (_context.TryGetValue(value, out var expanded))
+        {
+            if (IsAbsoluteIri(expanded))
+                return FormatIri(expanded);
+            return ExpandTypeIri(expanded);
+        }
+
+        // Already an absolute IRI
+        if (IsAbsoluteIri(value))
+        {
+            // Check if the "scheme" part is a defined prefix in context
+            var colonIndex = value.IndexOf(':');
+            var prefix = value.Substring(0, colonIndex);
+            if (_context.TryGetValue(prefix, out var prefixIri))
+            {
+                var localName = value.Substring(colonIndex + 1);
+                return FormatIri(prefixIri + localName);
+            }
+            return FormatIri(value);
+        }
+
+        // Check for compact IRI (prefix:localName)
+        var colonIdx = value.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            var prefix = value.Substring(0, colonIdx);
+            var localName = value.Substring(colonIdx + 1);
+
+            if (_context.TryGetValue(prefix, out var prefixIri))
+            {
+                return FormatIri(prefixIri + localName);
+            }
+        }
+
+        // For types, resolve against @vocab (not @base)
+        if (!string.IsNullOrEmpty(_vocabIri))
+        {
+            return FormatIri(_vocabIri + value);
+        }
+
+        // Fallback to @base
+        if (!string.IsNullOrEmpty(_baseIri))
+        {
+            return FormatIri(ResolveRelativeIri(_baseIri, value));
+        }
+
+        return FormatIri(value);
     }
 
     private void ProcessProperty(string subject, string predicate, string term, JsonElement value,
@@ -347,27 +483,132 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _typeCoercion.TryGetValue(term, out var coercedType);
         var isListContainer = _containerList.TryGetValue(term, out var isList) && isList;
 
-        if (value.ValueKind == JsonValueKind.Array)
+        // Check if this is a reverse property
+        if (_reverseProperty.TryGetValue(term, out var reversePredicate))
         {
-            if (isListContainer)
+            // For reverse properties, values become subjects and the current node becomes object
+            var expandedReversePredicate = ExpandTermValue(reversePredicate);
+            ProcessReverseProperty(subject, expandedReversePredicate, value, handler, graphIri, coercedType);
+            return;
+        }
+
+        // Apply scoped context if defined for this term
+        Dictionary<string, string>? savedContext = null;
+        Dictionary<string, string>? savedTypeCoercion = null;
+        Dictionary<string, bool>? savedContainerList = null;
+        if (_scopedContext.TryGetValue(term, out var scopedContextJson))
+        {
+            // Save current context state
+            savedContext = new Dictionary<string, string>(_context);
+            savedTypeCoercion = new Dictionary<string, string>(_typeCoercion);
+            savedContainerList = new Dictionary<string, bool>(_containerList);
+
+            // Apply the scoped context
+            using var scopedDoc = JsonDocument.Parse(scopedContextJson);
+            ProcessContext(scopedDoc.RootElement);
+        }
+
+        try
+        {
+            if (value.ValueKind == JsonValueKind.Array)
             {
-                // Create RDF list
-                var listHead = ProcessList(value, handler, graphIri, coercedType);
-                EmitQuad(handler, subject, predicate, listHead, graphIri);
+                if (isListContainer)
+                {
+                    // Create RDF list
+                    var listHead = ProcessList(value, handler, graphIri, coercedType);
+                    EmitQuad(handler, subject, predicate, listHead, graphIri);
+                }
+                else
+                {
+                    // Multiple values
+                    foreach (var item in value.EnumerateArray())
+                    {
+                        ProcessValue(subject, predicate, item, handler, graphIri, coercedType);
+                    }
+                }
             }
             else
             {
-                // Multiple values
-                foreach (var item in value.EnumerateArray())
-                {
-                    ProcessValue(subject, predicate, item, handler, graphIri, coercedType);
-                }
+                ProcessValue(subject, predicate, value, handler, graphIri, coercedType);
+            }
+        }
+        finally
+        {
+            // Restore context if scoped context was applied
+            if (savedContext != null)
+            {
+                _context.Clear();
+                foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
+            }
+            if (savedTypeCoercion != null)
+            {
+                _typeCoercion.Clear();
+                foreach (var kv in savedTypeCoercion) _typeCoercion[kv.Key] = kv.Value;
+            }
+            if (savedContainerList != null)
+            {
+                _containerList.Clear();
+                foreach (var kv in savedContainerList) _containerList[kv.Key] = kv.Value;
+            }
+        }
+    }
+
+    private void ProcessReverseProperty(string currentNode, string predicate, JsonElement value,
+        QuadHandler handler, string? graphIri, string? coercedType)
+    {
+        // For reverse properties, each value becomes a subject with currentNode as object
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                ProcessReverseValue(currentNode, predicate, item, handler, graphIri, coercedType);
             }
         }
         else
         {
-            ProcessValue(subject, predicate, value, handler, graphIri, coercedType);
+            ProcessReverseValue(currentNode, predicate, value, handler, graphIri, coercedType);
         }
+    }
+
+    private void ProcessReverseValue(string currentNode, string predicate, JsonElement value,
+        QuadHandler handler, string? graphIri, string? coercedType)
+    {
+        // The value becomes the subject, currentNode becomes the object
+        string newSubject;
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var strVal = value.GetString() ?? "";
+            // If type coercion is @id, treat as IRI
+            if (coercedType == "@id" || strVal.StartsWith("_:"))
+            {
+                newSubject = ExpandIri(strVal);
+            }
+            else
+            {
+                // String value becomes IRI
+                newSubject = ExpandIri(strVal);
+            }
+        }
+        else if (value.ValueKind == JsonValueKind.Object)
+        {
+            // Nested object
+            if (value.TryGetProperty("@id", out var idProp))
+            {
+                newSubject = ExpandIri(idProp.GetString() ?? "");
+            }
+            else
+            {
+                newSubject = GenerateBlankNode();
+            }
+        }
+        else
+        {
+            // Other types: generate blank node
+            newSubject = GenerateBlankNode();
+        }
+
+        EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
     }
 
     private void ProcessValue(string subject, string predicate, JsonElement value,
@@ -381,6 +622,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 {
                     // IRI reference
                     var iri = ExpandIri(strVal);
+                    EmitQuad(handler, subject, predicate, iri, graphIri);
+                }
+                else if (coercedType == "@vocab")
+                {
+                    // Vocabulary IRI - resolve using @vocab
+                    string iri;
+                    if (!string.IsNullOrEmpty(_vocabIri) && !IsAbsoluteIri(strVal) && !strVal.StartsWith("_:"))
+                    {
+                        iri = FormatIri(_vocabIri + strVal);
+                    }
+                    else
+                    {
+                        iri = ExpandIri(strVal);
+                    }
                     EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
                 else if (!string.IsNullOrEmpty(coercedType))
@@ -399,7 +654,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             case JsonValueKind.Number:
-                ProcessNumberLiteral(subject, predicate, value, handler, graphIri);
+                ProcessNumberLiteral(subject, predicate, value, handler, graphIri, coercedType);
                 break;
 
             case JsonValueKind.True:
@@ -498,39 +753,64 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     private void ProcessNumberLiteral(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri)
+        QuadHandler handler, string? graphIri, string? coercedType)
     {
         var rawText = value.GetRawText();
+        var isDouble = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
 
-        // Determine if integer or decimal
-        if (rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E'))
+        // Check if type coercion specifies xsd:double
+        var forceDouble = coercedType != null &&
+            (coercedType == "http://www.w3.org/2001/XMLSchema#double" ||
+             coercedType.EndsWith("#double"));
+
+        // Check if type coercion specifies xsd:integer
+        var forceInteger = coercedType != null &&
+            (coercedType == "http://www.w3.org/2001/XMLSchema#integer" ||
+             coercedType.EndsWith("#integer"));
+
+        // Determine effective datatype
+        string datatypeIri;
+        string lexicalValue;
+
+        if (forceDouble || (isDouble && !forceInteger))
         {
-            // Double - must use canonical XSD form with exponent notation
-            // Parse and reformat to ensure canonical representation (e.g., 5.3 -> 5.3E0)
+            // Format as double - must use canonical XSD form with exponent notation
+            datatypeIri = "<http://www.w3.org/2001/XMLSchema#double>";
             if (double.TryParse(rawText, System.Globalization.NumberStyles.Float,
                 System.Globalization.CultureInfo.InvariantCulture, out var doubleValue))
             {
-                // Format with exponent notation, uppercase E
                 var canonicalForm = doubleValue.ToString("E15", System.Globalization.CultureInfo.InvariantCulture);
-                // Trim trailing zeros in the significand but keep at least one digit after decimal
-                // E.g., 5.300000000000000E+000 -> 5.3E0
-                canonicalForm = NormalizeDoubleCanonical(canonicalForm);
-                EmitQuad(handler, subject, predicate,
-                    $"\"{canonicalForm}\"^^<http://www.w3.org/2001/XMLSchema#double>", graphIri);
+                lexicalValue = NormalizeDoubleCanonical(canonicalForm);
             }
             else
             {
-                // Fallback to raw text if parsing fails
-                EmitQuad(handler, subject, predicate,
-                    $"\"{rawText}\"^^<http://www.w3.org/2001/XMLSchema#double>", graphIri);
+                lexicalValue = rawText;
+            }
+        }
+        else if (forceInteger)
+        {
+            // Type coercion to integer - if value has decimal, format as double lexically but with integer type
+            datatypeIri = "<http://www.w3.org/2001/XMLSchema#integer>";
+            if (isDouble && double.TryParse(rawText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var doubleValue))
+            {
+                // Format non-integer value as double canonical form but typed as integer
+                var canonicalForm = doubleValue.ToString("E15", System.Globalization.CultureInfo.InvariantCulture);
+                lexicalValue = NormalizeDoubleCanonical(canonicalForm);
+            }
+            else
+            {
+                lexicalValue = rawText;
             }
         }
         else
         {
-            // Integer
-            EmitQuad(handler, subject, predicate,
-                $"\"{rawText}\"^^<http://www.w3.org/2001/XMLSchema#integer>", graphIri);
+            // Default: integer
+            datatypeIri = "<http://www.w3.org/2001/XMLSchema#integer>";
+            lexicalValue = rawText;
         }
+
+        EmitQuad(handler, subject, predicate, $"\"{lexicalValue}\"^^{datatypeIri}", graphIri);
     }
 
     /// <summary>
@@ -608,36 +888,52 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check context for term mapping
         if (_context.TryGetValue(term, out var expanded))
         {
-            return FormatIri(expanded);
+            // The expanded term might itself be a compact IRI that needs further expansion
+            return ExpandTermValue(expanded);
         }
 
-        // Check for compact IRI (prefix:localName)
-        var colonIndex = term.IndexOf(':');
-        if (colonIndex > 0)
+        return ExpandTermValue(term);
+    }
+
+    private string ExpandTermValue(string value)
+    {
+        // Already an absolute IRI (has scheme like http:, urn:, etc.)
+        if (IsAbsoluteIri(value))
         {
-            var prefix = term.Substring(0, colonIndex);
-            var localName = term.Substring(colonIndex + 1);
+            // But still check if the "scheme" part is a defined prefix in context
+            var colonIndex = value.IndexOf(':');
+            var prefix = value.Substring(0, colonIndex);
+            if (_context.TryGetValue(prefix, out var prefixIri))
+            {
+                // It's actually a compact IRI using a defined prefix
+                var localName = value.Substring(colonIndex + 1);
+                return FormatIri(prefixIri + localName);
+            }
+            // It's a real absolute IRI
+            return FormatIri(value);
+        }
+
+        // Check for compact IRI (prefix:localName) - prefix not a valid scheme
+        var colonIdx = value.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            var prefix = value.Substring(0, colonIdx);
+            var localName = value.Substring(colonIdx + 1);
 
             if (_context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
-            }
-
-            // Assume it's already an IRI
-            if (term.Contains("://"))
-            {
-                return FormatIri(term);
             }
         }
 
         // Use @vocab if defined
         if (!string.IsNullOrEmpty(_vocabIri))
         {
-            return FormatIri(_vocabIri + term);
+            return FormatIri(_vocabIri + value);
         }
 
         // Return as-is (invalid, but allows processing to continue)
-        return FormatIri(term);
+        return FormatIri(value);
     }
 
     private string ExpandIri(string value)
@@ -650,30 +946,44 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return GenerateBlankNode();
         }
 
-        // Already an absolute IRI
-        if (value.Contains("://"))
-        {
-            return FormatIri(value);
-        }
-
         // Blank node
         if (value.StartsWith("_:"))
         {
             return value;
         }
 
-        // Check context
+        // Check context first (exact term match)
         if (_context.TryGetValue(value, out var expanded))
         {
-            return FormatIri(expanded);
+            // The expanded value might itself need resolution
+            if (IsAbsoluteIri(expanded))
+                return FormatIri(expanded);
+            // Recursively expand
+            return ExpandIri(expanded);
         }
 
-        // Check for compact IRI
-        var colonIndex = value.IndexOf(':');
-        if (colonIndex > 0)
+        // Already an absolute IRI (has scheme like http:, urn:, etc.)
+        if (IsAbsoluteIri(value))
         {
+            // Check if the "scheme" part is a defined prefix in context
+            var colonIndex = value.IndexOf(':');
             var prefix = value.Substring(0, colonIndex);
-            var localName = value.Substring(colonIndex + 1);
+            if (_context.TryGetValue(prefix, out var prefixIri))
+            {
+                // It's actually a compact IRI using a defined prefix
+                var localName = value.Substring(colonIndex + 1);
+                return FormatIri(prefixIri + localName);
+            }
+            // It's a real absolute IRI
+            return FormatIri(value);
+        }
+
+        // Check for compact IRI (prefix:localName) - colon present but not a valid scheme
+        var colonIdx = value.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            var prefix = value.Substring(0, colonIdx);
+            var localName = value.Substring(colonIdx + 1);
 
             if (_context.TryGetValue(prefix, out var prefixIri))
             {
@@ -691,46 +1001,235 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         return FormatIri(value);
     }
 
+    /// <summary>
+    /// Resolve a relative IRI against a base IRI per RFC 3986 Section 5.
+    /// </summary>
     private static string ResolveRelativeIri(string baseIri, string relative)
     {
         if (string.IsNullOrEmpty(relative))
             return baseIri;
 
+        // Parse base IRI components
+        var (baseScheme, baseAuthority, basePath, baseQuery) = ParseIriComponents(baseIri);
+
+        // Check if base is hierarchical (has ://) or not (like tag:example)
+        var isHierarchical = baseIri.Contains("://");
+
+        // Reference starts with scheme - it's already absolute
+        if (IsAbsoluteIri(relative))
+            return relative;
+
+        // For non-hierarchical URIs (like tag:, urn:), handle specially
+        if (!isHierarchical)
+        {
+            // For fragment-only, append to base
+            if (relative.StartsWith('#'))
+            {
+                var hashIndex = baseIri.IndexOf('#');
+                var basePart = hashIndex >= 0 ? baseIri.Substring(0, hashIndex) : baseIri;
+                return basePart + relative;
+            }
+
+            // Check if the base has a path-like structure (contains /)
+            // For tag:example/foo with relative "a", expect tag:example/a
+            var colonIdx = baseIri.IndexOf(':');
+            var baseNonHierPath = baseIri.Substring(colonIdx + 1);
+            if (baseNonHierPath.Contains('/'))
+            {
+                // Merge paths: remove last segment from base, add relative
+                var lastSlash = baseNonHierPath.LastIndexOf('/');
+                var mergedPath = baseNonHierPath.Substring(0, lastSlash + 1) + relative;
+                return baseScheme + ":" + RemoveDotSegments(mergedPath);
+            }
+
+            // No path structure - just replace: scheme:relative
+            return baseScheme + ":" + relative;
+        }
+
+        // Reference starts with // - authority reference
+        if (relative.StartsWith("//"))
+        {
+            var (_, refAuth, refPath, refQuery) = ParseIriComponents(baseScheme + ":" + relative);
+            var result = baseScheme + "://" + refAuth + RemoveDotSegments(refPath);
+            if (!string.IsNullOrEmpty(refQuery))
+                result += "?" + refQuery;
+            return result;
+        }
+
+        // Reference starts with ? - query-only reference (keep base path)
+        if (relative.StartsWith('?'))
+        {
+            // Remove query and fragment from base, append new query
+            var queryIdx = relative.IndexOf('#');
+            var fragment = queryIdx >= 0 ? relative.Substring(queryIdx) : "";
+            var query = queryIdx >= 0 ? relative.Substring(1, queryIdx - 1) : relative.Substring(1);
+            return baseScheme + "://" + baseAuthority + basePath + "?" + query + fragment;
+        }
+
+        // Reference starts with # - fragment-only reference
         if (relative.StartsWith('#'))
         {
-            // Fragment
+            // Remove fragment from base path/query, append new fragment
             var hashIndex = baseIri.IndexOf('#');
-            if (hashIndex >= 0)
-            {
-                return baseIri.Substring(0, hashIndex) + relative;
-            }
-            return baseIri + relative;
+            var basePart = hashIndex >= 0 ? baseIri.Substring(0, hashIndex) : baseIri;
+            return basePart + relative;
         }
 
+        // Reference starts with / - absolute path reference
         if (relative.StartsWith('/'))
         {
-            // Absolute path
-            var schemeEnd = baseIri.IndexOf("://");
-            if (schemeEnd >= 0)
-            {
-                var authorityEnd = baseIri.IndexOf('/', schemeEnd + 3);
-                if (authorityEnd >= 0)
-                {
-                    return baseIri.Substring(0, authorityEnd) + relative;
-                }
-                return baseIri + relative;
-            }
-            return relative;
+            // Parse relative for query/fragment
+            var qIdx = relative.IndexOf('?');
+            var hIdx = relative.IndexOf('#');
+            var pathEnd = qIdx >= 0 ? qIdx : (hIdx >= 0 ? hIdx : relative.Length);
+            var refPath = relative.Substring(0, pathEnd);
+            var rest = relative.Substring(pathEnd);
+            return baseScheme + "://" + baseAuthority + RemoveDotSegments(refPath) + rest;
         }
 
-        // Relative path - resolve against base directory
-        var lastSlash = baseIri.LastIndexOf('/');
-        if (lastSlash >= 0)
+        // Relative path - merge with base
+        string targetPath;
+        if (string.IsNullOrEmpty(baseAuthority) && string.IsNullOrEmpty(basePath))
         {
-            return baseIri.Substring(0, lastSlash + 1) + relative;
+            targetPath = "/" + relative;
+        }
+        else
+        {
+            // Remove last segment from base path
+            var lastSlash = basePath.LastIndexOf('/');
+            if (lastSlash >= 0)
+            {
+                targetPath = basePath.Substring(0, lastSlash + 1) + relative;
+            }
+            else
+            {
+                targetPath = relative;
+            }
         }
 
-        return baseIri + "/" + relative;
+        // Split path from query/fragment before removing dot segments
+        var relQIdx = targetPath.IndexOf('?');
+        var relHIdx = targetPath.IndexOf('#');
+        var pathEndIdx = relQIdx >= 0 ? relQIdx : (relHIdx >= 0 ? relHIdx : targetPath.Length);
+        var pathOnly = targetPath.Substring(0, pathEndIdx);
+        var suffix = targetPath.Substring(pathEndIdx);
+
+        return baseScheme + "://" + baseAuthority + RemoveDotSegments(pathOnly) + suffix;
+    }
+
+    /// <summary>
+    /// Parse IRI into components (scheme, authority, path, query).
+    /// Fragment is not returned as it's handled separately.
+    /// </summary>
+    private static (string scheme, string authority, string path, string query) ParseIriComponents(string iri)
+    {
+        // Remove fragment
+        var hashIdx = iri.IndexOf('#');
+        if (hashIdx >= 0)
+            iri = iri.Substring(0, hashIdx);
+
+        // Extract scheme
+        var schemeEnd = iri.IndexOf(':');
+        if (schemeEnd < 0)
+            return ("", "", iri, "");
+
+        var scheme = iri.Substring(0, schemeEnd);
+        var rest = iri.Substring(schemeEnd + 1);
+
+        // Extract authority
+        string authority = "";
+        string pathPart = rest;
+        if (rest.StartsWith("//"))
+        {
+            rest = rest.Substring(2);
+            var pathStart = rest.IndexOf('/');
+            var queryStart = rest.IndexOf('?');
+            var authEnd = pathStart >= 0 ? pathStart : (queryStart >= 0 ? queryStart : rest.Length);
+            authority = rest.Substring(0, authEnd);
+            pathPart = rest.Substring(authEnd);
+        }
+
+        // Extract query
+        var qIdx = pathPart.IndexOf('?');
+        string path = qIdx >= 0 ? pathPart.Substring(0, qIdx) : pathPart;
+        string query = qIdx >= 0 ? pathPart.Substring(qIdx + 1) : "";
+
+        return (scheme, authority, path, query);
+    }
+
+    /// <summary>
+    /// Remove dot segments from a path per RFC 3986 Section 5.2.4.
+    /// </summary>
+    private static string RemoveDotSegments(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return path;
+
+        // Use a list as a stack of segments
+        var segments = new List<string>();
+        var i = 0;
+
+        while (i < path.Length)
+        {
+            // A: If the input buffer starts with a prefix of "../" or "./"
+            if (path.AsSpan(i).StartsWith("../"))
+            {
+                i += 3;
+                continue;
+            }
+            if (path.AsSpan(i).StartsWith("./"))
+            {
+                i += 2;
+                continue;
+            }
+
+            // B: If the input buffer starts with a prefix of "/./" or "/."
+            if (path.AsSpan(i).StartsWith("/./"))
+            {
+                i += 2; // Replace with "/"
+                continue;
+            }
+            if (i + 2 == path.Length && path.AsSpan(i).StartsWith("/."))
+            {
+                // "/." at end - replace with "/"
+                segments.Add("/");
+                break;
+            }
+
+            // C: If the input buffer starts with a prefix of "/../" or "/.."
+            if (path.AsSpan(i).StartsWith("/../"))
+            {
+                i += 3; // Replace with "/"
+                if (segments.Count > 0)
+                    segments.RemoveAt(segments.Count - 1);
+                continue;
+            }
+            if (i + 3 == path.Length && path.AsSpan(i).StartsWith("/.."))
+            {
+                // "/.." at end - replace with "/" and pop
+                if (segments.Count > 0)
+                    segments.RemoveAt(segments.Count - 1);
+                segments.Add("/");
+                break;
+            }
+
+            // D: If the input buffer consists only of "." or ".."
+            if (path.Substring(i) == "." || path.Substring(i) == "..")
+            {
+                break;
+            }
+
+            // E: Move first path segment (including initial "/" if any) to output
+            var segStart = i;
+            if (path[i] == '/')
+                i++;
+            while (i < path.Length && path[i] != '/')
+                i++;
+
+            segments.Add(path.Substring(segStart, i - segStart));
+        }
+
+        return string.Join("", segments);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -741,9 +1240,44 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         return $"<{iri}>";
     }
 
+    /// <summary>
+    /// Check if a string is an absolute IRI (has a scheme per RFC 3986).
+    /// Scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsAbsoluteIri(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return false;
+
+        // Find the first colon
+        var colonIndex = value.IndexOf(':');
+        if (colonIndex <= 0)
+            return false;
+
+        // Scheme must start with ALPHA
+        var firstChar = value[0];
+        if (!((firstChar >= 'A' && firstChar <= 'Z') || (firstChar >= 'a' && firstChar <= 'z')))
+            return false;
+
+        // Rest of scheme must be ALPHA / DIGIT / "+" / "-" / "."
+        for (int i = 1; i < colonIndex; i++)
+        {
+            var c = value[i];
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                  (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private string GenerateBlankNode()
     {
-        return $"_:b{_blankNodeCounter++}";
+        // Use 'g' prefix to avoid collision with blank nodes from input (which often use 'b')
+        return $"_:g{_blankNodeCounter++}";
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
