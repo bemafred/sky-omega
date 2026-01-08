@@ -63,6 +63,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _typeAliases; // terms aliased to @type
     private readonly HashSet<string> _idAliases; // terms aliased to @id
     private readonly HashSet<string> _graphAliases; // terms aliased to @graph
+    private readonly HashSet<string> _includedAliases; // terms aliased to @included
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
 
     // Base IRI for relative IRI resolution
@@ -117,6 +118,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _typeAliases = new HashSet<string>(StringComparer.Ordinal);
         _idAliases = new HashSet<string>(StringComparer.Ordinal);
         _graphAliases = new HashSet<string>(StringComparer.Ordinal);
+        _includedAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
     }
 
@@ -326,6 +328,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             if (_graphAliases.Contains(propName))
                 continue;
 
+            // Skip @included aliases (processed below)
+            if (_includedAliases.Contains(propName))
+                continue;
+
             // Check if this is a reverse property (term definition has @reverse but no @id)
             // Reverse properties may not expand to a predicate IRI, but ProcessProperty handles them
             var isReverseProperty = _reverseProperty.ContainsKey(propName);
@@ -356,6 +362,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
 
             _currentGraph = savedGraph;
+        }
+
+        // Process @included - additional nodes that are not linked to this node
+        if (root.TryGetProperty("@included", out var includedElement))
+        {
+            ProcessIncludedNodes(includedElement, handler);
+        }
+
+        // Also check for @included aliases
+        foreach (var alias in _includedAliases)
+        {
+            if (root.TryGetProperty(alias, out var aliasedIncluded))
+            {
+                ProcessIncludedNodes(aliasedIncluded, handler);
+            }
         }
 
         // Restore context if type-scoped context was applied
@@ -416,6 +437,24 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         ParseNode(ref tempReader, handler, null);
     }
 
+    /// <summary>
+    /// Process @included nodes - additional nodes that are not linked to the containing node.
+    /// </summary>
+    private void ProcessIncludedNodes(JsonElement element, QuadHandler handler)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var node in element.EnumerateArray())
+            {
+                ProcessGraphNode(node, handler);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Object)
+        {
+            ProcessGraphNode(element, handler);
+        }
+    }
+
     private void ProcessContext(JsonElement contextElement)
     {
         if (contextElement.ValueKind == JsonValueKind.String)
@@ -438,6 +477,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _typeAliases.Clear();
             _idAliases.Clear();
             _graphAliases.Clear();
+            _includedAliases.Clear();
             _nullTerms.Clear();
             _vocabIri = null;
             _defaultLanguage = null;
@@ -494,6 +534,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 else if (mappedValue == "@graph" || _graphAliases.Contains(mappedValue))
                 {
                     _graphAliases.Add(term);
+                }
+                else if (mappedValue == "@included" || _includedAliases.Contains(mappedValue))
+                {
+                    _includedAliases.Add(term);
                 }
                 else
                 {
@@ -779,6 +823,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         HashSet<string>? savedTypeAliases = null;
         HashSet<string>? savedIdAliases = null;
         HashSet<string>? savedGraphAliases = null;
+        HashSet<string>? savedIncludedAliases = null;
         HashSet<string>? savedNullTerms = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
@@ -797,6 +842,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedTypeAliases = new HashSet<string>(_typeAliases);
             savedIdAliases = new HashSet<string>(_idAliases);
             savedGraphAliases = new HashSet<string>(_graphAliases);
+            savedIncludedAliases = new HashSet<string>(_includedAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
@@ -899,6 +945,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _graphAliases.Clear();
                 foreach (var alias in savedGraphAliases!) _graphAliases.Add(alias);
+
+                _includedAliases.Clear();
+                foreach (var alias in savedIncludedAliases!) _includedAliases.Add(alias);
 
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
@@ -1862,7 +1911,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static string FormatIri(string iri)
     {
+        // Already formatted
         if (iri.StartsWith('<') && iri.EndsWith('>'))
+            return iri;
+        // Blank nodes should not be wrapped in angle brackets
+        if (iri.StartsWith("_:"))
             return iri;
         return $"<{iri}>";
     }
