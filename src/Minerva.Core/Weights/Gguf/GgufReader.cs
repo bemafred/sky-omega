@@ -1,4 +1,4 @@
-namespace SkyOmega.Minerva.Weights.Gguf;
+namespace SkyOmega.Minerva.Core.Weights.Gguf;
 
 /// <summary>
 /// Zero-copy GGUF file reader with memory-mapped access.

@@ -2443,6 +2443,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private string ProcessValueObject(JsonElement obj, JsonElement valueProp)
     {
         string valueStr;
+        string? inferredType = null;  // Inferred XSD type for native JSON values
 
         switch (valueProp.ValueKind)
         {
@@ -2450,13 +2451,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 valueStr = valueProp.GetString() ?? "";
                 break;
             case JsonValueKind.Number:
-                valueStr = valueProp.GetRawText();
+                var rawText = valueProp.GetRawText();
+                valueStr = rawText;
+                // Infer XSD type for native JSON numbers
+                var isDouble = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
+                inferredType = isDouble
+                    ? "<http://www.w3.org/2001/XMLSchema#double>"
+                    : "<http://www.w3.org/2001/XMLSchema#integer>";
                 break;
             case JsonValueKind.True:
                 valueStr = "true";
+                inferredType = "<http://www.w3.org/2001/XMLSchema#boolean>";
                 break;
             case JsonValueKind.False:
                 valueStr = "false";
+                inferredType = "<http://www.w3.org/2001/XMLSchema#boolean>";
                 break;
             default:
                 valueStr = "";
@@ -2503,7 +2512,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return $"\"{EscapeString(valueStr)}\"^^{datatype}";
         }
 
-        // Plain literal
+        // Use inferred type for native JSON values (numbers, booleans)
+        if (inferredType != null)
+        {
+            return $"\"{EscapeString(valueStr)}\"^^{inferredType}";
+        }
+
+        // Plain literal (strings without type)
         return $"\"{EscapeString(valueStr)}\"";
     }
 

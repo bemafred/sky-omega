@@ -1,4 +1,4 @@
-namespace SkyOmega.Minerva.Tokenizers;
+namespace SkyOmega.Minerva.Core.Tokenizers;
 
 /// <summary>
 /// Tokenizer abstraction supporting BPE, SentencePiece, and GGUF-embedded tokenizers.
