@@ -1330,7 +1330,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             // Handle @type container - object keys are @type values for nested objects
             else if (isTypeContainer && value.ValueKind == JsonValueKind.Object)
             {
-                ProcessTypeMap(subject, predicate, value, handler, graphIri);
+                ProcessTypeMap(subject, predicate, value, handler, graphIri, coercedType);
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
@@ -1751,7 +1751,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
     }
 
-    private void ProcessTypeMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri)
+    private void ProcessTypeMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri, string? coercedType = null)
     {
         foreach (var prop in value.EnumerateObject())
         {
@@ -1784,6 +1784,39 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, typeKey, subject);
                         EmitQuad(handler, subject, predicate, nestedId, graphIri);
                     }
+                    else if (item.ValueKind == JsonValueKind.String)
+                    {
+                        // String value in @type map is a node reference (m017)
+                        var stringVal = item.GetString() ?? "";
+                        // Use @vocab expansion if coercedType is @vocab (m019), otherwise use @base (m017/m018)
+                        var nodeRef = coercedType == "@vocab" ? ExpandTerm(stringVal) : ExpandIri(stringVal);
+                        if (!string.IsNullOrEmpty(nodeRef))
+                        {
+                            // Emit type triple if not @none
+                            if (!isNone && !string.IsNullOrEmpty(expandedTypeIri))
+                            {
+                                EmitQuad(handler, nodeRef, RdfType, expandedTypeIri, graphIri);
+                            }
+                            EmitQuad(handler, subject, predicate, nodeRef, graphIri);
+                        }
+                    }
+                }
+            }
+            else if (typeValue.ValueKind == JsonValueKind.String)
+            {
+                // String value in @type map is a node reference (m017)
+                // The string is the @id of a node with the key as its @type
+                var stringVal = typeValue.GetString() ?? "";
+                // Use @vocab expansion if coercedType is @vocab (m019), otherwise use @base (m017/m018)
+                var nodeRef = coercedType == "@vocab" ? ExpandTerm(stringVal) : ExpandIri(stringVal);
+                if (!string.IsNullOrEmpty(nodeRef))
+                {
+                    // Emit type triple if not @none
+                    if (!isNone && !string.IsNullOrEmpty(expandedTypeIri))
+                    {
+                        EmitQuad(handler, nodeRef, RdfType, expandedTypeIri, graphIri);
+                    }
+                    EmitQuad(handler, subject, predicate, nodeRef, graphIri);
                 }
             }
         }
