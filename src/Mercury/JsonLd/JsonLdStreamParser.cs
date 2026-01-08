@@ -2268,13 +2268,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     // IRI reference - compact IRIs and relative IRIs, NOT terms
                     // See test e056: "Use terms with @type: @vocab but not with @type: @id"
                     var iri = ExpandIri(strVal, expandTerms: false);
-                    EmitQuad(handler, subject, predicate, iri, graphIri);
+                    // Skip if IRI cannot be resolved (e.g., relative IRI with @base: null) (li14)
+                    if (iri != null)
+                        EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
                 else if (coercedType == "@vocab")
                 {
                     // Vocabulary IRI - first try as term, then use @vocab
                     var iri = ExpandIri(strVal, expandTerms: true);
-                    EmitQuad(handler, subject, predicate, iri, graphIri);
+                    // Skip if IRI cannot be resolved
+                    if (iri != null)
+                        EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
                 else if (coercedType == "@json")
                 {
@@ -3153,8 +3157,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return FormatIri(ResolveRelativeIri(_baseIri, value));
         }
 
-        // Return as-is
-        return FormatIri(value);
+        // @base is null/empty - relative IRI cannot be resolved (li14)
+        // Return null to signal the IRI should be dropped
+        return null!;
     }
 
     /// <summary>
