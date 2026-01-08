@@ -56,6 +56,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, string> _typeCoercion; // term -> @type IRI
     private readonly Dictionary<string, bool> _containerList; // term -> is @list container
     private readonly Dictionary<string, bool> _containerLanguage; // term -> is @language container
+    private readonly Dictionary<string, bool> _containerIndex; // term -> is @index container
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
     private readonly HashSet<string> _typeAliases; // terms aliased to @type
@@ -108,6 +109,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _typeCoercion = new Dictionary<string, string>(StringComparer.Ordinal);
         _containerList = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerLanguage = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _containerIndex = new Dictionary<string, bool>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeAliases = new HashSet<string>(StringComparer.Ordinal);
@@ -343,19 +345,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 foreach (var node in graphElement.EnumerateArray())
                 {
-                    if (node.ValueKind == JsonValueKind.Object)
-                    {
-                        var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(node.GetRawText()));
-                        tempReader.Read();
-                        ParseNode(ref tempReader, handler, null);
-                    }
+                    ProcessGraphNode(node, handler);
                 }
             }
             else if (graphElement.ValueKind == JsonValueKind.Object)
             {
-                var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(graphElement.GetRawText()));
-                tempReader.Read();
-                ParseNode(ref tempReader, handler, null);
+                ProcessGraphNode(graphElement, handler);
             }
 
             _currentGraph = savedGraph;
@@ -379,6 +374,46 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         return subject;
     }
 
+    /// <summary>
+    /// Process a node in @graph context, handling free-floating values, @set, and @list.
+    /// </summary>
+    private void ProcessGraphNode(JsonElement node, QuadHandler handler)
+    {
+        // Skip primitives - they are free-floating values
+        if (node.ValueKind != JsonValueKind.Object)
+            return;
+
+        // Skip value objects - they are free-floating and produce no triples
+        if (node.TryGetProperty("@value", out _))
+            return;
+
+        // Skip free-floating @list objects - they produce no output
+        if (node.TryGetProperty("@list", out _))
+            return;
+
+        // Handle @set objects - process their contents
+        if (node.TryGetProperty("@set", out var setElement))
+        {
+            if (setElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in setElement.EnumerateArray())
+                {
+                    ProcessGraphNode(item, handler);
+                }
+            }
+            else
+            {
+                ProcessGraphNode(setElement, handler);
+            }
+            return;
+        }
+
+        // Regular node object - parse it
+        var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(node.GetRawText()));
+        tempReader.Read();
+        ParseNode(ref tempReader, handler, null);
+    }
+
     private void ProcessContext(JsonElement contextElement)
     {
         if (contextElement.ValueKind == JsonValueKind.String)
@@ -394,6 +429,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _typeCoercion.Clear();
             _containerList.Clear();
             _containerLanguage.Clear();
+            _containerIndex.Clear();
             _reverseProperty.Clear();
             _scopedContext.Clear();
             _typeAliases.Clear();
@@ -511,6 +547,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     else if (containerVal == "@language")
                     {
                         _containerLanguage[term] = true;
+                    }
+                    else if (containerVal == "@index")
+                    {
+                        _containerIndex[term] = true;
                     }
                 }
 
@@ -670,13 +710,27 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _typeCoercion.TryGetValue(term, out var coercedType);
         var isListContainer = _containerList.TryGetValue(term, out var isList) && isList;
         var isLanguageContainer = _containerLanguage.TryGetValue(term, out var isLang) && isLang;
+        var isIndexContainer = _containerIndex.TryGetValue(term, out var isIdx) && isIdx;
 
         // Check if this is a reverse property
         if (_reverseProperty.TryGetValue(term, out var reversePredicate))
         {
             // For reverse properties, values become subjects and the current node becomes object
             var expandedReversePredicate = ExpandTermValue(reversePredicate);
-            ProcessReverseProperty(subject, expandedReversePredicate, value, handler, graphIri, coercedType);
+
+            // Handle index container with reverse property
+            if (isIndexContainer && value.ValueKind == JsonValueKind.Object)
+            {
+                // Value is an index map - iterate over values (keys are ignored)
+                foreach (var prop in value.EnumerateObject())
+                {
+                    ProcessReverseProperty(subject, expandedReversePredicate, prop.Value, handler, graphIri, coercedType);
+                }
+            }
+            else
+            {
+                ProcessReverseProperty(subject, expandedReversePredicate, value, handler, graphIri, coercedType);
+            }
             return;
         }
 
@@ -685,6 +739,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedTypeCoercion = null;
         Dictionary<string, bool>? savedContainerList = null;
         Dictionary<string, bool>? savedContainerLanguage = null;
+        Dictionary<string, bool>? savedContainerIndex = null;
         Dictionary<string, string>? savedReverseProperty = null;
         Dictionary<string, string>? savedScopedContext = null;
         HashSet<string>? savedTypeAliases = null;
@@ -701,6 +756,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedTypeCoercion = new Dictionary<string, string>(_typeCoercion);
             savedContainerList = new Dictionary<string, bool>(_containerList);
             savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
+            savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
             savedTypeAliases = new HashSet<string>(_typeAliases);
@@ -722,6 +778,24 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
             {
                 ProcessLanguageMap(subject, predicate, value, handler, graphIri);
+            }
+            // Handle index container - object keys are index values (ignored)
+            else if (isIndexContainer && value.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in value.EnumerateObject())
+                {
+                    if (prop.Value.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in prop.Value.EnumerateArray())
+                        {
+                            ProcessValue(subject, predicate, item, handler, graphIri, coercedType);
+                        }
+                    }
+                    else
+                    {
+                        ProcessValue(subject, predicate, prop.Value, handler, graphIri, coercedType);
+                    }
+                }
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
@@ -761,6 +835,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _containerLanguage.Clear();
                 foreach (var kv in savedContainerLanguage!) _containerLanguage[kv.Key] = kv.Value;
+
+                _containerIndex.Clear();
+                foreach (var kv in savedContainerIndex!) _containerIndex[kv.Key] = kv.Value;
 
                 _reverseProperty.Clear();
                 foreach (var kv in savedReverseProperty!) _reverseProperty[kv.Key] = kv.Value;
