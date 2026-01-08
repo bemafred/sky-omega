@@ -59,6 +59,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, bool> _containerIndex; // term -> is @index container
     private readonly Dictionary<string, bool> _containerGraph; // term -> is @graph container
     private readonly Dictionary<string, bool> _containerId; // term -> is @id container
+    private readonly Dictionary<string, bool> _containerType; // term -> is @type container
     private readonly Dictionary<string, string> _termLanguage; // term -> @language value
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
@@ -118,6 +119,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _containerIndex = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerGraph = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerId = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _containerType = new Dictionary<string, bool>(StringComparer.Ordinal);
         _termLanguage = new Dictionary<string, string>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -687,7 +689,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                             _containerGraph[term] = true;
                         else if (containerVal == "@id")
                             _containerId[term] = true;
-                        // Note: @set, @type containers treated as simple containers
+                        else if (containerVal == "@type")
+                            _containerType[term] = true;
+                        // Note: @set containers treated as simple containers
                     }
 
                     if (containerProp.ValueKind == JsonValueKind.String)
@@ -920,6 +924,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var isIndexContainer = _containerIndex.TryGetValue(term, out var isIdx) && isIdx;
         var isGraphContainer = _containerGraph.TryGetValue(term, out var isGraph) && isGraph;
         var isIdContainer = _containerId.TryGetValue(term, out var isId) && isId;
+        var isTypeContainer = _containerType.TryGetValue(term, out var isType) && isType;
 
         // Check if this is a reverse property
         if (_reverseProperty.TryGetValue(term, out var reversePredicate))
@@ -951,6 +956,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, bool>? savedContainerIndex = null;
         Dictionary<string, bool>? savedContainerGraph = null;
         Dictionary<string, bool>? savedContainerId = null;
+        Dictionary<string, bool>? savedContainerType = null;
         Dictionary<string, string>? savedTermLanguage = null;
         Dictionary<string, string>? savedReverseProperty = null;
         Dictionary<string, string>? savedScopedContext = null;
@@ -974,6 +980,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
             savedContainerGraph = new Dictionary<string, bool>(_containerGraph);
             savedContainerId = new Dictionary<string, bool>(_containerId);
+            savedContainerType = new Dictionary<string, bool>(_containerType);
             savedTermLanguage = new Dictionary<string, string>(_termLanguage);
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
@@ -1027,6 +1034,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             else if (isIdContainer && value.ValueKind == JsonValueKind.Object)
             {
                 ProcessIdMap(subject, predicate, value, handler, graphIri);
+            }
+            // Handle @type container - object keys are @type values for nested objects
+            else if (isTypeContainer && value.ValueKind == JsonValueKind.Object)
+            {
+                ProcessTypeMap(subject, predicate, value, handler, graphIri);
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
@@ -1099,6 +1111,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _containerId.Clear();
                 foreach (var kv in savedContainerId!) _containerId[kv.Key] = kv.Value;
+
+                _containerType.Clear();
+                foreach (var kv in savedContainerType!) _containerType[kv.Key] = kv.Value;
 
                 _termLanguage.Clear();
                 foreach (var kv in savedTermLanguage!) _termLanguage[kv.Key] = kv.Value;
@@ -1433,6 +1448,105 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
             }
         }
+    }
+
+    private void ProcessTypeMap(string subject, string predicate, JsonElement value, QuadHandler handler, string? graphIri)
+    {
+        foreach (var prop in value.EnumerateObject())
+        {
+            var typeKey = prop.Name;
+            var typeValue = prop.Value;
+
+            // @none or alias means no @type - don't emit rdf:type triple
+            var isNone = typeKey == "@none" || _noneAliases.Contains(typeKey);
+            var expandedTypeIri = isNone ? null : ExpandTypeIri(typeKey);
+
+            if (typeValue.ValueKind == JsonValueKind.Object)
+            {
+                // Process nested object with the key as @type
+                var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(typeValue.GetRawText()));
+                tempReader.Read();
+
+                // Parse the nested node with the specified @type
+                var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, subject);
+                EmitQuad(handler, subject, predicate, nestedId, graphIri);
+            }
+            else if (typeValue.ValueKind == JsonValueKind.Array)
+            {
+                // Multiple objects with same @type
+                foreach (var item in typeValue.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.Object)
+                    {
+                        var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(item.GetRawText()));
+                        tempReader.Read();
+                        var nestedId = ParseNodeWithType(ref tempReader, handler, expandedTypeIri, subject);
+                        EmitQuad(handler, subject, predicate, nestedId, graphIri);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parse a node with a pre-specified @type.
+    /// Used for @type container maps where the key provides the @type.
+    /// </summary>
+    private string ParseNodeWithType(ref Utf8JsonReader reader, QuadHandler handler, string? typeIri, string? parentNode)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+            return GenerateBlankNode();
+
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+
+        // Process @context if present
+        if (root.TryGetProperty("@context", out var contextElement))
+        {
+            ProcessContext(contextElement);
+        }
+
+        // Get @id for subject if present, otherwise generate blank node
+        string nodeId;
+        if (root.TryGetProperty("@id", out var idElement))
+        {
+            var objId = idElement.GetString();
+            nodeId = string.IsNullOrEmpty(objId) ? GenerateBlankNode() : ExpandIri(objId);
+        }
+        else
+        {
+            nodeId = GenerateBlankNode();
+        }
+
+        // Emit @type triple if typeIri is provided (not @none)
+        if (!string.IsNullOrEmpty(typeIri))
+        {
+            EmitQuad(handler, nodeId, RdfType, typeIri, _currentGraph);
+        }
+
+        // Process additional @type if present (in addition to the key-derived type)
+        if (root.TryGetProperty("@type", out var typeElement))
+        {
+            ProcessType(nodeId, typeElement, handler, _currentGraph);
+        }
+
+        // Process properties
+        foreach (var prop in root.EnumerateObject())
+        {
+            var propName = prop.Name;
+
+            // Skip keywords
+            if (propName.StartsWith('@'))
+                continue;
+
+            var propPredicate = ExpandTerm(propName);
+            if (string.IsNullOrEmpty(propPredicate))
+                continue;
+
+            ProcessProperty(nodeId, propPredicate, propName, prop.Value, handler, _currentGraph);
+        }
+
+        return nodeId;
     }
 
     /// <summary>
