@@ -804,18 +804,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
         else if (typeElement.ValueKind == JsonValueKind.Array)
         {
-            // Collect types with scoped contexts
-            var typesWithContexts = new List<(string term, string expandedIri)>();
+            // Collect types with scoped contexts AND save their context JSON
+            // IMPORTANT: We must save the JSON strings before applying any contexts because
+            // applying a context with `null` will clear _scopedContext, losing other type contexts
+            var typesWithContexts = new List<(string term, string expandedIri, string scopedJson)>();
             foreach (var t in typeElement.EnumerateArray())
             {
                 if (t.ValueKind == JsonValueKind.String)
                 {
                     var typeTerm = t.GetString() ?? "";
-                    if (_scopedContext.ContainsKey(typeTerm))
+                    if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
                     {
                         // Expand the type IRI for sorting
                         var expandedIri = ExpandTypeIri(typeTerm);
-                        typesWithContexts.Add((typeTerm, expandedIri));
+                        typesWithContexts.Add((typeTerm, expandedIri, scopedJson));
                     }
                 }
             }
@@ -823,14 +825,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             // Sort lexicographically by expanded IRI
             typesWithContexts.Sort((a, b) => string.Compare(a.expandedIri, b.expandedIri, StringComparison.Ordinal));
 
-            // Apply scoped contexts in sorted order
-            foreach (var (typeTerm, _) in typesWithContexts)
+            // Apply scoped contexts in sorted order using saved JSON
+            foreach (var (_, _, scopedJson) in typesWithContexts)
             {
-                if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
-                {
-                    using var doc = JsonDocument.Parse(scopedJson);
-                    ProcessContext(doc.RootElement);
-                }
+                using var doc = JsonDocument.Parse(scopedJson);
+                ProcessContext(doc.RootElement);
             }
         }
     }
