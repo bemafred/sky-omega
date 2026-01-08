@@ -753,9 +753,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 var vocabValue = value.GetString();
                 // @vocab can be a compact IRI like "ex:ns/" - expand it (e124)
+                // @vocab can also be a relative IRI like "/relative" - resolve against @base (e110)
                 if (!string.IsNullOrEmpty(vocabValue))
                 {
-                    _vocabIri = ExpandCompactIri(vocabValue);
+                    // First try expanding as compact IRI or term
+                    var expanded = ExpandCompactIri(vocabValue);
+                    // If not expanded and not absolute, resolve against @base
+                    if (expanded == vocabValue && !IsAbsoluteIri(vocabValue) && !string.IsNullOrEmpty(_baseIri))
+                    {
+                        _vocabIri = ResolveRelativeIri(_baseIri, vocabValue);
+                    }
+                    else
+                    {
+                        _vocabIri = expanded;
+                    }
                 }
                 else
                 {
