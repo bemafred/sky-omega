@@ -60,6 +60,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
     private readonly HashSet<string> _typeAliases; // terms aliased to @type
     private readonly HashSet<string> _idAliases; // terms aliased to @id
+    private readonly HashSet<string> _graphAliases; // terms aliased to @graph
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
 
     // Base IRI for relative IRI resolution
@@ -111,6 +112,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeAliases = new HashSet<string>(StringComparer.Ordinal);
         _idAliases = new HashSet<string>(StringComparer.Ordinal);
+        _graphAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
     }
 
@@ -245,12 +247,26 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
-        // Check for @graph
-        if (root.TryGetProperty("@graph", out var graphElement))
+        // Check for @graph or @graph alias
+        JsonElement graphElement = default;
+        if (root.TryGetProperty("@graph", out graphElement))
         {
             hasGraphKeyword = true;
             // Subject becomes the graph IRI if present
             graphIri = subject;
+        }
+        else
+        {
+            // Check for @graph aliases
+            foreach (var alias in _graphAliases)
+            {
+                if (root.TryGetProperty(alias, out graphElement))
+                {
+                    hasGraphKeyword = true;
+                    graphIri = subject;
+                    break;
+                }
+            }
         }
 
         // Generate blank node if no @id
@@ -300,6 +316,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             // Skip @id aliases (already processed above)
             if (_idAliases.Contains(propName))
+                continue;
+
+            // Skip @graph aliases (already processed above)
+            if (_graphAliases.Contains(propName))
                 continue;
 
             // Check if this is a reverse property (term definition has @reverse but no @id)
@@ -378,6 +398,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _scopedContext.Clear();
             _typeAliases.Clear();
             _idAliases.Clear();
+            _graphAliases.Clear();
             _nullTerms.Clear();
             _vocabIri = null;
             _defaultLanguage = null;
@@ -430,6 +451,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 else if (mappedValue == "@id" || _idAliases.Contains(mappedValue))
                 {
                     _idAliases.Add(term);
+                }
+                else if (mappedValue == "@graph" || _graphAliases.Contains(mappedValue))
+                {
+                    _graphAliases.Add(term);
                 }
                 else
                 {
@@ -664,6 +689,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedScopedContext = null;
         HashSet<string>? savedTypeAliases = null;
         HashSet<string>? savedIdAliases = null;
+        HashSet<string>? savedGraphAliases = null;
         HashSet<string>? savedNullTerms = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
@@ -679,6 +705,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
             savedTypeAliases = new HashSet<string>(_typeAliases);
             savedIdAliases = new HashSet<string>(_idAliases);
+            savedGraphAliases = new HashSet<string>(_graphAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
@@ -746,6 +773,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _idAliases.Clear();
                 foreach (var alias in savedIdAliases!) _idAliases.Add(alias);
+
+                _graphAliases.Clear();
+                foreach (var alias in savedGraphAliases!) _graphAliases.Add(alias);
 
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
@@ -961,28 +991,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 var strVal = value.GetString() ?? "";
                 if (coercedType == "@id")
                 {
-                    // IRI reference - type coercion allows term expansion
-                    var iri = ExpandIri(strVal, expandTerms: true);
+                    // IRI reference - compact IRIs and relative IRIs, NOT terms
+                    // See test e056: "Use terms with @type: @vocab but not with @type: @id"
+                    var iri = ExpandIri(strVal, expandTerms: false);
                     EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
                 else if (coercedType == "@vocab")
                 {
-                    // Vocabulary IRI - resolve using @vocab
-                    string iri;
-                    if (!string.IsNullOrEmpty(_vocabIri) && !IsAbsoluteIri(strVal) && !strVal.StartsWith("_:"))
-                    {
-                        iri = FormatIri(_vocabIri + strVal);
-                    }
-                    else
-                    {
-                        iri = ExpandIri(strVal);
-                    }
+                    // Vocabulary IRI - first try as term, then use @vocab
+                    var iri = ExpandIri(strVal, expandTerms: true);
                     EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
                 else if (!string.IsNullOrEmpty(coercedType))
                 {
-                    // Typed literal
-                    var datatypeIri = ExpandIri(coercedType);
+                    // Typed literal - terms like "dateTime" should be expanded using @vocab
+                    var datatypeIri = ExpandIri(coercedType, expandTerms: true);
                     var literal = $"\"{EscapeString(strVal)}\"^^{datatypeIri}";
                     EmitQuad(handler, subject, predicate, literal, graphIri);
                 }
@@ -1007,13 +1030,29 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             case JsonValueKind.True:
-                EmitQuad(handler, subject, predicate,
-                    "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>", graphIri);
+                if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab")
+                {
+                    var datatypeIri = ExpandIri(coercedType, expandTerms: true);
+                    EmitQuad(handler, subject, predicate, $"\"true\"^^{datatypeIri}", graphIri);
+                }
+                else
+                {
+                    EmitQuad(handler, subject, predicate,
+                        "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>", graphIri);
+                }
                 break;
 
             case JsonValueKind.False:
-                EmitQuad(handler, subject, predicate,
-                    "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>", graphIri);
+                if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab")
+                {
+                    var datatypeIri = ExpandIri(coercedType, expandTerms: true);
+                    EmitQuad(handler, subject, predicate, $"\"false\"^^{datatypeIri}", graphIri);
+                }
+                else
+                {
+                    EmitQuad(handler, subject, predicate,
+                        "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>", graphIri);
+                }
                 break;
 
             case JsonValueKind.Object:
@@ -1125,10 +1164,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return $"\"{EscapeString(valueStr)}\"@{lang}";
         }
 
-        // Check for @type (datatype)
+        // Check for @type (datatype) - terms should be expanded for datatypes
         if (obj.TryGetProperty("@type", out var typeProp))
         {
-            var datatype = ExpandIri(typeProp.GetString() ?? "");
+            var datatype = ExpandIri(typeProp.GetString() ?? "", expandTerms: true);
             return $"\"{EscapeString(valueStr)}\"^^{datatype}";
         }
 
@@ -1141,6 +1180,27 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     {
         var rawText = value.GetRawText();
         var isDouble = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
+
+        // Check if custom datatype is specified (not @id, @vocab, or standard xsd types)
+        if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab" &&
+            !coercedType.Contains("XMLSchema#double") && !coercedType.Contains("XMLSchema#integer"))
+        {
+            // Custom datatype - use canonical double form for non-integers
+            var customDatatype = ExpandIri(coercedType, expandTerms: true);
+            string customLexical;
+            if (isDouble && double.TryParse(rawText, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var customDoubleValue))
+            {
+                var canonicalForm = customDoubleValue.ToString("E15", System.Globalization.CultureInfo.InvariantCulture);
+                customLexical = NormalizeDoubleCanonical(canonicalForm);
+            }
+            else
+            {
+                customLexical = rawText;
+            }
+            EmitQuad(handler, subject, predicate, $"\"{customLexical}\"^^{customDatatype}", graphIri);
+            return;
+        }
 
         // Check if type coercion specifies xsd:double
         var forceDouble = coercedType != null &&
@@ -1347,15 +1407,24 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return value;
         }
 
-        // Term expansion only applies for type-coerced @id values, not @id keyword
-        // See test e048: "Terms are ignored in @id"
-        if (expandTerms && _context.TryGetValue(value, out var expanded))
+        // Term expansion applies for type-coerced @id values and datatypes
+        // See test e048: "Terms are ignored in @id" (expandTerms=false for @id keyword)
+        if (expandTerms)
         {
-            // The expanded value might itself need resolution
-            if (IsAbsoluteIri(expanded))
-                return FormatIri(expanded);
-            // Recursively expand
-            return ExpandIri(expanded, true);
+            if (_context.TryGetValue(value, out var expanded))
+            {
+                // The expanded value might itself need resolution
+                if (IsAbsoluteIri(expanded))
+                    return FormatIri(expanded);
+                // Recursively expand
+                return ExpandIri(expanded, true);
+            }
+            // If term not in context but @vocab is set, apply @vocab
+            // This handles datatypes like "dateTime" -> vocab#dateTime
+            if (!string.IsNullOrEmpty(_vocabIri) && !value.Contains(':'))
+            {
+                return FormatIri(_vocabIri + value);
+            }
         }
 
         // Already an absolute IRI (has scheme like http:, urn:, etc.)
