@@ -91,10 +91,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private string? _savedVocabForNested;
     private string? _savedBaseForNested;
 
-    // Track what terms/type-coercions were added/modified by type-scoped context (to revert for nested nodes)
+    // Track what terms/type-coercions/containers were added/modified by type-scoped context (to revert for nested nodes)
     // Value is original IRI (null if term was new). Only type-scoped changes should be reverted.
     private Dictionary<string, string?>? _typeScopedTermChanges;     // Terms added/modified by type-scoped context
     private Dictionary<string, string?>? _typeScopedCoercionChanges; // Coercions added/modified by type-scoped
+    private Dictionary<string, bool?>? _typeScopedContainerTypeChanges;   // @container: @type changes
+    private Dictionary<string, bool?>? _typeScopedContainerIndexChanges;  // @container: @index changes
+    private Dictionary<string, bool?>? _typeScopedContainerListChanges;   // @container: @list changes
+    private Dictionary<string, bool?>? _typeScopedContainerLangChanges;   // @container: @language changes
+    private Dictionary<string, bool?>? _typeScopedContainerGraphChanges;  // @container: @graph changes
+    private Dictionary<string, bool?>? _typeScopedContainerIdChanges;     // @container: @id changes
     private bool _typeScopedPropagate;                               // If true, type-scoped context DOES propagate
 
     private const int DefaultBufferSize = 65536; // 64KB
@@ -252,9 +258,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 savedVocabForNested = _vocabIri;
                 savedBaseForNested = _baseIri;
 
-                // Track terms and coercions BEFORE type-scoped context
+                // Track terms, coercions, and containers BEFORE type-scoped context
                 var termsBefore = new Dictionary<string, string>(_context);
                 var coercionsBefore = new Dictionary<string, string>(_typeCoercion);
+                var containerTypeBefore = new Dictionary<string, bool>(_containerType);
+                var containerIndexBefore = new Dictionary<string, bool>(_containerIndex);
+                var containerListBefore = new Dictionary<string, bool>(_containerList);
+                var containerLangBefore = new Dictionary<string, bool>(_containerLanguage);
+                var containerGraphBefore = new Dictionary<string, bool>(_containerGraph);
+                var containerIdBefore = new Dictionary<string, bool>(_containerId);
 
                 // Reset @propagate flag before applying type-scoped contexts
                 // It will be set to true if any type-scoped context has @propagate: true
@@ -292,6 +304,58 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         typeScopedCoercionChanges[kv.Key] = oldValue;
                     }
                 }
+
+                // Track container changes (null = newly added, true/false = original value)
+                Dictionary<string, bool?>? typeScopedContainerTypeChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerIndexChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerListChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerLangChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerGraphChanges = null;
+                Dictionary<string, bool?>? typeScopedContainerIdChanges = null;
+
+                // Helper to track container changes
+                void TrackContainerChanges(Dictionary<string, bool> before, Dictionary<string, bool> after, ref Dictionary<string, bool?>? changes)
+                {
+                    foreach (var kv in after)
+                    {
+                        if (!before.TryGetValue(kv.Key, out var oldValue))
+                        {
+                            // New container - store null (meaning remove on revert)
+                            changes ??= new Dictionary<string, bool?>();
+                            changes[kv.Key] = null;
+                        }
+                        else if (oldValue != kv.Value)
+                        {
+                            // Modified container
+                            changes ??= new Dictionary<string, bool?>();
+                            changes[kv.Key] = oldValue;
+                        }
+                    }
+                    // Also track removed containers
+                    foreach (var kv in before)
+                    {
+                        if (!after.ContainsKey(kv.Key))
+                        {
+                            // Container was removed - store original value
+                            changes ??= new Dictionary<string, bool?>();
+                            changes[kv.Key] = kv.Value;
+                        }
+                    }
+                }
+
+                TrackContainerChanges(containerTypeBefore, _containerType, ref typeScopedContainerTypeChanges);
+                TrackContainerChanges(containerIndexBefore, _containerIndex, ref typeScopedContainerIndexChanges);
+                TrackContainerChanges(containerListBefore, _containerList, ref typeScopedContainerListChanges);
+                TrackContainerChanges(containerLangBefore, _containerLanguage, ref typeScopedContainerLangChanges);
+                TrackContainerChanges(containerGraphBefore, _containerGraph, ref typeScopedContainerGraphChanges);
+                TrackContainerChanges(containerIdBefore, _containerId, ref typeScopedContainerIdChanges);
+
+                _typeScopedContainerTypeChanges = typeScopedContainerTypeChanges;
+                _typeScopedContainerIndexChanges = typeScopedContainerIndexChanges;
+                _typeScopedContainerListChanges = typeScopedContainerListChanges;
+                _typeScopedContainerLangChanges = typeScopedContainerLangChanges;
+                _typeScopedContainerGraphChanges = typeScopedContainerGraphChanges;
+                _typeScopedContainerIdChanges = typeScopedContainerIdChanges;
             }
             else
             {
@@ -383,6 +447,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var previousTypeScopedTermChanges = _typeScopedTermChanges;
         var previousTypeScopedCoercionChanges = _typeScopedCoercionChanges;
         var previousTypeScopedPropagate = _typeScopedPropagate;
+        var previousTypeScopedContainerTypeChanges = _typeScopedContainerTypeChanges;
+        var previousTypeScopedContainerIndexChanges = _typeScopedContainerIndexChanges;
+        var previousTypeScopedContainerListChanges = _typeScopedContainerListChanges;
+        var previousTypeScopedContainerLangChanges = _typeScopedContainerLangChanges;
+        var previousTypeScopedContainerGraphChanges = _typeScopedContainerGraphChanges;
+        var previousTypeScopedContainerIdChanges = _typeScopedContainerIdChanges;
         if (hasTypeScopedContext)
         {
             _savedContextForNested = savedContextForNested;
@@ -391,6 +461,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _typeScopedTermChanges = typeScopedTermChanges;
             _typeScopedCoercionChanges = typeScopedCoercionChanges;
             // Note: _typeScopedPropagate was already set during ApplyTypeScopedContexts
+            // Container changes are already assigned to fields during tracking above
         }
 
         // Process @reverse keyword - contains reverse properties
@@ -512,6 +583,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _typeScopedTermChanges = previousTypeScopedTermChanges;
         _typeScopedCoercionChanges = previousTypeScopedCoercionChanges;
         _typeScopedPropagate = previousTypeScopedPropagate;
+        _typeScopedContainerTypeChanges = previousTypeScopedContainerTypeChanges;
+        _typeScopedContainerIndexChanges = previousTypeScopedContainerIndexChanges;
+        _typeScopedContainerListChanges = previousTypeScopedContainerListChanges;
+        _typeScopedContainerLangChanges = previousTypeScopedContainerLangChanges;
+        _typeScopedContainerGraphChanges = previousTypeScopedContainerGraphChanges;
+        _typeScopedContainerIdChanges = previousTypeScopedContainerIdChanges;
 
         return subject;
     }
@@ -758,6 +835,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 if (value.TryGetProperty("@container", out var containerProp))
                 {
+                    // Clear all existing container flags for this term before setting new ones
+                    // This ensures that redefining @container replaces the old container type
+                    _containerList.Remove(term);
+                    _containerLanguage.Remove(term);
+                    _containerIndex.Remove(term);
+                    _containerGraph.Remove(term);
+                    _containerId.Remove(term);
+                    _containerType.Remove(term);
+
                     // @container can be a string or an array in JSON-LD 1.1
                     void ProcessContainerValue(string? containerVal)
                     {
@@ -1006,7 +1092,6 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var isGraphContainer = _containerGraph.TryGetValue(term, out var isGraph) && isGraph;
         var isIdContainer = _containerId.TryGetValue(term, out var isId) && isId;
         var isTypeContainer = _containerType.TryGetValue(term, out var isType) && isType;
-
         // Check if this is a reverse property
         if (_reverseProperty.TryGetValue(term, out var reversePredicate))
         {
@@ -1628,6 +1713,47 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
+        // Revert type-scoped container changes
+        Dictionary<string, bool>? savedContainerType = null;
+        Dictionary<string, bool>? savedContainerIndex = null;
+        Dictionary<string, bool>? savedContainerList = null;
+        Dictionary<string, bool>? savedContainerLang = null;
+        Dictionary<string, bool>? savedContainerGraph = null;
+        Dictionary<string, bool>? savedContainerId = null;
+
+        void RevertContainerChanges(Dictionary<string, bool?>? changes, Dictionary<string, bool> container, ref Dictionary<string, bool>? saved)
+        {
+            if (changes != null && changes.Count > 0)
+            {
+                saved = new Dictionary<string, bool>();
+                foreach (var kv in changes)
+                {
+                    if (container.TryGetValue(kv.Key, out var currentValue))
+                    {
+                        saved[kv.Key] = currentValue;
+                    }
+                    if (kv.Value == null)
+                    {
+                        container.Remove(kv.Key);
+                    }
+                    else
+                    {
+                        container[kv.Key] = kv.Value.Value;
+                    }
+                }
+            }
+        }
+
+        if (!_typeScopedPropagate)
+        {
+            RevertContainerChanges(_typeScopedContainerTypeChanges, _containerType, ref savedContainerType);
+            RevertContainerChanges(_typeScopedContainerIndexChanges, _containerIndex, ref savedContainerIndex);
+            RevertContainerChanges(_typeScopedContainerListChanges, _containerList, ref savedContainerList);
+            RevertContainerChanges(_typeScopedContainerLangChanges, _containerLanguage, ref savedContainerLang);
+            RevertContainerChanges(_typeScopedContainerGraphChanges, _containerGraph, ref savedContainerGraph);
+            RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
+        }
+
         // Restore @vocab/@base to pre-type-scoped state
         if (!_typeScopedPropagate && _savedContextForNested != null)
         {
@@ -1734,6 +1860,25 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _context[kv.Key] = kv.Value;
             }
         }
+
+        // Restore container values
+        void RestoreContainer(Dictionary<string, bool>? saved, Dictionary<string, bool> container)
+        {
+            if (saved != null)
+            {
+                foreach (var kv in saved)
+                {
+                    container[kv.Key] = kv.Value;
+                }
+            }
+        }
+        RestoreContainer(savedContainerType, _containerType);
+        RestoreContainer(savedContainerIndex, _containerIndex);
+        RestoreContainer(savedContainerList, _containerList);
+        RestoreContainer(savedContainerLang, _containerLanguage);
+        RestoreContainer(savedContainerGraph, _containerGraph);
+        RestoreContainer(savedContainerId, _containerId);
+
         _vocabIri = savedVocab;
         _baseIri = savedBase;
 
@@ -2137,6 +2282,49 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
+        // Revert type-scoped container changes
+        Dictionary<string, bool>? savedContainerType = null;
+        Dictionary<string, bool>? savedContainerIndex = null;
+        Dictionary<string, bool>? savedContainerList = null;
+        Dictionary<string, bool>? savedContainerLang = null;
+        Dictionary<string, bool>? savedContainerGraph = null;
+        Dictionary<string, bool>? savedContainerId = null;
+
+        void RevertContainerChanges(Dictionary<string, bool?>? changes, Dictionary<string, bool> container, ref Dictionary<string, bool>? saved)
+        {
+            if (changes != null && changes.Count > 0)
+            {
+                saved = new Dictionary<string, bool>();
+                foreach (var kv in changes)
+                {
+                    if (container.TryGetValue(kv.Key, out var currentValue))
+                    {
+                        saved[kv.Key] = currentValue;
+                    }
+                    if (kv.Value == null)
+                    {
+                        // Container was new - remove it
+                        container.Remove(kv.Key);
+                    }
+                    else
+                    {
+                        // Container was modified or removed - restore original
+                        container[kv.Key] = kv.Value.Value;
+                    }
+                }
+            }
+        }
+
+        if (!_typeScopedPropagate)
+        {
+            RevertContainerChanges(_typeScopedContainerTypeChanges, _containerType, ref savedContainerType);
+            RevertContainerChanges(_typeScopedContainerIndexChanges, _containerIndex, ref savedContainerIndex);
+            RevertContainerChanges(_typeScopedContainerListChanges, _containerList, ref savedContainerList);
+            RevertContainerChanges(_typeScopedContainerLangChanges, _containerLanguage, ref savedContainerLang);
+            RevertContainerChanges(_typeScopedContainerGraphChanges, _containerGraph, ref savedContainerGraph);
+            RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
+        }
+
         // Save @vocab and @base before processing nested node
         // This handles both type-scoped context restoration AND nested object inline @context
         var savedVocab = _vocabIri;
@@ -2171,6 +2359,25 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _context[kv.Key] = kv.Value;
             }
         }
+
+        // Restore container values
+        void RestoreContainer(Dictionary<string, bool>? saved, Dictionary<string, bool> container)
+        {
+            if (saved != null)
+            {
+                foreach (var kv in saved)
+                {
+                    container[kv.Key] = kv.Value;
+                }
+            }
+        }
+        RestoreContainer(savedContainerType, _containerType);
+        RestoreContainer(savedContainerIndex, _containerIndex);
+        RestoreContainer(savedContainerList, _containerList);
+        RestoreContainer(savedContainerLang, _containerLanguage);
+        RestoreContainer(savedContainerGraph, _containerGraph);
+        RestoreContainer(savedContainerId, _containerId);
+
         _vocabIri = savedVocab;
         _baseIri = savedBase;
     }
