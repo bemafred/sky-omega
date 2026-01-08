@@ -751,7 +751,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else if (term == "@vocab")
             {
-                _vocabIri = value.GetString();
+                var vocabValue = value.GetString();
+                // @vocab can be a compact IRI like "ex:ns/" - expand it (e124)
+                if (!string.IsNullOrEmpty(vocabValue))
+                {
+                    _vocabIri = ExpandCompactIri(vocabValue);
+                }
+                else
+                {
+                    _vocabIri = vocabValue;
+                }
             }
             else if (term == "@language")
             {
@@ -3213,6 +3222,37 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Expand a compact IRI (prefix:localName) or term using the context.
+    /// Used for @vocab values which can be compact IRIs (e124) or terms (e125).
+    /// </summary>
+    private string ExpandCompactIri(string value)
+    {
+        // First, check if value is a term that resolves to an IRI
+        if (_context.TryGetValue(value, out var termIri))
+        {
+            return termIri;
+        }
+
+        // Check for compact IRI (prefix:localName)
+        var colonIdx = value.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            var prefix = value.Substring(0, colonIdx);
+            var localName = value.Substring(colonIdx + 1);
+
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // Also, "_" as a prefix would conflict with blank nodes
+            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
+            {
+                return prefixIri + localName;
+            }
+        }
+
+        // Not a compact IRI or prefix not defined - return as-is
+        return value;
     }
 
     /// <summary>
