@@ -2125,7 +2125,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 var itemValue = prop.Value;
 
                 // For @id container, the key becomes the graph @id
-                string? graphIdFromKey = isIdContainer ? ExpandIri(key, expandTerms: false) : null;
+                // @none (or alias) means default graph - don't expand it (m015, m016)
+                string? graphIdFromKey = null;
+                if (isIdContainer)
+                {
+                    if (key == "@none" || _noneAliases.Contains(key))
+                    {
+                        // @none means default graph - graphIdFromKey stays null
+                        graphIdFromKey = null;
+                    }
+                    else
+                    {
+                        graphIdFromKey = ExpandIri(key, expandTerms: false);
+                    }
+                }
 
                 if (itemValue.ValueKind == JsonValueKind.Array)
                 {
