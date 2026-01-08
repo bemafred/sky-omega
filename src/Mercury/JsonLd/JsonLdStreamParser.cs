@@ -65,6 +65,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _idAliases; // terms aliased to @id
     private readonly HashSet<string> _graphAliases; // terms aliased to @graph
     private readonly HashSet<string> _includedAliases; // terms aliased to @included
+    private readonly HashSet<string> _nestAliases; // terms aliased to @nest
+    private readonly HashSet<string> _noneAliases; // terms aliased to @none
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
 
     // Base IRI for relative IRI resolution
@@ -121,6 +123,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _idAliases = new HashSet<string>(StringComparer.Ordinal);
         _graphAliases = new HashSet<string>(StringComparer.Ordinal);
         _includedAliases = new HashSet<string>(StringComparer.Ordinal);
+        _nestAliases = new HashSet<string>(StringComparer.Ordinal);
+        _noneAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
     }
 
@@ -216,11 +220,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         string? savedBaseForNested = null;
         bool hasTypeScopedContext = false;
         JsonElement typeElement = default;
+        List<string>? expandedTypeIris = null; // Type IRIs expanded BEFORE applying type-scoped context
 
         // Check for @type and apply type-scoped context BEFORE expanding @id
-        // (type-scoped context may change @base which affects @id resolution)
+        // IMPORTANT: Expand type IRIs BEFORE applying type-scoped context
+        // (type-scoped context changes @vocab which should NOT affect the @type IRI itself)
         if (root.TryGetProperty("@type", out typeElement))
         {
+            // Expand type IRIs using current context (BEFORE type-scoped context)
+            expandedTypeIris = ExpandTypeIris(typeElement);
+
             // Check if any type has a scoped context BEFORE applying
             hasTypeScopedContext = HasTypeScopedContext(typeElement);
 
@@ -232,7 +241,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 savedBaseForNested = _baseIri;
             }
 
-            // Apply type-scoped contexts (may change @base)
+            // Apply type-scoped contexts (may change @base/@vocab)
             ApplyTypeScopedContexts(typeElement);
         }
 
@@ -303,9 +312,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Emit type triple (after we have the subject)
-        if (typeElement.ValueKind != JsonValueKind.Undefined)
+        // Use pre-expanded type IRIs (expanded BEFORE type-scoped context was applied)
+        if (expandedTypeIris != null)
         {
-            ProcessType(subject, typeElement, handler, _currentGraph);
+            foreach (var typeIri in expandedTypeIris)
+            {
+                EmitQuad(handler, subject, RdfType, typeIri, _currentGraph);
+            }
         }
 
         // Store saved state for nested node restoration (only if type-scoped context was applied)
@@ -323,6 +336,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         if (root.TryGetProperty("@reverse", out var reverseElement))
         {
             ProcessReverseKeyword(subject, reverseElement, handler, _currentGraph);
+        }
+
+        // Process @nest keyword and aliases - contains properties to be "un-nested" onto this node
+        if (root.TryGetProperty("@nest", out var nestElement))
+        {
+            ProcessNestKeyword(subject, nestElement, handler, _currentGraph);
+        }
+        // Also process @nest aliases
+        foreach (var alias in _nestAliases)
+        {
+            if (root.TryGetProperty(alias, out var aliasNestElement))
+            {
+                ProcessNestKeyword(subject, aliasNestElement, handler, _currentGraph);
+            }
         }
 
         // Process other properties FIRST (before @graph content)
@@ -354,6 +381,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             // Skip @included aliases (processed below)
             if (_includedAliases.Contains(propName))
+                continue;
+
+            // Skip @nest aliases (already processed above)
+            if (_nestAliases.Contains(propName))
                 continue;
 
             // Check if this is a reverse property (term definition has @reverse but no @id)
@@ -528,7 +559,30 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
             if (term == "@base")
             {
-                _baseIri = value.GetString();
+                if (value.ValueKind == JsonValueKind.Null)
+                {
+                    // @base: null clears the base IRI
+                    _baseIri = null;
+                }
+                else
+                {
+                    var newBase = value.GetString();
+                    if (string.IsNullOrEmpty(newBase))
+                    {
+                        // @base: "" means keep current base (no change)
+                        // This is important when an empty @base is used with a base option
+                    }
+                    else if (!string.IsNullOrEmpty(_baseIri) && !IsAbsoluteIri(newBase))
+                    {
+                        // Relative @base is resolved against current base
+                        _baseIri = ResolveRelativeIri(_baseIri, newBase);
+                    }
+                    else
+                    {
+                        // Absolute @base or no current base
+                        _baseIri = newBase;
+                    }
+                }
             }
             else if (term == "@vocab")
             {
@@ -562,6 +616,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 else if (mappedValue == "@included" || _includedAliases.Contains(mappedValue))
                 {
                     _includedAliases.Add(term);
+                }
+                else if (mappedValue == "@nest" || _nestAliases.Contains(mappedValue))
+                {
+                    _nestAliases.Add(term);
+                }
+                else if (mappedValue == "@none" || _noneAliases.Contains(mappedValue))
+                {
+                    _noneAliases.Add(term);
                 }
                 else
                 {
@@ -691,7 +753,35 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
+    /// Expand type IRIs from @type element. Called BEFORE type-scoped context is applied.
+    /// </summary>
+    private List<string> ExpandTypeIris(JsonElement typeElement)
+    {
+        var result = new List<string>();
+
+        if (typeElement.ValueKind == JsonValueKind.String)
+        {
+            var typeIri = ExpandTypeIri(typeElement.GetString() ?? "");
+            result.Add(typeIri);
+        }
+        else if (typeElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var t in typeElement.EnumerateArray())
+            {
+                if (t.ValueKind == JsonValueKind.String)
+                {
+                    var typeIri = ExpandTypeIri(t.GetString() ?? "");
+                    result.Add(typeIri);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Apply type-scoped contexts from @type values.
+    /// Per JSON-LD spec, types are processed in lexicographical order of expanded IRIs.
     /// </summary>
     private void ApplyTypeScopedContexts(JsonElement typeElement)
     {
@@ -706,16 +796,32 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
         else if (typeElement.ValueKind == JsonValueKind.Array)
         {
+            // Collect types with scoped contexts
+            var typesWithContexts = new List<(string term, string expandedIri)>();
             foreach (var t in typeElement.EnumerateArray())
             {
                 if (t.ValueKind == JsonValueKind.String)
                 {
                     var typeTerm = t.GetString() ?? "";
-                    if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
+                    if (_scopedContext.ContainsKey(typeTerm))
                     {
-                        using var doc = JsonDocument.Parse(scopedJson);
-                        ProcessContext(doc.RootElement);
+                        // Expand the type IRI for sorting
+                        var expandedIri = ExpandTypeIri(typeTerm);
+                        typesWithContexts.Add((typeTerm, expandedIri));
                     }
+                }
+            }
+
+            // Sort lexicographically by expanded IRI
+            typesWithContexts.Sort((a, b) => string.Compare(a.expandedIri, b.expandedIri, StringComparison.Ordinal));
+
+            // Apply scoped contexts in sorted order
+            foreach (var (typeTerm, _) in typesWithContexts)
+            {
+                if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
+                {
+                    using var doc = JsonDocument.Parse(scopedJson);
+                    ProcessContext(doc.RootElement);
                 }
             }
         }
@@ -763,31 +869,25 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return ExpandTypeIri(expanded);
         }
 
-        // Already an absolute IRI
-        if (IsAbsoluteIri(value))
-        {
-            // Check if the "scheme" part is a defined prefix in context
-            var colonIndex = value.IndexOf(':');
-            var prefix = value.Substring(0, colonIndex);
-            if (_context.TryGetValue(prefix, out var prefixIri))
-            {
-                var localName = value.Substring(colonIndex + 1);
-                return FormatIri(prefixIri + localName);
-            }
-            return FormatIri(value);
-        }
-
-        // Check for compact IRI (prefix:localName)
+        // Check for compact IRI (prefix:localName) before checking absolute IRI
         var colonIdx = value.IndexOf(':');
         if (colonIdx > 0)
         {
             var prefix = value.Substring(0, colonIdx);
             var localName = value.Substring(colonIdx + 1);
 
-            if (_context.TryGetValue(prefix, out var prefixIri))
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // Also, "_" as a prefix would conflict with blank nodes
+            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
+        }
+
+        // Already an absolute IRI
+        if (IsAbsoluteIri(value))
+        {
+            return FormatIri(value);
         }
 
         // For types, resolve against @vocab (not @base)
@@ -852,6 +952,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         HashSet<string>? savedIdAliases = null;
         HashSet<string>? savedGraphAliases = null;
         HashSet<string>? savedIncludedAliases = null;
+        HashSet<string>? savedNestAliases = null;
+        HashSet<string>? savedNoneAliases = null;
         HashSet<string>? savedNullTerms = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
@@ -872,6 +974,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedIdAliases = new HashSet<string>(_idAliases);
             savedGraphAliases = new HashSet<string>(_graphAliases);
             savedIncludedAliases = new HashSet<string>(_includedAliases);
+            savedNestAliases = new HashSet<string>(_nestAliases);
+            savedNoneAliases = new HashSet<string>(_noneAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
@@ -939,7 +1043,23 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                // If @container: @list with a non-array value, wrap in list
+                if (isListContainer)
+                {
+                    // If the value is an object with @list, extract the inner list
+                    // Don't double-wrap explicit @list objects
+                    JsonElement listValue = value;
+                    if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("@list", out var innerList))
+                    {
+                        listValue = innerList;
+                    }
+                    var listHead = ProcessList(listValue, handler, graphIri, coercedType);
+                    EmitQuad(handler, subject, predicate, listHead, graphIri);
+                }
+                else
+                {
+                    ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                }
             }
         }
         finally
@@ -985,6 +1105,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _includedAliases.Clear();
                 foreach (var alias in savedIncludedAliases!) _includedAliases.Add(alias);
+
+                _nestAliases.Clear();
+                foreach (var alias in savedNestAliases!) _nestAliases.Add(alias);
+
+                _noneAliases.Clear();
+                foreach (var alias in savedNoneAliases!) _noneAliases.Add(alias);
 
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
@@ -1049,6 +1175,39 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             // Other types: generate blank node
             newSubject = GenerateBlankNode();
             EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
+        }
+    }
+
+    /// <summary>
+    /// Process the @nest keyword which contains properties to be "un-nested" onto the current node.
+    /// Properties inside @nest are processed as if they were direct properties of the containing node.
+    /// </summary>
+    private void ProcessNestKeyword(string currentNode, JsonElement nestElement, QuadHandler handler, string? graphIri)
+    {
+        if (nestElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in nestElement.EnumerateObject())
+            {
+                var propName = prop.Name;
+
+                // Skip JSON-LD keywords
+                if (propName.StartsWith('@'))
+                    continue;
+
+                var predicate = ExpandTerm(propName);
+                if (string.IsNullOrEmpty(predicate))
+                    continue;
+
+                ProcessProperty(currentNode, predicate, propName, prop.Value, handler, graphIri);
+            }
+        }
+        else if (nestElement.ValueKind == JsonValueKind.Array)
+        {
+            // @nest can be an array of objects
+            foreach (var item in nestElement.EnumerateArray())
+            {
+                ProcessNestKeyword(currentNode, item, handler, graphIri);
+            }
         }
     }
 
@@ -1169,10 +1328,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             var langTag = prop.Name;
             var langValue = prop.Value;
 
+            // @none means no language tag - output as plain literal
+            var isNone = langTag == "@none" || _noneAliases.Contains(langTag);
+
             if (langValue.ValueKind == JsonValueKind.String)
             {
                 var strVal = langValue.GetString() ?? "";
-                var literal = $"\"{EscapeString(strVal)}\"@{langTag}";
+                var literal = isNone
+                    ? $"\"{EscapeString(strVal)}\""
+                    : $"\"{EscapeString(strVal)}\"@{langTag}";
                 EmitQuad(handler, subject, predicate, literal, graphIri);
             }
             else if (langValue.ValueKind == JsonValueKind.Array)
@@ -1183,7 +1347,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     if (item.ValueKind == JsonValueKind.String)
                     {
                         var strVal = item.GetString() ?? "";
-                        var literal = $"\"{EscapeString(strVal)}\"@{langTag}";
+                        var literal = isNone
+                            ? $"\"{EscapeString(strVal)}\""
+                            : $"\"{EscapeString(strVal)}\"@{langTag}";
                         EmitQuad(handler, subject, predicate, literal, graphIri);
                     }
                 }
@@ -1409,6 +1575,43 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             var iri = ExpandIri(idProp.GetString() ?? "");
             EmitQuad(handler, subject, predicate, iri, graphIri);
+            return;
+        }
+
+        // Check for @graph (graph object)
+        if (value.TryGetProperty("@graph", out var graphProp))
+        {
+            // Create a blank node for the named graph
+            var graphNode = GenerateBlankNode();
+
+            // Emit the relationship from subject to the graph node
+            EmitQuad(handler, subject, predicate, graphNode, graphIri);
+
+            // Save current graph and set to the new named graph
+            var savedGraph = _currentGraph;
+            _currentGraph = graphNode;
+            try
+            {
+                // Process @graph contents into that named graph
+                if (graphProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in graphProp.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.Object)
+                        {
+                            ProcessGraphNode(item, handler);
+                        }
+                    }
+                }
+                else if (graphProp.ValueKind == JsonValueKind.Object)
+                {
+                    ProcessGraphNode(graphProp, handler);
+                }
+            }
+            finally
+            {
+                _currentGraph = savedGraph;
+            }
             return;
         }
 
@@ -1638,7 +1841,45 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ProcessList(JsonElement listElement, QuadHandler handler, string? graphIri, string? coercedType)
     {
-        if (listElement.ValueKind != JsonValueKind.Array || listElement.GetArrayLength() == 0)
+        // Handle non-array values by treating them as single-item arrays
+        if (listElement.ValueKind != JsonValueKind.Array)
+        {
+            // Null or @value:null produces empty list
+            if (listElement.ValueKind == JsonValueKind.Null)
+                return RdfNil;
+            if (listElement.ValueKind == JsonValueKind.Object &&
+                listElement.TryGetProperty("@value", out var valProp) &&
+                valProp.ValueKind == JsonValueKind.Null)
+                return RdfNil;
+
+            // Single non-null value - wrap in list
+            var singleNode = GenerateBlankNode();
+            ProcessValue(singleNode, RdfFirst, listElement, handler, graphIri, coercedType);
+            EmitQuad(handler, singleNode, RdfRest, RdfNil, graphIri);
+            return singleNode;
+        }
+
+        // Empty array
+        if (listElement.GetArrayLength() == 0)
+        {
+            return RdfNil;
+        }
+
+        // Filter out null values and @value:null objects
+        var validItems = new List<JsonElement>();
+        foreach (var item in listElement.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Null)
+                continue;
+            if (item.ValueKind == JsonValueKind.Object &&
+                item.TryGetProperty("@value", out var vp) &&
+                vp.ValueKind == JsonValueKind.Null)
+                continue;
+            validItems.Add(item);
+        }
+
+        // All items were null
+        if (validItems.Count == 0)
         {
             return RdfNil;
         }
@@ -1646,7 +1887,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         string? firstNode = null;
         string? previousNode = null;
 
-        foreach (var item in listElement.EnumerateArray())
+        foreach (var item in validItems)
         {
             var currentNode = GenerateBlankNode();
 
@@ -1693,33 +1934,26 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ExpandTermValue(string value)
     {
-        // Already an absolute IRI (has scheme like http:, urn:, etc.)
-        if (IsAbsoluteIri(value))
-        {
-            // But still check if the "scheme" part is a defined prefix in context
-            var colonIndex = value.IndexOf(':');
-            var prefix = value.Substring(0, colonIndex);
-            if (_context.TryGetValue(prefix, out var prefixIri))
-            {
-                // It's actually a compact IRI using a defined prefix
-                var localName = value.Substring(colonIndex + 1);
-                return FormatIri(prefixIri + localName);
-            }
-            // It's a real absolute IRI
-            return FormatIri(value);
-        }
-
-        // Check for compact IRI (prefix:localName) - prefix not a valid scheme
+        // Check for compact IRI (prefix:localName) before checking absolute IRI
         var colonIdx = value.IndexOf(':');
         if (colonIdx > 0)
         {
             var prefix = value.Substring(0, colonIdx);
             var localName = value.Substring(colonIdx + 1);
 
-            if (_context.TryGetValue(prefix, out var prefixIri))
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // e.g., "http://example.org" should NOT be expanded using "http" prefix
+            // Also, "_" as a prefix would conflict with blank nodes
+            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
+        }
+
+        // Already an absolute IRI (has scheme like http:, urn:, etc.)
+        if (IsAbsoluteIri(value))
+        {
+            return FormatIri(value);
         }
 
         // Use @vocab if defined
@@ -1781,33 +2015,29 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
         }
 
-        // Already an absolute IRI (has scheme like http:, urn:, etc.)
-        if (IsAbsoluteIri(value))
-        {
-            // Check if the "scheme" part is a defined prefix in context
-            var colonIndex = value.IndexOf(':');
-            var prefix = value.Substring(0, colonIndex);
-            if (_context.TryGetValue(prefix, out var prefixIri))
-            {
-                // It's actually a compact IRI using a defined prefix
-                var localName = value.Substring(colonIndex + 1);
-                return FormatIri(prefixIri + localName);
-            }
-            // It's a real absolute IRI
-            return FormatIri(value);
-        }
-
-        // Check for compact IRI (prefix:localName) - colon present but not a valid scheme
+        // Check for compact IRI (prefix:localName) before checking absolute IRI
+        // A compact IRI is "prefix:localName" where prefix is defined in context and
+        // the localName does NOT start with "//" (which would make it a scheme://authority pattern)
         var colonIdx = value.IndexOf(':');
         if (colonIdx > 0)
         {
             var prefix = value.Substring(0, colonIdx);
             var localName = value.Substring(colonIdx + 1);
 
-            if (_context.TryGetValue(prefix, out var prefixIri))
+            // Key check: if localName starts with "//", this is NOT a compact IRI
+            // e.g., "http://example.org" should NOT be expanded using "http" prefix
+            // Also, "_" as a prefix would conflict with blank nodes ("_:...")
+            if (!localName.StartsWith("//") && prefix != "_" && _context.TryGetValue(prefix, out var prefixIri))
             {
                 return FormatIri(prefixIri + localName);
             }
+        }
+
+        // Already an absolute IRI (has scheme like http:, urn:, etc.)
+        // At this point we've already checked for compact IRIs, so this is a real absolute IRI
+        if (IsAbsoluteIri(value))
+        {
+            return FormatIri(value);
         }
 
         // Resolve against @base
