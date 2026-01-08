@@ -1420,6 +1420,29 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return;
         }
 
+        // Check for @set - flatten the contents, ignore empty @set
+        if (value.TryGetProperty("@set", out var setProp))
+        {
+            // @set just contains values to be flattened - process each one
+            if (setProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in setProp.EnumerateArray())
+                {
+                    // Skip null values
+                    if (item.ValueKind == JsonValueKind.Null)
+                        continue;
+                    ProcessValue(subject, predicate, item, handler, graphIri, null, null);
+                }
+            }
+            else if (setProp.ValueKind != JsonValueKind.Null)
+            {
+                // Single value
+                ProcessValue(subject, predicate, setProp, handler, graphIri, null, null);
+            }
+            // Empty @set produces no output
+            return;
+        }
+
         // Nested object - create blank node
         // Restore context to pre-type-scoped state for nested nodes (type-scoped contexts don't propagate)
         Dictionary<string, string>? savedContext = null;
