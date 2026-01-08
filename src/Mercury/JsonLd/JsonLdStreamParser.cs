@@ -247,27 +247,33 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check for @type and apply type-scoped context BEFORE expanding @id
         // IMPORTANT: Expand type IRIs BEFORE applying type-scoped context
         // (type-scoped context changes @vocab which should NOT affect the @type IRI itself)
-        // Check both literal @type AND @type aliases
+        // Check both literal @type AND ALL @type aliases (multiple properties can alias to @type)
+        List<JsonElement> typeElements = new();
         bool foundType = root.TryGetProperty("@type", out typeElement);
-        if (!foundType)
+        if (foundType)
         {
-            // Check for @type aliases
-            foreach (var alias in _typeAliases)
+            typeElements.Add(typeElement);
+        }
+        // Also check ALL @type aliases - multiple properties can alias to @type (e.g., type1, type2)
+        foreach (var alias in _typeAliases)
+        {
+            if (root.TryGetProperty(alias, out var aliasElement))
             {
-                if (root.TryGetProperty(alias, out typeElement))
-                {
-                    foundType = true;
-                    break;
-                }
+                typeElements.Add(aliasElement);
+                foundType = true;
             }
         }
         if (foundType)
         {
             // Expand type IRIs using current context (BEFORE type-scoped context)
-            expandedTypeIris = ExpandTypeIris(typeElement);
-
-            // Check if any type has a scoped context BEFORE applying
-            hasTypeScopedContext = HasTypeScopedContext(typeElement);
+            // Combine types from all @type and alias properties
+            expandedTypeIris = new List<string>();
+            foreach (var te in typeElements)
+            {
+                expandedTypeIris.AddRange(ExpandTypeIris(te));
+            }
+            // Check if ANY type has a scoped context BEFORE applying
+            hasTypeScopedContext = typeElements.Any(te => HasTypeScopedContext(te));
 
             if (hasTypeScopedContext)
             {
@@ -290,8 +296,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 // It will be set to true if any type-scoped context has @propagate: true
                 _typeScopedPropagate = false;
 
-                // Apply type-scoped contexts (may change @base/@vocab and set @propagate)
-                ApplyTypeScopedContexts(typeElement);
+                // Apply type-scoped contexts from ALL type elements
+                foreach (var te in typeElements)
+                {
+                    ApplyTypeScopedContexts(te);
+                }
 
                 // Track what was ADDED or MODIFIED by type-scoped context
                 // Store the original value (null if term was added, original IRI if modified)
@@ -509,7 +518,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             var propName = prop.Name;
 
             // Skip JSON-LD keywords we've already processed
-            if (propName.StartsWith('@'))
+            // Per JSON-LD 1.1: Terms that look like keywords (@ followed by only lowercase a-z) are ignored
+            // But other @ patterns (like "@", "@foo.bar") can be term definitions (e119)
+            if (propName.StartsWith('@') && IsKeywordLike(propName))
                 continue;
 
             // Check for @type alias - already processed above (type emission and scoped context)
@@ -818,7 +829,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     }
                     else
                     {
-                        _context[term] = idProp.GetString() ?? "";
+                        var idValue = idProp.GetString() ?? "";
+                        // Per JSON-LD 1.1: @id values that look like keywords (e.g., "@ignoreMe")
+                        // should be ignored and the term should use @vocab instead (e120)
+                        if (idValue.StartsWith('@') && IsKeywordLike(idValue))
+                        {
+                            // Ignore keyword-like @id, term uses @vocab
+                            if (!string.IsNullOrEmpty(_vocabIri))
+                            {
+                                _context[term] = _vocabIri + term;
+                            }
+                        }
+                        else
+                        {
+                            _context[term] = idValue;
+                        }
                     }
                 }
                 else
@@ -1419,8 +1444,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 var propName = prop.Name;
 
-                // Skip JSON-LD keywords
-                if (propName.StartsWith('@'))
+                // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+                if (propName.StartsWith('@') && IsKeywordLike(propName))
                     continue;
 
                 var predicate = ExpandTerm(propName);
@@ -1854,8 +1879,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             var propName = prop.Name;
 
-            // Skip keywords
-            if (propName.StartsWith('@'))
+            // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+            if (propName.StartsWith('@') && IsKeywordLike(propName))
                 continue;
 
             var propPredicate = ExpandTerm(propName);
@@ -1958,8 +1983,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             var propName = prop.Name;
 
-            // Skip keywords
-            if (propName.StartsWith('@'))
+            // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+            if (propName.StartsWith('@') && IsKeywordLike(propName))
                 continue;
 
             var predicate = ExpandTerm(propName);
@@ -1996,12 +2021,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 {
                     foreach (var item in itemValue.EnumerateArray())
                     {
-                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey);
+                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true);
                     }
                 }
                 else
                 {
-                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey);
+                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true);
                 }
             }
         }
@@ -2021,7 +2046,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private void ProcessGraphContainerItem(string subject, string predicate, JsonElement value,
         QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
-        string? graphIdFromKey = null)
+        string? graphIdFromKey = null, bool isCompoundContainer = false)
     {
         if (value.ValueKind != JsonValueKind.Object)
         {
@@ -2046,18 +2071,19 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         bool hasInnerGraph = value.TryGetProperty("@graph", out var graphProp);
 
         // Generate blank nodes for the link object and graph
-        // When value has @graph, link object and graph ID should be DIFFERENT
-        // When value doesn't have @graph, they can be the same
+        // - For simple @graph container with inner @graph: use DIFFERENT blank nodes (e081)
+        // - For compound container [@graph, @index] with inner @graph: use SAME blank node (e084)
+        // - When value doesn't have @graph: always use same ID for both
         string linkObject = explicitId ?? GenerateBlankNode();
         string namedGraphIri;
-        if (hasInnerGraph)
+        if (hasInnerGraph && !isCompoundContainer)
         {
-            // Value already has @graph - use separate blank node for the graph
+            // Simple @graph container with inner @graph - use separate blank node
             namedGraphIri = GenerateBlankNode();
         }
         else
         {
-            // No inner @graph - use same ID for both
+            // Compound container with inner @graph OR no inner @graph - use same ID for both
             namedGraphIri = linkObject;
         }
 
@@ -2262,7 +2288,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check for @id only (IRI reference)
         if (value.TryGetProperty("@id", out var idProp) && value.EnumerateObject().Count() == 1)
         {
-            var iri = ExpandIri(idProp.GetString() ?? "");
+            var idValue = idProp.GetString() ?? "";
+            // Per JSON-LD 1.1: @id values that look like keywords (e.g., "@ignoreMe")
+            // should be ignored and no triple should be emitted (e122)
+            if (idValue.StartsWith('@') && IsKeywordLike(idValue))
+            {
+                return; // Ignore keyword-like @id value
+            }
+            var iri = ExpandIri(idValue);
             EmitQuad(handler, subject, predicate, iri, graphIri);
             return;
         }
@@ -3177,6 +3210,33 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 return false;
             }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Check if a string looks like a JSON-LD keyword.
+    /// Per JSON-LD 1.1, keywords match the regex @[A-Za-z]+ (@ followed by one or more ASCII letters).
+    /// Examples: @type, @id, @context, @ignoreMe are keyword-like.
+    /// Non-examples: @, @foo.bar, @123 are NOT keyword-like and can be term definitions.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsKeywordLike(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value[0] != '@')
+            return false;
+
+        // Must have at least one character after @
+        if (value.Length == 1)
+            return false;
+
+        // All characters after @ must be ASCII letters (A-Z or a-z)
+        for (int i = 1; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')))
+                return false;
         }
 
         return true;
