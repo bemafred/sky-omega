@@ -59,12 +59,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
     private readonly HashSet<string> _typeAliases; // terms aliased to @type
+    private readonly HashSet<string> _idAliases; // terms aliased to @id
+    private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
 
     // Base IRI for relative IRI resolution
     private string? _baseIri;
 
     // Vocabulary IRI for term expansion
     private string? _vocabIri;
+
+    // Default language from @language in context
+    private string? _defaultLanguage;
 
     // Blank node counter
     private int _blankNodeCounter;
@@ -105,6 +110,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeAliases = new HashSet<string>(StringComparer.Ordinal);
+        _idAliases = new HashSet<string>(StringComparer.Ordinal);
+        _nullTerms = new HashSet<string>(StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -220,9 +227,22 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Get @id for subject (AFTER type-scoped context is applied)
+        // Check both @id and any aliases for @id
         if (root.TryGetProperty("@id", out var idElement))
         {
             subject = ExpandIri(idElement.GetString() ?? "");
+        }
+        else
+        {
+            // Check for @id aliases
+            foreach (var alias in _idAliases)
+            {
+                if (root.TryGetProperty(alias, out var aliasIdElement))
+                {
+                    subject = ExpandIri(aliasIdElement.GetString() ?? "");
+                    break;
+                }
+            }
         }
 
         // Check for @graph
@@ -278,8 +298,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 continue;
             }
 
+            // Skip @id aliases (already processed above)
+            if (_idAliases.Contains(propName))
+                continue;
+
+            // Check if this is a reverse property (term definition has @reverse but no @id)
+            // Reverse properties may not expand to a predicate IRI, but ProcessProperty handles them
+            var isReverseProperty = _reverseProperty.ContainsKey(propName);
+
             var predicate = ExpandTerm(propName);
-            if (string.IsNullOrEmpty(predicate))
+            if (string.IsNullOrEmpty(predicate) && !isReverseProperty)
                 continue;
 
             ProcessProperty(subject, predicate, propName, prop.Value, handler, _currentGraph);
@@ -349,7 +377,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _reverseProperty.Clear();
             _scopedContext.Clear();
             _typeAliases.Clear();
+            _idAliases.Clear();
+            _nullTerms.Clear();
             _vocabIri = null;
+            _defaultLanguage = null;
             // Note: @base is NOT cleared by null context per JSON-LD spec
             return;
         }
@@ -379,13 +410,26 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 _vocabIri = value.GetString();
             }
+            else if (term == "@language")
+            {
+                _defaultLanguage = value.ValueKind == JsonValueKind.Null ? null : value.GetString();
+            }
+            else if (value.ValueKind == JsonValueKind.Null)
+            {
+                // Term mapped to null - decouple from @vocab
+                _nullTerms.Add(term);
+            }
             else if (value.ValueKind == JsonValueKind.String)
             {
                 var mappedValue = value.GetString() ?? "";
-                // Check for keyword alias
-                if (mappedValue == "@type")
+                // Check for keyword alias or transitive alias chain
+                if (mappedValue == "@type" || _typeAliases.Contains(mappedValue))
                 {
                     _typeAliases.Add(term);
+                }
+                else if (mappedValue == "@id" || _idAliases.Contains(mappedValue))
+                {
+                    _idAliases.Add(term);
                 }
                 else
                 {
@@ -398,7 +442,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 // Expanded term definition
                 if (value.TryGetProperty("@id", out var idProp))
                 {
-                    _context[term] = idProp.GetString() ?? "";
+                    if (idProp.ValueKind == JsonValueKind.Null)
+                    {
+                        // @id: null - decouple term from @vocab
+                        _nullTerms.Add(term);
+                    }
+                    else
+                    {
+                        _context[term] = idProp.GetString() ?? "";
+                    }
                 }
 
                 // Handle @reverse - the term maps to a reverse property
@@ -611,8 +663,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, string>? savedReverseProperty = null;
         Dictionary<string, string>? savedScopedContext = null;
         HashSet<string>? savedTypeAliases = null;
+        HashSet<string>? savedIdAliases = null;
+        HashSet<string>? savedNullTerms = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
+        string? savedDefaultLanguage = null;
         if (_scopedContext.TryGetValue(term, out var scopedContextJson))
         {
             // Save current context state (all fields that ProcessContext can modify)
@@ -623,8 +678,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
             savedTypeAliases = new HashSet<string>(_typeAliases);
+            savedIdAliases = new HashSet<string>(_idAliases);
+            savedNullTerms = new HashSet<string>(_nullTerms);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
+            savedDefaultLanguage = _defaultLanguage;
 
             // Apply the scoped context
             using var scopedDoc = JsonDocument.Parse(scopedContextJson);
@@ -686,8 +744,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _typeAliases.Clear();
                 foreach (var alias in savedTypeAliases!) _typeAliases.Add(alias);
 
+                _idAliases.Clear();
+                foreach (var alias in savedIdAliases!) _idAliases.Add(alias);
+
+                _nullTerms.Clear();
+                foreach (var t in savedNullTerms!) _nullTerms.Add(t);
+
                 _vocabIri = savedVocabIri;
                 _baseIri = savedBaseIri;
+                _defaultLanguage = savedDefaultLanguage;
             }
         }
     }
@@ -728,31 +793,31 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 // String value becomes IRI
                 newSubject = ExpandIri(strVal);
             }
+            EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
         }
         else if (value.ValueKind == JsonValueKind.Object)
         {
-            // Nested object
-            if (value.TryGetProperty("@id", out var idProp))
-            {
-                newSubject = ExpandIri(idProp.GetString() ?? "");
-            }
-            else
-            {
-                newSubject = GenerateBlankNode();
-            }
+            // Nested object - parse it fully to process its properties
+            var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()));
+            tempReader.Read();
+            newSubject = ParseNode(ref tempReader, handler, null);
+
+            // Emit the reverse triple
+            EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
         }
         else
         {
             // Other types: generate blank node
             newSubject = GenerateBlankNode();
+            EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
         }
-
-        EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
     }
 
     /// <summary>
     /// Process the @reverse keyword which contains reverse properties.
     /// Each property in @reverse becomes a predicate where values are subjects and currentNode is object.
+    /// If the property is itself a reverse property (defined with @reverse in context),
+    /// the double-negation results in a forward triple.
     /// </summary>
     private void ProcessReverseKeyword(string currentNode, JsonElement reverseElement, QuadHandler handler, string? graphIri)
     {
@@ -762,23 +827,72 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         foreach (var prop in reverseElement.EnumerateObject())
         {
             var propName = prop.Name;
-            var predicate = ExpandTerm(propName);
-            if (string.IsNullOrEmpty(predicate))
-                continue;
-
             var propValue = prop.Value;
 
-            if (propValue.ValueKind == JsonValueKind.Array)
+            // Check if this property is itself a reverse property (double-negation)
+            if (_reverseProperty.TryGetValue(propName, out var reversePredicate))
             {
-                foreach (var item in propValue.EnumerateArray())
+                // Double-negation: reverse of reverse = forward
+                // Process as a forward property from currentNode to values
+                var expandedPredicate = ExpandTermValue(reversePredicate);
+                if (string.IsNullOrEmpty(expandedPredicate))
+                    continue;
+
+                if (propValue.ValueKind == JsonValueKind.Array)
                 {
-                    ProcessReverseKeywordValue(currentNode, predicate, item, handler, graphIri);
+                    foreach (var item in propValue.EnumerateArray())
+                    {
+                        ProcessReverseKeywordValueForward(currentNode, expandedPredicate, item, handler, graphIri);
+                    }
+                }
+                else
+                {
+                    ProcessReverseKeywordValueForward(currentNode, expandedPredicate, propValue, handler, graphIri);
                 }
             }
             else
             {
-                ProcessReverseKeywordValue(currentNode, predicate, propValue, handler, graphIri);
+                // Normal reverse property in @reverse block
+                var predicate = ExpandTerm(propName);
+                if (string.IsNullOrEmpty(predicate))
+                    continue;
+
+                if (propValue.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in propValue.EnumerateArray())
+                    {
+                        ProcessReverseKeywordValue(currentNode, predicate, item, handler, graphIri);
+                    }
+                }
+                else
+                {
+                    ProcessReverseKeywordValue(currentNode, predicate, propValue, handler, graphIri);
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Process a forward triple from @reverse block (when property is itself @reverse, causing double-negation).
+    /// currentNode becomes subject, value becomes object.
+    /// </summary>
+    private void ProcessReverseKeywordValueForward(string currentNode, string predicate, JsonElement value, QuadHandler handler, string? graphIri)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            // Parse the nested node and get its subject, then emit forward triple
+            var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()));
+            tempReader.Read();
+            var nestedSubject = ParseNode(ref tempReader, handler, null);
+
+            // Forward triple: currentNode -> predicate -> nestedSubject
+            EmitQuad(handler, currentNode, predicate, nestedSubject, graphIri);
+        }
+        else if (value.ValueKind == JsonValueKind.String)
+        {
+            var strVal = value.GetString() ?? "";
+            var objectIri = ExpandIri(strVal);
+            EmitQuad(handler, currentNode, predicate, objectIri, graphIri);
         }
     }
 
@@ -847,8 +961,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 var strVal = value.GetString() ?? "";
                 if (coercedType == "@id")
                 {
-                    // IRI reference
-                    var iri = ExpandIri(strVal);
+                    // IRI reference - type coercion allows term expansion
+                    var iri = ExpandIri(strVal, expandTerms: true);
                     EmitQuad(handler, subject, predicate, iri, graphIri);
                 }
                 else if (coercedType == "@vocab")
@@ -874,8 +988,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    // Plain string literal
-                    var literal = $"\"{EscapeString(strVal)}\"";
+                    // Plain string literal - apply default language if set
+                    string literal;
+                    if (!string.IsNullOrEmpty(_defaultLanguage))
+                    {
+                        literal = $"\"{EscapeString(strVal)}\"@{_defaultLanguage}";
+                    }
+                    else
+                    {
+                        literal = $"\"{EscapeString(strVal)}\"";
+                    }
                     EmitQuad(handler, subject, predicate, literal, graphIri);
                 }
                 break;
@@ -1147,6 +1269,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ExpandTerm(string term)
     {
+        // Check if term is explicitly set to null (decoupled from @vocab)
+        if (_nullTerms.Contains(term))
+            return "";
+
         // Check context for term mapping
         if (_context.TryGetValue(term, out var expanded))
         {
@@ -1199,7 +1325,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         return string.Empty;
     }
 
-    private string ExpandIri(string value)
+    /// <summary>
+    /// Expand an IRI value, optionally including term expansion.
+    /// </summary>
+    /// <param name="value">The IRI value to expand.</param>
+    /// <param name="expandTerms">If true, check for term definitions. For @id keyword values, this should be false.
+    /// For type-coerced @id values (@type: "@id"), this should be true.</param>
+    private string ExpandIri(string value, bool expandTerms = false)
     {
         // Empty string resolves to base IRI per JSON-LD spec
         if (string.IsNullOrEmpty(value))
@@ -1215,14 +1347,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return value;
         }
 
-        // Check context first (exact term match)
-        if (_context.TryGetValue(value, out var expanded))
+        // Term expansion only applies for type-coerced @id values, not @id keyword
+        // See test e048: "Terms are ignored in @id"
+        if (expandTerms && _context.TryGetValue(value, out var expanded))
         {
             // The expanded value might itself need resolution
             if (IsAbsoluteIri(expanded))
                 return FormatIri(expanded);
             // Recursively expand
-            return ExpandIri(expanded);
+            return ExpandIri(expanded, true);
         }
 
         // Already an absolute IRI (has scheme like http:, urn:, etc.)
