@@ -57,6 +57,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, bool> _containerList; // term -> is @list container
     private readonly Dictionary<string, bool> _containerLanguage; // term -> is @language container
     private readonly Dictionary<string, bool> _containerIndex; // term -> is @index container
+    private readonly Dictionary<string, string> _termLanguage; // term -> @language value
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
     private readonly HashSet<string> _typeAliases; // terms aliased to @type
@@ -110,6 +111,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _containerList = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerLanguage = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerIndex = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _termLanguage = new Dictionary<string, string>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeAliases = new HashSet<string>(StringComparer.Ordinal);
@@ -430,6 +432,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             _containerList.Clear();
             _containerLanguage.Clear();
             _containerIndex.Clear();
+            _termLanguage.Clear();
             _reverseProperty.Clear();
             _scopedContext.Clear();
             _typeAliases.Clear();
@@ -539,18 +542,47 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 if (value.TryGetProperty("@container", out var containerProp))
                 {
-                    var containerVal = containerProp.GetString();
-                    if (containerVal == "@list")
+                    // @container can be a string or an array in JSON-LD 1.1
+                    void ProcessContainerValue(string? containerVal)
                     {
-                        _containerList[term] = true;
+                        if (containerVal == "@list")
+                            _containerList[term] = true;
+                        else if (containerVal == "@language")
+                            _containerLanguage[term] = true;
+                        else if (containerVal == "@index")
+                            _containerIndex[term] = true;
+                        // Note: @graph, @id, @set, @type containers not yet fully supported
                     }
-                    else if (containerVal == "@language")
+
+                    if (containerProp.ValueKind == JsonValueKind.String)
                     {
-                        _containerLanguage[term] = true;
+                        ProcessContainerValue(containerProp.GetString());
                     }
-                    else if (containerVal == "@index")
+                    else if (containerProp.ValueKind == JsonValueKind.Array)
                     {
-                        _containerIndex[term] = true;
+                        foreach (var containerItem in containerProp.EnumerateArray())
+                        {
+                            if (containerItem.ValueKind == JsonValueKind.String)
+                                ProcessContainerValue(containerItem.GetString());
+                        }
+                    }
+                }
+
+                // Handle term-level @language
+                if (value.TryGetProperty("@language", out var langProp))
+                {
+                    if (langProp.ValueKind == JsonValueKind.Null)
+                    {
+                        // @language: null means no language tag (override default)
+                        _termLanguage[term] = "";
+                    }
+                    else
+                    {
+                        var langVal = langProp.GetString();
+                        if (!string.IsNullOrEmpty(langVal))
+                        {
+                            _termLanguage[term] = langVal;
+                        }
                     }
                 }
 
@@ -706,8 +738,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private void ProcessProperty(string subject, string predicate, string term, JsonElement value,
         QuadHandler handler, string? graphIri)
     {
-        // Check for type coercion
+        // Check for type coercion and term-level language
         _typeCoercion.TryGetValue(term, out var coercedType);
+        _termLanguage.TryGetValue(term, out var termLang);
         var isListContainer = _containerList.TryGetValue(term, out var isList) && isList;
         var isLanguageContainer = _containerLanguage.TryGetValue(term, out var isLang) && isLang;
         var isIndexContainer = _containerIndex.TryGetValue(term, out var isIdx) && isIdx;
@@ -740,6 +773,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, bool>? savedContainerList = null;
         Dictionary<string, bool>? savedContainerLanguage = null;
         Dictionary<string, bool>? savedContainerIndex = null;
+        Dictionary<string, string>? savedTermLanguage = null;
         Dictionary<string, string>? savedReverseProperty = null;
         Dictionary<string, string>? savedScopedContext = null;
         HashSet<string>? savedTypeAliases = null;
@@ -757,6 +791,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedContainerList = new Dictionary<string, bool>(_containerList);
             savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
             savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
+            savedTermLanguage = new Dictionary<string, string>(_termLanguage);
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
             savedTypeAliases = new HashSet<string>(_typeAliases);
@@ -788,18 +823,26 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     {
                         foreach (var item in prop.Value.EnumerateArray())
                         {
-                            ProcessValue(subject, predicate, item, handler, graphIri, coercedType);
+                            ProcessValue(subject, predicate, item, handler, graphIri, coercedType, termLang);
                         }
                     }
                     else
                     {
-                        ProcessValue(subject, predicate, prop.Value, handler, graphIri, coercedType);
+                        ProcessValue(subject, predicate, prop.Value, handler, graphIri, coercedType, termLang);
                     }
                 }
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
-                if (isListContainer)
+                // Handle @json type - serialize entire array as canonical JSON literal
+                if (coercedType == "@json")
+                {
+                    var canonicalJson = CanonicalizeJson(value);
+                    var escapedJson = EscapeString(canonicalJson);
+                    EmitQuad(handler, subject, predicate,
+                        $"\"{escapedJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                }
+                else if (isListContainer)
                 {
                     // Create RDF list
                     var listHead = ProcessList(value, handler, graphIri, coercedType);
@@ -810,13 +853,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     // Multiple values
                     foreach (var item in value.EnumerateArray())
                     {
-                        ProcessValue(subject, predicate, item, handler, graphIri, coercedType);
+                        ProcessValue(subject, predicate, item, handler, graphIri, coercedType, termLang);
                     }
                 }
             }
             else
             {
-                ProcessValue(subject, predicate, value, handler, graphIri, coercedType);
+                ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
             }
         }
         finally
@@ -838,6 +881,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _containerIndex.Clear();
                 foreach (var kv in savedContainerIndex!) _containerIndex[kv.Key] = kv.Value;
+
+                _termLanguage.Clear();
+                foreach (var kv in savedTermLanguage!) _termLanguage[kv.Key] = kv.Value;
 
                 _reverseProperty.Clear();
                 foreach (var kv in savedReverseProperty!) _reverseProperty[kv.Key] = kv.Value;
@@ -1060,7 +1106,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     private void ProcessValue(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType)
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage = null)
     {
         switch (value.ValueKind)
         {
@@ -1088,9 +1134,23 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
                 else
                 {
-                    // Plain string literal - apply default language if set
+                    // Plain string literal - apply term language, then default language
+                    // Term-level @language: null (empty string) means explicitly no language tag
                     string literal;
-                    if (!string.IsNullOrEmpty(_defaultLanguage))
+                    if (termLanguage != null)
+                    {
+                        // Term has explicit @language setting
+                        if (termLanguage.Length > 0)
+                        {
+                            literal = $"\"{EscapeString(strVal)}\"@{termLanguage}";
+                        }
+                        else
+                        {
+                            // @language: null in term definition - no language tag
+                            literal = $"\"{EscapeString(strVal)}\"";
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(_defaultLanguage))
                     {
                         literal = $"\"{EscapeString(strVal)}\"@{_defaultLanguage}";
                     }
@@ -1133,7 +1193,18 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
 
             case JsonValueKind.Object:
-                ProcessObjectValue(subject, predicate, value, handler, graphIri);
+                // Handle @json type - serialize entire object as canonical JSON literal
+                if (coercedType == "@json")
+                {
+                    var canonicalJson = CanonicalizeJson(value);
+                    var escapedJson = EscapeString(canonicalJson);
+                    EmitQuad(handler, subject, predicate,
+                        $"\"{escapedJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                }
+                else
+                {
+                    ProcessObjectValue(subject, predicate, value, handler, graphIri);
+                }
                 break;
 
             case JsonValueKind.Null:
@@ -1257,6 +1328,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     {
         var rawText = value.GetRawText();
         var isDouble = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
+
+        // Handle @json type - use raw JSON representation
+        if (coercedType == "@json")
+        {
+            EmitQuad(handler, subject, predicate,
+                $"\"{rawText}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+            return;
+        }
 
         // Check if custom datatype is specified (not @id, @vocab, or standard xsd types)
         if (!string.IsNullOrEmpty(coercedType) && coercedType != "@id" && coercedType != "@vocab" &&
@@ -1476,6 +1555,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             if (!string.IsNullOrEmpty(_baseIri))
                 return FormatIri(_baseIri);
             return GenerateBlankNode();
+        }
+
+        // Handle JSON-LD keywords that map to RDF IRIs
+        if (value == "@json")
+        {
+            return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>";
         }
 
         // Blank node
@@ -1854,6 +1939,118 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Canonicalize a JSON element for rdf:JSON literals.
+    /// Removes whitespace and sorts object keys lexicographically.
+    /// </summary>
+    private static string CanonicalizeJson(JsonElement element)
+    {
+        var sb = new StringBuilder();
+        CanonicalizeJsonElement(element, sb);
+        return sb.ToString();
+    }
+
+    private static void CanonicalizeJsonElement(JsonElement element, StringBuilder sb)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                sb.Append('{');
+                // Sort keys lexicographically as per JCS
+                var props = element.EnumerateObject()
+                    .OrderBy(p => p.Name, StringComparer.Ordinal)
+                    .ToList();
+                for (int i = 0; i < props.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    // Key as JSON string
+                    sb.Append('"');
+                    CanonicalizeJsonString(props[i].Name, sb);
+                    sb.Append("\":");
+                    CanonicalizeJsonElement(props[i].Value, sb);
+                }
+                sb.Append('}');
+                break;
+
+            case JsonValueKind.Array:
+                sb.Append('[');
+                var items = element.EnumerateArray().ToList();
+                for (int i = 0; i < items.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    CanonicalizeJsonElement(items[i], sb);
+                }
+                sb.Append(']');
+                break;
+
+            case JsonValueKind.String:
+                sb.Append('"');
+                CanonicalizeJsonString(element.GetString() ?? "", sb);
+                sb.Append('"');
+                break;
+
+            case JsonValueKind.Number:
+                // Normalize number representation per I-JSON/JCS
+                // Integer: no exponent, no decimal point
+                // Non-integer: use shortest representation
+                var rawNum = element.GetRawText();
+                if (element.TryGetInt64(out var intVal))
+                {
+                    sb.Append(intVal.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
+                else if (element.TryGetDouble(out var dblVal))
+                {
+                    // Use "G17" for full precision, then normalize
+                    var numStr = dblVal.ToString("G17", System.Globalization.CultureInfo.InvariantCulture);
+                    sb.Append(numStr);
+                }
+                else
+                {
+                    sb.Append(rawNum);
+                }
+                break;
+
+            case JsonValueKind.True:
+                sb.Append("true");
+                break;
+
+            case JsonValueKind.False:
+                sb.Append("false");
+                break;
+
+            case JsonValueKind.Null:
+                sb.Append("null");
+                break;
+        }
+    }
+
+    private static void CanonicalizeJsonString(string value, StringBuilder sb)
+    {
+        foreach (var c in value)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\b': sb.Append("\\b"); break;
+                case '\f': sb.Append("\\f"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (c < 0x20)
+                    {
+                        sb.Append($"\\u{(int)c:X4}");
+                    }
+                    else
+                    {
+                        sb.Append(c);
+                    }
+                    break;
+            }
+        }
     }
 
     public void Dispose()
