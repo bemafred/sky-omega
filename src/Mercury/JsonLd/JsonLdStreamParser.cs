@@ -57,6 +57,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, bool> _containerList; // term -> is @list container
     private readonly Dictionary<string, bool> _containerLanguage; // term -> is @language container
     private readonly Dictionary<string, bool> _containerIndex; // term -> is @index container
+    private readonly Dictionary<string, bool> _containerGraph; // term -> is @graph container
     private readonly Dictionary<string, string> _termLanguage; // term -> @language value
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
@@ -112,6 +113,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _containerList = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerLanguage = new Dictionary<string, bool>(StringComparer.Ordinal);
         _containerIndex = new Dictionary<string, bool>(StringComparer.Ordinal);
+        _containerGraph = new Dictionary<string, bool>(StringComparer.Ordinal);
         _termLanguage = new Dictionary<string, string>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -595,7 +597,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                             _containerLanguage[term] = true;
                         else if (containerVal == "@index")
                             _containerIndex[term] = true;
-                        // Note: @graph, @id, @set, @type containers not yet fully supported
+                        else if (containerVal == "@graph")
+                            _containerGraph[term] = true;
+                        // Note: @id, @set, @type containers not yet fully supported
                     }
 
                     if (containerProp.ValueKind == JsonValueKind.String)
@@ -788,6 +792,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var isListContainer = _containerList.TryGetValue(term, out var isList) && isList;
         var isLanguageContainer = _containerLanguage.TryGetValue(term, out var isLang) && isLang;
         var isIndexContainer = _containerIndex.TryGetValue(term, out var isIdx) && isIdx;
+        var isGraphContainer = _containerGraph.TryGetValue(term, out var isGraph) && isGraph;
 
         // Check if this is a reverse property
         if (_reverseProperty.TryGetValue(term, out var reversePredicate))
@@ -817,6 +822,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         Dictionary<string, bool>? savedContainerList = null;
         Dictionary<string, bool>? savedContainerLanguage = null;
         Dictionary<string, bool>? savedContainerIndex = null;
+        Dictionary<string, bool>? savedContainerGraph = null;
         Dictionary<string, string>? savedTermLanguage = null;
         Dictionary<string, string>? savedReverseProperty = null;
         Dictionary<string, string>? savedScopedContext = null;
@@ -836,6 +842,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedContainerList = new Dictionary<string, bool>(_containerList);
             savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
             savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
+            savedContainerGraph = new Dictionary<string, bool>(_containerGraph);
             savedTermLanguage = new Dictionary<string, string>(_termLanguage);
             savedReverseProperty = new Dictionary<string, string>(_reverseProperty);
             savedScopedContext = new Dictionary<string, string>(_scopedContext);
@@ -855,8 +862,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
         try
         {
+            // Handle graph container - values are graph objects
+            if (isGraphContainer)
+            {
+                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang);
+            }
             // Handle language container - object keys are language tags
-            if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
+            else if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
             {
                 ProcessLanguageMap(subject, predicate, value, handler, graphIri);
             }
@@ -927,6 +939,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _containerIndex.Clear();
                 foreach (var kv in savedContainerIndex!) _containerIndex[kv.Key] = kv.Value;
+
+                _containerGraph.Clear();
+                foreach (var kv in savedContainerGraph!) _containerGraph[kv.Key] = kv.Value;
 
                 _termLanguage.Clear();
                 foreach (var kv in savedTermLanguage!) _termLanguage[kv.Key] = kv.Value;
@@ -1151,6 +1166,89 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     }
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Process a graph container value.
+    /// The value becomes a named graph with the property linking to the graph node.
+    /// </summary>
+    private void ProcessGraphContainer(string subject, string predicate, JsonElement value,
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage)
+    {
+        // Handle arrays - each item is a separate graph
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray())
+            {
+                ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage);
+            }
+        }
+        else
+        {
+            ProcessGraphContainerItem(subject, predicate, value, handler, graphIri, coercedType, termLanguage);
+        }
+    }
+
+    private void ProcessGraphContainerItem(string subject, string predicate, JsonElement value,
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            // Non-object values in graph container are processed normally
+            ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLanguage);
+            return;
+        }
+
+        // Check if the object has @id - use that as the graph name, otherwise create a blank node
+        string namedGraphIri;
+        if (value.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+        {
+            namedGraphIri = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
+        }
+        else
+        {
+            namedGraphIri = GenerateBlankNode();
+        }
+
+        // Emit the link from subject to the graph node
+        EmitQuad(handler, subject, predicate, namedGraphIri, graphIri);
+
+        // Save current graph and set to the named graph for content processing
+        var savedGraph = _currentGraph;
+        _currentGraph = namedGraphIri;
+
+        try
+        {
+            // Process the content - check for @graph property or process as regular node
+            if (value.TryGetProperty("@graph", out var graphProp))
+            {
+                // Value has explicit @graph - process its contents into the named graph
+                if (graphProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var node in graphProp.EnumerateArray())
+                    {
+                        if (node.ValueKind == JsonValueKind.Object)
+                        {
+                            ProcessGraphNode(node, handler);
+                        }
+                    }
+                }
+                else if (graphProp.ValueKind == JsonValueKind.Object)
+                {
+                    ProcessGraphNode(graphProp, handler);
+                }
+            }
+            else
+            {
+                // No explicit @graph - process the object itself into the named graph
+                ProcessGraphNode(value, handler);
+            }
+        }
+        finally
+        {
+            // Restore the previous graph
+            _currentGraph = savedGraph;
         }
     }
 
@@ -1963,6 +2061,39 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EmitQuad(QuadHandler handler, string subject, string predicate, string obj, string? graph)
     {
+        // Validate subject IRI (must be well-formed if it's an IRI, not a blank node)
+        if (subject.StartsWith('<') && !IsWellFormedIri(subject))
+            return;
+
+        // Validate predicate IRI (predicates are always IRIs in RDF)
+        if (!IsWellFormedIri(predicate))
+            return;
+
+        // Validate object IRI (if it's an IRI, not a literal or blank node)
+        if (obj.StartsWith('<') && !IsWellFormedIri(obj))
+            return;
+
+        // Validate language tag (if present)
+        if (obj.Contains("@") && obj.StartsWith('"'))
+        {
+            // Check for language-tagged literal: "value"@lang
+            var lastQuote = obj.LastIndexOf('"');
+            if (lastQuote > 0 && lastQuote < obj.Length - 1)
+            {
+                var suffix = obj.Substring(lastQuote + 1);
+                if (suffix.StartsWith("@") && !suffix.Contains("^^"))
+                {
+                    var langTag = suffix.Substring(1);
+                    if (!IsWellFormedLanguageTag(langTag))
+                        return;
+                }
+            }
+        }
+
+        // Validate graph IRI (if it's an IRI, not a blank node)
+        if (graph != null && graph.StartsWith('<') && !IsWellFormedIri(graph))
+            return;
+
         if (graph != null)
         {
             handler(subject.AsSpan(), predicate.AsSpan(), obj.AsSpan(), graph.AsSpan());
@@ -1971,6 +2102,46 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             handler(subject.AsSpan(), predicate.AsSpan(), obj.AsSpan(), ReadOnlySpan<char>.Empty);
         }
+    }
+
+    /// <summary>
+    /// Check if an IRI is well-formed (does not contain disallowed characters).
+    /// Per RFC 3987, certain characters must be percent-encoded.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsWellFormedIri(string iri)
+    {
+        // Strip angle brackets if present
+        var toCheck = iri;
+        if (iri.StartsWith('<') && iri.EndsWith('>'))
+            toCheck = iri.Substring(1, iri.Length - 2);
+
+        // Check for disallowed characters per RFC 3987
+        // These characters must be percent-encoded in IRIs
+        foreach (var c in toCheck)
+        {
+            // Space and control characters (0x00-0x1F, 0x7F)
+            if (c == ' ' || c < 0x20 || c == 0x7F)
+                return false;
+            // Delimiters that must be encoded: < > " { } | \ ^ `
+            if (c == '<' || c == '>' || c == '"' || c == '{' || c == '}' ||
+                c == '|' || c == '\\' || c == '^' || c == '`')
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Check if a language tag is well-formed per BCP 47.
+    /// Basic validation: must not contain spaces.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsWellFormedLanguageTag(string tag)
+    {
+        if (string.IsNullOrEmpty(tag))
+            return false;
+        // Basic validation: no spaces allowed in language tags
+        return !tag.Contains(' ');
     }
 
     private static string EscapeString(string value)
