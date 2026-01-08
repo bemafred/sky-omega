@@ -69,6 +69,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _includedAliases; // terms aliased to @included
     private readonly HashSet<string> _nestAliases; // terms aliased to @nest
     private readonly HashSet<string> _noneAliases; // terms aliased to @none
+    private readonly HashSet<string> _valueAliases; // terms aliased to @value
+    private readonly HashSet<string> _languageAliases; // terms aliased to @language
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
 
     // Base IRI for relative IRI resolution
@@ -141,6 +143,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _includedAliases = new HashSet<string>(StringComparer.Ordinal);
         _nestAliases = new HashSet<string>(StringComparer.Ordinal);
         _noneAliases = new HashSet<string>(StringComparer.Ordinal);
+        _valueAliases = new HashSet<string>(StringComparer.Ordinal);
+        _languageAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
     }
 
@@ -243,7 +247,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check for @type and apply type-scoped context BEFORE expanding @id
         // IMPORTANT: Expand type IRIs BEFORE applying type-scoped context
         // (type-scoped context changes @vocab which should NOT affect the @type IRI itself)
-        if (root.TryGetProperty("@type", out typeElement))
+        // Check both literal @type AND @type aliases
+        bool foundType = root.TryGetProperty("@type", out typeElement);
+        if (!foundType)
+        {
+            // Check for @type aliases
+            foreach (var alias in _typeAliases)
+            {
+                if (root.TryGetProperty(alias, out typeElement))
+                {
+                    foundType = true;
+                    break;
+                }
+            }
+        }
+        if (foundType)
         {
             // Expand type IRIs using current context (BEFORE type-scoped context)
             expandedTypeIris = ExpandTypeIris(typeElement);
@@ -494,14 +512,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             if (propName.StartsWith('@'))
                 continue;
 
-            // Check for @type alias
+            // Check for @type alias - already processed above (type emission and scoped context)
             if (_typeAliases.Contains(propName))
-            {
-                ProcessType(subject, prop.Value, handler, _currentGraph);
-                // Also apply type-scoped contexts
-                ApplyTypeScopedContexts(prop.Value);
                 continue;
-            }
 
             // Skip @id aliases (already processed above)
             if (_idAliases.Contains(propName))
@@ -778,6 +791,14 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 else if (mappedValue == "@none" || _noneAliases.Contains(mappedValue))
                 {
                     _noneAliases.Add(term);
+                }
+                else if (mappedValue == "@value" || _valueAliases.Contains(mappedValue))
+                {
+                    _valueAliases.Add(term);
+                }
+                else if (mappedValue == "@language" || _languageAliases.Contains(mappedValue))
+                {
+                    _languageAliases.Add(term);
                 }
                 else
                 {
@@ -1132,6 +1153,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         HashSet<string>? savedIncludedAliases = null;
         HashSet<string>? savedNestAliases = null;
         HashSet<string>? savedNoneAliases = null;
+        HashSet<string>? savedValueAliases = null;
+        HashSet<string>? savedLanguageAliases = null;
         HashSet<string>? savedNullTerms = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
@@ -1156,6 +1179,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedIncludedAliases = new HashSet<string>(_includedAliases);
             savedNestAliases = new HashSet<string>(_nestAliases);
             savedNoneAliases = new HashSet<string>(_noneAliases);
+            savedValueAliases = new HashSet<string>(_valueAliases);
+            savedLanguageAliases = new HashSet<string>(_languageAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
@@ -1307,6 +1332,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 _noneAliases.Clear();
                 foreach (var alias in savedNoneAliases!) _noneAliases.Add(alias);
+
+                _valueAliases.Clear();
+                foreach (var alias in savedValueAliases!) _valueAliases.Add(alias);
+
+                _languageAliases.Clear();
+                foreach (var alias in savedLanguageAliases!) _languageAliases.Add(alias);
 
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
@@ -2133,8 +2164,23 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private void ProcessObjectValue(string subject, string predicate, JsonElement value,
         QuadHandler handler, string? graphIri)
     {
-        // Check for value object (@value)
-        if (value.TryGetProperty("@value", out var valProp))
+        // Check for value object (@value or alias)
+        JsonElement valProp = default;
+        bool hasValue = value.TryGetProperty("@value", out valProp);
+        if (!hasValue)
+        {
+            // Check for @value aliases from type-scoped or property-scoped contexts
+            foreach (var alias in _valueAliases)
+            {
+                if (value.TryGetProperty(alias, out valProp))
+                {
+                    hasValue = true;
+                    break;
+                }
+            }
+        }
+
+        if (hasValue)
         {
             // Skip if @value is null
             if (valProp.ValueKind == JsonValueKind.Null)
@@ -2144,9 +2190,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             return;
         }
 
-        // Check for invalid value object with @language but no @value - drop it
+        // Check for invalid value object with @language (or alias) but no @value - drop it
         // Note: @type without @value is valid - it's a node object with rdf:type, not a value object
-        if (value.TryGetProperty("@language", out _))
+        bool hasLanguage = value.TryGetProperty("@language", out _);
+        if (!hasLanguage)
+        {
+            foreach (var alias in _languageAliases)
+            {
+                if (value.TryGetProperty(alias, out _))
+                {
+                    hasLanguage = true;
+                    break;
+                }
+            }
+        }
+        if (hasLanguage)
         {
             // @language requires @value - this is invalid, drop the property
             return;
@@ -2405,15 +2463,41 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 break;
         }
 
-        // Check for @language
-        if (obj.TryGetProperty("@language", out var langProp))
+        // Check for @language (or alias)
+        JsonElement langProp = default;
+        bool hasLanguage = obj.TryGetProperty("@language", out langProp);
+        if (!hasLanguage)
+        {
+            foreach (var alias in _languageAliases)
+            {
+                if (obj.TryGetProperty(alias, out langProp))
+                {
+                    hasLanguage = true;
+                    break;
+                }
+            }
+        }
+        if (hasLanguage)
         {
             var lang = langProp.GetString() ?? "";
             return $"\"{EscapeString(valueStr)}\"@{lang}";
         }
 
-        // Check for @type (datatype) - terms should be expanded for datatypes
-        if (obj.TryGetProperty("@type", out var typeProp))
+        // Check for @type (datatype, or alias) - terms should be expanded for datatypes
+        JsonElement typeProp = default;
+        bool hasType = obj.TryGetProperty("@type", out typeProp);
+        if (!hasType)
+        {
+            foreach (var alias in _typeAliases)
+            {
+                if (obj.TryGetProperty(alias, out typeProp))
+                {
+                    hasType = true;
+                    break;
+                }
+            }
+        }
+        if (hasType)
         {
             var datatype = ExpandIri(typeProp.GetString() ?? "", expandTerms: true);
             return $"\"{EscapeString(valueStr)}\"^^{datatype}";
