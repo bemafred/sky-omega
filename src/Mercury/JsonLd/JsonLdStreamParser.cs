@@ -1194,9 +1194,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         try
         {
             // Handle graph container - values are graph objects
+            // When combined with @index, object keys are ignored (just indexes)
+            // When combined with @id, object keys are used as graph @id
             if (isGraphContainer)
             {
-                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang);
+                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang, isIndexContainer, isIdContainer);
             }
             // Handle language container - object keys are language tags
             else if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
@@ -1975,10 +1977,36 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     /// The value becomes a named graph with the property linking to the graph node.
     /// </summary>
     private void ProcessGraphContainer(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage)
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
+        bool isIndexContainer = false, bool isIdContainer = false)
     {
+        // Handle compound container [@graph, @index] or [@graph, @id]
+        if ((isIndexContainer || isIdContainer) && value.ValueKind == JsonValueKind.Object)
+        {
+            // Object keys are indexes (@index) or graph IDs (@id)
+            foreach (var prop in value.EnumerateObject())
+            {
+                var key = prop.Name;
+                var itemValue = prop.Value;
+
+                // For @id container, the key becomes the graph @id
+                string? graphIdFromKey = isIdContainer ? ExpandIri(key, expandTerms: false) : null;
+
+                if (itemValue.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in itemValue.EnumerateArray())
+                    {
+                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey);
+                    }
+                }
+                else
+                {
+                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey);
+                }
+            }
+        }
         // Handle arrays - each item is a separate graph
-        if (value.ValueKind == JsonValueKind.Array)
+        else if (value.ValueKind == JsonValueKind.Array)
         {
             foreach (var item in value.EnumerateArray())
             {
@@ -1992,7 +2020,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     }
 
     private void ProcessGraphContainerItem(string subject, string predicate, JsonElement value,
-        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage)
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
+        string? graphIdFromKey = null)
     {
         if (value.ValueKind != JsonValueKind.Object)
         {
@@ -2002,10 +2031,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         // Check if the object has @id - use that as the graph name
+        // Priority: explicit @id in object > graphIdFromKey from compound container key
         string? explicitId = null;
         if (value.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
         {
             explicitId = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
+        }
+        else if (graphIdFromKey != null)
+        {
+            explicitId = graphIdFromKey;
         }
 
         // Check if value already has @graph - if so, we need different handling
