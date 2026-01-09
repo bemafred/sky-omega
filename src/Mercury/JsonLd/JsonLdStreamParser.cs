@@ -860,6 +860,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 {
                     _jsonAliases.Add(term);
                 }
+                else if (mappedValue.StartsWith('@') && IsKeywordLike(mappedValue))
+                {
+                    // Per JSON-LD 1.1: Terms mapping to keyword-like values (@ followed by
+                    // only lowercase a-z) that aren't real keywords are ignored (pr37)
+                    // The term will use @vocab instead when expanded
+                }
                 else
                 {
                     // Simple term -> IRI mapping (always prefix-able)
