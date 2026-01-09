@@ -511,7 +511,31 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             if (root.TryGetProperty(alias, out var aliasNestElement))
             {
-                ProcessNestKeyword(subject, aliasNestElement, handler, _currentGraph);
+                // Apply property-scoped context if present (c037)
+                if (_scopedContext.TryGetValue(alias, out var scopedContextJson))
+                {
+                    // Save and apply context, then restore after processing
+                    var savedVocab = _vocabIri;
+                    var savedBase = _baseIri;
+                    var savedContext = new Dictionary<string, string>(_context);
+                    using var scopedDoc = JsonDocument.Parse(scopedContextJson);
+                    ProcessContext(scopedDoc.RootElement);
+                    try
+                    {
+                        ProcessNestKeyword(subject, aliasNestElement, handler, _currentGraph);
+                    }
+                    finally
+                    {
+                        _vocabIri = savedVocab;
+                        _baseIri = savedBase;
+                        _context.Clear();
+                        foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
+                    }
+                }
+                else
+                {
+                    ProcessNestKeyword(subject, aliasNestElement, handler, _currentGraph);
+                }
             }
         }
 
@@ -886,9 +910,38 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     else
                     {
                         var idValue = idProp.GetString() ?? "";
+                        // Handle @id mapping to actual keywords - these create aliases (c037)
+                        if (idValue == "@nest" || _nestAliases.Contains(idValue))
+                        {
+                            _nestAliases.Add(term);
+                        }
+                        else if (idValue == "@type" || _typeAliases.Contains(idValue))
+                        {
+                            _typeAliases.Add(term);
+                        }
+                        else if (idValue == "@id" || _idAliases.Contains(idValue))
+                        {
+                            _idAliases.Add(term);
+                        }
+                        else if (idValue == "@graph" || _graphAliases.Contains(idValue))
+                        {
+                            _graphAliases.Add(term);
+                        }
+                        else if (idValue == "@included" || _includedAliases.Contains(idValue))
+                        {
+                            _includedAliases.Add(term);
+                        }
+                        else if (idValue == "@value" || _valueAliases.Contains(idValue))
+                        {
+                            _valueAliases.Add(term);
+                        }
+                        else if (idValue == "@language" || _languageAliases.Contains(idValue))
+                        {
+                            _languageAliases.Add(term);
+                        }
                         // Per JSON-LD 1.1: @id values that look like keywords (e.g., "@ignoreMe")
-                        // should be ignored and the term should use @vocab instead (e120)
-                        if (idValue.StartsWith('@') && IsKeywordLike(idValue))
+                        // but aren't real keywords should be ignored (e120)
+                        else if (idValue.StartsWith('@') && IsKeywordLike(idValue))
                         {
                             // Ignore keyword-like @id, term uses @vocab
                             if (!string.IsNullOrEmpty(_vocabIri))
