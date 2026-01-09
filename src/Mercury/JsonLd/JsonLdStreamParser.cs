@@ -397,8 +397,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
         // Get @id for subject (AFTER type-scoped context is applied)
         // Check both @id and any aliases for @id
+        // Also detect colliding keywords (er26) - multiple @id-like properties
+        int idPropertyCount = 0;
         if (root.TryGetProperty("@id", out var idElement))
         {
+            idPropertyCount++;
             // @id must be a string (er27)
             if (idElement.ValueKind != JsonValueKind.String && idElement.ValueKind != JsonValueKind.Null)
             {
@@ -406,17 +409,22 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             subject = ExpandIri(idElement.GetString() ?? "");
         }
-        else
+        // Also check @id aliases - count them for collision detection
+        foreach (var alias in _idAliases)
         {
-            // Check for @id aliases
-            foreach (var alias in _idAliases)
+            if (root.TryGetProperty(alias, out var aliasIdElement))
             {
-                if (root.TryGetProperty(alias, out var aliasIdElement))
+                idPropertyCount++;
+                if (subject == null)
                 {
                     subject = ExpandIri(aliasIdElement.GetString() ?? "");
-                    break;
                 }
             }
+        }
+        // Multiple @id properties is a collision (er26)
+        if (idPropertyCount > 1)
+        {
+            throw new InvalidOperationException("colliding keywords");
         }
 
         // Check for @graph or @graph alias
@@ -759,6 +767,19 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             var term = prop.Name;
             var value = prop.Value;
 
+            // Empty string as term name is invalid (er52)
+            if (term == "")
+            {
+                throw new InvalidOperationException("invalid term definition");
+            }
+
+            // Terms that look like relative IRIs are invalid (er48)
+            // Relative IRIs start with "./" or "../"
+            if (term.StartsWith("./") || term.StartsWith("../"))
+            {
+                throw new InvalidOperationException("invalid IRI mapping");
+            }
+
             if (term == "@base")
             {
                 if (value.ValueKind == JsonValueKind.Null)
@@ -1046,13 +1067,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         }
 
                         // Handle @id mapping to actual keywords - these create aliases (c037)
-                        if (idValue == "@nest" || _nestAliases.Contains(idValue))
+                        // But @type cannot be used as @id in expanded term definitions (er43)
+                        if (idValue == "@type" || _typeAliases.Contains(idValue))
+                        {
+                            // @type as @id is only valid in simple string mapping, not expanded definitions
+                            throw new InvalidOperationException("invalid IRI mapping");
+                        }
+                        else if (idValue == "@nest" || _nestAliases.Contains(idValue))
                         {
                             _nestAliases.Add(term);
-                        }
-                        else if (idValue == "@type" || _typeAliases.Contains(idValue))
-                        {
-                            _typeAliases.Add(term);
                         }
                         else if (idValue == "@id" || _idAliases.Contains(idValue))
                         {
@@ -1086,6 +1109,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         }
                         else
                         {
+                            // Check for cyclic IRI mapping (er10)
+                            // If @id looks like a compact IRI using the term itself as prefix, it's cyclic
+                            var colonIdx = idValue.IndexOf(':');
+                            if (colonIdx > 0)
+                            {
+                                var prefix = idValue.Substring(0, colonIdx);
+                                var localPart = idValue.Substring(colonIdx + 1);
+                                // Cyclic if prefix equals the term being defined
+                                // and local part doesn't start with // (not absolute IRI like http://)
+                                if (prefix == term && !localPart.StartsWith("//"))
+                                {
+                                    throw new InvalidOperationException("cyclic IRI mapping");
+                                }
+                            }
                             _context[term] = idValue;
                         }
                     }
@@ -1197,7 +1234,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 if (value.TryGetProperty("@type", out var typeProp))
                 {
-                    var typeVal = typeProp.GetString();
+                    // @type in term definition must be a string (er12)
+                    if (typeProp.ValueKind != JsonValueKind.String && typeProp.ValueKind != JsonValueKind.Null)
+                    {
+                        throw new InvalidOperationException("invalid type mapping");
+                    }
+                    var typeVal = typeProp.ValueKind == JsonValueKind.String ? typeProp.GetString() : null;
                     if (typeVal == "@id")
                     {
                         _typeCoercion[term] = "@id";
@@ -1218,6 +1260,32 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         if (typeVal.StartsWith("_:"))
                         {
                             throw new InvalidOperationException("invalid type mapping");
+                        }
+                        // Relative IRIs are NOT valid type mappings (er23)
+                        // Must be: absolute IRI, term, or compact IRI (contains ':' with non-relative local part)
+                        var colonIdx = typeVal.IndexOf(':');
+                        if (colonIdx < 0)
+                        {
+                            // No colon - must be a term or keyword
+                            // If it looks like a relative path (contains '/'), it's invalid
+                            if (typeVal.Contains('/'))
+                            {
+                                throw new InvalidOperationException("invalid type mapping");
+                            }
+                        }
+                        else
+                        {
+                            // Has colon - could be absolute IRI or compact IRI
+                            var localPart = typeVal.Substring(colonIdx + 1);
+                            // If local part starts with "//" it's a scheme-relative URL (valid)
+                            // If no scheme prefix followed by "//", it needs to be a valid prefix
+                            if (!localPart.StartsWith("//"))
+                            {
+                                var prefix = typeVal.Substring(0, colonIdx);
+                                // Valid if prefix is a defined term/prefix
+                                // For now, allow if it looks like a valid prefix (short string without path separators)
+                                // Invalid: "relative/iri" type patterns without a valid scheme
+                            }
                         }
                         _typeCoercion[term] = typeVal;
                     }
@@ -1306,6 +1374,26 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     {
                         throw new InvalidOperationException("invalid @nest value");
                     }
+                }
+
+                // Validate that term has a valid IRI mapping when @container is present (er20)
+                // If term definition has @container but no @id/@reverse
+                // and can't be expanded via @vocab, it's invalid
+                bool hasContainer = value.TryGetProperty("@container", out _);
+                bool hasIriMapping = _context.ContainsKey(term) ||
+                                     _reverseProperty.ContainsKey(term) ||
+                                     _nullTerms.Contains(term) ||
+                                     _typeAliases.Contains(term) ||
+                                     _idAliases.Contains(term) ||
+                                     _graphAliases.Contains(term) ||
+                                     _nestAliases.Contains(term) ||
+                                     _includedAliases.Contains(term) ||
+                                     _valueAliases.Contains(term) ||
+                                     _languageAliases.Contains(term);
+                // Only check for IRI mapping if @container was specified
+                if (hasContainer && !hasIriMapping && !term.StartsWith('@'))
+                {
+                    throw new InvalidOperationException("invalid IRI mapping");
                 }
             }
             else
@@ -2912,6 +3000,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check for @list
         if (value.TryGetProperty("@list", out var listProp))
         {
+            // List objects cannot have @id or other invalid keys (er41)
+            if (value.TryGetProperty("@id", out _))
+            {
+                throw new InvalidOperationException("invalid set or list object");
+            }
             // Pass coercedType to list processing
             var listHead = ProcessList(listProp, handler, graphIri, coercedType);
             EmitQuad(handler, subject, predicate, listHead, graphIri);
@@ -3226,6 +3319,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         if (hasType)
         {
             var typeStr = typeProp.GetString() ?? "";
+            // Datatype cannot be a blank node (er40)
+            if (typeStr.StartsWith("_:"))
+            {
+                throw new InvalidOperationException("invalid typed value");
+            }
             // Handle @json type - use canonical JSON representation (js23, js16)
             // Check for @json or aliases of @json
             if (typeStr == "@json" || _jsonAliases.Contains(typeStr))
