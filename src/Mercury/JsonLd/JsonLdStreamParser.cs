@@ -1184,9 +1184,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     }
                     else if (!string.IsNullOrEmpty(typeVal))
                     {
-                        // @type value must be @id, @vocab, @json, @none, or an absolute IRI (er13)
-                        // Blank nodes are not valid
-                        if (typeVal.StartsWith("_:") || (!typeVal.Contains(':') && !typeVal.StartsWith('@')))
+                        // @type value can be @id, @vocab, @json, @none, an absolute IRI, or a term to expand (er13)
+                        // Blank nodes are NOT valid type mappings
+                        if (typeVal.StartsWith("_:"))
                         {
                             throw new InvalidOperationException("invalid type mapping");
                         }
