@@ -828,6 +828,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else if (term == "@propagate")
             {
+                // @propagate must be a boolean (c030)
+                if (value.ValueKind != JsonValueKind.True && value.ValueKind != JsonValueKind.False)
+                {
+                    throw new InvalidOperationException("invalid @propagate value");
+                }
                 // @propagate: true means type-scoped context propagates to nested nodes
                 // Default is false for type-scoped contexts, true for property-scoped
                 if (value.ValueKind == JsonValueKind.True)
@@ -835,7 +840,43 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     _typeScopedPropagate = true;
                 }
             }
-            else if (term == "@version" || term == "@protected" || term == "@direction" || term == "@import")
+            else if (term == "@version")
+            {
+                // @version must be 1.1 (ep03)
+                if (value.ValueKind == JsonValueKind.Number)
+                {
+                    var version = value.GetDouble();
+                    if (version != 1.1)
+                    {
+                        throw new InvalidOperationException("invalid @version value");
+                    }
+                }
+                else if (value.ValueKind == JsonValueKind.String)
+                {
+                    var versionStr = value.GetString();
+                    if (versionStr != "1.1")
+                    {
+                        throw new InvalidOperationException("invalid @version value");
+                    }
+                }
+            }
+            else if (term == "@direction")
+            {
+                // @direction must be "ltr" or "rtl" (or null) (di08)
+                if (value.ValueKind == JsonValueKind.String)
+                {
+                    var dir = value.GetString();
+                    if (dir != "ltr" && dir != "rtl")
+                    {
+                        throw new InvalidOperationException("invalid base direction");
+                    }
+                }
+                else if (value.ValueKind != JsonValueKind.Null)
+                {
+                    throw new InvalidOperationException("invalid base direction");
+                }
+            }
+            else if (term == "@protected" || term == "@import")
             {
                 // Ignore other JSON-LD 1.1 keywords we don't fully implement yet
             }
