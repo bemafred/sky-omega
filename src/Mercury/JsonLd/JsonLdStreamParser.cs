@@ -888,6 +888,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             else if (value.ValueKind == JsonValueKind.String)
             {
                 var mappedValue = value.GetString() ?? "";
+
+                // Keywords cannot be aliased to other keywords (er01)
+                if (term.StartsWith('@') && IsJsonLdKeyword(term) && mappedValue.StartsWith('@') && IsJsonLdKeyword(mappedValue))
+                {
+                    throw new InvalidOperationException("keyword redefinition");
+                }
+
                 // Check for keyword alias or transitive alias chain
                 if (mappedValue == "@type" || _typeAliases.Contains(mappedValue))
                 {
@@ -1018,6 +1025,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     else
                     {
                         var idValue = idProp.GetString() ?? "";
+
+                        // @context cannot be aliased (er19)
+                        if (idValue == "@context")
+                        {
+                            throw new InvalidOperationException("invalid keyword alias");
+                        }
+
                         // Handle @id mapping to actual keywords - these create aliases (c037)
                         if (idValue == "@nest" || _nestAliases.Contains(idValue))
                         {
@@ -3762,6 +3776,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Check if a value is an actual JSON-LD keyword (not just keyword-like).
+    /// </summary>
+    private static bool IsJsonLdKeyword(string value)
+    {
+        return value switch
+        {
+            "@base" or "@context" or "@container" or "@direction" or "@graph" or
+            "@id" or "@import" or "@included" or "@index" or "@json" or "@language" or
+            "@list" or "@nest" or "@none" or "@prefix" or "@propagate" or "@protected" or
+            "@reverse" or "@set" or "@type" or "@value" or "@version" or "@vocab" => true,
+            _ => false
+        };
     }
 
     private string GenerateBlankNode()
