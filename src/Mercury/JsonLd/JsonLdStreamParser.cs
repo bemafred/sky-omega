@@ -1117,6 +1117,22 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                             {
                                 throw new InvalidOperationException("invalid term definition");
                             }
+
+                            // Validate @index value in term definition
+                            if (value.TryGetProperty("@index", out var indexValueProp))
+                            {
+                                // @index must be a string (pi04)
+                                if (indexValueProp.ValueKind != JsonValueKind.String)
+                                {
+                                    throw new InvalidOperationException("invalid term definition");
+                                }
+                                // @index must not be a keyword (pi03)
+                                var indexVal = indexValueProp.GetString();
+                                if (!string.IsNullOrEmpty(indexVal) && indexVal.StartsWith('@'))
+                                {
+                                    throw new InvalidOperationException("invalid term definition");
+                                }
+                            }
                         }
                     }
                 }

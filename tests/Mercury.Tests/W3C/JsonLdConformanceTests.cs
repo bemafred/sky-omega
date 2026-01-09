@@ -29,8 +29,9 @@ public class JsonLdConformanceTests
     {
         Skip.IfNot(JsonLdTestContext.IsAvailable, "JSON-LD test suite not available");
         Skip.IfNot(File.Exists(test.InputPath), $"Input file not found: {test.InputPath}");
-        Skip.If(test.ExpectPath == null, "No expected result file");
-        Skip.IfNot(File.Exists(test.ExpectPath), $"Expected file not found: {test.ExpectPath}");
+        // PositiveSyntaxTest has no expected output file - just tests parsing succeeds
+        Skip.If(test.ExpectPath == null && !test.IsSyntaxTest, "No expected result file");
+        Skip.If(!test.IsSyntaxTest && !File.Exists(test.ExpectPath), $"Expected file not found: {test.ExpectPath}");
 
         // Skip tests requiring features not yet implemented
         if (test.Option?.SpecVersion == "json-ld-1.0")
@@ -45,6 +46,8 @@ public class JsonLdConformanceTests
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Input: {test.InputPath}");
         _output.WriteLine($"Expected: {test.ExpectPath}");
+        if (test.IsSyntaxTest)
+            _output.WriteLine("(Syntax test - parsing should succeed, no output comparison)");
 
         // Parse the JSON-LD input
         var actualQuads = new List<(string s, string p, string o, string g)>();
@@ -61,10 +64,17 @@ public class JsonLdConformanceTests
             });
         }
 
+        // For syntax tests, we just verify parsing succeeded (no exception)
+        if (test.IsSyntaxTest)
+        {
+            _output.WriteLine($"Syntax test passed - parsed {actualQuads.Count} quads without error");
+            return;
+        }
+
         // Parse the expected N-Quads output
         var expectedQuads = new List<(string s, string p, string o, string g)>();
 
-        await using (var stream = File.OpenRead(test.ExpectPath))
+        await using (var stream = File.OpenRead(test.ExpectPath!))
         using (var parser = new NQuadsStreamParser(stream))
         {
             await parser.ParseAsync((s, p, o, g) =>
@@ -272,6 +282,7 @@ public static class JsonLdTestContext
 
         // Determine test type
         var isPositive = false;
+        var isSyntaxTest = false;
         var isToRdf = false;
 
         if (element.TryGetProperty("@type", out var typeProp))
@@ -282,6 +293,8 @@ public static class JsonLdTestContext
                 {
                     var typeStr = t.GetString();
                     if (typeStr == "jld:PositiveEvaluationTest") isPositive = true;
+                    // PositiveSyntaxTest tests that parsing succeeds (no expected output)
+                    if (typeStr == "jld:PositiveSyntaxTest") { isPositive = true; isSyntaxTest = true; }
                     if (typeStr == "jld:ToRDFTest") isToRdf = true;
                 }
             }
@@ -289,6 +302,7 @@ public static class JsonLdTestContext
             {
                 var typeStr = typeProp.GetString();
                 if (typeStr == "jld:PositiveEvaluationTest") isPositive = true;
+                if (typeStr == "jld:PositiveSyntaxTest") { isPositive = true; isSyntaxTest = true; }
                 if (typeStr == "jld:ToRDFTest") isToRdf = true;
             }
         }
@@ -325,6 +339,7 @@ public static class JsonLdTestContext
             Name = name,
             Purpose = purpose,
             IsPositive = isPositive,
+            IsSyntaxTest = isSyntaxTest,
             InputPath = Path.Combine(testsDir, input),
             ExpectPath = expect != null ? Path.Combine(testsDir, expect) : null,
             ExpectErrorCode = expectErrorCode,
@@ -365,6 +380,7 @@ public class JsonLdTestCase
     public required string Name { get; init; }
     public string? Purpose { get; init; }
     public bool IsPositive { get; init; }
+    public bool IsSyntaxTest { get; init; } // PositiveSyntaxTest - just tests parsing succeeds
     public required string InputPath { get; init; }
     public string? ExpectPath { get; init; }
     public string? ExpectErrorCode { get; init; }
