@@ -1124,6 +1124,38 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     {
                         throw new InvalidOperationException("invalid @nest value");
                     }
+                    // Per JSON-LD 1.1: @id MUST NOT be used with @reverse (er14)
+                    if (value.TryGetProperty("@id", out _))
+                    {
+                        throw new InvalidOperationException("invalid reverse property");
+                    }
+                    // Per JSON-LD 1.1: @reverse can only have @container: @set or @index (er17)
+                    if (value.TryGetProperty("@container", out var reverseContainerProp))
+                    {
+                        bool isValidReverseContainer = false;
+                        if (reverseContainerProp.ValueKind == JsonValueKind.String)
+                        {
+                            var c = reverseContainerProp.GetString();
+                            isValidReverseContainer = c == "@set" || c == "@index";
+                        }
+                        else if (reverseContainerProp.ValueKind == JsonValueKind.Array)
+                        {
+                            isValidReverseContainer = true; // Assume valid, check for invalid
+                            foreach (var c in reverseContainerProp.EnumerateArray())
+                            {
+                                var cv = c.GetString();
+                                if (cv != "@set" && cv != "@index")
+                                {
+                                    isValidReverseContainer = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!isValidReverseContainer)
+                        {
+                            throw new InvalidOperationException("invalid reverse property");
+                        }
+                    }
 
                     var reverseIri = reverseProp.GetString();
                     // Per JSON-LD 1.1: keyword-like values that aren't real keywords are ignored (pr38)
@@ -1146,8 +1178,18 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         // @type: @none means no type coercion (tn02) - don't add to _typeCoercion
                         // This ensures values are emitted as plain literals without datatype
                     }
+                    else if (typeVal == "@vocab" || typeVal == "@json")
+                    {
+                        _typeCoercion[term] = typeVal;
+                    }
                     else if (!string.IsNullOrEmpty(typeVal))
                     {
+                        // @type value must be @id, @vocab, @json, @none, or an absolute IRI (er13)
+                        // Blank nodes are not valid
+                        if (typeVal.StartsWith("_:") || (!typeVal.Contains(':') && !typeVal.StartsWith('@')))
+                        {
+                            throw new InvalidOperationException("invalid type mapping");
+                        }
                         _typeCoercion[term] = typeVal;
                     }
                 }
