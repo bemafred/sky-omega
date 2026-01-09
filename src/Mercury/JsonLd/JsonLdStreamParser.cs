@@ -399,6 +399,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         // Check both @id and any aliases for @id
         if (root.TryGetProperty("@id", out var idElement))
         {
+            // @id must be a string (er27)
+            if (idElement.ValueKind != JsonValueKind.String && idElement.ValueKind != JsonValueKind.Null)
+            {
+                throw new InvalidOperationException("invalid @id value");
+            }
             subject = ExpandIri(idElement.GetString() ?? "");
         }
         else
@@ -827,6 +832,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else if (term == "@language")
             {
+                // @language must be a string or null (er09)
+                if (value.ValueKind != JsonValueKind.String && value.ValueKind != JsonValueKind.Null)
+                {
+                    throw new InvalidOperationException("invalid default language");
+                }
                 _defaultLanguage = value.ValueKind == JsonValueKind.Null ? null : value.GetString();
             }
             else if (term == "@propagate")
@@ -1162,6 +1172,25 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     if (!string.IsNullOrEmpty(reverseIri) &&
                         !(reverseIri.StartsWith('@') && IsKeywordLike(reverseIri)))
                     {
+                        // Validate @reverse value can expand to valid IRI (er50)
+                        // The value must be an absolute IRI, a term, a compact IRI, or @vocab-expandable
+                        var expandedReverse = ExpandTermValue(reverseIri);
+                        if (string.IsNullOrEmpty(expandedReverse))
+                        {
+                            throw new InvalidOperationException("invalid IRI mapping");
+                        }
+                        // Also check for invalid IRI characters (spaces, etc.)
+                        var iriContent = expandedReverse;
+                        if (iriContent.StartsWith('<') && iriContent.EndsWith('>'))
+                        {
+                            iriContent = iriContent.Substring(1, iriContent.Length - 2);
+                        }
+                        if (iriContent.Contains(' ') || iriContent.Contains('"') ||
+                            iriContent.Contains('{') || iriContent.Contains('}') ||
+                            iriContent.Contains('|') || iriContent.Contains('^') || iriContent.Contains('`'))
+                        {
+                            throw new InvalidOperationException("invalid IRI mapping");
+                        }
                         _reverseProperty[term] = reverseIri;
                     }
                 }
@@ -1333,7 +1362,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     var typeIri = ExpandTypeIri(t.GetString() ?? "");
                     result.Add(typeIri);
                 }
+                else
+                {
+                    // @type array elements must be strings (er28)
+                    throw new InvalidOperationException("invalid type value");
+                }
             }
+        }
+        else
+        {
+            // @type must be a string or array of strings (er28)
+            throw new InvalidOperationException("invalid type value");
         }
 
         return result;
@@ -1404,7 +1443,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     var typeIri = ExpandTypeIri(t.GetString() ?? "");
                     EmitQuad(handler, subject, RdfType, typeIri, graph);
                 }
+                else
+                {
+                    // Array elements must be strings (er28)
+                    throw new InvalidOperationException("invalid type value");
+                }
             }
+        }
+        else
+        {
+            // @type must be a string or array of strings (er28)
+            throw new InvalidOperationException("invalid type value");
         }
     }
 
@@ -1766,6 +1815,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
         else if (value.ValueKind == JsonValueKind.Object)
         {
+            // @list values are not allowed for reverse properties (er36)
+            if (value.TryGetProperty("@list", out _))
+            {
+                throw new InvalidOperationException("invalid reverse property value");
+            }
+
             // Nested object - parse it fully to process its properties
             var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()));
             tempReader.Read();
@@ -1848,13 +1903,22 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private void ProcessReverseKeyword(string currentNode, JsonElement reverseElement, QuadHandler handler, string? graphIri)
     {
+        // @reverse must be an object (er33)
         if (reverseElement.ValueKind != JsonValueKind.Object)
-            return;
+        {
+            throw new InvalidOperationException("invalid @reverse value");
+        }
 
         foreach (var prop in reverseElement.EnumerateObject())
         {
             var propName = prop.Name;
             var propValue = prop.Value;
+
+            // JSON-LD keywords cannot be used as properties in @reverse (er25)
+            if (propName.StartsWith("@") && IsJsonLdKeyword(propName))
+            {
+                throw new InvalidOperationException("invalid reverse property map");
+            }
 
             // Check if this property is itself a reverse property (double-negation)
             if (_reverseProperty.TryGetValue(propName, out var reversePredicate))
@@ -1942,7 +2006,30 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             var strVal = value.GetString() ?? "";
             var newSubject = ExpandIri(strVal);
+            // Validate that the value expands to a valid node reference (er34)
+            // Must be non-empty and must not contain invalid IRI characters (spaces, etc.)
+            if (string.IsNullOrEmpty(newSubject))
+            {
+                throw new InvalidOperationException("invalid reverse property value");
+            }
+            // Check for invalid IRI characters - IRIs cannot contain unencoded spaces
+            var iriContent = newSubject;
+            if (iriContent.StartsWith('<') && iriContent.EndsWith('>'))
+            {
+                iriContent = iriContent.Substring(1, iriContent.Length - 2);
+            }
+            if (iriContent.Contains(' ') || iriContent.Contains('"') ||
+                iriContent.Contains('{') || iriContent.Contains('}') ||
+                iriContent.Contains('|') || iriContent.Contains('^') || iriContent.Contains('`'))
+            {
+                throw new InvalidOperationException("invalid reverse property value");
+            }
             EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
+        }
+        else
+        {
+            // Reverse property values must be node objects or strings (er34)
+            throw new InvalidOperationException("invalid reverse property value");
         }
     }
 
@@ -1981,7 +2068,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                             : $"\"{EscapeString(strVal)}\"@{langTag}";
                         EmitQuad(handler, subject, predicate, literal, graphIri);
                     }
+                    else if (item.ValueKind != JsonValueKind.Null)
+                    {
+                        // Language map values must be strings (er35)
+                        throw new InvalidOperationException("invalid language map value");
+                    }
                 }
+            }
+            else if (langValue.ValueKind != JsonValueKind.Null)
+            {
+                // Language map values must be strings or arrays of strings (er35)
+                throw new InvalidOperationException("invalid language map value");
             }
         }
     }
@@ -3001,6 +3098,42 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
     private string ProcessValueObject(JsonElement obj, JsonElement valueProp)
     {
+        // Value objects cannot contain @id (er37)
+        if (obj.TryGetProperty("@id", out _))
+        {
+            throw new InvalidOperationException("invalid value object");
+        }
+
+        // Value objects cannot have both @type and @language (er38)
+        bool hasTypeForConflict = obj.TryGetProperty("@type", out _);
+        if (!hasTypeForConflict)
+        {
+            foreach (var alias in _typeAliases)
+            {
+                if (obj.TryGetProperty(alias, out _))
+                {
+                    hasTypeForConflict = true;
+                    break;
+                }
+            }
+        }
+        bool hasLangForConflict = obj.TryGetProperty("@language", out _);
+        if (!hasLangForConflict)
+        {
+            foreach (var alias in _languageAliases)
+            {
+                if (obj.TryGetProperty(alias, out _))
+                {
+                    hasLangForConflict = true;
+                    break;
+                }
+            }
+        }
+        if (hasTypeForConflict && hasLangForConflict)
+        {
+            throw new InvalidOperationException("invalid value object");
+        }
+
         string valueStr;
         string? inferredType = null;  // Inferred XSD type for native JSON values
 
@@ -3026,9 +3159,13 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 valueStr = "false";
                 inferredType = "<http://www.w3.org/2001/XMLSchema#boolean>";
                 break;
-            default:
+            case JsonValueKind.Null:
+                // Null @value is allowed in some contexts (handled elsewhere)
                 valueStr = "";
                 break;
+            default:
+                // @value must be a scalar (string, number, boolean, null) - not array or object (er29)
+                throw new InvalidOperationException("invalid value object value");
         }
 
         // Check for @language (or alias)
@@ -3045,8 +3182,29 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 }
             }
         }
+        // Check for @index - if present, must be a string (er31)
+        // This must be checked early as @language handling returns immediately
+        if (obj.TryGetProperty("@index", out var indexProp))
+        {
+            if (indexProp.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException("invalid @index value");
+            }
+            // @index is valid but doesn't affect RDF output - it's just metadata
+        }
+
         if (hasLanguage)
         {
+            // @language must be a string (er30)
+            if (langProp.ValueKind != JsonValueKind.String && langProp.ValueKind != JsonValueKind.Null)
+            {
+                throw new InvalidOperationException("invalid language-tagged string");
+            }
+            // When @language is present, @value must be a string (er39)
+            if (valueProp.ValueKind != JsonValueKind.String)
+            {
+                throw new InvalidOperationException("invalid language-tagged value");
+            }
             var lang = langProp.GetString() ?? "";
             return $"\"{EscapeString(valueStr)}\"@{lang}";
         }
@@ -3336,6 +3494,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
 
             // Process list item - nested arrays become sublists (li05)
+            // Note: In JSON-LD 1.1, @list containing @list is ALLOWED (li01-li04)
+            // Only JSON-LD 1.0 mode (er32) rejects it, but we implement 1.1
             if (item.ValueKind == JsonValueKind.Array)
             {
                 // Nested array - recursively create a sublist
