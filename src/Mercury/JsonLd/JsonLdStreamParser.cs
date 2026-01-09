@@ -703,16 +703,55 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private void ProcessIncludedNodes(JsonElement element, QuadHandler handler)
     {
+        // @included value must be a node object or array of node objects (in07, in08, in09)
+        // It cannot be a string, value object, or list object
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            throw new InvalidOperationException("invalid @included value");
+        }
+
         if (element.ValueKind == JsonValueKind.Array)
         {
             foreach (var node in element.EnumerateArray())
             {
+                ValidateIncludedNode(node);
                 ProcessGraphNode(node, handler);
             }
         }
         else if (element.ValueKind == JsonValueKind.Object)
         {
+            ValidateIncludedNode(element);
             ProcessGraphNode(element, handler);
+        }
+    }
+
+    /// <summary>
+    /// Validate that a node is valid for @included (must be a node object, not value/list object)
+    /// </summary>
+    private void ValidateIncludedNode(JsonElement node)
+    {
+        if (node.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("invalid @included value");
+        }
+
+        // Check for value object (has @value or @value alias)
+        if (node.TryGetProperty("@value", out _))
+        {
+            throw new InvalidOperationException("invalid @included value");
+        }
+        foreach (var alias in _valueAliases)
+        {
+            if (node.TryGetProperty(alias, out _))
+            {
+                throw new InvalidOperationException("invalid @included value");
+            }
+        }
+
+        // Check for list object (has @list)
+        if (node.TryGetProperty("@list", out _))
+        {
+            throw new InvalidOperationException("invalid @included value");
         }
     }
 
@@ -771,6 +810,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             if (term == "")
             {
                 throw new InvalidOperationException("invalid term definition");
+            }
+
+            // @context cannot be redefined (er56)
+            if (term == "@context")
+            {
+                throw new InvalidOperationException("keyword redefinition");
             }
 
             // Terms that look like relative IRIs are invalid (er48)
@@ -1158,9 +1203,17 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
                 // Handle @prefix - marks term as usable as a prefix in compact IRIs (e124)
                 // Expanded term definitions are NOT prefix-able by default (unlike simple string mappings)
-                if (value.TryGetProperty("@prefix", out var prefixProp) && prefixProp.ValueKind == JsonValueKind.True)
+                if (value.TryGetProperty("@prefix", out var prefixProp))
                 {
-                    _prefixable.Add(term);
+                    // @prefix must be a boolean (er53)
+                    if (prefixProp.ValueKind != JsonValueKind.True && prefixProp.ValueKind != JsonValueKind.False)
+                    {
+                        throw new InvalidOperationException("invalid @prefix value");
+                    }
+                    if (prefixProp.ValueKind == JsonValueKind.True)
+                    {
+                        _prefixable.Add(term);
+                    }
                 }
 
                 // Handle @reverse - the term maps to a reverse property
@@ -1338,6 +1391,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         {
                             if (containerItem.ValueKind == JsonValueKind.String)
                                 ProcessContainerValue(containerItem.GetString());
+                        }
+                    }
+
+                    // When @container includes @type, @type must be @id, @vocab, or @none (m020)
+                    // A datatype IRI like "literal" is invalid with @container: @type
+                    if (_containerType.ContainsKey(term) && _typeCoercion.TryGetValue(term, out var typeCoercionVal))
+                    {
+                        if (typeCoercionVal != "@id" && typeCoercionVal != "@vocab" && typeCoercionVal != "@none")
+                        {
+                            throw new InvalidOperationException("invalid type mapping");
                         }
                     }
                 }
