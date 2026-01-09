@@ -955,9 +955,18 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                     throw new InvalidOperationException("invalid base direction");
                 }
             }
-            else if (term == "@protected" || term == "@import")
+            else if (term == "@protected")
             {
-                // Ignore other JSON-LD 1.1 keywords we don't fully implement yet
+                // Ignore @protected - we don't fully implement term protection yet
+            }
+            else if (term == "@import")
+            {
+                // @import must be a string (so02)
+                if (value.ValueKind != JsonValueKind.String)
+                {
+                    throw new InvalidOperationException("invalid @import value");
+                }
+                // Remote context imports not supported
             }
             else if (value.ValueKind == JsonValueKind.Null)
             {
@@ -1020,6 +1029,24 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 else
                 {
                     // Simple term -> IRI mapping (always prefix-able)
+                    // Check if term looks like compact IRI and verify consistency (er44)
+                    var termColonIdx = term.IndexOf(':');
+                    if (termColonIdx > 0)
+                    {
+                        var termPrefix = term.Substring(0, termColonIdx);
+                        var termLocalPart = term.Substring(termColonIdx + 1);
+                        // If prefix is defined, the mapped value must match prefix expansion + local part
+                        if (!termLocalPart.StartsWith("//") && _context.TryGetValue(termPrefix, out var prefixIri))
+                        {
+                            var expectedIri = prefixIri + termLocalPart;
+                            // Expand mappedValue if it's a compact IRI
+                            var expandedMappedValue = ExpandCompactIri(mappedValue);
+                            if (expandedMappedValue != expectedIri)
+                            {
+                                throw new InvalidOperationException("invalid IRI mapping");
+                            }
+                        }
+                    }
                     _context[term] = mappedValue;
                     _prefixable.Add(term);
                 }
@@ -1168,6 +1195,26 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                                     throw new InvalidOperationException("cyclic IRI mapping");
                                 }
                             }
+
+                            // Check if term looks like compact IRI and verify consistency (er44)
+                            var termColonIdx = term.IndexOf(':');
+                            if (termColonIdx > 0)
+                            {
+                                var termPrefix = term.Substring(0, termColonIdx);
+                                var termLocalPart = term.Substring(termColonIdx + 1);
+                                // If prefix is defined, the mapped value must match prefix expansion + local part
+                                if (!termLocalPart.StartsWith("//") && _context.TryGetValue(termPrefix, out var prefixIri))
+                                {
+                                    var expectedIri = prefixIri + termLocalPart;
+                                    // Expand idValue if it's a compact IRI
+                                    var expandedIdValue = ExpandCompactIri(idValue);
+                                    if (expandedIdValue != expectedIri)
+                                    {
+                                        throw new InvalidOperationException("invalid IRI mapping");
+                                    }
+                                }
+                            }
+
                             _context[term] = idValue;
                         }
                     }
