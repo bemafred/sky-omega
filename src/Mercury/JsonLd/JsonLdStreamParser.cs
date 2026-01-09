@@ -744,7 +744,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
 
         if (contextElement.ValueKind != JsonValueKind.Object)
-            return;
+        {
+            // Context must be null, string, object, or array (er06)
+            throw new InvalidOperationException("invalid local context");
+        }
 
         foreach (var prop in contextElement.EnumerateObject())
         {
@@ -1233,6 +1236,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                         throw new InvalidOperationException("invalid @nest value");
                     }
                 }
+            }
+            else
+            {
+                // Term definitions must be null, string, or object (er11)
+                throw new InvalidOperationException("invalid term definition");
             }
         }
     }
