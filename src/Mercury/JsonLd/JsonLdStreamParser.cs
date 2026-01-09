@@ -3076,6 +3076,20 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 return $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>";
             }
             var datatype = ExpandIri(typeStr, expandTerms: true);
+            // Validate that the datatype IRI is well-formed (e123)
+            // Strip angle brackets for validation, then check for invalid characters
+            var iriToValidate = datatype;
+            if (iriToValidate.StartsWith('<') && iriToValidate.EndsWith('>'))
+            {
+                iriToValidate = iriToValidate.Substring(1, iriToValidate.Length - 2);
+            }
+            // IRIs cannot contain spaces or other invalid characters
+            if (iriToValidate.Contains(' ') || iriToValidate.Contains('<') || iriToValidate.Contains('>') ||
+                iriToValidate.Contains('"') || iriToValidate.Contains('{') || iriToValidate.Contains('}') ||
+                iriToValidate.Contains('|') || iriToValidate.Contains('^') || iriToValidate.Contains('`'))
+            {
+                throw new InvalidOperationException("invalid typed value");
+            }
             return $"\"{EscapeString(valueStr)}\"^^{datatype}";
         }
 
