@@ -940,7 +940,74 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             }
             else if (value.ValueKind == JsonValueKind.Object)
             {
+                // Special handling for keyword term definitions (ec02)
+                // @type can only have @container and @protected in its term definition
+                if (term == "@type")
+                {
+                    bool hasValidContent = false;
+                    foreach (var typeDefProp in value.EnumerateObject())
+                    {
+                        var k = typeDefProp.Name;
+                        if (k == "@container" || k == "@protected")
+                        {
+                            hasValidContent = true;
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("invalid term definition");
+                        }
+                    }
+                    if (!hasValidContent)
+                    {
+                        // Empty object is invalid
+                        throw new InvalidOperationException("invalid term definition");
+                    }
+                    // Process @type @container if present
+                    if (value.TryGetProperty("@container", out var typeContainerProp))
+                    {
+                        // @type can have @container: @set
+                        // We don't need to do anything special here as @set is the default behavior
+                    }
+                    continue;
+                }
+
                 // Expanded term definition
+                // Validate that only valid keywords are used (ec01)
+                foreach (var termProp in value.EnumerateObject())
+                {
+                    var key = termProp.Name;
+                    if (key.StartsWith('@'))
+                    {
+                        // Valid keywords in expanded term definitions
+                        if (key != "@id" && key != "@type" && key != "@container" &&
+                            key != "@context" && key != "@language" && key != "@direction" &&
+                            key != "@reverse" && key != "@protected" && key != "@prefix" &&
+                            key != "@nest" && key != "@propagate" && key != "@index")
+                        {
+                            throw new InvalidOperationException("invalid term definition");
+                        }
+                        // @index is only valid when @container includes @index
+                        if (key == "@index")
+                        {
+                            bool hasIndexContainer = false;
+                            if (value.TryGetProperty("@container", out var containerCheck))
+                            {
+                                if (containerCheck.ValueKind == JsonValueKind.String)
+                                    hasIndexContainer = containerCheck.GetString() == "@index";
+                                else if (containerCheck.ValueKind == JsonValueKind.Array)
+                                {
+                                    foreach (var c in containerCheck.EnumerateArray())
+                                        if (c.GetString() == "@index") hasIndexContainer = true;
+                                }
+                            }
+                            if (!hasIndexContainer)
+                            {
+                                throw new InvalidOperationException("invalid term definition");
+                            }
+                        }
+                    }
+                }
+
                 if (value.TryGetProperty("@id", out var idProp))
                 {
                     if (idProp.ValueKind == JsonValueKind.Null)
@@ -1094,7 +1161,15 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                             _containerId[term] = true;
                         else if (containerVal == "@type")
                             _containerType[term] = true;
-                        // Note: @set containers treated as simple containers
+                        else if (containerVal == "@set")
+                        {
+                            // @set containers treated as simple containers
+                        }
+                        else if (!string.IsNullOrEmpty(containerVal))
+                        {
+                            // Invalid container value (em01)
+                            throw new InvalidOperationException("invalid container mapping");
+                        }
                     }
 
                     if (containerProp.ValueKind == JsonValueKind.String)
