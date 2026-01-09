@@ -71,6 +71,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _noneAliases; // terms aliased to @none
     private readonly HashSet<string> _valueAliases; // terms aliased to @value
     private readonly HashSet<string> _languageAliases; // terms aliased to @language
+    private readonly HashSet<string> _jsonAliases; // terms aliased to @json
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
     private readonly HashSet<string> _prefixable; // terms usable as prefixes in compact IRIs
 
@@ -146,6 +147,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _noneAliases = new HashSet<string>(StringComparer.Ordinal);
         _valueAliases = new HashSet<string>(StringComparer.Ordinal);
         _languageAliases = new HashSet<string>(StringComparer.Ordinal);
+        _jsonAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
         _prefixable = new HashSet<string>(StringComparer.Ordinal);
     }
@@ -854,6 +856,10 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 {
                     _languageAliases.Add(term);
                 }
+                else if (mappedValue == "@json" || _jsonAliases.Contains(mappedValue))
+                {
+                    _jsonAliases.Add(term);
+                }
                 else
                 {
                     // Simple term -> IRI mapping (always prefix-able)
@@ -1257,6 +1263,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         HashSet<string>? savedNoneAliases = null;
         HashSet<string>? savedValueAliases = null;
         HashSet<string>? savedLanguageAliases = null;
+        HashSet<string>? savedJsonAliases = null;
         HashSet<string>? savedNullTerms = null;
         HashSet<string>? savedPrefixable = null;
         string? savedVocabIri = null;
@@ -1284,6 +1291,7 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             savedNoneAliases = new HashSet<string>(_noneAliases);
             savedValueAliases = new HashSet<string>(_valueAliases);
             savedLanguageAliases = new HashSet<string>(_languageAliases);
+            savedJsonAliases = new HashSet<string>(_jsonAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
             savedPrefixable = new HashSet<string>(_prefixable);
             savedVocabIri = _vocabIri;
@@ -1445,6 +1453,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 _languageAliases.Clear();
                 foreach (var alias in savedLanguageAliases!) _languageAliases.Add(alias);
 
+                _jsonAliases.Clear();
+                foreach (var alias in savedJsonAliases!) _jsonAliases.Add(alias);
+
                 _nullTerms.Clear();
                 foreach (var t in savedNullTerms!) _nullTerms.Add(t);
 
@@ -1526,7 +1537,21 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 var propName = prop.Name;
 
-                // Skip JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
+                // Handle nested @nest recursively (n005)
+                if (propName == "@nest" || _nestAliases.Contains(propName))
+                {
+                    ProcessNestKeyword(currentNode, prop.Value, handler, graphIri);
+                    continue;
+                }
+
+                // Handle @type inside @nest - emit rdf:type for the parent node (n008)
+                if (propName == "@type" || _typeAliases.Contains(propName))
+                {
+                    ProcessType(currentNode, prop.Value, handler, graphIri);
+                    continue;
+                }
+
+                // Skip other JSON-LD keywords (but allow non-keyword @ patterns like "@" or "@foo.bar")
                 if (propName.StartsWith('@') && IsKeywordLike(propName))
                     continue;
 
@@ -2414,9 +2439,34 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
 
         if (hasValue)
         {
-            // Skip if @value is null
+            // Skip if @value is null, unless @type is @json (js22)
             if (valProp.ValueKind == JsonValueKind.Null)
+            {
+                // Check if @type is @json - if so, emit "null" as JSON literal
+                JsonElement typeProp = default;
+                bool hasJsonType = value.TryGetProperty("@type", out typeProp);
+                if (!hasJsonType)
+                {
+                    foreach (var alias in _typeAliases)
+                    {
+                        if (value.TryGetProperty(alias, out typeProp))
+                        {
+                            hasJsonType = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasJsonType)
+                {
+                    var typeVal = typeProp.GetString() ?? "";
+                    if (typeVal == "@json" || _jsonAliases.Contains(typeVal))
+                    {
+                        EmitQuad(handler, subject, predicate,
+                            "\"null\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
+                    }
+                }
                 return;
+            }
             var literal = ProcessValueObject(value, valProp);
             EmitQuad(handler, subject, predicate, literal, graphIri);
             return;
@@ -2750,8 +2800,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         if (hasType)
         {
             var typeStr = typeProp.GetString() ?? "";
-            // Handle @json type - use canonical JSON representation (js23)
-            if (typeStr == "@json")
+            // Handle @json type - use canonical JSON representation (js23, js16)
+            // Check for @json or aliases of @json
+            if (typeStr == "@json" || _jsonAliases.Contains(typeStr))
             {
                 var canonicalJson = CanonicalizeJson(valueProp);
                 return $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>";
@@ -2777,13 +2828,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         var hasDecimalOrExp = rawText.Contains('.') || rawText.Contains('e') || rawText.Contains('E');
 
         // JSON-LD spec: a number that can be exactly represented as an integer should be xsd:integer (tn02)
+        // But numbers >= 1e21 must be xsd:double even without fractions (rt01)
         // Parse the value to check if it's an exact integer even if written as a double (e.g., 10.0)
         var isDouble = hasDecimalOrExp;
         if (hasDecimalOrExp && double.TryParse(rawText, System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var checkValue))
         {
-            // If the value has no fractional part, treat it as an integer
-            if (Math.Floor(checkValue) == checkValue && !double.IsInfinity(checkValue) && !double.IsNaN(checkValue))
+            // If the value has no fractional part and is within integer range, treat it as an integer
+            // Numbers >= 1e21 cannot be exactly represented as integers and must use xsd:double
+            if (Math.Floor(checkValue) == checkValue && !double.IsInfinity(checkValue) && !double.IsNaN(checkValue)
+                && Math.Abs(checkValue) < 1e21)
             {
                 isDouble = false;
             }
