@@ -942,7 +942,9 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 if (value.TryGetProperty("@reverse", out var reverseProp))
                 {
                     var reverseIri = reverseProp.GetString();
-                    if (!string.IsNullOrEmpty(reverseIri))
+                    // Per JSON-LD 1.1: keyword-like values that aren't real keywords are ignored (pr38)
+                    if (!string.IsNullOrEmpty(reverseIri) &&
+                        !(reverseIri.StartsWith('@') && IsKeywordLike(reverseIri)))
                     {
                         _reverseProperty[term] = reverseIri;
                     }
