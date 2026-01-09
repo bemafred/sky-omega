@@ -506,8 +506,8 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
         {
             ProcessNestKeyword(subject, nestElement, handler, _currentGraph);
         }
-        // Also process @nest aliases
-        foreach (var alias in _nestAliases)
+        // Also process @nest aliases - use snapshot since ProcessNestKeyword may modify _nestAliases
+        foreach (var alias in _nestAliases.ToList())
         {
             if (root.TryGetProperty(alias, out var aliasNestElement))
             {
