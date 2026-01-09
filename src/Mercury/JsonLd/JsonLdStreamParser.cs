@@ -994,6 +994,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 // Handle @reverse - the term maps to a reverse property
                 if (value.TryGetProperty("@reverse", out var reverseProp))
                 {
+                    // Per JSON-LD 1.1: @nest MUST NOT be used with @reverse (en06)
+                    if (value.TryGetProperty("@nest", out _))
+                    {
+                        throw new InvalidOperationException("invalid @nest value");
+                    }
+
                     var reverseIri = reverseProp.GetString();
                     // Per JSON-LD 1.1: keyword-like values that aren't real keywords are ignored (pr38)
                     if (!string.IsNullOrEmpty(reverseIri) &&
@@ -1086,6 +1092,16 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
                 if (value.TryGetProperty("@context", out var scopedContextProp))
                 {
                     _scopedContext[term] = scopedContextProp.GetRawText();
+                }
+
+                // Handle @nest - the value MUST be @nest or an alias of @nest (en05)
+                if (value.TryGetProperty("@nest", out var nestProp))
+                {
+                    var nestVal = nestProp.GetString() ?? "";
+                    if (nestVal != "@nest" && !_nestAliases.Contains(nestVal))
+                    {
+                        throw new InvalidOperationException("invalid @nest value");
+                    }
                 }
             }
         }
@@ -1594,6 +1610,12 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
     {
         if (nestElement.ValueKind == JsonValueKind.Object)
         {
+            // @nest MUST NOT contain value objects (en04)
+            if (nestElement.TryGetProperty("@value", out _))
+            {
+                throw new InvalidOperationException("invalid @nest value");
+            }
+
             foreach (var prop in nestElement.EnumerateObject())
             {
                 var propName = prop.Name;
@@ -1630,6 +1652,11 @@ public sealed class JsonLdStreamParser : IDisposable, IAsyncDisposable
             {
                 ProcessNestKeyword(currentNode, item, handler, graphIri);
             }
+        }
+        else
+        {
+            // @nest MUST be an object or array - strings, booleans, numbers, and value objects are invalid
+            throw new InvalidOperationException("invalid @nest value");
         }
     }
 
