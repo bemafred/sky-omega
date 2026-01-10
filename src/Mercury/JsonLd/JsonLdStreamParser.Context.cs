@@ -20,6 +20,11 @@ public sealed partial class JsonLdStreamParser
 
         if (contextElement.ValueKind == JsonValueKind.Null)
         {
+            // Check for protected terms - cannot clear context with null if any terms are protected
+            if (_protectedTerms.Count > 0)
+            {
+                throw new InvalidOperationException("invalid context nullification");
+            }
             // Null context clears all term definitions
             _context.Clear();
             _typeCoercion.Clear();
@@ -56,6 +61,25 @@ public sealed partial class JsonLdStreamParser
             throw new InvalidOperationException("invalid local context");
         }
 
+        // Check for context-level @protected first
+        bool contextProtectedMode = false;
+        if (contextElement.TryGetProperty("@protected", out var protectedProp))
+        {
+            if (protectedProp.ValueKind == JsonValueKind.True)
+            {
+                contextProtectedMode = true;
+            }
+            else if (protectedProp.ValueKind != JsonValueKind.False)
+            {
+                throw new InvalidOperationException("invalid @protected value");
+            }
+        }
+
+        // Track terms defined in this context (for context-level @protected)
+        var termsDefinedInThisContext = new List<string>();
+        // Track terms that explicitly have @protected: false (should not be marked protected even if context-level is true)
+        var explicitlyUnprotectedTerms = new HashSet<string>(StringComparer.Ordinal);
+
         foreach (var prop in contextElement.EnumerateObject())
         {
             var term = prop.Name;
@@ -78,6 +102,15 @@ public sealed partial class JsonLdStreamParser
             if (term.StartsWith("./") || term.StartsWith("../"))
             {
                 throw new InvalidOperationException("invalid IRI mapping");
+            }
+
+            // Check if this term is already protected (cannot be redefined)
+            // Skip keywords like @base, @vocab, @language, etc.
+            if (!term.StartsWith('@') && _protectedTerms.Contains(term))
+            {
+                // Check if term definition is the same (identical redefinition is allowed)
+                // For now, we throw error on any redefinition attempt of protected term
+                throw new InvalidOperationException("protected term redefinition");
             }
 
             if (term == "@base")
@@ -212,7 +245,14 @@ public sealed partial class JsonLdStreamParser
             }
             else if (term == "@protected")
             {
-                // Ignore @protected - we don't fully implement term protection yet
+                // Context-level @protected must be a boolean
+                if (value.ValueKind != JsonValueKind.True && value.ValueKind != JsonValueKind.False)
+                {
+                    throw new InvalidOperationException("invalid @protected value");
+                }
+                // Context-level @protected: true marks all following terms in this context as protected
+                // We handle this by processing all terms first, then marking them protected below
+                // For now, just continue - we'll handle this after the loop
             }
             else if (term == "@import")
             {
@@ -227,6 +267,7 @@ public sealed partial class JsonLdStreamParser
             {
                 // Term mapped to null - decouple from @vocab
                 _nullTerms.Add(term);
+                termsDefinedInThisContext.Add(term);
             }
             else if (value.ValueKind == JsonValueKind.String)
             {
@@ -242,38 +283,47 @@ public sealed partial class JsonLdStreamParser
                 if (mappedValue == "@type" || _typeAliases.Contains(mappedValue))
                 {
                     _typeAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@id" || _idAliases.Contains(mappedValue))
                 {
                     _idAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@graph" || _graphAliases.Contains(mappedValue))
                 {
                     _graphAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@included" || _includedAliases.Contains(mappedValue))
                 {
                     _includedAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@nest" || _nestAliases.Contains(mappedValue))
                 {
                     _nestAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@none" || _noneAliases.Contains(mappedValue))
                 {
                     _noneAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@value" || _valueAliases.Contains(mappedValue))
                 {
                     _valueAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@language" || _languageAliases.Contains(mappedValue))
                 {
                     _languageAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue == "@json" || _jsonAliases.Contains(mappedValue))
                 {
                     _jsonAliases.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
                 else if (mappedValue.StartsWith('@') && IsKeywordLike(mappedValue))
                 {
@@ -304,6 +354,7 @@ public sealed partial class JsonLdStreamParser
                     }
                     _context[term] = mappedValue;
                     _prefixable.Add(term);
+                    termsDefinedInThisContext.Add(term);
                 }
             }
             else if (value.ValueKind == JsonValueKind.Object)
@@ -747,6 +798,39 @@ public sealed partial class JsonLdStreamParser
                     _scopedContext[term] = scopedContextProp.GetRawText();
                 }
 
+                // Handle term-level @protected
+                bool termExplicitlyProtected = false;
+                bool termExplicitlyUnprotected = false;
+                if (value.TryGetProperty("@protected", out var termProtectedProp))
+                {
+                    if (termProtectedProp.ValueKind == JsonValueKind.True)
+                    {
+                        termExplicitlyProtected = true;
+                    }
+                    else if (termProtectedProp.ValueKind == JsonValueKind.False)
+                    {
+                        termExplicitlyUnprotected = true;
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("invalid @protected value");
+                    }
+                }
+
+                // Track this term as defined in this context
+                termsDefinedInThisContext.Add(term);
+
+                // If term explicitly has @protected: true, mark it protected immediately
+                if (termExplicitlyProtected)
+                {
+                    _protectedTerms.Add(term);
+                }
+                // If term explicitly has @protected: false, don't mark it even if context-level is true
+                else if (termExplicitlyUnprotected)
+                {
+                    explicitlyUnprotectedTerms.Add(term);
+                }
+
                 // Handle @nest - the value MUST be @nest or an alias of @nest (en05)
                 if (value.TryGetProperty("@nest", out var nestProp))
                 {
@@ -781,6 +865,19 @@ public sealed partial class JsonLdStreamParser
             {
                 // Term definitions must be null, string, or object (er11)
                 throw new InvalidOperationException("invalid term definition");
+            }
+        }
+
+        // If context-level @protected is true, mark all terms defined in this context as protected
+        // (except those explicitly marked @protected: false)
+        if (contextProtectedMode)
+        {
+            foreach (var definedTerm in termsDefinedInThisContext)
+            {
+                if (!explicitlyUnprotectedTerms.Contains(definedTerm))
+                {
+                    _protectedTerms.Add(definedTerm);
+                }
             }
         }
     }

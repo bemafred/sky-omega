@@ -249,4 +249,4 @@ Mercury is the evidence. Not a toy. Not a proof-of-concept. A working system at 
 
 The methodology held because it doesn’t promise completeness. It promises a protocol for incompleteness. That’s what you need when you’re building something that hasn’t been built before.
 
-*Powered by Mercury. Validated by EEE.*
+*Powered by Mercury. Validated by EEE. Sky Omega.*

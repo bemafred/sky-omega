@@ -68,6 +68,7 @@ public sealed partial class JsonLdStreamParser
         HashSet<string>? savedJsonAliases = null;
         HashSet<string>? savedNullTerms = null;
         HashSet<string>? savedPrefixable = null;
+        HashSet<string>? savedProtectedTerms = null;
         string? savedVocabIri = null;
         string? savedBaseIri = null;
         string? savedDefaultLanguage = null;
@@ -96,9 +97,15 @@ public sealed partial class JsonLdStreamParser
             savedJsonAliases = new HashSet<string>(_jsonAliases);
             savedNullTerms = new HashSet<string>(_nullTerms);
             savedPrefixable = new HashSet<string>(_prefixable);
+            savedProtectedTerms = new HashSet<string>(_protectedTerms);
             savedVocabIri = _vocabIri;
             savedBaseIri = _baseIri;
             savedDefaultLanguage = _defaultLanguage;
+
+            // Clear protected terms before applying scoped context
+            // Property-scoped @context: null is allowed to clear protected terms
+            // (protection is restored after property processing)
+            _protectedTerms.Clear();
 
             // Apply the scoped context
             using var scopedDoc = JsonDocument.Parse(scopedContextJson);
@@ -263,6 +270,9 @@ public sealed partial class JsonLdStreamParser
 
                 _prefixable.Clear();
                 foreach (var t in savedPrefixable!) _prefixable.Add(t);
+
+                _protectedTerms.Clear();
+                foreach (var t in savedProtectedTerms!) _protectedTerms.Add(t);
 
                 _vocabIri = savedVocabIri;
                 _baseIri = savedBaseIri;

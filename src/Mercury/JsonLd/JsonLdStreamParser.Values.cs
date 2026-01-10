@@ -411,10 +411,19 @@ public sealed partial class JsonLdStreamParser
             RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
         }
 
-        // Save @vocab and @base before processing nested node
-        // This handles both type-scoped context restoration AND nested object inline @context
+        // Save full context state before processing nested node
+        // Nested object's inline @context should NOT affect siblings
         var savedVocab = _vocabIri;
         var savedBase = _baseIri;
+        var savedContextForNested = new Dictionary<string, string>(_context);
+        var savedTypeCoercionForNested = new Dictionary<string, string>(_typeCoercion);
+        var savedContainerListForNested = new Dictionary<string, bool>(_containerList);
+        var savedContainerLangForNested = new Dictionary<string, bool>(_containerLanguage);
+        var savedContainerIndexForNested = new Dictionary<string, bool>(_containerIndex);
+        var savedContainerGraphForNested = new Dictionary<string, bool>(_containerGraph);
+        var savedContainerIdForNested = new Dictionary<string, bool>(_containerId);
+        var savedContainerTypeForNested = new Dictionary<string, bool>(_containerType);
+
         // If type-scoped context changed @vocab/@base, restore to pre-type-scoped state for nested
         // (unless @propagate is true)
         if (!_typeScopedPropagate && _savedContextForNested != null)
@@ -428,9 +437,44 @@ public sealed partial class JsonLdStreamParser
         var blankNode = ParseNode(ref tempReader, handler, subject);
         EmitQuad(handler, subject, predicate, blankNode, graphIri);
 
-        // Restore after processing nested node:
-        // - Re-apply type-scoped changes (they apply to this node's remaining properties)
-        // - Restore @vocab/@base (nested node's inline @context shouldn't affect siblings)
+        // Restore full context state after processing nested node
+        // Nested object's inline @context should NOT affect siblings
+        _context.Clear();
+        foreach (var kv in savedContextForNested)
+            _context[kv.Key] = kv.Value;
+
+        _typeCoercion.Clear();
+        foreach (var kv in savedTypeCoercionForNested)
+            _typeCoercion[kv.Key] = kv.Value;
+
+        _containerList.Clear();
+        foreach (var kv in savedContainerListForNested)
+            _containerList[kv.Key] = kv.Value;
+
+        _containerLanguage.Clear();
+        foreach (var kv in savedContainerLangForNested)
+            _containerLanguage[kv.Key] = kv.Value;
+
+        _containerIndex.Clear();
+        foreach (var kv in savedContainerIndexForNested)
+            _containerIndex[kv.Key] = kv.Value;
+
+        _containerGraph.Clear();
+        foreach (var kv in savedContainerGraphForNested)
+            _containerGraph[kv.Key] = kv.Value;
+
+        _containerId.Clear();
+        foreach (var kv in savedContainerIdForNested)
+            _containerId[kv.Key] = kv.Value;
+
+        _containerType.Clear();
+        foreach (var kv in savedContainerTypeForNested)
+            _containerType[kv.Key] = kv.Value;
+
+        _vocabIri = savedVocab;
+        _baseIri = savedBase;
+
+        // Re-apply type-scoped changes (they apply to this node's remaining properties)
         if (savedCoercions != null)
         {
             foreach (var kv in savedCoercions)
@@ -446,7 +490,7 @@ public sealed partial class JsonLdStreamParser
             }
         }
 
-        // Restore container values
+        // Restore type-scoped container values
         void RestoreContainer(Dictionary<string, bool>? saved, Dictionary<string, bool> container)
         {
             if (saved != null)
@@ -463,9 +507,6 @@ public sealed partial class JsonLdStreamParser
         RestoreContainer(savedContainerLang, _containerLanguage);
         RestoreContainer(savedContainerGraph, _containerGraph);
         RestoreContainer(savedContainerId, _containerId);
-
-        _vocabIri = savedVocab;
-        _baseIri = savedBase;
     }
 
     private string ProcessValueObject(JsonElement obj, JsonElement valueProp)

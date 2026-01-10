@@ -74,6 +74,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _jsonAliases; // terms aliased to @json
     private readonly HashSet<string> _nullTerms; // terms decoupled from @vocab (mapped to null)
     private readonly HashSet<string> _prefixable; // terms usable as prefixes in compact IRIs
+    private readonly HashSet<string> _protectedTerms; // terms marked as @protected
 
     // Base IRI for relative IRI resolution
     private string? _baseIri;
@@ -150,6 +151,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _jsonAliases = new HashSet<string>(StringComparer.Ordinal);
         _nullTerms = new HashSet<string>(StringComparer.Ordinal);
         _prefixable = new HashSet<string>(StringComparer.Ordinal);
+        _protectedTerms = new HashSet<string>(StringComparer.Ordinal);
     }
 
     /// <summary>
