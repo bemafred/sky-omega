@@ -112,6 +112,30 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private Dictionary<string, bool?>? _typeScopedContainerIdChanges;     // @container: @id changes
     private bool _typeScopedPropagate;                               // If true, type-scoped context DOES propagate
 
+    // Track property-scoped context changes when @propagate: false (c027, c028)
+    // Property-scoped contexts propagate by default, but @propagate: false stops propagation to nested nodes
+    private Dictionary<string, string?>? _propScopedTermChanges;     // Terms added/modified by property-scoped context
+    private Dictionary<string, string?>? _propScopedCoercionChanges; // Coercions added/modified by property-scoped
+    private Dictionary<string, bool?>? _propScopedContainerTypeChanges;   // @container: @type changes
+    private Dictionary<string, bool?>? _propScopedContainerIndexChanges;  // @container: @index changes
+    private Dictionary<string, bool?>? _propScopedContainerListChanges;   // @container: @list changes
+    private Dictionary<string, bool?>? _propScopedContainerLangChanges;   // @container: @language changes
+    private Dictionary<string, bool?>? _propScopedContainerGraphChanges;  // @container: @graph changes
+    private Dictionary<string, bool?>? _propScopedContainerIdChanges;     // @container: @id changes
+    private bool _propScopedNoPropagate;                             // If true, property-scoped context does NOT propagate
+
+    // Track inline (embedded) context changes when @propagate: false (c028)
+    // Inline contexts propagate by default, but @propagate: false stops propagation to nested nodes
+    private Dictionary<string, string?>? _inlineScopedTermChanges;     // Terms added/modified by inline context
+    private Dictionary<string, string?>? _inlineScopedCoercionChanges; // Coercions added/modified by inline context
+    private Dictionary<string, bool?>? _inlineScopedContainerTypeChanges;   // @container: @type changes
+    private Dictionary<string, bool?>? _inlineScopedContainerIndexChanges;  // @container: @index changes
+    private Dictionary<string, bool?>? _inlineScopedContainerListChanges;   // @container: @list changes
+    private Dictionary<string, bool?>? _inlineScopedContainerLangChanges;   // @container: @language changes
+    private Dictionary<string, bool?>? _inlineScopedContainerGraphChanges;  // @container: @graph changes
+    private Dictionary<string, bool?>? _inlineScopedContainerIdChanges;     // @container: @id changes
+    private bool _inlineScopedNoPropagate;                           // If true, inline context does NOT propagate
+
     private const int DefaultBufferSize = 65536; // 64KB
     private const int OutputBufferSize = 16384;
 

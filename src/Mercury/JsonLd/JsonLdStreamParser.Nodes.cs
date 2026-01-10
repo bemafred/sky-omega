@@ -24,9 +24,120 @@ public sealed partial class JsonLdStreamParser
         var root = doc.RootElement;
 
         // Process @context first if present
+        // Track inline context changes for @propagate: false handling (c028)
+        // Save previous inline scope state (in case of nested inline contexts)
+        var savedInlineNoPropagate = _inlineScopedNoPropagate;
+        var savedInlineTermChanges = _inlineScopedTermChanges;
+        var savedInlineCoercionChanges = _inlineScopedCoercionChanges;
+        var savedInlineContainerTypeChanges = _inlineScopedContainerTypeChanges;
+        var savedInlineContainerIndexChanges = _inlineScopedContainerIndexChanges;
+        var savedInlineContainerListChanges = _inlineScopedContainerListChanges;
+        var savedInlineContainerLangChanges = _inlineScopedContainerLangChanges;
+        var savedInlineContainerGraphChanges = _inlineScopedContainerGraphChanges;
+        var savedInlineContainerIdChanges = _inlineScopedContainerIdChanges;
+
         if (root.TryGetProperty("@context", out var contextElement))
         {
-            ProcessContext(contextElement);
+            // Check if this inline context has @propagate: false (c028)
+            if (contextElement.ValueKind == JsonValueKind.Object &&
+                contextElement.TryGetProperty("@propagate", out var propagateProp) &&
+                propagateProp.ValueKind == JsonValueKind.False)
+            {
+                // Snapshot before state
+                var termsBefore = new Dictionary<string, string>(_context);
+                var coercionBefore = new Dictionary<string, string>(_typeCoercion);
+                var containerTypeBefore = new Dictionary<string, bool>(_containerType);
+                var containerIndexBefore = new Dictionary<string, bool>(_containerIndex);
+                var containerListBefore = new Dictionary<string, bool>(_containerList);
+                var containerLangBefore = new Dictionary<string, bool>(_containerLanguage);
+                var containerGraphBefore = new Dictionary<string, bool>(_containerGraph);
+                var containerIdBefore = new Dictionary<string, bool>(_containerId);
+
+                ProcessContext(contextElement);
+
+                // Set class-level fields for inline context tracking
+                _inlineScopedNoPropagate = true;
+                _inlineScopedTermChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
+                _inlineScopedCoercionChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
+                _inlineScopedContainerTypeChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _inlineScopedContainerIndexChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _inlineScopedContainerListChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _inlineScopedContainerLangChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _inlineScopedContainerGraphChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _inlineScopedContainerIdChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+
+                // Compute diffs - track what changed
+                foreach (var kv in _context)
+                {
+                    if (!termsBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedTermChanges[kv.Key] = termsBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _typeCoercion)
+                {
+                    if (!coercionBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedCoercionChanges[kv.Key] = coercionBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerType)
+                {
+                    if (!containerTypeBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedContainerTypeChanges[kv.Key] = containerTypeBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerIndex)
+                {
+                    if (!containerIndexBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedContainerIndexChanges[kv.Key] = containerIndexBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerList)
+                {
+                    if (!containerListBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedContainerListChanges[kv.Key] = containerListBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerLanguage)
+                {
+                    if (!containerLangBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedContainerLangChanges[kv.Key] = containerLangBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerGraph)
+                {
+                    if (!containerGraphBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedContainerGraphChanges[kv.Key] = containerGraphBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerId)
+                {
+                    if (!containerIdBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _inlineScopedContainerIdChanges[kv.Key] = containerIdBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+            }
+            else
+            {
+                // Clear inline scope when context doesn't have @propagate: false
+                _inlineScopedNoPropagate = false;
+                _inlineScopedTermChanges = null;
+                _inlineScopedCoercionChanges = null;
+                _inlineScopedContainerTypeChanges = null;
+                _inlineScopedContainerIndexChanges = null;
+                _inlineScopedContainerListChanges = null;
+                _inlineScopedContainerLangChanges = null;
+                _inlineScopedContainerGraphChanges = null;
+                _inlineScopedContainerIdChanges = null;
+                ProcessContext(contextElement);
+            }
         }
 
         // Track whether type-scoped context was applied (for nested node restoration)
@@ -457,6 +568,17 @@ public sealed partial class JsonLdStreamParser
         _typeScopedContainerLangChanges = previousTypeScopedContainerLangChanges;
         _typeScopedContainerGraphChanges = previousTypeScopedContainerGraphChanges;
         _typeScopedContainerIdChanges = previousTypeScopedContainerIdChanges;
+
+        // Restore previous inline scope state (c028)
+        _inlineScopedNoPropagate = savedInlineNoPropagate;
+        _inlineScopedTermChanges = savedInlineTermChanges;
+        _inlineScopedCoercionChanges = savedInlineCoercionChanges;
+        _inlineScopedContainerTypeChanges = savedInlineContainerTypeChanges;
+        _inlineScopedContainerIndexChanges = savedInlineContainerIndexChanges;
+        _inlineScopedContainerListChanges = savedInlineContainerListChanges;
+        _inlineScopedContainerLangChanges = savedInlineContainerLangChanges;
+        _inlineScopedContainerGraphChanges = savedInlineContainerGraphChanges;
+        _inlineScopedContainerIdChanges = savedInlineContainerIdChanges;
 
         return subject;
     }

@@ -107,9 +107,107 @@ public sealed partial class JsonLdStreamParser
             // (protection is restored after property processing)
             _protectedTerms.Clear();
 
-            // Apply the scoped context
+            // Check if the scoped context has @propagate: false (c027, c028)
+            // If so, we need to track changes to revert for nested objects
             using var scopedDoc = JsonDocument.Parse(scopedContextJson);
-            ProcessContext(scopedDoc.RootElement);
+            bool hasPropagateFalse = false;
+            if (scopedDoc.RootElement.ValueKind == JsonValueKind.Object &&
+                scopedDoc.RootElement.TryGetProperty("@propagate", out var propagateProp) &&
+                propagateProp.ValueKind == JsonValueKind.False)
+            {
+                hasPropagateFalse = true;
+            }
+
+            if (hasPropagateFalse)
+            {
+                // Snapshot current state before applying context
+                // We'll compute the diff after to track changes
+                _propScopedNoPropagate = true;
+                _propScopedTermChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
+                _propScopedCoercionChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
+                _propScopedContainerTypeChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _propScopedContainerIndexChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _propScopedContainerListChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _propScopedContainerLangChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _propScopedContainerGraphChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+                _propScopedContainerIdChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
+
+                // Snapshot before state for computing diffs
+                var termsBefore = new Dictionary<string, string>(_context);
+                var coercionBefore = new Dictionary<string, string>(_typeCoercion);
+                var containerTypeBefore = new Dictionary<string, bool>(_containerType);
+                var containerIndexBefore = new Dictionary<string, bool>(_containerIndex);
+                var containerListBefore = new Dictionary<string, bool>(_containerList);
+                var containerLangBefore = new Dictionary<string, bool>(_containerLanguage);
+                var containerGraphBefore = new Dictionary<string, bool>(_containerGraph);
+                var containerIdBefore = new Dictionary<string, bool>(_containerId);
+
+                // Apply the scoped context
+                ProcessContext(scopedDoc.RootElement);
+
+                // Compute diffs - track what changed
+                foreach (var kv in _context)
+                {
+                    if (!termsBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedTermChanges[kv.Key] = termsBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _typeCoercion)
+                {
+                    if (!coercionBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedCoercionChanges[kv.Key] = coercionBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerType)
+                {
+                    if (!containerTypeBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedContainerTypeChanges[kv.Key] = containerTypeBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerIndex)
+                {
+                    if (!containerIndexBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedContainerIndexChanges[kv.Key] = containerIndexBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerList)
+                {
+                    if (!containerListBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedContainerListChanges[kv.Key] = containerListBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerLanguage)
+                {
+                    if (!containerLangBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedContainerLangChanges[kv.Key] = containerLangBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerGraph)
+                {
+                    if (!containerGraphBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedContainerGraphChanges[kv.Key] = containerGraphBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+                foreach (var kv in _containerId)
+                {
+                    if (!containerIdBefore.TryGetValue(kv.Key, out var oldVal) || oldVal != kv.Value)
+                    {
+                        _propScopedContainerIdChanges[kv.Key] = containerIdBefore.TryGetValue(kv.Key, out var orig) ? orig : null;
+                    }
+                }
+            }
+            else
+            {
+                // Apply the scoped context without tracking
+                ProcessContext(scopedDoc.RootElement);
+            }
         }
 
         try
@@ -303,6 +401,19 @@ public sealed partial class JsonLdStreamParser
                 _baseIri = savedBaseIri;
                 _defaultLanguage = savedDefaultLanguage;
             }
+
+            // Clear property-scoped tracking (c027, c028)
+            // This happens after context restore to ensure nested objects processed in Values.cs
+            // had access to the tracking for reverting non-propagating property-scoped changes
+            _propScopedNoPropagate = false;
+            _propScopedTermChanges = null;
+            _propScopedCoercionChanges = null;
+            _propScopedContainerTypeChanges = null;
+            _propScopedContainerIndexChanges = null;
+            _propScopedContainerListChanges = null;
+            _propScopedContainerLangChanges = null;
+            _propScopedContainerGraphChanges = null;
+            _propScopedContainerIdChanges = null;
         }
     }
 

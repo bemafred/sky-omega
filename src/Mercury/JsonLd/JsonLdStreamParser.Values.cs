@@ -314,11 +314,13 @@ public sealed partial class JsonLdStreamParser
         }
 
         // Nested object - create blank node
-        // 1. Revert type-scoped changes (type-scoped contexts don't propagate)
-        // 2. Save/restore @vocab/@base around nested node (in case nested has inline @context)
-        // Property-scoped additions SHOULD propagate, so we only revert type-scoped changes
+        // 1. Revert type-scoped changes (type-scoped contexts don't propagate by default)
+        // 2. Revert property-scoped changes if @propagate: false (c027, c028)
+        // 3. Save/restore @vocab/@base around nested node (in case nested has inline @context)
         Dictionary<string, string>? savedCoercions = null;
         Dictionary<string, string>? savedTerms = null;
+        Dictionary<string, string>? savedPropCoercions = null;
+        Dictionary<string, string>? savedPropTerms = null;
         // Only revert type-scoped changes if @propagate is NOT true
         // @propagate: true means type-scoped context SHOULD propagate to nested nodes
         if (!_typeScopedPropagate && _typeScopedCoercionChanges != null && _typeScopedCoercionChanges.Count > 0)
@@ -408,6 +410,126 @@ public sealed partial class JsonLdStreamParser
             RevertContainerChanges(_typeScopedContainerLangChanges, _containerLanguage, ref savedContainerLang);
             RevertContainerChanges(_typeScopedContainerGraphChanges, _containerGraph, ref savedContainerGraph);
             RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
+        }
+
+        // Revert property-scoped changes if @propagate: false (c027, c028)
+        // Property-scoped contexts propagate by default, but @propagate: false stops propagation
+        Dictionary<string, bool>? savedPropContainerType = null;
+        Dictionary<string, bool>? savedPropContainerIndex = null;
+        Dictionary<string, bool>? savedPropContainerList = null;
+        Dictionary<string, bool>? savedPropContainerLang = null;
+        Dictionary<string, bool>? savedPropContainerGraph = null;
+        Dictionary<string, bool>? savedPropContainerId = null;
+
+        if (_propScopedNoPropagate && _propScopedCoercionChanges != null && _propScopedCoercionChanges.Count > 0)
+        {
+            savedPropCoercions = new Dictionary<string, string>();
+            foreach (var kv in _propScopedCoercionChanges)
+            {
+                if (_typeCoercion.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedPropCoercions[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _typeCoercion.Remove(kv.Key);
+                }
+                else
+                {
+                    _typeCoercion[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (_propScopedNoPropagate && _propScopedTermChanges != null && _propScopedTermChanges.Count > 0)
+        {
+            savedPropTerms = new Dictionary<string, string>();
+            foreach (var kv in _propScopedTermChanges)
+            {
+                if (_context.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedPropTerms[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _context.Remove(kv.Key);
+                }
+                else
+                {
+                    _context[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (_propScopedNoPropagate)
+        {
+            RevertContainerChanges(_propScopedContainerTypeChanges, _containerType, ref savedPropContainerType);
+            RevertContainerChanges(_propScopedContainerIndexChanges, _containerIndex, ref savedPropContainerIndex);
+            RevertContainerChanges(_propScopedContainerListChanges, _containerList, ref savedPropContainerList);
+            RevertContainerChanges(_propScopedContainerLangChanges, _containerLanguage, ref savedPropContainerLang);
+            RevertContainerChanges(_propScopedContainerGraphChanges, _containerGraph, ref savedPropContainerGraph);
+            RevertContainerChanges(_propScopedContainerIdChanges, _containerId, ref savedPropContainerId);
+        }
+
+        // Revert inline context changes if @propagate: false (c028)
+        // Inline contexts propagate by default, but @propagate: false stops propagation
+        Dictionary<string, string>? savedInlineCoercions = null;
+        Dictionary<string, string>? savedInlineTerms = null;
+        Dictionary<string, bool>? savedInlineContainerType = null;
+        Dictionary<string, bool>? savedInlineContainerIndex = null;
+        Dictionary<string, bool>? savedInlineContainerList = null;
+        Dictionary<string, bool>? savedInlineContainerLang = null;
+        Dictionary<string, bool>? savedInlineContainerGraph = null;
+        Dictionary<string, bool>? savedInlineContainerId = null;
+
+        if (_inlineScopedNoPropagate && _inlineScopedCoercionChanges != null && _inlineScopedCoercionChanges.Count > 0)
+        {
+            savedInlineCoercions = new Dictionary<string, string>();
+            foreach (var kv in _inlineScopedCoercionChanges)
+            {
+                if (_typeCoercion.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedInlineCoercions[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _typeCoercion.Remove(kv.Key);
+                }
+                else
+                {
+                    _typeCoercion[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (_inlineScopedNoPropagate && _inlineScopedTermChanges != null && _inlineScopedTermChanges.Count > 0)
+        {
+            savedInlineTerms = new Dictionary<string, string>();
+            foreach (var kv in _inlineScopedTermChanges)
+            {
+                if (_context.TryGetValue(kv.Key, out var currentValue))
+                {
+                    savedInlineTerms[kv.Key] = currentValue;
+                }
+                if (kv.Value == null)
+                {
+                    _context.Remove(kv.Key);
+                }
+                else
+                {
+                    _context[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        if (_inlineScopedNoPropagate)
+        {
+            RevertContainerChanges(_inlineScopedContainerTypeChanges, _containerType, ref savedInlineContainerType);
+            RevertContainerChanges(_inlineScopedContainerIndexChanges, _containerIndex, ref savedInlineContainerIndex);
+            RevertContainerChanges(_inlineScopedContainerListChanges, _containerList, ref savedInlineContainerList);
+            RevertContainerChanges(_inlineScopedContainerLangChanges, _containerLanguage, ref savedInlineContainerLang);
+            RevertContainerChanges(_inlineScopedContainerGraphChanges, _containerGraph, ref savedInlineContainerGraph);
+            RevertContainerChanges(_inlineScopedContainerIdChanges, _containerId, ref savedInlineContainerId);
         }
 
         // Save full context state before processing nested node
@@ -508,6 +630,50 @@ public sealed partial class JsonLdStreamParser
         RestoreContainer(savedContainerLang, _containerLanguage);
         RestoreContainer(savedContainerGraph, _containerGraph);
         RestoreContainer(savedContainerId, _containerId);
+
+        // Re-apply property-scoped changes (they apply to this node's remaining properties) (c027, c028)
+        if (savedPropCoercions != null)
+        {
+            foreach (var kv in savedPropCoercions)
+            {
+                _typeCoercion[kv.Key] = kv.Value;
+            }
+        }
+        if (savedPropTerms != null)
+        {
+            foreach (var kv in savedPropTerms)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+        }
+        RestoreContainer(savedPropContainerType, _containerType);
+        RestoreContainer(savedPropContainerIndex, _containerIndex);
+        RestoreContainer(savedPropContainerList, _containerList);
+        RestoreContainer(savedPropContainerLang, _containerLanguage);
+        RestoreContainer(savedPropContainerGraph, _containerGraph);
+        RestoreContainer(savedPropContainerId, _containerId);
+
+        // Re-apply inline context changes (they apply to this node's remaining properties) (c028)
+        if (savedInlineCoercions != null)
+        {
+            foreach (var kv in savedInlineCoercions)
+            {
+                _typeCoercion[kv.Key] = kv.Value;
+            }
+        }
+        if (savedInlineTerms != null)
+        {
+            foreach (var kv in savedInlineTerms)
+            {
+                _context[kv.Key] = kv.Value;
+            }
+        }
+        RestoreContainer(savedInlineContainerType, _containerType);
+        RestoreContainer(savedInlineContainerIndex, _containerIndex);
+        RestoreContainer(savedInlineContainerList, _containerList);
+        RestoreContainer(savedInlineContainerLang, _containerLanguage);
+        RestoreContainer(savedInlineContainerGraph, _containerGraph);
+        RestoreContainer(savedInlineContainerId, _containerId);
     }
 
     private string ProcessValueObject(JsonElement obj, JsonElement valueProp)
