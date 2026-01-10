@@ -63,6 +63,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, string> _termLanguage; // term -> @language value
     private readonly Dictionary<string, string> _reverseProperty; // term -> reverse predicate IRI
     private readonly Dictionary<string, string> _scopedContext; // term -> nested @context JSON
+    private readonly Dictionary<string, string> _indexProperty; // term -> @index property IRI (property-valued index)
     private readonly HashSet<string> _typeAliases; // terms aliased to @type
     private readonly HashSet<string> _idAliases; // terms aliased to @id
     private readonly HashSet<string> _graphAliases; // terms aliased to @graph
@@ -144,6 +145,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
         _termLanguage = new Dictionary<string, string>(StringComparer.Ordinal);
         _reverseProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _scopedContext = new Dictionary<string, string>(StringComparer.Ordinal);
+        _indexProperty = new Dictionary<string, string>(StringComparer.Ordinal);
         _typeAliases = new HashSet<string>(StringComparer.Ordinal);
         _idAliases = new HashSet<string>(StringComparer.Ordinal);
         _graphAliases = new HashSet<string>(StringComparer.Ordinal);

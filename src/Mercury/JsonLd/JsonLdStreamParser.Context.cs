@@ -34,6 +34,7 @@ public sealed partial class JsonLdStreamParser
             _termLanguage.Clear();
             _reverseProperty.Clear();
             _scopedContext.Clear();
+            _indexProperty.Clear();
             _typeAliases.Clear();
             _idAliases.Clear();
             _graphAliases.Clear();
@@ -430,7 +431,7 @@ public sealed partial class JsonLdStreamParser
                                 throw new InvalidOperationException("invalid term definition");
                             }
 
-                            // Validate @index value in term definition
+                            // Validate and store @index value in term definition (property-valued index)
                             if (value.TryGetProperty("@index", out var indexValueProp))
                             {
                                 // @index must be a string (pi04)
@@ -443,6 +444,11 @@ public sealed partial class JsonLdStreamParser
                                 if (!string.IsNullOrEmpty(indexVal) && indexVal.StartsWith('@'))
                                 {
                                     throw new InvalidOperationException("invalid term definition");
+                                }
+                                // Store the @index property for property-valued index expansion (pi06-pi11)
+                                if (!string.IsNullOrEmpty(indexVal))
+                                {
+                                    _indexProperty[term] = indexVal;
                                 }
                             }
                         }

@@ -119,28 +119,54 @@ public sealed partial class JsonLdStreamParser
             // When combined with @id, object keys are used as graph @id
             if (isGraphContainer)
             {
-                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang, isIndexContainer, isIdContainer);
+                // Check for property-valued @index (pi11)
+                _indexProperty.TryGetValue(term, out var graphIndexProp);
+                string? graphIndexPropIri = null;
+                string? graphIndexPropCoercedType = null;
+                if (!string.IsNullOrEmpty(graphIndexProp))
+                {
+                    graphIndexPropIri = ExpandTerm(graphIndexProp);
+                    _typeCoercion.TryGetValue(graphIndexProp, out graphIndexPropCoercedType);
+                }
+                ProcessGraphContainer(subject, predicate, value, handler, graphIri, coercedType, termLang, isIndexContainer, isIdContainer, graphIndexPropIri, graphIndexPropCoercedType);
             }
             // Handle language container - object keys are language tags
             else if (isLanguageContainer && value.ValueKind == JsonValueKind.Object)
             {
                 ProcessLanguageMap(subject, predicate, value, handler, graphIri);
             }
-            // Handle index container - object keys are index values (ignored)
+            // Handle index container - object keys are index values
+            // For property-valued @index, keys become property values on the object (pi06-pi11)
             else if (isIndexContainer && value.ValueKind == JsonValueKind.Object)
             {
+                // Check for property-valued @index
+                _indexProperty.TryGetValue(term, out var indexPropName);
+                string? indexPropIri = null;
+                string? indexPropCoercedType = null;
+                if (!string.IsNullOrEmpty(indexPropName))
+                {
+                    indexPropIri = ExpandTerm(indexPropName);
+                    _typeCoercion.TryGetValue(indexPropName, out indexPropCoercedType);
+                }
+
                 foreach (var prop in value.EnumerateObject())
                 {
+                    var indexKey = prop.Name;
+                    // @none or alias means no @index property emission (pi10)
+                    var isNone = indexKey == "@none" || _noneAliases.Contains(indexKey);
+
                     if (prop.Value.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var item in prop.Value.EnumerateArray())
                         {
-                            ProcessValue(subject, predicate, item, handler, graphIri, coercedType, termLang);
+                            ProcessValueWithIndex(subject, predicate, item, handler, graphIri, coercedType, termLang,
+                                indexPropIri, indexKey, indexPropCoercedType, isNone);
                         }
                     }
                     else
                     {
-                        ProcessValue(subject, predicate, prop.Value, handler, graphIri, coercedType, termLang);
+                        ProcessValueWithIndex(subject, predicate, prop.Value, handler, graphIri, coercedType, termLang,
+                            indexPropIri, indexKey, indexPropCoercedType, isNone);
                     }
                 }
             }
@@ -277,6 +303,76 @@ public sealed partial class JsonLdStreamParser
                 _baseIri = savedBaseIri;
                 _defaultLanguage = savedDefaultLanguage;
             }
+        }
+    }
+
+    /// <summary>
+    /// Process a value in an @index container with optional property-valued @index.
+    /// Emits main triple and, if property-valued @index is defined, emits the @index property triple.
+    /// </summary>
+    private void ProcessValueWithIndex(string subject, string predicate, JsonElement value,
+        QuadHandler handler, string? graphIri, string? coercedType, string? termLang,
+        string? indexPropIri, string indexKey, string? indexPropCoercedType, bool isNone)
+    {
+        // Get the value's subject IRI (for property-valued @index emission)
+        string? valueSubject = null;
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var strVal = value.GetString() ?? "";
+            if (coercedType == "@id")
+            {
+                // Type coerced to IRI - this IRI is both the object and the @index property subject
+                valueSubject = ExpandIri(strVal);
+            }
+            else if (coercedType == "@vocab")
+            {
+                valueSubject = ExpandTerm(strVal);
+            }
+        }
+        else if (value.ValueKind == JsonValueKind.Object)
+        {
+            // Get @id from the object if present
+            if (value.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+            {
+                valueSubject = ExpandIri(idProp.GetString() ?? "");
+            }
+            // Also check @id aliases
+            if (valueSubject == null)
+            {
+                foreach (var alias in _idAliases)
+                {
+                    if (value.TryGetProperty(alias, out var aliasIdProp) && aliasIdProp.ValueKind == JsonValueKind.String)
+                    {
+                        valueSubject = ExpandIri(aliasIdProp.GetString() ?? "");
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Process the value normally (emit main triple)
+        ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
+
+        // Emit @index property triple if property-valued @index is defined and not @none
+        if (!string.IsNullOrEmpty(indexPropIri) && !string.IsNullOrEmpty(valueSubject) && !isNone)
+        {
+            // Expand the index key according to the @index property's type coercion
+            string indexValue;
+            if (indexPropCoercedType == "@vocab")
+            {
+                indexValue = ExpandTerm(indexKey);
+            }
+            else if (indexPropCoercedType == "@id")
+            {
+                indexValue = ExpandIri(indexKey);
+            }
+            else
+            {
+                // Default to string literal
+                indexValue = $"\"{EscapeString(indexKey)}\"";
+            }
+            EmitQuad(handler, valueSubject, indexPropIri, indexValue, graphIri);
         }
     }
 

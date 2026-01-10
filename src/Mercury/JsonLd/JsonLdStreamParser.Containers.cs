@@ -200,7 +200,8 @@ public sealed partial class JsonLdStreamParser
     /// </summary>
     private void ProcessGraphContainer(string subject, string predicate, JsonElement value,
         QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
-        bool isIndexContainer = false, bool isIdContainer = false)
+        bool isIndexContainer = false, bool isIdContainer = false,
+        string? indexPropIri = null, string? indexPropCoercedType = null)
     {
         // Handle compound container [@graph, @index] or [@graph, @id]
         if ((isIndexContainer || isIdContainer) && value.ValueKind == JsonValueKind.Object)
@@ -211,17 +212,15 @@ public sealed partial class JsonLdStreamParser
                 var key = prop.Name;
                 var itemValue = prop.Value;
 
+                // Check for @none (no @index property emission for pi11)
+                bool isNone = key == "@none" || _noneAliases.Contains(key);
+
                 // For @id container, the key becomes the graph @id
                 // @none (or alias) means default graph - don't expand it (m015, m016)
                 string? graphIdFromKey = null;
                 if (isIdContainer)
                 {
-                    if (key == "@none" || _noneAliases.Contains(key))
-                    {
-                        // @none means default graph - graphIdFromKey stays null
-                        graphIdFromKey = null;
-                    }
-                    else
+                    if (!isNone)
                     {
                         graphIdFromKey = ExpandIri(key, expandTerms: false);
                     }
@@ -231,12 +230,12 @@ public sealed partial class JsonLdStreamParser
                 {
                     foreach (var item in itemValue.EnumerateArray())
                     {
-                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true);
+                        ProcessGraphContainerItem(subject, predicate, item, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true, indexPropIri, key, indexPropCoercedType, isNone);
                     }
                 }
                 else
                 {
-                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true);
+                    ProcessGraphContainerItem(subject, predicate, itemValue, handler, graphIri, coercedType, termLanguage, graphIdFromKey, isCompoundContainer: true, indexPropIri, key, indexPropCoercedType, isNone);
                 }
             }
         }
@@ -256,7 +255,8 @@ public sealed partial class JsonLdStreamParser
 
     private void ProcessGraphContainerItem(string subject, string predicate, JsonElement value,
         QuadHandler handler, string? graphIri, string? coercedType, string? termLanguage,
-        string? graphIdFromKey = null, bool isCompoundContainer = false)
+        string? graphIdFromKey = null, bool isCompoundContainer = false,
+        string? indexPropIri = null, string? indexKey = null, string? indexPropCoercedType = null, bool indexIsNone = false)
     {
         if (value.ValueKind != JsonValueKind.Object)
         {
@@ -299,6 +299,26 @@ public sealed partial class JsonLdStreamParser
 
         // Emit the link from subject to the graph node
         EmitQuad(handler, subject, predicate, linkObject, graphIri);
+
+        // Emit property-valued @index triple if defined and not @none (pi11)
+        if (!string.IsNullOrEmpty(indexPropIri) && !string.IsNullOrEmpty(indexKey) && !indexIsNone)
+        {
+            string indexValue;
+            if (indexPropCoercedType == "@vocab")
+            {
+                indexValue = ExpandTerm(indexKey);
+            }
+            else if (indexPropCoercedType == "@id")
+            {
+                indexValue = ExpandIri(indexKey);
+            }
+            else
+            {
+                // Default to string literal
+                indexValue = $"\"{EscapeString(indexKey)}\"";
+            }
+            EmitQuad(handler, linkObject, indexPropIri, indexValue, graphIri);
+        }
 
         // Save current graph and set to the named graph for content processing
         var savedGraph = _currentGraph;
