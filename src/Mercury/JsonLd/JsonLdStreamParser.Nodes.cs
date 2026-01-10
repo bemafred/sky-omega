@@ -192,9 +192,11 @@ public sealed partial class JsonLdStreamParser
         // Check both @id and any aliases for @id
         // Also detect colliding keywords (er26) - multiple @id-like properties
         int idPropertyCount = 0;
+        bool hasExplicitId = false;
         if (root.TryGetProperty("@id", out var idElement))
         {
             idPropertyCount++;
+            hasExplicitId = true;
             // @id must be a string (er27)
             if (idElement.ValueKind != JsonValueKind.String && idElement.ValueKind != JsonValueKind.Null)
             {
@@ -208,6 +210,7 @@ public sealed partial class JsonLdStreamParser
             if (root.TryGetProperty(alias, out var aliasIdElement))
             {
                 idPropertyCount++;
+                hasExplicitId = true;
                 if (subject == null)
                 {
                     subject = ExpandIri(aliasIdElement.GetString() ?? "");
@@ -218,6 +221,13 @@ public sealed partial class JsonLdStreamParser
         if (idPropertyCount > 1)
         {
             throw new InvalidOperationException("colliding keywords");
+        }
+
+        // If @id was present but unresolvable (relative IRI + null base), skip the node entirely (e060)
+        // Return null to signal the node should be dropped
+        if (hasExplicitId && subject == null)
+        {
+            return null!;
         }
 
         // Check for @graph or @graph alias
@@ -242,7 +252,7 @@ public sealed partial class JsonLdStreamParser
             }
         }
 
-        // Generate blank node if no @id
+        // Generate blank node if no @id (but not if @id was present and unresolvable - handled above)
         subject ??= GenerateBlankNode();
 
         // If this node has @graph and we generated a blank node for subject,

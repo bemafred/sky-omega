@@ -434,7 +434,9 @@ public sealed partial class JsonLdStreamParser
         var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()));
         tempReader.Read();
         var blankNode = ParseNode(ref tempReader, handler, subject);
-        EmitQuad(handler, subject, predicate, blankNode, graphIri);
+        // Skip emitting link if node was dropped (e.g., @id unresolvable with null @base) (e060)
+        if (blankNode != null)
+            EmitQuad(handler, subject, predicate, blankNode, graphIri);
 
         // Restore full context state after processing nested node
         // Nested object's inline @context should NOT affect siblings

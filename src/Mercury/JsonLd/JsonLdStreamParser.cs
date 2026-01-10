@@ -79,6 +79,9 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     // Base IRI for relative IRI resolution
     private string? _baseIri;
 
+    // Document base IRI (original, immutable) - restored when @context: null is used
+    private readonly string? _documentBaseIri;
+
     // Vocabulary IRI for term expansion
     private string? _vocabIri;
 
@@ -126,6 +129,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _baseIri = baseIri;
+        _documentBaseIri = baseIri;  // Preserve original document base for @context: null reset
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;

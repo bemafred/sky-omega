@@ -42,7 +42,9 @@ public sealed partial class JsonLdStreamParser
             _prefixable.Clear();
             _vocabIri = null;
             _defaultLanguage = null;
-            // Note: @base is NOT cleared by null context per JSON-LD spec
+            // @context: null resets @base to the document base IRI (e060)
+            // This is different from @base: null which disables relative IRI resolution
+            _baseIri = _documentBaseIri;
             return;
         }
 
@@ -921,7 +923,9 @@ public sealed partial class JsonLdStreamParser
         if (typeElement.ValueKind == JsonValueKind.String)
         {
             var typeIri = ExpandTypeIri(typeElement.GetString() ?? "");
-            result.Add(typeIri);
+            // Skip null type IRIs (unresolvable relative IRIs when @base is null) (e060)
+            if (typeIri != null)
+                result.Add(typeIri);
         }
         else if (typeElement.ValueKind == JsonValueKind.Array)
         {
@@ -930,7 +934,9 @@ public sealed partial class JsonLdStreamParser
                 if (t.ValueKind == JsonValueKind.String)
                 {
                     var typeIri = ExpandTypeIri(t.GetString() ?? "");
-                    result.Add(typeIri);
+                    // Skip null type IRIs (unresolvable relative IRIs when @base is null) (e060)
+                    if (typeIri != null)
+                        result.Add(typeIri);
                 }
                 else
                 {
@@ -1002,7 +1008,9 @@ public sealed partial class JsonLdStreamParser
         if (typeElement.ValueKind == JsonValueKind.String)
         {
             var typeIri = ExpandTypeIri(typeElement.GetString() ?? "");
-            EmitQuad(handler, subject, RdfType, typeIri, graph);
+            // Skip null type IRIs (unresolvable relative IRIs when @base is null) (e060)
+            if (typeIri != null)
+                EmitQuad(handler, subject, RdfType, typeIri, graph);
         }
         else if (typeElement.ValueKind == JsonValueKind.Array)
         {
@@ -1011,7 +1019,9 @@ public sealed partial class JsonLdStreamParser
                 if (t.ValueKind == JsonValueKind.String)
                 {
                     var typeIri = ExpandTypeIri(t.GetString() ?? "");
-                    EmitQuad(handler, subject, RdfType, typeIri, graph);
+                    // Skip null type IRIs (unresolvable relative IRIs when @base is null) (e060)
+                    if (typeIri != null)
+                        EmitQuad(handler, subject, RdfType, typeIri, graph);
                 }
                 else
                 {
@@ -1082,7 +1092,9 @@ public sealed partial class JsonLdStreamParser
             return FormatIri(ResolveRelativeIri(_baseIri, value));
         }
 
-        return FormatIri(value);
+        // No @vocab or @base - cannot resolve relative IRI (e060)
+        // Return null to indicate the type should be skipped
+        return null!;
     }
 
     /// <summary>

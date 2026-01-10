@@ -331,6 +331,10 @@ public sealed partial class JsonLdStreamParser
             tempReader.Read();
             newSubject = ParseNode(ref tempReader, handler, null);
 
+            // Skip reverse triple if node was dropped (e.g., @id unresolvable with null @base) (e060)
+            if (newSubject == null)
+                return;
+
             // Emit the reverse triple
             EmitQuad(handler, newSubject, predicate, currentNode, graphIri);
         }
@@ -481,6 +485,10 @@ public sealed partial class JsonLdStreamParser
             tempReader.Read();
             var nestedSubject = ParseNode(ref tempReader, handler, null);
 
+            // Skip forward triple if node was dropped (e.g., @id unresolvable with null @base) (e060)
+            if (nestedSubject == null)
+                return;
+
             // Forward triple: currentNode -> predicate -> nestedSubject
             EmitQuad(handler, currentNode, predicate, nestedSubject, graphIri);
         }
@@ -488,6 +496,9 @@ public sealed partial class JsonLdStreamParser
         {
             var strVal = value.GetString() ?? "";
             var objectIri = ExpandIri(strVal);
+            // Skip if IRI couldn't be resolved (e.g., relative IRI with null @base)
+            if (objectIri == null)
+                return;
             EmitQuad(handler, currentNode, predicate, objectIri, graphIri);
         }
     }
@@ -503,6 +514,10 @@ public sealed partial class JsonLdStreamParser
             var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()));
             tempReader.Read();
             var nestedSubject = ParseNode(ref tempReader, handler, null);
+
+            // Skip reverse triple if node was dropped (e.g., @id unresolvable with null @base) (e060)
+            if (nestedSubject == null)
+                return;
 
             // Emit the reverse triple
             EmitQuad(handler, nestedSubject, predicate, currentNode, graphIri);
