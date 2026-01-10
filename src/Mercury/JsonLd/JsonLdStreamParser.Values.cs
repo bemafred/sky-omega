@@ -39,7 +39,7 @@ public sealed partial class JsonLdStreamParser
                 }
                 else if (coercedType == "@json")
                 {
-                    // JSON literal - use canonical JSON representation for the string (js17)
+                    // JSON literal - use canonical JSON representation (js17)
                     var canonicalJson = CanonicalizeJson(value);
                     EmitQuad(handler, subject, predicate,
                         $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>", graphIri);
@@ -124,8 +124,7 @@ public sealed partial class JsonLdStreamParser
                 break;
 
             case JsonValueKind.Object:
-                // Handle @json type - serialize entire object as canonical JSON literal
-                // Note: Don't escape - the canonical JSON is the literal value (js06, js07)
+                // Handle @json type - serialize entire object as canonical JSON literal (js06, js07)
                 if (coercedType == "@json")
                 {
                     var canonicalJson = CanonicalizeJson(value);
@@ -545,6 +544,31 @@ public sealed partial class JsonLdStreamParser
         if (hasTypeForConflict && hasLangForConflict)
         {
             throw new InvalidOperationException("invalid value object");
+        }
+
+        // Early check for @json type - allows object/array values (js23, js16)
+        // Must check before the switch that throws for object/array
+        JsonElement earlyTypeProp = default;
+        bool hasEarlyType = obj.TryGetProperty("@type", out earlyTypeProp);
+        if (!hasEarlyType)
+        {
+            foreach (var alias in _typeAliases)
+            {
+                if (obj.TryGetProperty(alias, out earlyTypeProp))
+                {
+                    hasEarlyType = true;
+                    break;
+                }
+            }
+        }
+        if (hasEarlyType && earlyTypeProp.ValueKind == JsonValueKind.String)
+        {
+            var earlyTypeStr = earlyTypeProp.GetString() ?? "";
+            if (earlyTypeStr == "@json" || _jsonAliases.Contains(earlyTypeStr))
+            {
+                var canonicalJson = CanonicalizeJson(valueProp);
+                return $"\"{canonicalJson}\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON>";
+            }
         }
 
         string valueStr;

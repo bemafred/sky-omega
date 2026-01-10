@@ -156,8 +156,7 @@ public sealed partial class JsonLdStreamParser
             }
             else if (value.ValueKind == JsonValueKind.Array)
             {
-                // Handle @json type - serialize entire array as canonical JSON literal
-                // Note: Don't escape - the canonical JSON is the literal value (js06, js07)
+                // Handle @json type - serialize entire array as canonical JSON literal (js06, js07)
                 if (coercedType == "@json")
                 {
                     var canonicalJson = CanonicalizeJson(value);

@@ -218,9 +218,9 @@ public sealed partial class JsonLdStreamParser
                 break;
 
             case JsonValueKind.Number:
-                // Normalize number representation per I-JSON/JCS
+                // Normalize number representation per RFC 8785 (JCS)
                 // Integer: no exponent, no decimal point
-                // Non-integer: use shortest representation
+                // Non-integer: use shortest representation that round-trips
                 var rawNum = element.GetRawText();
                 if (element.TryGetInt64(out var intVal))
                 {
@@ -228,9 +228,9 @@ public sealed partial class JsonLdStreamParser
                 }
                 else if (element.TryGetDouble(out var dblVal))
                 {
-                    // Use "G17" for full precision, then normalize
-                    // JCS requires lowercase 'e' for exponents
-                    var numStr = dblVal.ToString("G17", System.Globalization.CultureInfo.InvariantCulture);
+                    // Use "G16" for IEEE 754 double precision
+                    // JCS requires shortest representation that round-trips with lowercase 'e'
+                    var numStr = dblVal.ToString("G16", System.Globalization.CultureInfo.InvariantCulture);
                     sb.Append(numStr.Replace('E', 'e'));
                 }
                 else

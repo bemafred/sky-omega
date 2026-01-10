@@ -108,9 +108,13 @@ public sealed partial class JsonLdStreamParser
             // Skip keywords like @base, @vocab, @language, etc.
             if (!term.StartsWith('@') && _protectedTerms.Contains(term))
             {
-                // Check if term definition is the same (identical redefinition is allowed)
-                // For now, we throw error on any redefinition attempt of protected term
-                throw new InvalidOperationException("protected term redefinition");
+                // Identical redefinition is allowed (pr23, pr15, pr16, pr17, pr18, pr19)
+                // Check if the new definition matches the existing one
+                if (!IsIdenticalDefinition(term, value))
+                {
+                    throw new InvalidOperationException("protected term redefinition");
+                }
+                // Identical redefinition - continue processing normally
             }
 
             if (term == "@base")
@@ -1079,5 +1083,68 @@ public sealed partial class JsonLdStreamParser
         }
 
         return FormatIri(value);
+    }
+
+    /// <summary>
+    /// Check if a new term definition is identical to the existing protected definition.
+    /// Identical redefinition of protected terms is allowed (pr23, pr15-pr19).
+    /// </summary>
+    private bool IsIdenticalDefinition(string term, JsonElement newValue)
+    {
+        // Check keyword aliases first
+        if (newValue.ValueKind == JsonValueKind.String)
+        {
+            var newMapping = newValue.GetString() ?? "";
+
+            // Check if term is an @id alias
+            if (_idAliases.Contains(term) && newMapping == "@id")
+                return true;
+            // Check if term is a @type alias
+            if (_typeAliases.Contains(term) && newMapping == "@type")
+                return true;
+            // Check if term is a @value alias
+            if (_valueAliases.Contains(term) && newMapping == "@value")
+                return true;
+            // Check if term is a @language alias
+            if (_languageAliases.Contains(term) && newMapping == "@language")
+                return true;
+            // Check if term is a @json alias
+            if (_jsonAliases.Contains(term) && newMapping == "@json")
+                return true;
+            // Check if term is a @none alias
+            if (_noneAliases.Contains(term) && newMapping == "@none")
+                return true;
+
+            // Check simple IRI mappings
+            if (_context.TryGetValue(term, out var existingMapping) && existingMapping == newMapping)
+                return true;
+        }
+        else if (newValue.ValueKind == JsonValueKind.Object)
+        {
+            // Expanded term definition - check @id property
+            if (newValue.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+            {
+                var newId = idProp.GetString() ?? "";
+
+                // Check if it matches keyword alias
+                if (_idAliases.Contains(term) && newId == "@id")
+                    return true;
+                if (_typeAliases.Contains(term) && newId == "@type")
+                    return true;
+
+                // Check simple IRI mapping
+                if (_context.TryGetValue(term, out var existingMapping) && existingMapping == newId)
+                    return true;
+
+                // For keyword aliases, also check if @id points to the keyword
+                if (newId.StartsWith('@'))
+                {
+                    if (newId == "@id" && _idAliases.Contains(term)) return true;
+                    if (newId == "@type" && _typeAliases.Contains(term)) return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

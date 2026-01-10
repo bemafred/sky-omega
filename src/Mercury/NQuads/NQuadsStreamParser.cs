@@ -569,7 +569,7 @@ public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
             }
             else
             {
-                AppendToOutput((char)ch);
+                AppendCodePoint(ch);  // Handle supplementary code points (> U+FFFF)
                 Consume();
             }
         }
