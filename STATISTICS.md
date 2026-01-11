@@ -10,9 +10,9 @@ Codebase metrics tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **54,774** | Knowledge substrate |
+| **Mercury (total)** | **55,295** | Knowledge substrate |
 | ├─ Sparql | 26,971 | SPARQL parser, executor, protocol |
-| ├─ JsonLd | 6,830 | JSON-LD parser and writer |
+| ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 5,410 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 3,944 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
@@ -29,7 +29,7 @@ Codebase metrics tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 39,133 | ~1,900 |
+| Mercury.Tests | 39,205 | ~1,900 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -57,12 +57,12 @@ Codebase metrics tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~56,243 |
-| Tests | ~39,133 |
+| Source code | ~56,764 |
+| Tests | ~39,205 |
 | Benchmarks | ~2,966 |
 | Examples | ~779 |
 | Documentation | ~15,025 |
-| **Grand total** | **~114,146** |
+| **Grand total** | **~114,739** |
 
 ## W3C Conformance
 
@@ -72,12 +72,12 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 
 | Format | Passing | Total | Coverage | Notes |
 |--------|--------:|------:|---------:|-------|
-| Turtle 1.2 | 514 | — | — | In progress |
+| JSON-LD 1.1 | 461 | 467 | **98.7%** | 6 skipped (generalized RDF, etc.) |
+| Turtle 1.2 | — | — | — | Pending |
 | N-Triples 1.2 | — | — | — | Pending |
 | N-Quads 1.2 | — | — | — | Pending |
 | TriG 1.2 | — | — | — | Pending |
 | RDF/XML 1.1 | — | — | — | Pending |
-| JSON-LD 1.1 | — | — | — | Pending |
 | SPARQL 1.1 | — | — | — | Pending |
 
 ## Benchmark Summary
