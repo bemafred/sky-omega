@@ -10,6 +10,86 @@ namespace SkyOmega.Mercury.Tests;
 
 public partial class QueryExecutorTests
 {
+    /// <summary>
+    /// Test implicit aggregation: COUNT without GROUP BY.
+    /// All results should be treated as a single group.
+    /// </summary>
+    [Fact]
+    public void Execute_ImplicitAggregation_CountWithoutGroupBy()
+    {
+        // COUNT all triples - should return single row with count
+        var query = "SELECT (COUNT(?o) AS ?count) WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify aggregate was parsed but no GROUP BY
+        Assert.True(parsedQuery.SelectClause.HasAggregates);
+        Assert.Equal(1, parsedQuery.SelectClause.AggregateCount);
+        Assert.False(parsedQuery.SolutionModifier.GroupBy.HasGroupBy);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            // Should get exactly one row
+            Assert.True(results.MoveNext());
+            var countIdx = results.Current.FindBinding("?count".AsSpan());
+            Assert.True(countIdx >= 0);
+
+            var count = results.Current.GetString(countIdx).ToString();
+            // Fixture has 7 triples (Alice: 3, Bob: 2, Charlie: 2)
+            Assert.Equal("7", count);
+
+            // Should not have a second row
+            Assert.False(results.MoveNext());
+            results.Dispose();
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    /// <summary>
+    /// Test implicit aggregation with COUNT(*).
+    /// </summary>
+    [Fact]
+    public void Execute_ImplicitAggregation_CountStar()
+    {
+        // COUNT(*) all triples - should return single row with count
+        var query = "SELECT (COUNT(*) AS ?count) WHERE { ?s ?p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify aggregate was parsed
+        Assert.True(parsedQuery.SelectClause.HasAggregates);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            // Should get exactly one row
+            Assert.True(results.MoveNext());
+            var countIdx = results.Current.FindBinding("?count".AsSpan());
+            Assert.True(countIdx >= 0);
+
+            var count = results.Current.GetString(countIdx).ToString();
+            Assert.Equal("7", count);
+
+            // Should not have a second row
+            Assert.False(results.MoveNext());
+            results.Dispose();
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     [Fact]
     public void Execute_GroupByWithCount()
     {

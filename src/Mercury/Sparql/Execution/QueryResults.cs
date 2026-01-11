@@ -188,7 +188,8 @@ public ref partial struct QueryResults
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;
@@ -235,7 +236,8 @@ public ref partial struct QueryResults
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;
@@ -370,7 +372,8 @@ public ref partial struct QueryResults
         _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;
@@ -414,7 +417,8 @@ public ref partial struct QueryResults
         _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;
@@ -460,7 +464,8 @@ public ref partial struct QueryResults
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;
@@ -505,7 +510,8 @@ public ref partial struct QueryResults
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;
@@ -549,7 +555,8 @@ public ref partial struct QueryResults
         _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
-        _hasGroupBy = groupBy.HasGroupBy;
+        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasAggregates;
         _groupedResults = null;
         _groupedIndex = -1;
         _having = having;

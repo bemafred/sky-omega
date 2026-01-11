@@ -124,9 +124,14 @@ public class SparqlConformanceTests
         var parsed = parser.ParseQuery();
         _output.WriteLine($"Query type: {parsed.Type}");
 
-        // Execute the query
-        store.AcquireReadLock();
+        // Parse expected results BEFORE acquiring lock to avoid thread-affinity issues
+        // (ReaderWriterLockSlim requires release on same thread as acquire)
+        var expectedRows = await ParseExpectedResultsAsync(test.ResultPath!);
+        _output.WriteLine($"Expected {expectedRows.Count} results");
+
+        // Execute the query (no async after lock acquisition)
         int actualCount = 0;
+        store.AcquireReadLock();
         try
         {
             using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
@@ -140,20 +145,16 @@ public class SparqlConformanceTests
             results.Dispose();
 
             _output.WriteLine($"Got {actualCount} results");
-
-            // Parse expected results
-            var expectedRows = await ParseExpectedResultsAsync(test.ResultPath!);
-            _output.WriteLine($"Expected {expectedRows.Count} results");
-
-            // Compare results
-            // Note: This is a simplified comparison - a full implementation would need
-            // to handle blank node isomorphism, unordered result sets, etc.
-            Assert.Equal(expectedRows.Count, actualCount);
         }
         finally
         {
             store.ReleaseReadLock();
         }
+
+        // Compare results
+        // Note: This is a simplified comparison - a full implementation would need
+        // to handle blank node isomorphism, unordered result sets, etc.
+        Assert.Equal(expectedRows.Count, actualCount);
     }
 
     private async Task LoadDataAsync(QuadStore store, string path)
