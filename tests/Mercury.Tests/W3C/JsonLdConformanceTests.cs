@@ -70,6 +70,16 @@ public class JsonLdConformanceTests
         await using (var stream = File.OpenRead(test.InputPath))
         using (var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection, contextResolver))
         {
+            // Apply expandContext if specified
+            if (!string.IsNullOrEmpty(test.Option?.ExpandContext))
+            {
+                // expandContext path is relative to tests directory (e.g., "toRdf/e077-context.jsonld")
+                var testsDir = Path.GetDirectoryName(testDir);  // Go up from toRdf to tests
+                var expandContextPath = Path.Combine(testsDir!, test.Option.ExpandContext);
+                var expandContextJson = await File.ReadAllTextAsync(expandContextPath);
+                parser.ApplyExpandContext(expandContextJson);
+            }
+
             await parser.ParseAsync((s, p, o, g) =>
             {
                 actualQuads.Add((s.ToString(), p.ToString(), o.ToString(), g.ToString()));
@@ -354,6 +364,7 @@ public static class JsonLdTestContext
                 ProduceGeneralizedRdf = optionProp.TryGetProperty("produceGeneralizedRdf", out var genProp) && genProp.GetBoolean(),
                 ProcessingMode = optionProp.TryGetProperty("processingMode", out var modeProp) ? modeProp.GetString() : null,
                 RdfDirection = optionProp.TryGetProperty("rdfDirection", out var rdfDirProp) ? rdfDirProp.GetString() : null,
+                ExpandContext = optionProp.TryGetProperty("expandContext", out var expandCtxProp) ? expandCtxProp.GetString() : null,
             };
         }
 
@@ -426,4 +437,5 @@ public class JsonLdTestOption
     public bool ProduceGeneralizedRdf { get; init; }
     public string? ProcessingMode { get; init; }
     public string? RdfDirection { get; init; }
+    public string? ExpandContext { get; init; }
 }

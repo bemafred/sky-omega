@@ -270,6 +270,23 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Apply an initial context before parsing the document.
+    /// Used for the expandContext option which provides an external context
+    /// to use when expanding the document.
+    /// </summary>
+    /// <param name="contextJson">JSON string containing the context document (must have @context property)</param>
+    public void ApplyExpandContext(string contextJson)
+    {
+        using var doc = JsonDocument.Parse(contextJson);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("@context", out var context))
+        {
+            ProcessContext(context);
+        }
+    }
+
     private void ParseDocument(ref Utf8JsonReader reader, QuadHandler handler)
     {
         if (!reader.Read())
