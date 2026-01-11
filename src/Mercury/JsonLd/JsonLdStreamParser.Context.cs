@@ -1110,6 +1110,19 @@ public sealed partial class JsonLdStreamParser
         // Check context first (exact term match)
         if (_context.TryGetValue(value, out var expanded))
         {
+            // Check if expanded value is a compact IRI using a known prefix before IsAbsoluteIri (c038)
+            // e.g., "Print" -> "bibo:Book" where "bibo" is a prefix
+            var expandedColonIdx = expanded.IndexOf(':');
+            if (expandedColonIdx > 0)
+            {
+                var expandedPrefix = expanded.Substring(0, expandedColonIdx);
+                var expandedLocalName = expanded.Substring(expandedColonIdx + 1);
+                if (!expandedLocalName.StartsWith("//") && expandedPrefix != "_" &&
+                    _prefixable.Contains(expandedPrefix) && _context.TryGetValue(expandedPrefix, out var expandedPrefixIri))
+                {
+                    return FormatIri(expandedPrefixIri + expandedLocalName);
+                }
+            }
             if (IsAbsoluteIri(expanded))
                 return FormatIri(expanded);
             return ExpandTypeIri(expanded);

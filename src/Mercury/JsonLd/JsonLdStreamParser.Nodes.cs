@@ -438,13 +438,23 @@ public sealed partial class JsonLdStreamParser
         {
             if (root.TryGetProperty(alias, out var aliasNestElement))
             {
-                // Apply property-scoped context if present (c037)
+                // Apply property-scoped context if present (c037, c038)
                 if (_scopedContext.TryGetValue(alias, out var scopedContextJson))
                 {
                     // Save and apply context, then restore after processing
+                    // Need to save all context-related fields for proper restoration (c038)
                     var savedVocab = _vocabIri;
                     var savedBase = _baseIri;
                     var savedContext = new Dictionary<string, string>(_context);
+                    var savedTypeCoercion = new Dictionary<string, string>(_typeCoercion);
+                    var savedContainerList = new Dictionary<string, bool>(_containerList);
+                    var savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
+                    var savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
+                    var savedContainerGraph = new Dictionary<string, bool>(_containerGraph);
+                    var savedContainerId = new Dictionary<string, bool>(_containerId);
+                    var savedContainerType = new Dictionary<string, bool>(_containerType);
+                    var savedScopedContext = new Dictionary<string, string>(_scopedContext);
+                    var savedNestAliases = new HashSet<string>(_nestAliases);
                     using var scopedDoc = JsonDocument.Parse(scopedContextJson);
                     ProcessContext(scopedDoc.RootElement);
                     try
@@ -457,6 +467,24 @@ public sealed partial class JsonLdStreamParser
                         _baseIri = savedBase;
                         _context.Clear();
                         foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
+                        _typeCoercion.Clear();
+                        foreach (var kv in savedTypeCoercion) _typeCoercion[kv.Key] = kv.Value;
+                        _containerList.Clear();
+                        foreach (var kv in savedContainerList) _containerList[kv.Key] = kv.Value;
+                        _containerLanguage.Clear();
+                        foreach (var kv in savedContainerLanguage) _containerLanguage[kv.Key] = kv.Value;
+                        _containerIndex.Clear();
+                        foreach (var kv in savedContainerIndex) _containerIndex[kv.Key] = kv.Value;
+                        _containerGraph.Clear();
+                        foreach (var kv in savedContainerGraph) _containerGraph[kv.Key] = kv.Value;
+                        _containerId.Clear();
+                        foreach (var kv in savedContainerId) _containerId[kv.Key] = kv.Value;
+                        _containerType.Clear();
+                        foreach (var kv in savedContainerType) _containerType[kv.Key] = kv.Value;
+                        _scopedContext.Clear();
+                        foreach (var kv in savedScopedContext) _scopedContext[kv.Key] = kv.Value;
+                        _nestAliases.Clear();
+                        foreach (var alias2 in savedNestAliases) _nestAliases.Add(alias2);
                     }
                 }
                 else

@@ -265,14 +265,12 @@ public sealed partial class JsonLdStreamParser
             return;
         }
 
-        // Check if the object has @id - use that as the graph name
-        // Priority: explicit @id in object > graphIdFromKey from compound container key
+        // For @container: @graph, the link object and graph name come from:
+        // 1. Compound container key (e.g., @id in [@graph, @id] container)
+        // 2. Otherwise a blank node (the inner @id is the SUBJECT inside the graph, not the graph name)
+        // This is different from regular processing - the inner @id does NOT become the graph name (pr43)
         string? explicitId = null;
-        if (value.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
-        {
-            explicitId = ExpandIri(idProp.GetString() ?? "", expandTerms: false);
-        }
-        else if (graphIdFromKey != null)
+        if (graphIdFromKey != null)
         {
             explicitId = graphIdFromKey;
         }
