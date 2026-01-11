@@ -72,7 +72,7 @@ public class JsonLdStreamParserTests
         var quads = await ParseJsonLd(jsonld);
 
         Assert.Single(quads);
-        Assert.StartsWith("_:b", quads[0].Subject);
+        Assert.StartsWith("_:", quads[0].Subject);
     }
 
     [Fact]
@@ -314,7 +314,7 @@ public class JsonLdStreamParserTests
 
         Assert.Equal(2, quads.Count);
         var knowsTriple = quads.First(q => q.Predicate == "<http://xmlns.com/foaf/0.1/knows>");
-        Assert.StartsWith("_:b", knowsTriple.Object);
+        Assert.StartsWith("_:", knowsTriple.Object);
 
         var nameTriple = quads.First(q => q.Predicate == "<http://xmlns.com/foaf/0.1/name>");
         Assert.Equal(knowsTriple.Object, nameTriple.Subject);

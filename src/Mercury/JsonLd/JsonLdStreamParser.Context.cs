@@ -624,6 +624,15 @@ public sealed partial class JsonLdStreamParser
                     }
                     if (prefixProp.ValueKind == JsonValueKind.True)
                     {
+                        // pr33: Keyword aliases cannot be declared as prefixes
+                        // Check if the term maps to a keyword via @id
+                        if (_typeAliases.Contains(term) || _idAliases.Contains(term) ||
+                            _graphAliases.Contains(term) || _includedAliases.Contains(term) ||
+                            _valueAliases.Contains(term) || _languageAliases.Contains(term) ||
+                            _nestAliases.Contains(term))
+                        {
+                            throw new InvalidOperationException("invalid term definition");
+                        }
                         _prefixable.Add(term);
                     }
                 }
