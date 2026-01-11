@@ -52,10 +52,12 @@ public class JsonLdContextException : Exception
 /// <summary>
 /// Context resolver that loads contexts from the local file system.
 /// Used primarily for testing with local context files.
+/// Tracks the current context location to properly resolve nested relative references.
 /// </summary>
 public class FileContextResolver : IContextResolver
 {
     private readonly string? _basePath;
+    private string? _currentContextDir;  // Track current context directory for nested resolutions
 
     /// <summary>
     /// Create a file context resolver.
@@ -64,6 +66,7 @@ public class FileContextResolver : IContextResolver
     public FileContextResolver(string? basePath = null)
     {
         _basePath = basePath;
+        _currentContextDir = basePath;
     }
 
     public async Task<string?> ResolveAsync(string contextUri, string? baseUri, CancellationToken cancellationToken = default)
@@ -82,7 +85,11 @@ public class FileContextResolver : IContextResolver
                 // For HTTP URIs in test mode, try to map to local file
                 // Extract the filename and look in base path
                 var filename = Path.GetFileName(absoluteUri.LocalPath);
-                if (_basePath != null)
+                if (_currentContextDir != null)
+                {
+                    resolvedPath = Path.Combine(_currentContextDir, filename);
+                }
+                else if (_basePath != null)
                 {
                     resolvedPath = Path.Combine(_basePath, filename);
                 }
@@ -101,20 +108,22 @@ public class FileContextResolver : IContextResolver
         }
         else
         {
-            // Relative URI - resolve against base
-            if (!string.IsNullOrEmpty(baseUri) && Uri.TryCreate(baseUri, UriKind.Absolute, out var baseUriObj))
+            // Relative URI - resolve against current context directory (for nested contexts)
+            // or basePath (for top-level contexts)
+            var resolveBase = _currentContextDir ?? _basePath;
+            if (resolveBase != null)
+            {
+                // Direct file system resolution against resolveBase
+                // Use GetFullPath to normalize ".." and "." segments
+                resolvedPath = Path.GetFullPath(Path.Combine(resolveBase, contextUri.Replace('/', Path.DirectorySeparatorChar)));
+            }
+            else if (!string.IsNullOrEmpty(baseUri) && Uri.TryCreate(baseUri, UriKind.Absolute, out var baseUriObj))
             {
                 if (Uri.TryCreate(baseUriObj, contextUri, out var resolved))
                 {
                     if (resolved.Scheme == "file")
                     {
                         resolvedPath = resolved.LocalPath;
-                    }
-                    else if (_basePath != null)
-                    {
-                        // Map HTTP-like URI to local file
-                        var filename = Path.GetFileName(resolved.LocalPath);
-                        resolvedPath = Path.Combine(_basePath, filename);
                     }
                     else
                     {
@@ -147,6 +156,10 @@ public class FileContextResolver : IContextResolver
                 $"Context file not found: {resolvedPath}");
         }
 
+        // Update current context directory for nested relative references
+        var previousContextDir = _currentContextDir;
+        _currentContextDir = Path.GetDirectoryName(resolvedPath);
+
         try
         {
             return await File.ReadAllTextAsync(resolvedPath, cancellationToken).ConfigureAwait(false);
@@ -155,6 +168,11 @@ public class FileContextResolver : IContextResolver
         {
             throw new JsonLdContextException(contextUri, "loading remote context failed",
                 $"Failed to read context file: {resolvedPath}", ex);
+        }
+        finally
+        {
+            // Note: We don't restore previousContextDir here because the parser handles
+            // context scoping. The _currentContextDir will be updated again on the next resolve.
         }
     }
 }

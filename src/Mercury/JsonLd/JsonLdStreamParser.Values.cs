@@ -442,16 +442,25 @@ public sealed partial class JsonLdStreamParser
             RevertContainerChanges(_typeScopedContainerIdChanges, _containerId, ref savedContainerId);
         }
 
-        // Revert property-scoped changes if @propagate: false (c027, c028)
-        // Property-scoped contexts propagate by default, but @propagate: false stops propagation
+        // Revert property-scoped changes if @propagate: false (c027, c028, so06)
+        // Property-scoped contexts propagate by default, but @propagate: false stops propagation to nested nodes
+        // IMPORTANT: First nested node (direct value) should still use the scoped context
+        // Only revert for deeper nesting levels
         Dictionary<string, bool>? savedPropContainerType = null;
         Dictionary<string, bool>? savedPropContainerIndex = null;
         Dictionary<string, bool>? savedPropContainerList = null;
         Dictionary<string, bool>? savedPropContainerLang = null;
         Dictionary<string, bool>? savedPropContainerGraph = null;
         Dictionary<string, bool>? savedPropContainerId = null;
+        bool shouldRevertPropScoped = _propScopedNoPropagate && !_propScopedFirstNode;
 
-        if (_propScopedNoPropagate && _propScopedCoercionChanges != null && _propScopedCoercionChanges.Count > 0)
+        // Clear the first node flag for subsequent nested nodes
+        if (_propScopedFirstNode)
+        {
+            _propScopedFirstNode = false;
+        }
+
+        if (shouldRevertPropScoped && _propScopedCoercionChanges != null && _propScopedCoercionChanges.Count > 0)
         {
             savedPropCoercions = new Dictionary<string, string>();
             foreach (var kv in _propScopedCoercionChanges)
@@ -471,7 +480,7 @@ public sealed partial class JsonLdStreamParser
             }
         }
 
-        if (_propScopedNoPropagate && _propScopedTermChanges != null && _propScopedTermChanges.Count > 0)
+        if (shouldRevertPropScoped && _propScopedTermChanges != null && _propScopedTermChanges.Count > 0)
         {
             savedPropTerms = new Dictionary<string, string>();
             foreach (var kv in _propScopedTermChanges)
@@ -491,7 +500,7 @@ public sealed partial class JsonLdStreamParser
             }
         }
 
-        if (_propScopedNoPropagate)
+        if (shouldRevertPropScoped)
         {
             RevertContainerChanges(_propScopedContainerTypeChanges, _containerType, ref savedPropContainerType);
             RevertContainerChanges(_propScopedContainerIndexChanges, _containerIndex, ref savedPropContainerIndex);

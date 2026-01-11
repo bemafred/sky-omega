@@ -117,12 +117,12 @@ public sealed partial class JsonLdStreamParser
             {
                 hasPropagateFalse = true;
             }
-
             if (hasPropagateFalse)
             {
                 // Snapshot current state before applying context
                 // We'll compute the diff after to track changes
                 _propScopedNoPropagate = true;
+                _propScopedFirstNode = true;  // First nested node should still use scoped context
                 _propScopedTermChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
                 _propScopedCoercionChanges = new Dictionary<string, string?>(StringComparer.Ordinal);
                 _propScopedContainerTypeChanges = new Dictionary<string, bool?>(StringComparer.Ordinal);
@@ -406,6 +406,7 @@ public sealed partial class JsonLdStreamParser
             // This happens after context restore to ensure nested objects processed in Values.cs
             // had access to the tracking for reverting non-propagating property-scoped changes
             _propScopedNoPropagate = false;
+            _propScopedFirstNode = false;
             _propScopedTermChanges = null;
             _propScopedCoercionChanges = null;
             _propScopedContainerTypeChanges = null;

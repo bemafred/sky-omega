@@ -141,6 +141,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private Dictionary<string, bool?>? _propScopedContainerGraphChanges;  // @container: @graph changes
     private Dictionary<string, bool?>? _propScopedContainerIdChanges;     // @container: @id changes
     private bool _propScopedNoPropagate;                             // If true, property-scoped context does NOT propagate
+    private bool _propScopedFirstNode;                               // True for first nested node (don't revert yet)
 
     // Track inline (embedded) context changes when @propagate: false (c028)
     // Inline contexts propagate by default, but @propagate: false stops propagation to nested nodes
