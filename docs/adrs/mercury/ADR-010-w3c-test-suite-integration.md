@@ -364,7 +364,23 @@ public static class W3CTestContext
 
 **Success criteria:**
 - [ ] RDF-star: >90% pass rate
-- [ ] JSON-LD: >80% pass rate (context handling may differ)
+- [x] JSON-LD toRdf: 98.7% pass rate (461/467 tests, 6 skipped)
+
+**JSON-LD Current Status (January 2026):**
+| Metric | Value |
+|--------|-------|
+| Passed | 461 |
+| Failed | 0 |
+| Skipped | 6 |
+| Pass Rate | 98.7% |
+
+Skipped tests (features not yet implemented):
+- `produce generalized RDF flag` - generalized RDF support
+- `@set of @value objects with keyword aliases` - keyword alias edge case
+- `Expanding term mapping to @type uses @type syntax` - @type expansion
+- `Drop blank node predicates by default` - blank node predicates
+- `Redefine terms looking like compact IRIs` - compact IRI edge case
+- `@vocab as blank node identifier` - blank node vocab
 
 ## CI Integration
 
@@ -438,17 +454,18 @@ Based on typical edge cases in W3C tests:
 
 ### Conformance Targets
 
-| Suite | Target Pass Rate | Notes |
-|-------|------------------|-------|
-| N-Triples | 100% | Baseline format, no exceptions |
-| N-Quads | 100% | Baseline format, no exceptions |
-| Turtle | >95% | May skip NFC normalization tests |
-| TriG | >95% | May skip NFC normalization tests |
-| RDF/XML | >90% | May skip DTD validation tests |
-| SPARQL Syntax | 100% | All syntax must be recognized |
-| SPARQL Query | >90% | May skip entailment tests |
-| SPARQL Update | >85% | May skip graph store protocol |
-| RDF-star | >90% | After Phase 4 |
+| Suite | Target Pass Rate | Actual | Notes |
+|-------|------------------|--------|-------|
+| N-Triples | 100% | - | Baseline format, no exceptions |
+| N-Quads | 100% | - | Baseline format, no exceptions |
+| Turtle | >95% | - | May skip NFC normalization tests |
+| TriG | >95% | - | May skip NFC normalization tests |
+| RDF/XML | >90% | - | May skip DTD validation tests |
+| SPARQL Syntax | 100% | - | All syntax must be recognized |
+| SPARQL Query | >90% | - | May skip entailment tests |
+| SPARQL Update | >85% | - | May skip graph store protocol |
+| RDF-star | >90% | - | After Phase 4 |
+| JSON-LD toRdf | >80% | **98.7%** | 461/467 passed, 6 skipped |
 
 ### Documentation
 - [ ] Conformance report published with each release
