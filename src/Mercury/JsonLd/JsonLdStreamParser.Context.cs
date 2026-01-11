@@ -174,9 +174,17 @@ public sealed partial class JsonLdStreamParser
                     }
                     else if (!IsAbsoluteIri(vocabValue))
                     {
-                        // Not expanded and not absolute - resolve against @base
-                        if (!string.IsNullOrEmpty(_baseIri))
+                        // Not expanded and not absolute - concatenate with existing @vocab (e111, e112)
+                        // JSON-LD 1.1: relative @vocab is concatenated with current vocabulary (not resolved)
+                        // This preserves the relative path segments for later concatenation with terms
+                        if (!string.IsNullOrEmpty(_vocabIri) && IsAbsoluteIri(_vocabIri))
                         {
+                            // Concatenate with existing vocabulary (no path resolution)
+                            _vocabIri = _vocabIri + vocabValue;
+                        }
+                        else if (!string.IsNullOrEmpty(_baseIri))
+                        {
+                            // Fall back to resolving against @base
                             _vocabIri = ResolveRelativeIri(_baseIri, vocabValue);
                         }
                         else
@@ -836,6 +844,11 @@ public sealed partial class JsonLdStreamParser
                 if (termExplicitlyProtected)
                 {
                     _protectedTerms.Add(term);
+                    // Track type-scoped protected terms separately (pr22)
+                    if (_isApplyingTypeScopedContext)
+                    {
+                        _typeScopedProtectedTerms.Add(term);
+                    }
                 }
                 // If term explicitly has @protected: false, don't mark it even if context-level is true
                 else if (termExplicitlyUnprotected)
@@ -889,6 +902,11 @@ public sealed partial class JsonLdStreamParser
                 if (!explicitlyUnprotectedTerms.Contains(definedTerm))
                 {
                     _protectedTerms.Add(definedTerm);
+                    // Track type-scoped protected terms separately (pr22)
+                    if (_isApplyingTypeScopedContext)
+                    {
+                        _typeScopedProtectedTerms.Add(definedTerm);
+                    }
                 }
             }
         }
@@ -966,44 +984,55 @@ public sealed partial class JsonLdStreamParser
     /// </summary>
     private void ApplyTypeScopedContexts(JsonElement typeElement)
     {
-        if (typeElement.ValueKind == JsonValueKind.String)
+        // Set flag so ProcessContext knows to track type-scoped protected terms (pr22)
+        var wasApplyingTypeScopedContext = _isApplyingTypeScopedContext;
+        _isApplyingTypeScopedContext = true;
+
+        try
         {
-            var typeTerm = typeElement.GetString() ?? "";
-            if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
+            if (typeElement.ValueKind == JsonValueKind.String)
             {
-                using var doc = JsonDocument.Parse(scopedJson);
-                ProcessContext(doc.RootElement);
-            }
-        }
-        else if (typeElement.ValueKind == JsonValueKind.Array)
-        {
-            // Collect types with scoped contexts AND save their context JSON
-            // IMPORTANT: We must save the JSON strings before applying any contexts because
-            // applying a context with `null` will clear _scopedContext, losing other type contexts
-            var typesWithContexts = new List<(string term, string expandedIri, string scopedJson)>();
-            foreach (var t in typeElement.EnumerateArray())
-            {
-                if (t.ValueKind == JsonValueKind.String)
+                var typeTerm = typeElement.GetString() ?? "";
+                if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
                 {
-                    var typeTerm = t.GetString() ?? "";
-                    if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
-                    {
-                        // Expand the type IRI for sorting
-                        var expandedIri = ExpandTypeIri(typeTerm);
-                        typesWithContexts.Add((typeTerm, expandedIri, scopedJson));
-                    }
+                    using var doc = JsonDocument.Parse(scopedJson);
+                    ProcessContext(doc.RootElement);
                 }
             }
-
-            // Sort lexicographically by expanded IRI
-            typesWithContexts.Sort((a, b) => string.Compare(a.expandedIri, b.expandedIri, StringComparison.Ordinal));
-
-            // Apply scoped contexts in sorted order using saved JSON
-            foreach (var (_, _, scopedJson) in typesWithContexts)
+            else if (typeElement.ValueKind == JsonValueKind.Array)
             {
-                using var doc = JsonDocument.Parse(scopedJson);
-                ProcessContext(doc.RootElement);
+                // Collect types with scoped contexts AND save their context JSON
+                // IMPORTANT: We must save the JSON strings before applying any contexts because
+                // applying a context with `null` will clear _scopedContext, losing other type contexts
+                var typesWithContexts = new List<(string term, string expandedIri, string scopedJson)>();
+                foreach (var t in typeElement.EnumerateArray())
+                {
+                    if (t.ValueKind == JsonValueKind.String)
+                    {
+                        var typeTerm = t.GetString() ?? "";
+                        if (_scopedContext.TryGetValue(typeTerm, out var scopedJson))
+                        {
+                            // Expand the type IRI for sorting
+                            var expandedIri = ExpandTypeIri(typeTerm);
+                            typesWithContexts.Add((typeTerm, expandedIri, scopedJson));
+                        }
+                    }
+                }
+
+                // Sort lexicographically by expanded IRI
+                typesWithContexts.Sort((a, b) => string.Compare(a.expandedIri, b.expandedIri, StringComparison.Ordinal));
+
+                // Apply scoped contexts in sorted order using saved JSON
+                foreach (var (_, _, scopedJson) in typesWithContexts)
+                {
+                    using var doc = JsonDocument.Parse(scopedJson);
+                    ProcessContext(doc.RootElement);
+                }
             }
+        }
+        finally
+        {
+            _isApplyingTypeScopedContext = wasApplyingTypeScopedContext;
         }
     }
 

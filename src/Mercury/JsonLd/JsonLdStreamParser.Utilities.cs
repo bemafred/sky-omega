@@ -118,6 +118,11 @@ public sealed partial class JsonLdStreamParser
         if (iri.StartsWith('<') && iri.EndsWith('>'))
             toCheck = iri.Substring(1, iri.Length - 2);
 
+        // Check for double hash (e111, e112) - invalid IRI pattern
+        // This occurs when @vocab ends with # and term starts with #
+        if (toCheck.Contains("##"))
+            return false;
+
         // Check for disallowed characters per RFC 3987
         // These characters must be percent-encoded in IRIs
         foreach (var c in toCheck)

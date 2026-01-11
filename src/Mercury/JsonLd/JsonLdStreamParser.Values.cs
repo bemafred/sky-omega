@@ -553,6 +553,16 @@ public sealed partial class JsonLdStreamParser
             _baseIri = _savedBaseForNested;
         }
 
+        // Save and temporarily remove type-scoped protected terms for nested node (pr22)
+        // Type-scoped protected terms should NOT prevent redefinition in nested nodes
+        var savedProtectedTerms = new HashSet<string>(_protectedTerms, StringComparer.Ordinal);
+        var savedTypeScopedProtectedTerms = new HashSet<string>(_typeScopedProtectedTerms, StringComparer.Ordinal);
+        foreach (var term in _typeScopedProtectedTerms)
+        {
+            _protectedTerms.Remove(term);
+        }
+        _typeScopedProtectedTerms.Clear();
+
         var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(value.GetRawText()));
         tempReader.Read();
         var blankNode = ParseNode(ref tempReader, handler, subject);
@@ -630,6 +640,14 @@ public sealed partial class JsonLdStreamParser
         RestoreContainer(savedContainerLang, _containerLanguage);
         RestoreContainer(savedContainerGraph, _containerGraph);
         RestoreContainer(savedContainerId, _containerId);
+
+        // Restore protected terms after nested node (pr22)
+        _protectedTerms.Clear();
+        foreach (var term in savedProtectedTerms)
+            _protectedTerms.Add(term);
+        _typeScopedProtectedTerms.Clear();
+        foreach (var term in savedTypeScopedProtectedTerms)
+            _typeScopedProtectedTerms.Add(term);
 
         // Re-apply property-scoped changes (they apply to this node's remaining properties) (c027, c028)
         if (savedPropCoercions != null)
