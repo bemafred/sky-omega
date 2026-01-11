@@ -328,10 +328,10 @@ public static class W3CTestContext
 4. TriG tests (~250+ tests)
 
 **Success criteria:**
-- [ ] N-Triples: 100% pass rate (syntax + eval)
-- [ ] N-Quads: 100% pass rate
-- [ ] Turtle: >95% pass rate, documented skip list
-- [ ] TriG: >95% pass rate, documented skip list
+- [x] N-Triples: 100% pass rate (70/70)
+- [x] N-Quads: 100% pass rate (87/87)
+- [x] Turtle: 100% pass rate (309/309)
+- [x] TriG: 100% pass rate (352/352)
 
 ### Phase 3: SPARQL Conformance (Week 3-4)
 
@@ -456,16 +456,17 @@ Based on typical edge cases in W3C tests:
 
 | Suite | Target Pass Rate | Actual | Notes |
 |-------|------------------|--------|-------|
-| N-Triples | 100% | - | Baseline format, no exceptions |
-| N-Quads | 100% | - | Baseline format, no exceptions |
-| Turtle | >95% | - | May skip NFC normalization tests |
-| TriG | >95% | - | May skip NFC normalization tests |
-| RDF/XML | >90% | - | May skip DTD validation tests |
-| SPARQL Syntax | 100% | - | All syntax must be recognized |
-| SPARQL Query | >90% | - | May skip entailment tests |
-| SPARQL Update | >85% | - | May skip graph store protocol |
-| RDF-star | >90% | - | After Phase 4 |
+| N-Triples | 100% | **100%** | 70/70 passed |
+| N-Quads | 100% | **100%** | 87/87 passed |
+| Turtle | >95% | **100%** | 309/309 passed |
+| TriG | >95% | **100%** | 352/352 passed |
+| RDF/XML | >90% | **100%** | 166/166 passed |
 | JSON-LD toRdf | >80% | **98.7%** | 461/467 passed, 6 skipped |
+| SPARQL Syntax | 100% | - | Pending |
+| SPARQL Query | >90% | - | Pending |
+| SPARQL Update | >85% | - | Pending |
+| RDF-star | >90% | - | After Phase 4 |
+| **Total** | | **99.6%** | 1,445/1,451 passed |
 
 ### Documentation
 - [ ] Conformance report published with each release
