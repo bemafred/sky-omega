@@ -1,3 +1,5 @@
+> 📖 **New here?** Read [AI.md](AI.md) first for project context.
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -129,18 +131,19 @@ Sky (Agent) → James (Orchestration) → Lucy (Semantic Memory) → Mercury (St
 - **Lucy** - RDF triple store with SPARQL queries
 - **Mira** - Presentation surfaces (CLI, chat, IDE extensions)
 - **Mercury** - B+Tree indexes, append-only stores, memory-mapped files
+- **Minerva** - Tensor inference (BCL only), HW interop in C/C++
 
 For the vision, methodology (EEE), and broader context, see [docs/architecture/sky-omega-convergence.md](docs/architecture/sky-omega-convergence.md).
 
 ### Storage Layer (`SkyOmega.Mercury.Storage`)
 
-| Component | Purpose |
-|-----------|---------|
-| `QuadStore` | Multi-index quad store with named graph support |
-| `QuadIndex` | B+Tree index with bitemporal + graph support (SPO, POS, OSP, TSPO) |
-| `AtomStore` | String interning with memory-mapped storage |
-| `PageCache` | LRU cache for B+Tree pages (clock algorithm) |
-| `TrigramIndex` | Full-text search via trigram inverted index (opt-in) |
+| Component      | Purpose                                                                |
+|----------------|------------------------------------------------------------------------|
+| `QuadStore`    | Multi-index quad store with named graph support                        |
+| `QuadIndex`    | B+Tree index with bitemporal + graph support (GSPO, GPOS, GOSP, TGSPO) |
+| `AtomStore`    | String interning with memory-mapped storage                            |
+| `PageCache`    | LRU cache for B+Tree pages (clock algorithm)                           |
+| `TrigramIndex` | Full-text search via trigram inverted index (opt-in)                   |
 
 ### Durability Design
 
