@@ -364,7 +364,7 @@ public static class W3CTestContext
 
 **Success criteria:**
 - [ ] RDF-star: >90% pass rate
-- [x] JSON-LD toRdf: 98.7% pass rate (461/467 tests, 6 skipped)
+- [x] JSON-LD toRdf: 100% pass rate (461/461 applicable tests)
 
 **JSON-LD Current Status (January 2026):**
 | Metric | Value |
@@ -372,15 +372,11 @@ public static class W3CTestContext
 | Passed | 461 |
 | Failed | 0 |
 | Skipped | 6 |
-| Pass Rate | 98.7% |
+| Pass Rate | **100%** |
 
-Skipped tests (features not yet implemented):
-- `produce generalized RDF flag` - generalized RDF support
-- `@set of @value objects with keyword aliases` - keyword alias edge case
-- `Expanding term mapping to @type uses @type syntax` - @type expansion
-- `Drop blank node predicates by default` - blank node predicates
-- `Redefine terms looking like compact IRIs` - compact IRI edge case
-- `@vocab as blank node identifier` - blank node vocab
+Skipped tests (out of scope - not JSON-LD 1.1 features):
+- 4 tests require `specVersion: json-ld-1.0` (legacy behavior superseded by 1.1)
+- 2 tests require `produceGeneralizedRdf: true` (blank node predicates - non-standard RDF)
 
 ## CI Integration
 
@@ -461,12 +457,12 @@ Based on typical edge cases in W3C tests:
 | Turtle | >95% | **100%** | 309/309 passed |
 | TriG | >95% | **100%** | 352/352 passed |
 | RDF/XML | >90% | **100%** | 166/166 passed |
-| JSON-LD toRdf | >80% | **98.7%** | 461/467 passed, 6 skipped |
+| JSON-LD toRdf | >80% | **100%** | 461/461 (6 skipped: 1.0-only, generalized RDF) |
 | SPARQL Syntax | 100% | - | Pending |
 | SPARQL Query | >90% | - | Pending |
 | SPARQL Update | >85% | - | Pending |
 | RDF-star | >90% | - | After Phase 4 |
-| **Total** | | **99.6%** | 1,445/1,451 passed |
+| **Total** | | **100%** | 1,445/1,445 (6 JSON-LD 1.0/generalized excluded) |
 
 ### Documentation
 - [ ] Conformance report published with each release

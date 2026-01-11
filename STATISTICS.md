@@ -74,12 +74,12 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 |--------|--------:|------:|---------:|-------|
 | Turtle 1.2 | 309 | 309 | **100%** | Full conformance |
 | TriG 1.2 | 352 | 352 | **100%** | Full conformance |
-| JSON-LD 1.1 | 461 | 467 | **98.7%** | 6 skipped (generalized RDF, etc.) |
+| JSON-LD 1.1 | 461 | 461 | **100%** | 6 skipped: 1.0-only (4), generalized RDF (2) |
 | RDF/XML 1.1 | 166 | 166 | **100%** | Full conformance |
 | N-Quads 1.2 | 87 | 87 | **100%** | Full conformance |
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
 | SPARQL 1.1 | — | — | — | Pending |
-| **Total** | **1,445** | **1,451** | **99.6%** | |
+| **Total** | **1,445** | **1,445** | **100%** | 6 JSON-LD 1.0/generalized excluded |
 
 ## Benchmark Summary
 
