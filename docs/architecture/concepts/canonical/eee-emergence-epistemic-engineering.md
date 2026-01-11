@@ -1,37 +1,33 @@
-# EEE (Emergence, Epistemics, Engineering)
+# EEE (Emergence, Epistemic, Engineering)
 
-## Status
-Canonical
+# Canonical Definition
 
-## Canonical Definition
-**EEE** is a methodology for AI-assisted development that enables disciplined interplay between emergence and structured form. It supports a cyclical flow: *Thought → Dialogue → Pattern → Structure → Reflection → Thought*.
+EEE is a conceptual lens describing **how robust systems and insights legitimately come into being**.
 
-## The Three Elements
+EEE distinguishes three fundamentally different modes of thinking and action:
 
-**Emergence** — Observing what naturally wants to happen within a system. Allowing development through constraint, intention, and dialogue rather than top-down decree.
+- **Emergence** – exploration among uncertainty, where discovery is possible but certainty is not
+- **Epistemic** – clarification of assumptions and understanding why something must be true
+- **Engineering** – construction, optimization, and automation of what is already known
 
-**Epistemics** — Understanding not merely *what* we know, but *how* we know it. Every design decision, every assumption, is traced, named, and made reflectable. This transforms knowledge into something observable and examinable.
+EEE does not describe a process or sequence to be followed mechanically.
+It describes **what kind of thinking is legitimate at a given moment**, and what is not.
 
-**Engineering** — Grounding the abstract work into concrete, executable systems that remain faithful to what emerged—and still open to what might.
+By making these distinctions explicit, EEE prevents premature engineering and makes the transition into engineering both justified and durable.
 
-## Why a New Methodology?
-
-Traditional methodologies presume clear boundaries between tool and user, designer and implementer, system and observer. AI-assisted development dissolves these distinctions.
-
-## Philosophy
-
-EEE functions as a way of knowing rather than a workflow:
-- Nothing escapes questioning
-- Meaning resides in form
-- Dialogue is foundational, not supplementary
+---
 
 ## Non-Goals
-- Replacing existing software engineering practices (complements them)
-- Prescribing specific tools or AI providers
-- Guaranteeing outcomes (methodology, not magic)
 
-## See Also
-- [E-Clean](e-clean.md) - Discipline discovered through EEE practice
-- [Semantic Architecture](semantic-architecture.md) - Structural patterns from EEE
-- [Sky Omega](sky-omega.md) - Primary application of EEE methodology
-- [EEE Manifesto](../../narratives/eee-manifesto.md) - Narrative vision document
+- EEE is not a development methodology.
+- It is not a delivery framework or lifecycle model.
+- It is not a replacement for engineering discipline.
+- It does not remove iteration or feedback.
+
+---
+
+## Notes
+
+- EEE complements E-Clean by explaining when epistemic legitimacy is earned.
+- Engineering is only legitimate once Epistemic work has resolved the relevant uncertainties.
+- EEE applies equally to technical, organizational, and cognitive systems.

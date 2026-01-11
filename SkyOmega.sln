@@ -31,7 +31,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Architecture", "Architectur
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Canonical Concepts", "Canonical Concepts", "{F5B6C7D8-E9F0-1234-5678-AAAAAAAAAAAA}"
 	ProjectSection(SolutionItems) = preProject
-		docs\architecture\concepts\canonical-authoring-queue.md = docs\architecture\concepts\canonical-authoring-queue.md
 		docs\architecture\concepts\canonical\canonical-definition.md = docs\architecture\concepts\canonical\canonical-definition.md
 		docs\architecture\concepts\canonical\domain-catalog.md = docs\architecture\concepts\canonical\domain-catalog.md
 		docs\architecture\concepts\canonical\e-clean.md = docs\architecture\concepts\canonical\e-clean.md

@@ -1,33 +1,36 @@
 # E-Clean
 
-## Status
-Canonical
-
 ## Canonical Definition
-**E-Clean (Epistemic Clean)** is the foundational discipline ensuring software systems remain epistemically sound—that software *means what it says* and keeps meaning it as systems evolve.
 
-E-Clean maintains strict separation between what is **known**, **assumed**, **undefined**, and **accidental**.
+E-Clean (Epistemically Clean) is an architectural stance that requires **epistemic clarity and legitimacy before, during, and after engineering**.
 
-> "If the system compiles, it must also *make sense*."
+The E in E-Clean stands for *Epistemically*.
 
-## Core Principles
-- Explicit domain vocabularies
-- Stable semantic boundaries
-- Elimination of ambiguous abstractions
-- Mechanical verification of architectural rules
+An E-Clean system maintains a strict separation between:
 
-## The Problem It Solves
-Systems deteriorate not from incorrect dependencies, but from eroding meaning. Common failure modes:
-- Generic abstractions that lose domain specificity
-- Semantic dumping grounds where concepts blur
-- Unenforced ubiquitous language that drifts from intent
+- What is known to be true
+- What is assumed but unverified
+- What is unknown
+- What is undecidable
+
+This separation is not temporary. It is actively preserved as systems evolve.
+
+E-Clean does not prescribe what to build.
+It governs **when structure, optimization, and automation are epistemically legitimate**, and enforces that illegitimate certainty is never silently encoded into architecture, code, or documentation.
+
+---
 
 ## Non-Goals
-- Runtime performance optimization (orthogonal concern)
-- Code style or formatting enforcement
-- Traditional "clean code" aesthetics without semantic grounding
 
-## See Also
-- [Semantic Architecture](semantic-architecture.md) - Structural implementation of E-Clean principles
-- [Epistemic Cleanliness](epistemic-cleanliness.md) - Related concept
-- [Semantic Drift](semantic-drift.md) - The problem E-Clean prevents
+- E-Clean is not a development methodology.
+- It is not a delivery process or governance framework.
+- It does not guarantee correctness or success.
+- It does not eliminate uncertainty or human judgment.
+
+---
+
+## Notes
+
+- E-Clean applies continuously, not just upfront.
+- Violations of E-Clean often appear as premature abstractions, over-generalized models, or undocumented assumptions.
+- E-Clean is a prerequisite for Semantic Architecture and meaningful use of EEE.

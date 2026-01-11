@@ -1,35 +1,33 @@
 # Semantic Architecture
 
-## Status
-Canonical
-
 ## Canonical Definition
-**Semantic Architecture** is the practice of treating meaning as a primary architectural concern. It provides the structural implementation of [E-Clean](e-clean.md) principles.
 
-## Five Core Principles
+Semantic Architecture is an architectural approach in which **meaning is treated as a first-class structural concern**.
 
-1. **Semantic identity supersedes technical role** — What something *means* matters more than what it *does*
-2. **Names function as lasting contracts** — Naming is commitment, not convenience
-3. **Types establish epistemic boundaries** — The type system encodes knowledge boundaries
-4. **Reflection and expressions serve as deliberate architectural instruments** — Not just runtime convenience
-5. **Architectural rules require mechanical verification** — If it can't be checked, it will drift
+In a semantic architecture, systems are designed around:
 
-## Why .NET?
+- Explicit representations of meaning
+- Stable conceptual boundaries
+- Traceable relationships between concepts
+- Clear separation between semantics and technical implementation
 
-The architecture deliberately targets modern .NET and C# because these platforms provide:
-- Deep runtime reflection
-- Expression tree inspection
-- Compiler-enforced constraints
-- Robust tooling integration
+Rather than encoding meaning implicitly in code structure or behavior, semantic architecture **makes meaning explicit**, inspectable, and evolvable.
 
-These capabilities are essential for mechanical semantic verification.
+Semantic Architecture enables systems to reason about, validate, and evolve their own conceptual models without conflating them with infrastructure or tooling concerns.
+
+---
 
 ## Non-Goals
-- Prescribing specific design patterns (patterns emerge from principles)
-- Replacing domain-driven design (complementary, not competing)
-- Language-agnostic universality (leverages platform-specific capabilities)
 
-## See Also
-- [E-Clean](e-clean.md) - The discipline Semantic Architecture implements
-- [Semantic Core](semantic-core.md) - Related infrastructure concept
-- [Semantic Drift](semantic-drift.md) - What mechanical verification prevents
+- Semantic Architecture is not a modeling technique or notation.
+- It is not a requirement to use any specific technology or storage format.
+- It is not equivalent to domain-driven design, though it may incorporate it.
+- It does not remove complexity; it makes complexity visible.
+
+---
+
+## Notes
+
+- Semantic Architecture relies on E-Clean to ensure that meaning is legitimate before it is structured.
+- It creates the conditions necessary for structured intelligence.
+- Sky Omega and VGR.Demo.Domain are concrete manifestations of semantic architecture, not its definition.
