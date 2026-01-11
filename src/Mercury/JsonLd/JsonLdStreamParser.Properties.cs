@@ -593,10 +593,69 @@ public sealed partial class JsonLdStreamParser
             {
                 var propName = prop.Name;
 
+                // Skip nullified terms - they should be completely ignored (in06 comments.data)
+                if (_nullTerms.Contains(propName))
+                    continue;
+
                 // Handle nested @nest recursively (n005)
+                // Need to apply scoped context for nested @nest terms (c038)
                 if (propName == "@nest" || _nestAliases.Contains(propName))
                 {
-                    ProcessNestKeyword(currentNode, prop.Value, handler, graphIri);
+                    // Apply property-scoped context if present (c038)
+                    if (_scopedContext.TryGetValue(propName, out var nestedScopedContextJson))
+                    {
+                        // Save and apply context, then restore after processing
+                        var savedVocab = _vocabIri;
+                        var savedBase = _baseIri;
+                        var savedContext = new Dictionary<string, string>(_context);
+                        var savedTypeCoercion = new Dictionary<string, string>(_typeCoercion);
+                        var savedContainerList = new Dictionary<string, bool>(_containerList);
+                        var savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage);
+                        var savedContainerIndex = new Dictionary<string, bool>(_containerIndex);
+                        var savedContainerGraph = new Dictionary<string, bool>(_containerGraph);
+                        var savedContainerId = new Dictionary<string, bool>(_containerId);
+                        var savedContainerType = new Dictionary<string, bool>(_containerType);
+                        var savedScopedContext = new Dictionary<string, string>(_scopedContext);
+                        var savedNestAliases = new HashSet<string>(_nestAliases);
+                        var savedNullTerms = new HashSet<string>(_nullTerms);
+                        using var nestedScopedDoc = JsonDocument.Parse(nestedScopedContextJson);
+                        ProcessContext(nestedScopedDoc.RootElement);
+                        try
+                        {
+                            ProcessNestKeyword(currentNode, prop.Value, handler, graphIri);
+                        }
+                        finally
+                        {
+                            _vocabIri = savedVocab;
+                            _baseIri = savedBase;
+                            _context.Clear();
+                            foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
+                            _typeCoercion.Clear();
+                            foreach (var kv in savedTypeCoercion) _typeCoercion[kv.Key] = kv.Value;
+                            _containerList.Clear();
+                            foreach (var kv in savedContainerList) _containerList[kv.Key] = kv.Value;
+                            _containerLanguage.Clear();
+                            foreach (var kv in savedContainerLanguage) _containerLanguage[kv.Key] = kv.Value;
+                            _containerIndex.Clear();
+                            foreach (var kv in savedContainerIndex) _containerIndex[kv.Key] = kv.Value;
+                            _containerGraph.Clear();
+                            foreach (var kv in savedContainerGraph) _containerGraph[kv.Key] = kv.Value;
+                            _containerId.Clear();
+                            foreach (var kv in savedContainerId) _containerId[kv.Key] = kv.Value;
+                            _containerType.Clear();
+                            foreach (var kv in savedContainerType) _containerType[kv.Key] = kv.Value;
+                            _scopedContext.Clear();
+                            foreach (var kv in savedScopedContext) _scopedContext[kv.Key] = kv.Value;
+                            _nestAliases.Clear();
+                            foreach (var alias in savedNestAliases) _nestAliases.Add(alias);
+                            _nullTerms.Clear();
+                            foreach (var t in savedNullTerms) _nullTerms.Add(t);
+                        }
+                    }
+                    else
+                    {
+                        ProcessNestKeyword(currentNode, prop.Value, handler, graphIri);
+                    }
                     continue;
                 }
 
@@ -604,6 +663,12 @@ public sealed partial class JsonLdStreamParser
                 if (propName == "@type" || _typeAliases.Contains(propName))
                 {
                     ProcessType(currentNode, prop.Value, handler, graphIri);
+                    continue;
+                }
+
+                // Skip @id and @id aliases inside @nest - they're used for subject determination, not properties (in06)
+                if (propName == "@id" || _idAliases.Contains(propName))
+                {
                     continue;
                 }
 
@@ -620,10 +685,42 @@ public sealed partial class JsonLdStreamParser
         }
         else if (nestElement.ValueKind == JsonValueKind.Array)
         {
-            // @nest can be an array of objects
+            // @nest can be an array of objects or node objects
             foreach (var item in nestElement.EnumerateArray())
             {
-                ProcessNestKeyword(currentNode, item, handler, graphIri);
+                // Check if this is a node object (has @id or @id alias)
+                // Node objects in @nest arrays should be processed as separate nodes (in06)
+                bool isNodeObject = false;
+                if (item.ValueKind == JsonValueKind.Object)
+                {
+                    if (item.TryGetProperty("@id", out _))
+                    {
+                        isNodeObject = true;
+                    }
+                    else
+                    {
+                        foreach (var alias in _idAliases)
+                        {
+                            if (item.TryGetProperty(alias, out _))
+                            {
+                                isNodeObject = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (isNodeObject)
+                {
+                    // Process as a separate node with its own @id
+                    var tempReader = new Utf8JsonReader(Encoding.UTF8.GetBytes(item.GetRawText()));
+                    tempReader.Read();
+                    ParseNode(ref tempReader, handler, currentNode);
+                }
+                else
+                {
+                    ProcessNestKeyword(currentNode, item, handler, graphIri);
+                }
             }
         }
         else

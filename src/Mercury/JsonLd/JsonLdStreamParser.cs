@@ -117,6 +117,7 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private Dictionary<string, string>? _savedContextForNested;
     private string? _savedVocabForNested;
     private string? _savedBaseForNested;
+    private HashSet<string>? _savedNullTermsForNested;  // Save null terms before type-scoped context (in06)
 
     // Track what terms/type-coercions/containers were added/modified by type-scoped context (to revert for nested nodes)
     // Value is original IRI (null if term was new). Only type-scoped changes should be reverted.

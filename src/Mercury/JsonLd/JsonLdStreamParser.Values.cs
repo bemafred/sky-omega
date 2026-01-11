@@ -592,6 +592,14 @@ public sealed partial class JsonLdStreamParser
             _baseIri = _savedBaseForNested;
         }
 
+        // Restore null terms for nested nodes (type-scoped context may have added terms to _nullTerms)
+        // in06: when type-scoped context sets data: null, this shouldn't affect nested nodes
+        if (!_typeScopedPropagate && _savedNullTermsForNested != null)
+        {
+            _nullTerms.Clear();
+            foreach (var t in _savedNullTermsForNested) _nullTerms.Add(t);
+        }
+
         // Save and temporarily remove type-scoped protected terms for nested node (pr22)
         // Type-scoped protected terms should NOT prevent redefinition in nested nodes
         var savedProtectedTerms = new HashSet<string>(_protectedTerms, StringComparer.Ordinal);

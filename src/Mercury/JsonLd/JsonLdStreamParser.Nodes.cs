@@ -146,6 +146,7 @@ public sealed partial class JsonLdStreamParser
         Dictionary<string, string>? savedContextForNested = null;
         string? savedVocabForNested = null;
         string? savedBaseForNested = null;
+        HashSet<string>? savedNullTermsForNested = null;  // in06: save null terms before type-scoped context
         Dictionary<string, string?>? typeScopedTermChanges = null;     // Terms added/modified by type-scoped (value = original IRI, null if new)
         Dictionary<string, string?>? typeScopedCoercionChanges = null; // Coercions added/modified by type-scoped
         bool hasTypeScopedContext = false;
@@ -189,6 +190,7 @@ public sealed partial class JsonLdStreamParser
                 savedContextForNested = new Dictionary<string, string>(_context);
                 savedVocabForNested = _vocabIri;
                 savedBaseForNested = _baseIri;
+                savedNullTermsForNested = new HashSet<string>(_nullTerms);  // in06
 
                 // Track terms, coercions, and containers BEFORE type-scoped context
                 var termsBefore = new Dictionary<string, string>(_context);
@@ -302,6 +304,10 @@ public sealed partial class JsonLdStreamParser
         // Get @id for subject (AFTER type-scoped context is applied)
         // Check both @id and any aliases for @id
         // Also detect colliding keywords (er26) - multiple @id-like properties
+        // Pre-scan: look for @id inside @nest properties (in06)
+        // @nest content is flattened, so @id inside @nest becomes the node's @id
+        string? nestedId = FindIdInNestProperties(root);
+
         int idPropertyCount = 0;
         bool hasExplicitId = false;
         if (root.TryGetProperty("@id", out var idElement))
@@ -327,6 +333,12 @@ public sealed partial class JsonLdStreamParser
                     subject = ExpandIri(aliasIdElement.GetString() ?? "");
                 }
             }
+        }
+        // Use @id from @nest properties if no direct @id (in06)
+        if (subject == null && nestedId != null)
+        {
+            subject = ExpandIri(nestedId);
+            hasExplicitId = true;
         }
         // Multiple @id properties is a collision (er26)
         if (idPropertyCount > 1)
@@ -402,6 +414,7 @@ public sealed partial class JsonLdStreamParser
         var previousSavedContext = _savedContextForNested;
         var previousSavedVocab = _savedVocabForNested;
         var previousSavedBase = _savedBaseForNested;
+        var previousSavedNullTerms = _savedNullTermsForNested;  // in06
         var previousTypeScopedTermChanges = _typeScopedTermChanges;
         var previousTypeScopedCoercionChanges = _typeScopedCoercionChanges;
         var previousTypeScopedPropagate = _typeScopedPropagate;
@@ -416,6 +429,7 @@ public sealed partial class JsonLdStreamParser
             _savedContextForNested = savedContextForNested;
             _savedVocabForNested = savedVocabForNested;
             _savedBaseForNested = savedBaseForNested;
+            _savedNullTermsForNested = savedNullTermsForNested;  // in06
             _typeScopedTermChanges = typeScopedTermChanges;
             _typeScopedCoercionChanges = typeScopedCoercionChanges;
             // Note: _typeScopedPropagate was already set during ApplyTypeScopedContexts
@@ -455,6 +469,7 @@ public sealed partial class JsonLdStreamParser
                     var savedContainerType = new Dictionary<string, bool>(_containerType);
                     var savedScopedContext = new Dictionary<string, string>(_scopedContext);
                     var savedNestAliases = new HashSet<string>(_nestAliases);
+                    var savedNullTerms = new HashSet<string>(_nullTerms);
                     using var scopedDoc = JsonDocument.Parse(scopedContextJson);
                     ProcessContext(scopedDoc.RootElement);
                     try
@@ -485,6 +500,8 @@ public sealed partial class JsonLdStreamParser
                         foreach (var kv in savedScopedContext) _scopedContext[kv.Key] = kv.Value;
                         _nestAliases.Clear();
                         foreach (var alias2 in savedNestAliases) _nestAliases.Add(alias2);
+                        _nullTerms.Clear();
+                        foreach (var t in savedNullTerms) _nullTerms.Add(t);
                     }
                 }
                 else
@@ -596,6 +613,7 @@ public sealed partial class JsonLdStreamParser
         _typeScopedContainerLangChanges = previousTypeScopedContainerLangChanges;
         _typeScopedContainerGraphChanges = previousTypeScopedContainerGraphChanges;
         _typeScopedContainerIdChanges = previousTypeScopedContainerIdChanges;
+        _savedNullTermsForNested = previousSavedNullTerms;  // in06
 
         // Restore previous inline scope state (c028)
         _inlineScopedNoPropagate = savedInlineNoPropagate;
@@ -987,5 +1005,76 @@ public sealed partial class JsonLdStreamParser
         }
 
         return subject;
+    }
+
+    /// <summary>
+    /// Find @id inside @nest properties (recursively).
+    /// This handles the case where @id is buried inside a @nest value (in06).
+    /// </summary>
+    private string? FindIdInNestProperties(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+
+        // Check @nest property (unless nullified)
+        if (!_nullTerms.Contains("@nest") && element.TryGetProperty("@nest", out var nestProp))
+        {
+            var id = FindIdInElement(nestProp);
+            if (id != null) return id;
+        }
+
+        // Check @nest aliases (skip if in _nullTerms - scoped context may have nullified it)
+        foreach (var alias in _nestAliases)
+        {
+            // Skip if term has been nullified by scoped context (in06 comments.data)
+            if (_nullTerms.Contains(alias))
+                continue;
+
+            if (element.TryGetProperty(alias, out var aliasProp))
+            {
+                var id = FindIdInElement(aliasProp);
+                if (id != null) return id;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Find @id in an element (could be object or array).
+    /// </summary>
+    private string? FindIdInElement(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            // Check for @id directly
+            if (element.TryGetProperty("@id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
+            {
+                return idProp.GetString();
+            }
+
+            // Check for @id aliases
+            foreach (var alias in _idAliases)
+            {
+                if (element.TryGetProperty(alias, out var aliasProp) && aliasProp.ValueKind == JsonValueKind.String)
+                {
+                    return aliasProp.GetString();
+                }
+            }
+
+            // Recursively check nested @nest properties
+            return FindIdInNestProperties(element);
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            // For arrays, check first element (arrays typically have one element for node objects)
+            foreach (var item in element.EnumerateArray())
+            {
+                var id = FindIdInElement(item);
+                if (id != null) return id;
+            }
+        }
+
+        return null;
     }
 }

@@ -152,11 +152,11 @@ public sealed partial class JsonLdStreamParser
         // Track terms that explicitly have @protected: false (should not be marked protected even if context-level is true)
         var explicitlyUnprotectedTerms = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var prop in contextElement.EnumerateObject())
+                foreach (var prop in contextElement.EnumerateObject())
         {
             var term = prop.Name;
             var value = prop.Value;
-
+            
             // Empty string as term name is invalid (er52)
             if (term == "")
             {
@@ -178,15 +178,15 @@ public sealed partial class JsonLdStreamParser
 
             // Check if this term is already protected (cannot be redefined)
             // Skip keywords like @base, @vocab, @language, etc.
-            if (!term.StartsWith('@') && _protectedTerms.Contains(term))
+                        if (!term.StartsWith('@') && _protectedTerms.Contains(term))
             {
-                // Identical redefinition is allowed (pr23, pr15, pr16, pr17, pr18, pr19)
+                                // Identical redefinition is allowed (pr23, pr15, pr16, pr17, pr18, pr19)
                 // Check if the new definition matches the existing one
                 if (!IsIdenticalDefinition(term, value))
                 {
-                    throw new InvalidOperationException("protected term redefinition");
+                                        throw new InvalidOperationException("protected term redefinition");
                 }
-                // Identical redefinition - continue processing normally
+                                // Identical redefinition - continue processing normally
             }
 
             if (term == "@base")
@@ -1123,7 +1123,35 @@ public sealed partial class JsonLdStreamParser
                 // Handle scoped context - nested @context for this term
                 if (value.TryGetProperty("@context", out var scopedContextProp))
                 {
-                    _scopedContext[term] = scopedContextProp.GetRawText();
+                    var scopedJson = scopedContextProp.GetRawText();
+                    _scopedContext[term] = scopedJson;
+
+                    // c032, c033: Validate scoped contexts immediately even if never used
+                    // Per JSON-LD 1.1 spec (4.2.2 step 14): if term has @context but no IRI mapping,
+                    // it's an "invalid scoped context" error because the context can never be applied
+                    // Check if term has a valid IRI mapping (via @id, compact IRI, or @vocab)
+                    bool termHasMapping = _context.ContainsKey(term) ||
+                                          _typeAliases.Contains(term) ||
+                                          _idAliases.Contains(term) ||
+                                          _graphAliases.Contains(term) ||
+                                          _includedAliases.Contains(term) ||
+                                          _nestAliases.Contains(term) ||
+                                          _valueAliases.Contains(term) ||
+                                          _languageAliases.Contains(term) ||
+                                          _reverseProperty.ContainsKey(term);
+
+                    if (!termHasMapping)
+                    {
+                        throw new InvalidOperationException("invalid scoped context");
+                    }
+
+                    // Also validate the scoped context contents recursively (for inline contexts only)
+                    // External string contexts will be validated when they're loaded
+                    if (scopedContextProp.ValueKind == JsonValueKind.Object ||
+                        scopedContextProp.ValueKind == JsonValueKind.Array)
+                    {
+                        ValidateScopedContext(scopedContextProp);
+                    }
                 }
 
                 // Handle term-level @protected
@@ -1217,6 +1245,106 @@ public sealed partial class JsonLdStreamParser
                     }
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Validate a scoped context by processing it with saved/restored state.
+    /// This ensures embedded contexts are validated even if never used (c032, c033).
+    /// </summary>
+    private void ValidateScopedContext(JsonElement scopedContext)
+    {
+        // Save all current context state
+        var savedContext = new Dictionary<string, string>(_context, StringComparer.Ordinal);
+        var savedTypeCoercion = new Dictionary<string, string>(_typeCoercion, StringComparer.Ordinal);
+        var savedContainerList = new Dictionary<string, bool>(_containerList, StringComparer.Ordinal);
+        var savedContainerLanguage = new Dictionary<string, bool>(_containerLanguage, StringComparer.Ordinal);
+        var savedContainerIndex = new Dictionary<string, bool>(_containerIndex, StringComparer.Ordinal);
+        var savedContainerGraph = new Dictionary<string, bool>(_containerGraph, StringComparer.Ordinal);
+        var savedContainerId = new Dictionary<string, bool>(_containerId, StringComparer.Ordinal);
+        var savedContainerType = new Dictionary<string, bool>(_containerType, StringComparer.Ordinal);
+        var savedTermLanguage = new Dictionary<string, string>(_termLanguage, StringComparer.Ordinal);
+        var savedReverseProperty = new Dictionary<string, string>(_reverseProperty, StringComparer.Ordinal);
+        var savedScopedContext = new Dictionary<string, string>(_scopedContext, StringComparer.Ordinal);
+        var savedIndexProperty = new Dictionary<string, string>(_indexProperty, StringComparer.Ordinal);
+        var savedTypeAliases = new HashSet<string>(_typeAliases, StringComparer.Ordinal);
+        var savedIdAliases = new HashSet<string>(_idAliases, StringComparer.Ordinal);
+        var savedGraphAliases = new HashSet<string>(_graphAliases, StringComparer.Ordinal);
+        var savedIncludedAliases = new HashSet<string>(_includedAliases, StringComparer.Ordinal);
+        var savedNestAliases = new HashSet<string>(_nestAliases, StringComparer.Ordinal);
+        var savedNoneAliases = new HashSet<string>(_noneAliases, StringComparer.Ordinal);
+        var savedValueAliases = new HashSet<string>(_valueAliases, StringComparer.Ordinal);
+        var savedLanguageAliases = new HashSet<string>(_languageAliases, StringComparer.Ordinal);
+        var savedJsonAliases = new HashSet<string>(_jsonAliases, StringComparer.Ordinal);
+        var savedNullTerms = new HashSet<string>(_nullTerms, StringComparer.Ordinal);
+        var savedPrefixable = new HashSet<string>(_prefixable, StringComparer.Ordinal);
+        var savedProtectedTerms = new HashSet<string>(_protectedTerms, StringComparer.Ordinal);
+        var savedTypeScopedProtectedTerms = new HashSet<string>(_typeScopedProtectedTerms, StringComparer.Ordinal);
+        var savedVocabIri = _vocabIri;
+        var savedBaseIri = _baseIri;
+        var savedDefaultLanguage = _defaultLanguage;
+
+        try
+        {
+            // Process the scoped context to validate it (will throw on errors)
+            ProcessContext(scopedContext);
+        }
+        finally
+        {
+            // Restore all context state
+            _context.Clear();
+            foreach (var kv in savedContext) _context[kv.Key] = kv.Value;
+            _typeCoercion.Clear();
+            foreach (var kv in savedTypeCoercion) _typeCoercion[kv.Key] = kv.Value;
+            _containerList.Clear();
+            foreach (var kv in savedContainerList) _containerList[kv.Key] = kv.Value;
+            _containerLanguage.Clear();
+            foreach (var kv in savedContainerLanguage) _containerLanguage[kv.Key] = kv.Value;
+            _containerIndex.Clear();
+            foreach (var kv in savedContainerIndex) _containerIndex[kv.Key] = kv.Value;
+            _containerGraph.Clear();
+            foreach (var kv in savedContainerGraph) _containerGraph[kv.Key] = kv.Value;
+            _containerId.Clear();
+            foreach (var kv in savedContainerId) _containerId[kv.Key] = kv.Value;
+            _containerType.Clear();
+            foreach (var kv in savedContainerType) _containerType[kv.Key] = kv.Value;
+            _termLanguage.Clear();
+            foreach (var kv in savedTermLanguage) _termLanguage[kv.Key] = kv.Value;
+            _reverseProperty.Clear();
+            foreach (var kv in savedReverseProperty) _reverseProperty[kv.Key] = kv.Value;
+            _scopedContext.Clear();
+            foreach (var kv in savedScopedContext) _scopedContext[kv.Key] = kv.Value;
+            _indexProperty.Clear();
+            foreach (var kv in savedIndexProperty) _indexProperty[kv.Key] = kv.Value;
+            _typeAliases.Clear();
+            foreach (var a in savedTypeAliases) _typeAliases.Add(a);
+            _idAliases.Clear();
+            foreach (var a in savedIdAliases) _idAliases.Add(a);
+            _graphAliases.Clear();
+            foreach (var a in savedGraphAliases) _graphAliases.Add(a);
+            _includedAliases.Clear();
+            foreach (var a in savedIncludedAliases) _includedAliases.Add(a);
+            _nestAliases.Clear();
+            foreach (var a in savedNestAliases) _nestAliases.Add(a);
+            _noneAliases.Clear();
+            foreach (var a in savedNoneAliases) _noneAliases.Add(a);
+            _valueAliases.Clear();
+            foreach (var a in savedValueAliases) _valueAliases.Add(a);
+            _languageAliases.Clear();
+            foreach (var a in savedLanguageAliases) _languageAliases.Add(a);
+            _jsonAliases.Clear();
+            foreach (var a in savedJsonAliases) _jsonAliases.Add(a);
+            _nullTerms.Clear();
+            foreach (var t in savedNullTerms) _nullTerms.Add(t);
+            _prefixable.Clear();
+            foreach (var p in savedPrefixable) _prefixable.Add(p);
+            _protectedTerms.Clear();
+            foreach (var p in savedProtectedTerms) _protectedTerms.Add(p);
+            _typeScopedProtectedTerms.Clear();
+            foreach (var p in savedTypeScopedProtectedTerms) _typeScopedProtectedTerms.Add(p);
+            _vocabIri = savedVocabIri;
+            _baseIri = savedBaseIri;
+            _defaultLanguage = savedDefaultLanguage;
         }
     }
 
@@ -1496,23 +1624,107 @@ public sealed partial class JsonLdStreamParser
 
                 // Check if it matches keyword alias
                 if (_idAliases.Contains(term) && newId == "@id")
-                    return true;
+                    return CheckScopedContextMatch(term, newValue);
                 if (_typeAliases.Contains(term) && newId == "@type")
-                    return true;
+                    return CheckScopedContextMatch(term, newValue);
 
                 // Check simple IRI mapping
                 if (_context.TryGetValue(term, out var existingMapping) && existingMapping == newId)
-                    return true;
+                    return CheckScopedContextMatch(term, newValue);
 
                 // For keyword aliases, also check if @id points to the keyword
                 if (newId.StartsWith('@'))
                 {
-                    if (newId == "@id" && _idAliases.Contains(term)) return true;
-                    if (newId == "@type" && _typeAliases.Contains(term)) return true;
+                    if (newId == "@id" && _idAliases.Contains(term)) return CheckScopedContextMatch(term, newValue);
+                    if (newId == "@type" && _typeAliases.Contains(term)) return CheckScopedContextMatch(term, newValue);
                 }
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Check if scoped context matches for protected term redefinition (pr26).
+    /// If the existing term has a scoped context, the new definition must also have one.
+    /// </summary>
+    private bool CheckScopedContextMatch(string term, JsonElement newValue)
+    {
+        bool existingHasContext = _scopedContext.ContainsKey(term);
+        bool newHasContext = newValue.TryGetProperty("@context", out var newContextElement);
+
+        // If existing has scoped context but new doesn't (or vice versa), not identical
+        if (existingHasContext != newHasContext)
+            return false;
+
+        // If both have scoped context, compare semantically
+        // Parse the existing context JSON and compare with new context
+        if (existingHasContext && newHasContext)
+        {
+            var existingContextJson = _scopedContext[term];
+            using var existingDoc = JsonDocument.Parse(existingContextJson);
+            if (!JsonElementsEqual(existingDoc.RootElement, newContextElement))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Compare two JsonElements for semantic equality (ignoring whitespace/formatting).
+    /// </summary>
+    private bool JsonElementsEqual(JsonElement a, JsonElement b)
+    {
+        if (a.ValueKind != b.ValueKind)
+            return false;
+
+        switch (a.ValueKind)
+        {
+            case JsonValueKind.Object:
+                // Compare object properties (order doesn't matter per JSON spec)
+                var aProps = new HashSet<string>();
+                foreach (var prop in a.EnumerateObject())
+                    aProps.Add(prop.Name);
+
+                var bProps = new HashSet<string>();
+                foreach (var prop in b.EnumerateObject())
+                    bProps.Add(prop.Name);
+
+                if (!aProps.SetEquals(bProps))
+                    return false;
+
+                foreach (var propName in aProps)
+                {
+                    if (!JsonElementsEqual(a.GetProperty(propName), b.GetProperty(propName)))
+                        return false;
+                }
+                return true;
+
+            case JsonValueKind.Array:
+                var aArr = a.EnumerateArray().ToList();
+                var bArr = b.EnumerateArray().ToList();
+                if (aArr.Count != bArr.Count)
+                    return false;
+                for (int i = 0; i < aArr.Count; i++)
+                {
+                    if (!JsonElementsEqual(aArr[i], bArr[i]))
+                        return false;
+                }
+                return true;
+
+            case JsonValueKind.String:
+                return a.GetString() == b.GetString();
+
+            case JsonValueKind.Number:
+                return a.GetRawText() == b.GetRawText();
+
+            case JsonValueKind.True:
+            case JsonValueKind.False:
+            case JsonValueKind.Null:
+                return true; // Same kind means equal
+
+            default:
+                return false;
+        }
     }
 }
