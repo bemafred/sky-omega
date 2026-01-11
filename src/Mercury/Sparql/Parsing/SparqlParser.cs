@@ -89,7 +89,8 @@ public ref partial struct SparqlParser
     private ReadOnlySpan<char> PeekSpan(int length)
     {
         var remaining = _source.Length - _position;
-        return remaining < length ? ReadOnlySpan<char>.Empty : _source.Slice(_position, length);
+        // Return what's available, even if less than requested
+        return remaining <= 0 ? ReadOnlySpan<char>.Empty : _source.Slice(_position, Math.Min(length, remaining));
     }
 
     private void SkipWhitespace()
@@ -1165,8 +1166,10 @@ public ref partial struct SparqlParser
 
         var span = PeekSpan(12);  // "ALL VERSIONS" is longest
 
-        // Check for "AS OF"
-        if (span.Length >= 2 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase))
+        // Check for "AS OF" - must be followed by whitespace and "OF"
+        // Note: Don't confuse with SPARQL "AS" keyword in expressions like (expr AS ?var)
+        if (span.Length >= 5 && span[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
+            char.IsWhiteSpace(span[2]) && span[3..5].Equals("OF", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("AS");
             SkipWhitespace();

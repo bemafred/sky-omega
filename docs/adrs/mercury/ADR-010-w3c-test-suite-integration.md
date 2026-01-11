@@ -458,8 +458,9 @@ Based on typical edge cases in W3C tests:
 | TriG | >95% | **100%** | 352/352 passed |
 | RDF/XML | >90% | **100%** | 166/166 passed |
 | JSON-LD toRdf | >80% | **100%** | 461/461 (6 skipped: 1.0-only, generalized RDF) |
-| SPARQL Syntax | 100% | - | Pending |
-| SPARQL Query | >90% | - | Pending |
+| SPARQL Syntax (positive) | 100% | **100%** | 63/63 passed |
+| SPARQL Syntax (negative) | 100% | 25% | 10/40 passed (parser too permissive) |
+| SPARQL Query | >90% | - | In progress |
 | SPARQL Update | >85% | - | Pending |
 | RDF-star | >90% | - | After Phase 4 |
 | **Total** | | **100%** | 1,445/1,445 (6 JSON-LD 1.0/generalized excluded) |

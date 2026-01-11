@@ -78,8 +78,9 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | RDF/XML 1.1 | 166 | 166 | **100%** | Full conformance |
 | N-Quads 1.2 | 87 | 87 | **100%** | Full conformance |
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
-| SPARQL 1.1 | — | — | — | Pending |
-| **Total** | **1,445** | **1,445** | **100%** | 6 JSON-LD 1.0/generalized excluded |
+| SPARQL 1.1 Syntax | 73 | 103 | **71%** | 63/63 positive, 10/40 negative |
+| SPARQL 1.1 Query | — | ~221 | — | In progress |
+| **Total** | **1,518** | **1,666+** | **91%** | SPARQL conformance in progress |
 
 ## Benchmark Summary
 

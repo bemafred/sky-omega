@@ -31,9 +31,37 @@ public ref partial struct SparqlParser
         ConsumeKeyword("CONSTRUCT");
         SkipWhitespace();
 
-        var template = ParseConstructTemplate();
-        var datasets = ParseDatasetClauses();
-        var whereClause = ParseWhereClause();
+        // Check for CONSTRUCT WHERE shorthand (WHERE keyword or FROM before template)
+        var span = PeekSpan(5);
+        bool isShorthand = (span.Length >= 5 && span[..5].Equals("WHERE", StringComparison.OrdinalIgnoreCase)) ||
+                           (span.Length >= 4 && span[..4].Equals("FROM", StringComparison.OrdinalIgnoreCase));
+
+        ConstructTemplate template;
+        DatasetClause[] datasets;
+        WhereClause whereClause;
+
+        if (isShorthand)
+        {
+            // CONSTRUCT WHERE { pattern } or CONSTRUCT FROM <g> WHERE { pattern }
+            // The WHERE clause patterns serve as both template and query pattern
+            datasets = ParseDatasetClauses();
+            whereClause = ParseWhereClause();
+
+            // Copy WHERE patterns to template
+            template = new ConstructTemplate();
+            for (int i = 0; i < whereClause.Pattern.PatternCount; i++)
+            {
+                template.AddPattern(whereClause.Pattern.GetPattern(i));
+            }
+        }
+        else
+        {
+            // Standard CONSTRUCT { template } WHERE { pattern }
+            template = ParseConstructTemplate();
+            datasets = ParseDatasetClauses();
+            whereClause = ParseWhereClause();
+        }
+
         var modifier = ParseSolutionModifier();
 
         return new Query
