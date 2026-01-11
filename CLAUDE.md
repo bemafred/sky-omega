@@ -50,6 +50,10 @@ ls docs/adrs/minerva/     # Minerva ADRs
 
 See individual ADRs for current implementation status. Don't duplicate progress tracking in CLAUDE.md.
 
+## Codebase Statistics
+
+See **[STATISTICS.md](STATISTICS.md)** for line counts, benchmark summaries, and growth tracking. Update after significant changes.
+
 ## Project Overview
 
 Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only).
@@ -132,8 +136,8 @@ For the vision, methodology (EEE), and broader context, see [docs/architecture/s
 
 | Component | Purpose |
 |-----------|---------|
-| `QuadStore` | Multi-index quad store (GSPO ordering) with named graph support |
-| `QuadIndex` | Single B+Tree index with bitemporal + graph support |
+| `QuadStore` | Multi-index quad store with named graph support |
+| `QuadIndex` | B+Tree index with bitemporal + graph support (SPO, POS, OSP, TSPO) |
 | `AtomStore` | String interning with memory-mapped storage |
 | `PageCache` | LRU cache for B+Tree pages (clock algorithm) |
 | `TrigramIndex` | Full-text search via trigram inverted index (opt-in) |
@@ -167,7 +171,7 @@ Use the batch API for high-throughput bulk loading (~100,000 triples/sec vs ~300
 QuadStore supports RDF named graphs for domain isolation. See [docs/api/api-usage.md#named-graphs-quads](docs/api/api-usage.md#named-graphs-quads).
 
 **Design notes:**
-- **GSPO ordering**: B+Tree keys ordered by Graph first for efficient graph-scoped queries
+- **Multiple index paths**: SPO, POS, OSP, TSPO for efficient query patterns from any entry point
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
 - **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + ValidFrom + ValidTo + TransactionTime)
 - **WAL record**: 72 bytes (includes GraphId for crash recovery)

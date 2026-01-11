@@ -5,7 +5,7 @@
 Mercury is the knowledge storage **substrate** of Sky Omega.
 
 Mercury is responsible for **persistence**, **indexing**, **versioning**, and **retrieval**.
-It stores triples with bitemporal semantics, provides O(1) access from any entry point, and ensures zero-GC performance under concurrent load.
+It stores triples with bitemporal semantics, provides O(1) atom lookup and O(log n) index access, and ensures zero-GC performance under concurrent load.
 
 Mercury does not interpret meaning and does not reason over content.
 Instead, it operates over **atoms**, **indices**, **time dimensions**, and **queries**, providing concrete capabilities such as:
