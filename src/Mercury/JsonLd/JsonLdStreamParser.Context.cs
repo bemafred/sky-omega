@@ -378,13 +378,25 @@ public sealed partial class JsonLdStreamParser
                 // @type can only have @container and @protected in its term definition
                 if (term == "@type")
                 {
+                    // Check if @type is already protected (pr32)
+                    if (_protectedTerms.Contains("@type"))
+                    {
+                        // @type is protected - any redefinition is invalid
+                        throw new InvalidOperationException("protected term redefinition");
+                    }
+
                     bool hasValidContent = false;
+                    bool makingProtected = false;
                     foreach (var typeDefProp in value.EnumerateObject())
                     {
                         var k = typeDefProp.Name;
                         if (k == "@container" || k == "@protected")
                         {
                             hasValidContent = true;
+                            if (k == "@protected" && typeDefProp.Value.ValueKind == JsonValueKind.True)
+                            {
+                                makingProtected = true;
+                            }
                         }
                         else
                         {
@@ -395,6 +407,11 @@ public sealed partial class JsonLdStreamParser
                     {
                         // Empty object is invalid
                         throw new InvalidOperationException("invalid term definition");
+                    }
+                    // Mark @type as protected if specified (pr30)
+                    if (makingProtected)
+                    {
+                        _protectedTerms.Add("@type");
                     }
                     // Process @type @container if present
                     if (value.TryGetProperty("@container", out var typeContainerProp))
@@ -481,11 +498,17 @@ public sealed partial class JsonLdStreamParser
                         }
 
                         // Handle @id mapping to actual keywords - these create aliases (c037)
-                        // But @type cannot be used as @id in expanded term definitions (er43)
+                        // @type as @id is allowed for aliasing, but NOT with @type coercion (er43)
                         if (idValue == "@type" || _typeAliases.Contains(idValue))
                         {
-                            // @type as @id is only valid in simple string mapping, not expanded definitions
-                            throw new InvalidOperationException("invalid IRI mapping");
+                            // Only allow @id: "@type" if there's no @type coercion defined
+                            // er43 has "@id": "@type" AND "@type": "@id" which is invalid
+                            // pr30 has "@id": "@type" with @container and @protected only - valid alias
+                            if (value.TryGetProperty("@type", out _))
+                            {
+                                throw new InvalidOperationException("invalid IRI mapping");
+                            }
+                            _typeAliases.Add(term);
                         }
                         else if (idValue == "@nest" || _nestAliases.Contains(idValue))
                         {
