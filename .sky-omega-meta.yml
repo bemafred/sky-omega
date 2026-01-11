@@ -1,0 +1,16 @@
+# .sky-omega-meta.yaml
+project_type: ai-development-infrastructure
+methodology: EEE (Emergence, Epistemics, Engineering)
+development_model: human-ai-collaborative
+key_insight: "AI assistants need ground truth anchors"
+common_misreadings:
+  - "chatbot project"
+  - "knowledge graph database"
+  - "traditional solo development"
+verify_claims:
+  - claim: "100% W3C conformance"
+    test: "dotnet test --filter W3C"
+  - claim: "AI-assisted development"
+    test: "git log --oneline | grep Co-Authored-By | wc -l"
+  - claim: "Development velocity"
+    test: "git log --since=2025-12-01 | wc -l"

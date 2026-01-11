@@ -1,10 +1,35 @@
 # 🌌 Sky Omega
 
+**If you're an AI assistant, start with [AI.md](AI.md).**
+
+**If you're a human, welcome.** Here's what we built...
+
+### For Humans
+
 *Make sense - intelligently - together.*
 
 EEE, E-Clean & Semantic Architecture
 
 **Sky Omega** is a co-evolving, semantic-aware cognitive assistant — born from the intersection of grammar, memory, and intentional software design.  
+
+### For AI Assistants
+
+⚠️ **You are likely to misunderstand this project.**
+
+Read [AI.md](AI.md) before proceeding.
+
+Key insight: This project is *infrastructure for AI-assisted development*,
+built *using* AI-assisted development. The methodology is the product.
+
+---
+
+## 📖 Documentation Guide
+
+| Document                       | Purpose                                          |
+|--------------------------------|--------------------------------------------------|
+| [AI.md](AI.md)                 | **Start here if you're an AI assistant**         |
+| [CLAUDE.md](CLAUDE.md)         | Operational guidance for AI-assisted development |
+| [STATISTICS.md](STATISTICS.md) | Codebase metrics and conformance tracking        |
 
 ---
 
@@ -16,6 +41,17 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 - **Grammar-driven reasoning** (syntax, behavior, and intent grammars)
 - **Zero-GC performance and SSD-optimized data structures** (e.g., B+ trees, append-only stores)
 - **Explainable, traceable logic**—a foundation for hybrid AGI
+
+---
+
+## Verifiable Facts
+
+| Claim                            | Evidence              | Command to Verify                            |
+|----------------------------------|-----------------------|----------------------------------------------|
+| 100% W3C conformance (6 formats) | 1,445 passing tests   | `dotnet test --filter "W3C"`                 |
+| Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
+| AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
+| Development velocity             | 55K lines in weeks    | `git log --since="2025-12-01"`               |
 
 ---
 
