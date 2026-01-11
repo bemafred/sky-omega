@@ -1123,12 +1123,27 @@ public sealed partial class JsonLdStreamParser
 
             // Process list item - nested arrays become sublists (li05)
             // Note: In JSON-LD 1.1, @list containing @list is ALLOWED (li01-li04)
-            // Only JSON-LD 1.0 mode (er32) rejects it, but we implement 1.1
+            // JSON-LD 1.0 rejects lists of lists (er24, er32)
             if (item.ValueKind == JsonValueKind.Array)
             {
+                // List of lists is invalid in 1.0 mode (er24)
+                if (_processingMode == "json-ld-1.0")
+                {
+                    throw new InvalidOperationException("list of lists");
+                }
                 // Nested array - recursively create a sublist
                 var sublistHead = ProcessList(item, handler, graphIri, coercedType);
                 EmitQuad(handler, currentNode, RdfFirst, sublistHead, graphIri);
+            }
+            else if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("@list", out _))
+            {
+                // List of lists is invalid in 1.0 mode (er32)
+                if (_processingMode == "json-ld-1.0")
+                {
+                    throw new InvalidOperationException("list of lists");
+                }
+                // Process the @list object (will call ProcessList recursively)
+                ProcessValue(currentNode, RdfFirst, item, handler, graphIri, coercedType);
             }
             else
             {

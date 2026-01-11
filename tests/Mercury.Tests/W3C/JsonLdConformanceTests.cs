@@ -52,11 +52,16 @@ public class JsonLdConformanceTests
         // Parse the JSON-LD input
         var actualQuads = new List<(string s, string p, string o, string g)>();
         var baseUri = test.Option?.Base ?? test.BaseIri;
+        // Use processingMode if set, otherwise derive from specVersion
+        var processingMode = test.Option?.ProcessingMode ??
+            (test.Option?.SpecVersion == "json-ld-1.0" ? "json-ld-1.0" : null);
 
         _output.WriteLine($"Base URI: {baseUri}");
+        if (processingMode != null)
+            _output.WriteLine($"Processing Mode: {processingMode}");
 
         await using (var stream = File.OpenRead(test.InputPath))
-        using (var parser = new JsonLdStreamParser(stream, baseUri))
+        using (var parser = new JsonLdStreamParser(stream, baseUri, processingMode))
         {
             await parser.ParseAsync((s, p, o, g) =>
             {
@@ -127,10 +132,16 @@ public class JsonLdConformanceTests
         _output.WriteLine($"Expected error: {test.ExpectErrorCode}");
 
         var baseUri = test.Option?.Base ?? test.BaseIri;
+        // Use processingMode if set, otherwise derive from specVersion
+        var processingMode = test.Option?.ProcessingMode ??
+            (test.Option?.SpecVersion == "json-ld-1.0" ? "json-ld-1.0" : null);
+
+        if (processingMode != null)
+            _output.WriteLine($"Processing Mode: {processingMode}");
 
         // Negative test: should throw an exception
         await using var stream = File.OpenRead(test.InputPath);
-        using var parser = new JsonLdStreamParser(stream, baseUri);
+        using var parser = new JsonLdStreamParser(stream, baseUri, processingMode);
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {

@@ -159,6 +159,11 @@ public sealed partial class JsonLdStreamParser
                 }
                 else if (vocabValue == "")
                 {
+                    // Empty @vocab is invalid in 1.0 mode (e115)
+                    if (_processingMode == "json-ld-1.0")
+                    {
+                        throw new InvalidOperationException("invalid vocab mapping");
+                    }
                     // Empty @vocab means use @base as vocabulary base (e092)
                     _vocabIri = _baseIri ?? "";
                 }
@@ -174,6 +179,11 @@ public sealed partial class JsonLdStreamParser
                     }
                     else if (!IsAbsoluteIri(vocabValue))
                     {
+                        // Relative @vocab is invalid in 1.0 mode (e116)
+                        if (_processingMode == "json-ld-1.0")
+                        {
+                            throw new InvalidOperationException("invalid vocab mapping");
+                        }
                         // Not expanded and not absolute - concatenate with existing @vocab (e111, e112)
                         // JSON-LD 1.1: relative @vocab is concatenated with current vocabulary (not resolved)
                         // This preserves the relative path segments for later concatenation with terms
@@ -210,6 +220,11 @@ public sealed partial class JsonLdStreamParser
             }
             else if (term == "@propagate")
             {
+                // @propagate is a 1.1 feature - invalid in 1.0 (ep02)
+                if (_processingMode == "json-ld-1.0")
+                {
+                    throw new InvalidOperationException("invalid context entry");
+                }
                 // @propagate must be a boolean (c030)
                 if (value.ValueKind != JsonValueKind.True && value.ValueKind != JsonValueKind.False)
                 {
@@ -225,12 +240,18 @@ public sealed partial class JsonLdStreamParser
             else if (term == "@version")
             {
                 // @version must be 1.1 (ep03)
+                // Check for conflict with processingMode (er34)
                 if (value.ValueKind == JsonValueKind.Number)
                 {
                     var version = value.GetDouble();
                     if (version != 1.1)
                     {
                         throw new InvalidOperationException("invalid @version value");
+                    }
+                    // er34: processingMode json-ld-1.0 conflicts with @version: 1.1
+                    if (_processingMode == "json-ld-1.0")
+                    {
+                        throw new InvalidOperationException("processing mode conflict");
                     }
                 }
                 else if (value.ValueKind == JsonValueKind.String)
@@ -239,6 +260,11 @@ public sealed partial class JsonLdStreamParser
                     if (versionStr != "1.1")
                     {
                         throw new InvalidOperationException("invalid @version value");
+                    }
+                    // er34: processingMode json-ld-1.0 conflicts with @version: 1.1
+                    if (_processingMode == "json-ld-1.0")
+                    {
+                        throw new InvalidOperationException("processing mode conflict");
                     }
                 }
             }
@@ -378,6 +404,12 @@ public sealed partial class JsonLdStreamParser
                 // @type can only have @container and @protected in its term definition
                 if (term == "@type")
                 {
+                    // Keyword redefinition is invalid in 1.0 (er42)
+                    if (_processingMode == "json-ld-1.0")
+                    {
+                        throw new InvalidOperationException("keyword redefinition");
+                    }
+
                     // Check if @type is already protected (pr32)
                     if (_protectedTerms.Contains("@type"))
                     {
@@ -459,6 +491,11 @@ public sealed partial class JsonLdStreamParser
                             // Validate and store @index value in term definition (property-valued index)
                             if (value.TryGetProperty("@index", out var indexValueProp))
                             {
+                                // Property-valued @index is 1.1-only (pi01)
+                                if (_processingMode == "json-ld-1.0")
+                                {
+                                    throw new InvalidOperationException("invalid term definition");
+                                }
                                 // @index must be a string (pi04)
                                 if (indexValueProp.ValueKind != JsonValueKind.String)
                                 {
@@ -498,9 +535,15 @@ public sealed partial class JsonLdStreamParser
                         }
 
                         // Handle @id mapping to actual keywords - these create aliases (c037)
+                        // In 1.0 mode, keyword aliasing is not allowed (er26)
                         // @type as @id is allowed for aliasing, but NOT with @type coercion (er43)
                         if (idValue == "@type" || _typeAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             // Only allow @id: "@type" if there's no @type coercion defined
                             // er43 has "@id": "@type" AND "@type": "@id" which is invalid
                             // pr30 has "@id": "@type" with @container and @protected only - valid alias
@@ -512,26 +555,56 @@ public sealed partial class JsonLdStreamParser
                         }
                         else if (idValue == "@nest" || _nestAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             _nestAliases.Add(term);
                         }
                         else if (idValue == "@id" || _idAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             _idAliases.Add(term);
                         }
                         else if (idValue == "@graph" || _graphAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             _graphAliases.Add(term);
                         }
                         else if (idValue == "@included" || _includedAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             _includedAliases.Add(term);
                         }
                         else if (idValue == "@value" || _valueAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             _valueAliases.Add(term);
                         }
                         else if (idValue == "@language" || _languageAliases.Contains(idValue))
                         {
+                            // Keyword redefinition is invalid in 1.0 (er26)
+                            if (_processingMode == "json-ld-1.0")
+                            {
+                                throw new InvalidOperationException("keyword redefinition");
+                            }
                             _languageAliases.Add(term);
                         }
                         // Per JSON-LD 1.1: @id values that look like keywords (e.g., "@ignoreMe")
@@ -720,6 +793,11 @@ public sealed partial class JsonLdStreamParser
                     }
                     else if (typeVal == "@none" || _noneAliases.Contains(typeVal ?? ""))
                     {
+                        // @type: @none is 1.1-only (tn01)
+                        if (_processingMode == "json-ld-1.0")
+                        {
+                            throw new InvalidOperationException("invalid type mapping");
+                        }
                         // @type: @none means no type coercion (tn02) - don't add to _typeCoercion
                         // This ensures values are emitted as plain literals without datatype
                     }
@@ -786,11 +864,26 @@ public sealed partial class JsonLdStreamParser
                         else if (containerVal == "@index")
                             _containerIndex[term] = true;
                         else if (containerVal == "@graph")
+                        {
+                            // @container: @graph is 1.1-only (er21)
+                            if (_processingMode == "json-ld-1.0")
+                                throw new InvalidOperationException("invalid container mapping");
                             _containerGraph[term] = true;
+                        }
                         else if (containerVal == "@id")
+                        {
+                            // @container: @id is 1.1-only (er21)
+                            if (_processingMode == "json-ld-1.0")
+                                throw new InvalidOperationException("invalid container mapping");
                             _containerId[term] = true;
+                        }
                         else if (containerVal == "@type")
+                        {
+                            // @container: @type is 1.1-only (er21)
+                            if (_processingMode == "json-ld-1.0")
+                                throw new InvalidOperationException("invalid container mapping");
                             _containerType[term] = true;
+                        }
                         else if (containerVal == "@set")
                         {
                             // @set containers treated as simple containers

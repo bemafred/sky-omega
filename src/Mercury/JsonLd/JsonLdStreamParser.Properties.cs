@@ -462,6 +462,27 @@ public sealed partial class JsonLdStreamParser
             }
         }
 
+        // Validate: property-valued @index cannot add property to value object (pi05)
+        // If indexPropIri is set but valueSubject is null (value is a literal), throw error
+        if (!string.IsNullOrEmpty(indexPropIri) && !isNone && valueSubject == null)
+        {
+            // Check if this would result in a value object (literal)
+            // Value objects are created from strings without @id coercion, or @value objects
+            bool isValueObject = false;
+            if (value.ValueKind == JsonValueKind.String && coercedType != "@id" && coercedType != "@vocab")
+            {
+                isValueObject = true;
+            }
+            else if (value.ValueKind == JsonValueKind.Object && value.TryGetProperty("@value", out _))
+            {
+                isValueObject = true;
+            }
+            if (isValueObject)
+            {
+                throw new InvalidOperationException("invalid value object");
+            }
+        }
+
         // Process the value normally (emit main triple)
         ProcessValue(subject, predicate, value, handler, graphIri, coercedType, termLang);
 

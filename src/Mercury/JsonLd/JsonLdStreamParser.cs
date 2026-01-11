@@ -79,6 +79,9 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private readonly HashSet<string> _typeScopedProtectedTerms; // protected terms from type-scoped contexts only
     private bool _isApplyingTypeScopedContext; // true when applying type-scoped context (for tracking protected terms)
 
+    // Processing mode: "json-ld-1.0" or "json-ld-1.1" (default)
+    private readonly string _processingMode;
+
     // Base IRI for relative IRI resolution
     private string? _baseIri;
 
@@ -148,15 +151,21 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
 
     public JsonLdStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
-        : this(stream, baseIri: null, bufferSize, bufferManager)
+        : this(stream, baseIri: null, processingMode: null, bufferSize, bufferManager)
     {
     }
 
     public JsonLdStreamParser(Stream stream, string? baseIri, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+        : this(stream, baseIri, processingMode: null, bufferSize, bufferManager)
+    {
+    }
+
+    public JsonLdStreamParser(Stream stream, string? baseIri, string? processingMode, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _baseIri = baseIri;
         _documentBaseIri = baseIri;  // Preserve original document base for @context: null reset
+        _processingMode = processingMode ?? "json-ld-1.1";  // Default to 1.1
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
