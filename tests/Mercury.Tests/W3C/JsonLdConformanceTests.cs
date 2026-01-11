@@ -63,8 +63,12 @@ public class JsonLdConformanceTests
         if (rdfDirection != null)
             _output.WriteLine($"RDF Direction: {rdfDirection}");
 
+        // Create context resolver for loading external context files
+        var testDir = Path.GetDirectoryName(test.InputPath);
+        var contextResolver = new FileContextResolver(testDir);
+
         await using (var stream = File.OpenRead(test.InputPath))
-        using (var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection))
+        using (var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection, contextResolver))
         {
             await parser.ParseAsync((s, p, o, g) =>
             {
@@ -145,9 +149,13 @@ public class JsonLdConformanceTests
         if (rdfDirection != null)
             _output.WriteLine($"RDF Direction: {rdfDirection}");
 
+        // Create context resolver for loading external context files
+        var testDir = Path.GetDirectoryName(test.InputPath);
+        var contextResolver = new FileContextResolver(testDir);
+
         // Negative test: should throw an exception
         await using var stream = File.OpenRead(test.InputPath);
-        using var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection);
+        using var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection, contextResolver);
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {

@@ -14,7 +14,76 @@ public sealed partial class JsonLdStreamParser
     {
         if (contextElement.ValueKind == JsonValueKind.String)
         {
-            // Remote context - not supported in this implementation
+            // Remote/external context - load using context resolver
+            var contextUri = contextElement.GetString() ?? "";
+
+            // Resolve relative URI against base
+            string resolvedUri = contextUri;
+            if (!Uri.IsWellFormedUriString(contextUri, UriKind.Absolute) && _baseIri != null)
+            {
+                if (Uri.TryCreate(_baseIri, UriKind.Absolute, out var baseUriObj) &&
+                    Uri.TryCreate(baseUriObj, contextUri, out var resolved))
+                {
+                    resolvedUri = resolved.ToString();
+                }
+            }
+
+            // Check for recursive context inclusion
+            if (_loadedContexts.Contains(resolvedUri))
+            {
+                // In JSON-LD 1.0, recursive contexts are an error
+                // In JSON-LD 1.1, scoped contexts can include themselves (we handle that elsewhere)
+                if (_processingMode == "json-ld-1.0")
+                {
+                    throw new InvalidOperationException("recursive context inclusion");
+                }
+                // Already loaded - skip to prevent infinite recursion
+                return;
+            }
+
+            // Load the context
+            string? contextJson;
+            try
+            {
+                contextJson = _contextResolver.ResolveAsync(contextUri, _baseIri).GetAwaiter().GetResult();
+            }
+            catch (JsonLdContextException ex)
+            {
+                throw new InvalidOperationException(ex.ErrorCode, ex);
+            }
+
+            if (contextJson == null)
+            {
+                // Context not found/not supported
+                throw new InvalidOperationException("loading remote context failed");
+            }
+
+            // Track this context to detect recursion
+            _loadedContexts.Add(resolvedUri);
+
+            try
+            {
+                // Parse and process the loaded context
+                using var doc = JsonDocument.Parse(contextJson);
+                var root = doc.RootElement;
+
+                // The loaded document should have a @context property
+                if (root.TryGetProperty("@context", out var loadedContext))
+                {
+                    ProcessContext(loadedContext);
+                }
+                else
+                {
+                    // Invalid context document - must have @context
+                    throw new InvalidOperationException("invalid remote context");
+                }
+            }
+            finally
+            {
+                // Allow re-loading this context in different scopes
+                // (but not recursively within the same scope)
+                _loadedContexts.Remove(resolvedUri);
+            }
             return;
         }
 
@@ -297,12 +366,126 @@ public sealed partial class JsonLdStreamParser
             }
             else if (term == "@import")
             {
+                // @import is a 1.1 feature - invalid in 1.0 (so01)
+                if (_processingMode == "json-ld-1.0")
+                {
+                    throw new InvalidOperationException("invalid context entry");
+                }
+
                 // @import must be a string (so02)
                 if (value.ValueKind != JsonValueKind.String)
                 {
                     throw new InvalidOperationException("invalid @import value");
                 }
-                // Remote context imports not supported
+
+                // @import cannot be used inside an imported context (so12)
+                if (_importDepth > 0)
+                {
+                    throw new InvalidOperationException("invalid context entry");
+                }
+
+                // Check for import depth overflow (so10)
+                if (_importDepth >= MaxImportDepth)
+                {
+                    throw new InvalidOperationException("context overflow");
+                }
+
+                var importUri = value.GetString() ?? "";
+
+                // Load the imported context
+                string? importedJson;
+                try
+                {
+                    importedJson = _contextResolver.ResolveAsync(importUri, _baseIri).GetAwaiter().GetResult();
+                }
+                catch (JsonLdContextException ex)
+                {
+                    throw new InvalidOperationException(ex.ErrorCode, ex);
+                }
+
+                if (importedJson == null)
+                {
+                    throw new InvalidOperationException("loading remote context failed");
+                }
+
+                // Track terms before import to identify newly imported terms
+                var termsBefore = new HashSet<string>(_context.Keys, StringComparer.Ordinal);
+                foreach (var alias in _typeAliases) termsBefore.Add(alias);
+                foreach (var alias in _idAliases) termsBefore.Add(alias);
+                foreach (var alias in _graphAliases) termsBefore.Add(alias);
+                foreach (var alias in _includedAliases) termsBefore.Add(alias);
+                foreach (var alias in _nestAliases) termsBefore.Add(alias);
+                foreach (var alias in _noneAliases) termsBefore.Add(alias);
+                foreach (var alias in _valueAliases) termsBefore.Add(alias);
+
+                // Parse and process the imported context
+                _importDepth++;
+                try
+                {
+                    using var doc = JsonDocument.Parse(importedJson);
+                    var root = doc.RootElement;
+
+                    // The imported document should have a @context property (so13 - must be single context)
+                    if (root.TryGetProperty("@context", out var importedContext))
+                    {
+                        // @import can only reference a single context object, not an array (so13)
+                        if (importedContext.ValueKind != JsonValueKind.Object)
+                        {
+                            throw new InvalidOperationException("invalid remote context");
+                        }
+                        ProcessContext(importedContext);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("invalid remote context");
+                    }
+                }
+                finally
+                {
+                    _importDepth--;
+                }
+
+                // Track terms added by import (for @protected handling)
+                foreach (var t in _context.Keys)
+                {
+                    if (!termsBefore.Contains(t))
+                        termsDefinedInThisContext.Add(t);
+                }
+                foreach (var alias in _typeAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
+                foreach (var alias in _idAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
+                foreach (var alias in _graphAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
+                foreach (var alias in _includedAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
+                foreach (var alias in _nestAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
+                foreach (var alias in _noneAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
+                foreach (var alias in _valueAliases)
+                {
+                    if (!termsBefore.Contains(alias))
+                        termsDefinedInThisContext.Add(alias);
+                }
             }
             else if (value.ValueKind == JsonValueKind.Null)
             {
