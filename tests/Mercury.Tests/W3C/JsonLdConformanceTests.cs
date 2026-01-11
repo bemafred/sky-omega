@@ -55,13 +55,16 @@ public class JsonLdConformanceTests
         // Use processingMode if set, otherwise derive from specVersion
         var processingMode = test.Option?.ProcessingMode ??
             (test.Option?.SpecVersion == "json-ld-1.0" ? "json-ld-1.0" : null);
+        var rdfDirection = test.Option?.RdfDirection;
 
         _output.WriteLine($"Base URI: {baseUri}");
         if (processingMode != null)
             _output.WriteLine($"Processing Mode: {processingMode}");
+        if (rdfDirection != null)
+            _output.WriteLine($"RDF Direction: {rdfDirection}");
 
         await using (var stream = File.OpenRead(test.InputPath))
-        using (var parser = new JsonLdStreamParser(stream, baseUri, processingMode))
+        using (var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection))
         {
             await parser.ParseAsync((s, p, o, g) =>
             {
@@ -135,13 +138,16 @@ public class JsonLdConformanceTests
         // Use processingMode if set, otherwise derive from specVersion
         var processingMode = test.Option?.ProcessingMode ??
             (test.Option?.SpecVersion == "json-ld-1.0" ? "json-ld-1.0" : null);
+        var rdfDirection = test.Option?.RdfDirection;
 
         if (processingMode != null)
             _output.WriteLine($"Processing Mode: {processingMode}");
+        if (rdfDirection != null)
+            _output.WriteLine($"RDF Direction: {rdfDirection}");
 
         // Negative test: should throw an exception
         await using var stream = File.OpenRead(test.InputPath);
-        using var parser = new JsonLdStreamParser(stream, baseUri, processingMode);
+        using var parser = new JsonLdStreamParser(stream, baseUri, processingMode, rdfDirection);
 
         var exception = await Assert.ThrowsAnyAsync<Exception>(async () =>
         {
@@ -339,6 +345,7 @@ public static class JsonLdTestContext
                 SpecVersion = optionProp.TryGetProperty("specVersion", out var specProp) ? specProp.GetString() : null,
                 ProduceGeneralizedRdf = optionProp.TryGetProperty("produceGeneralizedRdf", out var genProp) && genProp.GetBoolean(),
                 ProcessingMode = optionProp.TryGetProperty("processingMode", out var modeProp) ? modeProp.GetString() : null,
+                RdfDirection = optionProp.TryGetProperty("rdfDirection", out var rdfDirProp) ? rdfDirProp.GetString() : null,
             };
         }
 
@@ -410,4 +417,5 @@ public class JsonLdTestOption
     public string? SpecVersion { get; init; }
     public bool ProduceGeneralizedRdf { get; init; }
     public string? ProcessingMode { get; init; }
+    public string? RdfDirection { get; init; }
 }

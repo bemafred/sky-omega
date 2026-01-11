@@ -198,6 +198,36 @@ public sealed partial class JsonLdStreamParser
                 }
                 return;
             }
+
+            // Check for compound-literal mode with @direction
+            if (_rdfDirection == "compound-literal" && value.TryGetProperty("@direction", out var dirProp) &&
+                dirProp.ValueKind == JsonValueKind.String)
+            {
+                var direction = dirProp.GetString() ?? "";
+                var valueStr = valProp.ValueKind == JsonValueKind.String ? valProp.GetString() ?? "" : valProp.GetRawText();
+
+                // Create blank node for compound literal
+                var compoundNode = GenerateBlankNode();
+
+                // Emit: subject --predicate--> compoundNode
+                EmitQuad(handler, subject, predicate, compoundNode, graphIri);
+
+                // Emit: compoundNode --rdf:value--> "value"
+                EmitQuad(handler, compoundNode, RdfValue, $"\"{EscapeString(valueStr)}\"", graphIri);
+
+                // Emit: compoundNode --rdf:direction--> "direction"
+                EmitQuad(handler, compoundNode, RdfDirection, $"\"{direction}\"", graphIri);
+
+                // Check for @language - if present, emit rdf:language (lowercase)
+                if (value.TryGetProperty("@language", out var langProp) && langProp.ValueKind == JsonValueKind.String)
+                {
+                    var lang = langProp.GetString() ?? "";
+                    EmitQuad(handler, compoundNode, RdfLanguage, $"\"{lang.ToLowerInvariant()}\"", graphIri);
+                }
+
+                return;
+            }
+
             var literal = ProcessValueObject(value, valProp);
             EmitQuad(handler, subject, predicate, literal, graphIri);
             return;
@@ -816,6 +846,16 @@ public sealed partial class JsonLdStreamParser
             // @index is valid but doesn't affect RDF output - it's just metadata
         }
 
+        // Check for @direction
+        string? direction = null;
+        if (obj.TryGetProperty("@direction", out var dirProp))
+        {
+            if (dirProp.ValueKind == JsonValueKind.String)
+            {
+                direction = dirProp.GetString();
+            }
+        }
+
         if (hasLanguage)
         {
             // @language must be a string (er30)
@@ -829,7 +869,28 @@ public sealed partial class JsonLdStreamParser
                 throw new InvalidOperationException("invalid language-tagged value");
             }
             var lang = langProp.GetString() ?? "";
+
+            // Handle direction with language
+            if (!string.IsNullOrEmpty(direction) && !string.IsNullOrEmpty(_rdfDirection))
+            {
+                if (_rdfDirection == "i18n-datatype")
+                {
+                    // Format: "value"^^<https://www.w3.org/ns/i18n#{language}_{direction}>
+                    var datatype = $"<{I18nNamespace}{lang.ToLowerInvariant()}_{direction}>";
+                    return $"\"{EscapeString(valueStr)}\"^^{datatype}";
+                }
+                // compound-literal mode is handled in ProcessObjectValueWithDirection
+            }
+
             return $"\"{EscapeString(valueStr)}\"@{lang}";
+        }
+
+        // Handle direction without language (i18n-datatype mode only)
+        if (!string.IsNullOrEmpty(direction) && _rdfDirection == "i18n-datatype")
+        {
+            // Format: "value"^^<https://www.w3.org/ns/i18n#_{direction}>
+            var datatype = $"<{I18nNamespace}_{direction}>";
+            return $"\"{EscapeString(valueStr)}\"^^{datatype}";
         }
 
         // Check for @type (datatype, or alias) - terms should be expanded for datatypes

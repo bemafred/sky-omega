@@ -82,6 +82,9 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     // Processing mode: "json-ld-1.0" or "json-ld-1.1" (default)
     private readonly string _processingMode;
 
+    // RDF direction mode: "i18n-datatype", "compound-literal", or null (ignore)
+    private readonly string? _rdfDirection;
+
     // Base IRI for relative IRI resolution
     private string? _baseIri;
 
@@ -148,24 +151,34 @@ public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
     private const string RdfFirst = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#first>";
     private const string RdfRest = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#rest>";
     private const string RdfNil = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>";
+    private const string RdfValue = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#value>";
+    private const string RdfDirection = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#direction>";
+    private const string RdfLanguage = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#language>";
     private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
+    private const string I18nNamespace = "https://www.w3.org/ns/i18n#";
 
     public JsonLdStreamParser(Stream stream, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
-        : this(stream, baseIri: null, processingMode: null, bufferSize, bufferManager)
+        : this(stream, baseIri: null, processingMode: null, rdfDirection: null, bufferSize, bufferManager)
     {
     }
 
     public JsonLdStreamParser(Stream stream, string? baseIri, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
-        : this(stream, baseIri, processingMode: null, bufferSize, bufferManager)
+        : this(stream, baseIri, processingMode: null, rdfDirection: null, bufferSize, bufferManager)
     {
     }
 
     public JsonLdStreamParser(Stream stream, string? baseIri, string? processingMode, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
+        : this(stream, baseIri, processingMode, rdfDirection: null, bufferSize, bufferManager)
+    {
+    }
+
+    public JsonLdStreamParser(Stream stream, string? baseIri, string? processingMode, string? rdfDirection, int bufferSize = DefaultBufferSize, IBufferManager? bufferManager = null)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _baseIri = baseIri;
         _documentBaseIri = baseIri;  // Preserve original document base for @context: null reset
         _processingMode = processingMode ?? "json-ld-1.1";  // Default to 1.1
+        _rdfDirection = rdfDirection;
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _inputBuffer = _bufferManager.Rent<byte>(bufferSize).Array!;
         _outputBuffer = _bufferManager.Rent<char>(OutputBufferSize).Array!;
