@@ -15,6 +15,9 @@ public ref partial struct SparqlParser
         var whereClause = ParseWhereClause();
         var modifier = ParseSolutionModifier();
 
+        // Validate GROUP BY semantics
+        ValidateGroupBySemantics(selectClause, modifier.GroupBy);
+
         return new Query
         {
             Type = QueryType.Select,
@@ -24,6 +27,140 @@ public ref partial struct SparqlParser
             WhereClause = whereClause,
             SolutionModifier = modifier
         };
+    }
+
+    /// <summary>
+    /// Validates GROUP BY semantic constraints according to SPARQL 1.1 spec.
+    /// </summary>
+    private void ValidateGroupBySemantics(SelectClause selectClause, GroupByClause groupBy)
+    {
+        // Rule 1: SELECT * is not allowed with GROUP BY (syn-bad-01)
+        if (selectClause.SelectAll && groupBy.HasGroupBy)
+        {
+            throw new SparqlParseException("SELECT * is not allowed with GROUP BY");
+        }
+
+        // Rule 2: If SELECT has aggregates without GROUP BY, only aggregates/constants allowed (agg10)
+        // Rule 3: With GROUP BY, non-aggregate SELECT items must appear in GROUP BY (agg09, syn-bad-02, group06)
+        // These require tracking SELECT variables, which is done by ValidateSelectVariables
+        if (selectClause.HasProjectedVariables && (groupBy.HasGroupBy || selectClause.HasAggregates))
+        {
+            ValidateSelectVariables(selectClause, groupBy);
+        }
+    }
+
+    /// <summary>
+    /// Validates CONSTRUCT WHERE shorthand restrictions.
+    /// Only basic triple patterns are allowed (no FILTER, GRAPH, OPTIONAL, BIND, etc.)
+    /// </summary>
+    private void ValidateConstructWherePattern(GraphPattern pattern)
+    {
+        // constructwhere05: FILTER is not allowed
+        if (pattern.FilterCount > 0)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow FILTER");
+        }
+
+        // constructwhere06: GRAPH is not allowed
+        if (pattern.HasGraph)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow GRAPH");
+        }
+
+        // Other restrictions for shorthand form
+        if (pattern.HasOptionalPatterns)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow OPTIONAL");
+        }
+
+        if (pattern.HasBinds)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow BIND");
+        }
+
+        if (pattern.HasMinus)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow MINUS");
+        }
+
+        if (pattern.HasUnion)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow UNION");
+        }
+
+        if (pattern.HasService)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow SERVICE");
+        }
+
+        if (pattern.HasSubQueries)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow subqueries");
+        }
+
+        if (pattern.HasValues)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow VALUES");
+        }
+
+        if (pattern.HasExists)
+        {
+            throw new SparqlParseException("CONSTRUCT WHERE shorthand does not allow EXISTS");
+        }
+    }
+
+    /// <summary>
+    /// Validates that SELECT variables are properly scoped for GROUP BY.
+    /// </summary>
+    private void ValidateSelectVariables(SelectClause selectClause, GroupByClause groupBy)
+    {
+        // If there are aggregates but no GROUP BY, non-aggregate variables are not allowed
+        if (selectClause.HasAggregates && !groupBy.HasGroupBy)
+        {
+            // Any projected variable is an error - only aggregates allowed
+            for (int i = 0; i < selectClause.ProjectedVariableCount; i++)
+            {
+                var (start, len) = selectClause.GetProjectedVariable(i);
+                if (len > 0)
+                {
+                    var varName = _source.Slice(start, len);
+                    throw new SparqlParseException($"Variable {varName.ToString()} is not allowed in SELECT with aggregates but no GROUP BY");
+                }
+            }
+        }
+
+        // If there's GROUP BY, all projected variables must be in GROUP BY
+        if (groupBy.HasGroupBy)
+        {
+            for (int i = 0; i < selectClause.ProjectedVariableCount; i++)
+            {
+                var (varStart, varLen) = selectClause.GetProjectedVariable(i);
+                if (varLen == 0) continue;
+
+                var varName = _source.Slice(varStart, varLen);
+                bool found = false;
+
+                // Check if variable is in GROUP BY
+                for (int j = 0; j < groupBy.Count; j++)
+                {
+                    var (gbStart, gbLen) = groupBy.GetVariable(j);
+                    if (gbLen > 0)
+                    {
+                        var gbName = _source.Slice(gbStart, gbLen);
+                        if (varName.SequenceEqual(gbName))
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!found)
+                {
+                    throw new SparqlParseException($"Variable {varName.ToString()} in SELECT is not in GROUP BY and is not an aggregate");
+                }
+            }
+        }
     }
 
     private Query ParseConstructQuery(Prologue prologue)
@@ -46,6 +183,10 @@ public ref partial struct SparqlParser
             // The WHERE clause patterns serve as both template and query pattern
             datasets = ParseDatasetClauses();
             whereClause = ParseWhereClause();
+
+            // constructwhere05/06: CONSTRUCT WHERE shorthand restricts what can appear in the pattern
+            // Only basic triple patterns are allowed (no FILTER, GRAPH, OPTIONAL, etc.)
+            ValidateConstructWherePattern(whereClause.Pattern);
 
             // Copy WHERE patterns to template
             template = new ConstructTemplate();
@@ -214,6 +355,10 @@ public ref partial struct SparqlParser
         }
         else
         {
+            // Track aliases for duplicate detection (syn-bad-03)
+            Span<int> aliasHashes = stackalloc int[24];
+            int aliasCount = 0;
+
             // Parse projection list (variables and aggregate expressions)
             while (!IsAtEnd())
             {
@@ -225,19 +370,85 @@ public ref partial struct SparqlParser
                     var agg = ParseAggregateExpression();
                     if (agg.Function != AggregateFunction.None)
                     {
+                        // syn-bad-05: Aggregate expressions must have AS alias
+                        if (agg.AliasLength == 0)
+                        {
+                            throw new SparqlParseException("Aggregate expressions must use AS to assign an alias variable");
+                        }
+
+                        // Check for duplicate alias
+                        var aliasSpan = _source.Slice(agg.AliasStart, agg.AliasLength);
+                        var aliasHash = ComputeSpanHash(aliasSpan);
+                        for (int i = 0; i < aliasCount; i++)
+                        {
+                            if (aliasHashes[i] == aliasHash)
+                            {
+                                throw new SparqlParseException($"Duplicate variable name in SELECT: {aliasSpan.ToString()}");
+                            }
+                        }
+                        if (aliasCount < 24) aliasHashes[aliasCount++] = aliasHash;
+
                         clause.AddAggregate(agg);
+                    }
+                    else
+                    {
+                        // Check if this was a non-aggregate expression (expr AS ?var)
+                        // The parser returned None function, but we may have parsed an alias
+                        // We need to track these aliases too for duplicate detection
+                        if (agg.AliasLength > 0)
+                        {
+                            var aliasSpan = _source.Slice(agg.AliasStart, agg.AliasLength);
+                            var aliasHash = ComputeSpanHash(aliasSpan);
+                            for (int i = 0; i < aliasCount; i++)
+                            {
+                                if (aliasHashes[i] == aliasHash)
+                                {
+                                    throw new SparqlParseException($"Duplicate variable name in SELECT: {aliasSpan.ToString()}");
+                                }
+                            }
+                            if (aliasCount < 24) aliasHashes[aliasCount++] = aliasHash;
+                        }
                     }
                 }
                 // Check for variable
                 else if (Peek() == '?')
                 {
-                    // Skip over variable (not stored currently, just parsed)
-                    Advance();
+                    // Store variable position for validation
+                    var varStart = _position;
+                    Advance(); // Skip '?'
                     while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                         Advance();
+
+                    // Check for duplicate variable name
+                    var varSpan = _source.Slice(varStart, _position - varStart);
+                    var varHash = ComputeSpanHash(varSpan);
+                    for (int i = 0; i < aliasCount; i++)
+                    {
+                        if (aliasHashes[i] == varHash)
+                        {
+                            throw new SparqlParseException($"Duplicate variable name in SELECT: {varSpan.ToString()}");
+                        }
+                    }
+                    if (aliasCount < 24) aliasHashes[aliasCount++] = varHash;
+
+                    clause.AddProjectedVariable(varStart, _position - varStart);
                 }
                 else
                 {
+                    // syn-bad-05: Check for aggregate function names without enclosing parentheses
+                    // e.g., SELECT COUNT(*) {} is invalid - must be SELECT (COUNT(*) AS ?c) {}
+                    var aggSpan = PeekSpan(12);
+                    if ((aggSpan.Length >= 5 && aggSpan[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase) && !char.IsLetterOrDigit(aggSpan[5])) ||
+                        (aggSpan.Length >= 3 && aggSpan[..3].Equals("SUM", StringComparison.OrdinalIgnoreCase) && !char.IsLetterOrDigit(aggSpan[3])) ||
+                        (aggSpan.Length >= 3 && aggSpan[..3].Equals("AVG", StringComparison.OrdinalIgnoreCase) && !char.IsLetterOrDigit(aggSpan[3])) ||
+                        (aggSpan.Length >= 3 && aggSpan[..3].Equals("MIN", StringComparison.OrdinalIgnoreCase) && !char.IsLetterOrDigit(aggSpan[3])) ||
+                        (aggSpan.Length >= 3 && aggSpan[..3].Equals("MAX", StringComparison.OrdinalIgnoreCase) && !char.IsLetterOrDigit(aggSpan[3])) ||
+                        (aggSpan.Length >= 6 && aggSpan[..6].Equals("SAMPLE", StringComparison.OrdinalIgnoreCase) && !char.IsLetterOrDigit(aggSpan[6])) ||
+                        (aggSpan.Length >= 12 && aggSpan[..12].Equals("GROUP_CONCAT", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        throw new SparqlParseException("Aggregate expressions in SELECT must be enclosed in parentheses with AS alias: (FUNC(...) AS ?var)");
+                    }
+
                     // End of projection list
                     break;
                 }
@@ -247,6 +458,21 @@ public ref partial struct SparqlParser
         }
 
         return clause;
+    }
+
+    /// <summary>
+    /// Compute a hash for a span (for duplicate detection).
+    /// </summary>
+    private static int ComputeSpanHash(ReadOnlySpan<char> span)
+    {
+        // FNV-1a hash
+        uint hash = 2166136261;
+        foreach (var ch in span)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
     }
 
     private AggregateExpression ParseAggregateExpression()
@@ -298,10 +524,65 @@ public ref partial struct SparqlParser
         }
         else
         {
-            // Not a recognized aggregate, skip to closing paren
-            while (!IsAtEnd() && Peek() != ')')
+            // Not a recognized aggregate - parse as expression (expr AS ?var)
+            // Parse through the expression to find AS keyword and alias
+            int parenDepth = 0;
+            bool foundAs = false;
+
+            while (!IsAtEnd() && !(parenDepth == 0 && Peek() == ')'))
+            {
+                var ch = Peek();
+                if (ch == '(')
+                {
+                    parenDepth++;
+                    Advance();
+                }
+                else if (ch == ')')
+                {
+                    if (parenDepth == 0) break;
+                    parenDepth--;
+                    Advance();
+                }
+                else
+                {
+                    // Check for AS keyword at depth 0
+                    if (parenDepth == 0)
+                    {
+                        var checkSpan = PeekSpan(3);
+                        if (checkSpan.Length >= 2 && checkSpan[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
+                            (checkSpan.Length < 3 || !char.IsLetterOrDigit(checkSpan[2])))
+                        {
+                            ConsumeKeyword("AS");
+                            SkipWhitespace();
+
+                            // Parse the alias variable
+                            if (Peek() == '?')
+                            {
+                                agg.AliasStart = _position;
+                                Advance();
+                                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                                    Advance();
+                                agg.AliasLength = _position - agg.AliasStart;
+                                foundAs = true;
+                            }
+                            break;
+                        }
+                    }
+                    Advance();
+                }
+            }
+
+            // syn-bad-04: Expression in SELECT must use AS to assign alias
+            if (!foundAs)
+            {
+                throw new SparqlParseException("Expression in SELECT must use AS to assign an alias variable");
+            }
+
+            // Skip closing ')' of expression
+            SkipWhitespace();
+            if (Peek() == ')')
                 Advance();
-            if (Peek() == ')') Advance();
+
             return agg;
         }
 
@@ -346,6 +627,14 @@ public ref partial struct SparqlParser
         }
 
         SkipWhitespace();
+
+        // syn-bad-06: Check for invalid multiple arguments (only COUNT can take *)
+        // All aggregate functions take exactly 1 expression argument
+        if (Peek() == ',')
+        {
+            var funcName = agg.Function.ToString().ToUpper();
+            throw new SparqlParseException($"{funcName} aggregate function takes exactly 1 argument");
+        }
 
         // For GROUP_CONCAT, parse optional SEPARATOR clause: ; SEPARATOR = "..."
         if (agg.Function == AggregateFunction.GroupConcat && Peek() == ';')
