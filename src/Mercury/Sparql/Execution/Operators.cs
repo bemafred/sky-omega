@@ -1593,47 +1593,246 @@ internal ref struct VariableGraphScan
 }
 
 /// <summary>
+/// Boxed executor for subqueries that isolates large scan operator stack usage.
+/// This class exists to break the ref struct stack chain: when SubQueryScan (ref struct)
+/// calls this class's methods, the scan operators are created in a fresh stack frame
+/// that doesn't inherit the accumulated ref struct field sizes from the call chain.
+/// </summary>
+internal sealed class BoxedSubQueryExecutor
+{
+    private readonly QuadStore _store;
+    private readonly string _source;
+    private readonly SubSelect _subSelect;
+    private readonly bool _distinct;
+
+    public BoxedSubQueryExecutor(QuadStore store, string source, SubSelect subSelect)
+    {
+        _store = store;
+        _source = source;
+        _subSelect = subSelect;
+        _distinct = subSelect.Distinct;
+    }
+
+    /// <summary>
+    /// Execute the subquery and return materialized results.
+    /// This method creates scan operators locally - their stack usage is isolated.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public List<MaterializedRow> Execute()
+    {
+        var results = new List<MaterializedRow>();
+        var innerBindings = new Binding[16];
+        var innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
+        var bindingTable = new BindingTable(innerBindings, innerStringBuffer);
+        HashSet<int>? seenHashes = _distinct ? new HashSet<int>() : null;
+
+        try
+        {
+            int skipped = 0;
+            int returned = 0;
+
+            if (_subSelect.PatternCount == 1)
+            {
+                MaterializeSinglePattern(ref bindingTable, results, seenHashes, ref skipped, ref returned);
+            }
+            else
+            {
+                MaterializeMultiPattern(ref bindingTable, results, seenHashes, ref skipped, ref returned);
+            }
+        }
+        finally
+        {
+            PooledBufferManager.Shared.Return(innerStringBuffer);
+        }
+
+        return results;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MaterializeSinglePattern(ref BindingTable bindingTable, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned)
+    {
+        var tp = _subSelect.GetPattern(0);
+        var source = _source.AsSpan();
+        var scan = new TriplePatternScan(_store, source, tp, bindingTable);
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                {
+                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                        break;
+                }
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MaterializeMultiPattern(ref BindingTable bindingTable, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned)
+    {
+        // Build pattern on heap
+        var boxedPattern = new MultiPatternScan.BoxedPattern();
+        for (int i = 0; i < _subSelect.PatternCount; i++)
+        {
+            boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
+        }
+
+        var source = _source.AsSpan();
+        var scan = new MultiPatternScan(_store, source, boxedPattern);
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                {
+                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                        break;
+                }
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
+    private bool ProcessAndAddResult(ref BindingTable innerBindings, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned)
+    {
+        var source = _source.AsSpan();
+
+        // Apply filters if any
+        if (_subSelect.FilterCount > 0)
+        {
+            for (int i = 0; i < _subSelect.FilterCount; i++)
+            {
+                var filter = _subSelect.GetFilter(i);
+                var filterExpr = source.Slice(filter.Start, filter.Length);
+                var evaluator = new FilterEvaluator(filterExpr);
+                if (!evaluator.Evaluate(innerBindings.GetBindings(), innerBindings.Count, innerBindings.GetStringBuffer()))
+                    return false;
+            }
+        }
+
+        // Apply OFFSET
+        if (skipped < _subSelect.Offset)
+        {
+            skipped++;
+            return false;
+        }
+
+        // Apply DISTINCT on projected variables
+        if (seenHashes != null)
+        {
+            var hash = ComputeProjectedBindingsHash(ref innerBindings, source);
+            if (!seenHashes.Add(hash))
+                return false;
+        }
+
+        // Project and materialize the result
+        var projectedRow = ProjectToMaterializedRow(ref innerBindings, source);
+        results.Add(projectedRow);
+        returned++;
+        return true;
+    }
+
+    private int ComputeProjectedBindingsHash(ref BindingTable innerBindings, ReadOnlySpan<char> source)
+    {
+        int hash = 17;
+        if (_subSelect.SelectAll)
+        {
+            for (int i = 0; i < innerBindings.Count; i++)
+            {
+                hash = hash * 31 + innerBindings.GetVariableHash(i);
+                hash = hash * 31 + innerBindings.GetString(i).GetHashCode();
+            }
+        }
+        else
+        {
+            for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
+            {
+                var (start, len) = _subSelect.GetProjectedVariable(i);
+                var varName = source.Slice(start, len);
+                var idx = innerBindings.FindBinding(varName);
+                if (idx >= 0)
+                {
+                    hash = hash * 31 + innerBindings.GetVariableHash(idx);
+                    hash = hash * 31 + innerBindings.GetString(idx).GetHashCode();
+                }
+            }
+        }
+        return hash;
+    }
+
+    private MaterializedRow ProjectToMaterializedRow(ref BindingTable innerBindings, ReadOnlySpan<char> source)
+    {
+        var projectedBindings = new Binding[16];
+        var projectedBuffer = new char[512];
+        var projectedTable = new BindingTable(projectedBindings, projectedBuffer);
+
+        if (_subSelect.SelectAll)
+        {
+            for (int i = 0; i < innerBindings.Count; i++)
+            {
+                var varHash = innerBindings.GetVariableHash(i);
+                var value = innerBindings.GetString(i);
+                projectedTable.BindWithHash(varHash, value);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
+            {
+                var (start, len) = _subSelect.GetProjectedVariable(i);
+                var varName = source.Slice(start, len);
+                var idx = innerBindings.FindBinding(varName);
+                if (idx >= 0)
+                {
+                    projectedTable.Bind(varName, innerBindings.GetString(idx));
+                }
+            }
+        }
+
+        return new MaterializedRow(projectedTable);
+    }
+}
+
+/// <summary>
 /// Executes a subquery and yields only projected variable bindings.
 /// Conforms to <see cref="IScan"/> contract (duck typing).
 /// Handles variable scoping: only SELECT-ed variables are visible to outer query.
+///
+/// Design note: Results are materialized eagerly during Initialize() by delegating
+/// to BoxedSubQueryExecutor, which isolates large scan operator stack usage.
 /// </summary>
 internal ref struct SubQueryScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly SubSelect _subSelect;
-    private MultiPatternScan _innerScan;
-    private TriplePatternScan _singleScan;
-    private bool _isMultiPattern;
-    private Binding[] _innerBindingStorage;
-    private char[] _innerStringBuffer;
-    private BindingTable _innerBindings;
-    // Pattern is boxed on the heap to avoid stack overflow from ~4KB struct
-    // Uses MultiPatternScan.BoxedPattern for compatibility
-    private MultiPatternScan.BoxedPattern? _boxedPattern;
+    // Materialized results - populated during Initialize() via BoxedSubQueryExecutor
+    private List<MaterializedRow>? _materializedResults;
+    private int _currentIndex;
     private bool _initialized;
     private bool _exhausted;
-    private int _skipped;
-    private int _returned;
-    private HashSet<int>? _seenHashes;
 
     public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect)
     {
         _store = store;
         _source = source;
         _subSelect = subSelect;
-        _innerScan = default;
-        _singleScan = default;
-        _isMultiPattern = false;
-        _innerBindingStorage = new Binding[16];
-        _innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
-        _innerBindings = new BindingTable(_innerBindingStorage, _innerStringBuffer);
-        _boxedPattern = null;
+        _materializedResults = null;
+        _currentIndex = 0;
         _initialized = false;
         _exhausted = false;
-        _skipped = 0;
-        _returned = 0;
-        _seenHashes = subSelect.Distinct ? new HashSet<int>() : null;
     }
 
     public bool MoveNext(ref BindingTable outerBindings)
@@ -1647,175 +1846,45 @@ internal ref struct SubQueryScan
             _initialized = true;
         }
 
-        // Check LIMIT
-        if (_subSelect.Limit > 0 && _returned >= _subSelect.Limit)
+        if (_materializedResults == null || _currentIndex >= _materializedResults.Count)
         {
             _exhausted = true;
             return false;
         }
 
-        while (MoveNextInner())
+        // Clear outer bindings before projecting new values
+        outerBindings.Clear();
+
+        // Copy bindings from materialized row to outer bindings
+        var row = _materializedResults[_currentIndex++];
+        for (int i = 0; i < row.BindingCount; i++)
         {
-            // Apply filters if any
-            if (_subSelect.FilterCount > 0 && !EvaluateFilters())
-            {
-                _innerBindings.Clear();
-                continue;
-            }
-
-            // Apply OFFSET
-            if (_skipped < _subSelect.Offset)
-            {
-                _skipped++;
-                _innerBindings.Clear();
-                continue;
-            }
-
-            // Apply DISTINCT
-            if (_seenHashes != null)
-            {
-                var hash = ComputeProjectedBindingsHash();
-                if (!_seenHashes.Add(hash))
-                {
-                    _innerBindings.Clear();
-                    continue;
-                }
-            }
-
-            // Clear outer bindings before projecting new values
-            outerBindings.Clear();
-
-            // Project only selected variables to outer bindings
-            ProjectVariables(ref outerBindings);
-            _innerBindings.Clear();
-            _returned++;
-            return true;
+            outerBindings.BindWithHash(row.GetHash(i), row.GetValue(i));
         }
 
-        _exhausted = true;
-        return false;
-    }
-
-    private bool MoveNextInner()
-    {
-        if (_isMultiPattern)
-            return _innerScan.MoveNext(ref _innerBindings);
-        else
-            return _singleScan.MoveNext(ref _innerBindings);
-    }
-
-    private bool EvaluateFilters()
-    {
-        for (int i = 0; i < _subSelect.FilterCount; i++)
-        {
-            var filter = _subSelect.GetFilter(i);
-            var filterExpr = _source.Slice(filter.Start, filter.Length);
-
-            var evaluator = new FilterEvaluator(filterExpr);
-            var result = evaluator.Evaluate(
-                _innerBindings.GetBindings(),
-                _innerBindings.Count,
-                _innerBindings.GetStringBuffer());
-
-            if (!result) return false;
-        }
         return true;
     }
 
+    /// <summary>
+    /// Materializes all subquery results during initialization.
+    /// Delegates to BoxedSubQueryExecutor to isolate large scan operator stack usage.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private void Initialize()
     {
-        // Build a GraphPattern from the SubSelect's patterns
-        // Pattern is boxed on the heap to avoid stack overflow from nested subqueries
-        _boxedPattern = new MultiPatternScan.BoxedPattern();
-        for (int i = 0; i < _subSelect.PatternCount; i++)
-        {
-            _boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
-        }
+        // Convert span to string for boxed executor (one allocation per subquery is acceptable)
+        var sourceString = _source.ToString();
 
-        // Use single scan for one pattern, multi scan for multiple
-        if (_subSelect.PatternCount == 1)
-        {
-            _isMultiPattern = false;
-            var tp = _subSelect.GetPattern(0);
-            _singleScan = new TriplePatternScan(_store, _source, tp, _innerBindings);
-        }
-        else
-        {
-            _isMultiPattern = true;
-            // Pass boxed pattern by reference to avoid copying ~4KB struct
-            _innerScan = new MultiPatternScan(_store, _source, _boxedPattern);
-        }
-    }
-
-    private void ProjectVariables(ref BindingTable outerBindings)
-    {
-        if (_subSelect.SelectAll)
-        {
-            // Project all variables from inner to outer using hash-based binding
-            for (int i = 0; i < _innerBindings.Count; i++)
-            {
-                var varHash = _innerBindings.GetVariableHash(i);
-                var value = _innerBindings.GetString(i);
-                outerBindings.BindWithHash(varHash, value);
-            }
-        }
-        else
-        {
-            // Project only explicitly selected variables
-            for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
-            {
-                var (start, len) = _subSelect.GetProjectedVariable(i);
-                var varName = _source.Slice(start, len);
-                var idx = _innerBindings.FindBinding(varName);
-                if (idx >= 0)
-                {
-                    outerBindings.Bind(varName, _innerBindings.GetString(idx));
-                }
-            }
-        }
-    }
-
-    private int ComputeProjectedBindingsHash()
-    {
-        unchecked
-        {
-            int hash = (int)2166136261;
-
-            if (_subSelect.SelectAll)
-            {
-                for (int i = 0; i < _innerBindings.Count; i++)
-                {
-                    var value = _innerBindings.GetString(i);
-                    foreach (var c in value)
-                        hash = (hash ^ c) * 16777619;
-                }
-            }
-            else
-            {
-                for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
-                {
-                    var (start, len) = _subSelect.GetProjectedVariable(i);
-                    var varName = _source.Slice(start, len);
-                    var idx = _innerBindings.FindBinding(varName);
-                    if (idx >= 0)
-                    {
-                        var value = _innerBindings.GetString(idx);
-                        foreach (var c in value)
-                            hash = (hash ^ c) * 16777619;
-                    }
-                }
-            }
-
-            return hash;
-        }
+        // Use boxed executor to isolate scan operator stack usage
+        // The class methods have fresh stack frames without accumulated ref struct overhead
+        var executor = new BoxedSubQueryExecutor(_store, sourceString, _subSelect);
+        _materializedResults = executor.Execute();
     }
 
     public void Dispose()
     {
-        _innerScan.Dispose();
-        _singleScan.Dispose();
-        if (_innerStringBuffer != null)
-            PooledBufferManager.Shared.Return(_innerStringBuffer);
+        // No-op: scans are created and disposed in BoxedSubQueryExecutor
+        // Results are stored in _materializedResults (managed List<T>)
     }
 }
 
