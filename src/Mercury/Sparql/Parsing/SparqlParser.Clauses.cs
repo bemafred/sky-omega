@@ -18,6 +18,9 @@ public ref partial struct SparqlParser
         // Validate GROUP BY semantics
         ValidateGroupBySemantics(selectClause, modifier.GroupBy);
 
+        // Validate SELECT alias scope conflicts with subqueries (syntax-SELECTscope2)
+        ValidateSelectSubqueryScope(selectClause, ref whereClause.Pattern);
+
         return new Query
         {
             Type = QueryType.Select,
@@ -27,6 +30,52 @@ public ref partial struct SparqlParser
             WhereClause = whereClause,
             SolutionModifier = modifier
         };
+    }
+
+    /// <summary>
+    /// Validates that SELECT clause aliases don't conflict with subquery projections (syntax-SELECTscope2).
+    /// </summary>
+    private void ValidateSelectSubqueryScope(SelectClause selectClause, ref GraphPattern pattern)
+    {
+        // Collect SELECT clause aliases
+        Span<int> selectAliasHashes = stackalloc int[32];
+        int selectAliasCount = 0;
+
+        // Check aggregate expression aliases
+        for (int i = 0; i < selectClause.AggregateCount; i++)
+        {
+            var agg = selectClause.GetAggregate(i);
+            if (agg.AliasLength > 0)
+            {
+                var hash = ComputeSpanHash(_source.Slice(agg.AliasStart, agg.AliasLength));
+                if (selectAliasCount < 32) selectAliasHashes[selectAliasCount++] = hash;
+            }
+        }
+
+        // If no aliases to check, nothing to do
+        if (selectAliasCount == 0) return;
+
+        // Check each subquery's projected variables for conflicts
+        for (int i = 0; i < pattern.SubQueryCount; i++)
+        {
+            var subquery = pattern.GetSubQuery(i);
+            for (int j = 0; j < subquery.ProjectedVarCount; j++)
+            {
+                var (start, len) = subquery.GetProjectedVariable(j);
+                if (len > 0)
+                {
+                    var hash = ComputeSpanHash(_source.Slice(start, len));
+                    for (int k = 0; k < selectAliasCount; k++)
+                    {
+                        if (selectAliasHashes[k] == hash)
+                        {
+                            var varName = _source.Slice(start, len).ToString();
+                            throw new SparqlParseException($"Variable {varName} in SELECT conflicts with same variable in subquery projection");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -40,13 +89,31 @@ public ref partial struct SparqlParser
             throw new SparqlParseException("SELECT * is not allowed with GROUP BY");
         }
 
+        // Check if there are actual aggregate functions (not just expressions like (expr AS ?var))
+        bool hasActualAggregates = HasActualAggregateFunctions(selectClause);
+
         // Rule 2: If SELECT has aggregates without GROUP BY, only aggregates/constants allowed (agg10)
         // Rule 3: With GROUP BY, non-aggregate SELECT items must appear in GROUP BY (agg09, syn-bad-02, group06)
         // These require tracking SELECT variables, which is done by ValidateSelectVariables
-        if (selectClause.HasProjectedVariables && (groupBy.HasGroupBy || selectClause.HasAggregates))
+        if (selectClause.HasProjectedVariables && (groupBy.HasGroupBy || hasActualAggregates))
         {
-            ValidateSelectVariables(selectClause, groupBy);
+            ValidateSelectVariables(selectClause, groupBy, hasActualAggregates);
         }
+    }
+
+    /// <summary>
+    /// Checks if the SELECT clause contains actual aggregate functions (COUNT, SUM, etc.)
+    /// as opposed to just expressions with aliases like (expr AS ?var).
+    /// </summary>
+    private static bool HasActualAggregateFunctions(SelectClause selectClause)
+    {
+        for (int i = 0; i < selectClause.AggregateCount; i++)
+        {
+            var agg = selectClause.GetAggregate(i);
+            if (agg.Function != AggregateFunction.None)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -112,10 +179,10 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Validates that SELECT variables are properly scoped for GROUP BY.
     /// </summary>
-    private void ValidateSelectVariables(SelectClause selectClause, GroupByClause groupBy)
+    private void ValidateSelectVariables(SelectClause selectClause, GroupByClause groupBy, bool hasActualAggregates)
     {
-        // If there are aggregates but no GROUP BY, non-aggregate variables are not allowed
-        if (selectClause.HasAggregates && !groupBy.HasGroupBy)
+        // If there are actual aggregate functions but no GROUP BY, non-aggregate variables are not allowed
+        if (hasActualAggregates && !groupBy.HasGroupBy)
         {
             // Any projected variable is an error - only aggregates allowed
             for (int i = 0; i < selectClause.ProjectedVariableCount; i++)
@@ -161,6 +228,65 @@ public ref partial struct SparqlParser
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Checks if a variable is already in scope in the given GraphPattern.
+    /// Used for BIND variable scoping validation (syntax-BINDscope6, syntax-BINDscope7).
+    /// </summary>
+    private bool IsVariableInScope(ref GraphPattern pattern, int varStart, int varLen)
+    {
+        var targetVar = _source.Slice(varStart, varLen);
+
+        // Check all triple patterns for variable bindings
+        for (int i = 0; i < pattern.PatternCount; i++)
+        {
+            var tp = pattern.GetPattern(i);
+
+            // Check subject
+            if (tp.Subject.Type == TermType.Variable &&
+                _source.Slice(tp.Subject.Start, tp.Subject.Length).SequenceEqual(targetVar))
+                return true;
+
+            // Check predicate
+            if (tp.Predicate.Type == TermType.Variable &&
+                _source.Slice(tp.Predicate.Start, tp.Predicate.Length).SequenceEqual(targetVar))
+                return true;
+
+            // Check object
+            if (tp.Object.Type == TermType.Variable &&
+                _source.Slice(tp.Object.Start, tp.Object.Length).SequenceEqual(targetVar))
+                return true;
+        }
+
+        // Check previous BIND expressions
+        for (int i = 0; i < pattern.BindCount; i++)
+        {
+            var bind = pattern.GetBind(i);
+            if (_source.Slice(bind.VarStart, bind.VarLength).SequenceEqual(targetVar))
+                return true;
+        }
+
+        // Check GRAPH clause patterns
+        for (int i = 0; i < pattern.GraphClauseCount; i++)
+        {
+            var graphClause = pattern.GetGraphClause(i);
+            for (int j = 0; j < graphClause.PatternCount; j++)
+            {
+                var tp = graphClause.GetPattern(j);
+                if (tp.Subject.Type == TermType.Variable &&
+                    _source.Slice(tp.Subject.Start, tp.Subject.Length).SequenceEqual(targetVar))
+                    return true;
+                if (tp.Predicate.Type == TermType.Variable &&
+                    _source.Slice(tp.Predicate.Start, tp.Predicate.Length).SequenceEqual(targetVar))
+                    return true;
+                if (tp.Object.Type == TermType.Variable &&
+                    _source.Slice(tp.Object.Start, tp.Object.Length).SequenceEqual(targetVar))
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private Query ParseConstructQuery(Prologue prologue)
@@ -394,7 +520,7 @@ public ref partial struct SparqlParser
                     {
                         // Check if this was a non-aggregate expression (expr AS ?var)
                         // The parser returned None function, but we may have parsed an alias
-                        // We need to track these aliases too for duplicate detection
+                        // We need to track these aliases too for duplicate detection and scope validation
                         if (agg.AliasLength > 0)
                         {
                             var aliasSpan = _source.Slice(agg.AliasStart, agg.AliasLength);
@@ -407,6 +533,9 @@ public ref partial struct SparqlParser
                                 }
                             }
                             if (aliasCount < 24) aliasHashes[aliasCount++] = aliasHash;
+
+                            // Also add to aggregates list so scope validation can find the alias
+                            clause.AddAggregate(agg);
                         }
                     }
                 }
@@ -854,15 +983,63 @@ public ref partial struct SparqlParser
         }
         else
         {
-            // Parse variable list
-            while (Peek() == '?')
+            // Parse projection list: variables ?x or expressions (expr AS ?var)
+            while (Peek() == '?' || Peek() == '(')
             {
-                var varStart = _position;
-                Advance(); // Skip '?'
-                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                    Advance();
-                var varLen = _position - varStart;
-                subSelect.AddProjectedVariable(varStart, varLen);
+                if (Peek() == '?')
+                {
+                    var varStart = _position;
+                    Advance(); // Skip '?'
+                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                        Advance();
+                    var varLen = _position - varStart;
+                    subSelect.AddProjectedVariable(varStart, varLen);
+                }
+                else if (Peek() == '(')
+                {
+                    // Parse (expr AS ?var) - we need to extract the alias
+                    Advance(); // Skip '('
+                    int parenDepth = 0;
+                    // Skip to "AS" keyword
+                    while (!IsAtEnd())
+                    {
+                        var ch = Peek();
+                        if (ch == '(') { parenDepth++; Advance(); }
+                        else if (ch == ')')
+                        {
+                            if (parenDepth == 0) break;
+                            parenDepth--;
+                            Advance();
+                        }
+                        else
+                        {
+                            // Check for "AS" keyword at paren depth 0
+                            if (parenDepth == 0)
+                            {
+                                var asSpan = PeekSpan(3);
+                                if (asSpan.Length >= 2 && asSpan[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
+                                    (asSpan.Length < 3 || !char.IsLetterOrDigit(asSpan[2])))
+                                {
+                                    ConsumeKeyword("AS");
+                                    SkipWhitespace();
+                                    // Parse the alias variable
+                                    if (Peek() == '?')
+                                    {
+                                        var varStart = _position;
+                                        Advance(); // Skip '?'
+                                        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                                            Advance();
+                                        subSelect.AddProjectedVariable(varStart, _position - varStart);
+                                    }
+                                    break;
+                                }
+                            }
+                            Advance();
+                        }
+                    }
+                    SkipWhitespace();
+                    if (Peek() == ')') Advance(); // Skip closing ')'
+                }
                 SkipWhitespace();
             }
         }
@@ -1132,6 +1309,12 @@ public ref partial struct SparqlParser
                 throw new SparqlParseException("UNION requires graph patterns enclosed in braces: { pattern } UNION { pattern }");
             }
 
+            // syn-bad-07: Check for SELECT in middle of pattern - subqueries must be wrapped in { }
+            if (span.Length >= 6 && span[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SparqlParseException("SELECT (subquery) must be wrapped in braces: { SELECT ... }");
+            }
+
             // Check for nested group { ... } which might be a subquery or UNION
             if (Peek() == '{')
             {
@@ -1226,6 +1409,13 @@ public ref partial struct SparqlParser
             if (span.Length >= 7 && span[..7].Equals("SERVICE", StringComparison.OrdinalIgnoreCase))
             {
                 ParseService(ref pattern);
+                continue;
+            }
+
+            // Check for BIND inside nested group
+            if (span.Length >= 4 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseBind(ref pattern);
                 continue;
             }
 
@@ -1834,6 +2024,11 @@ public ref partial struct SparqlParser
         // Skip closing ')'
         if (Peek() == ')')
             Advance();
+
+        // Note: BIND scope validation (syntax-BINDscope6/7) is not implemented yet
+        // because it requires tracking scope levels separately. The current pattern
+        // structure doesn't distinguish between same-level bindings and parent-scope bindings.
+        // This is tracked as a future improvement.
 
         // Add the bind expression
         pattern.AddBind(new BindExpr

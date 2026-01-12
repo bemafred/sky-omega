@@ -365,11 +365,37 @@ public ref partial struct SparqlParser
 
         SkipWhitespace();
 
+        // syn-bad-pname-08/09: Check for incomplete triple pattern (subject only)
+        // If we hit '.' or '}' immediately after subject, the pattern is incomplete
+        if (Peek() == '.' || Peek() == '}')
+        {
+            throw new SparqlParseException("Incomplete triple pattern - expected predicate and object after subject");
+        }
+
         // Parse predicate - may be a property path
         var (predicate, path) = ParsePredicateOrPath();
 
+        // Check that we got a valid predicate
+        if (predicate.Length == 0 && path.Type == PathType.None)
+        {
+            throw new SparqlParseException("Incomplete triple pattern - expected predicate");
+        }
+
         SkipWhitespace();
+
+        // Check for incomplete triple pattern (subject and predicate only)
+        if (Peek() == '.' || Peek() == '}')
+        {
+            throw new SparqlParseException("Incomplete triple pattern - expected object after predicate");
+        }
+
         var obj = ParseTerm();
+
+        // Check that we got a valid object
+        if (obj.Length == 0)
+        {
+            throw new SparqlParseException("Incomplete triple pattern - expected object");
+        }
 
         // Add the first pattern
         AddTriplePatternOrExpand(ref pattern, subject, predicate, obj, path);
@@ -875,6 +901,13 @@ public ref partial struct SparqlParser
         while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
             Advance();
 
+        // syn-bad-pname-10/11/12: Variables cannot be followed by ':' (e.g., ?x:a is invalid)
+        if (Peek() == ':')
+        {
+            var varName = _source.Slice(start, _position - start).ToString();
+            throw new SparqlParseException($"Variable {varName} cannot be followed by colon - invalid syntax");
+        }
+
         return Term.Variable(start, _position - start);
     }
 
@@ -970,11 +1003,26 @@ public ref partial struct SparqlParser
             Advance(); // Skip ':'
 
             // Read local part - per SPARQL grammar PN_LOCAL can contain ':' after first char
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':'))
+            // Also handle PLX escapes (backslash escapes and percent escapes)
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':' || Peek() == '\\' || Peek() == '%'))
             {
                 // Don't include trailing dot
                 if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)) && PeekAt(1) != ':')
                     break;
+
+                // syn-bad-pname-06: Validate backslash escapes in prefixed names
+                if (Peek() == '\\')
+                {
+                    var nextChar = PeekAt(1);
+                    if (!IsValidPnLocalEsc(nextChar))
+                    {
+                        throw new SparqlParseException($"Invalid escape sequence '\\{nextChar}' in prefixed name local part");
+                    }
+                    Advance(); // Skip '\'
+                    Advance(); // Skip escaped char
+                    continue;
+                }
+
                 Advance();
             }
 
@@ -1007,15 +1055,131 @@ public ref partial struct SparqlParser
         Advance();
 
         // Read local part - per SPARQL grammar PN_LOCAL can contain ':' after first char
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':'))
+        // Also handle PLX escapes (backslash escapes and percent escapes)
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':' || Peek() == '\\' || Peek() == '%'))
         {
             // Don't include trailing dot
             if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)) && PeekAt(1) != ':')
                 break;
+
+            // syn-bad-pname-06: Validate backslash escapes in prefixed names
+            // PN_LOCAL_ESC ::= '\' ( '_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%' )
+            if (Peek() == '\\')
+            {
+                var nextChar = PeekAt(1);
+                if (!IsValidPnLocalEsc(nextChar))
+                {
+                    throw new SparqlParseException($"Invalid escape sequence '\\{nextChar}' in prefixed name local part");
+                }
+                Advance(); // Skip '\'
+                Advance(); // Skip escaped char
+                continue;
+            }
+
             Advance();
         }
 
         return Term.Iri(start, _position - start);
+    }
+
+    /// <summary>
+    /// Checks if a character is valid after '\' in PN_LOCAL_ESC.
+    /// Valid chars: _ ~ . - ! $ &amp; ' ( ) * + , ; = / ? # @ %
+    /// </summary>
+    private static bool IsValidPnLocalEsc(char c)
+    {
+        return c == '_' || c == '~' || c == '.' || c == '-' || c == '!' ||
+               c == '$' || c == '&' || c == '\'' || c == '(' || c == ')' ||
+               c == '*' || c == '+' || c == ',' || c == ';' || c == '=' ||
+               c == '/' || c == '?' || c == '#' || c == '@' || c == '%';
+    }
+
+    /// <summary>
+    /// Validates a \uXXXX Unicode escape sequence for invalid codepoints.
+    /// Throws if the codepoint is in the surrogate range (U+D800 to U+DFFF).
+    /// </summary>
+    private void ValidateUnicodeEscape4(int literalStart)
+    {
+        // Position is at '\', PeekAt(1) is 'u', PeekAt(2-5) are hex digits
+        if (_position + 6 > _source.Length)
+            return; // Not enough chars for \uXXXX
+
+        var hexSpan = _source.Slice(_position + 2, 4);
+        if (TryParseHex4(hexSpan, out int codepoint))
+        {
+            // Check for surrogate range (D800-DFFF)
+            if (codepoint >= 0xD800 && codepoint <= 0xDFFF)
+            {
+                throw new SparqlParseException($"Invalid Unicode codepoint U+{codepoint:X4} - surrogate codepoints are not allowed in strings");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Validates a \UXXXXXXXX Unicode escape sequence for invalid codepoints.
+    /// Throws if the codepoint is in the surrogate range (U+D800 to U+DFFF).
+    /// </summary>
+    private void ValidateUnicodeEscape8(int literalStart)
+    {
+        // Position is at '\', PeekAt(1) is 'U', PeekAt(2-9) are hex digits
+        if (_position + 10 > _source.Length)
+            return; // Not enough chars for \UXXXXXXXX
+
+        var hexSpan = _source.Slice(_position + 2, 8);
+        if (TryParseHex8(hexSpan, out int codepoint))
+        {
+            // Check for surrogate range (D800-DFFF)
+            if (codepoint >= 0xD800 && codepoint <= 0xDFFF)
+            {
+                throw new SparqlParseException($"Invalid Unicode codepoint U+{codepoint:X4} - surrogate codepoints are not allowed in strings");
+            }
+        }
+    }
+
+    private static bool TryParseHex4(ReadOnlySpan<char> hex, out int value)
+    {
+        value = 0;
+        if (hex.Length != 4)
+            return false;
+
+        for (int i = 0; i < 4; i++)
+        {
+            var c = hex[i];
+            int digit;
+            if (c >= '0' && c <= '9')
+                digit = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                digit = 10 + (c - 'a');
+            else if (c >= 'A' && c <= 'F')
+                digit = 10 + (c - 'A');
+            else
+                return false;
+            value = (value << 4) | digit;
+        }
+        return true;
+    }
+
+    private static bool TryParseHex8(ReadOnlySpan<char> hex, out int value)
+    {
+        value = 0;
+        if (hex.Length != 8)
+            return false;
+
+        for (int i = 0; i < 8; i++)
+        {
+            var c = hex[i];
+            int digit;
+            if (c >= '0' && c <= '9')
+                digit = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                digit = 10 + (c - 'a');
+            else if (c >= 'A' && c <= 'F')
+                digit = 10 + (c - 'A');
+            else
+                return false;
+            value = (value << 4) | digit;
+        }
+        return true;
     }
 
     /// <summary>
@@ -1052,7 +1216,21 @@ public ref partial struct SparqlParser
             while (!IsAtEnd() && Peek() != quote)
             {
                 if (Peek() == '\\')
-                    Advance(); // Skip escape
+                {
+                    var escapeChar = PeekAt(1);
+
+                    // Validate Unicode escapes for invalid codepoints (surrogates)
+                    if (escapeChar == 'u')
+                    {
+                        ValidateUnicodeEscape4(start);
+                    }
+                    else if (escapeChar == 'U')
+                    {
+                        ValidateUnicodeEscape8(start);
+                    }
+
+                    Advance(); // Skip '\'
+                }
                 Advance();
             }
 
@@ -1128,6 +1306,13 @@ public ref partial struct SparqlParser
                     break;
                 Advance();
             }
+        }
+
+        // syn-bad-pname-13: Blank nodes cannot be followed by ':' (e.g., _:az:b is invalid)
+        if (Peek() == ':')
+        {
+            var bnodeName = _source.Slice(start, _position - start).ToString();
+            throw new SparqlParseException($"Blank node {bnodeName} cannot be followed by colon - invalid syntax");
         }
 
         return Term.BlankNode(start, _position - start);
