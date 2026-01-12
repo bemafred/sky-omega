@@ -1752,7 +1752,7 @@ internal sealed class BoxedSubQueryExecutor
             for (int i = 0; i < innerBindings.Count; i++)
             {
                 hash = hash * 31 + innerBindings.GetVariableHash(i);
-                hash = hash * 31 + innerBindings.GetString(i).GetHashCode();
+                hash = hash * 31 + string.GetHashCode(innerBindings.GetString(i));
             }
         }
         else
@@ -1765,7 +1765,7 @@ internal sealed class BoxedSubQueryExecutor
                 if (idx >= 0)
                 {
                     hash = hash * 31 + innerBindings.GetVariableHash(idx);
-                    hash = hash * 31 + innerBindings.GetString(idx).GetHashCode();
+                    hash = hash * 31 + string.GetHashCode(innerBindings.GetString(idx));
                 }
             }
         }
