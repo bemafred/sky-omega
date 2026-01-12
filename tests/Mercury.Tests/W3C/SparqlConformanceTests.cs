@@ -297,6 +297,10 @@ public class SparqlConformanceTests
 
         foreach (var test in tests)
         {
+            // Skip tests at data generation level to prevent stack overflow during test execution
+            if (W3CTestContext.ShouldSkip(test.Id, out _))
+                continue;
+
             yield return new object[] { test.DisplayName, test };
         }
     }
