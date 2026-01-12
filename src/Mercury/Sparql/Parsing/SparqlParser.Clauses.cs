@@ -1373,6 +1373,10 @@ public ref partial struct SparqlParser
         Advance(); // Skip '{'
         SkipWhitespace();
 
+        // Record pattern count at start of nested group for BIND scope validation
+        // BIND inside a nested { } only checks variables from this scope, not outer
+        int nestedScopeStart = pattern.PatternCount;
+
         // Check for SubSelect: starts with "SELECT"
         var checkSpan = PeekSpan(6);
         if (checkSpan.Length >= 6 && checkSpan[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
@@ -1413,9 +1417,10 @@ public ref partial struct SparqlParser
             }
 
             // Check for BIND inside nested group
+            // Pass scopeStartIndex to only check variables from this nested scope
             if (span.Length >= 4 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase))
             {
-                ParseBind(ref pattern);
+                ParseBind(ref pattern, nestedScopeStart);
                 continue;
             }
 
@@ -1951,7 +1956,9 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Parse BIND clause: BIND ( expression AS ?variable )
     /// </summary>
-    private void ParseBind(ref GraphPattern pattern)
+    /// <param name="pattern">The graph pattern to add the bind to</param>
+    /// <param name="scopeStartIndex">The pattern index where current scope starts (for nested groups). Default 0 checks all patterns.</param>
+    private void ParseBind(ref GraphPattern pattern, int scopeStartIndex = 0)
     {
         ConsumeKeyword("BIND");
         SkipWhitespace();
@@ -2025,10 +2032,12 @@ public ref partial struct SparqlParser
         if (Peek() == ')')
             Advance();
 
-        // Note: BIND scope validation (syntax-BINDscope6/7) is not implemented yet
-        // because it requires tracking scope levels separately. The current pattern
-        // structure doesn't distinguish between same-level bindings and parent-scope bindings.
-        // This is tracked as a future improvement.
+        // BIND scope validation (syntax-BINDscope6/7): check if target variable is already bound
+        var targetVar = _source.Slice(varStart, varLength);
+        if (IsVariableInScope(ref pattern, targetVar, scopeStartIndex))
+        {
+            throw new SparqlParseException($"BIND target variable {targetVar.ToString()} is already in scope - cannot rebind");
+        }
 
         // Add the bind expression
         pattern.AddBind(new BindExpr
@@ -2038,6 +2047,52 @@ public ref partial struct SparqlParser
             VarStart = varStart,
             VarLength = varLength
         });
+    }
+
+    /// <summary>
+    /// Check if a variable is already in scope within the current graph pattern.
+    /// Used for BIND scope validation (syntax-BINDscope6/7).
+    /// </summary>
+    /// <param name="pattern">The graph pattern to check</param>
+    /// <param name="varName">The variable name to look for</param>
+    /// <param name="scopeStartIndex">Only check patterns from this index onwards (for nested groups)</param>
+    private bool IsVariableInScope(ref GraphPattern pattern, ReadOnlySpan<char> varName, int scopeStartIndex = 0)
+    {
+        // Check triple patterns in current scope (starting from scopeStartIndex for nested groups)
+        for (int i = scopeStartIndex; i < pattern.PatternCount; i++)
+        {
+            var tp = pattern.GetPattern(i);
+            if (TermMatchesVariable(tp.Subject, varName) ||
+                TermMatchesVariable(tp.Predicate, varName) ||
+                TermMatchesVariable(tp.Object, varName))
+            {
+                return true;
+            }
+        }
+
+        // Check previous BIND expressions in current scope
+        // Note: BINDs are always in current scope regardless of scopeStartIndex
+        for (int i = 0; i < pattern.BindCount; i++)
+        {
+            var bind = pattern.GetBind(i);
+            var bindVar = _source.Slice(bind.VarStart, bind.VarLength);
+            if (varName.SequenceEqual(bindVar))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check if a term matches a variable name.
+    /// </summary>
+    private bool TermMatchesVariable(Term term, ReadOnlySpan<char> varName)
+    {
+        if (!term.IsVariable)
+            return false;
+
+        var termVar = _source.Slice(term.Start, term.Length);
+        return varName.SequenceEqual(termVar);
     }
 
     /// <summary>

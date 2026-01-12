@@ -367,8 +367,24 @@ public ref partial struct SparqlParser
 
         // syn-bad-pname-08/09: Check for incomplete triple pattern (subject only)
         // If we hit '.' or '}' immediately after subject, the pattern is incomplete
+        // EXCEPTION: Blank node property lists [ :p :o ] are complete patterns on their own
         if (Peek() == '.' || Peek() == '}')
         {
+            // Blank node property lists starting with '[' ARE complete patterns
+            // They contain their own predicate-object pairs within the brackets
+            if (subject.IsBlankNode && _source[subject.Start] == '[')
+            {
+                // This is a valid standalone blank node property list pattern
+                // The patterns inside are not expanded here - they're captured in the term
+                pattern.AddPattern(new TriplePattern
+                {
+                    Subject = subject,
+                    Predicate = default,
+                    Object = default,
+                    Path = default
+                });
+                return true;
+            }
             throw new SparqlParseException("Incomplete triple pattern - expected predicate and object after subject");
         }
 
@@ -887,7 +903,99 @@ public ref partial struct SparqlParser
             return Term.Iri(_position - 1, 1); // 'a' shorthand
         }
 
+        // Blank node property list: [ :p :o ; :q :r ]
+        // Generates an anonymous blank node with properties
+        // For now, we capture the whole [...] as a blank node term for later expansion
+        if (ch == '[')
+        {
+            return ParseBlankNodePropertyList();
+        }
+
+        // Collection (RDF list): ( item1 item2 ... )
+        // Generates rdf:first/rdf:rest structure
+        // For now, we capture the whole (...) as a special term for later expansion
+        if (ch == '(')
+        {
+            return ParseCollection();
+        }
+
         return default;
+    }
+
+    /// <summary>
+    /// Parse a blank node property list: [ predicate object ; ... ]
+    /// Returns a blank node term. The actual property list is captured for later expansion.
+    /// Supports property paths in predicates (e.g., [:p*/:q 123]).
+    /// </summary>
+    private Term ParseBlankNodePropertyList()
+    {
+        var start = _position;
+        Advance(); // Skip '['
+        SkipWhitespace();
+
+        // Handle empty blank node []
+        if (Peek() == ']')
+        {
+            Advance();
+            return Term.BlankNode(start, _position - start);
+        }
+
+        // Parse property list inside brackets
+        // We just skip to the closing ']', counting nested brackets
+        int depth = 1;
+        while (!IsAtEnd() && depth > 0)
+        {
+            var ch = Peek();
+            if (ch == '[') depth++;
+            else if (ch == ']') depth--;
+
+            if (depth > 0)
+                Advance();
+        }
+
+        if (Peek() == ']')
+            Advance();
+
+        return Term.BlankNode(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse a collection (RDF list): ( item1 item2 ... )
+    /// Returns a blank node term representing the list head.
+    /// Supports blank node property lists with property paths inside.
+    /// </summary>
+    private Term ParseCollection()
+    {
+        var start = _position;
+        Advance(); // Skip '('
+        SkipWhitespace();
+
+        // Handle empty collection ()
+        if (Peek() == ')')
+        {
+            Advance();
+            // Empty list is rdf:nil - represent as IRI
+            return Term.Iri(start, _position - start);
+        }
+
+        // Parse items, counting nested parens and brackets
+        int depth = 1;
+        while (!IsAtEnd() && depth > 0)
+        {
+            var ch = Peek();
+            if (ch == '(' || ch == '[') depth++;
+            else if (ch == ')' || ch == ']') depth--;
+
+            if (depth > 0)
+                Advance();
+        }
+
+        if (Peek() == ')')
+            Advance();
+
+        // Collections are represented as blank nodes for now
+        // Full RDF list expansion would require generating rdf:first/rdf:rest triples
+        return Term.BlankNode(start, _position - start);
     }
 
     /// <summary>
