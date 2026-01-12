@@ -304,4 +304,71 @@ public class SparqlConformanceTests
             yield return new object[] { test.DisplayName, test };
         }
     }
+
+    [SkippableTheory]
+    [MemberData(nameof(GetUpdateEvalTests))]
+    public async Task Sparql11_UpdateEval(string name, W3CTestCase test)
+    {
+        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+
+        if (W3CTestContext.ShouldSkip(test.Id, out var reason))
+            Skip.If(true, reason);
+
+        _output.WriteLine($"Test: {test.Name}");
+        _output.WriteLine($"Update: {test.ActionPath}");
+        _output.WriteLine($"Data: {test.DataPath}");
+
+        Skip.IfNot(File.Exists(test.ActionPath), $"Update file not found: {test.ActionPath}");
+
+        // Read the update query (.ru file)
+        var update = await File.ReadAllTextAsync(test.ActionPath);
+        _output.WriteLine($"Update:\n{update}");
+
+        // Create a temporary store and load initial data
+        using var lease = _fixture.Pool.RentScoped();
+        var store = lease.Store;
+
+        if (test.DataPath != null && File.Exists(test.DataPath))
+        {
+            await LoadDataAsync(store, test.DataPath);
+            _output.WriteLine($"Loaded initial data from {test.DataPath}");
+        }
+
+        // Parse and execute the update
+        var parser = new SparqlParser(update.AsSpan());
+        var parsed = parser.ParseUpdate();
+        _output.WriteLine($"Update type: {parsed.Type}");
+
+        var executor = new UpdateExecutor(store, update.AsSpan(), parsed);
+        var result = executor.Execute();
+
+        _output.WriteLine($"Update result: Success={result.Success}, Affected={result.AffectedCount}");
+
+        if (!result.Success)
+        {
+            _output.WriteLine($"Error: {result.ErrorMessage}");
+        }
+
+        // Verify result - for now just check success
+        // Full conformance would compare actual graph state against expected
+        Assert.True(result.Success, result.ErrorMessage ?? "Update failed");
+    }
+
+    public static IEnumerable<object[]> GetUpdateEvalTests()
+    {
+        if (!W3CTestContext.IsAvailable)
+            yield break;
+
+        var tests = W3CTestContext.LoadTestCasesAsync(
+            W3CTestSuite.Sparql11Update,
+            W3CTestType.UpdateEval).GetAwaiter().GetResult();
+
+        foreach (var test in tests)
+        {
+            if (W3CTestContext.ShouldSkip(test.Id, out _))
+                continue;
+
+            yield return new object[] { test.DisplayName, test };
+        }
+    }
 }

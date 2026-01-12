@@ -16,6 +16,7 @@ public sealed class W3CManifestParser
     private const string RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
     private const string RDFS = "http://www.w3.org/2000/01/rdf-schema#";
     private const string QT = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#";
+    private const string UT = "http://www.w3.org/2009/sparql/tests/test-update#";
 
     // Common predicates
     private static readonly string RdfType = $"<{RDF}type>";
@@ -28,8 +29,13 @@ public sealed class W3CManifestParser
     private static readonly string MfAction = $"<{MF}action>";
     private static readonly string MfResult = $"<{MF}result>";
     private static readonly string RdfsComment = $"<{RDFS}comment>";
+    private static readonly string RdfsLabel = $"<{RDFS}label>";
     private static readonly string QtQuery = $"<{QT}query>";
     private static readonly string QtData = $"<{QT}data>";
+    private static readonly string UtRequest = $"<{UT}request>";
+    private static readonly string UtData = $"<{UT}data>";
+    private static readonly string UtGraphData = $"<{UT}graphData>";
+    private static readonly string UtGraph = $"<{UT}graph>";
 
     // Test type IRIs mapped to enum values
     private static readonly Dictionary<string, W3CTestType> TestTypes = new()
@@ -272,14 +278,24 @@ public sealed class W3CManifestParser
 
             if (action.StartsWith("_:"))
             {
-                // Blank node - look up qt:query and qt:data
+                // Blank node - look up query/data predicates
                 if (graph.Subjects.TryGetValue(action, out var actionProps))
                 {
+                    // Try qt:query first (SPARQL Query tests)
                     if (actionProps.TryGetValue(QtQuery, out var queries) && queries.Count > 0)
                         actionPath = ResolveIriToPath(queries[0], manifestDir);
 
+                    // Try ut:request for SPARQL Update tests
+                    if (actionPath == null && actionProps.TryGetValue(UtRequest, out var requests) && requests.Count > 0)
+                        actionPath = ResolveIriToPath(requests[0], manifestDir);
+
+                    // Try qt:data first (SPARQL Query tests)
                     if (actionProps.TryGetValue(QtData, out var dataFiles) && dataFiles.Count > 0)
                         dataPath = ResolveIriToPath(dataFiles[0], manifestDir);
+
+                    // Try ut:data for SPARQL Update tests
+                    if (dataPath == null && actionProps.TryGetValue(UtData, out var utDataFiles) && utDataFiles.Count > 0)
+                        dataPath = ResolveIriToPath(utDataFiles[0], manifestDir);
                 }
             }
             else

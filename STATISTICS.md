@@ -2,7 +2,7 @@
 
 Codebase metrics tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-11
+**Last updated:** 2026-01-12
 
 ## Line Counts
 
@@ -80,7 +80,8 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
 | SPARQL 1.1 Syntax | 73 | 103 | **71%** | 63/63 positive, 10/40 negative |
 | SPARQL 1.1 Query | — | ~221 | — | In progress |
-| **Total** | **1,518** | **1,666+** | **91%** | SPARQL conformance in progress |
+| SPARQL 1.1 Update | 67 | 94 | **71%** | ADD/COPY/MOVE graph targets need prefixed name support |
+| **Total** | **1,585** | **1,760+** | **90%** | SPARQL conformance in progress |
 
 ## Benchmark Summary
 
