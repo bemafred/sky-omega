@@ -461,9 +461,9 @@ Based on typical edge cases in W3C tests:
 | SPARQL Syntax (positive) | 100% | **100%** | 63/63 passed |
 | SPARQL Syntax (negative) | 100% | 25% | 10/40 passed (parser too permissive) |
 | SPARQL Query | >90% | - | In progress |
-| SPARQL Update | >85% | **71%** | 67/94 passed (ADD/COPY/MOVE need prefixed name support) |
+| SPARQL Update | >85% | **99%** | 93/94 passed (1 skipped: nested subquery UNION) |
 | RDF-star | >90% | - | After Phase 4 |
-| **Total** | | **97%** | 1,512/1,539 (6 JSON-LD 1.0/generalized excluded) |
+| **Total** | | **98%** | 1,538/1,565 (6 JSON-LD 1.0/generalized excluded) |
 
 ### Documentation
 - [ ] Conformance report published with each release

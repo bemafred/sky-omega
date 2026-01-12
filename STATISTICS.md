@@ -80,8 +80,8 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
 | SPARQL 1.1 Syntax | 73 | 103 | **71%** | 63/63 positive, 10/40 negative |
 | SPARQL 1.1 Query | — | ~221 | — | In progress |
-| SPARQL 1.1 Update | 67 | 94 | **71%** | ADD/COPY/MOVE graph targets need prefixed name support |
-| **Total** | **1,585** | **1,760+** | **90%** | SPARQL conformance in progress |
+| SPARQL 1.1 Update | 93 | 94 | **99%** | 1 skipped: nested subquery UNION edge case |
+| **Total** | **1,611** | **1,761** | **91%** | SPARQL conformance in progress |
 
 ## Benchmark Summary
 

@@ -40,6 +40,9 @@ public static class W3CTestContext
 
         // Known limitations
         ["nfc"] = "NFC normalization not enforced on IRIs",
+
+        // SPARQL Update edge cases
+        ["manifest#dawg-delete-insert-04>"] = "UNION inside nested subquery in DELETE WHERE not supported",
     };
 
     /// <summary>

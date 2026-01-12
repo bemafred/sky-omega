@@ -94,9 +94,9 @@ public ref partial struct SparqlParser
         if (TryConsumeKeyword("WITH"))
         {
             SkipWhitespace();
-            // Parse graph IRI - store in dedicated WithGraph fields
+            // Parse graph IRI or prefixed name - store in dedicated WithGraph fields
             var iriStart = _position;
-            ParseIriRef();
+            ParseIriOrPrefixedName();
             var iriLen = _position - iriStart;
             op.WithGraphStart = iriStart;
             op.WithGraphLength = iriLen;
@@ -140,7 +140,7 @@ public ref partial struct SparqlParser
                 isNamed = true;
             }
             var iriStart = _position;
-            ParseIriRef();
+            ParseIriOrPrefixedName();
             var iriLen = _position - iriStart;
             var clause = isNamed ? DatasetClause.Named(iriStart, iriLen) : DatasetClause.Default(iriStart, iriLen);
             usingClauses.Add(clause);
@@ -379,10 +379,10 @@ public ref partial struct SparqlParser
         {
             if (TryConsumeKeyword("GRAPH"))
             {
-                // GRAPH <iri> { triples }
+                // GRAPH <iri> { triples } or GRAPH prefix:local { triples }
                 SkipWhitespace();
                 var graphStart = _position;
-                ParseIriRef();
+                ParseIriOrPrefixedName();
                 var graphLen = _position - graphStart;
                 SkipWhitespace();
                 ExpectChar('{');
@@ -639,13 +639,14 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Parse GraphRef - GRAPH iri
+    /// Supports both full IRIs (&lt;http://...&gt;) and prefixed names (prefix:local, :local)
     /// </summary>
     private GraphTarget ParseGraphRef()
     {
         ConsumeKeyword("GRAPH");
         SkipWhitespace();
         var start = _position;
-        ParseIriRef();
+        ParseIriOrPrefixedName();
         var len = _position - start;
         return new GraphTarget
         {
@@ -672,6 +673,7 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Parse GraphOrDefault - DEFAULT | GRAPH? iri
+    /// Supports both full IRIs (&lt;http://...&gt;) and prefixed names (prefix:local, :local)
     /// </summary>
     private GraphTarget ParseGraphOrDefault()
     {
@@ -683,7 +685,7 @@ public ref partial struct SparqlParser
         SkipWhitespace();
 
         var start = _position;
-        ParseIriRef();
+        ParseIriOrPrefixedName();
         var len = _position - start;
         return new GraphTarget
         {
@@ -691,6 +693,31 @@ public ref partial struct SparqlParser
             IriStart = start,
             IriLength = len
         };
+    }
+
+    /// <summary>
+    /// Parse an IRI reference or prefixed name.
+    /// Handles: &lt;http://...&gt;, prefix:local, :local
+    /// </summary>
+    private void ParseIriOrPrefixedName()
+    {
+        var ch = Peek();
+
+        if (ch == '<')
+        {
+            // Full IRI: <http://...>
+            ParseIriRef();
+        }
+        else if (char.IsLetter(ch) || ch == ':')
+        {
+            // Prefixed name: prefix:local or :local
+            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == ':'))
+                Advance();
+        }
+        else
+        {
+            throw new SparqlParseException($"Expected IRI or prefixed name at position {_position}");
+        }
     }
 
     /// <summary>
