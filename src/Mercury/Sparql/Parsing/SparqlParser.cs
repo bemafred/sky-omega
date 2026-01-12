@@ -287,6 +287,19 @@ public ref partial struct SparqlParser
         ConsumeKeyword("PREFIX");
         SkipWhitespace();
 
+        // syn-bad-pname-05: Validate prefix name starts with letter (or is empty for default prefix)
+        // SPARQL grammar: PNAME_NS ::= PN_PREFIX? ':'
+        // PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)?
+        // PN_CHARS_BASE ::= [A-Z] | [a-z] | [#x00C0-#x00D6] | ...
+        if (!IsAtEnd() && Peek() != ':')
+        {
+            var firstChar = Peek();
+            if (!IsLetter(firstChar) && firstChar != '_')
+            {
+                throw new SparqlParseException($"PREFIX name must start with a letter, not '{firstChar}'");
+            }
+        }
+
         // Track prefix position
         var prefixStart = _position;
         ParsePnameNs();
@@ -956,11 +969,11 @@ public ref partial struct SparqlParser
         {
             Advance(); // Skip ':'
 
-            // Read local part
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+            // Read local part - per SPARQL grammar PN_LOCAL can contain ':' after first char
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':'))
             {
                 // Don't include trailing dot
-                if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)))
+                if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)) && PeekAt(1) != ':')
                     break;
                 Advance();
             }
@@ -993,11 +1006,11 @@ public ref partial struct SparqlParser
         // Skip ':'
         Advance();
 
-        // Read local part
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+        // Read local part - per SPARQL grammar PN_LOCAL can contain ':' after first char
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.' || Peek() == ':'))
         {
             // Don't include trailing dot
-            if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)))
+            if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)) && PeekAt(1) != ':')
                 break;
             Advance();
         }
@@ -1239,6 +1252,83 @@ public ref partial struct SparqlParser
         // Parse temporal clauses (AS OF, DURING, ALL VERSIONS)
         SkipWhitespace();
         modifier.Temporal = ParseTemporalClause();
+
+        // Check for deprecated BINDINGS clause and validate cardinality
+        SkipWhitespace();
+        span = PeekSpan(8);
+        if (span.Length >= 8 && span[..8].Equals("BINDINGS", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("BINDINGS");
+            SkipWhitespace();
+
+            // Count variables
+            int varCount = 0;
+            while (!IsAtEnd() && Peek() == '?')
+            {
+                Advance(); // Skip '?'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                varCount++;
+                SkipWhitespace();
+            }
+
+            // Expect '{'
+            if (Peek() == '{')
+            {
+                Advance();
+                SkipWhitespace();
+
+                // Parse rows and validate cardinality
+                while (!IsAtEnd() && Peek() != '}')
+                {
+                    if (Peek() == '(')
+                    {
+                        Advance(); // Skip '('
+                        SkipWhitespace();
+
+                        int rowValueCount = 0;
+                        while (!IsAtEnd() && Peek() != ')')
+                        {
+                            // Parse value
+                            var ch = Peek();
+                            if (ch == '"' || ch == '<' || IsDigit(ch) || ch == '-' || ch == '+' || IsLetter(ch))
+                            {
+                                // Skip value
+                                while (!IsAtEnd() && !char.IsWhiteSpace(Peek()) && Peek() != ')' && Peek() != '(')
+                                    Advance();
+                                rowValueCount++;
+                            }
+                            else if (ch == ')')
+                            {
+                                break;
+                            }
+                            else
+                            {
+                                Advance();
+                            }
+                            SkipWhitespace();
+                        }
+
+                        // Validate cardinality
+                        if (rowValueCount != varCount)
+                        {
+                            if (rowValueCount < varCount)
+                                throw new SparqlParseException($"BINDINGS row has {rowValueCount} values but {varCount} variables declared");
+                            else
+                                throw new SparqlParseException($"BINDINGS row has {rowValueCount} values but only {varCount} variables declared");
+                        }
+
+                        if (Peek() == ')')
+                            Advance();
+                        SkipWhitespace();
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+        }
 
         return modifier;
     }

@@ -1126,6 +1126,12 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // syn-bad-08: Check for UNION without braces - must have { } around both sides
+            if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SparqlParseException("UNION requires graph patterns enclosed in braces: { pattern } UNION { pattern }");
+            }
+
             // Check for nested group { ... } which might be a subquery or UNION
             if (Peek() == '{')
             {
@@ -1542,28 +1548,61 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse VALUES clause: VALUES ?var { value1 value2 ... }
-    /// Supports single variable with multiple values.
+    /// Parse VALUES clause: VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
+    /// Supports single variable or multiple variables with cardinality validation.
     /// </summary>
     private void ParseValues(ref GraphPattern pattern)
     {
         ConsumeKeyword("VALUES");
         SkipWhitespace();
 
-        // Parse variable
-        if (Peek() != '?')
-            return;
-
         var values = new ValuesClause();
-        values.VarStart = _position;
+        int varCount = 0;
 
-        Advance(); // Skip '?'
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-            Advance();
+        // Check for multi-variable form: (?var1 ?var2 ...)
+        if (Peek() == '(')
+        {
+            Advance(); // Skip '('
+            SkipWhitespace();
 
-        values.VarLength = _position - values.VarStart;
+            // Count and parse variables
+            while (!IsAtEnd() && Peek() == '?')
+            {
+                if (varCount == 0)
+                {
+                    // Store first variable for backwards compatibility
+                    values.VarStart = _position;
+                }
+                Advance(); // Skip '?'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                if (varCount == 0)
+                {
+                    values.VarLength = _position - values.VarStart;
+                }
+                varCount++;
+                SkipWhitespace();
+            }
 
-        SkipWhitespace();
+            if (Peek() == ')')
+                Advance(); // Skip ')'
+            SkipWhitespace();
+        }
+        // Single variable form: ?var
+        else if (Peek() == '?')
+        {
+            values.VarStart = _position;
+            Advance(); // Skip '?'
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                Advance();
+            values.VarLength = _position - values.VarStart;
+            varCount = 1;
+            SkipWhitespace();
+        }
+        else
+        {
+            return;
+        }
 
         // Expect '{'
         if (Peek() != '{')
@@ -1572,62 +1611,76 @@ public ref partial struct SparqlParser
         Advance(); // Skip '{'
         SkipWhitespace();
 
-        // Parse values
+        // Parse value rows
         while (!IsAtEnd() && Peek() != '}')
         {
             SkipWhitespace();
 
-            int valueStart = _position;
-            int valueLen = 0;
+            // Check for parenthesized row: (val1 val2 ...)
+            if (Peek() == '(')
+            {
+                Advance(); // Skip '('
+                SkipWhitespace();
 
-            var ch = Peek();
-            if (ch == '"')
-            {
-                // String literal
-                Advance();
-                while (!IsAtEnd() && Peek() != '"')
+                int rowValueCount = 0;
+                while (!IsAtEnd() && Peek() != ')')
                 {
-                    if (Peek() == '\\') Advance();
-                    Advance();
+                    int valueStart = _position;
+                    int valueLen = ParseValuesValue();
+                    if (valueLen > 0)
+                    {
+                        values.AddValue(valueStart, valueLen);
+                        rowValueCount++;
+                    }
+                    else if (Peek() == ')')
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        // Skip UNDEF
+                        var span = PeekSpan(5);
+                        if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ConsumeKeyword("UNDEF");
+                            rowValueCount++;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    SkipWhitespace();
                 }
-                if (!IsAtEnd()) Advance(); // Skip closing '"'
-                valueLen = _position - valueStart;
-            }
-            else if (ch == '<')
-            {
-                // IRI
-                Advance();
-                while (!IsAtEnd() && Peek() != '>')
-                    Advance();
-                if (!IsAtEnd()) Advance(); // Skip '>'
-                valueLen = _position - valueStart;
-            }
-            else if (IsDigit(ch) || ch == '-' || ch == '+')
-            {
-                // Numeric literal
-                if (ch == '-' || ch == '+') Advance();
-                while (!IsAtEnd() && (IsDigit(Peek()) || Peek() == '.'))
-                    Advance();
-                valueLen = _position - valueStart;
-            }
-            else if (IsLetter(ch))
-            {
-                // Boolean or prefixed name
-                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':'))
-                    Advance();
-                valueLen = _position - valueStart;
+
+                // Validate cardinality
+                if (rowValueCount != varCount)
+                {
+                    if (rowValueCount < varCount)
+                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but {varCount} variables declared");
+                    else
+                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but only {varCount} variables declared");
+                }
+
+                if (Peek() == ')')
+                    Advance(); // Skip ')'
+                SkipWhitespace();
             }
             else
             {
-                break;
+                // Single value (for single variable form)
+                int valueStart = _position;
+                int valueLen = ParseValuesValue();
+                if (valueLen > 0)
+                {
+                    values.AddValue(valueStart, valueLen);
+                }
+                else
+                {
+                    break;
+                }
+                SkipWhitespace();
             }
-
-            if (valueLen > 0)
-            {
-                values.AddValue(valueStart, valueLen);
-            }
-
-            SkipWhitespace();
         }
 
         SkipWhitespace();
@@ -1635,6 +1688,74 @@ public ref partial struct SparqlParser
             Advance(); // Skip '}'
 
         pattern.SetValues(values);
+    }
+
+    /// <summary>
+    /// Parse a single value in a VALUES clause. Returns length of value parsed.
+    /// </summary>
+    private int ParseValuesValue()
+    {
+        int valueStart = _position;
+        var ch = Peek();
+
+        if (ch == '"')
+        {
+            // String literal
+            Advance();
+            while (!IsAtEnd() && Peek() != '"')
+            {
+                if (Peek() == '\\') Advance();
+                Advance();
+            }
+            if (!IsAtEnd()) Advance(); // Skip closing '"'
+
+            // Check for language tag or datatype
+            SkipWhitespace();
+            if (Peek() == '@')
+            {
+                Advance();
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '-'))
+                    Advance();
+            }
+            else if (PeekSpan(2).Length >= 2 && PeekSpan(2)[0] == '^' && PeekSpan(2)[1] == '^')
+            {
+                Advance(); Advance(); // Skip ^^
+                if (Peek() == '<')
+                {
+                    Advance();
+                    while (!IsAtEnd() && Peek() != '>')
+                        Advance();
+                    if (!IsAtEnd()) Advance();
+                }
+            }
+            return _position - valueStart;
+        }
+        else if (ch == '<')
+        {
+            // IRI
+            Advance();
+            while (!IsAtEnd() && Peek() != '>')
+                Advance();
+            if (!IsAtEnd()) Advance(); // Skip '>'
+            return _position - valueStart;
+        }
+        else if (IsDigit(ch) || ch == '-' || ch == '+')
+        {
+            // Numeric literal
+            if (ch == '-' || ch == '+') Advance();
+            while (!IsAtEnd() && (IsDigit(Peek()) || Peek() == '.'))
+                Advance();
+            return _position - valueStart;
+        }
+        else if (IsLetter(ch))
+        {
+            // Boolean or prefixed name
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':'))
+                Advance();
+            return _position - valueStart;
+        }
+
+        return 0;
     }
 
     /// <summary>
