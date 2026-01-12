@@ -571,9 +571,22 @@ internal ref struct TriplePatternScan
 /// </summary>
 internal ref struct MultiPatternScan
 {
+    /// <summary>
+    /// Wrapper class to box GraphPattern on the heap for subquery execution.
+    /// This prevents stack overflow from nested subqueries since each MultiPatternScan
+    /// would otherwise embed a ~4KB GraphPattern on the stack.
+    /// </summary>
+    internal sealed class BoxedPattern
+    {
+        public GraphPattern Pattern;
+    }
+
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
+    // Pattern can be stored inline (for main queries) or via reference (for subqueries)
     private readonly GraphPattern _pattern;
+    private readonly BoxedPattern? _boxedPattern;
+    private readonly bool _useBoxedPattern;
     private readonly bool _unionMode;
     private readonly ReadOnlySpan<char> _graph;
     private readonly int[]? _patternOrder;  // Optimized pattern execution order
@@ -631,11 +644,61 @@ internal ref struct MultiPatternScan
 
     private bool _hasPushedFilters;
 
+    /// <summary>
+    /// Get the current pattern (from boxed or inline storage).
+    /// </summary>
+    private readonly GraphPattern CurrentPattern =>
+        _useBoxedPattern ? _boxedPattern!.Pattern : _pattern;
+
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode = false, ReadOnlySpan<char> graph = default, PrefixMapping[]? prefixes = null)
         : this(store, source, pattern, unionMode, graph,
                TemporalQueryMode.Current, default, default, default, null, null, prefixes)
     {
+    }
+
+    /// <summary>
+    /// Constructor for subqueries that takes a boxed pattern to avoid stack overflow.
+    /// The pattern is stored by reference on the heap instead of being copied inline.
+    /// </summary>
+    public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, BoxedPattern boxedPattern)
+    {
+        _store = store;
+        _source = source;
+        _pattern = default;  // Not used when boxed
+        _boxedPattern = boxedPattern;
+        _useBoxedPattern = true;
+        _unionMode = false;
+        _graph = default;
+        _patternOrder = null;
+        _temporalMode = TemporalQueryMode.Current;
+        _asOfTime = default;
+        _rangeStart = default;
+        _rangeEnd = default;
+        _prefixes = null;
+        _expandBuffer = null;
+        _currentLevel = 0;
+        _init0 = _init1 = _init2 = _init3 = false;
+        _init4 = _init5 = _init6 = _init7 = false;
+        _init8 = _init9 = _init10 = _init11 = false;
+        _exhausted = false;
+        _enum0 = default; _enum1 = default; _enum2 = default; _enum3 = default;
+        _enum4 = default; _enum5 = default; _enum6 = default; _enum7 = default;
+        _enum8 = default; _enum9 = default; _enum10 = default; _enum11 = default;
+        _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
+        _bindingCount4 = _bindingCount5 = _bindingCount6 = _bindingCount7 = 0;
+        _bindingCount8 = _bindingCount9 = _bindingCount10 = _bindingCount11 = 0;
+        _levelFilterCount0 = _levelFilterCount1 = _levelFilterCount2 = _levelFilterCount3 = 0;
+        _levelFilterCount4 = _levelFilterCount5 = _levelFilterCount6 = _levelFilterCount7 = 0;
+        _f0_0 = _f0_1 = _f0_2 = _f0_3 = 0;
+        _f1_0 = _f1_1 = _f1_2 = _f1_3 = 0;
+        _f2_0 = _f2_1 = _f2_2 = _f2_3 = 0;
+        _f3_0 = _f3_1 = _f3_2 = _f3_3 = 0;
+        _f4_0 = _f4_1 = _f4_2 = _f4_3 = 0;
+        _f5_0 = _f5_1 = _f5_2 = _f5_3 = 0;
+        _f6_0 = _f6_1 = _f6_2 = _f6_3 = 0;
+        _f7_0 = _f7_1 = _f7_2 = _f7_3 = 0;
+        _hasPushedFilters = false;
     }
 
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
@@ -648,6 +711,8 @@ internal ref struct MultiPatternScan
         _store = store;
         _source = source;
         _pattern = pattern;
+        _boxedPattern = null;
+        _useBoxedPattern = false;
         _unionMode = unionMode;
         _graph = graph;
         _patternOrder = patternOrder;
@@ -722,7 +787,8 @@ internal ref struct MultiPatternScan
             ? _patternOrder[level]
             : level;
 
-        return _unionMode ? _pattern.GetUnionPattern(patternIndex) : _pattern.GetPattern(patternIndex);
+        var pattern = CurrentPattern;
+        return _unionMode ? pattern.GetUnionPattern(patternIndex) : pattern.GetPattern(patternIndex);
     }
 
     /// <summary>
@@ -731,7 +797,8 @@ internal ref struct MultiPatternScan
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetPatternCount()
     {
-        return _unionMode ? _pattern.UnionBranchPatternCount : _pattern.RequiredPatternCount;
+        var pattern = CurrentPattern;
+        return _unionMode ? pattern.UnionBranchPatternCount : pattern.RequiredPatternCount;
     }
 
     #region Pushed Filter Helpers
@@ -835,7 +902,7 @@ internal ref struct MultiPatternScan
         for (int i = 0; i < count; i++)
         {
             var filterIndex = GetLevelFilter(level, i);
-            var filter = _pattern.GetFilter(filterIndex);
+            var filter = CurrentPattern.GetFilter(filterIndex);
             var filterExpr = _source.Slice(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
             if (!evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()))
@@ -1541,7 +1608,9 @@ internal ref struct SubQueryScan
     private Binding[] _innerBindingStorage;
     private char[] _innerStringBuffer;
     private BindingTable _innerBindings;
-    private GraphPattern _innerPattern;
+    // Pattern is boxed on the heap to avoid stack overflow from ~4KB struct
+    // Uses MultiPatternScan.BoxedPattern for compatibility
+    private MultiPatternScan.BoxedPattern? _boxedPattern;
     private bool _initialized;
     private bool _exhausted;
     private int _skipped;
@@ -1559,7 +1628,7 @@ internal ref struct SubQueryScan
         _innerBindingStorage = new Binding[16];
         _innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
         _innerBindings = new BindingTable(_innerBindingStorage, _innerStringBuffer);
-        _innerPattern = default;
+        _boxedPattern = null;
         _initialized = false;
         _exhausted = false;
         _skipped = 0;
@@ -1656,10 +1725,11 @@ internal ref struct SubQueryScan
     private void Initialize()
     {
         // Build a GraphPattern from the SubSelect's patterns
-        _innerPattern = new GraphPattern();
+        // Pattern is boxed on the heap to avoid stack overflow from nested subqueries
+        _boxedPattern = new MultiPatternScan.BoxedPattern();
         for (int i = 0; i < _subSelect.PatternCount; i++)
         {
-            _innerPattern.AddPattern(_subSelect.GetPattern(i));
+            _boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
         }
 
         // Use single scan for one pattern, multi scan for multiple
@@ -1672,7 +1742,8 @@ internal ref struct SubQueryScan
         else
         {
             _isMultiPattern = true;
-            _innerScan = new MultiPatternScan(_store, _source, _innerPattern);
+            // Pass boxed pattern by reference to avoid copying ~4KB struct
+            _innerScan = new MultiPatternScan(_store, _source, _boxedPattern);
         }
     }
 

@@ -117,6 +117,7 @@ public partial class QueryExecutor
 
     /// <summary>
     /// Execute a single subquery with no outer patterns (simple case).
+    /// Materializes results to avoid stack overflow from nested SubQueryScan operators.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private QueryResults ExecuteSingleSubQuerySimple()
@@ -125,17 +126,15 @@ public partial class QueryExecutor
         ref readonly var pattern = ref _cachedPattern;
         var subSelect = pattern.GetSubQuery(0);
 
-        // Build binding storage
+        // Materialize results to avoid stack overflow from nested scans
+        var results = ExecuteSubQuerySimpleCore(subSelect);
+        if (results == null || results.Count == 0)
+            return QueryResults.Empty();
+
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
-
-        // Create SubQueryScan operator
-        var subQueryScan = new SubQueryScan(_store, _source, subSelect);
-
-        return new QueryResults(subQueryScan, _buffer, _source, _store, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
-            _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
-            _buffer.GetHavingClause());
+        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
     /// <summary>
