@@ -46,6 +46,9 @@ public partial class QueryExecutor : IDisposable
     private readonly int _maxJoinDepth;
     private bool _disposed;
 
+    // Prefix mappings for expanding prefixed names
+    private readonly Prologue _prologue;
+
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
     private readonly string[]? _defaultGraphs;
     private readonly string[]? _namedGraphs;
@@ -116,6 +119,8 @@ public partial class QueryExecutor : IDisposable
         // Cache the original GraphPattern (has all complex structures like subqueries, service clauses)
         // Building from buffer would lose this info, so we copy directly
         _cachedPattern = query.WhereClause.Pattern;
+        // Store prologue for prefix expansion
+        _prologue = query.Prologue;
 
         _defaultGraphs = null;
         _namedGraphs = null;
@@ -328,7 +333,7 @@ public partial class QueryExecutor : IDisposable
 
                 var tp = pattern.GetPattern(requiredIdx);
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri.AsSpan(),
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
                 try
                 {
                     while (scan.MoveNext(ref bindingTable))
@@ -360,7 +365,7 @@ public partial class QueryExecutor : IDisposable
                     : null;
 
                 var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri.AsSpan(),
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters, _buffer.Prefixes);
                 try
                 {
                     while (multiScan.MoveNext(ref bindingTable))
@@ -491,7 +496,7 @@ public partial class QueryExecutor : IDisposable
 
             var tp = pattern.GetPattern(requiredIdx);
             var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
 
             return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
@@ -541,7 +546,7 @@ public partial class QueryExecutor : IDisposable
 
                 var tp = pattern.GetPattern(requiredIdx);
                 var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri,
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
 
                 return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
                     _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
@@ -555,7 +560,7 @@ public partial class QueryExecutor : IDisposable
             // Multiple patterns - use MultiPatternScan with graph
             return new QueryResults(
                 new MultiPatternScan(_store, _source, pattern, false, graphIri,
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd),
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null, _buffer.Prefixes),
                 _buffer, _source, _store, bindings, stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
                 _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
@@ -599,7 +604,8 @@ public partial class QueryExecutor : IDisposable
             }
 
             var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
 
             // For ASK, we just need to know if any result exists
             // No need for LIMIT/OFFSET/DISTINCT/ORDER BY
@@ -621,7 +627,7 @@ public partial class QueryExecutor : IDisposable
         }
 
         // Multiple required patterns - need join
-        var multiScan = new MultiPatternScan(_store, _source, pattern);
+        var multiScan = new MultiPatternScan(_store, _source, pattern, false, default, _buffer.Prefixes);
         var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
         try
         {
@@ -662,7 +668,8 @@ public partial class QueryExecutor : IDisposable
             }
 
             var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
             var queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
 
             return new ConstructResults(queryResults, template, _source, bindings, stringBuffer);
@@ -675,7 +682,7 @@ public partial class QueryExecutor : IDisposable
         }
 
         // Multiple required patterns - need join
-        var multiScan = new MultiPatternScan(_store, _source, pattern);
+        var multiScan = new MultiPatternScan(_store, _source, pattern, false, default, _buffer.Prefixes);
         var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
 
         return new ConstructResults(multiResults, template, _source, bindings, stringBuffer);
@@ -713,7 +720,8 @@ public partial class QueryExecutor : IDisposable
             }
 
             var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
             queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
         }
         else if (requiredCount == 0)
@@ -722,7 +730,7 @@ public partial class QueryExecutor : IDisposable
         }
         else
         {
-            var multiScan = new MultiPatternScan(_store, _source, pattern);
+            var multiScan = new MultiPatternScan(_store, _source, pattern, false, default, _buffer.Prefixes);
             queryResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
         }
 
@@ -746,7 +754,7 @@ public partial class QueryExecutor : IDisposable
         // Pass optimized pattern order if available for join reordering
         return new QueryResults(
             new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder),
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, null, _buffer.Prefixes),
             _buffer,
             _source,
             _store,

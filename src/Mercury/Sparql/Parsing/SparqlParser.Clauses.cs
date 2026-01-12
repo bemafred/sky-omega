@@ -698,6 +698,33 @@ public ref partial struct SparqlParser
         var obj = ParseTerm();
 
         subSelect.AddPattern(new TriplePattern { Subject = subject, Predicate = predicate, Object = obj });
+
+        // Handle semicolon-separated predicate-object lists (same subject)
+        SkipWhitespace();
+        while (Peek() == ';')
+        {
+            Advance(); // Skip ';'
+            SkipWhitespace();
+
+            // Check for empty predicate-object after semicolon
+            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                break;
+
+            // Check for FILTER keyword
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            // Parse next predicate-object pair with same subject
+            var nextPredicate = ParseTerm();
+            SkipWhitespace();
+            var nextObj = ParseTerm();
+
+            subSelect.AddPattern(new TriplePattern { Subject = subject, Predicate = nextPredicate, Object = nextObj });
+
+            SkipWhitespace();
+        }
+
         return true;
     }
 

@@ -854,7 +854,9 @@ internal sealed class QueryBuffer : IDisposable
         {
             foreach (var entry in GroupBy)
             {
-                clause.AddVariable(entry.VariableStart, entry.VariableLength);
+                // AddExpression handles both simple variables (exprLength=0) and expressions
+                clause.AddExpression(entry.VariableStart, entry.VariableLength,
+                    entry.ExpressionStart, entry.ExpressionLength);
             }
         }
         return clause;
@@ -997,6 +999,8 @@ internal struct GroupByEntry
 {
     public int VariableStart;
     public int VariableLength;
+    public int ExpressionStart;
+    public int ExpressionLength;
 }
 
 /// <summary>
@@ -1199,11 +1203,14 @@ internal static class QueryBufferAdapter
             var entries = new GroupByEntry[groupBy.Count];
             for (int i = 0; i < groupBy.Count; i++)
             {
-                var (start, length) = groupBy.GetVariable(i);
+                var (varStart, varLength) = groupBy.GetVariable(i);
+                var (exprStart, exprLength) = groupBy.GetExpression(i);
                 entries[i] = new GroupByEntry
                 {
-                    VariableStart = start,
-                    VariableLength = length
+                    VariableStart = varStart,
+                    VariableLength = varLength,
+                    ExpressionStart = exprStart,
+                    ExpressionLength = exprLength
                 };
             }
             buffer.GroupBy = entries;
@@ -1264,6 +1271,24 @@ internal static class QueryBufferAdapter
         buffer.TimeStartLength = query.SolutionModifier.Temporal.TimeStartLength;
         buffer.TimeEndStart = query.SolutionModifier.Temporal.TimeEndStart;
         buffer.TimeEndLength = query.SolutionModifier.Temporal.TimeEndLength;
+
+        // Copy prefix mappings from Prologue
+        if (query.Prologue.PrefixCount > 0)
+        {
+            var prefixes = new PrefixMapping[query.Prologue.PrefixCount];
+            for (int i = 0; i < query.Prologue.PrefixCount; i++)
+            {
+                var (prefixStart, prefixLength, iriStart, iriLength) = query.Prologue.GetPrefix(i);
+                prefixes[i] = new PrefixMapping
+                {
+                    PrefixStart = prefixStart,
+                    PrefixLength = prefixLength,
+                    IriStart = iriStart,
+                    IriLength = iriLength
+                };
+            }
+            buffer.Prefixes = prefixes;
+        }
 
         // Convert patterns to slots
         var patterns = buffer.GetPatterns();

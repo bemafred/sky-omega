@@ -582,7 +582,7 @@ public partial class QueryExecutor
                 branchPattern.AddPattern(pattern.GetPattern(i));
             }
             var multiScan = new MultiPatternScan(_store, _source, branchPattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null, _buffer.Prefixes);
             try
             {
                 while (multiScan.MoveNext(ref bindingTable))
@@ -642,7 +642,7 @@ public partial class QueryExecutor
                 branchPattern.AddPattern(pattern.GetPattern(i));
             }
             var multiScan = new MultiPatternScan(_store, _source, branchPattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null, _buffer.Prefixes);
             try
             {
                 while (multiScan.MoveNext(ref bindingTable))
@@ -749,7 +749,7 @@ public partial class QueryExecutor
                 : null;
 
             var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, levelFilters);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, levelFilters, _buffer.Prefixes);
             try
             {
                 while (multiScan.MoveNext(ref bindingTable))
@@ -965,7 +965,7 @@ public partial class QueryExecutor
             {
                 // Multiple patterns - use MultiPatternScan with filter pushdown
                 var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, levelFilters);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, levelFilters, _buffer.Prefixes);
                 try
                 {
                     while (multiScan.MoveNext(ref bindingTable))

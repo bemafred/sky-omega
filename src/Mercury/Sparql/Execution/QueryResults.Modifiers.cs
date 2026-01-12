@@ -273,7 +273,10 @@ public ref partial struct QueryResults
         // Collect all results using the streaming approach
         while (MoveNextUnorderedForCollection())
         {
-            // Build group key from GROUP BY variables
+            // Evaluate GROUP BY expressions and bind results to alias variables
+            EvaluateGroupByExpressions();
+
+            // Build group key from GROUP BY variables/aliases
             var keyBuilder = new System.Text.StringBuilder();
             for (int i = 0; i < _groupBy.Count; i++)
             {
@@ -297,7 +300,10 @@ public ref partial struct QueryResults
 
             // Update aggregates for this group
             group.UpdateAggregates(_bindingTable, sourceStr);
-            _bindingTable.Clear();
+            // Note: Do NOT call _bindingTable.Clear() here!
+            // The scan manages its own binding state via TruncateTo() for backtracking.
+            // Calling Clear() resets _stringOffset to 0, corrupting string data that
+            // the scan's stored _bindingCountN values still reference.
         }
 
         // Finalize aggregates (e.g., compute AVG from sum/count) and apply HAVING filter
@@ -475,6 +481,50 @@ public ref partial struct QueryResults
                 sb.Append(char.ToUpperInvariant(c));
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Evaluate GROUP BY expressions and bind results to alias variables.
+    /// E.g., for GROUP BY ((?O1 + ?O2) AS ?O12), evaluates (?O1 + ?O2) and binds to ?O12.
+    /// </summary>
+    private void EvaluateGroupByExpressions()
+    {
+        for (int i = 0; i < _groupBy.Count; i++)
+        {
+            if (!_groupBy.IsExpression(i))
+                continue; // Simple variable, already bound
+
+            var (aliasStart, aliasLen) = _groupBy.GetVariable(i);
+            var (exprStart, exprLen) = _groupBy.GetExpression(i);
+
+            var expr = _source.Slice(exprStart, exprLen);
+            var aliasVar = _source.Slice(aliasStart, aliasLen);
+
+            // Evaluate the expression using existing bindings
+            var evaluator = new BindExpressionEvaluator(expr,
+                _bindingTable.GetBindings(),
+                _bindingTable.Count,
+                _bindingTable.GetStringBuffer());
+            var value = evaluator.Evaluate();
+
+            // Bind the result to the alias variable
+            switch (value.Type)
+            {
+                case ValueType.Integer:
+                    _bindingTable.Bind(aliasVar, value.IntegerValue);
+                    break;
+                case ValueType.Double:
+                    _bindingTable.Bind(aliasVar, value.DoubleValue);
+                    break;
+                case ValueType.Boolean:
+                    _bindingTable.Bind(aliasVar, value.BooleanValue);
+                    break;
+                case ValueType.String:
+                case ValueType.Uri:
+                    _bindingTable.Bind(aliasVar, value.StringValue);
+                    break;
+            }
+        }
     }
 
     /// <summary>

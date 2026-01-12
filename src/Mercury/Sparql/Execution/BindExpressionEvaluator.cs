@@ -428,8 +428,23 @@ internal ref struct BindExpressionEvaluator
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double TryParseNumber(ReadOnlySpan<char> s)
     {
+        // Try parsing directly first (for plain numbers)
         if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var result))
             return result;
+
+        // Handle typed literals like "0"^^<http://www.w3.org/2001/XMLSchema#integer>
+        // Extract the lexical value between quotes
+        if (s.Length > 2 && s[0] == '"')
+        {
+            var endQuote = s.Slice(1).IndexOf('"');
+            if (endQuote > 0)
+            {
+                var lexicalValue = s.Slice(1, endQuote);
+                if (double.TryParse(lexicalValue, NumberStyles.Float, CultureInfo.InvariantCulture, out result))
+                    return result;
+            }
+        }
+
         return double.NaN;
     }
 

@@ -37,17 +37,90 @@ public struct Query
 
 public struct Prologue
 {
-    private const int MaxPrefixes = 32;
+    public const int MaxPrefixes = 32;
     private int _prefixCount;
-    private unsafe fixed byte _prefixData[2048]; // Inline storage
+
+    // Store prefixes as start/length pairs into source string
+    // Each prefix entry: (prefixStart, prefixLength, iriStart, iriLength)
+    private int _p0s, _p0l, _i0s, _i0l;
+    private int _p1s, _p1l, _i1s, _i1l;
+    private int _p2s, _p2l, _i2s, _i2l;
+    private int _p3s, _p3l, _i3s, _i3l;
+    private int _p4s, _p4l, _i4s, _i4l;
+    private int _p5s, _p5l, _i5s, _i5l;
+    private int _p6s, _p6l, _i6s, _i6l;
+    private int _p7s, _p7l, _i7s, _i7l;
+    private int _p8s, _p8l, _i8s, _i8l;
+    private int _p9s, _p9l, _i9s, _i9l;
+    private int _p10s, _p10l, _i10s, _i10l;
+    private int _p11s, _p11l, _i11s, _i11l;
+    private int _p12s, _p12l, _i12s, _i12l;
+    private int _p13s, _p13l, _i13s, _i13l;
+    private int _p14s, _p14l, _i14s, _i14l;
+    private int _p15s, _p15l, _i15s, _i15l;
 
     public int BaseUriStart;   // Start offset in source span
     public int BaseUriLength;  // Length in source span
 
+    public readonly int PrefixCount => _prefixCount;
+
     public void AddPrefix(ReadOnlySpan<char> prefix, ReadOnlySpan<char> iri)
     {
-        // Store prefixes in inline buffer
+        // This overload doesn't work well - we need start/length pairs
+        // For now, just count - this will be fixed by AddPrefixRange
         _prefixCount++;
+    }
+
+    public void AddPrefixRange(int prefixStart, int prefixLength, int iriStart, int iriLength)
+    {
+        if (_prefixCount >= MaxPrefixes)
+            throw new SparqlParseException("Too many prefix declarations (max 32)");
+
+        switch (_prefixCount)
+        {
+            case 0: _p0s = prefixStart; _p0l = prefixLength; _i0s = iriStart; _i0l = iriLength; break;
+            case 1: _p1s = prefixStart; _p1l = prefixLength; _i1s = iriStart; _i1l = iriLength; break;
+            case 2: _p2s = prefixStart; _p2l = prefixLength; _i2s = iriStart; _i2l = iriLength; break;
+            case 3: _p3s = prefixStart; _p3l = prefixLength; _i3s = iriStart; _i3l = iriLength; break;
+            case 4: _p4s = prefixStart; _p4l = prefixLength; _i4s = iriStart; _i4l = iriLength; break;
+            case 5: _p5s = prefixStart; _p5l = prefixLength; _i5s = iriStart; _i5l = iriLength; break;
+            case 6: _p6s = prefixStart; _p6l = prefixLength; _i6s = iriStart; _i6l = iriLength; break;
+            case 7: _p7s = prefixStart; _p7l = prefixLength; _i7s = iriStart; _i7l = iriLength; break;
+            case 8: _p8s = prefixStart; _p8l = prefixLength; _i8s = iriStart; _i8l = iriLength; break;
+            case 9: _p9s = prefixStart; _p9l = prefixLength; _i9s = iriStart; _i9l = iriLength; break;
+            case 10: _p10s = prefixStart; _p10l = prefixLength; _i10s = iriStart; _i10l = iriLength; break;
+            case 11: _p11s = prefixStart; _p11l = prefixLength; _i11s = iriStart; _i11l = iriLength; break;
+            case 12: _p12s = prefixStart; _p12l = prefixLength; _i12s = iriStart; _i12l = iriLength; break;
+            case 13: _p13s = prefixStart; _p13l = prefixLength; _i13s = iriStart; _i13l = iriLength; break;
+            case 14: _p14s = prefixStart; _p14l = prefixLength; _i14s = iriStart; _i14l = iriLength; break;
+            case 15: _p15s = prefixStart; _p15l = prefixLength; _i15s = iriStart; _i15l = iriLength; break;
+            default: throw new SparqlParseException("Too many prefix declarations (max 16)");
+        }
+        _prefixCount++;
+    }
+
+    public readonly (int PrefixStart, int PrefixLength, int IriStart, int IriLength) GetPrefix(int index)
+    {
+        return index switch
+        {
+            0 => (_p0s, _p0l, _i0s, _i0l),
+            1 => (_p1s, _p1l, _i1s, _i1l),
+            2 => (_p2s, _p2l, _i2s, _i2l),
+            3 => (_p3s, _p3l, _i3s, _i3l),
+            4 => (_p4s, _p4l, _i4s, _i4l),
+            5 => (_p5s, _p5l, _i5s, _i5l),
+            6 => (_p6s, _p6l, _i6s, _i6l),
+            7 => (_p7s, _p7l, _i7s, _i7l),
+            8 => (_p8s, _p8l, _i8s, _i8l),
+            9 => (_p9s, _p9l, _i9s, _i9l),
+            10 => (_p10s, _p10l, _i10s, _i10l),
+            11 => (_p11s, _p11l, _i11s, _i11l),
+            12 => (_p12s, _p12l, _i12s, _i12l),
+            13 => (_p13s, _p13l, _i13s, _i13l),
+            14 => (_p14s, _p14l, _i14s, _i14l),
+            15 => (_p15s, _p15l, _i15s, _i15l),
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
     }
 }
 
@@ -1159,32 +1232,55 @@ public struct GroupByClause
     public const int MaxVariables = 8;
     private int _count;
 
-    // Inline storage for up to 8 grouping variables (start, length pairs)
+    // Inline storage for up to 8 grouping variables/aliases (start, length pairs)
     private int _v0Start, _v0Len, _v1Start, _v1Len, _v2Start, _v2Len, _v3Start, _v3Len;
     private int _v4Start, _v4Len, _v5Start, _v5Len, _v6Start, _v6Len, _v7Start, _v7Len;
+
+    // Inline storage for up to 8 grouping expressions (start, length pairs)
+    // When expression length is 0, the entry is a simple variable; otherwise it's an expression with alias
+    private int _e0Start, _e0Len, _e1Start, _e1Len, _e2Start, _e2Len, _e3Start, _e3Len;
+    private int _e4Start, _e4Len, _e5Start, _e5Len, _e6Start, _e6Len, _e7Start, _e7Len;
 
     public readonly int Count => _count;
     public readonly bool HasGroupBy => _count > 0;
 
+    /// <summary>
+    /// Add a simple variable to GROUP BY (e.g., GROUP BY ?x).
+    /// </summary>
     public void AddVariable(int start, int length)
+    {
+        AddExpression(start, length, 0, 0);
+    }
+
+    /// <summary>
+    /// Add an expression with alias to GROUP BY (e.g., GROUP BY ((?O1 + ?O2) AS ?O12)).
+    /// </summary>
+    /// <param name="aliasStart">Start of alias variable (e.g., ?O12)</param>
+    /// <param name="aliasLength">Length of alias variable</param>
+    /// <param name="exprStart">Start of expression (e.g., (?O1 + ?O2))</param>
+    /// <param name="exprLength">Length of expression</param>
+    public void AddExpression(int aliasStart, int aliasLength, int exprStart, int exprLength)
     {
         if (_count >= MaxVariables)
             throw new SparqlParseException("Too many GROUP BY variables (max 8)");
 
         switch (_count)
         {
-            case 0: _v0Start = start; _v0Len = length; break;
-            case 1: _v1Start = start; _v1Len = length; break;
-            case 2: _v2Start = start; _v2Len = length; break;
-            case 3: _v3Start = start; _v3Len = length; break;
-            case 4: _v4Start = start; _v4Len = length; break;
-            case 5: _v5Start = start; _v5Len = length; break;
-            case 6: _v6Start = start; _v6Len = length; break;
-            case 7: _v7Start = start; _v7Len = length; break;
+            case 0: _v0Start = aliasStart; _v0Len = aliasLength; _e0Start = exprStart; _e0Len = exprLength; break;
+            case 1: _v1Start = aliasStart; _v1Len = aliasLength; _e1Start = exprStart; _e1Len = exprLength; break;
+            case 2: _v2Start = aliasStart; _v2Len = aliasLength; _e2Start = exprStart; _e2Len = exprLength; break;
+            case 3: _v3Start = aliasStart; _v3Len = aliasLength; _e3Start = exprStart; _e3Len = exprLength; break;
+            case 4: _v4Start = aliasStart; _v4Len = aliasLength; _e4Start = exprStart; _e4Len = exprLength; break;
+            case 5: _v5Start = aliasStart; _v5Len = aliasLength; _e5Start = exprStart; _e5Len = exprLength; break;
+            case 6: _v6Start = aliasStart; _v6Len = aliasLength; _e6Start = exprStart; _e6Len = exprLength; break;
+            case 7: _v7Start = aliasStart; _v7Len = aliasLength; _e7Start = exprStart; _e7Len = exprLength; break;
         }
         _count++;
     }
 
+    /// <summary>
+    /// Get the variable/alias at the given index.
+    /// </summary>
     public readonly (int Start, int Length) GetVariable(int index)
     {
         return index switch
@@ -1199,6 +1295,34 @@ public struct GroupByClause
             7 => (_v7Start, _v7Len),
             _ => throw new ArgumentOutOfRangeException(nameof(index))
         };
+    }
+
+    /// <summary>
+    /// Get the expression at the given index. Returns (0, 0) for simple variables.
+    /// </summary>
+    public readonly (int Start, int Length) GetExpression(int index)
+    {
+        return index switch
+        {
+            0 => (_e0Start, _e0Len),
+            1 => (_e1Start, _e1Len),
+            2 => (_e2Start, _e2Len),
+            3 => (_e3Start, _e3Len),
+            4 => (_e4Start, _e4Len),
+            5 => (_e5Start, _e5Len),
+            6 => (_e6Start, _e6Len),
+            7 => (_e7Start, _e7Len),
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+    }
+
+    /// <summary>
+    /// Returns true if the entry at the given index is an expression with alias.
+    /// </summary>
+    public readonly bool IsExpression(int index)
+    {
+        var (_, len) = GetExpression(index);
+        return len > 0;
     }
 }
 

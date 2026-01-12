@@ -169,7 +169,7 @@ public ref partial struct QueryResults
                     unionPattern.AddPattern(SlotToTriplePattern(patterns[i]));
                 }
             }
-            _unionMultiScan = new MultiPatternScan(_store, _source, unionPattern, unionMode: false);
+            _unionMultiScan = new MultiPatternScan(_store, _source, unionPattern, unionMode: false, default, _buffer?.Prefixes);
             _unionIsMultiPattern = true;
             return true;
         }

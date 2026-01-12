@@ -286,10 +286,20 @@ public ref partial struct SparqlParser
     {
         ConsumeKeyword("PREFIX");
         SkipWhitespace();
-        var prefix = ParsePnameNs();
+
+        // Track prefix position
+        var prefixStart = _position;
+        ParsePnameNs();
+        var prefixLength = _position - prefixStart;
+
         SkipWhitespace();
-        var iri = ParseIriRef();
-        prologue.AddPrefix(prefix, iri);
+
+        // Track IRI position
+        var iriStart = _position;
+        ParseIriRef();
+        var iriLength = _position - iriStart;
+
+        prologue.AddPrefixRange(prefixStart, prefixLength, iriStart, iriLength);
     }
 
     /// <summary>
@@ -326,6 +336,7 @@ public ref partial struct SparqlParser
     /// Try to parse a triple pattern (subject predicate object)
     /// Supports property paths in the predicate position.
     /// Expands SPARQL-star quoted triples to reification patterns.
+    /// Handles semicolon-separated predicate-object lists: ?s :p1 ?o1; :p2 ?o2
     /// </summary>
     private bool TryParseTriplePattern(ref GraphPattern pattern)
     {
@@ -347,16 +358,62 @@ public ref partial struct SparqlParser
         SkipWhitespace();
         var obj = ParseTerm();
 
+        // Add the first pattern
+        AddTriplePatternOrExpand(ref pattern, subject, predicate, obj, path);
+
+        // Handle semicolon-separated predicate-object lists (same subject)
+        // Grammar: PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
+        SkipWhitespace();
+        while (Peek() == ';')
+        {
+            Advance(); // Skip ';'
+            SkipWhitespace();
+
+            // Check for empty predicate-object after semicolon (valid: "?s :p ?o ;")
+            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                break;
+
+            // Check for keywords that indicate end of property list
+            var span = PeekSpan(8);
+            if ((span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase)) ||
+                (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase)) ||
+                (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase)) ||
+                (span.Length >= 4 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase)) ||
+                (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase)) ||
+                (span.Length >= 7 && span[..7].Equals("SERVICE", StringComparison.OrdinalIgnoreCase)) ||
+                (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase)))
+                break;
+
+            // Parse next predicate-object pair with same subject
+            var (nextPredicate, nextPath) = ParsePredicateOrPath();
+            SkipWhitespace();
+            var nextObj = ParseTerm();
+
+            AddTriplePatternOrExpand(ref pattern, subject, nextPredicate, nextObj, nextPath);
+
+            SkipWhitespace();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Add a triple pattern, handling quoted triples and sequence paths.
+    /// </summary>
+    private void AddTriplePatternOrExpand(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
+    {
         // Check if subject or object is a quoted triple - if so, expand to reification patterns
         if (subject.IsQuotedTriple || obj.IsQuotedTriple)
         {
-            return ExpandQuotedTriplePattern(ref pattern, subject, predicate, obj, path);
+            ExpandQuotedTriplePattern(ref pattern, subject, predicate, obj, path);
+            return;
         }
 
         // Check for sequence path - expand to multiple patterns with intermediate variables
         if (path.Type == PathType.Sequence)
         {
-            return ExpandSequencePath(ref pattern, subject, obj, path);
+            ExpandSequencePath(ref pattern, subject, obj, path);
+            return;
         }
 
         pattern.AddPattern(new TriplePattern
@@ -366,8 +423,6 @@ public ref partial struct SparqlParser
             Object = obj,
             Path = path
         });
-
-        return true;
     }
 
     /// <summary>
@@ -756,10 +811,16 @@ public ref partial struct SparqlParser
             return ParseTermIriRef();
         }
 
-        // Prefixed name: prefix:local
+        // Prefixed name: prefix:local or :local (empty prefix)
         if (IsLetter(ch))
         {
             return ParsePrefixedNameOrKeyword();
+        }
+
+        // Empty prefix: :local (starts with colon)
+        if (ch == ':')
+        {
+            return ParseEmptyPrefixName();
         }
 
         // Literal: "string" or 'string'
@@ -919,6 +980,28 @@ public ref partial struct SparqlParser
         }
 
         // Treat as bare word (error in strict parsing, but we'll be lenient)
+        return Term.Iri(start, _position - start);
+    }
+
+    /// <summary>
+    /// Parse a prefixed name with empty prefix: :local
+    /// </summary>
+    private Term ParseEmptyPrefixName()
+    {
+        var start = _position;
+
+        // Skip ':'
+        Advance();
+
+        // Read local part
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+        {
+            // Don't include trailing dot
+            if (Peek() == '.' && !IsLetterOrDigit(PeekAt(1)))
+                break;
+            Advance();
+        }
+
         return Term.Iri(start, _position - start);
     }
 
@@ -1264,26 +1347,121 @@ public ref partial struct SparqlParser
     {
         var clause = new GroupByClause();
 
-        // Parse one or more grouping variables
+        // Parse one or more grouping variables or expressions
         while (!IsAtEnd() && clause.Count < GroupByClause.MaxVariables)
         {
             SkipWhitespace();
 
-            // Check for variable
-            if (Peek() != '?')
-                break;
-
-            var start = _position;
-            Advance(); // Skip '?'
-
-            // Parse variable name
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                Advance();
-
-            var length = _position - start;
-            if (length > 1) // Must have at least one character after '?'
+            // Check for expression with alias: (expr AS ?var)
+            if (Peek() == '(')
             {
-                clause.AddVariable(start, length);
+                var exprStart = _position;
+                Advance(); // Skip opening '('
+                SkipWhitespace();
+
+                // Find the matching closing paren and AS keyword
+                // The expression is everything between the opening ( and AS
+                int depth = 1;
+                int asPosition = -1;
+
+                // Scan for AS keyword at depth 1
+                while (!IsAtEnd() && depth > 0)
+                {
+                    var c = Peek();
+                    if (c == '(')
+                    {
+                        depth++;
+                        Advance();
+                    }
+                    else if (c == ')')
+                    {
+                        depth--;
+                        if (depth > 0) Advance();
+                    }
+                    else if (depth == 1 && (c == 'A' || c == 'a'))
+                    {
+                        // Check for AS keyword
+                        var peek = PeekSpan(3);
+                        if (peek.Length >= 2 &&
+                            (peek[0] == 'A' || peek[0] == 'a') &&
+                            (peek[1] == 'S' || peek[1] == 's') &&
+                            (peek.Length < 3 || !IsLetterOrDigit(peek[2])))
+                        {
+                            asPosition = _position;
+                            ConsumeKeyword("AS");
+                            break;
+                        }
+                        else
+                        {
+                            Advance();
+                        }
+                    }
+                    else
+                    {
+                        Advance();
+                    }
+                }
+
+                if (asPosition < 0)
+                {
+                    throw new SparqlParseException("Expected AS in GROUP BY expression");
+                }
+
+                // The inner expression is from after ( to before AS (trim whitespace)
+                var innerExprStart = exprStart + 1;
+                var innerExprEnd = asPosition;
+                while (innerExprEnd > innerExprStart && char.IsWhiteSpace(_source[innerExprEnd - 1]))
+                    innerExprEnd--;
+                while (innerExprStart < innerExprEnd && char.IsWhiteSpace(_source[innerExprStart]))
+                    innerExprStart++;
+
+                var innerExprLength = innerExprEnd - innerExprStart;
+
+                // Now parse the alias variable
+                SkipWhitespace();
+                if (Peek() != '?')
+                {
+                    throw new SparqlParseException("Expected variable after AS in GROUP BY expression");
+                }
+
+                var aliasStart = _position;
+                Advance(); // Skip '?'
+
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+
+                var aliasLength = _position - aliasStart;
+
+                SkipWhitespace();
+
+                // Expect closing )
+                if (Peek() != ')')
+                {
+                    throw new SparqlParseException("Expected closing ) in GROUP BY expression");
+                }
+                Advance(); // Skip closing ')'
+
+                clause.AddExpression(aliasStart, aliasLength, innerExprStart, innerExprLength);
+            }
+            // Check for simple variable
+            else if (Peek() == '?')
+            {
+                var start = _position;
+                Advance(); // Skip '?'
+
+                // Parse variable name
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+
+                var length = _position - start;
+                if (length > 1) // Must have at least one character after '?'
+                {
+                    clause.AddVariable(start, length);
+                }
+            }
+            else
+            {
+                break;
             }
 
             SkipWhitespace();

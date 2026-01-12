@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -128,17 +129,22 @@ internal ref struct TriplePatternScan
     // State for alternative path traversal (p1|p2)
     private int _alternativePhase; // 0 = first predicate, 1 = second predicate
 
+    // Prefix mappings for expansion
+    private readonly PrefixMapping[]? _prefixes;
+    private char[]? _expandBuffer;  // Buffer for expanded IRIs
+
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
         : this(store, source, pattern, initialBindings, graph,
-               TemporalQueryMode.Current, default, default, default)
+               TemporalQueryMode.Current, default, default, default, null)
     {
     }
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
-        DateTimeOffset rangeStart, DateTimeOffset rangeEnd)
+        DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
+        PrefixMapping[]? prefixes = null)
     {
         _store = store;
         _source = source;
@@ -169,6 +175,9 @@ internal ref struct TriplePatternScan
         _startNode = null;
         _emittedReflexive = false;
         _alternativePhase = 0;
+
+        _prefixes = prefixes;
+        _expandBuffer = null;
     }
 
     public bool MoveNext(ref BindingTable bindings)
@@ -436,7 +445,51 @@ internal ref struct TriplePatternScan
         }
 
         // IRIs and literals use their source text
-        return _source.Slice(term.Start, term.Length);
+        var termSpan = _source.Slice(term.Start, term.Length);
+
+        // Check if this is a prefixed name that needs expansion
+        if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
+        {
+            // Find the colon that separates prefix from local name
+            var colonIdx = termSpan.IndexOf(':');
+            if (colonIdx >= 0)
+            {
+                var prefix = termSpan.Slice(0, colonIdx + 1); // Include colon
+                var localName = termSpan.Slice(colonIdx + 1);
+
+                // Look up prefix in mappings
+                for (int i = 0; i < _prefixes.Length; i++)
+                {
+                    var mapping = _prefixes[i];
+                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+                    if (prefix.SequenceEqual(mappedPrefix))
+                    {
+                        // Found matching prefix - expand to full IRI
+                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+
+                        // iriNs is like <http://example.org/>, we need to replace the > with local name >
+                        // Result: <http://example.org/localName>
+                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1); // Remove trailing >
+
+                        // Allocate buffer if needed
+                        _expandBuffer ??= new char[512];
+
+                        var totalLen = nsWithoutClose.Length + localName.Length + 1; // +1 for closing >
+                        if (totalLen > _expandBuffer.Length)
+                            _expandBuffer = new char[totalLen * 2];
+
+                        nsWithoutClose.CopyTo(_expandBuffer);
+                        localName.CopyTo(_expandBuffer.AsSpan(nsWithoutClose.Length));
+                        _expandBuffer[totalLen - 1] = '>';
+
+                        return _expandBuffer.AsSpan(0, totalLen);
+                    }
+                }
+            }
+        }
+
+        return termSpan;
     }
 
     /// <summary>
@@ -531,6 +584,10 @@ internal ref struct MultiPatternScan
     private readonly DateTimeOffset _rangeStart;
     private readonly DateTimeOffset _rangeEnd;
 
+    // Prefix expansion support
+    private readonly PrefixMapping[]? _prefixes;
+    private char[]? _expandBuffer;
+
     // Current state for each pattern level (support up to 12 patterns for SPARQL-star with multiple annotations)
     private TemporalResultEnumerator _enum0;
     private TemporalResultEnumerator _enum1;
@@ -575,9 +632,9 @@ internal ref struct MultiPatternScan
     private bool _hasPushedFilters;
 
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
-        bool unionMode = false, ReadOnlySpan<char> graph = default)
+        bool unionMode = false, ReadOnlySpan<char> graph = default, PrefixMapping[]? prefixes = null)
         : this(store, source, pattern, unionMode, graph,
-               TemporalQueryMode.Current, default, default, default, null, null)
+               TemporalQueryMode.Current, default, default, default, null, null, prefixes)
     {
     }
 
@@ -585,7 +642,8 @@ internal ref struct MultiPatternScan
         bool unionMode, ReadOnlySpan<char> graph,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
         DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
-        int[]? patternOrder = null, List<int>[]? levelFilters = null)
+        int[]? patternOrder = null, List<int>[]? levelFilters = null,
+        PrefixMapping[]? prefixes = null)
     {
         _store = store;
         _source = source;
@@ -597,6 +655,8 @@ internal ref struct MultiPatternScan
         _asOfTime = asOfTime;
         _rangeStart = rangeStart;
         _rangeEnd = rangeEnd;
+        _prefixes = prefixes;
+        _expandBuffer = null;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _init4 = _init5 = _init6 = _init7 = false;
@@ -1204,7 +1264,53 @@ internal ref struct MultiPatternScan
         }
 
         if (!term.IsVariable)
-            return _source.Slice(term.Start, term.Length);
+        {
+            var termSpan = _source.Slice(term.Start, term.Length);
+
+            // Check if this is a prefixed name that needs expansion
+            if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
+            {
+                var colonIdx = termSpan.IndexOf(':');
+                if (colonIdx >= 0)
+                {
+                    var prefix = termSpan.Slice(0, colonIdx + 1);
+                    var localName = termSpan.Slice(colonIdx + 1);
+
+                    for (int i = 0; i < _prefixes.Length; i++)
+                    {
+                        var mapping = _prefixes[i];
+                        var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+                        if (prefix.SequenceEqual(mappedPrefix))
+                        {
+                            // Found matching prefix - expand to full IRI
+                            var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+
+                            // IRI namespace is like <http://example.org/> - we need to strip angle brackets and append local name
+                            var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1); // Remove trailing >
+
+                            _expandBuffer ??= new char[512];
+                            int pos = 0;
+
+                            // Copy namespace (without closing >)
+                            for (int j = 0; j < nsWithoutClose.Length; j++)
+                                _expandBuffer[pos++] = nsWithoutClose[j];
+
+                            // Copy local name
+                            for (int j = 0; j < localName.Length; j++)
+                                _expandBuffer[pos++] = localName[j];
+
+                            // Add closing bracket
+                            _expandBuffer[pos++] = '>';
+
+                            return new ReadOnlySpan<char>(_expandBuffer, 0, pos);
+                        }
+                    }
+                }
+            }
+
+            return termSpan;
+        }
 
         var name = _source.Slice(term.Start, term.Length);
         var index = bindings.FindBinding(name);
