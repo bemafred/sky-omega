@@ -321,8 +321,12 @@ public ref partial struct QueryResults
                 }
 
                 // Evaluate HAVING expression
+                // HAVING can reference aggregates by alias (e.g., ?count > 2) OR by expression (e.g., COUNT(?x) > 2)
+                // Substitute aggregate expressions with their computed values before evaluation
                 var havingExpr = _source.Slice(_having.ExpressionStart, _having.ExpressionLength);
-                var evaluator = new FilterEvaluator(havingExpr);
+                var substitutedExpr = SubstituteAggregatesInHaving(havingExpr, group, sourceStr);
+
+                var evaluator = new FilterEvaluator(substitutedExpr.AsSpan());
                 if (!evaluator.Evaluate(_bindingTable.GetBindings(), _bindingTable.Count, _bindingTable.GetStringBuffer()))
                     continue; // Skip this group - doesn't match HAVING
             }
@@ -334,6 +338,143 @@ public ref partial struct QueryResults
         _groupedIndex = -1;
         _skipped = 0;
         _returned = 0;
+    }
+
+    /// <summary>
+    /// Substitute aggregate expressions in HAVING clause with their computed values.
+    /// E.g., "COUNT(?O) > 2" becomes "5 > 2" where 5 is the computed COUNT value.
+    /// </summary>
+    private string SubstituteAggregatesInHaving(ReadOnlySpan<char> havingExpr, GroupedRow group, string source)
+    {
+        var expr = havingExpr.ToString();
+
+        // Match aggregate patterns and substitute with computed values
+        // Patterns: COUNT(*), COUNT(?var), SUM(?var), AVG(?var), MIN(?var), MAX(?var), SAMPLE(?var), GROUP_CONCAT(?var)
+        var aggregateFunctions = new[] { "COUNT", "SUM", "AVG", "MIN", "MAX", "SAMPLE", "GROUP_CONCAT" };
+
+        foreach (var funcName in aggregateFunctions)
+        {
+            int searchStart = 0;
+            while (true)
+            {
+                // Find the function name (case-insensitive)
+                int funcIdx = expr.IndexOf(funcName, searchStart, StringComparison.OrdinalIgnoreCase);
+                if (funcIdx < 0) break;
+
+                // Find opening paren
+                int parenStart = funcIdx + funcName.Length;
+                while (parenStart < expr.Length && char.IsWhiteSpace(expr[parenStart]))
+                    parenStart++;
+
+                if (parenStart >= expr.Length || expr[parenStart] != '(')
+                {
+                    searchStart = funcIdx + 1;
+                    continue;
+                }
+
+                // Find matching closing paren
+                int depth = 1;
+                int parenEnd = parenStart + 1;
+                while (parenEnd < expr.Length && depth > 0)
+                {
+                    if (expr[parenEnd] == '(') depth++;
+                    else if (expr[parenEnd] == ')') depth--;
+                    parenEnd++;
+                }
+                parenEnd--; // Back to the closing paren
+
+                // Extract the full aggregate expression: e.g., "COUNT(?O)" or "COUNT(*)"
+                var aggExpr = expr.Substring(funcIdx, parenEnd - funcIdx + 1);
+
+                // Find matching aggregate in the group by comparing with stored aggregates
+                string? computedValue = null;
+                for (int i = 0; i < group.AggregateCount; i++)
+                {
+                    // Get the aggregate's alias and look it up in the binding table
+                    var aliasHash = group.GetAggregateHash(i);
+                    var aliasValue = group.GetAggregateValue(i);
+
+                    // Check if this aggregate matches by comparing the function and variable
+                    // We need to match the aggregate expression from SelectClause
+                    var selectAgg = GetAggregateExpressionString(i, source);
+                    if (selectAgg != null && AggregateExpressionsMatch(aggExpr, selectAgg))
+                    {
+                        computedValue = aliasValue.ToString();
+                        break;
+                    }
+                }
+
+                if (computedValue != null)
+                {
+                    // Replace the aggregate expression with the computed value
+                    expr = expr.Substring(0, funcIdx) + computedValue + expr.Substring(parenEnd + 1);
+                    searchStart = funcIdx + computedValue.Length;
+                }
+                else
+                {
+                    searchStart = parenEnd + 1;
+                }
+            }
+        }
+
+        return expr;
+    }
+
+    /// <summary>
+    /// Get the string representation of an aggregate expression from the SELECT clause.
+    /// </summary>
+    private string? GetAggregateExpressionString(int index, string source)
+    {
+        if (_selectClause.AggregateCount <= index)
+            return null;
+
+        var agg = _selectClause.GetAggregate(index);
+        var funcName = agg.Function switch
+        {
+            AggregateFunction.Count => "COUNT",
+            AggregateFunction.Sum => "SUM",
+            AggregateFunction.Avg => "AVG",
+            AggregateFunction.Min => "MIN",
+            AggregateFunction.Max => "MAX",
+            AggregateFunction.Sample => "SAMPLE",
+            AggregateFunction.GroupConcat => "GROUP_CONCAT",
+            _ => null
+        };
+
+        if (funcName == null) return null;
+
+        // Build the expression string
+        if (agg.VariableLength == 0)
+        {
+            // COUNT(*) case
+            return agg.Distinct ? $"{funcName}(DISTINCT *)" : $"{funcName}(*)";
+        }
+
+        var variable = source.AsSpan(agg.VariableStart, agg.VariableLength).ToString();
+        return agg.Distinct ? $"{funcName}(DISTINCT {variable})" : $"{funcName}({variable})";
+    }
+
+    /// <summary>
+    /// Check if two aggregate expressions match (e.g., "COUNT(?O)" matches "COUNT(?O)").
+    /// Handles case-insensitivity and whitespace differences.
+    /// </summary>
+    private static bool AggregateExpressionsMatch(string expr1, string expr2)
+    {
+        // Normalize: remove whitespace, uppercase
+        var norm1 = NormalizeAggregateExpr(expr1);
+        var norm2 = NormalizeAggregateExpr(expr2);
+        return norm1.Equals(norm2, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeAggregateExpr(string expr)
+    {
+        var sb = new System.Text.StringBuilder(expr.Length);
+        foreach (var c in expr)
+        {
+            if (!char.IsWhiteSpace(c))
+                sb.Append(char.ToUpperInvariant(c));
+        }
+        return sb.ToString();
     }
 
     /// <summary>
