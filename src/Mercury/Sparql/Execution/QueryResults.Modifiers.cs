@@ -306,6 +306,18 @@ public ref partial struct QueryResults
             // the scan's stored _bindingCountN values still reference.
         }
 
+        // Handle implicit aggregation with empty result set:
+        // When there are aggregates but no GROUP BY and no matching rows,
+        // SPARQL requires returning one row with default aggregate values (0 for COUNT/AVG/SUM, etc.)
+        if (groups.Count == 0 && _selectClause.HasAggregates && !_groupBy.HasGroupBy)
+        {
+            // Create an empty group with default aggregate values
+            _bindingTable.Clear();
+            var emptyGroup = new GroupedRow(_groupBy, _selectClause, _bindingTable, sourceStr);
+            // Don't call UpdateAggregates - we want the default values (0)
+            groups[""] = emptyGroup;
+        }
+
         // Finalize aggregates (e.g., compute AVG from sum/count) and apply HAVING filter
         _groupedResults = new List<GroupedRow>(groups.Count);
         foreach (var group in groups.Values)

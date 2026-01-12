@@ -907,7 +907,8 @@ internal sealed class GroupedRow
                 if (idx >= 0)
                 {
                     valueStr = bindings.GetString(idx).ToString();
-                    hasNumValue = double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out numValue);
+                    // Use RDF-aware numeric parsing to handle typed literals like "1"^^<xsd:integer>
+                    hasNumValue = TryParseRdfNumeric(valueStr, out numValue);
                 }
                 else
                 {
@@ -996,6 +997,36 @@ internal sealed class GroupedRow
             hash *= 16777619;
         }
         return (int)hash;
+    }
+
+    /// <summary>
+    /// Try to parse a numeric value from an RDF literal string.
+    /// Handles formats: "42", "3.14", "1"^^&lt;xsd:integer&gt;, "2.0"^^&lt;xsd:decimal&gt;
+    /// </summary>
+    private static bool TryParseRdfNumeric(string str, out double result)
+    {
+        result = 0;
+
+        if (string.IsNullOrEmpty(str))
+            return false;
+
+        // Handle typed literals: "value"^^<datatype>
+        if (str.StartsWith('"'))
+        {
+            // Find end of quoted value - it's either ^^ (typed), @ (language), or closing quote
+            int endQuote = str.IndexOf('"', 1);
+            if (endQuote <= 0)
+                return false;
+
+            // Extract the value between quotes
+            var valueStr = str.AsSpan(1, endQuote - 1);
+
+            // Try to parse the value
+            return double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+        }
+
+        // Try direct numeric parse (for unquoted numbers in some formats)
+        return double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
     }
 }
 

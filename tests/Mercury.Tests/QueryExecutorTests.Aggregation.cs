@@ -443,6 +443,98 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
+    public void Execute_HavingWithAvgExpression()
+    {
+        // HAVING with aggregate expression (not alias) - tests SubstituteAggregatesInHaving
+        // This matches the W3C test agg-avg-02
+
+        // First add test data similar to W3C test
+        Store.AddCurrent("<http://ex.org/ints>", "<http://ex.org/val>", "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/ints>", "<http://ex.org/val>", "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/ints>", "<http://ex.org/val>", "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/mixed>", "<http://ex.org/val>", "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://ex.org/mixed>", "<http://ex.org/val>", "\"2.2\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        Store.AddCurrent("<http://ex.org/decimals>", "<http://ex.org/val>", "\"1.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        Store.AddCurrent("<http://ex.org/decimals>", "<http://ex.org/val>", "\"2.2\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        Store.AddCurrent("<http://ex.org/decimals>", "<http://ex.org/val>", "\"3.5\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+
+        // ints: AVG(1,2,3) = 2.0 - should be included (<= 2.0)
+        // mixed: AVG(1, 2.2) = 1.6 - should be included (<= 2.0)
+        // decimals: AVG(1.0, 2.2, 3.5) = 2.233... - should be excluded (> 2.0)
+
+        var query = "SELECT ?s (AVG(?o) AS ?avg) WHERE { ?s <http://ex.org/val> ?o } GROUP BY ?s HAVING (AVG(?o) <= 2.0)";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var avgIdx = results.Current.FindBinding("?avg".AsSpan());
+                Assert.True(sIdx >= 0, "Should have ?s binding");
+                Assert.True(avgIdx >= 0, "Should have ?avg binding");
+
+                var s = results.Current.GetString(sIdx).ToString();
+                var avg = results.Current.GetString(avgIdx).ToString();
+                groups[s] = avg;
+            }
+            results.Dispose();
+
+            // Only ints (AVG=2.0) and mixed (AVG=1.6) should match
+            Assert.Equal(2, groups.Count);
+            Assert.True(groups.ContainsKey("<http://ex.org/ints>"), "Should include ints (AVG=2.0)");
+            Assert.True(groups.ContainsKey("<http://ex.org/mixed>"), "Should include mixed (AVG=1.6)");
+            Assert.False(groups.ContainsKey("<http://ex.org/decimals>"), "Should exclude decimals (AVG=2.233)");
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_AvgWithEmptyResult()
+    {
+        // AVG with empty group (no matching rows) should return 0
+        // This matches W3C test agg-avg-03
+        var query = "SELECT (AVG(?o) AS ?avg) WHERE { ?s <http://nonexistent/predicate> ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            int count = 0;
+            string? avgValue = null;
+            while (results.MoveNext())
+            {
+                count++;
+                var avgIdx = results.Current.FindBinding("?avg".AsSpan());
+                Assert.True(avgIdx >= 0, "Should have ?avg binding");
+                avgValue = results.Current.GetString(avgIdx).ToString();
+            }
+            results.Dispose();
+
+            // Should return exactly one row with AVG = 0
+            Assert.Equal(1, count);
+            Assert.Equal("0", avgValue);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     // ========== GROUP_CONCAT Tests ==========
 
     [Fact]
