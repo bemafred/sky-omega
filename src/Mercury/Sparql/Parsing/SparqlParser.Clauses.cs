@@ -1077,6 +1077,16 @@ public ref partial struct SparqlParser
     /// </summary>
     private void ParseSubSelectPatterns(ref SubSelect subSelect)
     {
+        SkipWhitespace();
+
+        // Check for UNION structure: { pattern } UNION { pattern }
+        if (Peek() == '{')
+        {
+            ParseSubSelectGroupOrUnion(ref subSelect);
+            return;
+        }
+
+        // Otherwise parse regular triple patterns
         while (!IsAtEnd() && Peek() != '}')
         {
             SkipWhitespace();
@@ -1099,6 +1109,143 @@ public ref partial struct SparqlParser
             if (Peek() == '.')
                 Advance();
         }
+    }
+
+    /// <summary>
+    /// Parse { pattern } UNION { pattern } UNION ... structure inside a subquery.
+    /// </summary>
+    private void ParseSubSelectGroupOrUnion(ref SubSelect subSelect)
+    {
+        // Parse first nested group
+        ParseSubSelectNestedGroup(ref subSelect);
+
+        SkipWhitespace();
+
+        // Check for UNION keyword
+        var span = PeekSpan(5);
+        if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("UNION");
+            SkipWhitespace();
+
+            // Mark where UNION patterns start
+            subSelect.HasUnion = true;
+            subSelect.UnionStartIndex = subSelect.PatternCount;
+
+            // Parse remaining UNION branches
+            while (true)
+            {
+                ParseSubSelectNestedGroup(ref subSelect);
+                SkipWhitespace();
+
+                // Check for another UNION
+                span = PeekSpan(5);
+                if (span.Length >= 5 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsumeKeyword("UNION");
+                    SkipWhitespace();
+                    continue;
+                }
+
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parse a nested { } group inside a subquery.
+    /// </summary>
+    private void ParseSubSelectNestedGroup(ref SubSelect subSelect)
+    {
+        SkipWhitespace();
+        if (Peek() != '{')
+            throw new SparqlParseException("Expected '{' for nested group pattern");
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside the nested group
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseSubSelectFilter(ref subSelect);
+                continue;
+            }
+
+            // Check for GRAPH
+            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseSubSelectGraph(ref subSelect);
+                continue;
+            }
+
+            // Parse triple pattern
+            if (!TryParseSubSelectTriplePattern(ref subSelect))
+                break;
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse GRAPH clause inside a subquery.
+    /// </summary>
+    private void ParseSubSelectGraph(ref SubSelect subSelect)
+    {
+        ConsumeKeyword("GRAPH");
+        SkipWhitespace();
+
+        // Parse graph IRI or variable
+        var graphTerm = ParseTerm();
+        SkipWhitespace();
+
+        // Expect { }
+        if (Peek() != '{')
+            throw new SparqlParseException("Expected '{' after GRAPH");
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside GRAPH block
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseSubSelectFilter(ref subSelect);
+                continue;
+            }
+
+            // Parse triple pattern (note: we're not tracking graph here - simplified for now)
+            if (!TryParseSubSelectTriplePattern(ref subSelect))
+                break;
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
     }
 
     /// <summary>

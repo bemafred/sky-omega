@@ -1076,12 +1076,18 @@ public struct SubSelect
     public int Offset;
     public OrderByClause OrderBy;
 
+    // UNION support
+    public bool HasUnion;
+    public int UnionStartIndex;  // Index of first pattern in union branch
+
     public readonly int ProjectedVarCount => _projectedVarCount;
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
     public readonly bool HasPatterns => _patternCount > 0;
     public readonly bool HasFilters => _filterCount > 0;
     public readonly bool HasOrderBy => OrderBy.HasOrderBy;
+    public readonly int FirstBranchPatternCount => HasUnion ? UnionStartIndex : PatternCount;
+    public readonly int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
 
     public void AddProjectedVariable(int start, int length)
     {

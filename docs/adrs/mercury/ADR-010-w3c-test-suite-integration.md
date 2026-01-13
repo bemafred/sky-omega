@@ -21,17 +21,17 @@ All test suites are maintained at [github.com/w3c/rdf-tests](https://github.com/
 
 ### Available Test Suites
 
-| Test Suite | Manifest Location | Mercury Component | Priority |
-|------------|-------------------|-------------------|----------|
-| N-Triples 1.2 | `rdf/rdf12/rdf-n-triples/` | `NTriplesStreamParser` | High |
-| N-Quads 1.2 | `rdf/rdf12/rdf-n-quads/` | `NQuadsStreamParser` | High |
-| Turtle 1.2 | `rdf/rdf12/rdf-turtle/` | `TurtleStreamParser` | High |
-| TriG 1.2 | `rdf/rdf12/rdf-trig/` | `TriGStreamParser` | High |
-| RDF/XML 1.1 | `rdf/rdf11/rdf-xml/` | `RdfXmlStreamParser` | Medium |
-| SPARQL 1.1 Query | `sparql/sparql11/` | `SparqlParser`, `QueryExecutor` | Critical |
-| SPARQL 1.1 Update | `sparql/sparql11/` | `UpdateExecutor` | Critical |
-| RDF-star | [w3c/rdf-star](https://w3c.github.io/rdf-star/tests/) | SPARQL-star support | High |
-| JSON-LD 1.1 | [json-ld-api/tests](https://w3c.github.io/json-ld-api/tests/) | `JsonLdStreamParser` | Medium |
+| Test Suite        | Manifest Location                                                | Mercury Component               | Priority |
+|-------------------|:-----------------------------------------------------------------|---------------------------------|----------|
+| N-Triples 1.2     | `rdf/rdf12/rdf-n-triples/`                                       | `NTriplesStreamParser`          | High     |
+| N-Quads 1.2       | `rdf/rdf12/rdf-n-quads/`                                         | `NQuadsStreamParser`            | High     |
+| Turtle 1.2        | `rdf/rdf12/rdf-turtle/`                                          | `TurtleStreamParser`            | High     |
+| TriG 1.2          | `rdf/rdf12/rdf-trig/`                                            | `TriGStreamParser`              | High     |
+| RDF/XML 1.1       | `rdf/rdf11/rdf-xml/`                                             | `RdfXmlStreamParser`            | Medium   |
+| SPARQL 1.1 Query  | `sparql/sparql11/`                                               | `SparqlParser`, `QueryExecutor` | Critical |
+| SPARQL 1.1 Update | `sparql/sparql11/`                                               | `UpdateExecutor`                | Critical |
+| RDF-star          | [w3c/rdf-star](https://w3c.github.io/rdf-star/tests/)            | SPARQL-star support             | High     |
+| JSON-LD 1.1       | [json-ld-api/tests](https://w3c.github.io/json-ld-api/tests/)    | `JsonLdStreamParser`            | Medium   |
 
 ### Test Suite Structure
 
@@ -341,14 +341,14 @@ public static class W3CTestContext
 
 **Priority categories:**
 
-| Category | Test Count (approx) | Priority |
-|----------|---------------------|----------|
-| Aggregates | ~30 | High |
-| Property paths | ~40 | High |
-| Subquery | ~20 | High |
-| Functions | ~100 | Medium |
-| Update basic | ~30 | High |
-| Update silent | ~10 | Low |
+| Category       | Test Count (approx) | Priority |
+|----------------|---------------------|----------|
+| Aggregates     | ~30                 | High     |
+| Property paths | ~40                 | High     |
+| Subquery       | ~20                 | High     |
+| Functions      | ~100                | Medium   |
+| Update basic   | ~30                 | High     |
+| Update silent  | ~10                 | Low      |
 
 **Success criteria:**
 - [ ] Syntax tests: 100% pass rate
@@ -367,11 +367,12 @@ public static class W3CTestContext
 - [x] JSON-LD toRdf: 100% pass rate (461/461 applicable tests)
 
 **JSON-LD Current Status (January 2026):**
-| Metric | Value |
-|--------|-------|
-| Passed | 461 |
-| Failed | 0 |
-| Skipped | 6 |
+
+| Metric    | Value    |
+|-----------|----------|
+| Passed    | 461      |
+| Failed    | 0        |
+| Skipped   | 6        |
 | Pass Rate | **100%** |
 
 Skipped tests (out of scope - not JSON-LD 1.1 features):
@@ -461,9 +462,9 @@ Based on typical edge cases in W3C tests:
 | SPARQL Syntax (positive) | 100% | **100%** | 63/63 passed |
 | SPARQL Syntax (negative) | 100% | 25% | 10/40 passed (parser too permissive) |
 | SPARQL Query | >90% | - | In progress |
-| SPARQL Update | >85% | **99%** | 93/94 passed (1 skipped: nested subquery UNION) |
+| SPARQL Update | >85% | **100%** | 94/94 passed |
 | RDF-star | >90% | - | After Phase 4 |
-| **Total** | | **98%** | 1,538/1,565 (6 JSON-LD 1.0/generalized excluded) |
+| **Total** | | **99%** | 1,539/1,565 (6 JSON-LD 1.0/generalized excluded) |
 
 ### Documentation
 - [ ] Conformance report published with each release

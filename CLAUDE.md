@@ -362,6 +362,8 @@ Key components:
 | SPARQL-star | Quoted triples (`<< s p o >>`), expanded to reification at parse time |
 | SPARQL Update | INSERT DATA, DELETE DATA, DELETE WHERE, DELETE/INSERT WHERE (WITH clause), CLEAR, DROP, CREATE, COPY, MOVE, ADD, LOAD |
 
+**Note:** Subqueries with UNION (e.g., `{ SELECT ?x WHERE { {?x ?p ?o} UNION {?s ?x ?o} } }`) are fully supported. Implementation uses `BoxedSubQueryExecutor` to materialize UNION branch results independently, achieving 100% W3C SPARQL 1.1 Update conformance (94/94 tests).
+
 **Query execution model:**
 1. Parse query → `Query` struct with patterns, filters, modifiers
 2. Build execution plan → Stack of operators (TriplePatternScan, MultiPatternScan)

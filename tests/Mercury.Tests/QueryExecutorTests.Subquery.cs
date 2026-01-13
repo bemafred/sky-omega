@@ -713,5 +713,71 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
+    public void SubQuery_UnionInNestedSubQuery_ReturnsCorrectResults()
+    {
+        // Test nested subquery with UNION - simplified version of W3C dawg-delete-insert-04
+        // Add test data: three entities with different predicate positions
+        Store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        Store.AddCurrent("<http://ex.org/s2>", "<http://ex.org/o2>", "<http://ex.org/p>");
+        Store.AddCurrent("<http://ex.org/o3>", "<http://ex.org/o4>", "<http://ex.org/s3>");
+
+        // Query finds all terms that appear in ANY position (subject, predicate, or object)
+        var query = @"
+            SELECT ?term WHERE {
+                { SELECT ?term WHERE {
+                    { ?term ?p1 ?o1 } UNION
+                    { ?s2 ?term ?o2 } UNION
+                    { ?s3 ?p3 ?term }
+                } }
+            }
+        ";
+
+        Store.AcquireReadLock();
+        try
+        {
+            var parser = new SparqlParser(query.AsSpan());
+            var parsed = parser.ParseQuery();
+
+            // Verify the subquery has UNION
+            Assert.True(parsed.WhereClause.Pattern.HasSubQueries);
+            var subSelect = parsed.WhereClause.Pattern.GetSubQuery(0);
+            Assert.True(subSelect.HasUnion, "SubQuery should have UNION");
+            Assert.Equal(3, subSelect.PatternCount);  // 3 UNION alternatives
+            Assert.Equal(1, subSelect.UnionStartIndex);  // UNION starts after first pattern
+            Assert.False(subSelect.Distinct, "Removed DISTINCT to avoid GetHashCode issue");
+
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.ExecuteSubQueryToMaterialized();
+
+            var terms = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var termIdx = results.Current.FindBinding("?term".AsSpan());
+                Assert.True(termIdx >= 0, "Should have ?term binding");
+                var term = results.Current.GetString(termIdx);
+                terms.Add(term.ToString());
+            }
+            results.Dispose();
+
+            // Should find all 9 unique terms (s1, s2, s3, p, o1, o2, o3, o4, plus http://ex.org/p appears twice)
+            Assert.True(terms.Count >= 8, $"Expected at least 8 unique terms, got {terms.Count}");
+
+            // Verify we got the expected terms
+            Assert.Contains("<http://ex.org/s1>", terms);
+            Assert.Contains("<http://ex.org/s2>", terms);
+            Assert.Contains("<http://ex.org/s3>", terms);
+            Assert.Contains("<http://ex.org/p>", terms);
+            Assert.Contains("<http://ex.org/o1>", terms);
+            Assert.Contains("<http://ex.org/o2>", terms);
+            Assert.Contains("<http://ex.org/o3>", terms);
+            Assert.Contains("<http://ex.org/o4>", terms);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

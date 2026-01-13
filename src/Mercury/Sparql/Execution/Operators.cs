@@ -1677,30 +1677,122 @@ internal sealed class BoxedSubQueryExecutor
     private void MaterializeMultiPattern(ref BindingTable bindingTable, List<MaterializedRow> results,
         HashSet<int>? seenHashes, ref int skipped, ref int returned)
     {
-        // Build pattern on heap
-        var boxedPattern = new MultiPatternScan.BoxedPattern();
-        for (int i = 0; i < _subSelect.PatternCount; i++)
+        if (_subSelect.HasUnion)
         {
-            boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
+            // Execute UNION: first branch then union branch
+            MaterializeUnionBranches(ref bindingTable, results, seenHashes, ref skipped, ref returned);
         }
-
-        var source = _source.AsSpan();
-        var scan = new MultiPatternScan(_store, source, boxedPattern);
-        try
+        else
         {
-            while (scan.MoveNext(ref bindingTable))
+            // Build pattern on heap
+            var boxedPattern = new MultiPatternScan.BoxedPattern();
+            for (int i = 0; i < _subSelect.PatternCount; i++)
             {
-                if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
+            }
+
+            var source = _source.AsSpan();
+            var scan = new MultiPatternScan(_store, source, boxedPattern);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
                 {
-                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
-                        break;
+                    if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                    {
+                        if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            break;
+                    }
+                    bindingTable.Clear();
                 }
-                bindingTable.Clear();
+            }
+            finally
+            {
+                scan.Dispose();
             }
         }
-        finally
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MaterializeUnionBranches(ref BindingTable bindingTable, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned)
+    {
+        var source = _source.AsSpan();
+
+        // Execute first branch (patterns before UNION)
+        if (_subSelect.FirstBranchPatternCount > 0)
         {
-            scan.Dispose();
+            // If first branch has multiple patterns, execute as multi-pattern scan
+            if (_subSelect.FirstBranchPatternCount > 1)
+            {
+                var firstBranch = new MultiPatternScan.BoxedPattern();
+                for (int i = 0; i < _subSelect.FirstBranchPatternCount; i++)
+                {
+                    firstBranch.Pattern.AddPattern(_subSelect.GetPattern(i));
+                }
+
+                var firstScan = new MultiPatternScan(_store, source, firstBranch);
+                try
+                {
+                    while (firstScan.MoveNext(ref bindingTable))
+                    {
+                        if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                        {
+                            if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                return;
+                        }
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    firstScan.Dispose();
+                }
+            }
+            else
+            {
+                // Single pattern - use TriplePatternScan
+                var tp = _subSelect.GetPattern(0);
+                var scan = new TriplePatternScan(_store, source, tp, bindingTable);
+                try
+                {
+                    while (scan.MoveNext(ref bindingTable))
+                    {
+                        if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                        {
+                            if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                return;
+                        }
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    scan.Dispose();
+                }
+            }
+        }
+
+        // Execute union branch - each pattern separately as an alternative
+        for (int i = _subSelect.UnionStartIndex; i < _subSelect.PatternCount; i++)
+        {
+            var tp = _subSelect.GetPattern(i);
+            var scan = new TriplePatternScan(_store, source, tp, bindingTable);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                    {
+                        if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            return;
+                    }
+                    bindingTable.Clear();
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
         }
     }
 
