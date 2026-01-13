@@ -19,6 +19,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentation", "Documentat
 		CHANGELOG.md = CHANGELOG.md
 		CLAUDE.md = CLAUDE.md
 		README.md = README.md
+		STATISTICS.md = STATISTICS.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{6A048219-87B6-4063-9E6B-D76490244A39}"
