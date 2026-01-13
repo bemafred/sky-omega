@@ -37,6 +37,13 @@ public partial class QueryExecutor : IDisposable
     /// </summary>
     public const int DefaultMaxJoinDepth = 32;
 
+    /// <summary>
+    /// Maximum number of result iterations before throwing an exception.
+    /// Prevents infinite loops in pathological queries (e.g., cyclic property paths).
+    /// Default: 10 million iterations.
+    /// </summary>
+    public const long DefaultMaxIterations = 10_000_000;
+
     private readonly QuadStore _store;
     private readonly string _source;
     private readonly QueryBuffer _buffer;  // Heap-allocated pattern storage (ADR-009 Phase 2)
@@ -74,13 +81,26 @@ public partial class QueryExecutor : IDisposable
     // Cancellation support
     private CancellationToken _cancellationToken;
 
+    // Circuit breaker for infinite loop protection
+    private long _iterationCount;
+    private readonly long _maxIterations;
+
     /// <summary>
     /// Throws OperationCanceledException if cancellation has been requested.
+    /// Also checks iteration count circuit breaker to prevent infinite loops.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private void ThrowIfCancellationRequested()
     {
         _cancellationToken.ThrowIfCancellationRequested();
+
+        // Circuit breaker: check if we've exceeded maximum iterations
+        if (++_iterationCount > _maxIterations)
+        {
+            throw new InvalidOperationException(
+                $"Query exceeded maximum iteration limit ({_maxIterations:N0}). " +
+                "Possible infinite loop detected in query execution.");
+        }
     }
 
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
@@ -111,6 +131,8 @@ public partial class QueryExecutor : IDisposable
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _planner = planner;
         _maxJoinDepth = maxJoinDepth;
+        _maxIterations = DefaultMaxIterations;
+        _iterationCount = 0;
 
         // ADR-009 Phase 2: Convert Query to QueryBuffer for heap-based storage
         // This avoids stack overflow when accessing patterns in nested calls

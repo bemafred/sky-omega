@@ -43,6 +43,46 @@ public static class W3CTestContext
     };
 
     /// <summary>
+    /// Known slow tests that may exceed standard timeout.
+    /// Tests listed here are known to take >10 seconds due to complexity.
+    /// </summary>
+    public static IReadOnlyDictionary<string, int> SlowTests { get; } = new Dictionary<string, int>
+    {
+        // Property path tests with transitive closure
+        ["pp37"] = 60000, // 60 seconds - transitive property paths on large graphs
+        ["pp38"] = 60000, // 60 seconds - complex property path expressions
+
+        // Subquery tests with cartesian products
+        ["sq14"] = 45000, // 45 seconds - nested subqueries with multiple joins
+
+        // Large dataset query tests
+        ["aggregates/agg-groupconcat-02"] = 30000, // 30 seconds - large string concatenation
+
+        // Complex UNION queries
+        ["union/dawg-union-002"] = 30000, // 30 seconds - many UNION branches
+    };
+
+    /// <summary>
+    /// Gets the recommended timeout for a test in milliseconds.
+    /// Returns null if the test should use the default timeout.
+    /// </summary>
+    public static int? GetRecommendedTimeout(string testId)
+    {
+        // Check for exact match
+        if (SlowTests.TryGetValue(testId, out var timeout))
+            return timeout;
+
+        // Check for partial match (test ID contains key)
+        foreach (var (pattern, recommendedTimeout) in SlowTests)
+        {
+            if (testId.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+                return recommendedTimeout;
+        }
+
+        return null; // Use default timeout
+    }
+
+    /// <summary>
     /// Checks if a test should be skipped.
     /// </summary>
     /// <param name="testId">The test identifier or path.</param>
