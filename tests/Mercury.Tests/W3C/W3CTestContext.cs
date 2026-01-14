@@ -159,7 +159,7 @@ public static class W3CTestContext
             return Array.Empty<W3CTestCase>();
 
         var parser = new W3CManifestParser();
-        var tests = await parser.ParseAsync(manifestPath, cancellationToken);
+        var tests = await parser.ParseAsync(manifestPath, cancellationToken).ConfigureAwait(false);
 
         if (filterType.HasValue)
             tests = tests.Where(t => t.Type == filterType.Value).ToList();

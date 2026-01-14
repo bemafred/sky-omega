@@ -103,7 +103,7 @@ public sealed class W3CManifestParser
         CancellationToken cancellationToken = default)
     {
         var results = new List<W3CTestCase>();
-        await ParseManifestRecursiveAsync(manifestPath, results, cancellationToken);
+        await ParseManifestRecursiveAsync(manifestPath, results, cancellationToken).ConfigureAwait(false);
         return results;
     }
 
@@ -126,12 +126,12 @@ public sealed class W3CManifestParser
         var manifestDir = Path.GetDirectoryName(normalizedPath) ?? ".";
 
         // Parse the manifest file into an in-memory graph
-        var graph = await ParseManifestFileAsync(normalizedPath, cancellationToken);
+        var graph = await ParseManifestFileAsync(normalizedPath, cancellationToken).ConfigureAwait(false);
 
         // Process mf:include directives first (recursive)
         foreach (var includePath in GetIncludedManifests(graph, manifestDir))
         {
-            await ParseManifestRecursiveAsync(includePath, results, cancellationToken);
+            await ParseManifestRecursiveAsync(includePath, results, cancellationToken).ConfigureAwait(false);
         }
 
         // Extract test cases from this manifest
@@ -166,7 +166,7 @@ public sealed class W3CManifestParser
                     o = NormalizeIri(o, baseUri);
 
                 graph.Add(s, p, o);
-            }, cancellationToken);
+            }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -258,6 +258,8 @@ public partial class QueryExecutor : IDisposable
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _serviceExecutor = serviceExecutor;
         _maxJoinDepth = DefaultMaxJoinDepth;  // Use default join depth limit
+        _maxIterations = DefaultMaxIterations;  // Circuit breaker for infinite loops
+        _iterationCount = 0;
 
         // Cache first pattern and service clause for SERVICE+local joins
         if (_cachedPattern.PatternCount > 0)
