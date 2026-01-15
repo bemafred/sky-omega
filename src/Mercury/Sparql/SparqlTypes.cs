@@ -306,6 +306,7 @@ public struct GraphPattern
     private int _serviceClauseCount;
     private uint _optionalFlags; // Bitmask: bit N = 1 means pattern N is optional
     private int _unionStartIndex; // Patterns from this index are the UNION branch
+    private int _firstBranchBindCount; // BINDs before UNION - rest are in second branch
     private bool _hasUnion;       // True if UNION keyword was encountered
     private bool _inUnionBranch;  // True when parsing second UNION branch
 
@@ -343,6 +344,8 @@ public struct GraphPattern
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
     public readonly int BindCount => _bindCount;
+    public readonly int FirstBranchBindCount => HasUnion ? _firstBranchBindCount : _bindCount;
+    public readonly int UnionBranchBindCount => HasUnion ? _bindCount - _firstBranchBindCount : 0;
     public readonly int MinusPatternCount => _minusPatternCount;
     public readonly int ExistsFilterCount => _existsFilterCount;
     public readonly int GraphClauseCount => _graphClauseCount;
@@ -396,11 +399,13 @@ public struct GraphPattern
     /// <summary>
     /// Mark the start of UNION patterns.
     /// Sets flag so SERVICE clauses added after this point are tagged with UnionBranch = 1.
+    /// Also captures how many BINDs belong to the first branch.
     /// </summary>
     public void StartUnionBranch()
     {
         _hasUnion = true;
         _unionStartIndex = _patternCount;
+        _firstBranchBindCount = _bindCount;
         _inUnionBranch = true;
     }
 

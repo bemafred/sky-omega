@@ -48,6 +48,8 @@ public ref partial struct QueryResults
     private TriplePatternScan _unionSingleScan;
     private MultiPatternScan _unionMultiScan;
     private bool _unionIsMultiPattern;
+    private readonly int _firstBranchBindCount;  // BINDs before UNION branch
+    private readonly bool _hasUnionBindsOnly;    // True if UNION branch has only BINDs (no patterns)
 
     // ORDER BY support
     private readonly OrderByClause _orderBy;
@@ -350,6 +352,8 @@ public ref partial struct QueryResults
         _hasFilters = buffer.HasFilters;
         _hasOptional = buffer.HasOptionalPatterns;
         _hasUnion = buffer.HasUnion;
+        _firstBranchBindCount = buffer.FirstBranchBindCount;
+        _hasUnionBindsOnly = buffer.HasUnion && buffer.UnionBranchTripleCount == 0 && buffer.UnionBranchBindCount > 0;
         _isMultiPattern = false;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;
@@ -395,6 +399,8 @@ public ref partial struct QueryResults
         _hasFilters = buffer.HasFilters;
         _hasOptional = buffer.HasOptionalPatterns;
         _hasUnion = buffer.HasUnion;
+        _firstBranchBindCount = buffer.FirstBranchBindCount;
+        _hasUnionBindsOnly = buffer.HasUnion && buffer.UnionBranchTripleCount == 0 && buffer.UnionBranchBindCount > 0;
         _isMultiPattern = true;
         _isSubQuery = false;
         _isDefaultGraphUnion = false;

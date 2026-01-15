@@ -131,8 +131,18 @@ public ref partial struct QueryResults
     {
         if (_store == null || _buffer == null) return false;
 
-        var unionPatternCount = _buffer.UnionBranchPatternCount;
-        if (unionPatternCount == 0) return false;
+        // Count only triple patterns in union branch (not BINDs, FILTERs, etc.)
+        var unionTripleCount = _buffer.UnionBranchTripleCount;
+
+        // Handle BIND-only UNION branches (no triple patterns in union, just BINDs)
+        if (unionTripleCount == 0)
+        {
+            if (!_hasUnionBindsOnly) return false;
+
+            // Re-create scan for first branch patterns so we can iterate again
+            // The second branch BINDs will be evaluated via _unionBranchActive flag
+            return InitializeFirstBranchScanForUnion();
+        }
 
         // Clear bindings from first branch before starting union branch
         _bindingTable.Clear();
@@ -140,7 +150,7 @@ public ref partial struct QueryResults
         var patterns = _buffer.GetPatterns();
         var unionStart = _buffer.UnionStartIndex;
 
-        if (unionPatternCount == 1)
+        if (unionTripleCount == 1)
         {
             // Single union pattern - use simple scan
             // Find the first Triple pattern after union start
@@ -170,6 +180,67 @@ public ref partial struct QueryResults
                 }
             }
             _unionMultiScan = new MultiPatternScan(_store, _source, unionPattern, unionMode: false, default, _buffer?.Prefixes);
+            _unionIsMultiPattern = true;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Initialize scan for first branch patterns to re-iterate for BIND-only UNION.
+    /// Used when the UNION branch contains only BIND expressions (no triple patterns).
+    /// </summary>
+    private bool InitializeFirstBranchScanForUnion()
+    {
+        if (_store == null || _buffer == null) return false;
+
+        // Clear bindings from first branch before re-scanning
+        _bindingTable.Clear();
+
+        var patterns = _buffer.GetPatterns();
+        var unionStart = _buffer.UnionStartIndex;
+
+        // Count triple patterns before union start (first branch)
+        int firstBranchPatternCount = 0;
+        for (int i = 0; i < unionStart; i++)
+        {
+            if (patterns[i].Kind == PatternKind.Triple)
+                firstBranchPatternCount++;
+        }
+
+        if (firstBranchPatternCount == 0)
+        {
+            // No patterns in first branch either - this shouldn't happen for valid UNION
+            return false;
+        }
+
+        if (firstBranchPatternCount == 1)
+        {
+            // Single pattern - use simple scan
+            for (int i = 0; i < unionStart; i++)
+            {
+                if (patterns[i].Kind == PatternKind.Triple)
+                {
+                    var slot = patterns[i];
+                    var tp = SlotToTriplePattern(slot);
+                    _unionSingleScan = new TriplePatternScan(_store, _source, tp, _bindingTable);
+                    _unionIsMultiPattern = false;
+                    return true;
+                }
+            }
+            return false;
+        }
+        else
+        {
+            // Multiple patterns - use multi-pattern scan
+            var firstBranchPattern = new GraphPattern();
+            for (int i = 0; i < unionStart; i++)
+            {
+                if (patterns[i].Kind == PatternKind.Triple)
+                {
+                    firstBranchPattern.AddPattern(SlotToTriplePattern(patterns[i]));
+                }
+            }
+            _unionMultiScan = new MultiPatternScan(_store, _source, firstBranchPattern, unionMode: false, default, _buffer?.Prefixes);
             _unionIsMultiPattern = true;
             return true;
         }
@@ -304,7 +375,8 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Evaluate all BIND expressions and add bindings to the binding table.
+    /// Evaluate BIND expressions and add bindings to the binding table.
+    /// When UNION has BIND-only branches, only evaluates BINDs for the current branch.
     /// </summary>
     private void EvaluateBindExpressions()
     {
@@ -313,9 +385,35 @@ public ref partial struct QueryResults
         var patterns = _buffer.GetPatterns();
         int bindsSeen = 0;
 
+        // Determine which BINDs to evaluate based on current branch
+        // For BIND-only UNION branches:
+        //   - First branch (not active): evaluate BINDs 0 to _firstBranchBindCount-1
+        //   - Second branch (active): evaluate BINDs _firstBranchBindCount to BindCount-1
+        int bindStart = 0;
+        int bindEnd = _buffer.BindCount;
+
+        if (_hasUnionBindsOnly)
+        {
+            if (_unionBranchActive)
+            {
+                bindStart = _firstBranchBindCount;
+            }
+            else
+            {
+                bindEnd = _firstBranchBindCount;
+            }
+        }
+
         for (int i = 0; i < _buffer.PatternCount && bindsSeen < _buffer.BindCount; i++)
         {
             if (patterns[i].Kind != PatternKind.Bind) continue;
+
+            // Check if this BIND should be evaluated in the current branch
+            if (bindsSeen < bindStart || bindsSeen >= bindEnd)
+            {
+                bindsSeen++;
+                continue;
+            }
             bindsSeen++;
 
             var slot = patterns[i];

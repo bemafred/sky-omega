@@ -713,6 +713,7 @@ internal sealed class QueryBuffer : IDisposable
     // Pattern metadata (computed during parsing, cached for fast access)
     public int FilterCount { get; set; }
     public int BindCount { get; set; }
+    public int FirstBranchBindCount { get; set; }  // BINDs in first UNION branch
     public int MinusPatternCount { get; set; }
     public int ExistsFilterCount { get; set; }
     public int UnionStartIndex { get; set; }  // Index where UNION branch starts
@@ -756,6 +757,26 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasUnion => HasUnionFlag;
     public bool HasOptionalPatterns => OptionalFlags != 0;
     public int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
+    public int UnionBranchBindCount => HasUnion ? BindCount - FirstBranchBindCount : 0;
+
+    /// <summary>
+    /// Count of triple patterns in the union branch (excludes BINDs, FILTERs, etc.)
+    /// </summary>
+    public int UnionBranchTripleCount
+    {
+        get
+        {
+            if (!HasUnion) return 0;
+            int count = 0;
+            var patterns = GetPatterns();
+            for (int i = UnionStartIndex; i < PatternCount; i++)
+            {
+                if (patterns[i].Kind == PatternKind.Triple)
+                    count++;
+            }
+            return count;
+        }
+    }
     public bool HasGraph => GraphClauseCount > 0;
     public bool HasHaving => HavingLength > 0;
     public bool HasConstruct => ConstructPatterns != null && ConstructPatterns.Length > 0;
@@ -1220,9 +1241,15 @@ internal static class QueryBufferAdapter
         ref readonly var gp = ref query.WhereClause.Pattern;
         buffer.FilterCount = gp.FilterCount;
         buffer.BindCount = gp.BindCount;
+        buffer.FirstBranchBindCount = gp.FirstBranchBindCount;
         buffer.MinusPatternCount = gp.MinusPatternCount;
         buffer.ExistsFilterCount = gp.ExistsFilterCount;
-        buffer.UnionStartIndex = gp.HasUnion ? gp.FirstBranchPatternCount : 0;
+        // UnionStartIndex in QueryBuffer accounts for linearized slot order:
+        // [all triples] + [all filters] + [all binds]
+        // The union branch starts after first-branch triples + all filters + first-branch binds
+        buffer.UnionStartIndex = gp.HasUnion
+            ? gp.FirstBranchPatternCount + gp.FilterCount + gp.FirstBranchBindCount
+            : 0;
         buffer.HasUnionFlag = gp.HasUnion;
         buffer.HasValues = gp.HasValues;
         // Copy OptionalFlags - build bitmask from GraphPattern's IsOptional checks

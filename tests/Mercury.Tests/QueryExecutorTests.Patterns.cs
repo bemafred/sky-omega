@@ -383,6 +383,69 @@ public partial class QueryExecutorTests
     }
 
     [Fact]
+    public void Execute_UnionWithBindOnlyBranches()
+    {
+        // W3C bind07 test case: UNION branches contain only BIND expressions (no triple patterns)
+        // Each solution from the base pattern should be duplicated with different BIND values
+        // Base pattern matches 7 triples (3 names + 3 ages + 1 knows), each should produce 2 rows
+        var query = @"SELECT ?s ?p ?o ?z WHERE {
+            ?s ?p ?o .
+            { BIND(?o AS ?z) } UNION { BIND(""union2"" AS ?z) }
+        }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify UNION was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasUnion);
+
+        // Verify pattern structure
+        var gp = parsedQuery.WhereClause.Pattern;
+        // PatternCount only counts triple patterns: 1 triple outside UNION
+        Assert.Equal(1, gp.PatternCount);
+        // BINDs are tracked separately: 2 total (one per UNION branch)
+        Assert.Equal(2, gp.BindCount);
+        Assert.Equal(1, gp.FirstBranchBindCount);
+        Assert.Equal(1, gp.UnionBranchBindCount);
+        // UnionBranchPatternCount = PatternCount - UnionStartIndex = 1 - 1 = 0
+        Assert.Equal(0, gp.UnionBranchPatternCount);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var rows = new List<(string s, string z)>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("s".AsSpan());
+                var zIdx = results.Current.FindBinding("?z".AsSpan());
+                if (zIdx < 0) zIdx = results.Current.FindBinding("z".AsSpan());
+
+                var s = sIdx >= 0 ? results.Current.GetString(sIdx).ToString() : "";
+                var z = zIdx >= 0 ? results.Current.GetString(zIdx).ToString() : "";
+                rows.Add((s, z));
+            }
+            results.Dispose();
+
+            // Should get 14 rows: 7 triples × 2 UNION branches
+            Assert.Equal(14, rows.Count);
+
+            // Count rows where z = "union2" (second branch)
+            var union2Count = rows.Count(r => r.z == "union2");
+            Assert.Equal(7, union2Count);  // 7 triples with second branch BIND
+
+            // Count rows where z != "union2" (first branch - z = value of ?o)
+            var union1Count = rows.Count(r => r.z != "union2");
+            Assert.Equal(7, union1Count);  // 7 triples with first branch BIND
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void Execute_BindConstant()
     {
         // BIND a constant value
