@@ -126,35 +126,233 @@ public class SparqlConformanceTests
 
         // Parse expected results BEFORE acquiring lock to avoid thread-affinity issues
         // (ReaderWriterLockSlim requires release on same thread as acquire)
-        var expectedRows = await ParseExpectedResultsAsync(test.ResultPath!);
-        _output.WriteLine($"Expected {expectedRows.Count} results");
+        var expected = await ParseExpectedResultSetAsync(test.ResultPath!);
+        _output.WriteLine($"Expected {expected.Count} results");
 
-        // Execute the query (no async after lock acquisition)
-        int actualCount = 0;
+        // Check for CONSTRUCT/DESCRIBE results (RDF graph format)
+        var resultExt = Path.GetExtension(test.ResultPath!).ToLowerInvariant();
+        if (resultExt == ".ttl" || resultExt == ".nt" || resultExt == ".rdf")
+        {
+            // CONSTRUCT/DESCRIBE results - skip for now (need graph comparison)
+            Skip.If(true, "CONSTRUCT/DESCRIBE result validation not yet implemented");
+        }
+
+        // Check if this is an ORDER BY query (results must match in order)
+        var hasOrderBy = query.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase);
+
+        // Execute the query and collect actual results
+        var actual = new SparqlResultSet();
+
+        // Add expected variables to actual result set
+        foreach (var variable in expected.Variables)
+        {
+            actual.AddVariable(variable);
+        }
+
         store.AcquireReadLock();
         try
         {
             using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
-            var results = executor.Execute();
 
-            // Count results
-            while (results.MoveNext())
+            // Handle ASK queries
+            if (parsed.Type == QueryType.Ask)
             {
-                actualCount++;
+                var askResult = executor.ExecuteAsk();
+                actual = SparqlResultSet.Boolean(askResult);
+                _output.WriteLine($"ASK result: {askResult}");
             }
-            results.Dispose();
+            else
+            {
+                // SELECT query - execute and collect results
+                var results = executor.Execute();
+                try
+                {
+                    while (results.MoveNext())
+                    {
+                        var row = new SparqlResultRow();
+                        var current = results.Current;
 
-            _output.WriteLine($"Got {actualCount} results");
+                        // Extract bindings for expected variables
+                        foreach (var varName in expected.Variables)
+                        {
+                            var binding = ExtractBinding(current, varName);
+                            row.Set(varName, binding);
+                        }
+
+                        actual.AddRow(row);
+                    }
+                }
+                finally
+                {
+                    results.Dispose();
+                }
+                _output.WriteLine($"Got {actual.Count} results");
+            }
         }
         finally
         {
             store.ReleaseReadLock();
         }
 
-        // Compare results
-        // Note: This is a simplified comparison - a full implementation would need
-        // to handle blank node isomorphism, unordered result sets, etc.
-        Assert.Equal(expectedRows.Count, actualCount);
+        // Compare results using full validation with blank node isomorphism
+        var comparisonError = SparqlResultComparer.Compare(expected, actual, ordered: hasOrderBy);
+
+        if (comparisonError != null)
+        {
+            _output.WriteLine("Comparison failed:");
+            _output.WriteLine(comparisonError);
+
+            // Log first few rows for debugging
+            _output.WriteLine("\nExpected rows:");
+            foreach (var row in expected.Rows.Take(3))
+            {
+                _output.WriteLine($"  {row}");
+            }
+            if (expected.Count > 3)
+                _output.WriteLine($"  ... ({expected.Count - 3} more)");
+
+            _output.WriteLine("\nActual rows:");
+            foreach (var row in actual.Rows.Take(3))
+            {
+                _output.WriteLine($"  {row}");
+            }
+            if (actual.Count > 3)
+                _output.WriteLine($"  ... ({actual.Count - 3} more)");
+        }
+
+        Assert.Null(comparisonError);
+    }
+
+    /// <summary>
+    /// Extracts a binding from the current result row.
+    /// </summary>
+    private static SparqlBinding ExtractBinding(BindingTable current, string varName)
+    {
+        // Try with '?' prefix first (aggregates and BIND store aliases with '?')
+        var prefixedName = "?" + varName;
+        var idx = current.FindBinding(prefixedName.AsSpan());
+
+        // Fall back to without prefix (triple pattern variables)
+        if (idx < 0)
+            idx = current.FindBinding(varName.AsSpan());
+
+        if (idx < 0)
+            return SparqlBinding.Unbound;
+
+        var type = current.GetType(idx);
+        var value = current.GetString(idx).ToString();
+
+        return type switch
+        {
+            BindingValueType.Uri => SparqlBinding.Uri(value),
+            BindingValueType.String => ParseLiteralBinding(value),
+            BindingValueType.Integer => SparqlBinding.TypedLiteral(value, "http://www.w3.org/2001/XMLSchema#integer"),
+            BindingValueType.Double => SparqlBinding.TypedLiteral(value, "http://www.w3.org/2001/XMLSchema#double"),
+            BindingValueType.Boolean => SparqlBinding.TypedLiteral(value, "http://www.w3.org/2001/XMLSchema#boolean"),
+            _ => SparqlBinding.Unbound
+        };
+    }
+
+    /// <summary>
+    /// Parses a literal value that may contain datatype or language tag.
+    /// Handles formats like: "value", "value"@lang, "value"^^<datatype>, <uri>, _:bnode
+    /// </summary>
+    private static SparqlBinding ParseLiteralBinding(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return SparqlBinding.Unbound;
+
+        // Check for URI (stored with angle brackets)
+        if (value.StartsWith('<') && value.EndsWith('>'))
+            return SparqlBinding.Uri(value[1..^1]);
+
+        // Check for blank node
+        if (value.StartsWith("_:"))
+            return SparqlBinding.BNode(value[2..]);
+
+        // Check for typed literal: "value"^^<datatype>
+        if (value.StartsWith('"'))
+        {
+            var closeQuote = FindClosingQuote(value);
+            if (closeQuote > 0)
+            {
+                var literalValue = UnescapeLiteral(value[1..closeQuote]);
+                var suffix = value[(closeQuote + 1)..];
+
+                if (suffix.StartsWith("^^"))
+                {
+                    var datatype = suffix[2..];
+                    if (datatype.StartsWith('<') && datatype.EndsWith('>'))
+                        datatype = datatype[1..^1];
+                    return SparqlBinding.TypedLiteral(literalValue, datatype);
+                }
+
+                if (suffix.StartsWith('@'))
+                {
+                    return SparqlBinding.LangLiteral(literalValue, suffix[1..]);
+                }
+
+                return SparqlBinding.Literal(literalValue);
+            }
+        }
+
+        // Plain value - treat as literal
+        return SparqlBinding.Literal(value);
+    }
+
+    private static int FindClosingQuote(string value)
+    {
+        for (int i = 1; i < value.Length; i++)
+        {
+            if (value[i] == '"' && (i == 1 || value[i - 1] != '\\'))
+                return i;
+        }
+        return -1;
+    }
+
+    private static string UnescapeLiteral(string value)
+    {
+        if (!value.Contains('\\'))
+            return value;
+
+        var sb = new System.Text.StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            if (value[i] == '\\' && i + 1 < value.Length)
+            {
+                var next = value[i + 1];
+                switch (next)
+                {
+                    case 'n': sb.Append('\n'); i++; break;
+                    case 'r': sb.Append('\r'); i++; break;
+                    case 't': sb.Append('\t'); i++; break;
+                    case '"': sb.Append('"'); i++; break;
+                    case '\\': sb.Append('\\'); i++; break;
+                    default: sb.Append(value[i]); break;
+                }
+            }
+            else
+            {
+                sb.Append(value[i]);
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parses expected results using the full SPARQL result format parser.
+    /// </summary>
+    private static async Task<SparqlResultSet> ParseExpectedResultSetAsync(string path)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+
+        // For RDF graph results (CONSTRUCT/DESCRIBE), return empty - handled separately
+        if (extension is ".ttl" or ".nt" or ".rdf")
+        {
+            return SparqlResultSet.Empty();
+        }
+
+        return await SparqlResultParser.ParseFileAsync(path);
     }
 
     private async Task LoadDataAsync(QuadStore store, string path)
@@ -182,78 +380,6 @@ public class SparqlConformanceTests
             });
         }
         // Add more formats as needed
-    }
-
-    private async Task<List<Dictionary<string, string>>> ParseExpectedResultsAsync(string path)
-    {
-        var results = new List<Dictionary<string, string>>();
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-
-        if (extension == ".srx" || extension == ".xml")
-        {
-            // Parse SPARQL Results XML format
-            results = await ParseSparqlResultsXmlAsync(path);
-        }
-        else if (extension == ".srj" || extension == ".json")
-        {
-            // Parse SPARQL Results JSON format
-            results = await ParseSparqlResultsJsonAsync(path);
-        }
-        else if (extension == ".ttl" || extension == ".nt")
-        {
-            // CONSTRUCT results - parse as triples
-            // For now, just return empty (we'd need triple comparison)
-            _output.WriteLine($"CONSTRUCT result format not fully implemented");
-        }
-
-        return results;
-    }
-
-    private async Task<List<Dictionary<string, string>>> ParseSparqlResultsXmlAsync(string path)
-    {
-        var results = new List<Dictionary<string, string>>();
-        var xml = await File.ReadAllTextAsync(path);
-
-        // Simple XML parsing for SPARQL results
-        // A full implementation would use proper XML parsing
-        // This is a placeholder that just counts results
-
-        var resultMatches = System.Text.RegularExpressions.Regex.Matches(xml, @"<result>");
-        foreach (System.Text.RegularExpressions.Match match in resultMatches)
-        {
-            results.Add(new Dictionary<string, string>());
-        }
-
-        return results;
-    }
-
-    private async Task<List<Dictionary<string, string>>> ParseSparqlResultsJsonAsync(string path)
-    {
-        var results = new List<Dictionary<string, string>>();
-        var json = await File.ReadAllTextAsync(path);
-
-        // Simple JSON parsing for SPARQL results
-        // A full implementation would use proper JSON parsing
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-
-        if (doc.RootElement.TryGetProperty("results", out var resultsElement) &&
-            resultsElement.TryGetProperty("bindings", out var bindings))
-        {
-            foreach (var binding in bindings.EnumerateArray())
-            {
-                var row = new Dictionary<string, string>();
-                foreach (var prop in binding.EnumerateObject())
-                {
-                    if (prop.Value.TryGetProperty("value", out var value))
-                    {
-                        row[prop.Name] = value.GetString() ?? "";
-                    }
-                }
-                results.Add(row);
-            }
-        }
-
-        return results;
     }
 
     public static IEnumerable<object[]> GetPositiveSyntaxTests()

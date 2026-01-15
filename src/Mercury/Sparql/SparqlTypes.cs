@@ -33,6 +33,7 @@ public struct Query
     public DatasetClause[] Datasets;
     public WhereClause WhereClause;
     public SolutionModifier SolutionModifier;
+    public ValuesClause Values;  // Trailing VALUES clause at end of query
 }
 
 public struct Prologue
@@ -1079,6 +1080,9 @@ public struct SubSelect
     // UNION support
     public bool HasUnion;
     public int UnionStartIndex;  // Index of first pattern in union branch
+
+    // VALUES clause (inline bindings at end of subquery)
+    public ValuesClause Values;
 
     public readonly int ProjectedVarCount => _projectedVarCount;
     public readonly int PatternCount => _patternCount;

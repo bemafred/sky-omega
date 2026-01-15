@@ -7,6 +7,7 @@ public ref partial struct SparqlParser
 {
     /// <summary>
     /// [7] SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier
+    /// [2] Query ::= Prologue ( SelectQuery | ... ) ValuesClause
     /// </summary>
     private Query ParseSelectQuery(Prologue prologue)
     {
@@ -21,7 +22,7 @@ public ref partial struct SparqlParser
         // Validate SELECT alias scope conflicts with subqueries (syntax-SELECTscope2)
         ValidateSelectSubqueryScope(selectClause, ref whereClause.Pattern);
 
-        return new Query
+        var query = new Query
         {
             Type = QueryType.Select,
             Prologue = prologue,
@@ -30,6 +31,124 @@ public ref partial struct SparqlParser
             WhereClause = whereClause,
             SolutionModifier = modifier
         };
+
+        // Parse optional trailing VALUES clause
+        SkipWhitespace();
+        var span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
+        {
+            query.Values = ParseQueryValues();
+        }
+
+        return query;
+    }
+
+    /// <summary>
+    /// Parse trailing VALUES clause for a query.
+    /// VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
+    /// </summary>
+    private ValuesClause ParseQueryValues()
+    {
+        ConsumeKeyword("VALUES");
+        SkipWhitespace();
+
+        var values = new ValuesClause();
+        int varCount = 0;
+
+        // Check for multi-variable form: (?var1 ?var2 ...)
+        if (Peek() == '(')
+        {
+            Advance(); // Skip '('
+            SkipWhitespace();
+
+            while (!IsAtEnd() && Peek() == '?')
+            {
+                if (varCount == 0)
+                {
+                    values.VarStart = _position;
+                }
+                Advance(); // Skip '?'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                if (varCount == 0)
+                {
+                    values.VarLength = _position - values.VarStart;
+                }
+                varCount++;
+                SkipWhitespace();
+            }
+
+            if (Peek() == ')')
+                Advance(); // Skip ')'
+            SkipWhitespace();
+        }
+        else if (Peek() == '?')
+        {
+            values.VarStart = _position;
+            Advance(); // Skip '?'
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                Advance();
+            values.VarLength = _position - values.VarStart;
+            varCount = 1;
+            SkipWhitespace();
+        }
+        else
+        {
+            return values;
+        }
+
+        // Expect '{'
+        if (Peek() != '{')
+            return values;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse value rows
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            if (Peek() == '(')
+            {
+                Advance(); // Skip '('
+                SkipWhitespace();
+
+                while (!IsAtEnd() && Peek() != ')')
+                {
+                    int valueStart = _position;
+                    int valueLen = ParseValuesValue();
+                    if (valueLen > 0)
+                    {
+                        values.AddValue(valueStart, valueLen);
+                    }
+                    else if (Peek() == ')')
+                    {
+                        break;
+                    }
+                    SkipWhitespace();
+                }
+
+                if (Peek() == ')')
+                    Advance(); // Skip ')'
+                SkipWhitespace();
+            }
+            else
+            {
+                int valueStart = _position;
+                int valueLen = ParseValuesValue();
+                if (valueLen > 0)
+                {
+                    values.AddValue(valueStart, valueLen);
+                }
+                SkipWhitespace();
+            }
+        }
+
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        return values;
     }
 
     /// <summary>
@@ -739,31 +858,58 @@ public ref partial struct SparqlParser
             agg.Distinct = true;
         }
 
-        // Parse variable or *
+        // Parse aggregate argument: variable, *, or expression
+        // Store the start of the expression for evaluation
+        agg.VariableStart = _position;
+
         if (Peek() == '*')
         {
-            agg.VariableStart = _position;
             Advance();
             agg.VariableLength = 1;
         }
         else if (Peek() == '?')
         {
-            agg.VariableStart = _position;
             Advance();
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                 Advance();
             agg.VariableLength = _position - agg.VariableStart;
         }
+        else
+        {
+            // Complex expression argument: IF(...), xsd:double(?x), etc.
+            // Skip through the expression tracking parenthesis depth
+            int depth = 0;
+            while (!IsAtEnd())
+            {
+                var ch = Peek();
+
+                // Check for separator clause (GROUP_CONCAT only)
+                if (depth == 0 && ch == ';')
+                    break;
+
+                // Check for closing ) of aggregate function
+                if (depth == 0 && ch == ')')
+                    break;
+
+                if (ch == '(')
+                {
+                    depth++;
+                    Advance();
+                }
+                else if (ch == ')')
+                {
+                    depth--;
+                    Advance();
+                }
+                else
+                {
+                    Advance();
+                }
+            }
+            agg.VariableLength = _position - agg.VariableStart;
+        }
 
         SkipWhitespace();
-
-        // syn-bad-06: Check for invalid multiple arguments (only COUNT can take *)
-        // All aggregate functions take exactly 1 expression argument
-        if (Peek() == ',')
-        {
-            var funcName = agg.Function.ToString().ToUpper();
-            throw new SparqlParseException($"{funcName} aggregate function takes exactly 1 argument");
-        }
 
         // For GROUP_CONCAT, parse optional SEPARATOR clause: ; SEPARATOR = "..."
         if (agg.Function == AggregateFunction.GroupConcat && Peek() == ';')
@@ -1091,11 +1237,19 @@ public ref partial struct SparqlParser
         {
             SkipWhitespace();
 
-            // Check for FILTER
             var span = PeekSpan(6);
+
+            // Check for FILTER
             if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
             {
                 ParseSubSelectFilter(ref subSelect);
+                continue;
+            }
+
+            // Check for VALUES (inline data block inside WHERE)
+            if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
+            {
+                subSelect.Values = ParseSubSelectValues();
                 continue;
             }
 
@@ -1250,6 +1404,7 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Parse a FILTER expression inside a subquery.
+    /// [68] Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
     /// </summary>
     private void ParseSubSelectFilter(ref SubSelect subSelect)
     {
@@ -1261,6 +1416,7 @@ public ref partial struct SparqlParser
 
         if (Peek() == '(')
         {
+            // BrackettedExpression: FILTER(expr)
             exprStart = _position;
             Advance(); // Skip '('
             int depth = 1;
@@ -1273,8 +1429,35 @@ public ref partial struct SparqlParser
             }
             exprEnd = _position;
         }
+        else if (char.IsLetter(Peek()))
+        {
+            // BuiltInCall or FunctionCall: FILTER CONTAINS(...) or FILTER fn:func(...)
+            exprStart = _position;
+
+            // Skip the function name (may include namespace prefix like fn:)
+            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
+                Advance();
+
+            SkipWhitespace();
+
+            // Parse function arguments if present
+            if (Peek() == '(')
+            {
+                int depth = 1;
+                Advance(); // Skip '('
+                while (!IsAtEnd() && depth > 0)
+                {
+                    var c = Peek();
+                    if (c == '(') depth++;
+                    else if (c == ')') depth--;
+                    Advance();
+                }
+            }
+            exprEnd = _position;
+        }
         else
         {
+            // Fallback: consume until delimiter
             exprStart = _position;
             while (!IsAtEnd() && Peek() != '.' && Peek() != '}')
                 Advance();
@@ -1342,7 +1525,8 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Parse solution modifiers for a subquery (ORDER BY, LIMIT, OFFSET).
+    /// Parse solution modifiers for a subquery (ORDER BY, LIMIT, OFFSET, VALUES).
+    /// [8] SubSelect ::= SelectClause WhereClause SolutionModifier ValuesClause
     /// </summary>
     private void ParseSubSelectSolutionModifiers(ref SubSelect subSelect)
     {
@@ -1377,6 +1561,125 @@ public ref partial struct SparqlParser
             subSelect.Offset = ParseInteger();
             SkipWhitespace();
         }
+
+        // Parse VALUES clause (inline data at end of subquery)
+        span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
+        {
+            subSelect.Values = ParseSubSelectValues();
+            SkipWhitespace();
+        }
+    }
+
+    /// <summary>
+    /// Parse VALUES clause for a subquery: VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
+    /// </summary>
+    private ValuesClause ParseSubSelectValues()
+    {
+        ConsumeKeyword("VALUES");
+        SkipWhitespace();
+
+        var values = new ValuesClause();
+        int varCount = 0;
+
+        // Check for multi-variable form: (?var1 ?var2 ...)
+        if (Peek() == '(')
+        {
+            Advance(); // Skip '('
+            SkipWhitespace();
+
+            // Count and parse variables
+            while (!IsAtEnd() && Peek() == '?')
+            {
+                if (varCount == 0)
+                {
+                    values.VarStart = _position;
+                }
+                Advance(); // Skip '?'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                if (varCount == 0)
+                {
+                    values.VarLength = _position - values.VarStart;
+                }
+                varCount++;
+                SkipWhitespace();
+            }
+
+            if (Peek() == ')')
+                Advance(); // Skip ')'
+            SkipWhitespace();
+        }
+        // Single variable form: ?var
+        else if (Peek() == '?')
+        {
+            values.VarStart = _position;
+            Advance(); // Skip '?'
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                Advance();
+            values.VarLength = _position - values.VarStart;
+            varCount = 1;
+            SkipWhitespace();
+        }
+        else
+        {
+            return values; // No valid VALUES
+        }
+
+        // Expect '{'
+        if (Peek() != '{')
+            return values;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse value rows
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for parenthesized row: (val1 val2 ...)
+            if (Peek() == '(')
+            {
+                Advance(); // Skip '('
+                SkipWhitespace();
+
+                while (!IsAtEnd() && Peek() != ')')
+                {
+                    int valueStart = _position;
+                    int valueLen = ParseValuesValue();
+                    if (valueLen > 0)
+                    {
+                        values.AddValue(valueStart, valueLen);
+                    }
+                    else if (Peek() == ')')
+                    {
+                        break;
+                    }
+                    SkipWhitespace();
+                }
+
+                if (Peek() == ')')
+                    Advance(); // Skip ')'
+                SkipWhitespace();
+            }
+            else
+            {
+                // Non-parenthesized value
+                int valueStart = _position;
+                int valueLen = ParseValuesValue();
+                if (valueLen > 0)
+                {
+                    values.AddValue(valueStart, valueLen);
+                }
+                SkipWhitespace();
+            }
+        }
+
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        return values;
     }
 
     /// <summary>
@@ -1463,9 +1766,10 @@ public ref partial struct SparqlParser
             }
 
             // Check for nested group { ... } which might be a subquery or UNION
+            // Use ParseGroupOrUnionGraphPattern to handle { ... } UNION { ... } patterns
             if (Peek() == '{')
             {
-                ParseNestedGroupGraphPattern(ref pattern);
+                ParseGroupOrUnionGraphPattern(ref pattern);
                 continue;
             }
 
@@ -1520,9 +1824,10 @@ public ref partial struct SparqlParser
         Advance(); // Skip '{'
         SkipWhitespace();
 
-        // Record pattern count at start of nested group for BIND scope validation
+        // Record pattern and bind counts at start of nested group for BIND scope validation
         // BIND inside a nested { } only checks variables from this scope, not outer
         int nestedScopeStart = pattern.PatternCount;
+        int bindScopeStart = pattern.BindCount;
 
         // Check for SubSelect: starts with "SELECT"
         var checkSpan = PeekSpan(6);
@@ -1567,7 +1872,7 @@ public ref partial struct SparqlParser
             // Pass scopeStartIndex to only check variables from this nested scope
             if (span.Length >= 4 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase))
             {
-                ParseBind(ref pattern, nestedScopeStart);
+                ParseBind(ref pattern, nestedScopeStart, bindScopeStart);
                 continue;
             }
 
@@ -1617,9 +1922,11 @@ public ref partial struct SparqlParser
         // Regular filter expression
         var start = _position;
 
-        // FILTER can be: FILTER(expr) or FILTER expr
+        // FILTER can be: FILTER(expr) or FILTER BuiltInCall
+        // [68] Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
         if (Peek() == '(')
         {
+            // BrackettedExpression: FILTER(expr)
             Advance(); // Skip '('
             start = _position;
             var depth = 1;
@@ -1630,6 +1937,34 @@ public ref partial struct SparqlParser
                 else if (ch == ')') depth--;
             }
             var length = _position - start - 1; // Exclude closing ')'
+            pattern.AddFilter(new FilterExpr { Start = start, Length = length });
+        }
+        else if (char.IsLetter(Peek()))
+        {
+            // BuiltInCall or FunctionCall: FILTER CONTAINS(...) or FILTER fn:func(...)
+            // Capture the function call including its arguments
+            start = _position;
+
+            // Skip the function name (may include namespace prefix like fn:)
+            while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
+                Advance();
+
+            SkipWhitespace();
+
+            // Expect opening parenthesis for function arguments
+            if (Peek() == '(')
+            {
+                var depth = 1;
+                Advance(); // Skip '('
+                while (!IsAtEnd() && depth > 0)
+                {
+                    var ch = Advance();
+                    if (ch == '(') depth++;
+                    else if (ch == ')') depth--;
+                }
+            }
+
+            var length = _position - start;
             pattern.AddFilter(new FilterExpr { Start = start, Length = length });
         }
     }
@@ -2105,7 +2440,8 @@ public ref partial struct SparqlParser
     /// </summary>
     /// <param name="pattern">The graph pattern to add the bind to</param>
     /// <param name="scopeStartIndex">The pattern index where current scope starts (for nested groups). Default 0 checks all patterns.</param>
-    private void ParseBind(ref GraphPattern pattern, int scopeStartIndex = 0)
+    /// <param name="bindScopeStartIndex">The bind index where current scope starts (for nested groups/UNION branches). Default 0 checks all binds.</param>
+    private void ParseBind(ref GraphPattern pattern, int scopeStartIndex = 0, int bindScopeStartIndex = 0)
     {
         ConsumeKeyword("BIND");
         SkipWhitespace();
@@ -2181,7 +2517,7 @@ public ref partial struct SparqlParser
 
         // BIND scope validation (syntax-BINDscope6/7): check if target variable is already bound
         var targetVar = _source.Slice(varStart, varLength);
-        if (IsVariableInScope(ref pattern, targetVar, scopeStartIndex))
+        if (IsVariableInScope(ref pattern, targetVar, scopeStartIndex, bindScopeStartIndex))
         {
             throw new SparqlParseException($"BIND target variable {targetVar.ToString()} is already in scope - cannot rebind");
         }
@@ -2203,7 +2539,8 @@ public ref partial struct SparqlParser
     /// <param name="pattern">The graph pattern to check</param>
     /// <param name="varName">The variable name to look for</param>
     /// <param name="scopeStartIndex">Only check patterns from this index onwards (for nested groups)</param>
-    private bool IsVariableInScope(ref GraphPattern pattern, ReadOnlySpan<char> varName, int scopeStartIndex = 0)
+    /// <param name="bindScopeStartIndex">Only check binds from this index onwards (for nested groups/UNION branches)</param>
+    private bool IsVariableInScope(ref GraphPattern pattern, ReadOnlySpan<char> varName, int scopeStartIndex = 0, int bindScopeStartIndex = 0)
     {
         // Check triple patterns in current scope (starting from scopeStartIndex for nested groups)
         for (int i = scopeStartIndex; i < pattern.PatternCount; i++)
@@ -2217,9 +2554,9 @@ public ref partial struct SparqlParser
             }
         }
 
-        // Check previous BIND expressions in current scope
-        // Note: BINDs are always in current scope regardless of scopeStartIndex
-        for (int i = 0; i < pattern.BindCount; i++)
+        // Check previous BIND expressions in current scope (starting from bindScopeStartIndex)
+        // Each nested group / UNION branch has its own bind scope
+        for (int i = bindScopeStartIndex; i < pattern.BindCount; i++)
         {
             var bind = pattern.GetBind(i);
             var bindVar = _source.Slice(bind.VarStart, bind.VarLength);
