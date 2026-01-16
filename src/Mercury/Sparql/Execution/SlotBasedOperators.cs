@@ -202,6 +202,7 @@ internal ref struct SlotTriplePatternScan
     {
         while (true)
         {
+            QueryCancellation.ThrowIfCancellationRequested();
             while (_enumerator.MoveNext())
             {
                 var triple = _enumerator.Current;
@@ -426,6 +427,7 @@ internal ref struct SlotMultiPatternScan
 
         while (true)
         {
+            QueryCancellation.ThrowIfCancellationRequested();
             bool advanced;
             switch (_currentLevel)
             {

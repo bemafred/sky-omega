@@ -627,6 +627,9 @@ public ref partial struct QueryResults
 
         while (true)
         {
+            // Check for cancellation on each iteration to support timeouts
+            ThrowIfCancellationRequested();
+
             bool hasNext;
 
             if (_isSubQuery)

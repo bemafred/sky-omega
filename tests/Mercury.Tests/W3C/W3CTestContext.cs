@@ -87,6 +87,13 @@ public static class W3CTestContext
     }
 
     /// <summary>
+    /// Optional: Include only tests matching this pattern.
+    /// Set via W3C_INCLUDE_ONLY environment variable.
+    /// Example: W3C_INCLUDE_ONLY=bind/ to only run bind tests.
+    /// </summary>
+    public static string? IncludeOnly { get; } = Environment.GetEnvironmentVariable("W3C_INCLUDE_ONLY");
+
+    /// <summary>
     /// Checks if a test should be skipped.
     /// </summary>
     /// <param name="testId">The test identifier or path.</param>
@@ -95,6 +102,16 @@ public static class W3CTestContext
     public static bool ShouldSkip(string testId, out string? reason)
     {
         reason = null;
+
+        // If IncludeOnly is set, skip tests that DON'T match
+        if (!string.IsNullOrEmpty(IncludeOnly))
+        {
+            if (!testId.Contains(IncludeOnly, StringComparison.OrdinalIgnoreCase))
+            {
+                reason = $"Not in include filter: {IncludeOnly}";
+                return true;
+            }
+        }
 
         // Check for exact match
         if (SkipList.TryGetValue(testId, out reason))

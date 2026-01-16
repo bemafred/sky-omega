@@ -481,6 +481,8 @@ public partial class QueryExecutor : IDisposable
     public QueryResults Execute(CancellationToken cancellationToken)
     {
         _cancellationToken = cancellationToken;
+        // Set thread-static token for operators to check
+        QueryCancellation.SetToken(cancellationToken);
         return Execute();
     }
 
