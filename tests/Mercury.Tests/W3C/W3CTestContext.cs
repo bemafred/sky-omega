@@ -41,15 +41,8 @@ public static class W3CTestContext
         // Known limitations
         ["nfc"] = "NFC normalization not enforced on IRIs",
 
-        // Feature not implemented - subquery aggregation
-        ["aggregates/"] = "Subquery aggregation not implemented (GROUP_CONCAT in subqueries)",
-
-        // Timeout issues - no CancellationToken support in query execution loops
-        // These categories contain queries that can run indefinitely without cancellation
-        ["property-path/"] = "Property paths can loop indefinitely (no cancellation support)",
-        ["negation/"] = "Complex MINUS/NOT EXISTS patterns timeout (no cancellation support)",
-        ["subquery/"] = "Subqueries can create cartesian products (no cancellation support)",
-        ["exists/"] = "EXISTS patterns can be slow (no cancellation support)",
+        // Re-enabled after adding CancellationToken support in operators (357f410)
+        // and subquery aggregation support (be3a46e)
     };
 
     /// <summary>
