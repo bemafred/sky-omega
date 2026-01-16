@@ -2,7 +2,7 @@
 
 Codebase metrics tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-12
+**Last updated:** 2026-01-15
 
 ## Line Counts
 
@@ -10,8 +10,8 @@ Codebase metrics tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **55,295** | Knowledge substrate |
-| ├─ Sparql | 26,971 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **58,066** | Knowledge substrate |
+| ├─ Sparql | 29,742 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 5,410 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 3,944 | Turtle parser and writer |
@@ -29,7 +29,7 @@ Codebase metrics tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 39,205 | ~1,900 |
+| Mercury.Tests | 41,499 | ~1,950 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -57,12 +57,12 @@ Codebase metrics tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~56,764 |
-| Tests | ~39,205 |
+| Source code | ~59,535 |
+| Tests | ~41,499 |
 | Benchmarks | ~2,966 |
 | Examples | ~779 |
 | Documentation | ~15,025 |
-| **Grand total** | **~114,739** |
+| **Grand total** | **~119,804** |
 
 ## W3C Conformance
 
@@ -79,9 +79,9 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | N-Quads 1.2 | 87 | 87 | **100%** | Full conformance |
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
 | SPARQL 1.1 Syntax | 73 | 103 | **71%** | 63/63 positive, 10/40 negative |
-| SPARQL 1.1 Query | — | ~221 | — | In progress |
-| SPARQL 1.1 Update | 93 | 94 | **99%** | 1 skipped: nested subquery UNION edge case |
-| **Total** | **1,611** | **1,761** | **91%** | SPARQL conformance in progress |
+| SPARQL 1.1 Query | — | 221 | — | ~105 skipped (no cancellation support), ~116 runnable |
+| SPARQL 1.1 Update | 94 | 94 | **100%** | Full conformance |
+| **Total** | **1,612** | **1,761** | **92%** | SPARQL Query conformance in progress |
 
 ## Benchmark Summary
 
