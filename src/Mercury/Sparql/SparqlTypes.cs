@@ -1089,12 +1089,25 @@ public struct SubSelect
     // VALUES clause (inline bindings at end of subquery)
     public ValuesClause Values;
 
+    // GROUP BY and HAVING support
+    public GroupByClause GroupBy;
+    public HavingClause Having;
+
+    // Aggregate expressions (e.g., COUNT(?x) AS ?c)
+    public const int MaxAggregates = 8;
+    private int _aggregateCount;
+    private AggregateExpression _a0, _a1, _a2, _a3, _a4, _a5, _a6, _a7;
+
     public readonly int ProjectedVarCount => _projectedVarCount;
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
+    public readonly int AggregateCount => _aggregateCount;
     public readonly bool HasPatterns => _patternCount > 0;
     public readonly bool HasFilters => _filterCount > 0;
     public readonly bool HasOrderBy => OrderBy.HasOrderBy;
+    public readonly bool HasAggregates => _aggregateCount > 0;
+    public readonly bool HasGroupBy => GroupBy.HasGroupBy;
+    public readonly bool HasHaving => Having.HasHaving;
     public readonly int FirstBranchPatternCount => HasUnion ? UnionStartIndex : PatternCount;
     public readonly int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
 
@@ -1188,6 +1201,33 @@ public struct SubSelect
             case 2: _f2 = filter; break; case 3: _f3 = filter; break;
             case 4: _f4 = filter; break; case 5: _f5 = filter; break;
             case 6: _f6 = filter; break; case 7: _f7 = filter; break;
+        }
+    }
+
+    public void AddAggregate(AggregateExpression agg)
+    {
+        if (_aggregateCount >= MaxAggregates) return;
+        SetAggregate(_aggregateCount++, agg);
+    }
+
+    public readonly AggregateExpression GetAggregate(int index)
+    {
+        return index switch
+        {
+            0 => _a0, 1 => _a1, 2 => _a2, 3 => _a3,
+            4 => _a4, 5 => _a5, 6 => _a6, 7 => _a7,
+            _ => default
+        };
+    }
+
+    private void SetAggregate(int index, AggregateExpression agg)
+    {
+        switch (index)
+        {
+            case 0: _a0 = agg; break; case 1: _a1 = agg; break;
+            case 2: _a2 = agg; break; case 3: _a3 = agg; break;
+            case 4: _a4 = agg; break; case 5: _a5 = agg; break;
+            case 6: _a6 = agg; break; case 7: _a7 = agg; break;
         }
     }
 }

@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Storage;
 
@@ -79,6 +80,24 @@ public ref partial struct QueryResults
     // HAVING support
     private readonly bool _hasHaving;
     private readonly HavingClause _having;
+
+    // Cancellation support for timeout handling
+    private CancellationToken _cancellationToken;
+
+    /// <summary>
+    /// Sets the cancellation token for timeout support.
+    /// Must be called before iteration if cancellation is needed.
+    /// </summary>
+    public void SetCancellationToken(CancellationToken cancellationToken)
+    {
+        _cancellationToken = cancellationToken;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ThrowIfCancellationRequested()
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+    }
 
     public static QueryResults Empty()
     {

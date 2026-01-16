@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql;
@@ -131,7 +132,12 @@ internal ref struct TriplePatternScan
 
     // Prefix mappings for expansion
     private readonly PrefixMapping[]? _prefixes;
-    private char[]? _expandBuffer;  // Buffer for expanded IRIs
+    // Expanded IRIs stored as strings to ensure span lifetime safety
+    // Each position needs its own storage since Initialize() resolves all three
+    // before calling ExecuteTemporalQuery
+    private string? _expandedSubject;
+    private string? _expandedPredicate;
+    private string? _expandedObject;
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
@@ -177,7 +183,9 @@ internal ref struct TriplePatternScan
         _alternativePhase = 0;
 
         _prefixes = prefixes;
-        _expandBuffer = null;
+        _expandedSubject = null;
+        _expandedPredicate = null;
+        _expandedObject = null;
     }
 
     public bool MoveNext(ref BindingTable bindings)
@@ -344,14 +352,16 @@ internal ref struct TriplePatternScan
         }
 
         // Resolve terms to spans for querying
-        var subject = ResolveTermForQuery(_pattern.Subject);
-        var obj = ResolveTermForQuery(_pattern.Object);
+        // ResolveTermWithStorage stores expanded IRIs as strings, returning spans over them
+        // This ensures spans remain valid until ExecuteTemporalQuery completes
+        var subject = ResolveTermWithStorage(_pattern.Subject, TermPosition.Subject);
+        var obj = ResolveTermWithStorage(_pattern.Object, TermPosition.Object);
 
         ReadOnlySpan<char> predicate;
         if (_isInverse)
         {
             // For inverse path, query with swapped subject/object
-            predicate = ResolveTermForQuery(_pattern.Path.Iri);
+            predicate = ResolveTermWithStorage(_pattern.Path.Iri, TermPosition.Predicate);
             _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
         }
         else if (_isAlternative)
@@ -368,10 +378,12 @@ internal ref struct TriplePatternScan
         }
         else
         {
-            predicate = ResolveTermForQuery(_pattern.Predicate);
+            predicate = ResolveTermWithStorage(_pattern.Predicate, TermPosition.Predicate);
             _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
         }
     }
+
+    private enum TermPosition { Subject, Predicate, Object }
 
     private TemporalResultEnumerator ExecuteTemporalQuery(
         ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
@@ -413,51 +425,51 @@ internal ref struct TriplePatternScan
             ReadOnlySpan<char>.Empty);
     }
 
+    /// <summary>
+    /// Resolve term for query with position-based string storage.
+    /// Expanded IRIs are stored as strings in position-specific fields to ensure
+    /// span lifetime safety when multiple terms are resolved simultaneously.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveTermForQuery(Term term)
+    private ReadOnlySpan<char> ResolveTermWithStorage(Term term, TermPosition position)
     {
         // Handle synthetic terms (negative offsets from SPARQL-star expansion)
         if (SyntheticTermHelper.IsSynthetic(term.Start))
         {
             if (term.IsVariable)
             {
-                // Synthetic variable: check binding with synthetic name
                 var varName = SyntheticTermHelper.GetSyntheticVarName(term.Start);
                 var idx = _initialBindings.FindBinding(varName);
                 if (idx >= 0)
                     return _initialBindings.GetString(idx);
                 return ReadOnlySpan<char>.Empty;
             }
-            // Synthetic IRI (rdf:type, rdf:subject, etc.)
             return SyntheticTermHelper.GetSyntheticIri(term.Start);
         }
 
         if (term.IsVariable)
         {
-            // Check if variable is already bound in initial bindings
             var varName = _source.Slice(term.Start, term.Length);
             var idx = _initialBindings.FindBinding(varName);
             if (idx >= 0)
                 return _initialBindings.GetString(idx);
-
-            // Unbound variable becomes wildcard (empty span)
             return ReadOnlySpan<char>.Empty;
         }
 
-        // IRIs and literals use their source text
+        if (term.IsBlankNode)
+            return ReadOnlySpan<char>.Empty;
+
         var termSpan = _source.Slice(term.Start, term.Length);
 
         // Check if this is a prefixed name that needs expansion
         if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
         {
-            // Find the colon that separates prefix from local name
             var colonIdx = termSpan.IndexOf(':');
             if (colonIdx >= 0)
             {
-                var prefix = termSpan.Slice(0, colonIdx + 1); // Include colon
+                var prefix = termSpan.Slice(0, colonIdx + 1);
                 var localName = termSpan.Slice(colonIdx + 1);
 
-                // Look up prefix in mappings
                 for (int i = 0; i < _prefixes.Length; i++)
                 {
                     var mapping = _prefixes[i];
@@ -465,25 +477,89 @@ internal ref struct TriplePatternScan
 
                     if (prefix.SequenceEqual(mappedPrefix))
                     {
-                        // Found matching prefix - expand to full IRI
                         var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
 
-                        // iriNs is like <http://example.org/>, we need to replace the > with local name >
-                        // Result: <http://example.org/localName>
-                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1); // Remove trailing >
+                        // Build expanded IRI and store as string
+                        var expanded = string.Concat(nsWithoutClose, localName, ">");
 
-                        // Allocate buffer if needed
-                        _expandBuffer ??= new char[512];
+                        // Store in position-specific field and return span over it
+                        switch (position)
+                        {
+                            case TermPosition.Subject:
+                                _expandedSubject = expanded;
+                                return _expandedSubject.AsSpan();
+                            case TermPosition.Predicate:
+                                _expandedPredicate = expanded;
+                                return _expandedPredicate.AsSpan();
+                            default:
+                                _expandedObject = expanded;
+                                return _expandedObject.AsSpan();
+                        }
+                    }
+                }
+            }
+        }
 
-                        var totalLen = nsWithoutClose.Length + localName.Length + 1; // +1 for closing >
-                        if (totalLen > _expandBuffer.Length)
-                            _expandBuffer = new char[totalLen * 2];
+        return termSpan;
+    }
 
-                        nsWithoutClose.CopyTo(_expandBuffer);
-                        localName.CopyTo(_expandBuffer.AsSpan(nsWithoutClose.Length));
-                        _expandBuffer[totalLen - 1] = '>';
+    /// <summary>
+    /// Simple term resolution for single-term use cases (transitive paths).
+    /// Uses shared buffer since only one term is resolved at a time.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveTermForQuery(Term term)
+    {
+        if (SyntheticTermHelper.IsSynthetic(term.Start))
+        {
+            if (term.IsVariable)
+            {
+                var varName = SyntheticTermHelper.GetSyntheticVarName(term.Start);
+                var idx = _initialBindings.FindBinding(varName);
+                if (idx >= 0)
+                    return _initialBindings.GetString(idx);
+                return ReadOnlySpan<char>.Empty;
+            }
+            return SyntheticTermHelper.GetSyntheticIri(term.Start);
+        }
 
-                        return _expandBuffer.AsSpan(0, totalLen);
+        if (term.IsVariable)
+        {
+            var varName = _source.Slice(term.Start, term.Length);
+            var idx = _initialBindings.FindBinding(varName);
+            if (idx >= 0)
+                return _initialBindings.GetString(idx);
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        if (term.IsBlankNode)
+            return ReadOnlySpan<char>.Empty;
+
+        var termSpan = _source.Slice(term.Start, term.Length);
+
+        // Check for prefix expansion
+        if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
+        {
+            var colonIdx = termSpan.IndexOf(':');
+            if (colonIdx >= 0)
+            {
+                var prefix = termSpan.Slice(0, colonIdx + 1);
+                var localName = termSpan.Slice(colonIdx + 1);
+
+                for (int i = 0; i < _prefixes.Length; i++)
+                {
+                    var mapping = _prefixes[i];
+                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+                    if (prefix.SequenceEqual(mappedPrefix))
+                    {
+                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+
+                        // For single-term resolution, store in subject field (reusable)
+                        _expandedSubject = string.Concat(nsWithoutClose, localName, ">");
+                        return _expandedSubject.AsSpan();
                     }
                 }
             }
@@ -661,7 +737,8 @@ internal ref struct MultiPatternScan
     /// Constructor for subqueries that takes a boxed pattern to avoid stack overflow.
     /// The pattern is stored by reference on the heap instead of being copied inline.
     /// </summary>
-    public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, BoxedPattern boxedPattern)
+    public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, BoxedPattern boxedPattern,
+        PrefixMapping[]? prefixes = null)
     {
         _store = store;
         _source = source;
@@ -675,7 +752,7 @@ internal ref struct MultiPatternScan
         _asOfTime = default;
         _rangeStart = default;
         _rangeEnd = default;
-        _prefixes = null;
+        _prefixes = prefixes;
         _expandBuffer = null;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
@@ -1330,6 +1407,12 @@ internal ref struct MultiPatternScan
             return SyntheticTermHelper.GetSyntheticIri(term.Start);
         }
 
+        // Blank nodes in patterns (e.g., [] or _:b) act as wildcards - they match any value
+        if (term.IsBlankNode)
+        {
+            return ReadOnlySpan<char>.Empty;
+        }
+
         if (!term.IsVariable)
         {
             var termSpan = _source.Slice(term.Start, term.Length);
@@ -1604,13 +1687,15 @@ internal sealed class BoxedSubQueryExecutor
     private readonly string _source;
     private readonly SubSelect _subSelect;
     private readonly bool _distinct;
+    private readonly PrefixMapping[]? _prefixes;
 
-    public BoxedSubQueryExecutor(QuadStore store, string source, SubSelect subSelect)
+    public BoxedSubQueryExecutor(QuadStore store, string source, SubSelect subSelect, PrefixMapping[]? prefixes = null)
     {
         _store = store;
         _source = source;
         _subSelect = subSelect;
         _distinct = subSelect.Distinct;
+        _prefixes = prefixes;
     }
 
     /// <summary>
@@ -1628,6 +1713,12 @@ internal sealed class BoxedSubQueryExecutor
 
         try
         {
+            // If subquery has aggregates, use aggregation path
+            if (_subSelect.HasAggregates)
+            {
+                return ExecuteWithAggregation(ref bindingTable);
+            }
+
             int skipped = 0;
             int returned = 0;
 
@@ -1646,6 +1737,316 @@ internal sealed class BoxedSubQueryExecutor
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Execute subquery with aggregation support.
+    /// Collects raw rows, groups them, computes aggregates, and returns aggregated results.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteWithAggregation(ref BindingTable bindingTable)
+    {
+        var groups = new Dictionary<string, SubQueryGroupedRow>();
+        var source = _source;
+
+        // Collect all raw rows
+        if (_subSelect.PatternCount == 1)
+        {
+            CollectRawResultsSingle(ref bindingTable, groups, source);
+        }
+        else
+        {
+            CollectRawResultsMulti(ref bindingTable, groups, source);
+        }
+
+        // Handle implicit aggregation with empty result set:
+        // When there are aggregates but no GROUP BY and no matching rows,
+        // SPARQL requires returning one row with default aggregate values
+        if (groups.Count == 0 && _subSelect.HasAggregates && !_subSelect.HasGroupBy)
+        {
+            bindingTable.Clear();
+            var emptyGroup = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+            groups[""] = emptyGroup;
+        }
+
+        // Finalize aggregates and convert to MaterializedRow
+        var results = new List<MaterializedRow>(groups.Count);
+        foreach (var group in groups.Values)
+        {
+            group.FinalizeAggregates();
+            results.Add(group.ToMaterializedRow());
+        }
+
+        // Apply LIMIT/OFFSET if specified
+        if (_subSelect.Offset > 0 || _subSelect.Limit > 0)
+        {
+            int skip = _subSelect.Offset;
+            int take = _subSelect.Limit > 0 ? _subSelect.Limit : results.Count;
+            if (skip >= results.Count)
+            {
+                results.Clear();
+            }
+            else
+            {
+                int available = results.Count - skip;
+                int actualTake = Math.Min(take, available);
+                results = results.GetRange(skip, actualTake);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Collect raw results from single pattern for aggregation.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CollectRawResultsSingle(ref BindingTable bindingTable,
+        Dictionary<string, SubQueryGroupedRow> groups, string source)
+    {
+        var tp = _subSelect.GetPattern(0);
+        var sourceSpan = source.AsSpan();
+        var scan = new TriplePatternScan(_store, sourceSpan, tp, bindingTable, default,
+            TemporalQueryMode.Current, default, default, default, _prefixes);
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                // Apply filters if any
+                if (_subSelect.FilterCount > 0)
+                {
+                    bool passedFilters = true;
+                    for (int i = 0; i < _subSelect.FilterCount; i++)
+                    {
+                        var filter = _subSelect.GetFilter(i);
+                        var filterExpr = sourceSpan.Slice(filter.Start, filter.Length);
+                        var evaluator = new FilterEvaluator(filterExpr);
+                        if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                        {
+                            passedFilters = false;
+                            break;
+                        }
+                    }
+                    if (!passedFilters)
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                }
+
+                // Build group key from GROUP BY variables
+                var groupKey = BuildGroupKey(ref bindingTable, source);
+
+                // Get or create group
+                if (!groups.TryGetValue(groupKey, out var group))
+                {
+                    group = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+                    groups[groupKey] = group;
+                }
+
+                // Update aggregates for this group
+                group.UpdateAggregates(bindingTable, source);
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Collect raw results from multi-pattern for aggregation.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CollectRawResultsMulti(ref BindingTable bindingTable,
+        Dictionary<string, SubQueryGroupedRow> groups, string source)
+    {
+        if (_subSelect.HasUnion)
+        {
+            CollectRawResultsUnion(ref bindingTable, groups, source);
+        }
+        else
+        {
+            var boxedPattern = new MultiPatternScan.BoxedPattern();
+            for (int i = 0; i < _subSelect.PatternCount; i++)
+            {
+                boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
+            }
+
+            var sourceSpan = source.AsSpan();
+            var scan = new MultiPatternScan(_store, sourceSpan, boxedPattern, _prefixes);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    // Apply filters if any
+                    if (_subSelect.FilterCount > 0)
+                    {
+                        bool passedFilters = true;
+                        for (int i = 0; i < _subSelect.FilterCount; i++)
+                        {
+                            var filter = _subSelect.GetFilter(i);
+                            var filterExpr = sourceSpan.Slice(filter.Start, filter.Length);
+                            var evaluator = new FilterEvaluator(filterExpr);
+                            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                            {
+                                passedFilters = false;
+                                break;
+                            }
+                        }
+                        if (!passedFilters)
+                        {
+                            bindingTable.Clear();
+                            continue;
+                        }
+                    }
+
+                    var groupKey = BuildGroupKey(ref bindingTable, source);
+
+                    if (!groups.TryGetValue(groupKey, out var group))
+                    {
+                        group = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+                        groups[groupKey] = group;
+                    }
+
+                    group.UpdateAggregates(bindingTable, source);
+                    bindingTable.Clear();
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Collect raw results from UNION branches for aggregation.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CollectRawResultsUnion(ref BindingTable bindingTable,
+        Dictionary<string, SubQueryGroupedRow> groups, string source)
+    {
+        var sourceSpan = source.AsSpan();
+
+        // Execute first branch
+        if (_subSelect.FirstBranchPatternCount > 0)
+        {
+            if (_subSelect.FirstBranchPatternCount > 1)
+            {
+                var firstBranch = new MultiPatternScan.BoxedPattern();
+                for (int i = 0; i < _subSelect.FirstBranchPatternCount; i++)
+                {
+                    firstBranch.Pattern.AddPattern(_subSelect.GetPattern(i));
+                }
+
+                var firstScan = new MultiPatternScan(_store, sourceSpan, firstBranch, _prefixes);
+                try
+                {
+                    while (firstScan.MoveNext(ref bindingTable))
+                    {
+                        ProcessRowForAggregation(ref bindingTable, groups, source, sourceSpan);
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    firstScan.Dispose();
+                }
+            }
+            else
+            {
+                var tp = _subSelect.GetPattern(0);
+                var scan = new TriplePatternScan(_store, sourceSpan, tp, bindingTable, default,
+                    TemporalQueryMode.Current, default, default, default, _prefixes);
+                try
+                {
+                    while (scan.MoveNext(ref bindingTable))
+                    {
+                        ProcessRowForAggregation(ref bindingTable, groups, source, sourceSpan);
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    scan.Dispose();
+                }
+            }
+        }
+
+        // Execute union branch patterns
+        for (int i = _subSelect.UnionStartIndex; i < _subSelect.PatternCount; i++)
+        {
+            var tp = _subSelect.GetPattern(i);
+            var scan = new TriplePatternScan(_store, sourceSpan, tp, bindingTable, default,
+                TemporalQueryMode.Current, default, default, default, _prefixes);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    ProcessRowForAggregation(ref bindingTable, groups, source, sourceSpan);
+                    bindingTable.Clear();
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Process a single row for aggregation: apply filters, build group key, update aggregates.
+    /// </summary>
+    private void ProcessRowForAggregation(ref BindingTable bindingTable,
+        Dictionary<string, SubQueryGroupedRow> groups, string source, ReadOnlySpan<char> sourceSpan)
+    {
+        // Apply filters if any
+        if (_subSelect.FilterCount > 0)
+        {
+            for (int i = 0; i < _subSelect.FilterCount; i++)
+            {
+                var filter = _subSelect.GetFilter(i);
+                var filterExpr = sourceSpan.Slice(filter.Start, filter.Length);
+                var evaluator = new FilterEvaluator(filterExpr);
+                if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                    return;
+            }
+        }
+
+        var groupKey = BuildGroupKey(ref bindingTable, source);
+
+        if (!groups.TryGetValue(groupKey, out var group))
+        {
+            group = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+            groups[groupKey] = group;
+        }
+
+        group.UpdateAggregates(bindingTable, source);
+    }
+
+    /// <summary>
+    /// Build a group key from GROUP BY variables.
+    /// </summary>
+    private string BuildGroupKey(ref BindingTable bindings, string source)
+    {
+        if (!_subSelect.HasGroupBy || _subSelect.GroupBy.Count == 0)
+            return "";
+
+        var keyBuilder = new System.Text.StringBuilder();
+        for (int i = 0; i < _subSelect.GroupBy.Count; i++)
+        {
+            var (start, len) = _subSelect.GroupBy.GetVariable(i);
+            var varName = source.AsSpan(start, len);
+            var bindingIdx = bindings.FindBinding(varName);
+            if (bindingIdx >= 0)
+            {
+                if (i > 0) keyBuilder.Append('\0');
+                keyBuilder.Append(bindings.GetString(bindingIdx));
+            }
+        }
+        return keyBuilder.ToString();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -1898,6 +2299,275 @@ internal sealed class BoxedSubQueryExecutor
 }
 
 /// <summary>
+/// Groups results and computes aggregates for subqueries with GROUP BY and/or aggregates.
+/// Similar to GroupedRow but works with SubSelect instead of SelectClause.
+/// </summary>
+internal sealed class SubQueryGroupedRow
+{
+    // Group key storage
+    private readonly int[] _keyHashes;
+    private readonly string[] _keyValues;
+    private readonly int _keyCount;
+
+    // Aggregate storage
+    private readonly int[] _aggHashes;        // Hash of alias variable name
+    private readonly string[] _aggValues;      // Final computed values
+    private readonly AggregateFunction[] _aggFunctions;
+    private readonly int[] _aggVarHashes;      // Hash of source variable name
+    private readonly int _aggCount;
+    private readonly bool[] _aggDistinct;      // DISTINCT flag per aggregate
+
+    // Aggregate accumulators
+    private readonly long[] _counts;
+    private readonly double[] _sums;
+    private readonly double[] _mins;
+    private readonly double[] _maxes;
+    private readonly HashSet<string>?[] _distinctSets;
+    private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
+    private readonly string[] _separators;           // For GROUP_CONCAT
+    private readonly string?[] _sampleValues;        // For SAMPLE
+
+    public int KeyCount => _keyCount;
+    public int AggregateCount => _aggCount;
+
+    public SubQueryGroupedRow(SubSelect subSelect, BindingTable bindings, string source)
+    {
+        // Store group key values from GROUP BY clause
+        _keyCount = subSelect.HasGroupBy ? subSelect.GroupBy.Count : 0;
+        _keyHashes = new int[_keyCount];
+        _keyValues = new string[_keyCount];
+
+        for (int i = 0; i < _keyCount; i++)
+        {
+            var (start, len) = subSelect.GroupBy.GetVariable(i);
+            var varName = source.AsSpan(start, len);
+            _keyHashes[i] = ComputeHash(varName);
+            var idx = bindings.FindBinding(varName);
+            _keyValues[i] = idx >= 0 ? bindings.GetString(idx).ToString() : "";
+        }
+
+        // Initialize aggregate accumulators from SubSelect
+        _aggCount = subSelect.AggregateCount;
+        _aggHashes = new int[_aggCount];
+        _aggValues = new string[_aggCount];
+        _aggFunctions = new AggregateFunction[_aggCount];
+        _aggVarHashes = new int[_aggCount];
+        _aggDistinct = new bool[_aggCount];
+        _counts = new long[_aggCount];
+        _sums = new double[_aggCount];
+        _mins = new double[_aggCount];
+        _maxes = new double[_aggCount];
+        _distinctSets = new HashSet<string>?[_aggCount];
+        _concatValues = new List<string>?[_aggCount];
+        _separators = new string[_aggCount];
+        _sampleValues = new string?[_aggCount];
+
+        for (int i = 0; i < _aggCount; i++)
+        {
+            var agg = subSelect.GetAggregate(i);
+            _aggFunctions[i] = agg.Function;
+            _aggDistinct[i] = agg.Distinct;
+
+            // Hash of alias (result variable name)
+            var aliasName = source.AsSpan(agg.AliasStart, agg.AliasLength);
+            _aggHashes[i] = ComputeHash(aliasName);
+
+            // Hash of source variable
+            if (agg.VariableLength > 0)
+            {
+                var varName = source.AsSpan(agg.VariableStart, agg.VariableLength);
+                _aggVarHashes[i] = ComputeHash(varName);
+            }
+            else
+            {
+                // COUNT(*) case
+                _aggVarHashes[i] = ComputeHash("*".AsSpan());
+            }
+
+            // Initialize accumulators
+            _mins[i] = double.MaxValue;
+            _maxes[i] = double.MinValue;
+            if (agg.Distinct)
+            {
+                _distinctSets[i] = new HashSet<string>();
+            }
+
+            // Initialize GROUP_CONCAT accumulators
+            if (agg.Function == AggregateFunction.GroupConcat)
+            {
+                _concatValues[i] = new List<string>();
+                // Extract separator from source, default to space
+                _separators[i] = agg.SeparatorLength > 0
+                    ? source.Substring(agg.SeparatorStart, agg.SeparatorLength)
+                    : " ";
+            }
+        }
+    }
+
+    public void UpdateAggregates(BindingTable bindings, string source)
+    {
+        for (int i = 0; i < _aggCount; i++)
+        {
+            var func = _aggFunctions[i];
+            var varHash = _aggVarHashes[i];
+
+            // Find the value for this aggregate's variable
+            string? valueStr = null;
+            double numValue = 0;
+            bool hasNumValue = false;
+
+            // For COUNT(*), we don't need a specific variable
+            if (varHash != ComputeHash("*".AsSpan()))
+            {
+                var idx = bindings.FindBindingByHash(varHash);
+                if (idx >= 0)
+                {
+                    valueStr = bindings.GetString(idx).ToString();
+                    // Use RDF-aware numeric parsing to handle typed literals
+                    hasNumValue = TryParseRdfNumeric(valueStr, out numValue);
+                }
+                else
+                {
+                    // Variable not bound - skip for most aggregates
+                    if (func != AggregateFunction.Count)
+                        continue;
+                }
+            }
+
+            // Handle DISTINCT
+            if (_distinctSets[i] != null)
+            {
+                var val = valueStr ?? "";
+                if (!_distinctSets[i]!.Add(val))
+                    continue; // Already seen this value
+            }
+
+            // Update accumulator based on function
+            switch (func)
+            {
+                case AggregateFunction.Count:
+                    _counts[i]++;
+                    break;
+                case AggregateFunction.Sum:
+                    if (hasNumValue) _sums[i] += numValue;
+                    break;
+                case AggregateFunction.Avg:
+                    if (hasNumValue)
+                    {
+                        _sums[i] += numValue;
+                        _counts[i]++;
+                    }
+                    break;
+                case AggregateFunction.Min:
+                    if (hasNumValue && numValue < _mins[i])
+                        _mins[i] = numValue;
+                    break;
+                case AggregateFunction.Max:
+                    if (hasNumValue && numValue > _maxes[i])
+                        _maxes[i] = numValue;
+                    break;
+                case AggregateFunction.GroupConcat:
+                    if (valueStr != null)
+                        _concatValues[i]!.Add(valueStr);
+                    break;
+                case AggregateFunction.Sample:
+                    // SAMPLE returns an arbitrary value - we take the first one
+                    if (_sampleValues[i] == null && valueStr != null)
+                        _sampleValues[i] = valueStr;
+                    break;
+            }
+        }
+    }
+
+    public void FinalizeAggregates()
+    {
+        for (int i = 0; i < _aggCount; i++)
+        {
+            _aggValues[i] = _aggFunctions[i] switch
+            {
+                AggregateFunction.Count => _counts[i].ToString(),
+                AggregateFunction.Sum => _sums[i].ToString(CultureInfo.InvariantCulture),
+                AggregateFunction.Avg => _counts[i] > 0
+                    ? (_sums[i] / _counts[i]).ToString(CultureInfo.InvariantCulture)
+                    : "0",
+                AggregateFunction.Min => _mins[i] == double.MaxValue ? "" : _mins[i].ToString(CultureInfo.InvariantCulture),
+                AggregateFunction.Max => _maxes[i] == double.MinValue ? "" : _maxes[i].ToString(CultureInfo.InvariantCulture),
+                AggregateFunction.GroupConcat => _concatValues[i] != null
+                    ? string.Join(_separators[i], _concatValues[i]!)
+                    : "",
+                AggregateFunction.Sample => _sampleValues[i] ?? "",
+                _ => ""
+            };
+        }
+    }
+
+    public int GetKeyHash(int index) => _keyHashes[index];
+    public ReadOnlySpan<char> GetKeyValue(int index) => _keyValues[index];
+    public int GetAggregateHash(int index) => _aggHashes[index];
+    public ReadOnlySpan<char> GetAggregateValue(int index) => _aggValues[index];
+
+    /// <summary>
+    /// Converts this grouped row to a MaterializedRow with all key and aggregate bindings.
+    /// </summary>
+    public MaterializedRow ToMaterializedRow()
+    {
+        var bindings = new Binding[16];
+        var buffer = new char[512];
+        var table = new BindingTable(bindings, buffer);
+
+        // Add group key bindings
+        for (int i = 0; i < _keyCount; i++)
+        {
+            table.BindWithHash(_keyHashes[i], _keyValues[i]);
+        }
+
+        // Add aggregate bindings
+        for (int i = 0; i < _aggCount; i++)
+        {
+            table.BindWithHash(_aggHashes[i], _aggValues[i]);
+        }
+
+        return new MaterializedRow(table);
+    }
+
+    private static int ComputeHash(ReadOnlySpan<char> s)
+    {
+        uint hash = 2166136261;
+        foreach (var ch in s)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
+    }
+
+    /// <summary>
+    /// Try to parse a numeric value from an RDF literal string.
+    /// </summary>
+    private static bool TryParseRdfNumeric(string str, out double result)
+    {
+        result = 0;
+
+        if (string.IsNullOrEmpty(str))
+            return false;
+
+        // Handle typed literals: "value"^^<datatype>
+        if (str.StartsWith('"'))
+        {
+            int endQuote = str.IndexOf('"', 1);
+            if (endQuote <= 0)
+                return false;
+
+            var valueStr = str.AsSpan(1, endQuote - 1);
+            return double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+        }
+
+        // Try direct numeric parse
+        return double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+    }
+}
+
+/// <summary>
 /// Executes a subquery and yields only projected variable bindings.
 /// Conforms to <see cref="IScan"/> contract (duck typing).
 /// Handles variable scoping: only SELECT-ed variables are visible to outer query.
@@ -1910,6 +2580,7 @@ internal ref struct SubQueryScan
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
     private readonly SubSelect _subSelect;
+    private readonly PrefixMapping[]? _prefixes;
     // Materialized results - populated during Initialize() via BoxedSubQueryExecutor
     private List<MaterializedRow>? _materializedResults;
     private int _currentIndex;
@@ -1917,10 +2588,16 @@ internal ref struct SubQueryScan
     private bool _exhausted;
 
     public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect)
+        : this(store, source, subSelect, null)
+    {
+    }
+
+    public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect, PrefixMapping[]? prefixes)
     {
         _store = store;
         _source = source;
         _subSelect = subSelect;
+        _prefixes = prefixes;
         _materializedResults = null;
         _currentIndex = 0;
         _initialized = false;
@@ -1969,7 +2646,8 @@ internal ref struct SubQueryScan
 
         // Use boxed executor to isolate scan operator stack usage
         // The class methods have fresh stack frames without accumulated ref struct overhead
-        var executor = new BoxedSubQueryExecutor(_store, sourceString, _subSelect);
+        // Pass prefix mappings for expanding prefixed names in subquery patterns
+        var executor = new BoxedSubQueryExecutor(_store, sourceString, _subSelect, _prefixes);
         _materializedResults = executor.Execute();
     }
 
@@ -1992,6 +2670,7 @@ internal ref struct SubQueryJoinScan
     private readonly ReadOnlySpan<char> _source;
     private readonly GraphPattern _pattern;
     private readonly SubSelect _subSelect;
+    private readonly PrefixMapping[]? _prefixes;
 
     // Subquery execution state
     private SubQueryScan _subQueryScan;
@@ -2011,14 +2690,21 @@ internal ref struct SubQueryJoinScan
 
     public SubQueryJoinScan(QuadStore store, ReadOnlySpan<char> source,
         GraphPattern pattern, SubSelect subSelect)
+        : this(store, source, pattern, subSelect, null)
+    {
+    }
+
+    public SubQueryJoinScan(QuadStore store, ReadOnlySpan<char> source,
+        GraphPattern pattern, SubSelect subSelect, PrefixMapping[]? prefixes)
     {
         _store = store;
         _source = source;
         _pattern = pattern;
         _subSelect = subSelect;
+        _prefixes = prefixes;
 
-        // Initialize subquery state
-        _subQueryScan = new SubQueryScan(store, source, subSelect);
+        // Initialize subquery state with prefix mappings
+        _subQueryScan = new SubQueryScan(store, source, subSelect, prefixes);
         _subBindingStorage = new Binding[16];
         _subStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
         _subBindings = new BindingTable(_subBindingStorage, _subStringBuffer);
@@ -2512,8 +3198,10 @@ internal ref struct CrossGraphMultiPatternScan
     {
         ReadOnlySpan<char> subject, predicate, obj;
 
-        // Resolve subject
-        if (!pattern.Subject.IsVariable)
+        // Resolve subject - blank nodes act as wildcards (match any value)
+        if (pattern.Subject.IsBlankNode)
+            subject = ReadOnlySpan<char>.Empty;
+        else if (!pattern.Subject.IsVariable)
             subject = _source.Slice(pattern.Subject.Start, pattern.Subject.Length);
         else
         {
@@ -2522,8 +3210,10 @@ internal ref struct CrossGraphMultiPatternScan
             subject = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
         }
 
-        // Resolve predicate
-        if (!pattern.Predicate.IsVariable)
+        // Resolve predicate - blank nodes act as wildcards
+        if (pattern.Predicate.IsBlankNode)
+            predicate = ReadOnlySpan<char>.Empty;
+        else if (!pattern.Predicate.IsVariable)
             predicate = _source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
         else
         {
@@ -2532,8 +3222,10 @@ internal ref struct CrossGraphMultiPatternScan
             predicate = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
         }
 
-        // Resolve object
-        if (!pattern.Object.IsVariable)
+        // Resolve object - blank nodes act as wildcards
+        if (pattern.Object.IsBlankNode)
+            obj = ReadOnlySpan<char>.Empty;
+        else if (!pattern.Object.IsVariable)
             obj = _source.Slice(pattern.Object.Start, pattern.Object.Length);
         else
         {

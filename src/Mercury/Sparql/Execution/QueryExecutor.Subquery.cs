@@ -75,8 +75,8 @@ public partial class QueryExecutor
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Create SubQueryScan operator
-        var subQueryScan = new SubQueryScan(_store, _source, subSelect);
+        // Create SubQueryScan operator with prefix mappings for expansion
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect, _prefixMappings);
         try
         {
             while (subQueryScan.MoveNext(ref bindingTable))
@@ -96,92 +96,62 @@ public partial class QueryExecutor
     /// <summary>
     /// Execute a query that contains subqueries.
     /// For queries like: SELECT * WHERE { ?s ?p ?o . { SELECT ?s WHERE { ... } } }
-    /// NOTE: NoInlining prevents stack overflow from QueryResults struct size.
+    /// Returns List&lt;MaterializedRow&gt; to avoid stack overflow from 22KB QueryResults struct.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteWithSubQueries()
+    private List<MaterializedRow>? ExecuteWithSubQueries_ToList()
     {
         // Check for multiple subqueries FIRST with minimal stack usage
         // Accessing SubQueryCount via cached pattern avoids copying large struct
         if (_cachedPattern.SubQueryCount > 1)
-            return ExecuteMultipleSubQueries();
-
-        // Single subquery with outer patterns - delegate to join method directly
-        // to minimize call chain depth
-        if (_cachedPattern.PatternCount > 0)
-            return ExecuteSingleSubQueryWithJoin();
-
-        // Single subquery without outer patterns
-        return ExecuteSingleSubQuerySimple();
-    }
-
-    /// <summary>
-    /// Execute a single subquery with no outer patterns (simple case).
-    /// Materializes results to avoid stack overflow from nested SubQueryScan operators.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteSingleSubQuerySimple()
-    {
-        // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _cachedPattern;
-        var subSelect = pattern.GetSubQuery(0);
-
-        // Materialize results to avoid stack overflow from nested scans
-        var results = ExecuteSubQuerySimpleCore(subSelect);
-        if (results == null || results.Count == 0)
-            return QueryResults.Empty();
-
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
-    }
-
-    /// <summary>
-    /// Execute a single subquery with outer patterns (join case).
-    /// Minimal stack usage - collects results eagerly.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteSingleSubQueryWithJoin()
-    {
-        // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _cachedPattern;
-        var subSelect = pattern.GetSubQuery(0);
-
-        // Execute join and materialize results
-        var results = ExecuteSubQueryJoinCore(subSelect);
-        if (results == null || results.Count == 0)
-            return QueryResults.Empty();
-
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
-    }
-
-    /// <summary>
-    /// Execute multiple subqueries and join their results.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteMultipleSubQueries()
-    {
-        // Collect results from all subqueries and join them
-        var joinedResults = CollectAndJoinSubQueryResults();
-        if (joinedResults == null || joinedResults.Count == 0)
-            return QueryResults.Empty();
-
-        // If there are outer triple patterns, join with them too
-        ref readonly var pattern = ref _cachedPattern;
-        if (pattern.RequiredPatternCount > 0)
         {
-            joinedResults = JoinWithOuterPatterns(joinedResults);
+            // Collect results from all subqueries and join them
+            var joinedResults = CollectAndJoinSubQueryResults();
             if (joinedResults == null || joinedResults.Count == 0)
-                return QueryResults.Empty();
+                return null;
+
+            // If there are outer triple patterns, join with them too
+            ref readonly var pattern = ref _cachedPattern;
+            if (pattern.RequiredPatternCount > 0)
+            {
+                joinedResults = JoinWithOuterPatterns(joinedResults);
+            }
+            return joinedResults;
         }
 
+        // Single subquery with outer patterns - delegate to join method directly
+        if (_cachedPattern.PatternCount > 0)
+        {
+            ref readonly var pattern = ref _cachedPattern;
+            var subSelect = pattern.GetSubQuery(0);
+            return ExecuteSubQueryJoinCore(subSelect);
+        }
+
+        // Single subquery without outer patterns
+        {
+            ref readonly var pattern = ref _cachedPattern;
+            var subSelect = pattern.GetSubQuery(0);
+            return ExecuteSubQuerySimpleCore(subSelect);
+        }
+    }
+
+    /// <summary>
+    /// Execute a query that contains subqueries (legacy entry point).
+    /// Creates QueryResults from materialized list at the end to avoid stack overflow.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private QueryResults ExecuteWithSubQueries()
+    {
+        // Collect all results as a list first (returns reference, not 22KB struct)
+        var results = ExecuteWithSubQueries_ToList();
+
+        // Create QueryResults ONCE at the end
+        if (results == null || results.Count == 0)
+            return QueryResults.Empty();
+
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
-        return QueryResults.FromMaterializedList(joinedResults, bindings, stringBuffer,
+        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
@@ -229,7 +199,7 @@ public partial class QueryExecutor
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         var results = new List<MaterializedRow>();
-        var subQueryScan = new SubQueryScan(_store, _source, subSelect);
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect, _prefixMappings);
         try
         {
             while (subQueryScan.MoveNext(ref bindingTable))
@@ -396,7 +366,7 @@ public partial class QueryExecutor
 
         // Note: SubQueryJoinScan still takes pattern by value.
         // This is acceptable since we're only copying once (not recursively).
-        var joinScan = new SubQueryJoinScan(_store, _source, pattern, subSelect);
+        var joinScan = new SubQueryJoinScan(_store, _source, pattern, subSelect, _prefixMappings);
         try
         {
             while (joinScan.MoveNext(ref bindingTable))

@@ -55,6 +55,7 @@ public partial class QueryExecutor : IDisposable
 
     // Prefix mappings for expanding prefixed names
     private readonly Prologue _prologue;
+    private readonly PrefixMapping[]? _prefixMappings;
 
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
     private readonly string[]? _defaultGraphs;
@@ -143,6 +144,9 @@ public partial class QueryExecutor : IDisposable
         _cachedPattern = query.WhereClause.Pattern;
         // Store prologue for prefix expansion
         _prologue = query.Prologue;
+
+        // Extract prefix mappings for subquery execution
+        _prefixMappings = ExtractPrefixMappings(in _prologue);
 
         _defaultGraphs = null;
         _namedGraphs = null;
@@ -234,6 +238,30 @@ public partial class QueryExecutor : IDisposable
             return new DateTimeOffset(dt, TimeSpan.Zero);
 
         return DateTimeOffset.MinValue;
+    }
+
+    /// <summary>
+    /// Extract prefix mappings from Prologue into an array for subquery execution.
+    /// Returns null if no prefixes are defined.
+    /// </summary>
+    private static PrefixMapping[]? ExtractPrefixMappings(in Prologue prologue)
+    {
+        if (prologue.PrefixCount == 0)
+            return null;
+
+        var mappings = new PrefixMapping[prologue.PrefixCount];
+        for (int i = 0; i < prologue.PrefixCount; i++)
+        {
+            var (ps, pl, irs, irl) = prologue.GetPrefix(i);
+            mappings[i] = new PrefixMapping
+            {
+                PrefixStart = ps,
+                PrefixLength = pl,
+                IriStart = irs,
+                IriLength = irl
+            };
+        }
+        return mappings;
     }
 
     /// <summary>

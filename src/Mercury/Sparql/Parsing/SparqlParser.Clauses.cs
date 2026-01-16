@@ -1143,48 +1143,22 @@ public ref partial struct SparqlParser
                 }
                 else if (Peek() == '(')
                 {
-                    // Parse (expr AS ?var) - we need to extract the alias
-                    Advance(); // Skip '('
-                    int parenDepth = 0;
-                    // Skip to "AS" keyword
-                    while (!IsAtEnd())
+                    // Parse (expr AS ?var) or aggregate expression (COUNT(?x) AS ?c)
+                    // Reuse ParseAggregateExpression which handles both cases
+                    var agg = ParseAggregateExpression();
+
+                    if (agg.Function != AggregateFunction.None)
                     {
-                        var ch = Peek();
-                        if (ch == '(') { parenDepth++; Advance(); }
-                        else if (ch == ')')
-                        {
-                            if (parenDepth == 0) break;
-                            parenDepth--;
-                            Advance();
-                        }
-                        else
-                        {
-                            // Check for "AS" keyword at paren depth 0
-                            if (parenDepth == 0)
-                            {
-                                var asSpan = PeekSpan(3);
-                                if (asSpan.Length >= 2 && asSpan[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
-                                    (asSpan.Length < 3 || !char.IsLetterOrDigit(asSpan[2])))
-                                {
-                                    ConsumeKeyword("AS");
-                                    SkipWhitespace();
-                                    // Parse the alias variable
-                                    if (Peek() == '?')
-                                    {
-                                        var varStart = _position;
-                                        Advance(); // Skip '?'
-                                        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-                                            Advance();
-                                        subSelect.AddProjectedVariable(varStart, _position - varStart);
-                                    }
-                                    break;
-                                }
-                            }
-                            Advance();
-                        }
+                        // It's an aggregate - store both the aggregate and the projected variable
+                        subSelect.AddAggregate(agg);
+                        if (agg.AliasLength > 0)
+                            subSelect.AddProjectedVariable(agg.AliasStart, agg.AliasLength);
                     }
-                    SkipWhitespace();
-                    if (Peek() == ')') Advance(); // Skip closing ')'
+                    else if (agg.AliasLength > 0)
+                    {
+                        // It's a non-aggregate expression with alias - just add as projected variable
+                        subSelect.AddProjectedVariable(agg.AliasStart, agg.AliasLength);
+                    }
                 }
                 SkipWhitespace();
             }
@@ -1530,8 +1504,52 @@ public ref partial struct SparqlParser
     /// </summary>
     private void ParseSubSelectSolutionModifiers(ref SubSelect subSelect)
     {
-        // Parse ORDER BY
+        // Parse GROUP BY (must come before HAVING and ORDER BY)
         var span = PeekSpan(8);
+        if (span.Length >= 5 && span[..5].Equals("GROUP", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("GROUP");
+            SkipWhitespace();
+            ConsumeKeyword("BY");
+            SkipWhitespace();
+            subSelect.GroupBy = ParseGroupByClause();
+            SkipWhitespace();
+        }
+
+        // Parse HAVING (must come after GROUP BY, before ORDER BY)
+        span = PeekSpan(6);
+        if (span.Length >= 6 && span[..6].Equals("HAVING", StringComparison.OrdinalIgnoreCase))
+        {
+            ConsumeKeyword("HAVING");
+            SkipWhitespace();
+
+            // HAVING expression is in parentheses
+            if (Peek() == '(')
+            {
+                Advance(); // Skip '('
+                var start = _position;
+
+                // Find matching closing paren
+                int depth = 1;
+                while (!IsAtEnd() && depth > 0)
+                {
+                    var ch = Peek();
+                    if (ch == '(') depth++;
+                    else if (ch == ')') depth--;
+                    if (depth > 0) Advance();
+                }
+
+                var length = _position - start;
+                subSelect.Having = new HavingClause { ExpressionStart = start, ExpressionLength = length };
+
+                if (Peek() == ')')
+                    Advance(); // Skip ')'
+            }
+            SkipWhitespace();
+        }
+
+        // Parse ORDER BY
+        span = PeekSpan(8);
         if (span.Length >= 5 && span[..5].Equals("ORDER", StringComparison.OrdinalIgnoreCase))
         {
             ConsumeKeyword("ORDER");
