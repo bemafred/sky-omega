@@ -393,37 +393,146 @@ public partial class QueryExecutor
     }
 
     /// <summary>
-    /// Execute patterns using recursive nested loop join.
+    /// Execute patterns using iterative nested loop join.
+    /// Uses explicit state management instead of recursion to avoid stack overflow.
+    /// Supports up to 12 pattern levels (matching _maxJoinDepth).
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private void ExecuteNestedLoopJoin(
         TriplePattern[] patterns, int patternCount, int patternIndex,
         ref BindingTable bindingTable, string? graph, List<MaterializedRow> results)
     {
+        // Early exit for empty pattern set
         if (patternIndex >= patternCount)
         {
-            // All patterns matched - emit result
             results.Add(new MaterializedRow(bindingTable));
             return;
         }
 
-        var tp = patterns[patternIndex];
-        var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graph.AsSpan(),
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+        // Inline scan storage (ref structs can't be in arrays/collections)
+        // Using 12 slots to match MaxJoinDepth constant
+        TriplePatternScan scan0 = default, scan1 = default, scan2 = default, scan3 = default;
+        TriplePatternScan scan4 = default, scan5 = default, scan6 = default, scan7 = default;
+        TriplePatternScan scan8 = default, scan9 = default, scan10 = default, scan11 = default;
+        bool init0 = false, init1 = false, init2 = false, init3 = false;
+        bool init4 = false, init5 = false, init6 = false, init7 = false;
+        bool init8 = false, init9 = false, init10 = false, init11 = false;
+
+        var graphSpan = graph.AsSpan();
+        int level = patternIndex;
+
         try
         {
-            while (scan.MoveNext(ref bindingTable))
+            while (level >= patternIndex)
             {
-                // Check for cancellation periodically (on each row)
                 ThrowIfCancellationRequested();
 
-                // Recursively match remaining patterns with current bindings
-                ExecuteNestedLoopJoin(patterns, patternCount, patternIndex + 1, ref bindingTable, graph, results);
+                // All patterns matched - emit result and backtrack
+                if (level >= patternCount)
+                {
+                    results.Add(new MaterializedRow(bindingTable));
+                    level--;
+                    continue;
+                }
+
+                // Get/create scan for current level and try to advance
+                bool advanced = level switch
+                {
+                    0 => AdvanceScan(ref scan0, ref init0, patterns[0], ref bindingTable, graphSpan),
+                    1 => AdvanceScan(ref scan1, ref init1, patterns[1], ref bindingTable, graphSpan),
+                    2 => AdvanceScan(ref scan2, ref init2, patterns[2], ref bindingTable, graphSpan),
+                    3 => AdvanceScan(ref scan3, ref init3, patterns[3], ref bindingTable, graphSpan),
+                    4 => AdvanceScan(ref scan4, ref init4, patterns[4], ref bindingTable, graphSpan),
+                    5 => AdvanceScan(ref scan5, ref init5, patterns[5], ref bindingTable, graphSpan),
+                    6 => AdvanceScan(ref scan6, ref init6, patterns[6], ref bindingTable, graphSpan),
+                    7 => AdvanceScan(ref scan7, ref init7, patterns[7], ref bindingTable, graphSpan),
+                    8 => AdvanceScan(ref scan8, ref init8, patterns[8], ref bindingTable, graphSpan),
+                    9 => AdvanceScan(ref scan9, ref init9, patterns[9], ref bindingTable, graphSpan),
+                    10 => AdvanceScan(ref scan10, ref init10, patterns[10], ref bindingTable, graphSpan),
+                    11 => AdvanceScan(ref scan11, ref init11, patterns[11], ref bindingTable, graphSpan),
+                    _ => throw new System.InvalidOperationException($"Join depth {level} exceeds maximum of 12")
+                };
+
+                if (advanced)
+                {
+                    // Move to next pattern level
+                    level++;
+                }
+                else
+                {
+                    // Exhausted at this level - dispose and backtrack
+                    DisposeScanAtLevel(level,
+                        ref scan0, ref scan1, ref scan2, ref scan3,
+                        ref scan4, ref scan5, ref scan6, ref scan7,
+                        ref scan8, ref scan9, ref scan10, ref scan11,
+                        ref init0, ref init1, ref init2, ref init3,
+                        ref init4, ref init5, ref init6, ref init7,
+                        ref init8, ref init9, ref init10, ref init11);
+                    level--;
+                }
             }
         }
         finally
         {
-            scan.Dispose();
+            // Dispose any remaining initialized scans
+            if (init0) scan0.Dispose();
+            if (init1) scan1.Dispose();
+            if (init2) scan2.Dispose();
+            if (init3) scan3.Dispose();
+            if (init4) scan4.Dispose();
+            if (init5) scan5.Dispose();
+            if (init6) scan6.Dispose();
+            if (init7) scan7.Dispose();
+            if (init8) scan8.Dispose();
+            if (init9) scan9.Dispose();
+            if (init10) scan10.Dispose();
+            if (init11) scan11.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Initialize scan if needed and advance it. Returns true if advanced successfully.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private bool AdvanceScan(
+        ref TriplePatternScan scan, ref bool initialized,
+        TriplePattern pattern, ref BindingTable bindingTable, ReadOnlySpan<char> graph)
+    {
+        if (!initialized)
+        {
+            scan = new TriplePatternScan(_store, _source, pattern, bindingTable, graph,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+            initialized = true;
+        }
+        return scan.MoveNext(ref bindingTable);
+    }
+
+    /// <summary>
+    /// Dispose scan at specified level and mark as uninitialized.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static void DisposeScanAtLevel(int level,
+        ref TriplePatternScan scan0, ref TriplePatternScan scan1, ref TriplePatternScan scan2, ref TriplePatternScan scan3,
+        ref TriplePatternScan scan4, ref TriplePatternScan scan5, ref TriplePatternScan scan6, ref TriplePatternScan scan7,
+        ref TriplePatternScan scan8, ref TriplePatternScan scan9, ref TriplePatternScan scan10, ref TriplePatternScan scan11,
+        ref bool init0, ref bool init1, ref bool init2, ref bool init3,
+        ref bool init4, ref bool init5, ref bool init6, ref bool init7,
+        ref bool init8, ref bool init9, ref bool init10, ref bool init11)
+    {
+        switch (level)
+        {
+            case 0: if (init0) { scan0.Dispose(); init0 = false; } break;
+            case 1: if (init1) { scan1.Dispose(); init1 = false; } break;
+            case 2: if (init2) { scan2.Dispose(); init2 = false; } break;
+            case 3: if (init3) { scan3.Dispose(); init3 = false; } break;
+            case 4: if (init4) { scan4.Dispose(); init4 = false; } break;
+            case 5: if (init5) { scan5.Dispose(); init5 = false; } break;
+            case 6: if (init6) { scan6.Dispose(); init6 = false; } break;
+            case 7: if (init7) { scan7.Dispose(); init7 = false; } break;
+            case 8: if (init8) { scan8.Dispose(); init8 = false; } break;
+            case 9: if (init9) { scan9.Dispose(); init9 = false; } break;
+            case 10: if (init10) { scan10.Dispose(); init10 = false; } break;
+            case 11: if (init11) { scan11.Dispose(); init11 = false; } break;
         }
     }
 
