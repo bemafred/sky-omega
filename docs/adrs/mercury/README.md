@@ -12,3 +12,4 @@
 | [ADR-008](ADR-008-quadstore-pool-unified.md) | QuadStore Pool Unified | Proposed |
 | [ADR-009](ADR-009-stack-overflow-mitigation.md) | Stack Overflow Mitigation Strategy | Accepted |
 | [ADR-010](ADR-010-w3c-test-suite-integration.md) | W3C Test Suite Integration | In Progress |
+| [ADR-011](ADR-011-queryresults-stack-reduction.md) | QueryResults Stack Reduction | Proposed |
