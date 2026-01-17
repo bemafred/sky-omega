@@ -2422,6 +2422,12 @@ public ref partial struct SparqlParser
                         Advance();
                     if (!IsAtEnd()) Advance();
                 }
+                else
+                {
+                    // Prefixed name datatype (e.g., ^^xsd:integer)
+                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':' || Peek() == '_'))
+                        Advance();
+                }
             }
             return _position - valueStart;
         }
@@ -2442,10 +2448,30 @@ public ref partial struct SparqlParser
                 Advance();
             return _position - valueStart;
         }
+        else if (ch == ':')
+        {
+            // Prefixed name with empty prefix (e.g., :localName)
+            Advance(); // Skip ':'
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+                Advance();
+            return _position - valueStart;
+        }
+        else if (ch == '_')
+        {
+            // Blank node (e.g., _:b0)
+            Advance(); // Skip '_'
+            if (!IsAtEnd() && Peek() == ':')
+            {
+                Advance(); // Skip ':'
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == '.'))
+                    Advance();
+            }
+            return _position - valueStart;
+        }
         else if (IsLetter(ch))
         {
-            // Boolean or prefixed name
-            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':'))
+            // Boolean, UNDEF, or prefixed name (e.g., true, false, UNDEF, ex:localName)
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':' || Peek() == '_' || Peek() == '-' || Peek() == '.'))
                 Advance();
             return _position - valueStart;
         }
