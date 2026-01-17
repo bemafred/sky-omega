@@ -10,3 +10,5 @@
 | [ADR-006](ADR-006-dual-mode-store-access.md) | Dual-Mode Store Access | Proposed |
 | [ADR-007](ADR-007-union-service-execution.md) | UNION SERVICE Execution | Accepted |
 | [ADR-008](ADR-008-quadstore-pool-unified.md) | QuadStore Pool Unified | Proposed |
+| [ADR-009](ADR-009-stack-overflow-mitigation.md) | Stack Overflow Mitigation Strategy | Accepted |
+| [ADR-010](ADR-010-w3c-test-suite-integration.md) | W3C Test Suite Integration | In Progress |
