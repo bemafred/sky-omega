@@ -494,9 +494,17 @@ public partial class QueryExecutor : IDisposable
     {
         // Check for GRAPH clauses first - use _buffer to avoid large struct copies
         // A query with GRAPH but no direct triple patterns (only patterns inside GRAPH)
+        // Call ExecuteGraphClausesToList() which returns List<MaterializedRow>? (8 bytes)
+        // instead of QueryResults (~22KB) to reduce stack pressure
         if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
         {
-            return ExecuteGraphClauses();
+            var graphResults = ExecuteGraphClausesToList();
+            if (graphResults == null || graphResults.Count == 0)
+                return QueryResults.Empty();
+
+            var graphBindings = new Binding[16];
+            return QueryResults.FromMaterializedList(graphResults, graphBindings, _stringBuffer,
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
 
         // Check for subqueries - use _buffer

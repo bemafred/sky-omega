@@ -58,9 +58,10 @@ public partial class QueryExecutor
     /// Execute a query with only GRAPH clauses (no default graph patterns).
     /// For queries like: SELECT * WHERE { GRAPH &lt;g&gt; { ?s ?p ?o } }
     /// Uses PatternSlot views to avoid large struct copies and stack overflow.
+    /// Returns List instead of QueryResults to avoid ~22KB return value on stack.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteGraphClauses()
+    private List<MaterializedRow>? ExecuteGraphClausesToList()
     {
         // Get patterns from buffer - this returns a ref struct view (16 bytes)
         var patterns = _buffer.GetPatterns();
@@ -69,41 +70,21 @@ public partial class QueryExecutor
         // Multiple GRAPH clauses - join results
         if (graphCount > 1)
         {
-            var joinedResults = CollectAndJoinGraphResultsSlotBased(patterns);
-            if (joinedResults == null || joinedResults.Count == 0)
-                return QueryResults.Empty();
-
-            var bindings = new Binding[16];
-            var stringBuffer = _stringBuffer;
-            return QueryResults.FromMaterializedList(joinedResults, bindings, stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+            return CollectAndJoinGraphResultsSlotBased(patterns);
         }
 
         // Single GRAPH clause - check if variable or fixed
         if (_buffer.FirstGraphIsVariable)
         {
             if (_buffer.FirstGraphPatternCount == 0)
-                return QueryResults.Empty();
+                return null;
 
             // Variable graph execution
-            var results = ExecuteVariableGraphSlotBased(patterns);
-            if (results == null || results.Count == 0)
-                return QueryResults.Empty();
-
-            var bindings = new Binding[16];
-            var stringBuffer = _stringBuffer;
-            return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+            return ExecuteVariableGraphSlotBased(patterns);
         }
 
-        // Fixed IRI graph execution - get list to avoid returning large QueryResults from nested call
-        var fixedResults = ExecuteFixedGraphSlotBasedList(patterns);
-        if (fixedResults == null || fixedResults.Count == 0)
-            return QueryResults.Empty();
-
-        var fixedBindings = new Binding[16];
-        return QueryResults.FromMaterializedList(fixedResults, fixedBindings, _stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+        // Fixed IRI graph execution
+        return ExecuteFixedGraphSlotBasedList(patterns);
     }
 
     /// <summary>
