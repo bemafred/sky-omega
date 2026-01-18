@@ -217,9 +217,8 @@ internal ref struct BindExpressionEvaluator
 
     private Value ParseStringLiteral()
     {
-        var fullStart = _position; // Track start (including opening quote)
-
         Advance(); // Skip '"'
+        var start = _position;
 
         while (!IsAtEnd() && Peek() != '"')
         {
@@ -227,9 +226,13 @@ internal ref struct BindExpressionEvaluator
             Advance();
         }
 
+        // Capture string content before moving past closing quote
+        var str = _expression.Slice(start, _position - start);
+
         if (!IsAtEnd()) Advance(); // Skip closing '"'
 
         // Handle optional language tag @lang or datatype ^^type
+        // We must skip these to avoid hanging in the parent parsing loop
         if (!IsAtEnd())
         {
             if (Peek() == '@')
@@ -269,9 +272,8 @@ internal ref struct BindExpressionEvaluator
             }
         }
 
-        // Return full literal (including quotes and datatype) for proper grouping
-        var fullLiteral = _expression.Slice(fullStart, _position - fullStart);
-        return new Value { Type = ValueType.String, StringValue = fullLiteral };
+        // Return the string content (without quotes) as the value
+        return new Value { Type = ValueType.String, StringValue = str };
     }
 
     private Value ParseNumericLiteral()

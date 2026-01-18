@@ -594,6 +594,30 @@ public partial class QueryExecutor : IDisposable
     /// </summary>
     public bool ExecuteAsk()
     {
+        // Check for GRAPH clauses - delegate to Execute()
+        if (_buffer.HasGraph)
+        {
+            var results = Execute();
+            try { return results.MoveNext(); }
+            finally { results.Dispose(); }
+        }
+
+        // Check for subqueries - delegate to Execute()
+        if (_buffer.HasSubQueries)
+        {
+            var results = Execute();
+            try { return results.MoveNext(); }
+            finally { results.Dispose(); }
+        }
+
+        // Check for SERVICE clauses - delegate to Execute()
+        if (_buffer.HasService)
+        {
+            var results = Execute();
+            try { return results.MoveNext(); }
+            finally { results.Dispose(); }
+        }
+
         ref readonly var pattern = ref _cachedPattern;
 
         if (pattern.PatternCount == 0)

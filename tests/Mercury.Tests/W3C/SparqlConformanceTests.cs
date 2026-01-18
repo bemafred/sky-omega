@@ -168,7 +168,7 @@ public class SparqlConformanceTests
                 
                 try
                 {
-                    while (results.MoveNext()) // TODO: This call hangs when name == "Group-4"
+                    while (results.MoveNext()) 
                     {
                         var row = new SparqlResultRow();
                         var current = results.Current;
