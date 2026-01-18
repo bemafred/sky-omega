@@ -457,12 +457,16 @@ public class SparqlConformanceTests
         }
 
         // Parse and execute the update
+        // Run on dedicated thread with 8MB stack to avoid stack overflow from large ref structs
         var parser = new SparqlParser(update.AsSpan());
         var parsed = parser.ParseUpdate();
         _output.WriteLine($"Update type: {parsed.Type}");
 
-        var executor = new UpdateExecutor(store, update.AsSpan(), parsed);
-        var result = executor.Execute();
+        var result = RunOnLargeStack(() =>
+        {
+            var executor = new UpdateExecutor(store, update.AsSpan(), parsed);
+            return executor.Execute();
+        });
 
         _output.WriteLine($"Update result: Success={result.Success}, Affected={result.AffectedCount}");
 
