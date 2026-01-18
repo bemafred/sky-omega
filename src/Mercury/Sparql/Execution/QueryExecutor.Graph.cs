@@ -98,7 +98,6 @@ public partial class QueryExecutor
 
         while (graphHeaders.MoveNext())
         {
-            ThrowIfCancellationRequested();
             var header = graphHeaders.Current;
             var headerIndex = graphHeaders.CurrentIndex;
 
@@ -168,7 +167,6 @@ public partial class QueryExecutor
             // FROM NAMED specified - only iterate those graphs
             foreach (var graphStr in _namedGraphs)
             {
-                ThrowIfCancellationRequested();
                 var graphIri = graphStr.AsSpan();
 
                 // Bind graph variable
@@ -197,7 +195,6 @@ public partial class QueryExecutor
         // No FROM NAMED restriction - iterate all named graphs
         foreach (var graphIri in _store.GetNamedGraphs())
         {
-            ThrowIfCancellationRequested();
             // Bind graph variable
             bindingTable.Clear();
             bindingTable.Bind(varName, graphIri);
@@ -406,8 +403,6 @@ public partial class QueryExecutor
         {
             while (level >= patternIndex)
             {
-                ThrowIfCancellationRequested();
-
                 // All patterns matched - emit result and backtrack
                 if (level >= patternCount)
                 {

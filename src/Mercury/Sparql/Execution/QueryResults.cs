@@ -81,24 +81,6 @@ public ref partial struct QueryResults
     private readonly bool _hasHaving;
     private readonly HavingClause _having;
 
-    // Cancellation support for timeout handling
-    private CancellationToken _cancellationToken;
-
-    /// <summary>
-    /// Sets the cancellation token for timeout support.
-    /// Must be called before iteration if cancellation is needed.
-    /// </summary>
-    public void SetCancellationToken(CancellationToken cancellationToken)
-    {
-        _cancellationToken = cancellationToken;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ThrowIfCancellationRequested()
-    {
-        _cancellationToken.ThrowIfCancellationRequested();
-    }
-
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -627,9 +609,6 @@ public ref partial struct QueryResults
 
         while (true)
         {
-            // Check for cancellation on each iteration to support timeouts
-            ThrowIfCancellationRequested();
-
             bool hasNext;
 
             if (_isSubQuery)

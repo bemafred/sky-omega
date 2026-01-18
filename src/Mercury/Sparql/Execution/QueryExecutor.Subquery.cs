@@ -81,7 +81,6 @@ public partial class QueryExecutor
         {
             while (subQueryScan.MoveNext(ref bindingTable))
             {
-                ThrowIfCancellationRequested();
                 results.Add(new MaterializedRow(bindingTable));
             }
         }
@@ -204,7 +203,6 @@ public partial class QueryExecutor
         {
             while (subQueryScan.MoveNext(ref bindingTable))
             {
-                ThrowIfCancellationRequested();
                 results.Add(new MaterializedRow(bindingTable));
                 bindingTable.Clear();
             }
@@ -235,7 +233,6 @@ public partial class QueryExecutor
             var tp = pattern.GetPattern(0);
             foreach (var subRow in subQueryResults)
             {
-                ThrowIfCancellationRequested();
                 // Load subquery bindings
                 bindingTable.Clear();
                 for (int i = 0; i < subRow.BindingCount; i++)
@@ -291,7 +288,6 @@ public partial class QueryExecutor
             // Multiple outer patterns - use MultiPatternScan per subquery result
             foreach (var subRow in subQueryResults)
             {
-                ThrowIfCancellationRequested();
                 // Load subquery bindings
                 bindingTable.Clear();
                 for (int i = 0; i < subRow.BindingCount; i++)
@@ -316,7 +312,6 @@ public partial class QueryExecutor
                 {
                     while (scan.MoveNext(ref bindingTable))
                     {
-                        ThrowIfCancellationRequested();
                         results.Add(new MaterializedRow(bindingTable));
                         bindingTable.TruncateTo(savedCount);
                     }
@@ -371,7 +366,6 @@ public partial class QueryExecutor
         {
             while (joinScan.MoveNext(ref bindingTable))
             {
-                ThrowIfCancellationRequested();
                 // Apply outer FILTER clauses
                 if (hasFilters)
                 {

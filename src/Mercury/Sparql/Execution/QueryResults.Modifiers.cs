@@ -120,21 +120,8 @@ public ref partial struct QueryResults
     /// </summary>
     private bool MoveNextUnorderedForCollection()
     {
-        const int MaxIterations = 1_000_000; // Safety limit to prevent infinite loops
-        int iterations = 0;
-
         while (true)
         {
-            // Check for cancellation periodically to allow timeout
-            ThrowIfCancellationRequested();
-
-            // Safety check - prevent infinite loops in case of bugs
-            if (++iterations > MaxIterations)
-            {
-                throw new InvalidOperationException(
-                    $"MoveNextUnorderedForCollection exceeded {MaxIterations} iterations - possible infinite loop");
-            }
-
             bool hasNext;
 
             if (_isSubQuery)

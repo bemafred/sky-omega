@@ -217,8 +217,9 @@ internal ref struct BindExpressionEvaluator
 
     private Value ParseStringLiteral()
     {
+        var fullStart = _position; // Track start (including opening quote)
+
         Advance(); // Skip '"'
-        var start = _position;
 
         while (!IsAtEnd() && Peek() != '"')
         {
@@ -226,11 +227,51 @@ internal ref struct BindExpressionEvaluator
             Advance();
         }
 
-        var str = _expression.Slice(start, _position - start);
-
         if (!IsAtEnd()) Advance(); // Skip closing '"'
 
-        return new Value { Type = ValueType.String, StringValue = str };
+        // Handle optional language tag @lang or datatype ^^type
+        if (!IsAtEnd())
+        {
+            if (Peek() == '@')
+            {
+                // Skip language tag: @en, @en-US, etc.
+                Advance(); // Skip '@'
+                while (!IsAtEnd() && (IsLetter(Peek()) || Peek() == '-'))
+                    Advance();
+            }
+            else if (Peek() == '^' && _position + 1 < _expression.Length &&
+                     _expression[_position + 1] == '^')
+            {
+                // Skip datatype: ^^<IRI> or ^^prefix:local
+                Advance(); // Skip first '^'
+                Advance(); // Skip second '^'
+
+                if (!IsAtEnd() && Peek() == '<')
+                {
+                    // Full IRI: <http://...>
+                    Advance(); // Skip '<'
+                    while (!IsAtEnd() && Peek() != '>')
+                        Advance();
+                    if (!IsAtEnd()) Advance(); // Skip '>'
+                }
+                else
+                {
+                    // Prefixed name: prefix:local
+                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                        Advance();
+                    if (!IsAtEnd() && Peek() == ':')
+                    {
+                        Advance();
+                        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-'))
+                            Advance();
+                    }
+                }
+            }
+        }
+
+        // Return full literal (including quotes and datatype) for proper grouping
+        var fullLiteral = _expression.Slice(fullStart, _position - fullStart);
+        return new Value { Type = ValueType.String, StringValue = fullLiteral };
     }
 
     private Value ParseNumericLiteral()

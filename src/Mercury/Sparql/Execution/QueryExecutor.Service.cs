@@ -45,8 +45,7 @@ public partial class QueryExecutor
     /// </summary>
     private List<MaterializedRow> IterateServiceResults(
         ServiceFetchResult fetchResult,
-        BindingTable bindingTable,
-        bool checkCancellation = true)
+        BindingTable bindingTable)
     {
         var results = new List<MaterializedRow>();
         var initialBindingsCount = bindingTable.Count;
@@ -63,7 +62,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    if (checkCancellation) ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                     bindingTable.TruncateTo(initialBindingsCount);
                 }
@@ -81,7 +79,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    if (checkCancellation) ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                     bindingTable.TruncateTo(initialBindingsCount);
                 }
@@ -103,8 +100,7 @@ public partial class QueryExecutor
         ServiceFetchResult fetchResult,
         ref BindingTable bindingTable,
         List<MaterializedRow> results,
-        int bindingsToPreserve,
-        bool checkCancellation = true)
+        int bindingsToPreserve)
     {
         if (fetchResult.IsIndexed)
         {
@@ -118,7 +114,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    if (checkCancellation) ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -135,7 +130,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    if (checkCancellation) ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -335,7 +329,6 @@ public partial class QueryExecutor
             {
                 while (serviceScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -403,7 +396,6 @@ public partial class QueryExecutor
             {
                 while (serviceScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -463,12 +455,11 @@ public partial class QueryExecutor
             var localResults = ExecuteFirstBranchPatterns(in pattern, bindings, stringBuffer);
             foreach (var localRow in localResults)
             {
-                ThrowIfCancellationRequested();
                 bindingTable.TruncateTo(0);
                 localRow.RestoreBindings(ref bindingTable);
 
                 var fetchResult = FetchServiceWithDualPath(firstBranchService.Value, bindingTable);
-                IterateServiceResultsWithJoin(fetchResult, ref bindingTable, results, bindingTable.Count, checkCancellation: false);
+                IterateServiceResultsWithJoin(fetchResult, ref bindingTable, results, bindingTable.Count);
             }
         }
         else if (firstBranchPatternCount > 0)
@@ -486,7 +477,6 @@ public partial class QueryExecutor
             {
                 while (serviceScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -505,12 +495,11 @@ public partial class QueryExecutor
             var localResults = ExecuteSecondBranchPatterns(in pattern, bindings, stringBuffer);
             foreach (var localRow in localResults)
             {
-                ThrowIfCancellationRequested();
                 bindingTable.TruncateTo(0);
                 localRow.RestoreBindings(ref bindingTable);
 
                 var fetchResult = FetchServiceWithDualPath(secondBranchService.Value, bindingTable);
-                IterateServiceResultsWithJoin(fetchResult, ref bindingTable, results, bindingTable.Count, checkCancellation: false);
+                IterateServiceResultsWithJoin(fetchResult, ref bindingTable, results, bindingTable.Count);
             }
         }
         else if (secondBranchPatternCount > 0)
@@ -529,7 +518,6 @@ public partial class QueryExecutor
             {
                 while (serviceScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -564,7 +552,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -587,7 +574,6 @@ public partial class QueryExecutor
             {
                 while (multiScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -624,7 +610,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -647,7 +632,6 @@ public partial class QueryExecutor
             {
                 while (multiScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     results.Add(new MaterializedRow(bindingTable));
                 }
             }
@@ -724,7 +708,6 @@ public partial class QueryExecutor
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     if (!PassesFilters(in pattern, ref bindingTable))
                     {
                         bindingTable.TruncateTo(incomingBindingCount);
@@ -754,7 +737,6 @@ public partial class QueryExecutor
             {
                 while (multiScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     // Only evaluate unpushable filters - pushed ones were checked in MoveNext
                     if (!PassesUnpushableFilters(in pattern, ref bindingTable, unpushableFilters))
                     {
@@ -814,8 +796,6 @@ public partial class QueryExecutor
 
         foreach (var localRow in localResults)
         {
-            ThrowIfCancellationRequested();
-
             // Restore local bindings
             var bindingTable = new BindingTable(bindings, stringBuffer);
             bindingTable.TruncateTo(0);
@@ -928,8 +908,6 @@ public partial class QueryExecutor
 
         foreach (var serviceRow in serviceResults)
         {
-            ThrowIfCancellationRequested();
-
             // Restore bindings from SERVICE result
             bindingTable.TruncateTo(0);
             serviceRow.RestoreBindings(ref bindingTable);
@@ -1040,7 +1018,6 @@ public partial class QueryExecutor
                 {
                     while (serviceScan.MoveNext(ref bindingTable))
                     {
-                        ThrowIfCancellationRequested();
                         currentResults.Add(new MaterializedRow(bindingTable));
                     }
                 }
@@ -1057,13 +1034,12 @@ public partial class QueryExecutor
 
                 foreach (var row in currentResults)
                 {
-                    ThrowIfCancellationRequested();
                     bindingTable.TruncateTo(0);
                     row.RestoreBindings(ref bindingTable);
 
                     // Fetch SERVICE with current bindings - allows remote filtering
                     var fetchResult = FetchServiceWithDualPath(serviceClause, bindingTable);
-                    IterateServiceResultsWithJoin(fetchResult, ref bindingTable, newResults, bindingTable.Count, checkCancellation: false);
+                    IterateServiceResultsWithJoin(fetchResult, ref bindingTable, newResults, bindingTable.Count);
                 }
 
                 currentResults = newResults;

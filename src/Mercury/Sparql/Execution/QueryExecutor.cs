@@ -79,31 +79,6 @@ public partial class QueryExecutor : IDisposable
     private readonly QueryPlanner? _planner;
     private readonly int[]? _optimizedPatternOrder;
 
-    // Cancellation support
-    private CancellationToken _cancellationToken;
-
-    // Circuit breaker for infinite loop protection
-    private long _iterationCount;
-    private readonly long _maxIterations;
-
-    /// <summary>
-    /// Throws OperationCanceledException if cancellation has been requested.
-    /// Also checks iteration count circuit breaker to prevent infinite loops.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private void ThrowIfCancellationRequested()
-    {
-        _cancellationToken.ThrowIfCancellationRequested();
-
-        // Circuit breaker: check if we've exceeded maximum iterations
-        if (++_iterationCount > _maxIterations)
-        {
-            throw new InvalidOperationException(
-                $"Query exceeded maximum iteration limit ({_maxIterations:N0}). " +
-                "Possible infinite loop detected in query execution.");
-        }
-    }
-
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
         : this(store, source, in query, null, null, null, DefaultMaxJoinDepth) { }
 
@@ -132,8 +107,6 @@ public partial class QueryExecutor : IDisposable
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _planner = planner;
         _maxJoinDepth = maxJoinDepth;
-        _maxIterations = DefaultMaxIterations;
-        _iterationCount = 0;
 
         // ADR-009 Phase 2: Convert Query to QueryBuffer for heap-based storage
         // This avoids stack overflow when accessing patterns in nested calls
@@ -286,8 +259,6 @@ public partial class QueryExecutor : IDisposable
         _stringBuffer = _bufferManager.Rent<char>(1024).Array!;  // Pooled buffer for string operations
         _serviceExecutor = serviceExecutor;
         _maxJoinDepth = DefaultMaxJoinDepth;  // Use default join depth limit
-        _maxIterations = DefaultMaxIterations;  // Circuit breaker for infinite loops
-        _iterationCount = 0;
 
         // Cache first pattern and service clause for SERVICE+local joins
         if (_cachedPattern.PatternCount > 0)
@@ -390,7 +361,6 @@ public partial class QueryExecutor : IDisposable
                 {
                     while (scan.MoveNext(ref bindingTable))
                     {
-                        ThrowIfCancellationRequested();
                         if (!PassesFilters(in pattern, ref bindingTable))
                         {
                             bindingTable.Clear();
@@ -422,7 +392,6 @@ public partial class QueryExecutor : IDisposable
                 {
                     while (multiScan.MoveNext(ref bindingTable))
                     {
-                        ThrowIfCancellationRequested();
                         // Only evaluate unpushable filters - pushed ones were checked in MoveNext
                         if (!PassesUnpushableFilters(in pattern, ref bindingTable, unpushableFilters))
                         {
@@ -446,7 +415,6 @@ public partial class QueryExecutor : IDisposable
             {
                 while (crossGraphScan.MoveNext(ref bindingTable))
                 {
-                    ThrowIfCancellationRequested();
                     if (!PassesFilters(in pattern, ref bindingTable))
                     {
                         bindingTable.Clear();
@@ -466,24 +434,6 @@ public partial class QueryExecutor : IDisposable
 
         return new MaterializedQueryResults(results, bindings, stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
-    }
-
-    /// <summary>
-    /// Execute a parsed query and return results.
-    /// Caller must hold read lock on store and call Dispose on results.
-    /// Note: Use _buffer for pattern metadata to avoid large struct copies that cause stack overflow.
-    /// </summary>
-    /// <summary>
-    /// Execute the query with cancellation support.
-    /// </summary>
-    /// <param name="cancellationToken">Token to cancel query execution.</param>
-    /// <returns>Query results that can be iterated.</returns>
-    public QueryResults Execute(CancellationToken cancellationToken)
-    {
-        _cancellationToken = cancellationToken;
-        // Set thread-static token for operators to check
-        QueryCancellation.SetToken(cancellationToken);
-        return Execute();
     }
 
     /// <remarks>

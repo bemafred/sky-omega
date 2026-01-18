@@ -149,10 +149,6 @@ public class SparqlConformanceTests
             actual.AddVariable(variable);
         }
 
-        // Get timeout for this test (default 30 seconds)
-        var timeoutMs = W3CTestContext.GetRecommendedTimeout(test.Id) ?? 30000;
-        using var cts = new CancellationTokenSource(timeoutMs);
-
         store.AcquireReadLock();
         try
         {
@@ -168,13 +164,12 @@ public class SparqlConformanceTests
             else
             {
                 // SELECT query - execute and collect results with timeout
-                var results = executor.Execute(cts.Token);
-                results.SetCancellationToken(cts.Token); // Enable timeout in collection loops
+                var results = executor.Execute();
+                
                 try
                 {
-                    while (results.MoveNext())
+                    while (results.MoveNext()) // TODO: This call hangs when name == "Group-4"
                     {
-                        cts.Token.ThrowIfCancellationRequested();
                         var row = new SparqlResultRow();
                         var current = results.Current;
 
@@ -194,10 +189,6 @@ public class SparqlConformanceTests
                 }
                 _output.WriteLine($"Got {actual.Count} results");
             }
-        }
-        catch (OperationCanceledException)
-        {
-            throw new Xunit.Sdk.XunitException($"Test timed out after {timeoutMs}ms");
         }
         finally
         {
