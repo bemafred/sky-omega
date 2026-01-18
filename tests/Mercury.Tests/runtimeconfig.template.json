@@ -1,5 +1,6 @@
 {
   "configProperties": {
-    "System.Threading.Thread.DefaultStackSize": 4194304
+    "System.Threading.Thread.DefaultStackSize": 33554432
   }
 }
+N

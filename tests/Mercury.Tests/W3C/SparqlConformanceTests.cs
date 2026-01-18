@@ -141,59 +141,54 @@ public class SparqlConformanceTests
         var hasOrderBy = query.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase);
 
         // Execute the query and collect actual results
-        var actual = new SparqlResultSet();
-
-        // Add expected variables to actual result set
-        foreach (var variable in expected.Variables)
+        // Run on dedicated thread with 8MB stack to avoid stack overflow from QueryResults (~22KB)
+        var actual = RunOnLargeStack(() =>
         {
-            actual.AddVariable(variable);
-        }
+            var resultSet = new SparqlResultSet();
+            foreach (var variable in expected.Variables)
+                resultSet.AddVariable(variable);
 
-        store.AcquireReadLock();
-        try
-        {
-            using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
+            store.AcquireReadLock();
+            try
+            {
+                using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
 
-            // Handle ASK queries
-            if (parsed.Type == QueryType.Ask)
-            {
-                var askResult = executor.ExecuteAsk();
-                actual = SparqlResultSet.Boolean(askResult);
-                _output.WriteLine($"ASK result: {askResult}");
-            }
-            else
-            {
-                // SELECT query - execute and collect results with timeout
+                // Handle ASK queries
+                if (parsed.Type == QueryType.Ask)
+                {
+                    var askResult = executor.ExecuteAsk();
+                    return SparqlResultSet.Boolean(askResult);
+                }
+
+                // SELECT query - execute and collect results
                 var results = executor.Execute();
-                
                 try
                 {
-                    while (results.MoveNext()) 
+                    while (results.MoveNext())
                     {
                         var row = new SparqlResultRow();
                         var current = results.Current;
 
-                        // Extract bindings for expected variables
                         foreach (var varName in expected.Variables)
                         {
                             var binding = ExtractBinding(current, varName);
                             row.Set(varName, binding);
                         }
-
-                        actual.AddRow(row);
+                        resultSet.AddRow(row);
                     }
                 }
                 finally
                 {
                     results.Dispose();
                 }
-                _output.WriteLine($"Got {actual.Count} results");
+                return resultSet;
             }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
+            finally
+            {
+                store.ReleaseReadLock();
+            }
+        });
+        _output.WriteLine($"Got {actual.Count} results");
 
         // Compare results using full validation with blank node isomorphism
         var comparisonError = SparqlResultComparer.Compare(expected, actual, ordered: hasOrderBy);
@@ -497,5 +492,37 @@ public class SparqlConformanceTests
 
             yield return new object[] { test.DisplayName, test };
         }
+    }
+
+    /// <summary>
+    /// Run a function on a dedicated thread with 8MB stack to avoid stack overflow
+    /// from large ref structs like QueryResults (~22KB).
+    /// Thread pool threads have 1MB stacks which is insufficient for complex queries.
+    /// </summary>
+    private static T RunOnLargeStack<T>(Func<T> func)
+    {
+        const int stackSize = 8 * 1024 * 1024; // 8MB
+        T? result = default;
+        Exception? exception = null;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                result = func();
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
+            }
+        }, stackSize);
+
+        thread.Start();
+        thread.Join();
+
+        if (exception != null)
+            throw exception;
+
+        return result!;
     }
 }
