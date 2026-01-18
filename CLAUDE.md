@@ -104,6 +104,15 @@ SkyOmega.sln
 │   └── Minerva.Mcp/         # Minerva MCP server (future)
 ├── tests/
 │   ├── Mercury.Tests/       # Mercury xUnit tests
+│   │   ├── Diagnostics/     # Diagnostic system tests
+│   │   ├── Fixtures/        # Test fixtures and helpers
+│   │   ├── Infrastructure/  # Cross-cutting tests (allocation, concurrency, buffers)
+│   │   ├── Owl/             # OWL/RDFS reasoning tests
+│   │   ├── Rdf/             # RDF format parser/writer tests
+│   │   ├── Repl/            # REPL session tests
+│   │   ├── Sparql/          # SPARQL parser, executor, protocol tests
+│   │   ├── Storage/         # Storage layer tests (QuadStore, AtomStore, WAL)
+│   │   └── W3C/             # W3C conformance test suites
 │   └── Minerva.Tests/       # Minerva xUnit tests (future)
 ├── benchmarks/
 │   ├── Mercury.Benchmarks/  # Mercury BenchmarkDotNet tests
