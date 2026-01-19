@@ -74,6 +74,11 @@ public ref partial struct QueryResults
     // EXISTS/NOT EXISTS support
     private readonly bool _hasExists;
 
+    // Expanded term storage for prefix resolution in EXISTS/MINUS evaluation
+    private string? _expandedSubject;
+    private string? _expandedPredicate;
+    private string? _expandedObject;
+
     // GROUP BY support
     private readonly bool _hasGroupBy;
     private readonly GroupByClause _groupBy;

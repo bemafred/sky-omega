@@ -36,10 +36,10 @@ public ref partial struct QueryResults
         if (_store == null) return;
 
         // Resolve terms - variables that are already bound use their value,
-        // unbound variables become wildcards
-        var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength);
-        var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength);
-        var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength);
+        // unbound variables become wildcards, prefixed names are expanded
+        var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, SlotTermPosition.Subject);
+        var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, SlotTermPosition.Predicate);
+        var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, SlotTermPosition.Object);
 
         // Query the store
         var results = _store.QueryCurrent(subject, predicate, obj);
@@ -62,13 +62,60 @@ public ref partial struct QueryResults
         }
     }
 
+    /// <summary>
+    /// Term position for prefix expansion.
+    /// </summary>
+    private enum SlotTermPosition { Subject, Predicate, Object }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveSlotTerm(TermType termType, int start, int length)
+    private ReadOnlySpan<char> ResolveSlotTerm(TermType termType, int start, int length, SlotTermPosition position = SlotTermPosition.Subject)
     {
         if (termType != TermType.Variable)
         {
-            // Constant - use source text
-            return _source.Slice(start, length);
+            // Constant - check if it's a prefixed name that needs expansion
+            var termSpan = _source.Slice(start, length);
+
+            // Check for prefixed name: not starting with < or ", contains :
+            if (_buffer?.Prefixes != null && termSpan.Length > 0 &&
+                termSpan[0] != '<' && termSpan[0] != '"')
+            {
+                var colonIdx = termSpan.IndexOf(':');
+                if (colonIdx >= 0)
+                {
+                    var prefix = termSpan.Slice(0, colonIdx + 1);
+                    var localName = termSpan.Slice(colonIdx + 1);
+
+                    foreach (var mapping in _buffer.Prefixes)
+                    {
+                        var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+                        if (prefix.SequenceEqual(mappedPrefix))
+                        {
+                            var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+                            var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+
+                            // Build expanded IRI and store as string
+                            var expanded = string.Concat(nsWithoutClose, localName, ">");
+
+                            // Store in position-specific field and return span over it
+                            switch (position)
+                            {
+                                case SlotTermPosition.Subject:
+                                    _expandedSubject = expanded;
+                                    return _expandedSubject.AsSpan();
+                                case SlotTermPosition.Predicate:
+                                    _expandedPredicate = expanded;
+                                    return _expandedPredicate.AsSpan();
+                                default:
+                                    _expandedObject = expanded;
+                                    return _expandedObject.AsSpan();
+                            }
+                        }
+                    }
+                }
+            }
+
+            return termSpan;
         }
 
         // Check if variable is already bound
@@ -353,10 +400,10 @@ public ref partial struct QueryResults
             var patternSlot = patterns[p];
             if (patternSlot.Kind != PatternKind.Triple) continue;
 
-            // Resolve terms - use bound values for variables
-            var subject = ResolveSlotTerm(patternSlot.SubjectType, patternSlot.SubjectStart, patternSlot.SubjectLength);
-            var predicate = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength);
-            var obj = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength);
+            // Resolve terms - use bound values for variables, expand prefixed names
+            var subject = ResolveSlotTerm(patternSlot.SubjectType, patternSlot.SubjectStart, patternSlot.SubjectLength, SlotTermPosition.Subject);
+            var predicate = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength, SlotTermPosition.Predicate);
+            var obj = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength, SlotTermPosition.Object);
 
             // Query the store
             var results = _store.QueryCurrent(subject, predicate, obj);
@@ -534,10 +581,10 @@ public ref partial struct QueryResults
     {
         if (_store == null) return false;
 
-        // Resolve terms using current bindings
-        var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength);
-        var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength);
-        var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength);
+        // Resolve terms using current bindings, expand prefixed names
+        var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, SlotTermPosition.Subject);
+        var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, SlotTermPosition.Predicate);
+        var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, SlotTermPosition.Object);
 
         // Query the store to see if this pattern matches
         var results = _store.QueryCurrent(subject, predicate, obj);
