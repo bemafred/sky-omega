@@ -706,7 +706,12 @@ internal ref struct MultiPatternScan
 
     // Prefix expansion support
     private readonly PrefixMapping[]? _prefixes;
-    private char[]? _expandBuffer;
+    // Expanded IRIs stored as strings to ensure span lifetime safety
+    // Each position needs its own storage since ResolveAndQuery() resolves all three
+    // before calling ExecuteTemporalQuery
+    private string? _expandedSubject;
+    private string? _expandedPredicate;
+    private string? _expandedObject;
 
     // Current state for each pattern level (support up to 12 patterns for SPARQL-star with multiple annotations)
     private TemporalResultEnumerator _enum0;
@@ -751,6 +756,9 @@ internal ref struct MultiPatternScan
 
     private bool _hasPushedFilters;
 
+    // Term position enum for prefix expansion storage
+    private enum TermPosition { Subject, Predicate, Object }
+
     /// <summary>
     /// Get the current pattern (from boxed or inline storage).
     /// </summary>
@@ -784,7 +792,9 @@ internal ref struct MultiPatternScan
         _rangeStart = default;
         _rangeEnd = default;
         _prefixes = prefixes;
-        _expandBuffer = null;
+        _expandedSubject = null;
+        _expandedPredicate = null;
+        _expandedObject = null;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _init4 = _init5 = _init6 = _init7 = false;
@@ -829,7 +839,9 @@ internal ref struct MultiPatternScan
         _rangeStart = rangeStart;
         _rangeEnd = rangeEnd;
         _prefixes = prefixes;
-        _expandBuffer = null;
+        _expandedSubject = null;
+        _expandedPredicate = null;
+        _expandedObject = null;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _init4 = _init5 = _init6 = _init7 = false;
@@ -1398,21 +1410,23 @@ internal ref struct MultiPatternScan
         // For each term, resolve to a span. Constants come from _source (stable),
         // unbound variables become empty span. Bound variables need special handling.
         // Synthetic terms (negative offsets) come from SPARQL-star expansion.
+        // IMPORTANT: Each term uses its own storage field to prevent buffer overwrite issues.
         ReadOnlySpan<char> subject, predicate, obj;
 
         // Check if this is an inverse path
         bool isInverse = pattern.Path.Type == PathType.Inverse;
 
-        // Resolve subject
-        subject = ResolveTerm(pattern.Subject, ref bindings);
+        // Resolve subject - store in _expandedSubject if expansion needed
+        subject = ResolveTerm(pattern.Subject, ref bindings, TermPosition.Subject);
 
         // Resolve predicate - for inverse paths, use Path.Iri
+        // Store in _expandedPredicate if expansion needed
         predicate = isInverse
-            ? ResolveTerm(pattern.Path.Iri, ref bindings)
-            : ResolveTerm(pattern.Predicate, ref bindings);
+            ? ResolveTerm(pattern.Path.Iri, ref bindings, TermPosition.Predicate)
+            : ResolveTerm(pattern.Predicate, ref bindings, TermPosition.Predicate);
 
-        // Resolve object
-        obj = ResolveTerm(pattern.Object, ref bindings);
+        // Resolve object - store in _expandedObject if expansion needed
+        obj = ResolveTerm(pattern.Object, ref bindings, TermPosition.Object);
 
         // For inverse paths, swap subject and object in the query
         if (isInverse)
@@ -1426,7 +1440,7 @@ internal ref struct MultiPatternScan
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveTerm(Term term, scoped ref BindingTable bindings)
+    private ReadOnlySpan<char> ResolveTerm(Term term, scoped ref BindingTable bindings, TermPosition position)
     {
         // Handle synthetic terms (negative offsets from SPARQL-star expansion)
         if (SyntheticTermHelper.IsSynthetic(term.Start))
@@ -1472,21 +1486,20 @@ internal ref struct MultiPatternScan
                             // IRI namespace is like <http://example.org/> - we need to strip angle brackets and append local name
                             var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1); // Remove trailing >
 
-                            _expandBuffer ??= new char[512];
-                            int pos = 0;
-
-                            // Copy namespace (without closing >)
-                            for (int j = 0; j < nsWithoutClose.Length; j++)
-                                _expandBuffer[pos++] = nsWithoutClose[j];
-
-                            // Copy local name
-                            for (int j = 0; j < localName.Length; j++)
-                                _expandBuffer[pos++] = localName[j];
-
-                            // Add closing bracket
-                            _expandBuffer[pos++] = '>';
-
-                            return new ReadOnlySpan<char>(_expandBuffer, 0, pos);
+                            // Store expanded IRI in position-specific field to prevent buffer overwrite
+                            var expanded = string.Concat(nsWithoutClose, localName, ">");
+                            switch (position)
+                            {
+                                case TermPosition.Subject:
+                                    _expandedSubject = expanded;
+                                    return _expandedSubject.AsSpan();
+                                case TermPosition.Predicate:
+                                    _expandedPredicate = expanded;
+                                    return _expandedPredicate.AsSpan();
+                                default:
+                                    _expandedObject = expanded;
+                                    return _expandedObject.AsSpan();
+                            }
                         }
                     }
                 }

@@ -653,12 +653,13 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Re-parse a path segment from source offsets.
-    /// Parses just the term and optional modifier (*, +, ?) without looking for sequence (/) or alternative (|).
+    /// Handles nested sequences/alternatives within the segment bounds.
     /// </summary>
     private (Term predicate, PropertyPath path) ParsePathSegment(int start, int length)
     {
         // Save current parser position
         var savedPosition = _position;
+        var segmentEnd = start + length;
 
         // Temporarily set position to the segment location
         _position = start;
@@ -682,7 +683,7 @@ public ref partial struct SparqlParser
             // Parse the term
             term = ParseTerm();
 
-            // Check for modifier after the term (but NOT / or |)
+            // Check for modifier after the term
             SkipWhitespace();
             ch = Peek();
 
@@ -706,7 +707,27 @@ public ref partial struct SparqlParser
                     resultPath = PropertyPath.ZeroOrOne(term);
                 }
             }
-            // Do NOT check for / or | here - that would cause infinite recursion
+            // Check for sequence or alternative within segment bounds
+            else if (ch == '/' && _position < segmentEnd)
+            {
+                var leftStart = term.Start;
+                var leftLength = term.Length;
+                Advance(); // Skip '/'
+                SkipWhitespace();
+                var rightStart = _position;
+                var rightLength = segmentEnd - rightStart;
+                resultPath = PropertyPath.Sequence(leftStart, leftLength, rightStart, rightLength);
+            }
+            else if (ch == '|' && _position < segmentEnd)
+            {
+                var leftStart = term.Start;
+                var leftLength = term.Length;
+                Advance(); // Skip '|'
+                SkipWhitespace();
+                var rightStart = _position;
+                var rightLength = segmentEnd - rightStart;
+                resultPath = PropertyPath.Alternative(leftStart, leftLength, rightStart, rightLength);
+            }
         }
 
         // Restore original position
@@ -815,25 +836,59 @@ public ref partial struct SparqlParser
             }
         }
 
-        // Check for sequence or alternative (simple case: iri1/iri2 or iri1|iri2)
+        // Check for sequence: iri1/iri2/iri3... (parse entire right side span for nested sequences)
         if (ch == '/')
         {
             var leftStart = term.Start;
             var leftLength = term.Length;
             Advance(); // Skip '/'
             SkipWhitespace();
-            var right = ParseTerm();
-            return (term, PropertyPath.Sequence(leftStart, leftLength, right.Start, right.Length));
+            var rightStart = _position;
+            ParseTerm();  // Parse first right term
+            var rightEnd = _position;  // Track end before whitespace
+
+            // Continue parsing while we see more '/' to capture the entire span
+            // This allows a/b/c to capture right = "b/c" for recursive expansion
+            while (true)
+            {
+                SkipWhitespace();
+                if (Peek() != '/')
+                    break;
+                Advance(); // Skip '/'
+                SkipWhitespace();
+                ParseTerm();  // Parse next term
+                rightEnd = _position;  // Update end position after each term
+            }
+
+            var rightLength = rightEnd - rightStart;  // Use end position, not current position
+            return (term, PropertyPath.Sequence(leftStart, leftLength, rightStart, rightLength));
         }
 
+        // Check for alternative: iri1|iri2|iri3... (parse entire right side span for nested alternatives)
         if (ch == '|')
         {
             var leftStart = term.Start;
             var leftLength = term.Length;
             Advance(); // Skip '|'
             SkipWhitespace();
-            var right = ParseTerm();
-            return (term, PropertyPath.Alternative(leftStart, leftLength, right.Start, right.Length));
+            var rightStart = _position;
+            ParseTerm();  // Parse first right term
+            var rightEnd = _position;  // Track end before whitespace
+
+            // Continue parsing while we see more '|' to capture the entire span
+            while (true)
+            {
+                SkipWhitespace();
+                if (Peek() != '|')
+                    break;
+                Advance(); // Skip '|'
+                SkipWhitespace();
+                ParseTerm();  // Parse next term
+                rightEnd = _position;  // Update end position after each term
+            }
+
+            var rightLength = rightEnd - rightStart;  // Use end position, not current position
+            return (term, PropertyPath.Alternative(leftStart, leftLength, rightStart, rightLength));
         }
 
         // Simple predicate - no path
