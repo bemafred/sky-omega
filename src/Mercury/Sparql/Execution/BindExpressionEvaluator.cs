@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text.RegularExpressions;
 using SkyOmega.Mercury.Sparql;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -337,6 +338,24 @@ internal ref struct BindExpressionEvaluator
                 return ParseCoalesceFunction();
             }
 
+            // STRBEFORE(string, delimiter) - returns substring before first occurrence
+            if (name.Equals("STRBEFORE", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseStrBeforeFunction();
+            }
+
+            // STRAFTER(string, delimiter) - returns substring after first occurrence
+            if (name.Equals("STRAFTER", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseStrAfterFunction();
+            }
+
+            // REPLACE(string, pattern, replacement [, flags]) - regex replacement
+            if (name.Equals("REPLACE", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseReplaceFunction();
+            }
+
             var arg = ParseAdditive();
             SkipWhitespace();
 
@@ -374,9 +393,125 @@ internal ref struct BindExpressionEvaluator
             // LCASE function
             if (name.Equals("LCASE", StringComparison.OrdinalIgnoreCase))
                 return arg; // Would need buffer for actual lowercase
+
+            // DateTime extraction functions - extract components directly from lexical value per SPARQL spec
+            // YEAR - extract year from xsd:dateTime
+            if (name.Equals("YEAR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out var year, out _, out _, out _, out _, out _))
+                    return new Value { Type = ValueType.Integer, IntegerValue = year };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // MONTH - extract month from xsd:dateTime (1-12)
+            if (name.Equals("MONTH", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out _, out var month, out _, out _, out _, out _))
+                    return new Value { Type = ValueType.Integer, IntegerValue = month };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // DAY - extract day from xsd:dateTime (1-31)
+            if (name.Equals("DAY", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out _, out _, out var day, out _, out _, out _))
+                    return new Value { Type = ValueType.Integer, IntegerValue = day };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // HOURS - extract hours from xsd:dateTime (0-23)
+            if (name.Equals("HOURS", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out _, out _, out _, out var hour, out _, out _))
+                    return new Value { Type = ValueType.Integer, IntegerValue = hour };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // MINUTES - extract minutes from xsd:dateTime (0-59)
+            if (name.Equals("MINUTES", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out _, out _, out _, out _, out var minute, out _))
+                    return new Value { Type = ValueType.Integer, IntegerValue = minute };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // SECONDS - extract seconds from xsd:dateTime (0-59, with fractional part)
+            if (name.Equals("SECONDS", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out _, out _, out _, out _, out _, out var seconds))
+                    return new Value { Type = ValueType.Double, DoubleValue = seconds };
+                return new Value { Type = ValueType.Unbound };
+            }
         }
 
         return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Try to parse an xsd:dateTime string and extract time components.
+    /// Supports formats: yyyy-MM-ddTHH:mm:ss, yyyy-MM-ddTHH:mm:ss.fff, with optional timezone.
+    /// Also handles RDF typed literals like "2010-06-21T11:28:01Z"^^xsd:dateTime.
+    /// Extracts components directly from lexical value per SPARQL spec (no timezone conversion).
+    /// </summary>
+    private static bool TryParseDateTime(ReadOnlySpan<char> str, out int year, out int month, out int day,
+        out int hour, out int minute, out double second)
+    {
+        year = month = day = hour = minute = 0;
+        second = 0.0;
+        if (str.IsEmpty)
+            return false;
+
+        // Handle RDF typed literals: extract lexical value from quotes
+        var parseSpan = str;
+        if (str.Length > 2 && str[0] == '"')
+        {
+            // Find the closing quote
+            var endQuote = str.Slice(1).IndexOf('"');
+            if (endQuote > 0)
+            {
+                parseSpan = str.Slice(1, endQuote);
+            }
+        }
+
+        // Parse ISO 8601 format: yyyy-MM-ddTHH:mm:ss[.fff][Z|+HH:MM|-HH:MM]
+        // Minimum valid: yyyy-MM-ddTHH:mm:ss (19 chars)
+        if (parseSpan.Length < 19)
+            return false;
+
+        // Extract components directly from string
+        // Format: 0123456789012345678
+        //         yyyy-MM-ddTHH:mm:ss
+        if (parseSpan[4] != '-' || parseSpan[7] != '-' || parseSpan[10] != 'T' ||
+            parseSpan[13] != ':' || parseSpan[16] != ':')
+            return false;
+
+        if (!int.TryParse(parseSpan.Slice(0, 4), NumberStyles.None, CultureInfo.InvariantCulture, out year))
+            return false;
+        if (!int.TryParse(parseSpan.Slice(5, 2), NumberStyles.None, CultureInfo.InvariantCulture, out month))
+            return false;
+        if (!int.TryParse(parseSpan.Slice(8, 2), NumberStyles.None, CultureInfo.InvariantCulture, out day))
+            return false;
+        if (!int.TryParse(parseSpan.Slice(11, 2), NumberStyles.None, CultureInfo.InvariantCulture, out hour))
+            return false;
+        if (!int.TryParse(parseSpan.Slice(14, 2), NumberStyles.None, CultureInfo.InvariantCulture, out minute))
+            return false;
+
+        // Parse seconds (may include fractional part)
+        var secondsStart = 17;
+        var secondsEnd = 19;
+        for (int i = 19; i < parseSpan.Length; i++)
+        {
+            var c = parseSpan[i];
+            if (c == '.' || IsDigit(c))
+                secondsEnd = i + 1;
+            else
+                break;
+        }
+        if (!double.TryParse(parseSpan.Slice(secondsStart, secondsEnd - secondsStart),
+            NumberStyles.Float, CultureInfo.InvariantCulture, out second))
+            return false;
+
+        return true;
     }
 
     /// <summary>
@@ -451,6 +586,203 @@ internal ref struct BindExpressionEvaluator
 
         return result;
     }
+
+    /// <summary>
+    /// Parse STRBEFORE(string, delimiter) - returns substring before first occurrence of delimiter
+    /// </summary>
+    private Value ParseStrBeforeFunction()
+    {
+        var stringArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            // Skip to closing paren
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var delimiterArg = ParseAdditive();
+        SkipWhitespace();
+        if (Peek() == ')') Advance();
+
+        if (stringArg.Type != ValueType.String || delimiterArg.Type != ValueType.String)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        var str = ExtractLexicalValue(stringArg.StringValue);
+        var delimiter = ExtractLexicalValue(delimiterArg.StringValue);
+
+        // Empty delimiter returns empty string
+        if (delimiter.IsEmpty)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        var index = str.IndexOf(delimiter);
+        if (index < 0)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        // Return quoted result
+        _stringResult = $"\"{str.Slice(0, index).ToString()}\"";
+        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+    }
+
+    /// <summary>
+    /// Parse STRAFTER(string, delimiter) - returns substring after first occurrence of delimiter
+    /// </summary>
+    private Value ParseStrAfterFunction()
+    {
+        var stringArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var delimiterArg = ParseAdditive();
+        SkipWhitespace();
+        if (Peek() == ')') Advance();
+
+        if (stringArg.Type != ValueType.String || delimiterArg.Type != ValueType.String)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        var str = ExtractLexicalValue(stringArg.StringValue);
+        var delimiter = ExtractLexicalValue(delimiterArg.StringValue);
+
+        // Empty delimiter returns full string (per SPARQL spec)
+        if (delimiter.IsEmpty)
+        {
+            _stringResult = $"\"{str.ToString()}\"";
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
+
+        var index = str.IndexOf(delimiter);
+        if (index < 0)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        // Return quoted result
+        _stringResult = $"\"{str.Slice(index + delimiter.Length).ToString()}\"";
+        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+    }
+
+    /// <summary>
+    /// Parse REPLACE(string, pattern, replacement [, flags]) - regex replacement
+    /// </summary>
+    private Value ParseReplaceFunction()
+    {
+        var stringArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var patternArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var replacementArg = ParseAdditive();
+        SkipWhitespace();
+
+        // Optional flags argument
+        ReadOnlySpan<char> flags = ReadOnlySpan<char>.Empty;
+        if (Peek() == ',')
+        {
+            Advance(); // Skip ','
+            SkipWhitespace();
+            var flagsArg = ParseAdditive();
+            if (flagsArg.Type == ValueType.String)
+                flags = ExtractLexicalValue(flagsArg.StringValue);
+        }
+
+        SkipWhitespace();
+        if (Peek() == ')') Advance();
+
+        if (stringArg.Type != ValueType.String ||
+            patternArg.Type != ValueType.String ||
+            replacementArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        var str = ExtractLexicalValue(stringArg.StringValue);
+        var pattern = ExtractLexicalValue(patternArg.StringValue);
+        var replacement = ExtractLexicalValue(replacementArg.StringValue);
+
+        // Build regex options from flags
+        var options = RegexOptions.None;
+        foreach (var flag in flags)
+        {
+            switch (flag)
+            {
+                case 'i': options |= RegexOptions.IgnoreCase; break;
+                case 's': options |= RegexOptions.Singleline; break;
+                case 'm': options |= RegexOptions.Multiline; break;
+                case 'x': options |= RegexOptions.IgnorePatternWhitespace; break;
+            }
+        }
+
+        // Perform regex replacement
+        try
+        {
+            var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
+            _stringResult = $"\"{regex.Replace(str.ToString(), replacement.ToString())}\"";
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
+        catch
+        {
+            // Invalid regex pattern
+            return new Value { Type = ValueType.Unbound };
+        }
+    }
+
+    /// <summary>
+    /// Extract the lexical value from an RDF literal.
+    /// Handles both quoted literals ("value") and unquoted values.
+    /// </summary>
+    private static ReadOnlySpan<char> ExtractLexicalValue(ReadOnlySpan<char> str)
+    {
+        if (str.IsEmpty)
+            return str;
+
+        // Handle RDF typed literals: extract lexical value from quotes
+        if (str.Length > 2 && str[0] == '"')
+        {
+            var endQuote = str.Slice(1).IndexOf('"');
+            if (endQuote > 0)
+                return str.Slice(1, endQuote);
+        }
+
+        return str;
+    }
+
+    // Field to hold string results to prevent GC of span backing memory
+    private string _stringResult = "";
 
     /// <summary>
     /// Coerce a Value to a number. Strings are parsed as numbers.

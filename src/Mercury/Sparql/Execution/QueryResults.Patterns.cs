@@ -448,6 +448,55 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
+    /// Evaluate non-aggregate SELECT expressions (e.g., (HOURS(?date) AS ?x)).
+    /// These are stored with AggregateFunction.None and should be evaluated per row.
+    /// </summary>
+    private void EvaluateSelectExpressions()
+    {
+        if (_selectClause.AggregateCount == 0) return;
+
+        for (int i = 0; i < _selectClause.AggregateCount; i++)
+        {
+            var agg = _selectClause.GetAggregate(i);
+
+            // Only evaluate non-aggregate expressions (Function == None)
+            if (agg.Function != AggregateFunction.None) continue;
+
+            // Skip if no expression to evaluate
+            if (agg.VariableLength == 0) continue;
+
+            // Get expression and alias
+            var expr = _source.Slice(agg.VariableStart, agg.VariableLength);
+            var aliasName = _source.Slice(agg.AliasStart, agg.AliasLength);
+
+            // Evaluate the expression using BindExpressionEvaluator
+            var evaluator = new BindExpressionEvaluator(expr,
+                _bindingTable.GetBindings(),
+                _bindingTable.Count,
+                _bindingTable.GetStringBuffer());
+            var value = evaluator.Evaluate();
+
+            // Bind the result to the alias variable
+            switch (value.Type)
+            {
+                case ValueType.Integer:
+                    _bindingTable.Bind(aliasName, value.IntegerValue);
+                    break;
+                case ValueType.Double:
+                    _bindingTable.Bind(aliasName, value.DoubleValue);
+                    break;
+                case ValueType.Boolean:
+                    _bindingTable.Bind(aliasName, value.BooleanValue);
+                    break;
+                case ValueType.String:
+                case ValueType.Uri:
+                    _bindingTable.Bind(aliasName, value.StringValue);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
     /// Check if current bindings match all MINUS patterns.
     /// Returns true if any MINUS pattern matches (solution should be excluded).
     /// </summary>

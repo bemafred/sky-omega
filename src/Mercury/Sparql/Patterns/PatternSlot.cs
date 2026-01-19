@@ -1049,6 +1049,11 @@ internal sealed class SelectClauseData
     public bool Reduced { get; init; }
     public bool SelectAll { get; init; }
     public bool HasAggregates { get; init; }
+    /// <summary>
+    /// True if there are real aggregate functions (COUNT, SUM, AVG, etc.).
+    /// Non-aggregate computed expressions do not count.
+    /// </summary>
+    public bool HasRealAggregates { get; init; }
     public AggregateEntry[]? Aggregates { get; init; }
 
     /// <summary>
@@ -1083,6 +1088,7 @@ internal sealed class SelectClauseData
             Reduced = clause.Reduced,
             SelectAll = clause.SelectAll,
             HasAggregates = clause.HasAggregates,
+            HasRealAggregates = clause.HasRealAggregates,
             Aggregates = aggs
         };
     }

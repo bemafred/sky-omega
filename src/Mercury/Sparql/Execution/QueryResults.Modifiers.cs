@@ -182,6 +182,9 @@ public ref partial struct QueryResults
                 EvaluateBindExpressions();
             }
 
+            // Evaluate non-aggregate SELECT expressions (e.g., (HOURS(?date) AS ?x))
+            EvaluateSelectExpressions();
+
             if (_hasFilters && !EvaluateFilters())
             {
                 _bindingTable.Clear();
@@ -325,7 +328,7 @@ public ref partial struct QueryResults
         // Handle implicit aggregation with empty result set:
         // When there are aggregates but no GROUP BY and no matching rows,
         // SPARQL requires returning one row with default aggregate values (0 for COUNT/AVG/SUM, etc.)
-        if (groups.Count == 0 && _selectClause.HasAggregates && !_groupBy.HasGroupBy)
+        if (groups.Count == 0 && _selectClause.HasRealAggregates && !_groupBy.HasGroupBy)
         {
             // Create an empty group with default aggregate values
             _bindingTable.Clear();

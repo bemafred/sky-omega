@@ -146,6 +146,23 @@ public struct SelectClause
 
     public readonly int AggregateCount => _aggregateCount;
     public readonly bool HasAggregates => _aggregateCount > 0;
+    /// <summary>
+    /// Returns true if there are any real aggregate functions (COUNT, SUM, AVG, etc.).
+    /// Non-aggregate computed expressions (HOURS, STR, etc.) with AggregateFunction.None
+    /// do not count as real aggregates and should not trigger implicit grouping.
+    /// </summary>
+    public readonly bool HasRealAggregates
+    {
+        get
+        {
+            for (int i = 0; i < _aggregateCount; i++)
+            {
+                if (GetAggregate(i).Function != AggregateFunction.None)
+                    return true;
+            }
+            return false;
+        }
+    }
     public readonly int ProjectedVariableCount => _projectedVariableCount;
     public readonly bool HasProjectedVariables => _projectedVariableCount > 0;
 

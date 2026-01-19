@@ -740,32 +740,38 @@ public ref partial struct SparqlParser
             ConsumeKeyword("GROUP_CONCAT");
             agg.Function = AggregateFunction.GroupConcat;
         }
-        else if (span.Length >= 5 && span[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase))
+        else if (span.Length >= 5 && span[..5].Equals("COUNT", StringComparison.OrdinalIgnoreCase) &&
+                 (span.Length == 5 || !char.IsLetterOrDigit(span[5])))
         {
             ConsumeKeyword("COUNT");
             agg.Function = AggregateFunction.Count;
         }
-        else if (span.Length >= 3 && span[..3].Equals("SUM", StringComparison.OrdinalIgnoreCase))
+        else if (span.Length >= 3 && span[..3].Equals("SUM", StringComparison.OrdinalIgnoreCase) &&
+                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
         {
             ConsumeKeyword("SUM");
             agg.Function = AggregateFunction.Sum;
         }
-        else if (span.Length >= 3 && span[..3].Equals("AVG", StringComparison.OrdinalIgnoreCase))
+        else if (span.Length >= 3 && span[..3].Equals("AVG", StringComparison.OrdinalIgnoreCase) &&
+                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
         {
             ConsumeKeyword("AVG");
             agg.Function = AggregateFunction.Avg;
         }
-        else if (span.Length >= 3 && span[..3].Equals("MIN", StringComparison.OrdinalIgnoreCase))
+        else if (span.Length >= 3 && span[..3].Equals("MIN", StringComparison.OrdinalIgnoreCase) &&
+                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
         {
             ConsumeKeyword("MIN");
             agg.Function = AggregateFunction.Min;
         }
-        else if (span.Length >= 3 && span[..3].Equals("MAX", StringComparison.OrdinalIgnoreCase))
+        else if (span.Length >= 3 && span[..3].Equals("MAX", StringComparison.OrdinalIgnoreCase) &&
+                 (span.Length == 3 || !char.IsLetterOrDigit(span[3])))
         {
             ConsumeKeyword("MAX");
             agg.Function = AggregateFunction.Max;
         }
-        else if (span.Length >= 6 && span[..6].Equals("SAMPLE", StringComparison.OrdinalIgnoreCase))
+        else if (span.Length >= 6 && span[..6].Equals("SAMPLE", StringComparison.OrdinalIgnoreCase) &&
+                 (span.Length == 6 || !char.IsLetterOrDigit(span[6])))
         {
             ConsumeKeyword("SAMPLE");
             agg.Function = AggregateFunction.Sample;
@@ -773,6 +779,10 @@ public ref partial struct SparqlParser
         else
         {
             // Not a recognized aggregate - parse as expression (expr AS ?var)
+            // Store expression start position for later evaluation
+            int exprStart = _position;
+            int exprEnd = _position;
+
             // Parse through the expression to find AS keyword and alias
             int parenDepth = 0;
             bool foundAs = false;
@@ -800,6 +810,11 @@ public ref partial struct SparqlParser
                         if (checkSpan.Length >= 2 && checkSpan[..2].Equals("AS", StringComparison.OrdinalIgnoreCase) &&
                             (checkSpan.Length < 3 || !char.IsLetterOrDigit(checkSpan[2])))
                         {
+                            // Save expression end position (before whitespace and AS)
+                            exprEnd = _position;
+                            while (exprEnd > exprStart && char.IsWhiteSpace(_source[exprEnd - 1]))
+                                exprEnd--;
+
                             ConsumeKeyword("AS");
                             SkipWhitespace();
 
@@ -825,6 +840,10 @@ public ref partial struct SparqlParser
             {
                 throw new SparqlParseException("Expression in SELECT must use AS to assign an alias variable");
             }
+
+            // Store expression in VariableStart/VariableLength for evaluation
+            agg.VariableStart = exprStart;
+            agg.VariableLength = exprEnd - exprStart;
 
             // Skip closing ')' of expression
             SkipWhitespace();
