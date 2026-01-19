@@ -749,6 +749,11 @@ internal sealed class QueryBuffer : IDisposable
     // SelectClause data needed for QueryResults (stored on heap to avoid 8KB Query struct)
     public SelectClauseData? SelectData { get; set; }
 
+    // Post-query VALUES clause (appears after WHERE clause, not inline)
+    // Stored separately from inline VALUES (which goes into pattern slots)
+    public ValuesClause PostQueryValues { get; set; }
+    public bool HasPostQueryValues => PostQueryValues.HasValues;
+
     // Computed properties
     public bool HasFilters => FilterCount > 0;
     public bool HasBinds => BindCount > 0;
@@ -1321,6 +1326,12 @@ internal static class QueryBufferAdapter
                 };
             }
             buffer.Prefixes = prefixes;
+        }
+
+        // Copy post-query VALUES clause (if present)
+        if (query.Values.HasValues)
+        {
+            buffer.PostQueryValues = query.Values;
         }
 
         // Convert patterns to slots

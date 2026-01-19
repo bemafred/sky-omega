@@ -345,6 +345,111 @@ public partial class QueryExecutorTests
         }
     }
 
+    // ========== Post-Query VALUES Tests (W3C style - VALUES after WHERE clause) ==========
+    [Fact]
+    public void Execute_PostQueryValuesBasic()
+    {
+        // Post-query VALUES (after WHERE clause) - W3C style
+        // This is different from inline VALUES which appears inside the WHERE clause
+        var query = @"
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+SELECT ?person ?age
+WHERE { ?person foaf:age ?age }
+VALUES ?age { 25 30 }";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify post-query VALUES was parsed (in query.Values, not in WhereClause.Pattern.Values)
+        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
+        Assert.False(parsedQuery.WhereClause.Pattern.Values.HasValues, "Inline VALUES should not be set");
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var ages = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?age".AsSpan());
+                Assert.True(idx >= 0);
+                ages.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice (30) and Bob (25), Charlie (35) is excluded
+            Assert.Equal(2, ages.Count);
+            Assert.Contains("25", ages);
+            Assert.Contains("30", ages);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_PostQueryValuesWithPrefixedName()
+    {
+        // Post-query VALUES with prefixed name - requires prefix expansion
+        var query = @"
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX ex: <http://example.org/>
+SELECT ?person ?name
+WHERE { ?person foaf:name ?name }
+VALUES ?person { ex:Alice }";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.True(parsedQuery.Values.HasValues, "Post-query VALUES should be parsed");
+        Assert.Equal(1, parsedQuery.Values.ValueCount);
+
+        // Debug: Check what the VALUES variable and value are
+        var valVar = query.Substring(parsedQuery.Values.VarStart, parsedQuery.Values.VarLength);
+        Assert.Equal("?person", valVar);
+
+        var (valStart, valLen) = parsedQuery.Values.GetValue(0);
+        var valValue = query.Substring(valStart, valLen);
+        Assert.Equal("ex:Alice", valValue);
+
+        // Debug: Check prefix mappings
+        Assert.True(parsedQuery.Prologue.PrefixCount >= 2, $"Expected at least 2 prefixes, got {parsedQuery.Prologue.PrefixCount}");
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            // First, let's see what results we get without VALUES filtering
+            var allResults = new List<(string person, string name)>();
+            while (results.MoveNext())
+            {
+                var personIdx = results.Current.FindBinding("?person".AsSpan());
+                var nameIdx = results.Current.FindBinding("?name".AsSpan());
+                allResults.Add((
+                    personIdx >= 0 ? results.Current.GetString(personIdx).ToString() : "N/A",
+                    nameIdx >= 0 ? results.Current.GetString(nameIdx).ToString() : "N/A"
+                ));
+            }
+            results.Dispose();
+
+            // Debug output
+            Assert.True(allResults.Count > 0, $"Expected at least 1 result, but got 0. Without VALUES, there should be 3 results (Alice, Bob, Charlie).");
+
+            // Only Alice should match
+            Assert.Single(allResults);
+            Assert.Contains(("<http://example.org/Alice>", "\"Alice\""), allResults);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     // ========== CONSTRUCT Tests ==========
     [Fact]
     public void ExecuteConstruct_BasicTemplate()

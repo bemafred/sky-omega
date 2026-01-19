@@ -652,6 +652,92 @@ public ref partial struct QueryResults
         return true;
     }
 
+    /// <summary>
+    /// Check if the current bindings match the post-query VALUES constraint.
+    /// The VALUES variable must be bound to one of the VALUES values.
+    /// Post-query VALUES appears after the WHERE clause (not inline in patterns).
+    /// </summary>
+    private bool MatchesPostQueryValuesConstraint()
+    {
+        if (_buffer == null || !_buffer.HasPostQueryValues) return true;
+
+        var postValues = _buffer.PostQueryValues;
+        if (!postValues.HasValues) return true;
+
+        // Get the variable name from post-query VALUES
+        var varName = _source.Slice(postValues.VarStart, postValues.VarLength);
+
+        // Find the binding for this variable
+        var bindingIdx = _bindingTable.FindBinding(varName);
+        if (bindingIdx < 0)
+        {
+            // Variable not bound - allow (VALUES would bind it in a more complete impl)
+            return true;
+        }
+
+        // Get the bound value
+        var boundValue = _bindingTable.GetString(bindingIdx);
+
+        // Check if it matches any VALUES entry
+        for (int i = 0; i < postValues.ValueCount; i++)
+        {
+            var (start, length) = postValues.GetValue(i);
+            var valuesValue = _source.Slice(start, length);
+
+            // Expand prefixed names to full IRIs for comparison
+            var expandedValue = ExpandPrefixedName(valuesValue);
+            if (boundValue.SequenceEqual(expandedValue))
+                return true;
+        }
+
+        // Bound value doesn't match any VALUES value
+        return false;
+    }
+
+    /// <summary>
+    /// Expand a prefixed name to its full IRI using the buffer's prefix mappings.
+    /// Returns the original span if not a prefixed name or no matching prefix found.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
+    {
+        // Skip if already a full IRI, literal, or blank node
+        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
+            return term;
+
+        // Look for colon indicating prefixed name
+        var colonIdx = term.IndexOf(':');
+        if (colonIdx < 0 || _buffer?.Prefixes == null)
+            return term;
+
+        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
+        var prefixWithColon = term.Slice(0, colonIdx + 1);
+        var localPart = term.Slice(colonIdx + 1);
+
+        // Find matching prefix in buffer
+        foreach (var mapping in _buffer.Prefixes)
+        {
+            var mappingPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+            if (prefixWithColon.SequenceEqual(mappingPrefix))
+            {
+                // Found matching prefix, expand to full IRI
+                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
+                var iriBase = _source.Slice(mapping.IriStart, mapping.IriLength);
+
+                // Strip angle brackets from IRI base if present, then build full IRI
+                var iriContent = iriBase;
+                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
+                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
+
+                // Build full IRI: <base + localPart>
+                // Store in _expandedSubject (reusing storage field)
+                _expandedSubject = $"<{iriContent.ToString()}{localPart.ToString()}>";
+                return _expandedSubject.AsSpan();
+            }
+        }
+
+        return term;
+    }
+
     public void Dispose()
     {
         _singleScan.Dispose();

@@ -68,8 +68,11 @@ public ref partial struct QueryResults
     // MINUS support
     private readonly bool _hasMinus;
 
-    // VALUES support
+    // VALUES support (inline VALUES in pattern slots)
     private readonly bool _hasValues;
+
+    // Post-query VALUES support (VALUES clause after WHERE clause)
+    private readonly bool _hasPostQueryValues;
 
     // EXISTS/NOT EXISTS support
     private readonly bool _hasExists;
@@ -214,6 +217,7 @@ public ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
+        _hasPostQueryValues = false;
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -264,6 +268,7 @@ public ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
+        _hasPostQueryValues = false;
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -311,6 +316,7 @@ public ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
+        _hasPostQueryValues = false;
         _hasExists = false;
         _groupBy = default;
         _selectClause = default;
@@ -356,6 +362,7 @@ public ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
+        _hasPostQueryValues = false;
         _hasExists = false;
         _groupBy = default;
         _selectClause = default;
@@ -402,6 +409,7 @@ public ref partial struct QueryResults
         _hasBinds = buffer.HasBinds;
         _hasMinus = buffer.HasMinus;
         _hasValues = buffer.HasValues;
+        _hasPostQueryValues = buffer.HasPostQueryValues;
         _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -449,6 +457,7 @@ public ref partial struct QueryResults
         _hasBinds = buffer.HasBinds;
         _hasMinus = buffer.HasMinus;
         _hasValues = buffer.HasValues;
+        _hasPostQueryValues = buffer.HasPostQueryValues;
         _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -496,6 +505,7 @@ public ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
+        _hasPostQueryValues = false;
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -542,6 +552,7 @@ public ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
+        _hasPostQueryValues = false;
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -587,6 +598,7 @@ public ref partial struct QueryResults
         _hasBinds = buffer.HasBinds;
         _hasMinus = buffer.HasMinus;
         _hasValues = buffer.HasValues;
+        _hasPostQueryValues = buffer.HasPostQueryValues;
         _hasExists = buffer.HasExists;
         _groupBy = groupBy;
         _selectClause = selectClause;
@@ -736,13 +748,23 @@ public ref partial struct QueryResults
                 }
             }
 
-            // Apply VALUES - check if bound value matches any VALUES value
+            // Apply VALUES - check if bound value matches any VALUES value (inline VALUES in patterns)
             if (_hasValues)
             {
                 if (!MatchesValuesConstraint())
                 {
                     _bindingTable.Clear();
                     continue; // Doesn't match VALUES, skip this row
+                }
+            }
+
+            // Apply post-query VALUES - check if bound value matches (VALUES after WHERE clause)
+            if (_hasPostQueryValues)
+            {
+                if (!MatchesPostQueryValuesConstraint())
+                {
+                    _bindingTable.Clear();
+                    continue; // Doesn't match post-query VALUES, skip this row
                 }
             }
 

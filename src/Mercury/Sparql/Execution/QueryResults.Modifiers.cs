@@ -208,10 +208,20 @@ public ref partial struct QueryResults
                 }
             }
 
-            // Apply VALUES - check if bound value matches any VALUES value
+            // Apply VALUES - check if bound value matches any VALUES value (inline VALUES in patterns)
             if (_hasValues)
             {
                 if (!MatchesValuesConstraint())
+                {
+                    _bindingTable.Clear();
+                    continue;
+                }
+            }
+
+            // Apply post-query VALUES - check if bound value matches (VALUES after WHERE clause)
+            if (_hasPostQueryValues)
+            {
+                if (!MatchesPostQueryValuesConstraint())
                 {
                     _bindingTable.Clear();
                     continue;
