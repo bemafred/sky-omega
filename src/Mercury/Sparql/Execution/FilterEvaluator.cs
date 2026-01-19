@@ -371,75 +371,11 @@ public ref partial struct FilterEvaluator
     }
 
     /// <summary>
-    /// Parse a string binding that may be a typed RDF literal (e.g., "3"^^&lt;xsd:integer&gt;).
-    /// Extracts the numeric value if it's a numeric type.
-    /// For plain quoted strings without datatype, returns the original string as-is (with quotes).
+    /// Parse a string binding that may be a typed RDF literal.
+    /// Delegates to Value.ParseFromBinding for shared implementation.
     /// </summary>
-    private static Value ParseTypedLiteralString(ReadOnlySpan<char> str)
-    {
-        // Check for URI format: <uri>
-        if (str.Length >= 2 && str[0] == '<' && str[^1] == '>')
-        {
-            return new Value { Type = ValueType.Uri, StringValue = str };
-        }
-
-        // Check for typed literal format: "value"^^<datatype>
-        if (str.Length > 2 && str[0] == '"')
-        {
-            var closeQuote = str.Slice(1).IndexOf('"');
-            if (closeQuote > 0)
-            {
-                var value = str.Slice(1, closeQuote);
-                var suffix = str.Slice(closeQuote + 2);
-
-                // Check for datatype annotation
-                if (suffix.StartsWith("^^"))
-                {
-                    var datatype = suffix.Slice(2);
-
-                    // Check if it's a numeric datatype
-                    if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
-                        {
-                            return new Value { Type = ValueType.Integer, IntegerValue = intVal };
-                        }
-                    }
-
-                    if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
-                        datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
-                        {
-                            return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
-                        }
-                    }
-
-                    if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var boolVal = value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                                      value.Equals("1", StringComparison.Ordinal);
-                        return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
-                    }
-
-                    // For other typed literals (like xsd:string), return as string with just the value
-                    return new Value { Type = ValueType.String, StringValue = value };
-                }
-
-                // Plain literal with quotes but no datatype - return as-is (keep quotes for REGEX etc.)
-                // This preserves existing behavior where quoted strings include quotes
-                return new Value { Type = ValueType.String, StringValue = str };
-            }
-        }
-
-        // Not a typed literal - return as-is
-        return new Value { Type = ValueType.String, StringValue = str };
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Value ParseTypedLiteralString(ReadOnlySpan<char> str) => Value.ParseFromBinding(str);
 
     private int FindBinding(ReadOnlySpan<char> variableName)
     {
@@ -1920,6 +1856,76 @@ public ref struct Value
     public double DoubleValue;
     public bool BooleanValue;
     public ReadOnlySpan<char> StringValue;
+
+    /// <summary>
+    /// Parse a string binding that may be a URI, typed RDF literal, or plain string.
+    /// Detects URIs (&lt;...&gt;), typed literals ("value"^^&lt;datatype&gt;), and extracts
+    /// numeric values for integer/decimal/double/float/boolean datatypes.
+    /// </summary>
+    public static Value ParseFromBinding(ReadOnlySpan<char> str)
+    {
+        // Check for URI format: <uri>
+        if (str.Length >= 2 && str[0] == '<' && str[^1] == '>')
+        {
+            return new Value { Type = ValueType.Uri, StringValue = str };
+        }
+
+        // Check for typed literal format: "value"^^<datatype>
+        if (str.Length > 2 && str[0] == '"')
+        {
+            var closeQuote = str.Slice(1).IndexOf('"');
+            if (closeQuote > 0)
+            {
+                var value = str.Slice(1, closeQuote);
+                var suffix = str.Slice(closeQuote + 2);
+
+                // Check for datatype annotation
+                if (suffix.StartsWith("^^"))
+                {
+                    var datatype = suffix.Slice(2);
+
+                    // Check if it's a numeric datatype
+                    if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
+                        datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
+                        datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
+                        datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
+                        datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
+                        {
+                            return new Value { Type = ValueType.Integer, IntegerValue = intVal };
+                        }
+                    }
+
+                    if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
+                        datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
+                        datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
+                        {
+                            return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
+                        }
+                    }
+
+                    if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var boolVal = value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                                      value.Equals("1", StringComparison.Ordinal);
+                        return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
+                    }
+
+                    // For other typed literals (like xsd:string), return as string with just the value
+                    return new Value { Type = ValueType.String, StringValue = value };
+                }
+
+                // Plain literal with quotes but no datatype - return as-is (keep quotes for REGEX etc.)
+                return new Value { Type = ValueType.String, StringValue = str };
+            }
+        }
+
+        // Not a typed literal - return as-is
+        return new Value { Type = ValueType.String, StringValue = str };
+    }
 }
 
 public enum ValueType
