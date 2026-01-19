@@ -13,3 +13,4 @@
 | [ADR-009](ADR-009-stack-overflow-mitigation.md) | Stack Overflow Mitigation Strategy | Accepted |
 | [ADR-010](ADR-010-w3c-test-suite-integration.md) | W3C Test Suite Integration | In Progress |
 | [ADR-011](ADR-011-queryresults-stack-reduction.md) | QueryResults Stack Reduction | Proposed |
+| [ADR-012](ADR-012-conformance-fix-plan.md) | W3C SPARQL Conformance Fix Plan | In Progress |

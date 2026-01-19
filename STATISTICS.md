@@ -2,7 +2,7 @@
 
 Codebase metrics tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-15
+**Last updated:** 2026-01-19
 
 ## Line Counts
 
@@ -79,9 +79,9 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | N-Quads 1.2 | 87 | 87 | **100%** | Full conformance |
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
 | SPARQL 1.1 Syntax | 73 | 103 | **71%** | 63/63 positive, 10/40 negative |
-| SPARQL 1.1 Query | — | 221 | — | ~105 skipped (no cancellation support), ~116 runnable |
+| SPARQL 1.1 Query | 100 | 224 | **46%** | 8 skipped, 116 failing (see [ADR-012](docs/adrs/mercury/ADR-012-conformance-fix-plan.md)) |
 | SPARQL 1.1 Update | 94 | 94 | **100%** | Full conformance |
-| **Total** | **1,612** | **1,761** | **92%** | SPARQL Query conformance in progress |
+| **Total** | **1,712** | **1,866** | **92%** | SPARQL Query conformance in progress |
 
 ## Benchmark Summary
 

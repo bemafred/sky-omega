@@ -1,8 +1,9 @@
 # ADR-012: W3C SPARQL Conformance Fix Plan
 
-**Status:** Proposed
+**Status:** In Progress
 **Created:** 2026-01-19
-**Baseline:** 3768 tests total, 3583 passing (95.1%), 171 failing, 14 ignored
+**Updated:** 2026-01-19
+**Baseline:** 3774 tests total, 3643 passing (96.5%), 116 failing, 15 skipped
 
 ## Context
 
@@ -162,6 +163,35 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 
 ---
 
+### Phase 8: XSD Cast Functions ✅ COMPLETED
+**Target:** 6 tests
+**Effort:** Medium
+**Files:** `BindExpressionEvaluator.cs`, `FilterEvaluator.cs`, `SparqlTypes.cs`, `SparqlResultComparer.cs`
+**Completed:** 2026-01-19
+
+**Issue:** W3C XSD cast tests failing due to multiple interacting bugs:
+1. `ParseTypedLiteralString` didn't detect URIs (values like `<http://...>`)
+2. `CastToString` didn't strip angle brackets from URIs
+3. `TruncateTo` in `BindingTable` didn't reclaim string buffer space during backtracking
+4. Numeric value comparison didn't handle different representations (e.g., "3.333E1" vs "33.33")
+5. Structural hash included Unbound bindings
+
+**Fix:**
+- Added URI detection in `ParseTypedLiteralString` to return `ValueType.Uri` for `<...>` values
+- `CastToString` now strips angle brackets from URIs when casting to `xsd:string`
+- `TruncateTo` now reclaims string buffer space based on last retained binding
+- Added `AreNumericValuesEqual` for value-based numeric comparison in result comparer
+- Structural hash now skips Unbound bindings
+- Refactored: consolidated `ParseTypedLiteralString` into `Value.ParseFromBinding` static method
+
+**Result:** All 6 XSD cast tests pass (boolean, integer, float, double, decimal, string)
+
+**Commits:**
+- `ac770a4` Fix W3C SPARQL 1.1 XSD cast function conformance tests
+- `be25b30` Refactor: extract Value.ParseFromBinding to eliminate duplication
+
+---
+
 ## Execution Strategy
 
 ### Principles
@@ -172,15 +202,18 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 
 ### Success Criteria per Phase
 
-| Phase | Tests Fixed | Cumulative Pass Rate |
-|-------|-------------|---------------------|
-| 1 | +15 | 95.5% |
-| 2 | +5 | 95.6% |
-| 3 | +35 | 96.5% |
-| 4 | +10 | 96.8% |
-| 5 | +12 | 97.1% |
-| 6 | +11 | 97.4% |
-| 7 | +10 | 97.7% |
+| Phase | Tests Fixed | Cumulative Pass Rate | Status |
+|-------|-------------|---------------------|--------|
+| 1 | +15 | 95.5% | Pending |
+| 2 | +5 | 95.6% | Pending |
+| 3 | +35 | 96.5% | Pending |
+| 4 | +10 | 96.8% | Pending |
+| 5 | +12 | 97.1% | Pending |
+| 6 | +11 | 97.4% | Pending |
+| 7 | +10 | 97.7% | Pending |
+| 8 | +6 | 96.5% | ✅ Done |
+
+**Current Progress:** Phase 8 complete. 3643/3774 tests passing (96.5%).
 
 ### Commands for Each Phase
 
