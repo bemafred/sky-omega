@@ -150,8 +150,13 @@ public partial class QueryExecutor
 
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
-        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+
+        // Pass outer query's clauses to enable aggregation (GROUP BY, HAVING, ORDER BY)
+        // This is critical for queries like: SELECT (COUNT(*) AS ?c) { subquery FILTER(...) }
+        return QueryResults.FromMaterializedSimple(results, _source.AsSpan(), _store, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+            _buffer.GetHavingClause());
     }
 
     /// <summary>
@@ -339,9 +344,11 @@ public partial class QueryExecutor
         if (results == null || results.Count == 0)
             return QueryResults.Empty();
 
-        // Return via minimal materialized list wrapper
-        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+        // Pass outer query's clauses to enable aggregation (GROUP BY, HAVING, ORDER BY)
+        return QueryResults.FromMaterializedSimple(results, _source.AsSpan(), _store, bindings, stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
+            _buffer.GetHavingClause());
     }
 
     /// <summary>

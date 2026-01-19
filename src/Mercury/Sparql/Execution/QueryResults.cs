@@ -58,6 +58,10 @@ public ref partial struct QueryResults
     private List<MaterializedRow>? _sortedResults;
     private int _sortedIndex;
 
+    // Pre-materialized results support (for grouping pre-materialized data)
+    private readonly bool _isMaterialized;
+    private int _materializedIndex;
+
     // BIND support
     private readonly bool _hasBinds;
 
@@ -233,6 +237,8 @@ public ref partial struct QueryResults
         _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
         _sortedResults = rows;
         _sortedIndex = -1;
+        _isMaterialized = true;  // Enable iteration from pre-materialized list
+        _materializedIndex = -1;
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;

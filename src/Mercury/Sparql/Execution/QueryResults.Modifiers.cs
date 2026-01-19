@@ -124,7 +124,23 @@ public ref partial struct QueryResults
         {
             bool hasNext;
 
-            if (_isSubQuery)
+            if (_isMaterialized)
+            {
+                // Iterate through pre-materialized results
+                _materializedIndex++;
+                if (_materializedIndex >= _sortedResults!.Count)
+                    return false;
+
+                // Load bindings from materialized row
+                _bindingTable.Clear();
+                var row = _sortedResults[_materializedIndex];
+                for (int i = 0; i < row.BindingCount; i++)
+                {
+                    _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
+                }
+                hasNext = true;
+            }
+            else if (_isSubQuery)
             {
                 hasNext = _subQueryScan.MoveNext(ref _bindingTable);
             }
