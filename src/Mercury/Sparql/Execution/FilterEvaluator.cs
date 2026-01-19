@@ -462,19 +462,69 @@ public ref partial struct FilterEvaluator
     {
         Advance(); // Skip '"'
         var start = _position;
-        
+
         while (!IsAtEnd() && Peek() != '"')
         {
             if (Peek() == '\\')
                 Advance(); // Skip escape
             Advance();
         }
-        
+
         var str = _expression.Slice(start, _position - start);
-        
+
         if (!IsAtEnd())
             Advance(); // Skip closing '"'
-        
+
+        // Check for typed literal suffix: ^^<datatype>
+        if (_position + 1 < _expression.Length && _expression[_position] == '^' && _expression[_position + 1] == '^')
+        {
+            Advance(); // Skip first '^'
+            Advance(); // Skip second '^'
+
+            // Consume the datatype IRI <...>
+            if (!IsAtEnd() && Peek() == '<')
+            {
+                var dtStart = _position;
+                Advance(); // Skip '<'
+                while (!IsAtEnd() && Peek() != '>')
+                    Advance();
+                if (!IsAtEnd())
+                    Advance(); // Skip '>'
+
+                var datatype = _expression.Slice(dtStart, _position - dtStart);
+
+                // Parse numeric datatypes
+                if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
+                    datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
+                    datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
+                    datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
+                    datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
+                    {
+                        return new Value { Type = ValueType.Integer, IntegerValue = intVal };
+                    }
+                }
+
+                if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
+                    datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
+                    datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
+                    {
+                        return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
+                    }
+                }
+
+                if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
+                {
+                    var boolVal = str.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                                  str.Equals("1", StringComparison.Ordinal);
+                    return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
+                }
+            }
+        }
+
         return new Value
         {
             Type = ValueType.String,
