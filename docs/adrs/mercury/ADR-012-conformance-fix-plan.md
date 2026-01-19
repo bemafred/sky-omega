@@ -45,30 +45,20 @@ Mercury's SPARQL engine has achieved 95% W3C conformance. The remaining 171 fail
 
 ---
 
-### Phase 2: GROUP_CONCAT Edge Cases
+### Phase 2: GROUP_CONCAT Edge Cases ✅ COMPLETED
 **Target:** ~5 tests
 **Effort:** Small
 **Files:** `QueryResults.Modifiers.cs`
+**Completed:** 2026-01-19
 
 **Issue:** GROUP_CONCAT with subqueries produces wrong row counts.
 
-Example failing test (`agg-groupconcat-2`):
-```sparql
-SELECT (COUNT(*) AS ?c) {
-    {SELECT ?p (GROUP_CONCAT(?o) AS ?g) WHERE { [] ?p ?o } GROUP BY ?p}
-    FILTER(...)
-}
-```
-Expected: 1 row, Actual: 2 rows
-
-**Fix:**
-- The outer COUNT(*) isn't properly counting filtered subquery results
-- Need to verify subquery result materialization before outer aggregation
-
-**Verification:**
-```bash
-dotnet test --filter "Name~GROUP_CONCAT" tests/Mercury.Tests
-```
+**Result:** All 5 W3C GROUP_CONCAT tests pass:
+- GROUP_CONCAT 1: ✅ Passing
+- GROUP_CONCAT 2: ✅ Passing (subquery case from ADR)
+- GROUP_CONCAT with SEPARATOR: ✅ Passing
+- GROUP_CONCAT with same language tag: ✅ Passing
+- GROUP_CONCAT with different language tags: ✅ Passing
 
 ---
 
@@ -204,7 +194,7 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | Phase | Tests Fixed | Cumulative Pass Rate | Status |
 |-------|-------------|---------------------|--------|
 | 1 | +22 | 96.5% | ✅ Done |
-| 2 | +5 | 96.6% | Pending |
+| 2 | +5 | 96.5% | ✅ Done |
 | 3 | +35 | 97.5% | Pending |
 | 4 | +10 | 97.8% | Pending |
 | 5 | +12 | 98.1% | Pending |
@@ -212,7 +202,7 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | 7 | +10 | 98.7% | Pending |
 | 8 | +6 | 96.5% | ✅ Done |
 
-**Current Progress:** Phases 1 and 8 complete. 3643/3774 tests passing (96.5%).
+**Current Progress:** Phases 1, 2, and 8 complete. 3643/3774 tests passing (96.5%).
 
 ### Commands for Each Phase
 
@@ -230,19 +220,18 @@ dotnet test --filter "FullyQualifiedName~W3C" tests/Mercury.Tests
 dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 ```
 
-## Next Steps: Phase 2 (GROUP_CONCAT Edge Cases)
+## Next Steps: Phase 3 (SPARQL Functions)
 
-**Recommended action:** Investigate GROUP_CONCAT with subqueries.
+**Recommended action:** Investigate SPARQL function edge cases.
 
 ```bash
-# Run GROUP_CONCAT tests to identify remaining failures
-dotnet test --filter "Name~GROUP_CONCAT" tests/Mercury.Tests
+# Run function tests to identify failures
+dotnet test --filter "FullyQualifiedName~functions" tests/Mercury.Tests
 
-# Check specific failing test
-cat tests/w3c-rdf-tests/sparql/sparql11/aggregates/agg-groupconcat-2.rq
+# Priority areas: MINUTES, SECONDS, HOURS, ENCODE_FOR_URI, STRBEFORE, STRAFTER
 ```
 
-The issue is that GROUP_CONCAT in subqueries may produce wrong row counts when combined with outer aggregates.
+Focus on DateTime extraction functions and string boundary cases first.
 
 ## Out of Scope
 
