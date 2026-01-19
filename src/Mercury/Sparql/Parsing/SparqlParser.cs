@@ -1533,6 +1533,8 @@ public ref partial struct SparqlParser
         }
 
         // Parse HAVING (must come after GROUP BY, before ORDER BY)
+        // W3C Grammar: HavingClause ::= 'HAVING' HavingCondition+
+        // Multiple conditions are ANDed together
         SkipWhitespace();
         span = PeekSpan(6);
         if (span.Length >= 6 && span[..6].Equals("HAVING", StringComparison.OrdinalIgnoreCase))
@@ -1540,27 +1542,39 @@ public ref partial struct SparqlParser
             ConsumeKeyword("HAVING");
             SkipWhitespace();
 
-            // HAVING expression is in parentheses
+            // HAVING can have multiple conditions: (cond1) (cond2) ...
+            // Capture the entire span of all conditions
             if (Peek() == '(')
             {
-                Advance(); // Skip '('
-                var start = _position;
+                var start = _position;  // Start includes first '('
 
-                // Find matching closing paren
-                int depth = 1;
-                while (!IsAtEnd() && depth > 0)
+                // Parse all HAVING conditions
+                while (Peek() == '(')
                 {
-                    var ch = Peek();
-                    if (ch == '(') depth++;
-                    else if (ch == ')') depth--;
-                    if (depth > 0) Advance();
+                    Advance(); // Skip '('
+
+                    // Find matching closing paren
+                    int depth = 1;
+                    while (!IsAtEnd() && depth > 0)
+                    {
+                        var ch = Peek();
+                        if (ch == '(') depth++;
+                        else if (ch == ')') depth--;
+                        if (depth > 0) Advance();
+                    }
+
+                    if (Peek() == ')')
+                        Advance(); // Skip ')'
+
+                    SkipWhitespace();
                 }
 
                 var length = _position - start;
-                modifier.Having = new HavingClause { ExpressionStart = start, ExpressionLength = length };
+                // Trim trailing whitespace from length
+                while (length > 0 && char.IsWhiteSpace(_source[start + length - 1]))
+                    length--;
 
-                if (Peek() == ')')
-                    Advance(); // Skip ')'
+                modifier.Having = new HavingClause { ExpressionStart = start, ExpressionLength = length };
             }
         }
 

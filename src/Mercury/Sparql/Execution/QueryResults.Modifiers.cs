@@ -359,12 +359,13 @@ public ref partial struct QueryResults
 
                 // Evaluate HAVING expression
                 // HAVING can reference aggregates by alias (e.g., ?count > 2) OR by expression (e.g., COUNT(?x) > 2)
-                // Substitute aggregate expressions with their computed values before evaluation
+                // W3C Grammar: HavingClause ::= 'HAVING' HavingCondition+
+                // Multiple conditions are ANDed together: (cond1) (cond2) means cond1 AND cond2
                 var havingExpr = _source.Slice(_having.ExpressionStart, _having.ExpressionLength);
                 var substitutedExpr = SubstituteAggregatesInHaving(havingExpr, group, sourceStr);
 
-                var evaluator = new FilterEvaluator(substitutedExpr.AsSpan());
-                if (!evaluator.Evaluate(_bindingTable.GetBindings(), _bindingTable.Count, _bindingTable.GetStringBuffer()))
+                // Evaluate all conditions - each (expression) must be true
+                if (!EvaluateMultipleHavingConditions(substitutedExpr, _bindingTable))
                     continue; // Skip this group - doesn't match HAVING
             }
 
@@ -375,6 +376,61 @@ public ref partial struct QueryResults
         _groupedIndex = -1;
         _skipped = 0;
         _returned = 0;
+    }
+
+    /// <summary>
+    /// Evaluate multiple HAVING conditions (ANDed together).
+    /// Handles format: (cond1) (cond2) ... where all conditions must be true.
+    /// Also handles single condition: (cond1) or just: cond1
+    /// </summary>
+    private static bool EvaluateMultipleHavingConditions(string expr, BindingTable bindingTable)
+    {
+        var span = expr.AsSpan().Trim();
+        if (span.Length == 0)
+            return true;
+
+        // Check if the expression starts with '(' - multiple conditions format
+        if (span[0] == '(')
+        {
+            int pos = 0;
+            while (pos < span.Length)
+            {
+                // Skip whitespace
+                while (pos < span.Length && char.IsWhiteSpace(span[pos]))
+                    pos++;
+
+                if (pos >= span.Length)
+                    break;
+
+                if (span[pos] != '(')
+                    break; // No more conditions
+
+                // Find matching closing paren
+                pos++; // Skip '('
+                int condStart = pos;
+                int depth = 1;
+                while (pos < span.Length && depth > 0)
+                {
+                    if (span[pos] == '(') depth++;
+                    else if (span[pos] == ')') depth--;
+                    if (depth > 0) pos++;
+                }
+
+                var condition = span.Slice(condStart, pos - condStart);
+                pos++; // Skip closing ')'
+
+                // Evaluate this condition
+                var evaluator = new FilterEvaluator(condition);
+                if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                    return false; // This condition failed - AND fails
+            }
+
+            return true; // All conditions passed
+        }
+
+        // Single condition without outer parens - evaluate directly
+        var singleEvaluator = new FilterEvaluator(span);
+        return singleEvaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer());
     }
 
     /// <summary>
