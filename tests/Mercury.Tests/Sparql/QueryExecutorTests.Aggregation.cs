@@ -11,6 +11,29 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 public partial class QueryExecutorTests
 {
     /// <summary>
+    /// Extract the value part from a typed RDF literal.
+    /// Handles formats: "value", "value"^^&lt;datatype&gt;, plain value
+    /// </summary>
+    private static string ExtractLiteralValue(string literal)
+    {
+        if (string.IsNullOrEmpty(literal))
+            return literal;
+
+        // Check for typed literal format: "value"^^<datatype>
+        if (literal.StartsWith('"'))
+        {
+            var closeQuote = literal.IndexOf('"', 1);
+            if (closeQuote > 0)
+            {
+                return literal.Substring(1, closeQuote - 1);
+            }
+        }
+
+        // Plain value
+        return literal;
+    }
+
+    /// <summary>
     /// Test implicit aggregation: COUNT without GROUP BY.
     /// All results should be treated as a single group.
     /// </summary>
@@ -38,7 +61,7 @@ public partial class QueryExecutorTests
             var countIdx = results.Current.FindBinding("?count".AsSpan());
             Assert.True(countIdx >= 0);
 
-            var count = results.Current.GetString(countIdx).ToString();
+            var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
             // Fixture has 7 triples (Alice: 3, Bob: 2, Charlie: 2)
             Assert.Equal("7", count);
 
@@ -77,7 +100,7 @@ public partial class QueryExecutorTests
             var countIdx = results.Current.FindBinding("?count".AsSpan());
             Assert.True(countIdx >= 0);
 
-            var count = results.Current.GetString(countIdx).ToString();
+            var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
             Assert.Equal("7", count);
 
             // Should not have a second row
@@ -121,7 +144,7 @@ public partial class QueryExecutorTests
                 Assert.True(countIdx >= 0);
 
                 var person = results.Current.GetString(personIdx).ToString();
-                var count = results.Current.GetString(countIdx).ToString();
+                var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
                 groups[person] = count;
             }
             results.Dispose();
@@ -156,7 +179,7 @@ public partial class QueryExecutorTests
             var sumIdx = results.Current.FindBinding("?totalAge".AsSpan());
             Assert.True(sumIdx >= 0);
 
-            var sum = results.Current.GetString(sumIdx).ToString();
+            var sum = ExtractLiteralValue(results.Current.GetString(sumIdx).ToString());
             // 30 + 25 + 35 = 90
             Assert.Equal("90", sum);
 
@@ -189,8 +212,8 @@ public partial class QueryExecutorTests
             Assert.True(minIdx >= 0);
             Assert.True(maxIdx >= 0);
 
-            var min = results.Current.GetString(minIdx).ToString();
-            var max = results.Current.GetString(maxIdx).ToString();
+            var min = ExtractLiteralValue(results.Current.GetString(minIdx).ToString());
+            var max = ExtractLiteralValue(results.Current.GetString(maxIdx).ToString());
 
             Assert.Equal("25", min);  // Bob
             Assert.Equal("35", max);  // Charlie
@@ -222,7 +245,7 @@ public partial class QueryExecutorTests
             var avgIdx = results.Current.FindBinding("?avgAge".AsSpan());
             Assert.True(avgIdx >= 0);
 
-            var avg = results.Current.GetString(avgIdx).ToString();
+            var avg = ExtractLiteralValue(results.Current.GetString(avgIdx).ToString());
             // (30 + 25 + 35) / 3 = 30
             Assert.Equal("30", avg);
 
@@ -257,7 +280,7 @@ public partial class QueryExecutorTests
                 Assert.True(countIdx >= 0);
 
                 var p = results.Current.GetString(pIdx).ToString();
-                var count = results.Current.GetString(countIdx).ToString();
+                var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
                 groups[p] = count;
             }
             results.Dispose();
@@ -323,7 +346,7 @@ public partial class QueryExecutorTests
                 Assert.True(countIdx >= 0);
 
                 var person = results.Current.GetString(personIdx).ToString();
-                var count = results.Current.GetString(countIdx).ToString();
+                var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
                 groups[person] = count;
             }
             results.Dispose();
@@ -362,7 +385,7 @@ public partial class QueryExecutorTests
                 Assert.True(countIdx >= 0);
 
                 var p = results.Current.GetString(pIdx).ToString();
-                var count = results.Current.GetString(countIdx).ToString();
+                var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
                 groups[p] = count;
             }
             results.Dispose();
@@ -482,7 +505,7 @@ public partial class QueryExecutorTests
                 Assert.True(avgIdx >= 0, "Should have ?avg binding");
 
                 var s = results.Current.GetString(sIdx).ToString();
-                var avg = results.Current.GetString(avgIdx).ToString();
+                var avg = ExtractLiteralValue(results.Current.GetString(avgIdx).ToString());
                 groups[s] = avg;
             }
             results.Dispose();
@@ -521,7 +544,7 @@ public partial class QueryExecutorTests
                 count++;
                 var avgIdx = results.Current.FindBinding("?avg".AsSpan());
                 Assert.True(avgIdx >= 0, "Should have ?avg binding");
-                avgValue = results.Current.GetString(avgIdx).ToString();
+                avgValue = ExtractLiteralValue(results.Current.GetString(avgIdx).ToString());
             }
             results.Dispose();
 

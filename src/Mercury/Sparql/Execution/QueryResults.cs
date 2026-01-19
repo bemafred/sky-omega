@@ -823,6 +823,10 @@ internal sealed class GroupedRow
     private readonly double[] _sums;
     private readonly double[] _mins;
     private readonly double[] _maxes;
+    private readonly decimal[] _decimalSums;    // For precise decimal arithmetic
+    private readonly decimal[] _decimalMins;
+    private readonly decimal[] _decimalMaxes;
+    private readonly bool[] _useDecimal;        // True if all values are decimal (not double/float)
     private readonly HashSet<string>?[] _distinctSets;
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
     private readonly string[] _separators;           // For GROUP_CONCAT
@@ -857,6 +861,10 @@ internal sealed class GroupedRow
         _sums = new double[_aggCount];
         _mins = new double[_aggCount];
         _maxes = new double[_aggCount];
+        _decimalSums = new decimal[_aggCount];
+        _decimalMins = new decimal[_aggCount];
+        _decimalMaxes = new decimal[_aggCount];
+        _useDecimal = new bool[_aggCount];
         _distinctSets = new HashSet<string>?[_aggCount];
         _concatValues = new List<string>?[_aggCount];
         _separators = new string[_aggCount];
@@ -878,6 +886,9 @@ internal sealed class GroupedRow
             // Initialize accumulators
             _mins[i] = double.MaxValue;
             _maxes[i] = double.MinValue;
+            _decimalMins[i] = decimal.MaxValue;
+            _decimalMaxes[i] = decimal.MinValue;
+            _useDecimal[i] = true; // Assume decimal until we see a double/float
             if (agg.Distinct)
             {
                 _distinctSets[i] = new HashSet<string>();
@@ -905,7 +916,9 @@ internal sealed class GroupedRow
             // Find the value for this aggregate's variable
             string? valueStr = null;
             double numValue = 0;
+            decimal decimalValue = 0;
             bool hasNumValue = false;
+            bool isDouble = false;
 
             // For COUNT(*), we don't need a specific variable
             if (varHash != ComputeHash("*".AsSpan()))
@@ -915,7 +928,7 @@ internal sealed class GroupedRow
                 {
                     valueStr = bindings.GetString(idx).ToString();
                     // Use RDF-aware numeric parsing to handle typed literals like "1"^^<xsd:integer>
-                    hasNumValue = TryParseRdfNumeric(valueStr, out numValue);
+                    hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
                 }
                 else
                 {
@@ -933,6 +946,10 @@ internal sealed class GroupedRow
                     continue; // Already seen this value
             }
 
+            // If we encounter a double/float value, switch to double mode
+            if (hasNumValue && isDouble)
+                _useDecimal[i] = false;
+
             // Update accumulator based on function
             switch (func)
             {
@@ -940,22 +957,37 @@ internal sealed class GroupedRow
                     _counts[i]++;
                     break;
                 case AggregateFunction.Sum:
-                    if (hasNumValue) _sums[i] += numValue;
+                    if (hasNumValue)
+                    {
+                        _sums[i] += numValue;
+                        _decimalSums[i] += decimalValue;
+                    }
                     break;
                 case AggregateFunction.Avg:
                     if (hasNumValue)
                     {
                         _sums[i] += numValue;
+                        _decimalSums[i] += decimalValue;
                         _counts[i]++;
                     }
                     break;
                 case AggregateFunction.Min:
-                    if (hasNumValue && numValue < _mins[i])
-                        _mins[i] = numValue;
+                    if (hasNumValue)
+                    {
+                        if (numValue < _mins[i])
+                            _mins[i] = numValue;
+                        if (decimalValue < _decimalMins[i])
+                            _decimalMins[i] = decimalValue;
+                    }
                     break;
                 case AggregateFunction.Max:
-                    if (hasNumValue && numValue > _maxes[i])
-                        _maxes[i] = numValue;
+                    if (hasNumValue)
+                    {
+                        if (numValue > _maxes[i])
+                            _maxes[i] = numValue;
+                        if (decimalValue > _decimalMaxes[i])
+                            _decimalMaxes[i] = decimalValue;
+                    }
                     break;
                 case AggregateFunction.GroupConcat:
                     if (valueStr != null)
@@ -976,11 +1008,21 @@ internal sealed class GroupedRow
         {
             _aggValues[i] = _aggFunctions[i] switch
             {
-                AggregateFunction.Count => _counts[i].ToString(),
-                AggregateFunction.Sum => _sums[i].ToString(),
-                AggregateFunction.Avg => _counts[i] > 0 ? (_sums[i] / _counts[i]).ToString() : "0",
-                AggregateFunction.Min => _mins[i] == double.MaxValue ? "" : _mins[i].ToString(),
-                AggregateFunction.Max => _maxes[i] == double.MinValue ? "" : _maxes[i].ToString(),
+                AggregateFunction.Count => FormatTypedLiteral(_counts[i].ToString(), XsdInteger),
+                AggregateFunction.Sum => _useDecimal[i]
+                    ? FormatTypedLiteral(FormatDecimal(_decimalSums[i]), XsdDecimal)
+                    : FormatTypedLiteral(_sums[i].ToString(CultureInfo.InvariantCulture), XsdDouble),
+                AggregateFunction.Avg => _counts[i] > 0
+                    ? (_useDecimal[i]
+                        ? FormatTypedLiteral(FormatDecimal(_decimalSums[i] / _counts[i]), XsdDecimal)
+                        : FormatTypedLiteral((_sums[i] / _counts[i]).ToString(CultureInfo.InvariantCulture), XsdDouble))
+                    : FormatTypedLiteral("0", XsdInteger),
+                AggregateFunction.Min => _useDecimal[i]
+                    ? (_decimalMins[i] == decimal.MaxValue ? "" : FormatTypedLiteral(FormatDecimal(_decimalMins[i]), XsdDecimal))
+                    : (_mins[i] == double.MaxValue ? "" : FormatTypedLiteral(_mins[i].ToString(CultureInfo.InvariantCulture), XsdDouble)),
+                AggregateFunction.Max => _useDecimal[i]
+                    ? (_decimalMaxes[i] == decimal.MinValue ? "" : FormatTypedLiteral(FormatDecimal(_decimalMaxes[i]), XsdDecimal))
+                    : (_maxes[i] == double.MinValue ? "" : FormatTypedLiteral(_maxes[i].ToString(CultureInfo.InvariantCulture), XsdDouble)),
                 AggregateFunction.GroupConcat => _concatValues[i] != null
                     ? string.Join(_separators[i], _concatValues[i]!)
                     : "",
@@ -988,6 +1030,29 @@ internal sealed class GroupedRow
                 _ => ""
             };
         }
+    }
+
+    private const string XsdInteger = "http://www.w3.org/2001/XMLSchema#integer";
+    private const string XsdDecimal = "http://www.w3.org/2001/XMLSchema#decimal";
+    private const string XsdDouble = "http://www.w3.org/2001/XMLSchema#double";
+
+    /// <summary>
+    /// Format a value as a typed RDF literal: "value"^^&lt;datatype&gt;
+    /// </summary>
+    private static string FormatTypedLiteral(string value, string datatype)
+    {
+        return $"\"{value}\"^^<{datatype}>";
+    }
+
+    /// <summary>
+    /// Format a decimal value, removing trailing zeros but keeping at least one decimal place
+    /// if the original value had decimals.
+    /// </summary>
+    private static string FormatDecimal(decimal value)
+    {
+        // Use G29 to get up to 29 significant digits without trailing zeros
+        var str = value.ToString("G29", CultureInfo.InvariantCulture);
+        return str;
     }
 
     public int GetKeyHash(int index) => _keyHashes[index];
@@ -1009,13 +1074,20 @@ internal sealed class GroupedRow
     /// <summary>
     /// Try to parse a numeric value from an RDF literal string.
     /// Handles formats: "42", "3.14", "1"^^&lt;xsd:integer&gt;, "2.0"^^&lt;xsd:decimal&gt;
+    /// Returns both double and decimal representations, and indicates if the value
+    /// is a double (scientific notation or xsd:double/xsd:float type).
     /// </summary>
-    private static bool TryParseRdfNumeric(string str, out double result)
+    private static bool TryParseRdfNumeric(string str, out double doubleResult, out decimal decimalResult, out bool isDouble)
     {
-        result = 0;
+        doubleResult = 0;
+        decimalResult = 0;
+        isDouble = false;
 
         if (string.IsNullOrEmpty(str))
             return false;
+
+        string valueStr;
+        string? datatype = null;
 
         // Handle typed literals: "value"^^<datatype>
         if (str.StartsWith('"'))
@@ -1026,14 +1098,54 @@ internal sealed class GroupedRow
                 return false;
 
             // Extract the value between quotes
-            var valueStr = str.AsSpan(1, endQuote - 1);
+            valueStr = str.Substring(1, endQuote - 1);
 
-            // Try to parse the value
-            return double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+            // Check for datatype
+            var suffix = str.AsSpan(endQuote + 1);
+            if (suffix.StartsWith("^^"))
+            {
+                var dtStr = suffix.Slice(2).ToString();
+                if (dtStr.StartsWith('<') && dtStr.EndsWith('>'))
+                    datatype = dtStr.Substring(1, dtStr.Length - 2);
+                else
+                    datatype = dtStr;
+            }
+        }
+        else
+        {
+            valueStr = str;
         }
 
-        // Try direct numeric parse (for unquoted numbers in some formats)
-        return double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+        // Determine if this is a double/float type
+        isDouble = datatype != null &&
+            (datatype.EndsWith("double", StringComparison.OrdinalIgnoreCase) ||
+             datatype.EndsWith("float", StringComparison.OrdinalIgnoreCase));
+
+        // Also check for scientific notation (indicates double)
+        if (!isDouble && (valueStr.Contains('e') || valueStr.Contains('E')))
+            isDouble = true;
+
+        // Try to parse as double (always)
+        if (!double.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out doubleResult))
+            return false;
+
+        // Try to parse as decimal (may fail for very large/small numbers or scientific notation)
+        if (!decimal.TryParse(valueStr, NumberStyles.Float, CultureInfo.InvariantCulture, out decimalResult))
+        {
+            // If decimal parse fails, use the double value converted to decimal
+            // This will lose precision but at least gives us a value
+            try
+            {
+                decimalResult = (decimal)doubleResult;
+            }
+            catch
+            {
+                decimalResult = 0;
+                isDouble = true; // Force double mode since decimal can't represent this
+            }
+        }
+
+        return true;
     }
 }
 
