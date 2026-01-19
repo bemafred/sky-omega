@@ -12,6 +12,7 @@ namespace SkyOmega.Mercury.Tests.W3C;
 /// <param name="ActionPath">Path to the input file to be parsed/executed.</param>
 /// <param name="ResultPath">Path to the expected output file (for evaluation tests).</param>
 /// <param name="DataPath">Path to the data file (for SPARQL query tests).</param>
+/// <param name="GraphDataPaths">Paths to named graph data files (qt:graphData).</param>
 /// <param name="ManifestPath">Path to the manifest file this test came from.</param>
 public sealed record W3CTestCase(
     string Id,
@@ -21,6 +22,7 @@ public sealed record W3CTestCase(
     string ActionPath,
     string? ResultPath,
     string? DataPath,
+    string[]? GraphDataPaths,
     string ManifestPath)
 {
     /// <summary>

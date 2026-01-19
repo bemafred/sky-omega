@@ -2755,13 +2755,77 @@ public ref partial struct SparqlParser
             SkipWhitespace();
 
             // Check for FILTER inside GRAPH
-            var span = PeekSpan(6);
+            var span = PeekSpan(8);
             if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
             {
                 // For now, add filters to parent pattern
                 // (proper scoping would require nested patterns)
                 ParseFilter(ref pattern);
                 continue;
+            }
+
+            // Check for OPTIONAL inside GRAPH
+            if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                // TODO: Handle OPTIONAL inside GRAPH properly
+                ParseOptional(ref pattern);
+                continue;
+            }
+
+            // Check for nested group { ... } which might be a subquery
+            if (Peek() == '{')
+            {
+                Advance(); // Skip '{'
+                SkipWhitespace();
+
+                // Check if this is a subquery: { SELECT ... }
+                var checkSpan = PeekSpan(6);
+                if (checkSpan.Length >= 6 && checkSpan[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Parse subquery with graph context
+                    var subSelect = ParseSubSelect();
+                    subSelect.GraphContext = graphTerm;  // Set the graph context
+                    pattern.AddSubQuery(subSelect);
+                    SkipWhitespace();
+                    if (Peek() == '}')
+                        Advance(); // Skip '}'
+                    continue;
+                }
+                else
+                {
+                    // Not a subquery - need to back up and parse as nested patterns
+                    // For simplicity, reparse the nested group into the graph clause
+                    while (!IsAtEnd() && Peek() != '}')
+                    {
+                        SkipWhitespace();
+                        if (IsAtEnd() || Peek() == '}')
+                            break;
+
+                        var nestedSubject = ParseTerm();
+                        if (nestedSubject.Type == TermType.Variable && nestedSubject.Length == 0)
+                            break;
+
+                        SkipWhitespace();
+                        var nestedPredicate = ParseTerm();
+                        SkipWhitespace();
+                        var nestedObj = ParseTerm();
+
+                        graphClause.AddPattern(new TriplePattern
+                        {
+                            Subject = nestedSubject,
+                            Predicate = nestedPredicate,
+                            Object = nestedObj
+                        });
+
+                        SkipWhitespace();
+                        if (Peek() == '.')
+                            Advance();
+                    }
+                    SkipWhitespace();
+                    if (Peek() == '}')
+                        Advance(); // Skip inner '}'
+                    continue;
+                }
             }
 
             // Try to parse a triple pattern

@@ -116,8 +116,20 @@ public class SparqlConformanceTests
             _output.WriteLine($"Loaded data from {test.DataPath}");
         }
 
-        // Note: Additional graph data (qt:graphData) not yet supported
-        // Would need to extend W3CTestCase to include multiple graph paths
+        // Load named graph data (qt:graphData)
+        // The graph IRI is the file path converted to a file:// URI
+        if (test.GraphDataPaths != null)
+        {
+            foreach (var graphPath in test.GraphDataPaths)
+            {
+                if (File.Exists(graphPath))
+                {
+                    var graphIri = $"<{new Uri(graphPath).AbsoluteUri}>";
+                    await LoadDataToNamedGraphAsync(store, graphPath, graphIri);
+                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIri}");
+                }
+            }
+        }
 
         // Parse the query
         var parser = new SparqlParser(query.AsSpan());
@@ -375,7 +387,53 @@ public class SparqlConformanceTests
                 store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
             });
         }
+        else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
+            });
+        }
         // Add more formats as needed
+    }
+
+    private async Task LoadDataToNamedGraphAsync(QuadStore store, string path, string graphIri)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+
+        if (extension == ".ttl" || extension == ".turtle")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new TurtleStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
+            });
+        }
+        else if (extension == ".nt" || extension == ".ntriples")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new Mercury.NTriples.NTriplesStreamParser(stream);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
+            });
+        }
+        else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
+            });
+        }
     }
 
     public static IEnumerable<object[]> GetPositiveSyntaxTests()

@@ -1106,6 +1106,11 @@ public struct SubSelect
     // VALUES clause (inline bindings at end of subquery)
     public ValuesClause Values;
 
+    // Graph context (for subqueries inside GRAPH clauses)
+    // When this is set, the subquery patterns should be evaluated against this graph
+    public Term GraphContext;
+    public bool HasGraphContext => GraphContext.Type != TermType.Variable || GraphContext.Length > 0;
+
     // GROUP BY and HAVING support
     public GroupByClause GroupBy;
     public HavingClause Having;

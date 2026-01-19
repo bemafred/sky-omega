@@ -32,6 +32,7 @@ public sealed class W3CManifestParser
     private static readonly string RdfsLabel = $"<{RDFS}label>";
     private static readonly string QtQuery = $"<{QT}query>";
     private static readonly string QtData = $"<{QT}data>";
+    private static readonly string QtGraphData = $"<{QT}graphData>";
     private static readonly string UtRequest = $"<{UT}request>";
     private static readonly string UtData = $"<{UT}data>";
     private static readonly string UtGraphData = $"<{UT}graphData>";
@@ -271,6 +272,7 @@ public sealed class W3CManifestParser
         // Get action (input file or blank node with query/data)
         string? actionPath = null;
         string? dataPath = null;
+        string[]? graphDataPaths = null;
 
         if (props.TryGetValue(MfAction, out var actions) && actions.Count > 0)
         {
@@ -296,6 +298,15 @@ public sealed class W3CManifestParser
                     // Try ut:data for SPARQL Update tests
                     if (dataPath == null && actionProps.TryGetValue(UtData, out var utDataFiles) && utDataFiles.Count > 0)
                         dataPath = ResolveIriToPath(utDataFiles[0], manifestDir);
+
+                    // Extract qt:graphData for named graphs (can have multiple entries)
+                    if (actionProps.TryGetValue(QtGraphData, out var graphDataFiles) && graphDataFiles.Count > 0)
+                    {
+                        graphDataPaths = graphDataFiles
+                            .Select(f => ResolveIriToPath(f, manifestDir))
+                            .Where(p => p != null)
+                            .ToArray()!;
+                    }
                 }
             }
             else
@@ -321,6 +332,7 @@ public sealed class W3CManifestParser
             ActionPath: actionPath,
             ResultPath: resultPath,
             DataPath: dataPath,
+            GraphDataPaths: graphDataPaths?.Length > 0 ? graphDataPaths : null,
             ManifestPath: manifestPath);
     }
 

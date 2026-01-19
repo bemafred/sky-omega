@@ -1736,6 +1736,7 @@ internal sealed class BoxedSubQueryExecutor
     private readonly SubSelect _subSelect;
     private readonly bool _distinct;
     private readonly PrefixMapping[]? _prefixes;
+    private readonly string? _graphContext;  // Graph context for subqueries inside GRAPH clauses
 
     public BoxedSubQueryExecutor(QuadStore store, string source, SubSelect subSelect, PrefixMapping[]? prefixes = null)
     {
@@ -1744,6 +1745,13 @@ internal sealed class BoxedSubQueryExecutor
         _subSelect = subSelect;
         _distinct = subSelect.Distinct;
         _prefixes = prefixes;
+
+        // Extract graph context if the subquery is inside a GRAPH clause
+        if (subSelect.HasGraphContext)
+        {
+            var graphTerm = subSelect.GraphContext;
+            _graphContext = source.AsSpan(graphTerm.Start, graphTerm.Length).ToString();
+        }
     }
 
     /// <summary>
@@ -1753,6 +1761,13 @@ internal sealed class BoxedSubQueryExecutor
     [MethodImpl(MethodImplOptions.NoInlining)]
     public List<MaterializedRow> Execute()
     {
+        // Handle variable graph context (GRAPH ?g { subquery })
+        // When graph context is a variable, we need to iterate over all named graphs
+        if (_subSelect.HasGraphContext && _subSelect.GraphContext.IsVariable)
+        {
+            return ExecuteWithVariableGraphContext();
+        }
+
         var results = new List<MaterializedRow>();
         var innerBindings = new Binding[16];
         var innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
@@ -1785,6 +1800,260 @@ internal sealed class BoxedSubQueryExecutor
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Execute subquery with variable graph context (GRAPH ?g { subquery }).
+    /// Iterates over all named graphs and executes the subquery against each.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteWithVariableGraphContext()
+    {
+        var results = new List<MaterializedRow>();
+        var innerBindings = new Binding[16];
+        var innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
+        var bindingTable = new BindingTable(innerBindings, innerStringBuffer);
+        HashSet<int>? seenHashes = _distinct ? new HashSet<int>() : null;
+
+        // Get the graph variable name from source
+        var graphTerm = _subSelect.GraphContext;
+        var graphVarName = _source.AsSpan(graphTerm.Start, graphTerm.Length);
+        var graphVarNameStr = graphVarName.ToString();
+
+        try
+        {
+            int skipped = 0;
+            int returned = 0;
+
+            // Iterate over all named graphs
+            var graphEnum = _store.GetNamedGraphs();
+            while (graphEnum.MoveNext())
+            {
+                var graphIri = graphEnum.Current;
+                var graphIriStr = graphIri.ToString();
+
+                // Execute patterns against this graph
+                if (_subSelect.PatternCount == 1)
+                {
+                    MaterializeSinglePatternWithGraph(ref bindingTable, results, seenHashes,
+                        ref skipped, ref returned, graphIriStr, graphVarNameStr);
+                }
+                else
+                {
+                    MaterializeMultiPatternWithGraph(ref bindingTable, results, seenHashes,
+                        ref skipped, ref returned, graphIriStr, graphVarNameStr);
+                }
+
+                // Check limit
+                if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                    break;
+            }
+        }
+        finally
+        {
+            PooledBufferManager.Shared.Return(innerStringBuffer);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Materialize single pattern results for a specific graph, binding the graph variable.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MaterializeSinglePatternWithGraph(ref BindingTable bindingTable, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned, string graphIri, string graphVarName)
+    {
+        var tp = _subSelect.GetPattern(0);
+        var source = _source.AsSpan();
+        var scan = new TriplePatternScan(_store, source, tp, bindingTable, graphIri.AsSpan(),
+            TemporalQueryMode.Current, default, default, default, _prefixes);
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                // Bind the graph variable
+                bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+
+                if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                {
+                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                        break;
+                }
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Materialize multi-pattern results for a specific graph, binding the graph variable.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MaterializeMultiPatternWithGraph(ref BindingTable bindingTable, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned, string graphIri, string graphVarName)
+    {
+        if (_subSelect.HasUnion)
+        {
+            // Execute UNION branches with graph context
+            MaterializeUnionBranchesWithGraph(ref bindingTable, results, seenHashes,
+                ref skipped, ref returned, graphIri, graphVarName);
+        }
+        else
+        {
+            // Build pattern on heap
+            var boxedPattern = new MultiPatternScan.BoxedPattern();
+            for (int i = 0; i < _subSelect.PatternCount; i++)
+            {
+                boxedPattern.Pattern.AddPattern(_subSelect.GetPattern(i));
+            }
+
+            var source = _source.AsSpan();
+            var scan = new MultiPatternScan(_store, source, boxedPattern.Pattern, false, graphIri.AsSpan());
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    // Bind the graph variable
+                    bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+
+                    if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                    {
+                        if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            break;
+                    }
+                    bindingTable.Clear();
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Materialize UNION branch results for a specific graph, binding the graph variable.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void MaterializeUnionBranchesWithGraph(ref BindingTable bindingTable, List<MaterializedRow> results,
+        HashSet<int>? seenHashes, ref int skipped, ref int returned, string graphIri, string graphVarName)
+    {
+        var source = _source.AsSpan();
+        var graphSpan = graphIri.AsSpan();
+
+        // Execute first branch
+        if (_subSelect.FirstBranchPatternCount > 0)
+        {
+            if (_subSelect.FirstBranchPatternCount > 1)
+            {
+                var firstBranch = new MultiPatternScan.BoxedPattern();
+                for (int i = 0; i < _subSelect.FirstBranchPatternCount; i++)
+                {
+                    firstBranch.Pattern.AddPattern(_subSelect.GetPattern(i));
+                }
+
+                var firstScan = new MultiPatternScan(_store, source, firstBranch.Pattern, false, graphSpan);
+                try
+                {
+                    while (firstScan.MoveNext(ref bindingTable))
+                    {
+                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                        {
+                            if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                return;
+                        }
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    firstScan.Dispose();
+                }
+            }
+            else
+            {
+                var firstTp = _subSelect.GetPattern(0);
+                var firstScan = new TriplePatternScan(_store, source, firstTp, bindingTable, graphSpan,
+                    TemporalQueryMode.Current, default, default, default, _prefixes);
+                try
+                {
+                    while (firstScan.MoveNext(ref bindingTable))
+                    {
+                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                        {
+                            if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                return;
+                        }
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    firstScan.Dispose();
+                }
+            }
+        }
+
+        // Execute union branch
+        if (_subSelect.UnionBranchPatternCount > 0)
+        {
+            if (_subSelect.UnionBranchPatternCount > 1)
+            {
+                var unionBranch = new MultiPatternScan.BoxedPattern();
+                for (int i = 0; i < _subSelect.UnionBranchPatternCount; i++)
+                {
+                    unionBranch.Pattern.AddPattern(_subSelect.GetPattern(_subSelect.UnionStartIndex + i));
+                }
+
+                var unionScan = new MultiPatternScan(_store, source, unionBranch.Pattern, false, graphSpan);
+                try
+                {
+                    while (unionScan.MoveNext(ref bindingTable))
+                    {
+                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                        {
+                            if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                return;
+                        }
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    unionScan.Dispose();
+                }
+            }
+            else
+            {
+                var unionTp = _subSelect.GetPattern(_subSelect.UnionStartIndex);
+                var unionScan = new TriplePatternScan(_store, source, unionTp, bindingTable, graphSpan,
+                    TemporalQueryMode.Current, default, default, default, _prefixes);
+                try
+                {
+                    while (unionScan.MoveNext(ref bindingTable))
+                    {
+                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                        {
+                            if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                return;
+                        }
+                        bindingTable.Clear();
+                    }
+                }
+                finally
+                {
+                    unionScan.Dispose();
+                }
+            }
+        }
     }
 
     /// <summary>

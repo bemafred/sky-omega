@@ -442,7 +442,14 @@ public partial class QueryExecutor : IDisposable
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public QueryResults Execute()
     {
-        // Check for GRAPH clauses first - use _buffer to avoid large struct copies
+        // Check for subqueries first - they may have graph context that takes precedence
+        // over empty GRAPH clause execution
+        if (_buffer.HasSubQueries)
+        {
+            return ExecuteWithSubQueries();
+        }
+
+        // Check for GRAPH clauses - use _buffer to avoid large struct copies
         // A query with GRAPH but no direct triple patterns (only patterns inside GRAPH)
         // Call ExecuteGraphClausesToList() which returns List<MaterializedRow>? (8 bytes)
         // instead of QueryResults (~22KB) to reduce stack pressure
@@ -455,12 +462,6 @@ public partial class QueryExecutor : IDisposable
             var graphBindings = new Binding[16];
             return QueryResults.FromMaterializedList(graphResults, graphBindings, _stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
-        }
-
-        // Check for subqueries - use _buffer
-        if (_buffer.HasSubQueries)
-        {
-            return ExecuteWithSubQueries();
         }
 
         // Check for SERVICE clauses - use _buffer
