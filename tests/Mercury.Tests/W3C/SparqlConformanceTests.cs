@@ -136,6 +136,20 @@ public class SparqlConformanceTests
         var parsed = parser.ParseQuery();
         _output.WriteLine($"Query type: {parsed.Type}");
 
+        // Debug: Log SelectClause info for cast tests
+        if (test.Id.Contains("cast", StringComparison.OrdinalIgnoreCase))
+        {
+            _output.WriteLine($"SelectClause.HasAggregates: {parsed.SelectClause.HasAggregates}");
+            _output.WriteLine($"SelectClause.AggregateCount: {parsed.SelectClause.AggregateCount}");
+            for (int i = 0; i < parsed.SelectClause.AggregateCount; i++)
+            {
+                var agg = parsed.SelectClause.GetAggregate(i);
+                var expr = query.AsSpan(agg.VariableStart, agg.VariableLength).ToString();
+                var alias = agg.AliasLength > 0 ? query.AsSpan(agg.AliasStart, agg.AliasLength).ToString() : "(none)";
+                _output.WriteLine($"  Aggregate {i}: Function={agg.Function}, Expr='{expr}', Alias='{alias}'");
+            }
+        }
+
         // Parse expected results BEFORE acquiring lock to avoid thread-affinity issues
         // (ReaderWriterLockSlim requires release on same thread as acquire)
         var expected = await ParseExpectedResultSetAsync(test.ResultPath!);
@@ -174,12 +188,33 @@ public class SparqlConformanceTests
 
                 // SELECT query - execute and collect results
                 var results = executor.Execute();
+                int rowNum = 0;
                 try
                 {
                     while (results.MoveNext())
                     {
+                        rowNum++;
                         var row = new SparqlResultRow();
                         var current = results.Current;
+
+                        // Debug: for cast tests, log binding details
+                        if (test.Id.Contains("cast-int"))
+                        {
+                            var diagSb = new System.Text.StringBuilder();
+                            diagSb.AppendLine($"Row {rowNum}: BindingCount={current.Count}");
+                            for (int i = 0; i < current.Count; i++)
+                            {
+                                diagSb.AppendLine($"  [{i}]: Type={current.GetType(i)}, Value='{current.GetString(i).ToString()}'");
+                            }
+                            // Try to find ?integer
+                            var intIdx = current.FindBinding("?integer".AsSpan());
+                            diagSb.AppendLine($"  FindBinding('?integer')={intIdx}");
+                            if (intIdx >= 0)
+                            {
+                                diagSb.AppendLine($"  ?integer Type={current.GetType(intIdx)}, Value='{current.GetString(intIdx).ToString()}'");
+                            }
+                            _output.WriteLine(diagSb.ToString());
+                        }
 
                         foreach (var varName in expected.Variables)
                         {

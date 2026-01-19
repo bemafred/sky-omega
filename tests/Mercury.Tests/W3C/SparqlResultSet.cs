@@ -146,6 +146,11 @@ public sealed class SparqlResultRow
         var hash = new HashCode();
         foreach (var (variable, binding) in _bindings.OrderBy(kv => kv.Key))
         {
+            // Skip unbound bindings - they should not affect the hash
+            // This ensures rows with explicit Unbound entries hash the same as rows without them
+            if (binding.Type == RdfTermType.Unbound)
+                continue;
+
             hash.Add(variable);
             hash.Add(binding.Type);
             // Don't include blank node labels in hash - they vary between implementations

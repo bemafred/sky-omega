@@ -377,6 +377,12 @@ public ref partial struct FilterEvaluator
     /// </summary>
     private static Value ParseTypedLiteralString(ReadOnlySpan<char> str)
     {
+        // Check for URI format: <uri>
+        if (str.Length >= 2 && str[0] == '<' && str[^1] == '>')
+        {
+            return new Value { Type = ValueType.Uri, StringValue = str };
+        }
+
         // Check for typed literal format: "value"^^<datatype>
         if (str.Length > 2 && str[0] == '"')
         {
@@ -1218,6 +1224,43 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
+        // XSD type cast functions
+        // xsd:integer - cast to integer
+        if (funcName.Equals("xsd:integer", StringComparison.OrdinalIgnoreCase))
+        {
+            return CastToInteger(arg1);
+        }
+
+        // xsd:decimal - cast to decimal (represented as double internally)
+        if (funcName.Equals("xsd:decimal", StringComparison.OrdinalIgnoreCase))
+        {
+            return CastToDecimal(arg1);
+        }
+
+        // xsd:double - cast to double
+        if (funcName.Equals("xsd:double", StringComparison.OrdinalIgnoreCase))
+        {
+            return CastToDouble(arg1);
+        }
+
+        // xsd:float - cast to float (same as double in SPARQL)
+        if (funcName.Equals("xsd:float", StringComparison.OrdinalIgnoreCase))
+        {
+            return CastToFloat(arg1);
+        }
+
+        // xsd:boolean - cast to boolean
+        if (funcName.Equals("xsd:boolean", StringComparison.OrdinalIgnoreCase))
+        {
+            return CastToBoolean(arg1);
+        }
+
+        // xsd:string - cast to string
+        if (funcName.Equals("xsd:string", StringComparison.OrdinalIgnoreCase))
+        {
+            return CastToString(arg1);
+        }
+
         return new Value { Type = ValueType.Unbound };
     }
 
@@ -1375,6 +1418,261 @@ public ref partial struct FilterEvaluator
             return "PT0S";
 
         return result.ToString();
+    }
+
+    // Storage for XSD cast results to keep span valid
+    private string _castResult = string.Empty;
+
+    /// <summary>
+    /// Cast a value to xsd:integer.
+    /// Supports: booleans, typed numerics (integer/decimal/double/float), and strings that are valid integer literals.
+    /// Plain strings can only cast if they match integer lexical form (digits with optional sign).
+    /// </summary>
+    private static Value CastToInteger(Value arg)
+    {
+        // Boolean to integer: true=1, false=0
+        if (arg.Type == ValueType.Boolean)
+        {
+            return new Value { Type = ValueType.Integer, IntegerValue = arg.BooleanValue ? 1 : 0 };
+        }
+
+        // Already integer
+        if (arg.Type == ValueType.Integer)
+        {
+            return arg;
+        }
+
+        // Double to integer (truncate) - this handles typed decimals/doubles/floats
+        if (arg.Type == ValueType.Double)
+        {
+            if (double.IsNaN(arg.DoubleValue) || double.IsInfinity(arg.DoubleValue))
+                return new Value { Type = ValueType.Unbound };
+            return new Value { Type = ValueType.Integer, IntegerValue = (long)arg.DoubleValue };
+        }
+
+        // String to integer - ONLY valid integer lexical representations (no decimal point or scientific notation)
+        if (arg.Type == ValueType.String)
+        {
+            var str = ExtractLiteralValue(arg.StringValue);
+
+            // For plain strings, only accept valid integer lexical form (digits with optional leading +/-)
+            // Must NOT contain decimal point (.), 'E', 'e' (scientific notation)
+            if (str.IndexOfAny(['.', 'E', 'e']) >= 0)
+            {
+                // Contains decimal point or scientific notation - not a valid integer string
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            if (long.TryParse(str, System.Globalization.NumberStyles.Integer | System.Globalization.NumberStyles.AllowLeadingSign,
+                System.Globalization.CultureInfo.InvariantCulture, out var intVal))
+            {
+                return new Value { Type = ValueType.Integer, IntegerValue = intVal };
+            }
+        }
+
+        return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Cast a value to xsd:decimal.
+    /// </summary>
+    private Value CastToDecimal(Value arg)
+    {
+        // Boolean to decimal: true=1.0, false=0.0
+        if (arg.Type == ValueType.Boolean)
+        {
+            return new Value { Type = ValueType.Double, DoubleValue = arg.BooleanValue ? 1.0 : 0.0 };
+        }
+
+        // Integer to decimal
+        if (arg.Type == ValueType.Integer)
+        {
+            return new Value { Type = ValueType.Double, DoubleValue = arg.IntegerValue };
+        }
+
+        // Already double (treat as decimal)
+        if (arg.Type == ValueType.Double)
+        {
+            if (double.IsNaN(arg.DoubleValue) || double.IsInfinity(arg.DoubleValue))
+                return new Value { Type = ValueType.Unbound };
+            return arg;
+        }
+
+        // String to decimal
+        if (arg.Type == ValueType.String)
+        {
+            var str = ExtractLiteralValue(arg.StringValue);
+            if (double.TryParse(str, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dblVal))
+            {
+                if (!double.IsNaN(dblVal) && !double.IsInfinity(dblVal))
+                    return new Value { Type = ValueType.Double, DoubleValue = dblVal };
+            }
+        }
+
+        return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Cast a value to xsd:double.
+    /// </summary>
+    private Value CastToDouble(Value arg)
+    {
+        // Boolean to double: true=1.0E0, false=0.0E0
+        if (arg.Type == ValueType.Boolean)
+        {
+            return new Value { Type = ValueType.Double, DoubleValue = arg.BooleanValue ? 1.0 : 0.0 };
+        }
+
+        // Integer to double
+        if (arg.Type == ValueType.Integer)
+        {
+            return new Value { Type = ValueType.Double, DoubleValue = arg.IntegerValue };
+        }
+
+        // Already double
+        if (arg.Type == ValueType.Double)
+        {
+            return arg;
+        }
+
+        // String to double
+        if (arg.Type == ValueType.String)
+        {
+            var str = ExtractLiteralValue(arg.StringValue);
+            // Handle special values
+            if (str.Equals("INF", StringComparison.OrdinalIgnoreCase))
+                return new Value { Type = ValueType.Double, DoubleValue = double.PositiveInfinity };
+            if (str.Equals("-INF", StringComparison.OrdinalIgnoreCase))
+                return new Value { Type = ValueType.Double, DoubleValue = double.NegativeInfinity };
+            if (str.Equals("NaN", StringComparison.OrdinalIgnoreCase))
+                return new Value { Type = ValueType.Double, DoubleValue = double.NaN };
+
+            if (double.TryParse(str, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var dblVal))
+            {
+                return new Value { Type = ValueType.Double, DoubleValue = dblVal };
+            }
+        }
+
+        return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Cast a value to xsd:float.
+    /// </summary>
+    private Value CastToFloat(Value arg)
+    {
+        // Float is same as double in SPARQL (both use ValueType.Double)
+        // Internal representation is identical; difference only matters for serialization
+        return CastToDouble(arg);
+    }
+
+    /// <summary>
+    /// Cast a value to xsd:boolean.
+    /// </summary>
+    private Value CastToBoolean(Value arg)
+    {
+        // Already boolean
+        if (arg.Type == ValueType.Boolean)
+        {
+            return arg;
+        }
+
+        // Integer to boolean: 0=false, non-zero=true
+        if (arg.Type == ValueType.Integer)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = arg.IntegerValue != 0 };
+        }
+
+        // Double to boolean: 0.0=false, NaN=false, non-zero=true
+        if (arg.Type == ValueType.Double)
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = arg.DoubleValue != 0.0 && !double.IsNaN(arg.DoubleValue) };
+        }
+
+        // String to boolean: "true"/"1" = true, "false"/"0" = false
+        if (arg.Type == ValueType.String)
+        {
+            var str = ExtractLiteralValue(arg.StringValue);
+            if (str.Equals("true", StringComparison.OrdinalIgnoreCase) || str.Equals("1", StringComparison.Ordinal))
+                return new Value { Type = ValueType.Boolean, BooleanValue = true };
+            if (str.Equals("false", StringComparison.OrdinalIgnoreCase) || str.Equals("0", StringComparison.Ordinal))
+                return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
+        return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Cast a value to xsd:string.
+    /// </summary>
+    private Value CastToString(Value arg)
+    {
+        switch (arg.Type)
+        {
+            case ValueType.Boolean:
+                return new Value { Type = ValueType.String, StringValue = (arg.BooleanValue ? "true" : "false").AsSpan() };
+
+            case ValueType.Integer:
+                _castResult = arg.IntegerValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
+
+            case ValueType.Double:
+                if (double.IsNaN(arg.DoubleValue))
+                    return new Value { Type = ValueType.String, StringValue = "NaN".AsSpan() };
+                if (double.IsPositiveInfinity(arg.DoubleValue))
+                    return new Value { Type = ValueType.String, StringValue = "INF".AsSpan() };
+                if (double.IsNegativeInfinity(arg.DoubleValue))
+                    return new Value { Type = ValueType.String, StringValue = "-INF".AsSpan() };
+                _castResult = arg.DoubleValue.ToString("G", System.Globalization.CultureInfo.InvariantCulture);
+                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
+
+            case ValueType.String:
+                // Extract just the value part (strip datatype/language tag)
+                var val = ExtractLiteralValue(arg.StringValue);
+                _castResult = val.ToString();
+                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
+
+            case ValueType.Uri:
+                // Strip angle brackets if present to get just the URI string
+                var uriStr = arg.StringValue;
+                if (uriStr.Length >= 2 && uriStr[0] == '<' && uriStr[^1] == '>')
+                    uriStr = uriStr[1..^1];
+                _castResult = uriStr.ToString();
+                return new Value { Type = ValueType.String, StringValue = _castResult.AsSpan() };
+
+            default:
+                return new Value { Type = ValueType.Unbound };
+        }
+    }
+
+    /// <summary>
+    /// Extract the value part from an RDF literal string.
+    /// Handles formats: "value", "value"^^type, "value"@lang
+    /// </summary>
+    private static ReadOnlySpan<char> ExtractLiteralValue(ReadOnlySpan<char> str)
+    {
+        if (str.IsEmpty)
+            return str;
+
+        // Check if it's a quoted literal
+        if (str[0] == '"')
+        {
+            // Find the closing quote (might have datatype or language tag after)
+            for (int i = 1; i < str.Length; i++)
+            {
+                if (str[i] == '"')
+                {
+                    // Check if escaped
+                    if (i > 0 && str[i - 1] == '\\')
+                        continue;
+                    // Return content between quotes
+                    return str.Slice(1, i - 1);
+                }
+            }
+        }
+
+        // Not a quoted literal, return as-is
+        return str;
     }
 
     /// <summary>

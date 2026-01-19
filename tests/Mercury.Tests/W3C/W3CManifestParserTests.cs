@@ -111,6 +111,26 @@ public class W3CManifestParserTests
     }
 
     [SkippableFact]
+    public async Task ParseSparql11QueryManifest_IncludesCastTests()
+    {
+        Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
+
+        var parser = new W3CManifestParser();
+        var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Sparql11Query);
+
+        var tests = await parser.ParseAsync(manifestPath);
+
+        // Find cast tests
+        var castTests = tests.Where(t =>
+            t.Id.Contains("cast", StringComparison.OrdinalIgnoreCase) ||
+            t.Name.Contains("cast", StringComparison.OrdinalIgnoreCase) ||
+            t.ManifestPath.Contains("cast", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        Assert.NotEmpty(castTests);
+        Assert.Equal(6, castTests.Count); // cast-bool, cast-int, cast-float, cast-double, cast-decimal, cast-string
+    }
+
+    [SkippableFact]
     public async Task TestCase_HasCorrectProperties()
     {
         Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");

@@ -1757,15 +1757,25 @@ public ref struct BindingTable
     /// <summary>
     /// Truncate bindings to a previous count.
     /// Used for backtracking in multi-pattern joins.
-    /// Note: String buffer space is not reclaimed (acceptable for fixed buffer).
+    /// Reclaims string buffer space to prevent overflow during heavy backtracking.
     /// </summary>
     public void TruncateTo(int count)
     {
         if (count < _count)
         {
+            // Reclaim string buffer space by resetting to right after the last retained binding
+            // Each binding stores its StringOffset and StringLength, and bindings are added
+            // in order, so string space is allocated sequentially.
+            if (count > 0)
+            {
+                ref var lastBinding = ref _bindings[count - 1];
+                _stringOffset = lastBinding.StringOffset + lastBinding.StringLength;
+            }
+            else
+            {
+                _stringOffset = 0;
+            }
             _count = count;
-            // String buffer is not truncated - we leave gaps, which is fine for fixed buffer
-            // In a more sophisticated implementation, we'd track string offset per binding
         }
     }
 

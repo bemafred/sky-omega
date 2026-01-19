@@ -94,6 +94,16 @@ public static class SparqlResultComparer
             .GroupBy(x => x.row.GetStructuralHashCode())
             .ToDictionary(g => g.Key, g => g.ToList());
 
+        // Debug: Log hash bucket distribution
+        File.AppendAllText("/tmp/compare_debug.log",
+            $"\n=== Hash Buckets ===\nExpected rows: {expected.Count}, Actual rows: {actual.Count}\n" +
+            $"Actual buckets: {actualByHash.Count}\n");
+        foreach (var bucket in actualByHash.Take(5))
+        {
+            File.AppendAllText("/tmp/compare_debug.log",
+                $"  Hash {bucket.Key}: {bucket.Value.Count} rows\n");
+        }
+
         // Track which actual rows have been matched
         var matchedActual = new bool[actual.Count];
         var bnodeMapping = new Dictionary<string, string>();
@@ -102,6 +112,17 @@ public static class SparqlResultComparer
         if (TryMatchRows(expected.Rows, 0, actualByHash, matchedActual, expected.Variables, bnodeMapping))
         {
             return null; // All rows matched
+        }
+
+        // Debug: Log which expected rows failed to match
+        File.AppendAllText("/tmp/compare_debug.log", "\n=== Unmatched Expected Rows ===\n");
+        for (int i = 0; i < expected.Count && i < 5; i++)
+        {
+            var expRow = expected.Rows[i];
+            var expHash = expRow.GetStructuralHashCode();
+            var hasMatch = actualByHash.ContainsKey(expHash);
+            File.AppendAllText("/tmp/compare_debug.log",
+                $"Expected[{i}] hash={expHash}, has_bucket={hasMatch}: {expRow}\n");
         }
 
         // Failed to find a complete matching - generate helpful error message
@@ -216,7 +237,14 @@ public static class SparqlResultComparer
             var actBinding = actual[varName];
 
             if (!BindingsMatch(expBinding, actBinding, bnodeMapping))
+            {
+                // Debug: Log which binding failed with full details
+                File.AppendAllText("/tmp/compare_debug.log",
+                    $"[COMPARE] Binding mismatch for ?{varName}:\n" +
+                    $"  Expected: Type={expBinding.Type}, Value='{expBinding.Value}', Datatype='{expBinding.Datatype}', Lang='{expBinding.Language}'\n" +
+                    $"  Actual:   Type={actBinding.Type}, Value='{actBinding.Value}', Datatype='{actBinding.Datatype}', Lang='{actBinding.Language}'\n\n");
                 return false;
+            }
         }
 
         return true;
@@ -273,19 +301,30 @@ public static class SparqlResultComparer
         // Literals must match value, datatype, and language
         if (expected.Type == RdfTermType.Literal)
         {
-            if (expected.Value != actual.Value)
-                return false;
-
             // Normalize datatype comparison
             var expDatatype = NormalizeDatatype(expected.Datatype);
             var actDatatype = NormalizeDatatype(actual.Datatype);
 
-            // Allow numeric type flexibility - if values are numerically equal,
-            // treat plain literals as compatible with numeric types
-            if (expDatatype != actDatatype)
+            // For numeric types, do value-based comparison (not string comparison)
+            // because "3.333E1" and "33.33" represent the same value
+            if (IsNumericType(expDatatype) && IsNumericType(actDatatype))
             {
-                if (!AreNumericTypesCompatible(expected.Value, expDatatype, actDatatype))
+                if (!AreNumericValuesEqual(expected.Value, actual.Value, expDatatype, actDatatype))
                     return false;
+            }
+            else
+            {
+                // For non-numeric types, string comparison
+                if (expected.Value != actual.Value)
+                    return false;
+
+                // Allow numeric type flexibility - if values are numerically equal,
+                // treat plain literals as compatible with numeric types
+                if (expDatatype != actDatatype)
+                {
+                    if (!AreNumericTypesCompatible(expected.Value, expDatatype, actDatatype))
+                        return false;
+                }
             }
 
             // Language tags are case-insensitive
@@ -354,6 +393,66 @@ public static class SparqlResultComparer
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Checks if a datatype is a numeric XSD type.
+    /// </summary>
+    private static bool IsNumericType(string? datatype)
+    {
+        if (string.IsNullOrEmpty(datatype))
+            return false;
+
+        return datatype == "http://www.w3.org/2001/XMLSchema#integer" ||
+               datatype == "http://www.w3.org/2001/XMLSchema#decimal" ||
+               datatype == "http://www.w3.org/2001/XMLSchema#double" ||
+               datatype == "http://www.w3.org/2001/XMLSchema#float";
+    }
+
+    /// <summary>
+    /// Compares two numeric values for equality, handling different representations
+    /// like "3.333E1" vs "33.33".
+    /// </summary>
+    private static bool AreNumericValuesEqual(string expectedValue, string actualValue, string? expectedType, string? actualType)
+    {
+        // Parse both values as doubles for comparison
+        if (!double.TryParse(expectedValue, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var expected))
+            return false;
+
+        if (!double.TryParse(actualValue, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var actual))
+            return false;
+
+        // Handle special cases
+        if (double.IsNaN(expected) && double.IsNaN(actual))
+            return true;
+        if (double.IsPositiveInfinity(expected) && double.IsPositiveInfinity(actual))
+            return true;
+        if (double.IsNegativeInfinity(expected) && double.IsNegativeInfinity(actual))
+            return true;
+
+        // For integer types, check exact equality
+        if (expectedType == "http://www.w3.org/2001/XMLSchema#integer" &&
+            actualType == "http://www.w3.org/2001/XMLSchema#integer")
+        {
+            return expected == actual;
+        }
+
+        // For float/double/decimal, use relative tolerance for floating point comparison
+        // This handles different representations like "3.333E1" vs "33.33"
+        if (expected == actual)
+            return true;
+
+        // Use relative epsilon for non-zero values
+        if (expected != 0 && actual != 0)
+        {
+            var relativeError = Math.Abs((expected - actual) / Math.Max(Math.Abs(expected), Math.Abs(actual)));
+            return relativeError < 1e-10;
+        }
+
+        // One is zero, check absolute difference for near-zero values
+        return Math.Abs(expected - actual) < 1e-15;
     }
 
     /// <summary>
