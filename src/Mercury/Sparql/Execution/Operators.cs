@@ -1858,6 +1858,28 @@ internal sealed class BoxedSubQueryExecutor
     }
 
     /// <summary>
+    /// Check if a variable is projected by the subquery (either SELECT * or explicitly listed).
+    /// </summary>
+    private bool IsVariableProjected(string varName)
+    {
+        // SELECT * projects all variables
+        if (_subSelect.SelectAll)
+            return true;
+
+        // Check explicitly projected variables
+        var source = _source.AsSpan();
+        for (int i = 0; i < _subSelect.ProjectedVarCount; i++)
+        {
+            var (start, len) = _subSelect.GetProjectedVariable(i);
+            var projectedVar = source.Slice(start, len);
+            if (projectedVar.SequenceEqual(varName.AsSpan()))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Materialize single pattern results for a specific graph, binding the graph variable.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -1866,26 +1888,46 @@ internal sealed class BoxedSubQueryExecutor
     {
         var tp = _subSelect.GetPattern(0);
         var source = _source.AsSpan();
+
+        // Only pre-bind the graph variable if the subquery projects it (SELECT * or explicit).
+        // This enables proper join semantics:
+        // - If projected: filter pattern results where ?g doesn't match graphIri (sq02)
+        // - If not projected: no filtering, all results pass through (sq03)
+        bool preBindGraph = IsVariableProjected(graphVarName);
+        int preBindCount = 0;
+
+        if (preBindGraph)
+        {
+            bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+            preBindCount = bindingTable.Count;
+        }
+
         var scan = new TriplePatternScan(_store, source, tp, bindingTable, graphIri.AsSpan(),
             TemporalQueryMode.Current, default, default, default, _prefixes);
         try
         {
             while (scan.MoveNext(ref bindingTable))
             {
-                // Bind the graph variable
-                bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+                // Bind graph variable for output (needed for both cases)
+                if (!preBindGraph)
+                    bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
 
                 if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
                 {
                     if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
                         break;
                 }
-                bindingTable.Clear();
+
+                if (preBindGraph)
+                    bindingTable.TruncateTo(preBindCount);  // Keep graph binding, clear pattern bindings
+                else
+                    bindingTable.Clear();
             }
         }
         finally
         {
             scan.Dispose();
+            bindingTable.Clear();  // Clear for next graph iteration
         }
     }
 
@@ -1912,25 +1954,42 @@ internal sealed class BoxedSubQueryExecutor
             }
 
             var source = _source.AsSpan();
+
+            // Only pre-bind the graph variable if the subquery projects it
+            bool preBindGraph = IsVariableProjected(graphVarName);
+            int preBindCount = 0;
+
+            if (preBindGraph)
+            {
+                bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+                preBindCount = bindingTable.Count;
+            }
+
             var scan = new MultiPatternScan(_store, source, boxedPattern.Pattern, false, graphIri.AsSpan());
             try
             {
                 while (scan.MoveNext(ref bindingTable))
                 {
-                    // Bind the graph variable
-                    bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+                    // Bind graph variable for output (needed for both cases)
+                    if (!preBindGraph)
+                        bindingTable.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
 
                     if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
                     {
                         if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
                             break;
                     }
-                    bindingTable.Clear();
+
+                    if (preBindGraph)
+                        bindingTable.TruncateTo(preBindCount);
+                    else
+                        bindingTable.Clear();
                 }
             }
             finally
             {
                 scan.Dispose();
+                bindingTable.Clear();  // Clear for next graph iteration
             }
         }
     }
@@ -1944,6 +2003,16 @@ internal sealed class BoxedSubQueryExecutor
     {
         var source = _source.AsSpan();
         var graphSpan = graphIri.AsSpan();
+
+        // Only pre-bind the graph variable if the subquery projects it
+        bool preBindGraph = IsVariableProjected(graphVarName);
+        int preBindCount = 0;
+
+        if (preBindGraph)
+        {
+            bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+            preBindCount = bindingTable.Count;
+        }
 
         // Execute first branch
         if (_subSelect.FirstBranchPatternCount > 0)
@@ -1961,13 +2030,22 @@ internal sealed class BoxedSubQueryExecutor
                 {
                     while (firstScan.MoveNext(ref bindingTable))
                     {
-                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (!preBindGraph)
+                            bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+
                         if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
                         {
                             if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            {
+                                bindingTable.Clear();
                                 return;
+                            }
                         }
-                        bindingTable.Clear();
+
+                        if (preBindGraph)
+                            bindingTable.TruncateTo(preBindCount);
+                        else
+                            bindingTable.Clear();
                     }
                 }
                 finally
@@ -1984,13 +2062,22 @@ internal sealed class BoxedSubQueryExecutor
                 {
                     while (firstScan.MoveNext(ref bindingTable))
                     {
-                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (!preBindGraph)
+                            bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+
                         if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
                         {
                             if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            {
+                                bindingTable.Clear();
                                 return;
+                            }
                         }
-                        bindingTable.Clear();
+
+                        if (preBindGraph)
+                            bindingTable.TruncateTo(preBindCount);
+                        else
+                            bindingTable.Clear();
                     }
                 }
                 finally
@@ -2016,13 +2103,22 @@ internal sealed class BoxedSubQueryExecutor
                 {
                     while (unionScan.MoveNext(ref bindingTable))
                     {
-                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (!preBindGraph)
+                            bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+
                         if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
                         {
                             if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            {
+                                bindingTable.Clear();
                                 return;
+                            }
                         }
-                        bindingTable.Clear();
+
+                        if (preBindGraph)
+                            bindingTable.TruncateTo(preBindCount);
+                        else
+                            bindingTable.Clear();
                     }
                 }
                 finally
@@ -2039,13 +2135,22 @@ internal sealed class BoxedSubQueryExecutor
                 {
                     while (unionScan.MoveNext(ref bindingTable))
                     {
-                        bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+                        if (!preBindGraph)
+                            bindingTable.Bind(graphVarName.AsSpan(), graphSpan);
+
                         if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
                         {
                             if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                            {
+                                bindingTable.Clear();
                                 return;
+                            }
                         }
-                        bindingTable.Clear();
+
+                        if (preBindGraph)
+                            bindingTable.TruncateTo(preBindCount);
+                        else
+                            bindingTable.Clear();
                     }
                 }
                 finally
@@ -2054,6 +2159,8 @@ internal sealed class BoxedSubQueryExecutor
                 }
             }
         }
+
+        bindingTable.Clear();  // Clear for next graph iteration
     }
 
     /// <summary>
