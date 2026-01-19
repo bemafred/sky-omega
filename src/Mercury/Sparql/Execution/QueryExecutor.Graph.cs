@@ -594,10 +594,17 @@ public partial class QueryExecutor
         if (results == null || results.Count == 0)
             return QueryResults.Empty();
 
+        // Get the graph IRI for EXISTS/MINUS evaluation context
+        ref readonly var pattern = ref _cachedPattern;
+        var graphClause = pattern.GetGraphClause(0);
+        var graphIri = _source.Substring(graphClause.Graph.Start, graphClause.Graph.Length);
+
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
-        return QueryResults.FromMaterializedList(results, bindings, stringBuffer,
-            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+
+        // Use FromMaterializedWithGraphContext to enable EXISTS/MINUS filters to query the correct graph
+        return QueryResults.FromMaterializedWithGraphContext(results, _buffer, _source.AsSpan(), _store, bindings, stringBuffer,
+            graphIri, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
     /// <summary>

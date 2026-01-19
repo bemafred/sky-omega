@@ -79,6 +79,9 @@ public ref partial struct QueryResults
     private string? _expandedPredicate;
     private string? _expandedObject;
 
+    // Graph context for EXISTS/MINUS evaluation inside GRAPH clauses
+    private string? _graphContext;
+
     // GROUP BY support
     private readonly bool _hasGroupBy;
     private readonly GroupByClause _groupBy;
@@ -115,6 +118,20 @@ public ref partial struct QueryResults
 
         return new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
             limit, offset, distinct, orderBy, groupBy, selectClause, having);
+    }
+
+    /// <summary>
+    /// Create QueryResults from pre-materialized rows with graph context for EXISTS/MINUS evaluation.
+    /// Used for GRAPH clause results where EXISTS filters need to query the named graph.
+    /// </summary>
+    internal static QueryResults FromMaterializedWithGraphContext(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
+        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
+        string graphContext, int limit = 0, int offset = 0, bool distinct = false)
+    {
+        var result = new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
+            limit, offset, distinct, default, default, default, default);
+        result._graphContext = graphContext;
+        return result;
     }
 
     /// <summary>
@@ -585,6 +602,15 @@ public ref partial struct QueryResults
     /// Current result row with variable bindings.
     /// </summary>
     public readonly BindingTable Current => _bindingTable;
+
+    /// <summary>
+    /// Set the graph context for EXISTS/MINUS evaluation inside GRAPH clauses.
+    /// When set, EXISTS patterns will query the specified graph instead of the default graph.
+    /// </summary>
+    internal void SetGraphContext(string? graphIri)
+    {
+        _graphContext = graphIri;
+    }
 
     /// <summary>
     /// Move to next result row.

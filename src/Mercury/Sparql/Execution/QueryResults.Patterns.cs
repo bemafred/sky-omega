@@ -405,8 +405,10 @@ public ref partial struct QueryResults
             var predicate = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength, SlotTermPosition.Predicate);
             var obj = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength, SlotTermPosition.Object);
 
-            // Query the store
-            var results = _store.QueryCurrent(subject, predicate, obj);
+            // Query the store - use graph context if inside a GRAPH clause
+            var results = _graphContext != null
+                ? _store.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+                : _store.QueryCurrent(subject, predicate, obj);
             try
             {
                 if (!results.MoveNext())
@@ -586,8 +588,10 @@ public ref partial struct QueryResults
         var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, SlotTermPosition.Predicate);
         var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, SlotTermPosition.Object);
 
-        // Query the store to see if this pattern matches
-        var results = _store.QueryCurrent(subject, predicate, obj);
+        // Query the store to see if this pattern matches - use graph context if inside a GRAPH clause
+        var results = _graphContext != null
+            ? _store.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+            : _store.QueryCurrent(subject, predicate, obj);
         try
         {
             return results.MoveNext(); // Match if at least one triple found

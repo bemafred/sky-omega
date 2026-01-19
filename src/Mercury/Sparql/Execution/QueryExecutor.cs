@@ -460,6 +460,27 @@ public partial class QueryExecutor : IDisposable
                 return QueryResults.Empty();
 
             var graphBindings = new Binding[16];
+
+            // For EXISTS/MINUS evaluation inside GRAPH clauses, we need to pass the graph context
+            // Get the graph IRI from the first graph header slot
+            string? graphContext = null;
+            if (_buffer.GraphClauseCount == 1 && !_buffer.FirstGraphIsVariable)
+            {
+                var patterns = _buffer.GetPatterns();
+                var graphHeaders = patterns.EnumerateGraphHeaders();
+                if (graphHeaders.MoveNext())
+                {
+                    var header = graphHeaders.Current;
+                    graphContext = _source.Substring(header.GraphTermStart, header.GraphTermLength);
+                }
+            }
+
+            if (graphContext != null)
+            {
+                return QueryResults.FromMaterializedWithGraphContext(graphResults, _buffer, _source.AsSpan(), _store, graphBindings, _stringBuffer,
+                    graphContext, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+            }
+
             return QueryResults.FromMaterializedList(graphResults, graphBindings, _stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
