@@ -62,59 +62,99 @@ Mercury's SPARQL engine has achieved 95% W3C conformance. The remaining 171 fail
 
 ---
 
-### Phase 3: SPARQL Functions
+### Phase 3: SPARQL Functions — 22% (13/59)
 **Target:** ~30-40 tests (subset of 73)
 **Effort:** Medium
 **Files:** `FilterEvaluator.Functions.cs`
 
-**Priority functions (highest impact):**
+**Current status (as of 2026-01-19):**
 
-| Function | Tests | Issue |
-|----------|-------|-------|
-| MINUTES, SECONDS, HOURS | ~10 | DateTime extraction |
-| ENCODE_FOR_URI | ~3 | IRI encoding |
-| STRBEFORE, STRAFTER | ~5 | String boundary cases |
-| REPLACE | ~5 | Regex replacement |
-| IF, COALESCE | ~5 | Error propagation |
-
-**Approach:**
-1. Run function tests in isolation to identify exact failures
-2. Fix one function family at a time
-3. Add unit tests for edge cases discovered
+| Function | Status | Notes |
+|----------|--------|-------|
+| isNumeric, ABS | ✅ Pass | |
+| MINUTES, SECONDS, HOURS | ✅ Pass | DateTime extraction working |
+| IF, COALESCE | ✅ Pass (basic) | Error propagation cases fail |
+| REPLACE (overlap, capture) | ✅ Pass | Basic cases work |
+| CEIL, FLOOR, ROUND | ❌ Fail | Numeric rounding |
+| CONCAT (4 tests) | ❌ Fail | String concatenation |
+| SUBSTR (4 tests) | ❌ Fail | Substring extraction |
+| UCASE, LCASE (4 tests) | ❌ Fail | Case conversion |
+| ENCODE_FOR_URI (2 tests) | ❌ Fail | IRI encoding |
+| MD5, SHA1, SHA256, SHA384, SHA512 | ❌ Fail | Hash functions (10 tests) |
+| TIMEZONE, TZ | ❌ Fail | Timezone extraction |
+| BNODE(str) | ❌ Fail | Blank node creation |
+| STRBEFORE, STRAFTER (4 tests) | ❌ Fail | String boundary cases |
+| REPLACE (basic, 'i' option) | ❌ Fail | Regex flags |
+| IF error propagation | ❌ Fail | |
+| COALESCE() without args | ❌ Fail | |
 
 **Verification:**
 ```bash
-dotnet test --filter "FullyQualifiedName~functions" tests/Mercury.Tests
+dotnet test --filter "FullyQualifiedName~Sparql11_QueryEval" tests/Mercury.Tests | grep -E "functions"
 ```
 
 ---
 
-### Phase 4: Property Path Parsing
+### Phase 4: Property Path Parsing — 39% (13/33)
 **Target:** ~10 tests (subset of 23)
 **Effort:** Medium-Large
 **Files:** `SparqlParser.cs`, `Operators.cs`
+
+**Current status (as of 2026-01-19):**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| pp01 Simple path | ✅ Pass | |
+| pp03 Simple path with loop | ✅ Pass | |
+| pp06 Path with two graphs | ✅ Pass | |
+| pp08 Reverse path | ✅ Pass | |
+| pp11, pp21, pp23, pp25 Diamond patterns | ✅ Pass | :p+ working |
+| pp31 Operator precedence 2 | ✅ Pass | |
+| pp37 Nested (*)* | ✅ Pass | |
+| ZeroOrX terms, * and ? with end constant | ✅ Pass | |
+| pp02 Star path (*) | ❌ Fail | Zero-or-more |
+| pp07, pp09, pp10, pp12, pp14, pp16 | ❌ Fail | Various path patterns |
+| pp28a (:p/:p)? | ❌ Fail | Grouped path with modifier |
+| pp30, pp32, pp33 Operator precedence | ❌ Fail | Precedence issues |
+| pp34, pp35 Named Graph paths | ❌ Fail | |
+| pp36 Arbitrary path with bound endpoints | ❌ Fail | |
+| Negated Property Sets (4 tests) | ❌ Fail | inverse, direct+inverse, 'a', '^a' |
+| * and ? with start constant on empty | ❌ Fail | |
 
 **Known parsing gaps:**
 1. Negated property sets with both direct and inverse: `!(ex:p | ^ex:q)`
 2. Complex nested alternatives: `(p1|p2)/(p3|p4)`
 3. Modifiers on grouped paths: `(p1/p2)+`
 
-**Approach:**
-1. Audit `ParsePathSegment()` and `ParsePredicateOrPath()`
-2. Add test cases for each syntax variant
-3. Fix parsing before execution
-
 **Verification:**
 ```bash
-dotnet test --filter "Name~pp" tests/Mercury.Tests
+dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 ```
 
 ---
 
-### Phase 5: Subquery Scope
+### Phase 5: Subquery Scope — 50% (7/14)
 **Target:** ~12 tests
 **Effort:** Medium
 **Files:** `QueryExecutor.cs`, `BoxedSubQueryExecutor.cs`
+
+**Current status (as of 2026-01-19):**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| sq01 Subquery within graph pattern | ✅ Pass | |
+| sq02 Graph variable bound | ✅ Pass | |
+| sq03 Graph variable not bound | ✅ Pass | |
+| sq04 Default graph does not apply | ✅ Pass | |
+| sq05, sq06 FROM NAMED applies | ✅ Pass | |
+| sq10 Subquery with EXISTS | ✅ Pass | |
+| Post-subquery VALUES | ❌ Fail | |
+| sq07 Subquery with FROM | ❌ Fail | |
+| sq08 Subquery with aggregate | ❌ Fail | Aggregate in subquery |
+| sq09 Nested Subqueries | ❌ Fail | |
+| sq11 Subquery limit per resource | ❌ Fail | |
+| sq13 Subqueries don't inject bindings | ❌ Fail | Binding scope |
+| sq14 Limit by resource | ❌ Fail | |
 
 **Issues:**
 1. Variable projection from subquery to outer query
@@ -128,27 +168,65 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 
 ---
 
-### Phase 6: Negation (NOT EXISTS, MINUS)
+### Phase 6: Negation (NOT EXISTS, MINUS) — 32% (7/22)
 **Target:** ~11 tests
 **Effort:** Medium
 **Files:** `Operators.cs` (MINUS operator)
+
+**Current status (as of 2026-01-19):**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| exists01 Exists with one constant | ✅ Pass | |
+| exists02 Exists with ground triple | ✅ Pass | |
+| exists04 Nested positive exists | ✅ Pass | |
+| exists05 Nested negative exists in positive | ✅ Pass | |
+| Positive EXISTS 2 | ✅ Pass | |
+| sq10 Subquery with exists | ✅ Pass | |
+| exists03 Exists within graph pattern | ❌ Fail | GRAPH context |
+| GRAPH variable inside EXISTS | ❌ Fail | External binding |
+| Subsets by exclusion (NOT EXISTS) | ❌ Fail | |
+| Subsets by exclusion (MINUS) | ❌ Fail | |
+| Medical temporal proximity (NOT EXISTS) | ❌ Fail | |
+| subset-01, subset-02, subset-03, set-equals-1 | ❌ Fail | Set operations |
+| Positive EXISTS 1 | ❌ Fail | |
+| MINUS from fully/partially bound minuend | ❌ Fail | |
+| GRAPH operator with MINUS disjointness | ❌ Fail | |
+| pp10 Path with negation | ❌ Fail | |
 
 **Issues:**
 1. MINUS with multiple patterns
 2. NOT EXISTS with OPTIONAL inside
 3. Blank node comparison semantics
+4. EXISTS within GRAPH patterns
 
 ---
 
-### Phase 7: VALUES Clause
+### Phase 7: VALUES Clause — 30% (3/10)
 **Target:** ~10 tests
 **Effort:** Small-Medium
 **Files:** `SparqlParser.cs`
+
+**Current status (as of 2026-01-19):**
+
+| Test | Status | Notes |
+|------|--------|-------|
+| values1 Post-query VALUES with subj-var, 1 row | ✅ Pass | Single variable works |
+| values2 Post-query VALUES with obj-var, 1 row | ✅ Pass | |
+| values6 Post-query VALUES with pred-var, 1 row | ✅ Pass | |
+| values3 Post-query VALUES with 2 obj-vars | ❌ Fail | Multi-variable |
+| values4 Post-query VALUES with UNDEF | ❌ Fail | UNDEF handling |
+| values5 Post-query VALUES 2 rows with UNDEF | ❌ Fail | |
+| values7 Post-query VALUES with OPTIONAL | ❌ Fail | |
+| values8 Post-query VALUES with subj/obj-vars | ❌ Fail | Multi-variable |
+| inline1 Inline VALUES graph pattern | ❌ Fail | Inline VALUES |
+| inline2 Post-subquery VALUES | ❌ Fail | VALUES in subquery |
 
 **Issues:**
 1. Multi-variable VALUES: `VALUES (?x ?y) { (:a :b) (:c :d) }`
 2. UNDEF handling in VALUES
 3. VALUES in subqueries
+4. Inline VALUES graph patterns
 
 ---
 
@@ -191,18 +269,23 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 
 ### Success Criteria per Phase
 
-| Phase | Tests Fixed | Cumulative Pass Rate | Status |
-|-------|-------------|---------------------|--------|
-| 1 | +22 | 96.5% | ✅ Done |
-| 2 | +5 | 96.5% | ✅ Done |
-| 3 | +35 | 97.5% | Pending |
-| 4 | +10 | 97.8% | Pending |
-| 5 | +12 | 98.1% | Pending |
-| 6 | +11 | 98.4% | Pending |
-| 7 | +10 | 98.7% | Pending |
-| 8 | +6 | 96.5% | ✅ Done |
+| Phase | Description | Current | Target | Status |
+|-------|-------------|---------|--------|--------|
+| 1 | Numeric Aggregates | ~95% | 100% | ✅ Done |
+| 2 | GROUP_CONCAT | 100% | 100% | ✅ Done |
+| 3 | SPARQL Functions | 22% (13/59) | ~70% | In Progress |
+| 4 | Property Paths | 39% (13/33) | ~70% | In Progress |
+| 5 | Subquery Scope | 50% (7/14) | ~90% | In Progress |
+| 6 | Negation (EXISTS/MINUS) | 32% (7/22) | ~80% | In Progress |
+| 7 | VALUES Clause | 30% (3/10) | ~90% | In Progress |
+| 8 | XSD Cast Functions | 100% | 100% | ✅ Done |
 
-**Current Progress:** Phases 1, 2, and 8 complete. 3643/3774 tests passing (96.5%).
+**Current Progress:** Phases 1, 2, and 8 complete. Phases 3-7 need work.
+
+**Recommended priority:**
+1. **Phase 5** (Subqueries) - 50% done, closest to completion
+2. **Phase 3** (Functions) - Highest test count, likely quick fixes for many
+3. **Phase 7** (VALUES) - Small scope, well-defined issues
 
 ### Commands for Each Phase
 
