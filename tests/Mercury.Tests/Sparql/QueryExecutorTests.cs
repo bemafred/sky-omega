@@ -14,8 +14,11 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 [Collection("QuadStore")]
 public partial class QueryExecutorTests : PooledStoreTestBase
 {
+    private readonly QuadStorePoolFixture _fixture;
+
     public QueryExecutorTests(QuadStorePoolFixture fixture) : base(fixture)
     {
+        _fixture = fixture;
         // Populate with test data
         Store.BeginBatch();
         Store.AddCurrentBatched("<http://example.org/Alice>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"");

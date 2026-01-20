@@ -185,57 +185,41 @@ public ref partial struct QueryResults
             // Evaluate non-aggregate SELECT expressions (e.g., (HOURS(?date) AS ?x))
             EvaluateSelectExpressions();
 
+            // Note: Don't clear binding table on rejection - the scan's TruncateTo handles resetting.
+            // Clearing here breaks the scan's internal binding count tracking.
             if (_hasFilters && !EvaluateFilters())
-            {
-                _bindingTable.Clear();
                 continue;
-            }
 
             // Apply EXISTS/NOT EXISTS filters
             if (_hasExists && !EvaluateExistsFilters())
-            {
-                _bindingTable.Clear();
                 continue;
-            }
 
             // Apply MINUS - exclude matching rows
             if (_hasMinus)
             {
                 if (MatchesMinusPattern())
-                {
-                    _bindingTable.Clear();
                     continue;
-                }
             }
 
             // Apply VALUES - check if bound value matches any VALUES value (inline VALUES in patterns)
             if (_hasValues)
             {
                 if (!MatchesValuesConstraint())
-                {
-                    _bindingTable.Clear();
                     continue;
-                }
             }
 
             // Apply post-query VALUES - check if bound value matches (VALUES after WHERE clause)
             if (_hasPostQueryValues)
             {
                 if (!MatchesPostQueryValuesConstraint())
-                {
-                    _bindingTable.Clear();
                     continue;
-                }
             }
 
             if (_distinct)
             {
                 var hash = ComputeBindingsHash();
                 if (!_seenHashes!.Add(hash))
-                {
-                    _bindingTable.Clear();
                     continue;
-                }
             }
 
             return true;

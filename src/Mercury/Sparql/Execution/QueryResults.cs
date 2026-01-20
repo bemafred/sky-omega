@@ -73,6 +73,9 @@ public ref partial struct QueryResults
 
     // Post-query VALUES support (VALUES clause after WHERE clause)
     private readonly bool _hasPostQueryValues;
+    // For join semantics: track iteration through VALUES rows for current base solution
+    private bool _pendingValuesJoin;
+    private int _valuesJoinRowIndex;
 
     // EXISTS/NOT EXISTS support
     private readonly bool _hasExists;
@@ -658,6 +661,33 @@ public ref partial struct QueryResults
 
         while (true)
         {
+            // If we have a pending base solution for VALUES join, iterate through VALUES rows
+            if (_pendingValuesJoin)
+            {
+                if (TryNextValuesJoinRow())
+                {
+                    // Apply DISTINCT - skip duplicate rows
+                    if (_distinct)
+                    {
+                        var hash = ComputeBindingsHash();
+                        if (!_seenHashes!.Add(hash))
+                            continue; // Duplicate, try next VALUES row
+                    }
+
+                    // Apply OFFSET - skip results until we've skipped enough
+                    if (_skipped < _offset)
+                    {
+                        _skipped++;
+                        continue;
+                    }
+
+                    _returned++;
+                    return true;
+                }
+                // No more matching VALUES rows for this base solution
+                _pendingValuesJoin = false;
+            }
+
             bool hasNext;
 
             if (_isSubQuery)
@@ -719,53 +749,45 @@ public ref partial struct QueryResults
             EvaluateSelectExpressions();
 
             // Apply filters
+            // Note: Don't clear binding table on rejection - the scan's TruncateTo handles resetting.
+            // Clearing here breaks the scan's internal binding count tracking.
             if (_hasFilters)
             {
                 if (!EvaluateFilters())
-                {
-                    _bindingTable.Clear();
                     continue; // Try next row
-                }
             }
 
             // Apply EXISTS/NOT EXISTS filters
             if (_hasExists)
             {
                 if (!EvaluateExistsFilters())
-                {
-                    _bindingTable.Clear();
                     continue; // EXISTS condition failed
-                }
             }
 
             // Apply MINUS - exclude matching rows
             if (_hasMinus)
             {
                 if (MatchesMinusPattern())
-                {
-                    _bindingTable.Clear();
                     continue; // Matches MINUS, skip this row
-                }
             }
 
             // Apply VALUES - check if bound value matches any VALUES value (inline VALUES in patterns)
             if (_hasValues)
             {
                 if (!MatchesValuesConstraint())
-                {
-                    _bindingTable.Clear();
                     continue; // Doesn't match VALUES, skip this row
-                }
             }
 
-            // Apply post-query VALUES - check if bound value matches (VALUES after WHERE clause)
+            // Apply post-query VALUES as a join (not a filter)
+            // For each base solution, we return one result per matching VALUES row
+            // This implements proper join semantics where a solution matching multiple
+            // VALUES rows appears multiple times in the output
             if (_hasPostQueryValues)
             {
-                if (!MatchesPostQueryValuesConstraint())
-                {
-                    _bindingTable.Clear();
-                    continue; // Doesn't match post-query VALUES, skip this row
-                }
+                // Start iterating through VALUES rows for this base solution
+                _pendingValuesJoin = true;
+                _valuesJoinRowIndex = 0;
+                continue; // Go back to start of loop to process VALUES rows
             }
 
             // Apply DISTINCT - skip duplicate rows
@@ -773,23 +795,106 @@ public ref partial struct QueryResults
             {
                 var hash = ComputeBindingsHash();
                 if (!_seenHashes!.Add(hash))
-                {
-                    _bindingTable.Clear();
                     continue; // Duplicate, try next row
-                }
             }
 
             // Apply OFFSET - skip results until we've skipped enough
             if (_skipped < _offset)
             {
                 _skipped++;
-                _bindingTable.Clear();
                 continue;
             }
 
             _returned++;
             return true;
         }
+    }
+
+    /// <summary>
+    /// Try to find the next matching VALUES row for the current base solution.
+    /// Returns true if a matching row was found, false if no more rows match.
+    /// In SPARQL semantics, VALUES is a join, not a filter:
+    /// - If a variable is bound and matches the VALUES value → match
+    /// - If a variable is unbound and VALUES value is not UNDEF → introduce binding and match
+    /// - If a variable is bound but doesn't match → no match
+    /// </summary>
+    private bool TryNextValuesJoinRow()
+    {
+        if (_buffer == null || !_buffer.HasPostQueryValues) return false;
+
+        var postValues = _buffer.PostQueryValues;
+        if (!postValues.HasValues) return false;
+
+        int varCount = postValues.VariableCount;
+        if (varCount == 0) return false;
+
+        int rowCount = postValues.RowCount;
+
+        // Continue from where we left off
+        while (_valuesJoinRowIndex < rowCount)
+        {
+            int row = _valuesJoinRowIndex++;
+
+            bool rowMatches = true;
+            // Track which variable indices need bindings introduced (unbound in solution, non-UNDEF in VALUES)
+            Span<int> unboundVarIndices = stackalloc int[varCount];
+            int unboundCount = 0;
+
+            for (int varIdx = 0; varIdx < varCount; varIdx++)
+            {
+                var (varStart, varLength) = postValues.GetVariable(varIdx);
+                var varName = _source.Slice(varStart, varLength);
+
+                var (valStart, valLength) = postValues.GetValueAt(row, varIdx);
+
+                // UNDEF matches anything (including unbound)
+                if (valLength == -1)
+                    continue;
+
+                // Find binding for this variable
+                var bindingIdx = _bindingTable.FindBinding(varName);
+                if (bindingIdx < 0)
+                {
+                    // Variable not bound - VALUES can introduce a binding (join semantics)
+                    // Record the index so we can add bindings later
+                    unboundVarIndices[unboundCount++] = varIdx;
+                    continue;
+                }
+
+                var valuesValue = _source.Slice(valStart, valLength);
+                var expandedValue = ExpandPrefixedName(valuesValue);
+                var boundValue = _bindingTable.GetString(bindingIdx);
+
+                // Handle string literal comparison
+                if (!CompareValuesMatch(boundValue, expandedValue))
+                {
+                    rowMatches = false;
+                    break;
+                }
+            }
+
+            if (rowMatches)
+            {
+                // Introduce bindings for unbound variables
+                for (int i = 0; i < unboundCount; i++)
+                {
+                    var varIdx = unboundVarIndices[i];
+                    var (varStart, varLength) = postValues.GetVariable(varIdx);
+                    var varName = _source.Slice(varStart, varLength);
+                    var (valStart, valLength) = postValues.GetValueAt(row, varIdx);
+                    var valuesValue = _source.Slice(valStart, valLength);
+                    var expandedValue = ExpandPrefixedName(valuesValue);
+
+                    // Use generic Bind - the value is already in the correct format
+                    // (URIs have angle brackets, literals have quotes)
+                    _bindingTable.Bind(varName, expandedValue);
+                }
+                return true;
+            }
+        }
+
+        // No more matching rows
+        return false;
     }
 
     /// <summary>

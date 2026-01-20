@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Created:** 2026-01-19
 **Updated:** 2026-01-20
-**Baseline:** 3787 tests total, 3666 passing (96.8%), 106 failing, 15 skipped
+**Baseline:** 3787 tests total, 3668 passing (96.8%), 104 failing, 15 skipped
 
 ## Context
 
@@ -213,31 +213,41 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 
 ---
 
-### Phase 7: VALUES Clause — 30% (3/10)
+### Phase 7: VALUES Clause — 50% (5/10)
 **Target:** ~10 tests
 **Effort:** Small-Medium
-**Files:** `SparqlParser.cs`
+**Files:** `SparqlParser.Clauses.cs`, `SparqlTypes.cs`, `QueryResults.Patterns.cs`
+**Updated:** 2026-01-20
 
-**Current status (as of 2026-01-19):**
+**Current status (as of 2026-01-20):**
 
 | Test | Status | Notes |
 |------|--------|-------|
 | values1 Post-query VALUES with subj-var, 1 row | ✅ Pass | Single variable works |
 | values2 Post-query VALUES with obj-var, 1 row | ✅ Pass | |
 | values6 Post-query VALUES with pred-var, 1 row | ✅ Pass | |
-| values3 Post-query VALUES with 2 obj-vars | ❌ Fail | Multi-variable |
-| values4 Post-query VALUES with UNDEF | ❌ Fail | UNDEF handling |
-| values5 Post-query VALUES 2 rows with UNDEF | ❌ Fail | |
-| values7 Post-query VALUES with OPTIONAL | ❌ Fail | |
-| values8 Post-query VALUES with subj/obj-vars | ❌ Fail | Multi-variable |
+| values4 Post-query VALUES with UNDEF | ✅ Pass | UNDEF handling now works |
+| values8 Post-query VALUES with subj/obj-vars | ✅ Pass | Multi-variable now works |
+| values3 Post-query VALUES with 2 obj-vars | ❌ Fail | String literal comparison issue |
+| values5 Post-query VALUES 2 rows with UNDEF | ❌ Fail | Multi-row issue |
+| values7 Post-query VALUES with OPTIONAL | ❌ Fail | OPTIONAL interaction |
 | inline1 Inline VALUES graph pattern | ❌ Fail | Inline VALUES |
 | inline2 Post-subquery VALUES | ❌ Fail | VALUES in subquery |
 
-**Issues:**
-1. Multi-variable VALUES: `VALUES (?x ?y) { (:a :b) (:c :d) }`
-2. UNDEF handling in VALUES
+**Fixed (2026-01-20):**
+- Updated `ValuesClause` to support up to 4 variables and 16 values
+- Added `AddVariable()` method and row/column access with `GetValueAt()`
+- UNDEF values stored with length = -1
+- Updated all VALUES parsing methods to use `AddVariable()`
+- Updated `MatchesPostQueryValuesConstraint` for multi-variable row matching
+
+**Commits:**
+- `de3fc89` Add multi-variable VALUES support and UNDEF handling
+
+**Remaining Issues:**
+1. String literal comparison (quoted vs unquoted)
+2. Inline VALUES inside WHERE clause
 3. VALUES in subqueries
-4. Inline VALUES graph patterns
 
 ---
 
@@ -288,7 +298,7 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 | 4 | Property Paths | 39% (13/33) | ~70% | In Progress |
 | 5 | Subquery Scope | 79% (11/14) | ~90% | In Progress |
 | 6 | Negation (EXISTS/MINUS) | 32% (7/22) | ~80% | In Progress |
-| 7 | VALUES Clause | 30% (3/10) | ~90% | In Progress |
+| 7 | VALUES Clause | 50% (5/10) | ~90% | In Progress |
 | 8 | XSD Cast Functions | 100% | 100% | ✅ Done |
 
 **Current Progress:** Phases 1, 2, 3, and 8 complete or exceeded target. Phase 5 at 79%. Phases 4, 6, 7 need work.

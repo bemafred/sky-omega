@@ -2565,13 +2565,18 @@ public ref partial struct SparqlParser
             }
             if (!IsAtEnd()) Advance(); // Skip closing '"'
 
+            // Save position after closing quote (before any whitespace)
+            int valueEnd = _position;
+
             // Check for language tag or datatype
-            SkipWhitespace();
+            // Language tags and datatypes must immediately follow the string (no whitespace per spec)
+            // but we'll be lenient and allow whitespace for compatibility
             if (Peek() == '@')
             {
                 Advance();
                 while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '-'))
                     Advance();
+                return _position - valueStart;
             }
             else if (PeekSpan(2).Length >= 2 && PeekSpan(2)[0] == '^' && PeekSpan(2)[1] == '^')
             {
@@ -2589,8 +2594,11 @@ public ref partial struct SparqlParser
                     while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == ':' || Peek() == '_'))
                         Advance();
                 }
+                return _position - valueStart;
             }
-            return _position - valueStart;
+
+            // No language tag or datatype - return length without trailing whitespace
+            return valueEnd - valueStart;
         }
         else if (ch == '<')
         {

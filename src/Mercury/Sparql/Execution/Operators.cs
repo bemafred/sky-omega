@@ -1165,6 +1165,10 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            // If bindings from previous level are missing, backtrack to repopulate
+            if (bindings.Count < _bindingCount1)
+                return false;
             // Rolling back bindings from previous attempt at this level
             bindings.TruncateTo(_bindingCount1);
         }
@@ -1184,6 +1188,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount2)
+                return false;
             // Rolling back bindings from previous attempt at this level
             bindings.TruncateTo(_bindingCount2);
         }
@@ -1203,6 +1210,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount3)
+                return false;
             // Rolling back bindings from previous attempt at this level
             bindings.TruncateTo(_bindingCount3);
         }
@@ -1222,6 +1232,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount4)
+                return false;
             bindings.TruncateTo(_bindingCount4);
         }
 
@@ -1240,6 +1253,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount5)
+                return false;
             bindings.TruncateTo(_bindingCount5);
         }
 
@@ -1258,6 +1274,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount6)
+                return false;
             bindings.TruncateTo(_bindingCount6);
         }
 
@@ -1276,6 +1295,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount7)
+                return false;
             bindings.TruncateTo(_bindingCount7);
         }
 
@@ -1294,6 +1316,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount8)
+                return false;
             bindings.TruncateTo(_bindingCount8);
         }
 
@@ -1312,6 +1337,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount9)
+                return false;
             bindings.TruncateTo(_bindingCount9);
         }
 
@@ -1330,6 +1358,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount10)
+                return false;
             bindings.TruncateTo(_bindingCount10);
         }
 
@@ -1348,6 +1379,9 @@ internal ref struct MultiPatternScan
         }
         else
         {
+            // Check if binding table was externally cleared (e.g., by VALUES filtering)
+            if (bindings.Count < _bindingCount11)
+                return false;
             bindings.TruncateTo(_bindingCount11);
         }
 
