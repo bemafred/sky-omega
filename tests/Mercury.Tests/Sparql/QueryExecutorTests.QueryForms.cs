@@ -1101,4 +1101,75 @@ SELECT ?s ?o1 ?o2
     }
 
     // ========== GROUP BY Tests ==========
+
+    // ========== Inline VALUES with Prefixed Names Test ==========
+    [Fact]
+    public void Execute_InlineValuesWithPrefixedName()
+    {
+        // Test similar to W3C inline01 - inline VALUES with prefixed names
+        // Data setup: add some books to test with
+        Store.AddCurrent(
+            "<http://example.org/book/book1>",
+            "<http://purl.org/dc/elements/1.1/title>",
+            "\"SPARQL Tutorial\"");
+        Store.AddCurrent(
+            "<http://example.org/book/book1>",
+            "<http://example.org/ns#price>",
+            "\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent(
+            "<http://example.org/book/book2>",
+            "<http://purl.org/dc/elements/1.1/title>",
+            "\"The Semantic Web\"");
+        Store.AddCurrent(
+            "<http://example.org/book/book2>",
+            "<http://example.org/ns#price>",
+            "\"23\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+
+        var query = @"
+PREFIX dc:   <http://purl.org/dc/elements/1.1/>
+PREFIX :     <http://example.org/book/>
+PREFIX ns:   <http://example.org/ns#>
+
+SELECT ?book ?title ?price
+{
+   VALUES ?book { :book1 }
+   ?book dc:title ?title ;
+         ns:price ?price .
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var books = new List<(string book, string title, string price)>();
+            while (results.MoveNext())
+            {
+                var current = results.Current;
+                var bookIdx = current.FindBinding("?book".AsSpan());
+                var titleIdx = current.FindBinding("?title".AsSpan());
+                var priceIdx = current.FindBinding("?price".AsSpan());
+
+                // Debug output
+                var bookVal = bookIdx >= 0 ? current.GetString(bookIdx).ToString() : "<unbound>";
+                var titleVal = titleIdx >= 0 ? current.GetString(titleIdx).ToString() : "<unbound>";
+                var priceVal = priceIdx >= 0 ? current.GetString(priceIdx).ToString() : "<unbound>";
+
+                books.Add((bookVal, titleVal, priceVal));
+            }
+            results.Dispose();
+
+            // Should only have book1, not book2
+            Assert.Single(books);
+            Assert.Contains("<http://example.org/book/book1>", books[0].book);
+            Assert.Contains("SPARQL Tutorial", books[0].title);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
 }

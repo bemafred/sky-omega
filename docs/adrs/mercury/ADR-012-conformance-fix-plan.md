@@ -188,28 +188,26 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 
 ---
 
-### Phase 7: VALUES Clause — 2 tests failing
+### Phase 7: VALUES Clause ✅ COMPLETED
 **Target:** Reduce VALUES failures to 0
 **Effort:** Small
-**Files:** `SparqlParser.Clauses.cs`, `SparqlTypes.cs`, `QueryResults.Patterns.cs`
-**Updated:** 2026-01-20
+**Files:** `SparqlParser.Clauses.cs`, `SparqlTypes.cs`, `QueryResults.Patterns.cs`, `Operators.cs`
+**Completed:** 2026-01-20
 
-**Failing VALUES tests (2 total):**
+**Previously failing VALUES tests (2 total):**
 
 | Test | Issue |
 |------|-------|
 | Inline VALUES graph pattern | VALUES inside WHERE clause not joined correctly |
 | Post-subquery VALUES | VALUES after subquery not applied |
 
-**Previously fixed:**
-- Multi-variable VALUES support (up to 4 variables, 16 values)
-- UNDEF value handling (stored with length = -1)
-- Row/column access via `GetValueAt()`
-- Post-query VALUES constraint matching
+**Fix:**
+1. Inline VALUES: Added prefix expansion in `MatchesValuesConstraint()` in `QueryResults.Patterns.cs` to expand prefixed names before comparison
+2. Post-subquery VALUES: Added `MatchesValuesConstraint()` to `BoxedSubQueryExecutor` in `Operators.cs` to filter subquery results against VALUES clause
 
-**Root causes:**
-1. Inline VALUES needs to be treated as a join rather than a filter
-2. Post-subquery VALUES needs to be applied after subquery projection
+**Result:** Both VALUES tests now pass:
+- Inline VALUES graph pattern: ✅
+- Post-subquery VALUES: ✅
 
 ---
 
@@ -260,16 +258,15 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | 4 | Property Paths | 18 | ~5 | In Progress |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 8 | ~2 | In Progress |
-| 7 | VALUES Clause | 2 | 0 | In Progress |
+| 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 97 failing tests total (118 passing, 9 skipped out of 224)
+**Current Progress:** 95 failing tests total (120 passing, 9 skipped out of 224)
 
 **Recommended priority:**
-1. **Phase 7** (VALUES) - Only 2 tests, well-defined issues
-2. **Phase 6** (Negation) - 8 tests, GRAPH context issue is key
-3. **Phase 4** (Property Paths) - 18 tests, complex parser work
-4. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
+1. **Phase 6** (Negation) - 8 tests, GRAPH context issue is key
+2. **Phase 4** (Property Paths) - 18 tests, complex parser work
+3. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
 
 ### Commands for Each Phase
 
@@ -289,26 +286,20 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 
 ## Next Steps
 
-**Priority 1: VALUES Clause (2 tests)**
-```bash
-dotnet test --filter "Name~inline" tests/Mercury.Tests
-```
-Fix inline VALUES to work as a join pattern rather than a filter.
-
-**Priority 2: Negation/EXISTS (8 tests)**
+**Priority 1: Negation/EXISTS (8 tests)**
 ```bash
 dotnet test --filter "Name~exists" tests/Mercury.Tests
 dotnet test --filter "Name~MINUS" tests/Mercury.Tests
 ```
 Key issue: GRAPH context propagation into EXISTS evaluation.
 
-**Priority 3: Property Paths (18 tests)**
+**Priority 2: Property Paths (18 tests)**
 ```bash
 dotnet test --filter "Name~pp" tests/Mercury.Tests
 ```
 Focus on zero-or-more/zero-or-one reflexive bindings on empty data.
 
-**Priority 4: Functions (46 tests)**
+**Priority 3: Functions (46 tests)**
 Most failures are Unicode edge cases (non-BMP characters). Lower priority as core functionality works.
 
 ## Out of Scope

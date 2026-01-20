@@ -678,7 +678,9 @@ public ref partial struct QueryResults
                 if (entrySlot.Kind != PatternKind.ValuesEntry) continue;
 
                 var valuesValue = _source.Slice(entrySlot.ValuesEntryStart, entrySlot.ValuesEntryLength);
-                if (boundValue.SequenceEqual(valuesValue))
+                // Expand prefixed names to full URIs for comparison
+                var expandedValue = ExpandPrefixedName(valuesValue);
+                if (CompareValuesMatch(boundValue, expandedValue))
                     return true;
             }
 

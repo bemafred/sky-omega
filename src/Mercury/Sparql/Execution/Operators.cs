@@ -3010,6 +3010,13 @@ internal sealed class BoxedSubQueryExecutor
             }
         }
 
+        // Apply VALUES constraint if present
+        if (_subSelect.Values.HasValues)
+        {
+            if (!MatchesValuesConstraint(ref innerBindings, source))
+                return false;
+        }
+
         // Apply OFFSET
         if (skipped < _subSelect.Offset)
         {
@@ -3090,6 +3097,107 @@ internal sealed class BoxedSubQueryExecutor
         }
 
         return new MaterializedRow(projectedTable);
+    }
+
+    /// <summary>
+    /// Check if current bindings match the VALUES constraint.
+    /// Returns true if bindings match at least one row in the VALUES clause.
+    /// </summary>
+    private bool MatchesValuesConstraint(ref BindingTable bindings, ReadOnlySpan<char> source)
+    {
+        var values = _subSelect.Values;
+        int rowCount = values.RowCount;
+        int varCount = values.VariableCount;
+
+        // For each row in VALUES, check if ALL values in that row match
+        for (int row = 0; row < rowCount; row++)
+        {
+            bool rowMatches = true;
+
+            for (int varIdx = 0; varIdx < varCount; varIdx++)
+            {
+                var (valStart, valLen) = values.GetValueAt(row, varIdx);
+
+                // UNDEF matches anything
+                if (valLen == -1)
+                    continue;
+
+                // Get variable name
+                var (varStart, varLength) = values.GetVariable(varIdx);
+                var varName = source.Slice(varStart, varLength);
+
+                // Find binding for this variable
+                var bindingIdx = bindings.FindBinding(varName);
+                if (bindingIdx < 0)
+                {
+                    // Variable not bound - doesn't match this row
+                    rowMatches = false;
+                    break;
+                }
+
+                var boundValue = bindings.GetString(bindingIdx);
+                var valuesEntry = source.Slice(valStart, valLen);
+
+                // Compare with prefix expansion
+                if (!CompareValuesMatchWithPrefixExpansion(boundValue, valuesEntry))
+                {
+                    rowMatches = false;
+                    break;
+                }
+            }
+
+            if (rowMatches)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Compare a bound value with a VALUES entry for equality, expanding prefixed names if needed.
+    /// </summary>
+    private bool CompareValuesMatchWithPrefixExpansion(ReadOnlySpan<char> boundValue, ReadOnlySpan<char> valuesEntry)
+    {
+        // Direct comparison first
+        if (boundValue.SequenceEqual(valuesEntry))
+            return true;
+
+        // If VALUES entry is already a full IRI
+        if (valuesEntry.Length > 0 && valuesEntry[0] == '<')
+        {
+            return boundValue.SequenceEqual(valuesEntry);
+        }
+
+        // Check for prefixed name that needs expansion
+        var colonIdx = valuesEntry.IndexOf(':');
+        if (colonIdx >= 0 && _prefixes != null)
+        {
+            var prefix = valuesEntry.Slice(0, colonIdx + 1); // Include the colon
+            var localName = valuesEntry.Slice(colonIdx + 1);
+
+            foreach (var mapping in _prefixes)
+            {
+                var mappedPrefix = _source.AsSpan(mapping.PrefixStart, mapping.PrefixLength);
+                if (prefix.SequenceEqual(mappedPrefix))
+                {
+                    // Found matching prefix - expand and compare
+                    var iriNs = _source.AsSpan(mapping.IriStart, mapping.IriLength);
+                    // IRI namespace is like <http://example.org/> - remove trailing > and append local name
+                    var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+                    var expanded = string.Concat(nsWithoutClose, localName, ">");
+                    return boundValue.SequenceEqual(expanded.AsSpan());
+                }
+            }
+        }
+
+        // Handle literal comparison
+        if (valuesEntry.Length > 0 && valuesEntry[0] == '"' &&
+            boundValue.Length > 0 && boundValue[0] == '"')
+        {
+            return boundValue.SequenceEqual(valuesEntry);
+        }
+
+        return false;
     }
 }
 
