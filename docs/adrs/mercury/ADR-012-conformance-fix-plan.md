@@ -3,7 +3,7 @@
 **Status:** In Progress
 **Created:** 2026-01-19
 **Updated:** 2026-01-20
-**Baseline:** 3784 tests total, 3654 passing (96.6%), 115 failing, 15 skipped
+**Baseline:** 3785 tests total, 3656 passing (96.6%), 114 failing, 15 skipped
 
 ## Context
 
@@ -133,10 +133,10 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 
 ---
 
-### Phase 5: Subquery Scope — 64% (9/14)
+### Phase 5: Subquery Scope — 71% (10/14)
 **Target:** ~12 tests
 **Effort:** Medium
-**Files:** `QueryExecutor.cs`, `BoxedSubQueryExecutor.cs`, `Operators.cs`
+**Files:** `QueryExecutor.cs`, `BoxedSubQueryExecutor.cs`, `Operators.cs`, `SparqlParser.Clauses.cs`
 
 **Current status (as of 2026-01-20):**
 
@@ -149,9 +149,9 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 | sq05, sq06 FROM NAMED applies | ✅ Pass | |
 | sq08 Subquery with aggregate | ✅ Pass | Fixed 2026-01-20 |
 | sq09 Nested Subqueries | ✅ Pass | Fixed 2026-01-20 |
+| sq10 Subquery with EXISTS | ✅ Pass | Fixed 2026-01-20 |
 | Post-subquery VALUES | ❌ Fail | |
 | sq07 Subquery with FROM | ❌ Fail | |
-| sq10 Subquery with EXISTS | ❌ Fail | Data loading issue |
 | sq11 Subquery limit per resource | ❌ Fail | Blank node property list syntax |
 | sq13 Subqueries don't inject bindings | ❌ Fail | Blank node property list syntax |
 | sq14 Limit by resource | ❌ Fail | Blank node property list syntax |
@@ -159,15 +159,17 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 **Fixed (2026-01-20):**
 - sq08: Subquery with aggregate now works correctly
 - sq09: Nested subqueries (subquery within subquery) now execute correctly
+- sq10: Subquery with EXISTS filter now evaluates correctly
 - `a` keyword: Now properly expands to `<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>`
+- `FILTER(EXISTS {...})` syntax: Now correctly parsed into ExistsFilter
 
 **Commits:**
 - `4bb127f` Fix nested subqueries and 'a' keyword expansion in SPARQL executor
+- `af0de6a` Fix EXISTS filter parsing and evaluation in subquery context
 
 **Remaining Issues:**
 1. sq11, sq13, sq14 use blank node property list syntax (`[ predicate object ]`) which requires expansion
 2. sq07 has FROM clause in subquery (dataset scope)
-3. sq10 appears to have data loading issues with RDF/XML format
 
 ---
 
@@ -278,15 +280,15 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 | 2 | GROUP_CONCAT | 100% | 100% | ✅ Done |
 | 3 | SPARQL Functions | 22% (13/59) | ~70% | In Progress |
 | 4 | Property Paths | 39% (13/33) | ~70% | In Progress |
-| 5 | Subquery Scope | 64% (9/14) | ~90% | In Progress |
+| 5 | Subquery Scope | 71% (10/14) | ~90% | In Progress |
 | 6 | Negation (EXISTS/MINUS) | 32% (7/22) | ~80% | In Progress |
 | 7 | VALUES Clause | 30% (3/10) | ~90% | In Progress |
 | 8 | XSD Cast Functions | 100% | 100% | ✅ Done |
 
-**Current Progress:** Phases 1, 2, and 8 complete. Phase 5 at 64%. Phases 3, 4, 6, 7 need work.
+**Current Progress:** Phases 1, 2, and 8 complete. Phase 5 at 71%. Phases 3, 4, 6, 7 need work.
 
 **Recommended priority:**
-1. **Phase 5** (Subqueries) - 50% done, closest to completion
+1. **Phase 5** (Subqueries) - 71% done, closest to completion
 2. **Phase 3** (Functions) - Highest test count, likely quick fixes for many
 3. **Phase 7** (VALUES) - Small scope, well-defined issues
 
