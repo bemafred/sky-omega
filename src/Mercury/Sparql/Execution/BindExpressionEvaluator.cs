@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using SkyOmega.Mercury.Sparql;
 
@@ -364,6 +365,18 @@ internal ref struct BindExpressionEvaluator
                 return ParseReplaceFunction();
             }
 
+            // CONCAT(string1, string2, ...) - string concatenation
+            if (name.Equals("CONCAT", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseConcatFunction();
+            }
+
+            // SUBSTR(string, start [, length]) - substring extraction
+            if (name.Equals("SUBSTR", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseSubstrFunction();
+            }
+
             var arg = ParseAdditive();
             SkipWhitespace();
 
@@ -394,13 +407,140 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            // UCASE function
-            if (name.Equals("UCASE", StringComparison.OrdinalIgnoreCase))
-                return arg; // Would need buffer for actual uppercase
+            // ABS - absolute value
+            if (name.Equals("ABS", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.Integer)
+                    return new Value { Type = ValueType.Integer, IntegerValue = Math.Abs(arg.IntegerValue) };
+                if (arg.Type == ValueType.Double)
+                    return new Value { Type = ValueType.Double, DoubleValue = Math.Abs(arg.DoubleValue) };
+                return new Value { Type = ValueType.Unbound };
+            }
 
-            // LCASE function
+            // CEIL - round up to nearest integer, preserving datatype
+            if (name.Equals("CEIL", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.Integer)
+                    return arg; // Already an integer
+                if (arg.Type == ValueType.Double)
+                    return new Value { Type = ValueType.Double, DoubleValue = Math.Ceiling(arg.DoubleValue) };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // FLOOR - round down to nearest integer, preserving datatype
+            if (name.Equals("FLOOR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.Integer)
+                    return arg; // Already an integer
+                if (arg.Type == ValueType.Double)
+                    return new Value { Type = ValueType.Double, DoubleValue = Math.Floor(arg.DoubleValue) };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // ROUND - round to nearest integer, preserving datatype
+            // SPARQL uses round-half-to-even (banker's rounding) for .5 cases
+            if (name.Equals("ROUND", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.Integer)
+                    return arg; // Already an integer
+                if (arg.Type == ValueType.Double)
+                    return new Value { Type = ValueType.Double, DoubleValue = Math.Round(arg.DoubleValue, MidpointRounding.AwayFromZero) };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // UCASE function - convert to uppercase
+            if (name.Equals("UCASE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String)
+                {
+                    var upper = arg.StringValue.ToString().ToUpperInvariant();
+                    return new Value { Type = ValueType.String, StringValue = upper.AsSpan() };
+                }
+                return arg;
+            }
+
+            // LCASE function - convert to lowercase
             if (name.Equals("LCASE", StringComparison.OrdinalIgnoreCase))
-                return arg; // Would need buffer for actual lowercase
+            {
+                if (arg.Type == ValueType.String)
+                {
+                    var lower = arg.StringValue.ToString().ToLowerInvariant();
+                    return new Value { Type = ValueType.String, StringValue = lower.AsSpan() };
+                }
+                return arg;
+            }
+
+            // ENCODE_FOR_URI - percent-encode string for use in URI
+            if (name.Equals("ENCODE_FOR_URI", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                {
+                    var encoded = Uri.EscapeDataString(arg.StringValue.ToString());
+                    return new Value { Type = ValueType.String, StringValue = encoded.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // Hash functions - compute hash of string
+            if (name.Equals("MD5", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var hash = System.Security.Cryptography.MD5.HashData(bytes);
+                    var result = Convert.ToHexString(hash).ToLowerInvariant();
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            if (name.Equals("SHA1", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var hash = System.Security.Cryptography.SHA1.HashData(bytes);
+                    var result = Convert.ToHexString(hash).ToLowerInvariant();
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            if (name.Equals("SHA256", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+                    var result = Convert.ToHexString(hash).ToLowerInvariant();
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            if (name.Equals("SHA384", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var hash = System.Security.Cryptography.SHA384.HashData(bytes);
+                    var result = Convert.ToHexString(hash).ToLowerInvariant();
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            if (name.Equals("SHA512", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var hash = System.Security.Cryptography.SHA512.HashData(bytes);
+                    var result = Convert.ToHexString(hash).ToLowerInvariant();
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
 
             // DateTime extraction functions - extract components directly from lexical value per SPARQL spec
             // YEAR - extract year from xsd:dateTime
@@ -842,6 +982,141 @@ internal ref struct BindExpressionEvaluator
         if (Peek() == ')') Advance();
 
         return result;
+    }
+
+    /// <summary>
+    /// Parse CONCAT(string1, string2, ...) - concatenates all string arguments
+    /// Per SPARQL spec: if any argument is unbound, result is unbound
+    /// </summary>
+    private Value ParseConcatFunction()
+    {
+        // Collect all argument string values
+        var parts = new List<string>();
+
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            var value = ParseAdditive();
+
+            if (value.Type == ValueType.Unbound)
+            {
+                // Per SPARQL spec, unbound argument results in unbound
+                // Skip to closing paren
+                while (!IsAtEnd() && Peek() != ')')
+                    Advance();
+                if (Peek() == ')') Advance();
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // Convert value to string
+            if (value.Type == ValueType.String)
+            {
+                parts.Add(value.StringValue.ToString());
+            }
+            else if (value.Type == ValueType.Integer)
+            {
+                parts.Add(value.IntegerValue.ToString(CultureInfo.InvariantCulture));
+            }
+            else if (value.Type == ValueType.Double)
+            {
+                parts.Add(value.DoubleValue.ToString(CultureInfo.InvariantCulture));
+            }
+            else if (value.Type == ValueType.Boolean)
+            {
+                parts.Add(value.BooleanValue ? "true" : "false");
+            }
+            else if (value.Type == ValueType.Uri)
+            {
+                parts.Add(value.StringValue.ToString());
+            }
+
+            SkipWhitespace();
+            if (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+        }
+
+        if (Peek() == ')') Advance();
+
+        // Concatenate all parts
+        var result = string.Concat(parts);
+        return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+    }
+
+    /// <summary>
+    /// Parse SUBSTR(string, start [, length]) - returns substring
+    /// Note: SPARQL uses 1-based indexing
+    /// </summary>
+    private Value ParseSubstrFunction()
+    {
+        var stringArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            // Skip to closing paren
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var startArg = ParseAdditive();
+        SkipWhitespace();
+
+        // Optional length argument
+        Value lengthArg = new Value { Type = ValueType.Unbound };
+        if (Peek() == ',')
+        {
+            Advance();
+            SkipWhitespace();
+            lengthArg = ParseAdditive();
+            SkipWhitespace();
+        }
+
+        if (Peek() == ')') Advance();
+
+        if (stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri)
+            return new Value { Type = ValueType.Unbound };
+
+        if (startArg.Type != ValueType.Integer && startArg.Type != ValueType.Double)
+            return new Value { Type = ValueType.Unbound };
+
+        var str = stringArg.StringValue;
+        var startVal = startArg.Type == ValueType.Integer ? startArg.IntegerValue : (long)startArg.DoubleValue;
+        var start = (int)startVal - 1; // SPARQL is 1-based
+
+        if (start < 0) start = 0;
+        if (start >= str.Length)
+            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+
+        int length;
+        if (lengthArg.Type == ValueType.Integer)
+        {
+            length = (int)lengthArg.IntegerValue;
+            if (length < 0) length = 0;
+            if (start + length > str.Length)
+                length = str.Length - start;
+        }
+        else if (lengthArg.Type == ValueType.Double)
+        {
+            length = (int)lengthArg.DoubleValue;
+            if (length < 0) length = 0;
+            if (start + length > str.Length)
+                length = str.Length - start;
+        }
+        else
+        {
+            length = str.Length - start;
+        }
+
+        // Return as new allocated string since we need to slice
+        var result = str.Slice(start, length).ToString();
+        return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
     }
 
     /// <summary>
