@@ -654,7 +654,7 @@ public ref partial struct QueryResults
 
     /// <summary>
     /// Check if the current bindings match the post-query VALUES constraint.
-    /// The VALUES variable must be bound to one of the VALUES values.
+    /// For multi-variable VALUES, all variables in a row must match (UNDEF matches anything).
     /// Post-query VALUES appears after the WHERE clause (not inline in patterns).
     /// </summary>
     private bool MatchesPostQueryValuesConstraint()
@@ -664,33 +664,100 @@ public ref partial struct QueryResults
         var postValues = _buffer.PostQueryValues;
         if (!postValues.HasValues) return true;
 
-        // Get the variable name from post-query VALUES
-        var varName = _source.Slice(postValues.VarStart, postValues.VarLength);
+        int varCount = postValues.VariableCount;
+        if (varCount == 0) return true;
 
-        // Find the binding for this variable
-        var bindingIdx = _bindingTable.FindBinding(varName);
-        if (bindingIdx < 0)
+        int rowCount = postValues.RowCount;
+        if (rowCount == 0) return true;
+
+        // For each row, check if ALL variables match their bound values
+        // A row matches if every variable either:
+        // 1. Has UNDEF (matches any bound value or unbound)
+        // 2. Has a value that matches the bound value
+        for (int row = 0; row < rowCount; row++)
         {
-            // Variable not bound - allow (VALUES would bind it in a more complete impl)
-            return true;
-        }
+            bool rowMatches = true;
 
-        // Get the bound value
-        var boundValue = _bindingTable.GetString(bindingIdx);
+            for (int varIdx = 0; varIdx < varCount; varIdx++)
+            {
+                var (varStart, varLength) = postValues.GetVariable(varIdx);
+                var varName = _source.Slice(varStart, varLength);
 
-        // Check if it matches any VALUES entry
-        for (int i = 0; i < postValues.ValueCount; i++)
-        {
-            var (start, length) = postValues.GetValue(i);
-            var valuesValue = _source.Slice(start, length);
+                var (valStart, valLength) = postValues.GetValueAt(row, varIdx);
 
-            // Expand prefixed names to full IRIs for comparison
-            var expandedValue = ExpandPrefixedName(valuesValue);
-            if (boundValue.SequenceEqual(expandedValue))
+                // UNDEF matches anything (including unbound)
+                if (valLength == -1)
+                    continue;
+
+                // Find binding for this variable
+                var bindingIdx = _bindingTable.FindBinding(varName);
+                if (bindingIdx < 0)
+                {
+                    // Variable not bound - doesn't match this non-UNDEF value
+                    rowMatches = false;
+                    break;
+                }
+
+                var boundValue = _bindingTable.GetString(bindingIdx);
+                var valuesValue = _source.Slice(valStart, valLength);
+
+                // Expand prefixed names to full IRIs for comparison
+                var expandedValue = ExpandPrefixedName(valuesValue);
+
+                // Handle string literal comparison (values03 uses quoted strings)
+                if (!CompareValuesMatch(boundValue, expandedValue))
+                {
+                    rowMatches = false;
+                    break;
+                }
+            }
+
+            if (rowMatches)
                 return true;
         }
 
-        // Bound value doesn't match any VALUES value
+        // No row matched
+        return false;
+    }
+
+    /// <summary>
+    /// Compare a bound value with a VALUES value, handling quoted strings.
+    /// </summary>
+    private static bool CompareValuesMatch(ReadOnlySpan<char> boundValue, ReadOnlySpan<char> valuesValue)
+    {
+        // Direct match
+        if (boundValue.SequenceEqual(valuesValue))
+            return true;
+
+        // Handle quoted string literals - strip quotes for comparison
+        if (valuesValue.Length >= 2 && valuesValue[0] == '"')
+        {
+            // Find end of string value (before language tag or datatype)
+            int endQuote = valuesValue.LastIndexOf('"');
+            if (endQuote > 0)
+            {
+                var unquotedValue = valuesValue.Slice(1, endQuote - 1);
+
+                // Also strip quotes from bound value if present
+                if (boundValue.Length >= 2 && boundValue[0] == '"')
+                {
+                    int boundEndQuote = boundValue.LastIndexOf('"');
+                    if (boundEndQuote > 0)
+                    {
+                        var unquotedBound = boundValue.Slice(1, boundEndQuote - 1);
+                        if (unquotedBound.SequenceEqual(unquotedValue))
+                            return true;
+                    }
+                }
+                else
+                {
+                    // Bound value might be unquoted already
+                    if (boundValue.SequenceEqual(unquotedValue))
+                        return true;
+                }
+            }
+        }
+
         return false;
     }
 

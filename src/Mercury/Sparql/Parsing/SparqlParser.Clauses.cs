@@ -46,6 +46,7 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Parse trailing VALUES clause for a query.
     /// VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
+    /// UNDEF values are stored with length = -1.
     /// </summary>
     private ValuesClause ParseQueryValues()
     {
@@ -53,7 +54,6 @@ public ref partial struct SparqlParser
         SkipWhitespace();
 
         var values = new ValuesClause();
-        int varCount = 0;
 
         // Check for multi-variable form: (?var1 ?var2 ...)
         if (Peek() == '(')
@@ -61,20 +61,14 @@ public ref partial struct SparqlParser
             Advance(); // Skip '('
             SkipWhitespace();
 
+            // Parse all variables
             while (!IsAtEnd() && Peek() == '?')
             {
-                if (varCount == 0)
-                {
-                    values.VarStart = _position;
-                }
+                int varStart = _position;
                 Advance(); // Skip '?'
                 while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                     Advance();
-                if (varCount == 0)
-                {
-                    values.VarLength = _position - values.VarStart;
-                }
-                varCount++;
+                values.AddVariable(varStart, _position - varStart);
                 SkipWhitespace();
             }
 
@@ -84,18 +78,19 @@ public ref partial struct SparqlParser
         }
         else if (Peek() == '?')
         {
-            values.VarStart = _position;
+            int varStart = _position;
             Advance(); // Skip '?'
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                 Advance();
-            values.VarLength = _position - values.VarStart;
-            varCount = 1;
+            values.AddVariable(varStart, _position - varStart);
             SkipWhitespace();
         }
         else
         {
             return values;
         }
+
+        int varCount = values.VariableCount;
 
         // Expect '{'
         if (Peek() != '{')
@@ -114,19 +109,41 @@ public ref partial struct SparqlParser
                 Advance(); // Skip '('
                 SkipWhitespace();
 
+                int rowValueCount = 0;
                 while (!IsAtEnd() && Peek() != ')')
                 {
-                    int valueStart = _position;
-                    int valueLen = ParseValuesValue();
-                    if (valueLen > 0)
+                    // Check for UNDEF first
+                    var span = PeekSpan(5);
+                    if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
                     {
-                        values.AddValue(valueStart, valueLen);
+                        ConsumeKeyword("UNDEF");
+                        values.AddValue(0, -1); // Mark as UNDEF with length = -1
+                        rowValueCount++;
                     }
-                    else if (Peek() == ')')
+                    else
                     {
-                        break;
+                        int valueStart = _position;
+                        int valueLen = ParseValuesValue();
+                        if (valueLen > 0)
+                        {
+                            values.AddValue(valueStart, valueLen);
+                            rowValueCount++;
+                        }
+                        else
+                        {
+                            break;
+                        }
                     }
                     SkipWhitespace();
+                }
+
+                // Validate cardinality
+                if (varCount > 0 && rowValueCount != varCount)
+                {
+                    if (rowValueCount < varCount)
+                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but {varCount} variables declared");
+                    else
+                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but only {varCount} variables declared");
                 }
 
                 if (Peek() == ')')
@@ -135,11 +152,22 @@ public ref partial struct SparqlParser
             }
             else
             {
-                int valueStart = _position;
-                int valueLen = ParseValuesValue();
-                if (valueLen > 0)
+                // Single value (for single variable form)
+                // Check for UNDEF
+                var span = PeekSpan(5);
+                if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
                 {
-                    values.AddValue(valueStart, valueLen);
+                    ConsumeKeyword("UNDEF");
+                    values.AddValue(0, -1); // Mark as UNDEF with length = -1
+                }
+                else
+                {
+                    int valueStart = _position;
+                    int valueLen = ParseValuesValue();
+                    if (valueLen > 0)
+                    {
+                        values.AddValue(valueStart, valueLen);
+                    }
                 }
                 SkipWhitespace();
             }
@@ -1651,6 +1679,7 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Parse VALUES clause for a subquery: VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
+    /// UNDEF values are stored with length = -1.
     /// </summary>
     private ValuesClause ParseSubSelectValues()
     {
@@ -1658,7 +1687,6 @@ public ref partial struct SparqlParser
         SkipWhitespace();
 
         var values = new ValuesClause();
-        int varCount = 0;
 
         // Check for multi-variable form: (?var1 ?var2 ...)
         if (Peek() == '(')
@@ -1666,21 +1694,14 @@ public ref partial struct SparqlParser
             Advance(); // Skip '('
             SkipWhitespace();
 
-            // Count and parse variables
+            // Parse all variables
             while (!IsAtEnd() && Peek() == '?')
             {
-                if (varCount == 0)
-                {
-                    values.VarStart = _position;
-                }
+                int varStart = _position;
                 Advance(); // Skip '?'
                 while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                     Advance();
-                if (varCount == 0)
-                {
-                    values.VarLength = _position - values.VarStart;
-                }
-                varCount++;
+                values.AddVariable(varStart, _position - varStart);
                 SkipWhitespace();
             }
 
@@ -1691,18 +1712,19 @@ public ref partial struct SparqlParser
         // Single variable form: ?var
         else if (Peek() == '?')
         {
-            values.VarStart = _position;
+            int varStart = _position;
             Advance(); // Skip '?'
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                 Advance();
-            values.VarLength = _position - values.VarStart;
-            varCount = 1;
+            values.AddVariable(varStart, _position - varStart);
             SkipWhitespace();
         }
         else
         {
             return values; // No valid VALUES
         }
+
+        int varCount = values.VariableCount;
 
         // Expect '{'
         if (Peek() != '{')
@@ -1722,19 +1744,41 @@ public ref partial struct SparqlParser
                 Advance(); // Skip '('
                 SkipWhitespace();
 
+                int rowValueCount = 0;
                 while (!IsAtEnd() && Peek() != ')')
                 {
-                    int valueStart = _position;
-                    int valueLen = ParseValuesValue();
-                    if (valueLen > 0)
+                    // Check for UNDEF first
+                    var span = PeekSpan(5);
+                    if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
                     {
-                        values.AddValue(valueStart, valueLen);
+                        ConsumeKeyword("UNDEF");
+                        values.AddValue(0, -1); // Mark as UNDEF with length = -1
+                        rowValueCount++;
                     }
-                    else if (Peek() == ')')
+                    else
                     {
-                        break;
+                        int valueStart = _position;
+                        int valueLen = ParseValuesValue();
+                        if (valueLen > 0)
+                        {
+                            values.AddValue(valueStart, valueLen);
+                            rowValueCount++;
+                        }
+                        else
+                        {
+                            break;
+                        }
                     }
                     SkipWhitespace();
+                }
+
+                // Validate cardinality
+                if (varCount > 0 && rowValueCount != varCount)
+                {
+                    if (rowValueCount < varCount)
+                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but {varCount} variables declared");
+                    else
+                        throw new SparqlParseException($"VALUES row has {rowValueCount} values but only {varCount} variables declared");
                 }
 
                 if (Peek() == ')')
@@ -1743,12 +1787,22 @@ public ref partial struct SparqlParser
             }
             else
             {
-                // Non-parenthesized value
-                int valueStart = _position;
-                int valueLen = ParseValuesValue();
-                if (valueLen > 0)
+                // Single value (for single variable form)
+                // Check for UNDEF
+                var span = PeekSpan(5);
+                if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
                 {
-                    values.AddValue(valueStart, valueLen);
+                    ConsumeKeyword("UNDEF");
+                    values.AddValue(0, -1); // Mark as UNDEF with length = -1
+                }
+                else
+                {
+                    int valueStart = _position;
+                    int valueLen = ParseValuesValue();
+                    if (valueLen > 0)
+                    {
+                        values.AddValue(valueStart, valueLen);
+                    }
                 }
                 SkipWhitespace();
             }
@@ -2352,6 +2406,7 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Parse VALUES clause: VALUES ?var { value1 value2 ... } or VALUES (?var1 ?var2) { (val1 val2) ... }
     /// Supports single variable or multiple variables with cardinality validation.
+    /// UNDEF values are stored with length = -1.
     /// </summary>
     private void ParseValues(ref GraphPattern pattern)
     {
@@ -2359,7 +2414,6 @@ public ref partial struct SparqlParser
         SkipWhitespace();
 
         var values = new ValuesClause();
-        int varCount = 0;
 
         // Check for multi-variable form: (?var1 ?var2 ...)
         if (Peek() == '(')
@@ -2367,22 +2421,14 @@ public ref partial struct SparqlParser
             Advance(); // Skip '('
             SkipWhitespace();
 
-            // Count and parse variables
+            // Parse all variables
             while (!IsAtEnd() && Peek() == '?')
             {
-                if (varCount == 0)
-                {
-                    // Store first variable for backwards compatibility
-                    values.VarStart = _position;
-                }
+                int varStart = _position;
                 Advance(); // Skip '?'
                 while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                     Advance();
-                if (varCount == 0)
-                {
-                    values.VarLength = _position - values.VarStart;
-                }
-                varCount++;
+                values.AddVariable(varStart, _position - varStart);
                 SkipWhitespace();
             }
 
@@ -2393,18 +2439,19 @@ public ref partial struct SparqlParser
         // Single variable form: ?var
         else if (Peek() == '?')
         {
-            values.VarStart = _position;
+            int varStart = _position;
             Advance(); // Skip '?'
             while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                 Advance();
-            values.VarLength = _position - values.VarStart;
-            varCount = 1;
+            values.AddVariable(varStart, _position - varStart);
             SkipWhitespace();
         }
         else
         {
             return;
         }
+
+        int varCount = values.VariableCount;
 
         // Expect '{'
         if (Peek() != '{')
@@ -2427,24 +2474,21 @@ public ref partial struct SparqlParser
                 int rowValueCount = 0;
                 while (!IsAtEnd() && Peek() != ')')
                 {
-                    int valueStart = _position;
-                    int valueLen = ParseValuesValue();
-                    if (valueLen > 0)
+                    // Check for UNDEF first
+                    var span = PeekSpan(5);
+                    if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
                     {
-                        values.AddValue(valueStart, valueLen);
+                        ConsumeKeyword("UNDEF");
+                        values.AddValue(0, -1); // Mark as UNDEF with length = -1
                         rowValueCount++;
-                    }
-                    else if (Peek() == ')')
-                    {
-                        break;
                     }
                     else
                     {
-                        // Skip UNDEF
-                        var span = PeekSpan(5);
-                        if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
+                        int valueStart = _position;
+                        int valueLen = ParseValuesValue();
+                        if (valueLen > 0)
                         {
-                            ConsumeKeyword("UNDEF");
+                            values.AddValue(valueStart, valueLen);
                             rowValueCount++;
                         }
                         else
@@ -2471,15 +2515,25 @@ public ref partial struct SparqlParser
             else
             {
                 // Single value (for single variable form)
-                int valueStart = _position;
-                int valueLen = ParseValuesValue();
-                if (valueLen > 0)
+                // Check for UNDEF
+                var span = PeekSpan(5);
+                if (span.Length >= 5 && span[..5].Equals("UNDEF", StringComparison.OrdinalIgnoreCase))
                 {
-                    values.AddValue(valueStart, valueLen);
+                    ConsumeKeyword("UNDEF");
+                    values.AddValue(0, -1); // Mark as UNDEF with length = -1
                 }
                 else
                 {
-                    break;
+                    int valueStart = _position;
+                    int valueLen = ParseValuesValue();
+                    if (valueLen > 0)
+                    {
+                        values.AddValue(valueStart, valueLen);
+                    }
+                    else
+                    {
+                        break;
+                    }
                 }
                 SkipWhitespace();
             }
