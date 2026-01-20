@@ -492,6 +492,12 @@ internal ref struct TriplePatternScan
 
         var termSpan = _source.Slice(term.Start, term.Length);
 
+        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+        if (termSpan.Length == 1 && termSpan[0] == 'a')
+        {
+            return SyntheticTermHelper.RdfType.AsSpan();
+        }
+
         // Check if this is a prefixed name that needs expansion
         if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
         {
@@ -568,6 +574,12 @@ internal ref struct TriplePatternScan
             return ReadOnlySpan<char>.Empty;
 
         var termSpan = _source.Slice(term.Start, term.Length);
+
+        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+        if (termSpan.Length == 1 && termSpan[0] == 'a')
+        {
+            return SyntheticTermHelper.RdfType.AsSpan();
+        }
 
         // Check for prefix expansion
         if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
@@ -1464,6 +1476,12 @@ internal ref struct MultiPatternScan
         {
             var termSpan = _source.Slice(term.Start, term.Length);
 
+            // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+            if (termSpan.Length == 1 && termSpan[0] == 'a')
+            {
+                return SyntheticTermHelper.RdfType.AsSpan();
+            }
+
             // Check if this is a prefixed name that needs expansion
             if (_prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
             {
@@ -1780,6 +1798,12 @@ internal sealed class BoxedSubQueryExecutor
             if (_subSelect.HasAggregates)
             {
                 return ExecuteWithAggregation(ref bindingTable);
+            }
+
+            // Handle nested subqueries (subquery within subquery)
+            if (_subSelect.HasSubQueries && _subSelect.PatternCount == 0)
+            {
+                return ExecuteNestedSubQueries(ref bindingTable);
             }
 
             int skipped = 0;
@@ -2164,6 +2188,79 @@ internal sealed class BoxedSubQueryExecutor
     }
 
     /// <summary>
+    /// Execute nested subqueries (subquery containing another subquery but no triple patterns).
+    /// Recursively executes nested subqueries and passes results through.
+    /// For queries like: SELECT * WHERE { { SELECT ?x WHERE { ... } } }
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteNestedSubQueries(ref BindingTable bindingTable)
+    {
+        var results = new List<MaterializedRow>();
+        var source = _source;
+
+        // Execute all nested subqueries
+        for (int i = 0; i < _subSelect.SubQueryCount; i++)
+        {
+            var nestedSubSelect = _subSelect.GetSubQuery(i);
+            // Pass prefix mappings to nested executor for prefix expansion
+            var nestedExecutor = new BoxedSubQueryExecutor(_store, source, nestedSubSelect, _prefixes);
+            var nestedResults = nestedExecutor.Execute();
+
+            // Pass through all results from nested subquery
+            // Projection is already handled by the nested subquery's SELECT clause
+            results.AddRange(nestedResults);
+        }
+
+        // Apply DISTINCT if specified
+        if (_distinct && results.Count > 1)
+        {
+            var seen = new HashSet<string>();
+            var distinctResults = new List<MaterializedRow>();
+            foreach (var row in results)
+            {
+                // Build a key from all values to identify unique rows
+                var key = BuildRowKey(row);
+                if (seen.Add(key))
+                    distinctResults.Add(row);
+            }
+            return distinctResults;
+        }
+
+        // Apply LIMIT/OFFSET if specified
+        if (_subSelect.Offset > 0 || _subSelect.Limit > 0)
+        {
+            int skip = _subSelect.Offset;
+            int take = _subSelect.Limit > 0 ? _subSelect.Limit : results.Count;
+            if (skip >= results.Count)
+            {
+                results.Clear();
+            }
+            else
+            {
+                int available = results.Count - skip;
+                int actualTake = Math.Min(take, available);
+                results = results.GetRange(skip, actualTake);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Build a string key from all binding values in a row for DISTINCT comparison.
+    /// </summary>
+    private static string BuildRowKey(MaterializedRow row)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < row.BindingCount; i++)
+        {
+            if (i > 0) sb.Append('\x1F'); // Unit separator
+            sb.Append(row.GetValue(i));
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Execute subquery with aggregation support.
     /// Collects raw rows, groups them, computes aggregates, and returns aggregated results.
     /// </summary>
@@ -2479,7 +2576,9 @@ internal sealed class BoxedSubQueryExecutor
     {
         var tp = _subSelect.GetPattern(0);
         var source = _source.AsSpan();
-        var scan = new TriplePatternScan(_store, source, tp, bindingTable);
+        // Pass prefixes for prefix expansion in nested subqueries (e.g., ex:q -> <http://...#q>)
+        var scan = new TriplePatternScan(_store, source, tp, bindingTable, default,
+            TemporalQueryMode.Current, default, default, default, _prefixes);
         try
         {
             while (scan.MoveNext(ref bindingTable))
@@ -2517,7 +2616,8 @@ internal sealed class BoxedSubQueryExecutor
             }
 
             var source = _source.AsSpan();
-            var scan = new MultiPatternScan(_store, source, boxedPattern);
+            // Pass prefixes for prefix expansion in nested subqueries (e.g., ex:q -> <http://...#q>)
+            var scan = new MultiPatternScan(_store, source, boxedPattern, _prefixes);
             try
             {
                 while (scan.MoveNext(ref bindingTable))
@@ -2555,7 +2655,7 @@ internal sealed class BoxedSubQueryExecutor
                     firstBranch.Pattern.AddPattern(_subSelect.GetPattern(i));
                 }
 
-                var firstScan = new MultiPatternScan(_store, source, firstBranch);
+                var firstScan = new MultiPatternScan(_store, source, firstBranch, _prefixes);
                 try
                 {
                     while (firstScan.MoveNext(ref bindingTable))
@@ -2577,7 +2677,8 @@ internal sealed class BoxedSubQueryExecutor
             {
                 // Single pattern - use TriplePatternScan
                 var tp = _subSelect.GetPattern(0);
-                var scan = new TriplePatternScan(_store, source, tp, bindingTable);
+                var scan = new TriplePatternScan(_store, source, tp, bindingTable, default,
+                    TemporalQueryMode.Current, default, default, default, _prefixes);
                 try
                 {
                     while (scan.MoveNext(ref bindingTable))
@@ -2601,7 +2702,8 @@ internal sealed class BoxedSubQueryExecutor
         for (int i = _subSelect.UnionStartIndex; i < _subSelect.PatternCount; i++)
         {
             var tp = _subSelect.GetPattern(i);
-            var scan = new TriplePatternScan(_store, source, tp, bindingTable);
+            var scan = new TriplePatternScan(_store, source, tp, bindingTable, default,
+                TemporalQueryMode.Current, default, default, default, _prefixes);
             try
             {
                 while (scan.MoveNext(ref bindingTable))
@@ -2750,6 +2852,8 @@ internal sealed class SubQueryGroupedRow
     private readonly decimal[] _decimalMins;
     private readonly decimal[] _decimalMaxes;
     private readonly bool[] _useDecimal;        // True if all values are decimal (not double/float)
+    private readonly string?[] _minLiterals;    // Original literal for MIN (preserve datatype)
+    private readonly string?[] _maxLiterals;    // Original literal for MAX (preserve datatype)
     private readonly HashSet<string>?[] _distinctSets;
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
     private readonly string[] _separators;           // For GROUP_CONCAT
@@ -2789,6 +2893,8 @@ internal sealed class SubQueryGroupedRow
         _decimalMins = new decimal[_aggCount];
         _decimalMaxes = new decimal[_aggCount];
         _useDecimal = new bool[_aggCount];
+        _minLiterals = new string?[_aggCount];
+        _maxLiterals = new string?[_aggCount];
         _distinctSets = new HashSet<string>?[_aggCount];
         _concatValues = new List<string>?[_aggCount];
         _separators = new string[_aggCount];
@@ -2907,19 +3013,31 @@ internal sealed class SubQueryGroupedRow
                 case AggregateFunction.Min:
                     if (hasNumValue)
                     {
-                        if (numValue < _mins[i])
+                        // Use decimal comparison if in decimal mode, else double
+                        bool isNewMin = _useDecimal[i]
+                            ? decimalValue < _decimalMins[i]
+                            : numValue < _mins[i];
+                        if (isNewMin)
+                        {
                             _mins[i] = numValue;
-                        if (decimalValue < _decimalMins[i])
                             _decimalMins[i] = decimalValue;
+                            _minLiterals[i] = valueStr;  // Preserve original literal with datatype
+                        }
                     }
                     break;
                 case AggregateFunction.Max:
                     if (hasNumValue)
                     {
-                        if (numValue > _maxes[i])
+                        // Use decimal comparison if in decimal mode, else double
+                        bool isNewMax = _useDecimal[i]
+                            ? decimalValue > _decimalMaxes[i]
+                            : numValue > _maxes[i];
+                        if (isNewMax)
+                        {
                             _maxes[i] = numValue;
-                        if (decimalValue > _decimalMaxes[i])
                             _decimalMaxes[i] = decimalValue;
+                            _maxLiterals[i] = valueStr;  // Preserve original literal with datatype
+                        }
                     }
                     break;
                 case AggregateFunction.GroupConcat:
@@ -2950,12 +3068,8 @@ internal sealed class SubQueryGroupedRow
                         ? FormatTypedLiteral(FormatDecimal(_decimalSums[i] / _counts[i]), XsdDecimal)
                         : FormatTypedLiteral((_sums[i] / _counts[i]).ToString(CultureInfo.InvariantCulture), XsdDouble))
                     : FormatTypedLiteral("0", XsdInteger),
-                AggregateFunction.Min => _useDecimal[i]
-                    ? (_decimalMins[i] == decimal.MaxValue ? "" : FormatTypedLiteral(FormatDecimal(_decimalMins[i]), XsdDecimal))
-                    : (_mins[i] == double.MaxValue ? "" : FormatTypedLiteral(_mins[i].ToString(CultureInfo.InvariantCulture), XsdDouble)),
-                AggregateFunction.Max => _useDecimal[i]
-                    ? (_decimalMaxes[i] == decimal.MinValue ? "" : FormatTypedLiteral(FormatDecimal(_decimalMaxes[i]), XsdDecimal))
-                    : (_maxes[i] == double.MinValue ? "" : FormatTypedLiteral(_maxes[i].ToString(CultureInfo.InvariantCulture), XsdDouble)),
+                AggregateFunction.Min => _minLiterals[i] ?? "",  // Preserve original literal with datatype
+                AggregateFunction.Max => _maxLiterals[i] ?? "",  // Preserve original literal with datatype
                 AggregateFunction.GroupConcat => _concatValues[i] != null
                     ? string.Join(_separators[i], _concatValues[i]!)
                     : "",
@@ -3323,14 +3437,17 @@ internal ref struct SubQueryJoinScan
     {
         if (_useMultiPattern)
         {
-            // MultiPatternScan with initial bindings
+            // MultiPatternScan with initial bindings and prefix mappings
             // MultiPatternScan resolves variables from bindings in ResolveAndQuery
-            _outerScan = new MultiPatternScan(_store, _source, _outerPattern);
+            _outerScan = new MultiPatternScan(_store, _source, _outerPattern,
+                unionMode: false, graph: default, prefixes: _prefixes);
         }
         else if (_outerPattern.PatternCount == 1)
         {
             var tp = _outerPattern.GetPattern(0);
-            _singleOuterScan = new TriplePatternScan(_store, _source, tp, bindings);
+            // Pass prefix mappings to enable prefix expansion (e.g., ex:p → <http://...>)
+            _singleOuterScan = new TriplePatternScan(_store, _source, tp, bindings, default,
+                TemporalQueryMode.Current, default, default, default, _prefixes);
         }
     }
 

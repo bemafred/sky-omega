@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
@@ -772,6 +773,551 @@ public partial class QueryExecutorTests
             Assert.Contains("<http://ex.org/o2>", terms);
             Assert.Contains("<http://ex.org/o3>", terms);
             Assert.Contains("<http://ex.org/o4>", terms);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_NestedSubqueries_ParsesCorrectly()
+    {
+        // Test parsing of sq09-style nested subqueries:
+        // SELECT * WHERE { { SELECT * WHERE { { SELECT ?x WHERE { ?x ?p ?o } } } } ?x ?p2 ?y }
+        var query = @"
+            PREFIX ex: <http://ex.org/>
+            SELECT * WHERE {
+                { SELECT * WHERE {
+                    { SELECT ?x WHERE { ?x ex:q ?t } }
+                } }
+                ?x ex:p ?y
+            }
+        ";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify outer query has a subquery
+        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries, "Outer query should have subquery");
+        Assert.Equal(1, parsedQuery.WhereClause.Pattern.SubQueryCount);
+
+        // Get the middle subquery
+        var middleSq = parsedQuery.WhereClause.Pattern.GetSubQuery(0);
+        Assert.True(middleSq.SelectAll, "Middle subquery should be SELECT *");
+
+        // The middle subquery should have a nested subquery
+        Assert.True(middleSq.HasSubQueries, "Middle subquery should have nested subquery");
+        Assert.Equal(1, middleSq.SubQueryCount);
+
+        // Get the innermost subquery
+        var innerSq = middleSq.GetSubQuery(0);
+        Assert.False(innerSq.SelectAll, "Inner subquery should NOT be SELECT *");
+        Assert.Equal(1, innerSq.ProjectedVarCount);
+        Assert.Equal(1, innerSq.PatternCount);
+    }
+
+    [Fact]
+    public void SubQuery_NestedSubqueries_ExecutesCorrectly()
+    {
+        // Recreate sq09 test case
+        // Data: in:a ex:p in:b ; in:a ex:q in:c ; in:d ex:p in:e
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#p>", "<http://www.example.org/instance#b>");
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+        Store.AddCurrent("<http://www.example.org/instance#d>", "<http://www.example.org/schema#p>", "<http://www.example.org/instance#e>");
+
+        Store.AcquireReadLock();
+        try
+        {
+            // Test doubly nested subquery (like sq09 but without outer join)
+            var doubleNestedQuery = @"
+                PREFIX ex: <http://www.example.org/schema#>
+                SELECT * WHERE {
+                    { SELECT * WHERE {
+                        { SELECT ?x WHERE { ?x ex:q ?t } }
+                    } }
+                }
+            ";
+
+            var doubleParser = new SparqlParser(doubleNestedQuery.AsSpan());
+            var doubleParsed = doubleParser.ParseQuery();
+
+            // Verify parsing
+            Assert.True(doubleParsed.WhereClause.Pattern.HasSubQueries, "Should have subquery");
+            var middleSq = doubleParsed.WhereClause.Pattern.GetSubQuery(0);
+            Assert.True(middleSq.HasSubQueries, "Middle should have nested subquery");
+            Assert.Equal(0, middleSq.PatternCount);  // Middle has no direct patterns
+            var innerSq = middleSq.GetSubQuery(0);
+            Assert.Equal(1, innerSq.PatternCount);  // Inner has 1 pattern
+
+            // First, verify direct execution works (it does - from diagnostic tests)
+            PrefixMapping[]? prefixes = null;
+            if (doubleParsed.Prologue.PrefixCount > 0)
+            {
+                prefixes = new PrefixMapping[doubleParsed.Prologue.PrefixCount];
+                for (int i = 0; i < doubleParsed.Prologue.PrefixCount; i++)
+                {
+                    var (ps, pl, irs, irl) = doubleParsed.Prologue.GetPrefix(i);
+                    prefixes[i] = new PrefixMapping
+                    {
+                        PrefixStart = ps,
+                        PrefixLength = pl,
+                        IriStart = irs,
+                        IriLength = irl
+                    };
+                }
+            }
+
+            // Verify direct BoxedSubQueryExecutor works
+            var directExecutor = new BoxedSubQueryExecutor(Store, doubleNestedQuery, middleSq, prefixes);
+            var directResults = directExecutor.Execute();
+            Assert.Equal(1, directResults.Count);
+
+            // Now test through QueryExecutor
+            using var doubleExecutor = new QueryExecutor(Store, doubleNestedQuery.AsSpan(), doubleParsed);
+            var doubleResults = doubleExecutor.ExecuteSubQueryToMaterialized();
+            int doubleCount = 0;
+            while (doubleResults.MoveNext()) doubleCount++;
+            doubleResults.Dispose();
+            Assert.Equal(1, doubleCount);  // Should get 1 result for ?x=in:a
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_NestedSubqueriesWithJoin_ExecutesCorrectly()
+    {
+        // Full sq09 test case with outer join pattern
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#p>", "<http://www.example.org/instance#b>");
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+        Store.AddCurrent("<http://www.example.org/instance#d>", "<http://www.example.org/schema#p>", "<http://www.example.org/instance#e>");
+
+        var fullQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            PREFIX in: <http://www.example.org/instance#>
+            SELECT * WHERE {
+                { SELECT * WHERE {
+                    { SELECT ?x WHERE { ?x ex:q ?t } }
+                } }
+                ?x ex:p ?y
+            }
+        ";
+
+        Store.AcquireReadLock();
+        try
+        {
+            var fullParser = new SparqlParser(fullQuery.AsSpan());
+            var fullParsed = fullParser.ParseQuery();
+
+            // Use ExecuteSubQueryToMaterialized to avoid stack overflow
+            using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
+            var fullResults = fullExecutor.ExecuteSubQueryToMaterialized();
+
+            var rows = new List<(string x, string y)>();
+            while (fullResults.MoveNext())
+            {
+                var xIdx = fullResults.Current.FindBinding("?x".AsSpan());
+                var yIdx = fullResults.Current.FindBinding("?y".AsSpan());
+                var x = xIdx >= 0 ? fullResults.Current.GetString(xIdx).ToString() : "";
+                var y = yIdx >= 0 ? fullResults.Current.GetString(yIdx).ToString() : "";
+                rows.Add((x, y));
+            }
+            fullResults.Dispose();
+
+            // Expected result: 1 row with x=in:a, y=in:b
+            // Inner: ?x ex:q ?t returns ?x=in:a (only in:a has ex:q)
+            // Middle: SELECT * passes through ?x=in:a
+            // Outer: joins ?x=in:a with ?x ex:p ?y, yielding ?x=in:a, ?y=in:b
+            Assert.Single(rows);
+            Assert.Equal("<http://www.example.org/instance#a>", rows[0].x);
+            Assert.Equal("<http://www.example.org/instance#b>", rows[0].y);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_SingleLevel_WithPrefix_ExecutesCorrectly()
+    {
+        // Test a single-level subquery with prefix to verify prefix expansion works
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+
+        var singleQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            SELECT * WHERE {
+                { SELECT ?x WHERE { ?x ex:q ?t } }
+            }
+        ";
+
+        Store.AcquireReadLock();
+        try
+        {
+            var parser = new SparqlParser(singleQuery.AsSpan());
+            var parsed = parser.ParseQuery();
+
+            // Verify parsing
+            Assert.True(parsed.WhereClause.Pattern.HasSubQueries, "Should have subquery");
+            var sq = parsed.WhereClause.Pattern.GetSubQuery(0);
+            Assert.Equal(1, sq.PatternCount);
+            Assert.False(sq.HasSubQueries, "Single level should not have nested subqueries");
+
+            // Execute
+            using var executor = new QueryExecutor(Store, singleQuery.AsSpan(), parsed);
+            var results = executor.ExecuteSubQueryToMaterialized();
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var xIdx = results.Current.FindBinding("?x".AsSpan());
+                Assert.True(xIdx >= 0, "Should have ?x binding");
+                var xValue = results.Current.GetString(xIdx).ToString();
+                Assert.Equal("<http://www.example.org/instance#a>", xValue);
+            }
+            results.Dispose();
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_Diagnostic_InnerSubQueryDirectly()
+    {
+        // Test executing the innermost subquery directly (no nesting)
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+
+        var directQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            SELECT ?x WHERE { ?x ex:q ?t }
+        ";
+
+        Store.AcquireReadLock();
+        try
+        {
+            var parser = new SparqlParser(directQuery.AsSpan());
+            var parsed = parser.ParseQuery();
+
+            // Should not have subqueries - this is a direct query
+            Assert.False(parsed.WhereClause.Pattern.HasSubQueries);
+            Assert.Equal(1, parsed.WhereClause.Pattern.PatternCount);
+
+            // Execute normally
+            using var executor = new QueryExecutor(Store, directQuery.AsSpan(), parsed);
+            var results = executor.Execute();
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+                var xIdx = results.Current.FindBinding("?x".AsSpan());
+                Assert.True(xIdx >= 0, "Should have ?x binding");
+                var xValue = results.Current.GetString(xIdx).ToString();
+                Assert.Equal("<http://www.example.org/instance#a>", xValue);
+            }
+            results.Dispose();
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_Diagnostic_BoxedSubSelectRetrieval()
+    {
+        // Verify that the inner SubSelect is correctly retrieved after boxing/unboxing
+        var doubleNestedQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            SELECT * WHERE {
+                { SELECT * WHERE {
+                    { SELECT ?x WHERE { ?x ex:q ?t } }
+                } }
+            }
+        ";
+
+        var parser = new SparqlParser(doubleNestedQuery.AsSpan());
+        var parsed = parser.ParseQuery();
+
+        // Get middle SubSelect from outer GroupPattern
+        var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
+
+        // Verify middle SubSelect state
+        Assert.True(middleSq.SelectAll, "Middle SelectAll should be true");
+        Assert.True(middleSq.HasSubQueries, "Middle HasSubQueries should be true");
+        Assert.Equal(1, middleSq.SubQueryCount);
+        Assert.Equal(0, middleSq.PatternCount);
+
+        // Get inner SubSelect from middle SubSelect (this involves unboxing)
+        var innerSq = middleSq.GetSubQuery(0);
+
+        // Verify inner SubSelect state after unboxing
+        Assert.False(innerSq.SelectAll, "Inner SelectAll should be false");
+        Assert.False(innerSq.HasSubQueries, "Inner HasSubQueries should be false (no more nesting)");
+        Assert.Equal(0, innerSq.SubQueryCount);
+        Assert.Equal(1, innerSq.PatternCount);
+        Assert.Equal(1, innerSq.ProjectedVarCount);
+
+        // Now simulate what BoxedSubQueryExecutor does for middle SubSelect
+        // It should detect HasSubQueries && PatternCount == 0 and call ExecuteNestedSubQueries
+        Assert.True(middleSq.HasSubQueries && middleSq.PatternCount == 0,
+            "Middle SubSelect should trigger ExecuteNestedSubQueries path");
+    }
+
+    [Fact]
+    public void SubQuery_Diagnostic_BoxedSubQueryExecutorDirectly()
+    {
+        // Test executing BoxedSubQueryExecutor directly on the middle SubSelect
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+
+        var doubleNestedQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            SELECT * WHERE {
+                { SELECT * WHERE {
+                    { SELECT ?x WHERE { ?x ex:q ?t } }
+                } }
+            }
+        ";
+
+        Store.AcquireReadLock();
+        try
+        {
+            var parser = new SparqlParser(doubleNestedQuery.AsSpan());
+            var parsed = parser.ParseQuery();
+
+            // Get middle SubSelect
+            var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
+
+            // Get prefix mappings from prologue
+            PrefixMapping[]? prefixes = null;
+            if (parsed.Prologue.PrefixCount > 0)
+            {
+                prefixes = new PrefixMapping[parsed.Prologue.PrefixCount];
+                for (int i = 0; i < parsed.Prologue.PrefixCount; i++)
+                {
+                    var (ps, pl, irs, irl) = parsed.Prologue.GetPrefix(i);
+                    prefixes[i] = new PrefixMapping
+                    {
+                        PrefixStart = ps,
+                        PrefixLength = pl,
+                        IriStart = irs,
+                        IriLength = irl
+                    };
+                }
+            }
+
+            // Create BoxedSubQueryExecutor directly for the middle SubSelect
+            var executor = new BoxedSubQueryExecutor(Store, doubleNestedQuery, middleSq, prefixes);
+            var results = executor.Execute();
+
+            // Check results
+            Assert.NotNull(results);
+            Assert.True(results.Count > 0, $"BoxedSubQueryExecutor should return results. Got: {results.Count}");
+            Assert.Equal(1, results.Count);
+
+            // Verify the result has ?x binding
+            var row = results[0];
+            var xValue = row.GetValueByName("?x".AsSpan());
+            Assert.False(xValue.IsEmpty, "Result should have ?x binding");
+            Assert.Equal("<http://www.example.org/instance#a>", xValue.ToString());
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_Diagnostic_SubQueryScanDirectly()
+    {
+        // Test SubQueryScan execution directly
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+
+        var doubleNestedQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            SELECT * WHERE {
+                { SELECT * WHERE {
+                    { SELECT ?x WHERE { ?x ex:q ?t } }
+                } }
+            }
+        ";
+
+        Store.AcquireReadLock();
+        try
+        {
+            var parser = new SparqlParser(doubleNestedQuery.AsSpan());
+            var parsed = parser.ParseQuery();
+
+            // Get middle SubSelect
+            var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
+
+            // Get prefix mappings from prologue
+            PrefixMapping[]? prefixes = null;
+            if (parsed.Prologue.PrefixCount > 0)
+            {
+                prefixes = new PrefixMapping[parsed.Prologue.PrefixCount];
+                for (int i = 0; i < parsed.Prologue.PrefixCount; i++)
+                {
+                    var (ps, pl, irs, irl) = parsed.Prologue.GetPrefix(i);
+                    prefixes[i] = new PrefixMapping
+                    {
+                        PrefixStart = ps,
+                        PrefixLength = pl,
+                        IriStart = irs,
+                        IriLength = irl
+                    };
+                }
+            }
+
+            // Create SubQueryScan and iterate through it
+            var bindings = new Binding[16];
+            var stringBuffer = new char[1024];
+            var bindingTable = new BindingTable(bindings, stringBuffer);
+
+            var subQueryScan = new SubQueryScan(Store, doubleNestedQuery.AsSpan(), middleSq, prefixes);
+            var results = new List<MaterializedRow>();
+            try
+            {
+                while (subQueryScan.MoveNext(ref bindingTable))
+                {
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                subQueryScan.Dispose();
+            }
+
+            // Check results
+            Assert.True(results.Count > 0, $"SubQueryScan should return results. Got: {results.Count}");
+            Assert.Equal(1, results.Count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void SubQuery_Diagnostic_InnerSubSelectPatternRefs()
+    {
+        // Verify that the inner SubSelect's pattern references are valid when retrieved from middle SubSelect
+        var doubleNestedQuery = @"
+            PREFIX ex: <http://www.example.org/schema#>
+            SELECT * WHERE {
+                { SELECT * WHERE {
+                    { SELECT ?x WHERE { ?x ex:q ?t } }
+                } }
+            }
+        ";
+
+        var parser = new SparqlParser(doubleNestedQuery.AsSpan());
+        var parsed = parser.ParseQuery();
+
+        // Get the outer GroupPattern's subquery (middle SubSelect)
+        var middleSq = parsed.WhereClause.Pattern.GetSubQuery(0);
+        Assert.True(middleSq.SelectAll, "Middle should be SELECT *");
+        Assert.Equal(0, middleSq.PatternCount);
+        Assert.True(middleSq.HasSubQueries, "Middle should have nested subquery");
+
+        // Get the inner SubSelect from the middle SubSelect
+        var innerSq = middleSq.GetSubQuery(0);
+        Assert.False(innerSq.SelectAll, "Inner should NOT be SELECT *");
+        Assert.Equal(1, innerSq.PatternCount);
+        Assert.Equal(1, innerSq.ProjectedVarCount);
+
+        // Verify the inner pattern's term references point to valid positions in source
+        var tp = innerSq.GetPattern(0);
+        var source = doubleNestedQuery.AsSpan();
+
+        // Subject should be ?x (variable)
+        Assert.Equal(TermType.Variable, tp.Subject.Type);
+        Assert.True(tp.Subject.Start >= 0 && tp.Subject.Start + tp.Subject.Length <= source.Length,
+            $"Subject offset invalid: Start={tp.Subject.Start}, Length={tp.Subject.Length}, SourceLength={source.Length}");
+        var subjStr = source.Slice(tp.Subject.Start, tp.Subject.Length).ToString();
+        Assert.Equal("?x", subjStr);
+
+        // Predicate should be ex:q (prefixed name)
+        Assert.True(tp.Predicate.Start >= 0 && tp.Predicate.Start + tp.Predicate.Length <= source.Length,
+            $"Predicate offset invalid: Start={tp.Predicate.Start}, Length={tp.Predicate.Length}, SourceLength={source.Length}");
+        var predStr = source.Slice(tp.Predicate.Start, tp.Predicate.Length).ToString();
+        Assert.Equal("ex:q", predStr);
+
+        // Object should be ?t (variable)
+        Assert.Equal(TermType.Variable, tp.Object.Type);
+        Assert.True(tp.Object.Start >= 0 && tp.Object.Start + tp.Object.Length <= source.Length,
+            $"Object offset invalid: Start={tp.Object.Start}, Length={tp.Object.Length}, SourceLength={source.Length}");
+        var objStr = source.Slice(tp.Object.Start, tp.Object.Length).ToString();
+        Assert.Equal("?t", objStr);
+    }
+
+    [Fact]
+    public void SubQuery_Sq11_LimitPerResource_ExecutesCorrectly()
+    {
+        // W3C sq11 test case: Subquery with ORDER BY and LIMIT that limits by resource count
+        // The subquery gets the first 2 orders, outer query joins to get item labels
+
+        // Simplified test data (no blank node property lists to avoid stack issues)
+        Store.AddCurrent("<http://www.example.org/order1>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://www.example.org/Order>");
+        Store.AddCurrent("<http://www.example.org/order1>", "<http://www.example.org/hasItem>", "<http://www.example.org/item1>");
+        Store.AddCurrent("<http://www.example.org/item1>", "<http://www.w3.org/2000/01/rdf-schema#label>", "\"Ice Cream\"");
+
+        Store.AddCurrent("<http://www.example.org/order2>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://www.example.org/Order>");
+        Store.AddCurrent("<http://www.example.org/order2>", "<http://www.example.org/hasItem>", "<http://www.example.org/item2>");
+        Store.AddCurrent("<http://www.example.org/item2>", "<http://www.w3.org/2000/01/rdf-schema#label>", "\"Pizza\"");
+
+        Store.AddCurrent("<http://www.example.org/order3>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://www.example.org/Order>");
+        Store.AddCurrent("<http://www.example.org/order3>", "<http://www.example.org/hasItem>", "<http://www.example.org/item3>");
+        Store.AddCurrent("<http://www.example.org/item3>", "<http://www.w3.org/2000/01/rdf-schema#label>", "\"Sandwich\"");
+
+        Store.AcquireReadLock();
+        try
+        {
+            // Test full query with subquery (without blank node property list syntax)
+            var fullQuery = """
+                PREFIX : <http://www.example.org/>
+                PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+                SELECT ?L
+                WHERE {
+                  ?O :hasItem ?item .
+                  ?item rdfs:label ?L .
+                  {
+                    SELECT DISTINCT ?O
+                    WHERE { ?O a :Order }
+                    ORDER BY ?O
+                    LIMIT 2
+                  }
+                } ORDER BY ?L
+                """;
+
+            var fullParser = new SparqlParser(fullQuery.AsSpan());
+            var fullParsed = fullParser.ParseQuery();
+            using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
+            var fullResults = fullExecutor.Execute();
+
+            var labels = new List<string>();
+            while (fullResults.MoveNext())
+            {
+                var row = fullResults.Current;
+                var idx = row.FindBinding("?L".AsSpan());
+                if (idx >= 0)
+                {
+                    labels.Add(row.GetString(idx).ToString());
+                }
+            }
+            fullResults.Dispose();
+
+            // Expected: 2 labels from 2 orders (order1 has Ice Cream, order2 has Pizza)
+            Assert.Equal(2, labels.Count);
+            Assert.Contains("\"Ice Cream\"", labels);
+            Assert.Contains("\"Pizza\"", labels);
         }
         finally
         {

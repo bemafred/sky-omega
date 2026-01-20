@@ -1120,6 +1120,13 @@ public struct SubSelect
     private int _aggregateCount;
     private AggregateExpression _a0, _a1, _a2, _a3, _a4, _a5, _a6, _a7;
 
+    // Nested subqueries (boxed to avoid recursive struct definition)
+    // For queries like: SELECT * WHERE { { SELECT ?x WHERE { ... } } ?x ?p ?o }
+    public const int MaxNestedSubQueries = 2;
+    private int _nestedSubQueryCount;
+    private object? _nestedSq0;  // Boxed SubSelect
+    private object? _nestedSq1;  // Boxed SubSelect
+
     public readonly int ProjectedVarCount => _projectedVarCount;
     public readonly int PatternCount => _patternCount;
     public readonly int FilterCount => _filterCount;
@@ -1132,6 +1139,8 @@ public struct SubSelect
     public readonly bool HasHaving => Having.HasHaving;
     public readonly int FirstBranchPatternCount => HasUnion ? UnionStartIndex : PatternCount;
     public readonly int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
+    public readonly int SubQueryCount => _nestedSubQueryCount;
+    public readonly bool HasSubQueries => _nestedSubQueryCount > 0;
 
     public void AddProjectedVariable(int start, int length)
     {
@@ -1251,6 +1260,33 @@ public struct SubSelect
             case 4: _a4 = agg; break; case 5: _a5 = agg; break;
             case 6: _a6 = agg; break; case 7: _a7 = agg; break;
         }
+    }
+
+    /// <summary>
+    /// Add a nested subquery to this SubSelect.
+    /// Used for queries like: SELECT * WHERE { { SELECT ?x WHERE { ... } } }
+    /// </summary>
+    public void AddSubQuery(SubSelect subQuery)
+    {
+        if (_nestedSubQueryCount >= MaxNestedSubQueries) return;
+        switch (_nestedSubQueryCount++)
+        {
+            case 0: _nestedSq0 = subQuery; break;
+            case 1: _nestedSq1 = subQuery; break;
+        }
+    }
+
+    /// <summary>
+    /// Get a nested subquery by index.
+    /// </summary>
+    public readonly SubSelect GetSubQuery(int index)
+    {
+        return index switch
+        {
+            0 => _nestedSq0 is SubSelect sq0 ? sq0 : default,
+            1 => _nestedSq1 is SubSelect sq1 ? sq1 : default,
+            _ => default
+        };
     }
 }
 

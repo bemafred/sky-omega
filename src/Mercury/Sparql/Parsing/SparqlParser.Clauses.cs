@@ -1230,6 +1230,14 @@ public ref partial struct SparqlParser
         {
             SkipWhitespace();
 
+            // Check for nested group/subquery: { ... } or { SELECT ... }
+            if (Peek() == '{')
+            {
+                ParseSubSelectNestedGroup(ref subSelect);
+                SkipWhitespace();
+                continue;
+            }
+
             var span = PeekSpan(6);
 
             // Check for FILTER
@@ -1301,6 +1309,7 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Parse a nested { } group inside a subquery.
+    /// Handles: triple patterns, FILTER, GRAPH, nested SELECT subqueries, and nested groups.
     /// </summary>
     private void ParseSubSelectNestedGroup(ref SubSelect subSelect)
     {
@@ -1311,10 +1320,32 @@ public ref partial struct SparqlParser
         Advance(); // Skip '{'
         SkipWhitespace();
 
+        // Check for nested SELECT subquery: { SELECT ... }
+        var selectSpan = PeekSpan(6);
+        if (selectSpan.Length >= 6 && selectSpan[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+        {
+            // Parse the nested subquery and add to this subselect
+            var nestedSubSelect = ParseSubSelect();
+            subSelect.AddSubQuery(nestedSubSelect);
+
+            SkipWhitespace();
+            if (Peek() == '}')
+                Advance(); // Skip closing '}'
+            return;
+        }
+
         // Parse patterns inside the nested group
         while (!IsAtEnd() && Peek() != '}')
         {
             SkipWhitespace();
+
+            // Check for another nested group (which may contain a subquery)
+            if (Peek() == '{')
+            {
+                ParseSubSelectNestedGroup(ref subSelect);
+                SkipWhitespace();
+                continue;
+            }
 
             // Check for FILTER
             var span = PeekSpan(6);
