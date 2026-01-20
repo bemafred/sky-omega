@@ -2,8 +2,8 @@
 
 **Status:** In Progress
 **Created:** 2026-01-19
-**Updated:** 2026-01-19
-**Baseline:** 3774 tests total, 3643 passing (96.5%), 116 failing, 15 skipped
+**Updated:** 2026-01-20
+**Baseline:** 3784 tests total, 3654 passing (96.6%), 115 failing, 15 skipped
 
 ## Context
 
@@ -133,12 +133,12 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 
 ---
 
-### Phase 5: Subquery Scope — 50% (7/14)
+### Phase 5: Subquery Scope — 64% (9/14)
 **Target:** ~12 tests
 **Effort:** Medium
-**Files:** `QueryExecutor.cs`, `BoxedSubQueryExecutor.cs`
+**Files:** `QueryExecutor.cs`, `BoxedSubQueryExecutor.cs`, `Operators.cs`
 
-**Current status (as of 2026-01-19):**
+**Current status (as of 2026-01-20):**
 
 | Test | Status | Notes |
 |------|--------|-------|
@@ -147,24 +147,27 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 | sq03 Graph variable not bound | ✅ Pass | |
 | sq04 Default graph does not apply | ✅ Pass | |
 | sq05, sq06 FROM NAMED applies | ✅ Pass | |
-| sq10 Subquery with EXISTS | ✅ Pass | |
+| sq08 Subquery with aggregate | ✅ Pass | Fixed 2026-01-20 |
+| sq09 Nested Subqueries | ✅ Pass | Fixed 2026-01-20 |
 | Post-subquery VALUES | ❌ Fail | |
 | sq07 Subquery with FROM | ❌ Fail | |
-| sq08 Subquery with aggregate | ❌ Fail | Aggregate in subquery |
-| sq09 Nested Subqueries | ❌ Fail | |
-| sq11 Subquery limit per resource | ❌ Fail | |
-| sq13 Subqueries don't inject bindings | ❌ Fail | Binding scope |
-| sq14 Limit by resource | ❌ Fail | |
+| sq10 Subquery with EXISTS | ❌ Fail | Data loading issue |
+| sq11 Subquery limit per resource | ❌ Fail | Blank node property list syntax |
+| sq13 Subqueries don't inject bindings | ❌ Fail | Blank node property list syntax |
+| sq14 Limit by resource | ❌ Fail | Blank node property list syntax |
 
-**Issues:**
-1. Variable projection from subquery to outer query
-2. Aggregates in subqueries interacting with outer GROUP BY
-3. BIND scope in nested groups (known: test_62a)
+**Fixed (2026-01-20):**
+- sq08: Subquery with aggregate now works correctly
+- sq09: Nested subqueries (subquery within subquery) now execute correctly
+- `a` keyword: Now properly expands to `<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>`
 
-**Approach:**
-1. Trace through `SubQueryScan` execution path
-2. Verify variable binding tables are correctly scoped
-3. Add explicit scope boundary handling
+**Commits:**
+- `4bb127f` Fix nested subqueries and 'a' keyword expansion in SPARQL executor
+
+**Remaining Issues:**
+1. sq11, sq13, sq14 use blank node property list syntax (`[ predicate object ]`) which requires expansion
+2. sq07 has FROM clause in subquery (dataset scope)
+3. sq10 appears to have data loading issues with RDF/XML format
 
 ---
 
@@ -275,12 +278,12 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 | 2 | GROUP_CONCAT | 100% | 100% | ✅ Done |
 | 3 | SPARQL Functions | 22% (13/59) | ~70% | In Progress |
 | 4 | Property Paths | 39% (13/33) | ~70% | In Progress |
-| 5 | Subquery Scope | 50% (7/14) | ~90% | In Progress |
+| 5 | Subquery Scope | 64% (9/14) | ~90% | In Progress |
 | 6 | Negation (EXISTS/MINUS) | 32% (7/22) | ~80% | In Progress |
 | 7 | VALUES Clause | 30% (3/10) | ~90% | In Progress |
 | 8 | XSD Cast Functions | 100% | 100% | ✅ Done |
 
-**Current Progress:** Phases 1, 2, and 8 complete. Phases 3-7 need work.
+**Current Progress:** Phases 1, 2, and 8 complete. Phase 5 at 64%. Phases 3, 4, 6, 7 need work.
 
 **Recommended priority:**
 1. **Phase 5** (Subqueries) - 50% done, closest to completion
