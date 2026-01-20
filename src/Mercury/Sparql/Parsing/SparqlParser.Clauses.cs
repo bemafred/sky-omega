@@ -1247,6 +1247,13 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // Check for GRAPH
+            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseSubSelectGraph(ref subSelect);
+                continue;
+            }
+
             // Check for VALUES (inline data block inside WHERE)
             if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
             {
@@ -1390,6 +1397,9 @@ public ref partial struct SparqlParser
         var graphTerm = ParseTerm();
         SkipWhitespace();
 
+        // Store the graph context so subquery executor knows to filter by graph
+        subSelect.GraphContext = graphTerm;
+
         // Expect { }
         if (Peek() != '{')
             throw new SparqlParseException("Expected '{' after GRAPH");
@@ -1410,7 +1420,7 @@ public ref partial struct SparqlParser
                 continue;
             }
 
-            // Parse triple pattern (note: we're not tracking graph here - simplified for now)
+            // Parse triple pattern
             if (!TryParseSubSelectTriplePattern(ref subSelect))
                 break;
 
