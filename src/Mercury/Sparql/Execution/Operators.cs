@@ -55,12 +55,17 @@ internal static class SyntheticTermHelper
     // Pre-allocated synthetic variable names for sequence path intermediates (up to 32 per query)
     private static readonly string[] SyntheticSeqVarNames = new string[32];
 
+    // Pre-allocated synthetic variable names for blank node property lists (up to 32 per query)
+    private static readonly string[] SyntheticBnVarNames = new string[32];
+
     static SyntheticTermHelper()
     {
         for (int i = 0; i < SyntheticVarNames.Length; i++)
             SyntheticVarNames[i] = $"?_qt{i}";
         for (int i = 0; i < SyntheticSeqVarNames.Length; i++)
             SyntheticSeqVarNames[i] = $"?_seq{i}";
+        for (int i = 0; i < SyntheticBnVarNames.Length; i++)
+            SyntheticBnVarNames[i] = $"?_bn{i}";
     }
 
     /// <summary>
@@ -91,11 +96,20 @@ internal static class SyntheticTermHelper
     /// Get the synthetic variable name for a negative offset.
     /// Reifier variables: -100 to -131 = ?_qt0 to ?_qt31
     /// Sequence variables: -200 to -231 = ?_seq0 to ?_seq31
+    /// Blank node property list variables: -300 to -331 = ?_bn0 to ?_bn31
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ReadOnlySpan<char> GetSyntheticVarName(int start)
     {
-        // Check for sequence variables first (-200 to -231)
+        // Check for blank node property list variables first (-300 to -331)
+        if (start <= -300 && start > -332)
+        {
+            var index = -start - 300;
+            if (index < SyntheticBnVarNames.Length)
+                return SyntheticBnVarNames[index].AsSpan();
+        }
+
+        // Check for sequence variables (-200 to -231)
         if (start <= -200 && start > -232)
         {
             var index = -start - 200;
@@ -116,6 +130,13 @@ internal static class SyntheticTermHelper
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int GetSeqVarOffset(int index) => -(200 + index);
+
+    /// <summary>
+    /// Get the synthetic offset for a blank node property list variable.
+    /// Index 0 = offset -300, index 1 = offset -301, etc.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetBnVarOffset(int index) => -(300 + index);
 }
 
 /// <summary>
@@ -3364,6 +3385,12 @@ internal ref struct SubQueryJoinScan
     // Current binding checkpoint for rollback
     private int _bindingCheckpoint;
 
+    // Store subquery bindings so we can restore them if caller clears bindings externally
+    // This is needed because ExecuteSubQueryJoinCore calls bindingTable.Clear() after each result
+    private int _subBindingsCount;
+    private int[] _storedSubBindingHashes;
+    private string[] _storedSubBindingValues;
+
     public SubQueryJoinScan(QuadStore store, ReadOnlySpan<char> source,
         GraphPattern pattern, SubSelect subSelect)
         : this(store, source, pattern, subSelect, null)
@@ -3386,10 +3413,14 @@ internal ref struct SubQueryJoinScan
         _subBindings = new BindingTable(_subBindingStorage, _subStringBuffer);
 
         // Build outer pattern from non-subquery patterns
+        // Preserve optional flags so OPTIONAL patterns are handled correctly
         _outerPattern = new GraphPattern();
         for (int i = 0; i < pattern.PatternCount; i++)
         {
-            _outerPattern.AddPattern(pattern.GetPattern(i));
+            if (pattern.IsOptional(i))
+                _outerPattern.AddOptionalPattern(pattern.GetPattern(i));
+            else
+                _outerPattern.AddPattern(pattern.GetPattern(i));
         }
         _useMultiPattern = _outerPattern.PatternCount > 1;
 
@@ -3397,6 +3428,11 @@ internal ref struct SubQueryJoinScan
         _singleOuterScan = default;
         _outerInitialized = false;
         _bindingCheckpoint = 0;
+
+        // Initialize storage for subquery bindings (max 16 bindings)
+        _subBindingsCount = 0;
+        _storedSubBindingHashes = new int[16];
+        _storedSubBindingValues = new string[16];
     }
 
     public bool MoveNext(ref BindingTable bindings)
@@ -3417,6 +3453,14 @@ internal ref struct SubQueryJoinScan
             // Try to get next result from current outer pattern scan
             if (_outerInitialized)
             {
+                // BUGFIX: Restore subquery bindings if caller cleared bindings externally
+                // This happens when ExecuteSubQueryJoinCore calls bindingTable.Clear() after each result
+                // Without this, TruncateTo in MultiPatternScan fails because count > _count after Clear()
+                if (bindings.Count < _subBindingsCount)
+                {
+                    RestoreSubQueryBindings(ref bindings);
+                }
+
                 bool hasOuter;
                 if (_useMultiPattern)
                     hasOuter = _outerScan.MoveNext(ref bindings);
@@ -3425,6 +3469,9 @@ internal ref struct SubQueryJoinScan
 
                 if (hasOuter)
                 {
+                    // Try to match OPTIONAL patterns (left outer join semantics)
+                    TryMatchOptionalPatterns(ref bindings);
+
                     // We have a joined result: subquery bindings + outer pattern bindings
                     return true;
                 }
@@ -3457,14 +3504,30 @@ internal ref struct SubQueryJoinScan
 
     private void CopySubQueryBindings(ref BindingTable bindings)
     {
-        // Project subquery variables to outer binding table
+        // Store subquery bindings so we can restore them if caller clears bindings
+        _subBindingsCount = _subBindings.Count;
         for (int i = 0; i < _subBindings.Count; i++)
         {
             var hash = _subBindings.GetVariableHash(i);
             var value = _subBindings.GetString(i);
+
+            // Store for potential restoration
+            _storedSubBindingHashes[i] = hash;
+            _storedSubBindingValues[i] = value.ToString();
+
+            // Copy to outer binding table
             bindings.BindWithHash(hash, value);
         }
         _subBindings.Clear();
+    }
+
+    private void RestoreSubQueryBindings(ref BindingTable bindings)
+    {
+        // Restore previously stored subquery bindings
+        for (int i = 0; i < _subBindingsCount; i++)
+        {
+            bindings.BindWithHash(_storedSubBindingHashes[i], _storedSubBindingValues[i].AsSpan());
+        }
     }
 
     private void InitializeOuterScan(ref BindingTable bindings)
@@ -3482,6 +3545,53 @@ internal ref struct SubQueryJoinScan
             // Pass prefix mappings to enable prefix expansion (e.g., ex:p → <http://...>)
             _singleOuterScan = new TriplePatternScan(_store, _source, tp, bindings, default,
                 TemporalQueryMode.Current, default, default, default, _prefixes);
+        }
+    }
+
+    /// <summary>
+    /// Try to match OPTIONAL patterns (left outer join semantics).
+    /// Called after required patterns have been matched.
+    /// </summary>
+    private void TryMatchOptionalPatterns(ref BindingTable bindings)
+    {
+        // Check each pattern to see if it's optional
+        for (int i = 0; i < _outerPattern.PatternCount; i++)
+        {
+            if (!_outerPattern.IsOptional(i)) continue;
+
+            var tp = _outerPattern.GetPattern(i);
+            TryMatchSingleOptionalPattern(ref tp, ref bindings);
+        }
+    }
+
+    /// <summary>
+    /// Try to match a single optional pattern against the store.
+    /// If it matches, bind any unbound variables.
+    /// If it doesn't match, the row is still returned (left outer join).
+    /// Uses TriplePatternScan for proper prefix expansion and variable resolution.
+    /// </summary>
+    private void TryMatchSingleOptionalPattern(ref TriplePattern tp, ref BindingTable bindings)
+    {
+        // Use TriplePatternScan which handles:
+        // - Prefix expansion (foaf:mbox → <http://xmlns.com/foaf/0.1/mbox>)
+        // - Variable binding resolution
+        // - Proper term resolution
+        var scan = new TriplePatternScan(_store, _source, tp, bindings, default,
+            TemporalQueryMode.Current, default, default, default, _prefixes);
+
+        try
+        {
+            // Try to match the pattern
+            if (scan.MoveNext(ref bindings))
+            {
+                // Pattern matched - bindings are already extended by MoveNext
+                // Nothing more to do
+            }
+            // If no match, variables remain unbound (left outer join semantics)
+        }
+        finally
+        {
+            scan.Dispose();
         }
     }
 

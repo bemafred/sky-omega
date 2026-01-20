@@ -146,8 +146,10 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Compute a hash of all current bindings for DISTINCT checking.
-    /// Uses FNV-1a hash combined across all binding values.
+    /// Compute a hash of bindings for DISTINCT checking.
+    /// For SELECT *, hashes all bindings.
+    /// For SELECT ?x ?y, hashes only the projected variables.
+    /// Uses FNV-1a hash combined across binding values.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int ComputeBindingsHash()
@@ -156,14 +158,40 @@ public ref partial struct QueryResults
         {
             int hash = (int)2166136261; // FNV offset basis
 
-            for (int i = 0; i < _bindingTable.Count; i++)
+            // If SELECT * or no explicit variables, hash all bindings
+            if (_selectClause.SelectAll || _selectClause.ProjectedVariableCount == 0)
             {
-                var value = _bindingTable.GetString(i);
-                foreach (var ch in value)
+                for (int i = 0; i < _bindingTable.Count; i++)
                 {
-                    hash = (hash ^ ch) * 16777619; // FNV prime
+                    var value = _bindingTable.GetString(i);
+                    foreach (var ch in value)
+                    {
+                        hash = (hash ^ ch) * 16777619; // FNV prime
+                    }
+                    hash = (hash ^ '|') * 16777619; // Separator between bindings
                 }
-                hash = (hash ^ '|') * 16777619; // Separator between bindings
+            }
+            else
+            {
+                // Only hash the projected variables for DISTINCT
+                for (int i = 0; i < _selectClause.ProjectedVariableCount; i++)
+                {
+                    var (start, length) = _selectClause.GetProjectedVariable(i);
+                    if (length > 0)
+                    {
+                        var varName = _source.Slice(start, length);
+                        var bindingIdx = _bindingTable.FindBinding(varName);
+                        if (bindingIdx >= 0)
+                        {
+                            var value = _bindingTable.GetString(bindingIdx);
+                            foreach (var ch in value)
+                            {
+                                hash = (hash ^ ch) * 16777619; // FNV prime
+                            }
+                        }
+                        hash = (hash ^ '|') * 16777619; // Separator between bindings
+                    }
+                }
             }
 
             return hash;

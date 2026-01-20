@@ -22,19 +22,28 @@ public ref partial struct QueryResults
         // Iterate through sorted results
         while (++_sortedIndex < _sortedResults!.Count)
         {
-            // Apply OFFSET
-            if (_skipped < _offset)
-            {
-                _skipped++;
-                continue;
-            }
-
             // Load the materialized row into binding table
             var row = _sortedResults[_sortedIndex];
             _bindingTable.Clear();
             for (int i = 0; i < row.BindingCount; i++)
             {
                 _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
+            }
+
+            // Apply DISTINCT - skip duplicate rows
+            // This must happen after loading bindings so we can compute the hash
+            if (_distinct)
+            {
+                var hash = ComputeBindingsHash();
+                if (!_seenHashes!.Add(hash))
+                    continue; // Duplicate, try next row
+            }
+
+            // Apply OFFSET
+            if (_skipped < _offset)
+            {
+                _skipped++;
+                continue;
             }
 
             _returned++;

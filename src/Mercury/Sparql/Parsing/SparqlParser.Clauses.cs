@@ -531,6 +531,32 @@ public ref partial struct SparqlParser
 
             SkipWhitespace();
 
+            // Handle semicolon-separated predicate-object lists (same subject)
+            // Grammar: PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
+            while (Peek() == ';')
+            {
+                Advance(); // Skip ';'
+                SkipWhitespace();
+
+                // Check for empty predicate-object after semicolon (valid: "?s :p ?o ;")
+                if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                    break;
+
+                // Parse next predicate-object pair with same subject
+                predicate = ParseTerm();
+                SkipWhitespace();
+                obj = ParseTerm();
+
+                template.AddPattern(new TriplePattern
+                {
+                    Subject = subject,
+                    Predicate = predicate,
+                    Object = obj
+                });
+
+                SkipWhitespace();
+            }
+
             // Optional dot separator
             if (Peek() == '.')
             {
@@ -1545,6 +1571,13 @@ public ref partial struct SparqlParser
         if (subject.Type == TermType.Variable && subject.Length == 0)
             return false;
 
+        // Check if subject is a blank node property list
+        Term actualSubject = subject;
+        if (IsBlankNodePropertyList(subject))
+        {
+            actualSubject = ExpandBlankNodePropertyListForSubSelect(ref subSelect, subject);
+        }
+
         SkipWhitespace();
 
         // Parse predicate
@@ -1555,7 +1588,14 @@ public ref partial struct SparqlParser
         // Parse object
         var obj = ParseTerm();
 
-        subSelect.AddPattern(new TriplePattern { Subject = subject, Predicate = predicate, Object = obj });
+        // Check if object is a blank node property list
+        Term actualObject = obj;
+        if (IsBlankNodePropertyList(obj))
+        {
+            actualObject = ExpandBlankNodePropertyListForSubSelect(ref subSelect, obj);
+        }
+
+        subSelect.AddPattern(new TriplePattern { Subject = actualSubject, Predicate = predicate, Object = actualObject });
 
         // Handle semicolon-separated predicate-object lists (same subject)
         SkipWhitespace();
@@ -1578,7 +1618,14 @@ public ref partial struct SparqlParser
             SkipWhitespace();
             var nextObj = ParseTerm();
 
-            subSelect.AddPattern(new TriplePattern { Subject = subject, Predicate = nextPredicate, Object = nextObj });
+            // Check if object is a blank node property list
+            Term actualNextObj = nextObj;
+            if (IsBlankNodePropertyList(nextObj))
+            {
+                actualNextObj = ExpandBlankNodePropertyListForSubSelect(ref subSelect, nextObj);
+            }
+
+            subSelect.AddPattern(new TriplePattern { Subject = actualSubject, Predicate = nextPredicate, Object = actualNextObj });
 
             SkipWhitespace();
         }

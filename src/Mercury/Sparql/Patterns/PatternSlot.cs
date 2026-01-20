@@ -1062,6 +1062,11 @@ internal sealed class SelectClauseData
     public AggregateEntry[]? Aggregates { get; init; }
 
     /// <summary>
+    /// Projected variables (start, length pairs) for DISTINCT computation.
+    /// </summary>
+    public (int Start, int Length)[]? ProjectedVariables { get; init; }
+
+    /// <summary>
     /// Create SelectClauseData from a SelectClause struct.
     /// </summary>
     public static SelectClauseData FromSelectClause(in SelectClause clause)
@@ -1087,6 +1092,17 @@ internal sealed class SelectClauseData
             }
         }
 
+        // Copy projected variables for DISTINCT computation
+        (int, int)[]? projVars = null;
+        if (clause.HasProjectedVariables)
+        {
+            projVars = new (int, int)[clause.ProjectedVariableCount];
+            for (int i = 0; i < clause.ProjectedVariableCount; i++)
+            {
+                projVars[i] = clause.GetProjectedVariable(i);
+            }
+        }
+
         return new SelectClauseData
         {
             Distinct = clause.Distinct,
@@ -1094,7 +1110,8 @@ internal sealed class SelectClauseData
             SelectAll = clause.SelectAll,
             HasAggregates = clause.HasAggregates,
             HasRealAggregates = clause.HasRealAggregates,
-            Aggregates = aggs
+            Aggregates = aggs,
+            ProjectedVariables = projVars
         };
     }
 
@@ -1125,6 +1142,15 @@ internal sealed class SelectClauseData
                     SeparatorStart = agg.SeparatorStart,
                     SeparatorLength = agg.SeparatorLength
                 });
+            }
+        }
+
+        // Restore projected variables
+        if (ProjectedVariables != null)
+        {
+            foreach (var (start, length) in ProjectedVariables)
+            {
+                clause.AddProjectedVariable(start, length);
             }
         }
 

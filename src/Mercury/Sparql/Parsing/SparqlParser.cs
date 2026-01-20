@@ -24,6 +24,7 @@ public ref partial struct SparqlParser
     private int _position;
     private int _quotedTripleCounter; // Counter for generating synthetic reifier variables
     private int _seqVarCounter; // Counter for generating synthetic sequence intermediate variables
+    private int _blankNodePropListCounter; // Counter for generating synthetic blank nodes for [ ] property lists
     private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
     private readonly int _maxDepth; // Maximum allowed recursion depth
 
@@ -52,6 +53,7 @@ public ref partial struct SparqlParser
         _position = 0;
         _quotedTripleCounter = 0;
         _seqVarCounter = 0;
+        _blankNodePropListCounter = 0;
         _currentDepth = 0;
         _maxDepth = maxDepth;
     }
@@ -453,7 +455,7 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Add a triple pattern, handling quoted triples and sequence paths.
+    /// Add a triple pattern, handling quoted triples, blank node property lists, and sequence paths.
     /// </summary>
     private void AddTriplePatternOrExpand(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
     {
@@ -464,20 +466,267 @@ public ref partial struct SparqlParser
             return;
         }
 
+        // Check if subject or object is a blank node property list [ :p :o ]
+        // These need to be expanded to multiple patterns with a generated blank node
+        Term actualSubject = subject;
+        Term actualObject = obj;
+
+        if (IsBlankNodePropertyList(subject))
+        {
+            actualSubject = ExpandBlankNodePropertyList(ref pattern, subject);
+        }
+
+        if (IsBlankNodePropertyList(obj))
+        {
+            actualObject = ExpandBlankNodePropertyList(ref pattern, obj);
+        }
+
         // Check for sequence path - expand to multiple patterns with intermediate variables
         if (path.Type == PathType.Sequence)
         {
-            ExpandSequencePath(ref pattern, subject, obj, path);
+            ExpandSequencePath(ref pattern, actualSubject, actualObject, path);
             return;
         }
 
         pattern.AddPattern(new TriplePattern
         {
-            Subject = subject,
+            Subject = actualSubject,
             Predicate = predicate,
-            Object = obj,
+            Object = actualObject,
             Path = path
         });
+    }
+
+    /// <summary>
+    /// Check if a term is a blank node property list (starts with '[').
+    /// </summary>
+    private bool IsBlankNodePropertyList(Term term)
+    {
+        if (!term.IsBlankNode || term.Length < 2)
+            return false;
+
+        // Check if it starts with '[' - if so, it's a property list, not a named blank node like _:b1
+        return term.Start >= 0 && term.Start < _source.Length && _source[term.Start] == '[';
+    }
+
+    /// <summary>
+    /// Expand a blank node property list into multiple patterns.
+    /// For: ?s :p [ :q :r ; :t :u ]
+    /// Generates a synthetic variable ?_bn{N} and patterns:
+    ///   ?_bn{N} :q :r .
+    ///   ?_bn{N} :t :u .
+    /// Returns the synthetic variable term to be used in the main pattern.
+    /// Uses synthetic variables (not blank nodes) so patterns join properly.
+    /// </summary>
+    private Term ExpandBlankNodePropertyList(ref GraphPattern pattern, Term blankNodePropList)
+    {
+        // Generate a synthetic variable for joining (not a blank node, which would be a wildcard)
+        // We use negative offsets with a specific range to indicate synthetic blank node property list vars
+        var blankNodeIndex = _blankNodePropListCounter++;
+        // Use negative start in range -300 to -331 to indicate synthetic blank node property list variable
+        var syntheticVar = Term.Variable(-(blankNodeIndex + 300), 0);
+
+        // Parse the property list inside the brackets
+        // Save current position and temporarily move to parse the inner content
+        var savedPosition = _position;
+        _position = blankNodePropList.Start + 1; // Skip the opening '['
+        SkipWhitespace();
+
+        // Parse predicate-object pairs until we hit the closing ']'
+        while (!IsAtEnd() && Peek() != ']')
+        {
+            SkipWhitespace();
+
+            // Parse predicate
+            var (innerPredicate, innerPath) = ParsePredicateOrPath();
+            if (innerPredicate.Length == 0 && innerPath.Type == PathType.None)
+                break;
+
+            SkipWhitespace();
+
+            // Parse object
+            var innerObject = ParseTerm();
+            if (innerObject.Length == 0)
+                break;
+
+            // Check if inner object is itself a blank node property list (nested)
+            Term actualInnerObject = innerObject;
+            if (IsBlankNodePropertyList(innerObject))
+            {
+                actualInnerObject = ExpandBlankNodePropertyList(ref pattern, innerObject);
+            }
+
+            // Add the pattern: syntheticVar innerPredicate innerObject
+            if (innerPath.Type == PathType.Sequence)
+            {
+                ExpandSequencePath(ref pattern, syntheticVar, actualInnerObject, innerPath);
+            }
+            else
+            {
+                pattern.AddPattern(new TriplePattern
+                {
+                    Subject = syntheticVar,
+                    Predicate = innerPredicate,
+                    Object = actualInnerObject,
+                    Path = innerPath
+                });
+            }
+
+            SkipWhitespace();
+
+            // Handle comma-separated objects (same predicate): [ :p :o1, :o2 ]
+            while (Peek() == ',')
+            {
+                Advance(); // Skip ','
+                SkipWhitespace();
+
+                innerObject = ParseTerm();
+                if (innerObject.Length == 0)
+                    break;
+
+                actualInnerObject = innerObject;
+                if (IsBlankNodePropertyList(innerObject))
+                {
+                    actualInnerObject = ExpandBlankNodePropertyList(ref pattern, innerObject);
+                }
+
+                if (innerPath.Type == PathType.Sequence)
+                {
+                    ExpandSequencePath(ref pattern, syntheticVar, actualInnerObject, innerPath);
+                }
+                else
+                {
+                    pattern.AddPattern(new TriplePattern
+                    {
+                        Subject = syntheticVar,
+                        Predicate = innerPredicate,
+                        Object = actualInnerObject,
+                        Path = innerPath
+                    });
+                }
+
+                SkipWhitespace();
+            }
+
+            // Handle semicolon-separated predicate-object pairs: [ :p :o ; :q :r ]
+            if (Peek() == ';')
+            {
+                Advance(); // Skip ';'
+                SkipWhitespace();
+                // Continue to next predicate-object pair
+            }
+            else if (Peek() == '.')
+            {
+                Advance(); // Skip '.'
+                SkipWhitespace();
+            }
+            else
+            {
+                // No more pairs
+                break;
+            }
+        }
+
+        // Restore position (we've parsed the property list, caller will skip past the ']')
+        _position = savedPosition;
+
+        return syntheticVar;
+    }
+
+    /// <summary>
+    /// Expand a blank node property list into multiple patterns for a SubSelect.
+    /// Overload that works with SubSelect instead of GraphPattern.
+    /// </summary>
+    private Term ExpandBlankNodePropertyListForSubSelect(ref SubSelect subSelect, Term blankNodePropList)
+    {
+        // Generate a synthetic variable for joining
+        var blankNodeIndex = _blankNodePropListCounter++;
+        var syntheticVar = Term.Variable(-(blankNodeIndex + 300), 0);
+
+        // Parse the property list inside the brackets
+        var savedPosition = _position;
+        _position = blankNodePropList.Start + 1; // Skip the opening '['
+        SkipWhitespace();
+
+        // Parse predicate-object pairs until we hit the closing ']'
+        while (!IsAtEnd() && Peek() != ']')
+        {
+            SkipWhitespace();
+
+            // Parse predicate (simplified - no path support in subselect version for now)
+            var innerPredicate = ParseTerm();
+            if (innerPredicate.Length == 0)
+                break;
+
+            SkipWhitespace();
+
+            // Parse object
+            var innerObject = ParseTerm();
+            if (innerObject.Length == 0)
+                break;
+
+            // Check if inner object is itself a blank node property list (nested)
+            Term actualInnerObject = innerObject;
+            if (IsBlankNodePropertyList(innerObject))
+            {
+                actualInnerObject = ExpandBlankNodePropertyListForSubSelect(ref subSelect, innerObject);
+            }
+
+            // Add the pattern: syntheticVar innerPredicate innerObject
+            subSelect.AddPattern(new TriplePattern
+            {
+                Subject = syntheticVar,
+                Predicate = innerPredicate,
+                Object = actualInnerObject
+            });
+
+            SkipWhitespace();
+
+            // Handle comma-separated objects (same predicate)
+            while (Peek() == ',')
+            {
+                Advance();
+                SkipWhitespace();
+
+                innerObject = ParseTerm();
+                if (innerObject.Length == 0)
+                    break;
+
+                actualInnerObject = innerObject;
+                if (IsBlankNodePropertyList(innerObject))
+                {
+                    actualInnerObject = ExpandBlankNodePropertyListForSubSelect(ref subSelect, innerObject);
+                }
+
+                subSelect.AddPattern(new TriplePattern
+                {
+                    Subject = syntheticVar,
+                    Predicate = innerPredicate,
+                    Object = actualInnerObject
+                });
+
+                SkipWhitespace();
+            }
+
+            // Handle semicolon-separated predicate-object pairs
+            if (Peek() == ';')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+            else if (Peek() == '.')
+            {
+                Advance();
+                SkipWhitespace();
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        _position = savedPosition;
+        return syntheticVar;
     }
 
     /// <summary>
