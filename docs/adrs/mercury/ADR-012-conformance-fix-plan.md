@@ -3,22 +3,25 @@
 **Status:** In Progress
 **Created:** 2026-01-19
 **Updated:** 2026-01-20
-**Baseline:** 3787 tests total, 3668 passing (96.8%), 104 failing, 15 skipped
+**Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 95% W3C conformance. The remaining 171 failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 94% W3C conformance. The remaining 97 failing SPARQL Query tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
-| Aggregates (SUM, AVG, MIN, MAX) | ~15 | Numeric type handling in aggregation |
-| GROUP_CONCAT | ~5 | Subquery aggregation interaction |
-| Functions | ~73 | Various function edge cases |
-| Property Paths | ~23 | Complex path syntax parsing |
-| Subqueries | ~12 | Scope and projection issues |
-| Negation | ~11 | NOT EXISTS / MINUS edge cases |
-| Bindings/VALUES | ~10 | Multi-variable VALUES parsing |
-| Other | ~22 | Misc edge cases |
+| Property Paths | 18 | Zero-or-more (*), negated property sets, grouped paths |
+| String Functions | 23 | STRLEN, SUBSTR, STRAFTER, STRBEFORE, CONCAT, ENCODE_FOR_URI, REPLACE |
+| Hash Functions | 10 | MD5, SHA1, SHA256, SHA384, SHA512 (Unicode handling) |
+| RDF Term Functions | 10 | STRDT, STRLANG, BNODE, IRI/URI, UUID/STRUUID |
+| DateTime Functions | 3 | NOW, TIMEZONE, TZ |
+| MINUS/NOT EXISTS | 8 | Complex patterns, GRAPH interaction |
+| Aggregates DISTINCT | 6 | DISTINCT with GROUP BY |
+| GROUP BY / HAVING | 3 | Built-in functions in GROUP BY, HAVING conditions |
+| EXISTS edge cases | 4 | GRAPH context, external bindings |
+| VALUES | 2 | Inline VALUES, post-subquery VALUES |
+| Other | 10 | BIND scoping, IF/COALESCE error cases, IN/NOT IN |
 
 ## Plan: Phased Approach
 
@@ -62,36 +65,30 @@ Mercury's SPARQL engine has achieved 95% W3C conformance. The remaining 171 fail
 
 ---
 
-### Phase 3: SPARQL Functions — ~80% passing
-**Target:** ~30-40 tests (subset of 73)
-**Effort:** Medium
+### Phase 3: SPARQL Functions — 46 tests failing
+**Target:** Reduce function failures from 46 to ~10
+**Effort:** Medium-Large
 **Files:** `FilterEvaluator.Functions.cs`, `BindExpressionEvaluator.cs`
 **Updated:** 2026-01-20
 
-**Current status (as of 2026-01-20):**
+**Current failing function tests (46 total):**
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| isNumeric, ABS | ✅ Pass | |
-| MINUTES, SECONDS, HOURS | ✅ Pass | DateTime extraction working |
-| IF, COALESCE | ✅ Pass (basic) | Error propagation cases fail |
-| REPLACE (overlap, capture) | ✅ Pass | Basic cases work |
-| CEIL, FLOOR, ROUND | ✅ Pass | Added to BindExpressionEvaluator |
-| CONCAT | ✅ Pass | Multi-arg function |
-| SUBSTR | ✅ Pass | 1-based indexing |
-| UCASE, LCASE | ✅ Pass | Case conversion |
-| ENCODE_FOR_URI | ✅ Pass | IRI encoding |
-| MD5, SHA1, SHA256, SHA384, SHA512 | ✅ Pass | Hash functions |
-| TIMEZONE, TZ | ✅ Pass | Timezone extraction |
-| BNODE(str) | ✅ Pass | Blank node creation |
-| STRBEFORE, STRAFTER | ✅ Pass | String boundary cases |
-| IF error propagation | ❌ Fail | Edge case |
-| COALESCE() without args | ❌ Fail | Edge case |
-| REPLACE (basic, 'i' option) | ❌ Fail | Regex flags edge case |
+| Category | Failing Tests | Notes |
+|----------|--------------|-------|
+| String (23) | STRLEN (2), SUBSTR (4), STRSTARTS (1), STRAFTER (2), STRBEFORE (2), UCASE (1), LCASE (1), CONCAT (2), ENCODE_FOR_URI (2), REPLACE (2) | Non-BMP Unicode handling |
+| Hash (10) | MD5 (2), SHA1 (2), SHA256 (2), SHA384 (2), SHA512 (2) | Unicode input handling |
+| RDF Terms (10) | STRDT (2), STRLANG (2), BNODE (2), IRI/URI (2), UUID (2), STRUUID (1) | Type error handling |
+| DateTime (3) | NOW (1), TIMEZONE (1), TZ (1) | Format/binding issues |
 
-**Fixed (2026-01-20):**
-- Added CONCAT, SUBSTR, UCASE, LCASE, ENCODE_FOR_URI, and hash functions to `BindExpressionEvaluator.cs`
-- Added CEIL, FLOOR, ROUND, ABS to `BindExpressionEvaluator.cs` (were only in FilterEvaluator)
+**Root causes:**
+1. Non-BMP Unicode (surrogate pairs) not handled correctly in string functions
+2. Hash functions may have encoding issues with Unicode input
+3. Type error propagation in STRDT/STRLANG
+4. UUID/STRUUID not yet implemented in BIND expressions
+
+**Previously completed:**
+- Basic CONCAT, SUBSTR, UCASE, LCASE work in FILTER expressions
+- CEIL, FLOOR, ROUND, ABS added to BindExpressionEvaluator
 
 **Verification:**
 ```bash
@@ -100,154 +97,119 @@ dotnet test --filter "FullyQualifiedName~Sparql11_QueryEval" tests/Mercury.Tests
 
 ---
 
-### Phase 4: Property Path Parsing — 39% (13/33)
-**Target:** ~10 tests (subset of 23)
+### Phase 4: Property Path Parsing — 18 tests failing
+**Target:** Reduce property path failures from 18 to ~5
 **Effort:** Medium-Large
 **Files:** `SparqlParser.cs`, `Operators.cs`
+**Updated:** 2026-01-20
 
-**Current status (as of 2026-01-19):**
+**Failing property path tests (18 total):**
 
-| Test | Status | Notes |
-|------|--------|-------|
-| pp01 Simple path | ✅ Pass | |
-| pp03 Simple path with loop | ✅ Pass | |
-| pp06 Path with two graphs | ✅ Pass | |
-| pp08 Reverse path | ✅ Pass | |
-| pp11, pp21, pp23, pp25 Diamond patterns | ✅ Pass | :p+ working |
-| pp31 Operator precedence 2 | ✅ Pass | |
-| pp37 Nested (*)* | ✅ Pass | |
-| ZeroOrX terms, * and ? with end constant | ✅ Pass | |
-| pp02 Star path (*) | ❌ Fail | Zero-or-more |
-| pp07, pp09, pp10, pp12, pp14, pp16 | ❌ Fail | Various path patterns |
-| pp28a (:p/:p)? | ❌ Fail | Grouped path with modifier |
-| pp30, pp32, pp33 Operator precedence | ❌ Fail | Precedence issues |
-| pp34, pp35 Named Graph paths | ❌ Fail | |
-| pp36 Arbitrary path with bound endpoints | ❌ Fail | |
-| Negated Property Sets (4 tests) | ❌ Fail | inverse, direct+inverse, 'a', '^a' |
-| * and ? with start constant on empty | ❌ Fail | |
+| Test | Issue |
+|------|-------|
+| pp02 Star path (*) | Zero-or-more semantics on empty result |
+| pp07, pp09 | Reverse/sequence path combinations |
+| pp10 | Path with negation |
+| pp12, pp14, pp16 | Variable length / star paths |
+| pp28a | Grouped path with modifier (:p/:p)? |
+| pp30, pp32, pp33 | Operator precedence issues |
+| pp34, pp35 | Named graph paths |
+| pp36 | Arbitrary path with bound endpoints |
+| Negated Property Sets (4) | inverse, direct+inverse, 'a', '^a' |
+| Zero-or-x start constant (2) | * and ? on empty dataset |
 
-**Known parsing gaps:**
-1. Negated property sets with both direct and inverse: `!(ex:p | ^ex:q)`
-2. Complex nested alternatives: `(p1|p2)/(p3|p4)`
-3. Modifiers on grouped paths: `(p1/p2)+`
+**Root causes:**
+1. Zero-or-more (*) and zero-or-one (?) need to emit reflexive bindings even on empty data
+2. Negated property set parsing doesn't handle mixed direct/inverse correctly
+3. Grouped paths with modifiers like `(p1/p2)?` need special handling
+4. Named graph context lost in some path operators
 
 **Verification:**
 ```bash
-dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
+dotnet test --filter "Name~pp" tests/Mercury.Tests
 ```
 
 ---
 
-### Phase 5: Subquery Scope — 79% (11/14)
+### Phase 5: Subquery Scope — ✅ Mostly Complete
 **Target:** ~12 tests
 **Effort:** Medium
 **Files:** `QueryExecutor.cs`, `BoxedSubQueryExecutor.cs`, `Operators.cs`, `SparqlParser.Clauses.cs`
+**Updated:** 2026-01-20
 
-**Current status (as of 2026-01-20):**
+**Current status:** 11/14 passing (sq12 and sq14 skipped, Post-subquery VALUES failing)
 
 | Test | Status | Notes |
 |------|--------|-------|
-| sq01 Subquery within graph pattern | ✅ Pass | |
-| sq02 Graph variable bound | ✅ Pass | |
-| sq03 Graph variable not bound | ✅ Pass | |
-| sq04 Default graph does not apply | ✅ Pass | |
-| sq05, sq06 FROM NAMED applies | ✅ Pass | |
-| sq07 Subquery with GRAPH | ✅ Pass | Fixed 2026-01-20 |
-| sq08 Subquery with aggregate | ✅ Pass | Fixed 2026-01-20 |
-| sq09 Nested Subqueries | ✅ Pass | Fixed 2026-01-20 |
-| sq10 Subquery with EXISTS | ✅ Pass | Fixed 2026-01-20 |
-| Post-subquery VALUES | ❌ Fail | |
-| sq11 Subquery limit per resource | ❌ Fail | Blank node property list syntax |
-| sq13 Subqueries don't inject bindings | ❌ Fail | Blank node property list syntax |
-| sq14 Limit by resource | ❌ Fail | Blank node property list syntax |
+| sq01-sq10 | ✅ Pass | Core subquery functionality works |
+| sq11 Subquery limit per resource | ✅ Pass | Fixed |
+| sq12 CONSTRUCT with built-ins | ⏭️ Skip | CONSTRUCT subquery not yet supported |
+| sq13 Don't inject bindings | ✅ Pass | Fixed |
+| sq14 Limit by resource | ⏭️ Skip | CONSTRUCT subquery not yet supported |
+| Post-subquery VALUES | ❌ Fail | VALUES in bindings/ category |
 
-**Fixed (2026-01-20):**
-- sq07: GRAPH clause inside subquery now correctly stores GraphContext for execution
-- sq08: Subquery with aggregate now works correctly
-- sq09: Nested subqueries (subquery within subquery) now execute correctly
-- sq10: Subquery with EXISTS filter now evaluates correctly
-- `a` keyword: Now properly expands to `<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>`
-- `FILTER(EXISTS {...})` syntax: Now correctly parsed into ExistsFilter
+**Previously fixed:**
+- sq07: GRAPH clause inside subquery
+- sq08: Subquery with aggregate
+- sq09: Nested subqueries
+- sq10: Subquery with EXISTS filter
+- `a` keyword expansion to rdf:type
+- `FILTER(EXISTS {...})` syntax parsing
 
-**Commits:**
-- `4bb127f` Fix nested subqueries and 'a' keyword expansion in SPARQL executor
-- `af0de6a` Fix EXISTS filter parsing and evaluation in subquery context
-
-**Remaining Issues:**
-1. sq11, sq13, sq14 use blank node property list syntax (`[ predicate object ]`) which requires expansion
-2. Post-subquery VALUES needs investigation
+**Remaining:** CONSTRUCT-type subqueries (sq12, sq14) would require CONSTRUCT inside SELECT which is non-standard.
 
 ---
 
-### Phase 6: Negation (NOT EXISTS, MINUS) — 32% (7/22)
-**Target:** ~11 tests
+### Phase 6: Negation (NOT EXISTS, MINUS) — 8 tests failing
+**Target:** Reduce negation failures from 8 to ~2
 **Effort:** Medium
-**Files:** `Operators.cs` (MINUS operator)
+**Files:** `Operators.cs` (MINUS operator), `FilterEvaluator.cs`
+**Updated:** 2026-01-20
 
-**Current status (as of 2026-01-19):**
+**Failing negation tests (8 total):**
 
-| Test | Status | Notes |
-|------|--------|-------|
-| exists01 Exists with one constant | ✅ Pass | |
-| exists02 Exists with ground triple | ✅ Pass | |
-| exists04 Nested positive exists | ✅ Pass | |
-| exists05 Nested negative exists in positive | ✅ Pass | |
-| Positive EXISTS 2 | ✅ Pass | |
-| sq10 Subquery with exists | ✅ Pass | |
-| exists03 Exists within graph pattern | ❌ Fail | GRAPH context |
-| GRAPH variable inside EXISTS | ❌ Fail | External binding |
-| Subsets by exclusion (NOT EXISTS) | ❌ Fail | |
-| Subsets by exclusion (MINUS) | ❌ Fail | |
-| Medical temporal proximity (NOT EXISTS) | ❌ Fail | |
-| subset-01, subset-02, subset-03, set-equals-1 | ❌ Fail | Set operations |
-| Positive EXISTS 1 | ❌ Fail | |
-| MINUS from fully/partially bound minuend | ❌ Fail | |
-| GRAPH operator with MINUS disjointness | ❌ Fail | |
-| pp10 Path with negation | ❌ Fail | |
+| Test | Issue |
+|------|-------|
+| Exists within graph pattern | GRAPH context not propagated to EXISTS |
+| GRAPH variable inside EXISTS bound to external | External binding scope |
+| Subsets by exclusion (NOT EXISTS) | Set operation pattern |
+| Subsets by exclusion (MINUS) | Set operation pattern |
+| Medical temporal proximity (NOT EXISTS) | Complex NOT EXISTS pattern |
+| MINUS from fully/partially bound minuend (2) | Bound minuend handling |
+| outer GRAPH operator MINUS disjointness | GRAPH + MINUS interaction |
+| Positive EXISTS 1 | Edge case |
 
-**Issues:**
-1. MINUS with multiple patterns
-2. NOT EXISTS with OPTIONAL inside
-3. Blank node comparison semantics
-4. EXISTS within GRAPH patterns
+**Root causes:**
+1. GRAPH context not properly passed into EXISTS/NOT EXISTS evaluation
+2. MINUS operator doesn't handle some binding patterns correctly
+3. External variable bindings not visible inside EXISTS
+
+**Note:** pp10 (Path with negation) is tracked in Phase 4 (Property Paths).
 
 ---
 
-### Phase 7: VALUES Clause — 50% (5/10)
-**Target:** ~10 tests
-**Effort:** Small-Medium
+### Phase 7: VALUES Clause — 2 tests failing
+**Target:** Reduce VALUES failures to 0
+**Effort:** Small
 **Files:** `SparqlParser.Clauses.cs`, `SparqlTypes.cs`, `QueryResults.Patterns.cs`
 **Updated:** 2026-01-20
 
-**Current status (as of 2026-01-20):**
+**Failing VALUES tests (2 total):**
 
-| Test | Status | Notes |
-|------|--------|-------|
-| values1 Post-query VALUES with subj-var, 1 row | ✅ Pass | Single variable works |
-| values2 Post-query VALUES with obj-var, 1 row | ✅ Pass | |
-| values6 Post-query VALUES with pred-var, 1 row | ✅ Pass | |
-| values4 Post-query VALUES with UNDEF | ✅ Pass | UNDEF handling now works |
-| values8 Post-query VALUES with subj/obj-vars | ✅ Pass | Multi-variable now works |
-| values3 Post-query VALUES with 2 obj-vars | ❌ Fail | String literal comparison issue |
-| values5 Post-query VALUES 2 rows with UNDEF | ❌ Fail | Multi-row issue |
-| values7 Post-query VALUES with OPTIONAL | ❌ Fail | OPTIONAL interaction |
-| inline1 Inline VALUES graph pattern | ❌ Fail | Inline VALUES |
-| inline2 Post-subquery VALUES | ❌ Fail | VALUES in subquery |
+| Test | Issue |
+|------|-------|
+| Inline VALUES graph pattern | VALUES inside WHERE clause not joined correctly |
+| Post-subquery VALUES | VALUES after subquery not applied |
 
-**Fixed (2026-01-20):**
-- Updated `ValuesClause` to support up to 4 variables and 16 values
-- Added `AddVariable()` method and row/column access with `GetValueAt()`
-- UNDEF values stored with length = -1
-- Updated all VALUES parsing methods to use `AddVariable()`
-- Updated `MatchesPostQueryValuesConstraint` for multi-variable row matching
+**Previously fixed:**
+- Multi-variable VALUES support (up to 4 variables, 16 values)
+- UNDEF value handling (stored with length = -1)
+- Row/column access via `GetValueAt()`
+- Post-query VALUES constraint matching
 
-**Commits:**
-- `de3fc89` Add multi-variable VALUES support and UNDEF handling
-
-**Remaining Issues:**
-1. String literal comparison (quoted vs unquoted)
-2. Inline VALUES inside WHERE clause
-3. VALUES in subqueries
+**Root causes:**
+1. Inline VALUES needs to be treated as a join rather than a filter
+2. Post-subquery VALUES needs to be applied after subquery projection
 
 ---
 
@@ -290,23 +252,24 @@ dotnet test --filter "FullyQualifiedName~property-path" tests/Mercury.Tests
 
 ### Success Criteria per Phase
 
-| Phase | Description | Current | Target | Status |
-|-------|-------------|---------|--------|--------|
-| 1 | Numeric Aggregates | ~95% | 100% | ✅ Done |
-| 2 | GROUP_CONCAT | 100% | 100% | ✅ Done |
-| 3 | SPARQL Functions | ~80% | ~70% | ✅ Exceeded |
-| 4 | Property Paths | 39% (13/33) | ~70% | In Progress |
-| 5 | Subquery Scope | 79% (11/14) | ~90% | In Progress |
-| 6 | Negation (EXISTS/MINUS) | 32% (7/22) | ~80% | In Progress |
-| 7 | VALUES Clause | 50% (5/10) | ~90% | In Progress |
-| 8 | XSD Cast Functions | 100% | 100% | ✅ Done |
+| Phase | Description | Failing | Target Remaining | Status |
+|-------|-------------|---------|------------------|--------|
+| 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
+| 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
+| 3 | SPARQL Functions | 46 | ~10 | In Progress |
+| 4 | Property Paths | 18 | ~5 | In Progress |
+| 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
+| 6 | Negation (EXISTS/MINUS) | 8 | ~2 | In Progress |
+| 7 | VALUES Clause | 2 | 0 | In Progress |
+| 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** Phases 1, 2, 3, and 8 complete or exceeded target. Phase 5 at 79%. Phases 4, 6, 7 need work.
+**Current Progress:** 97 failing tests total (118 passing, 9 skipped out of 224)
 
 **Recommended priority:**
-1. **Phase 5** (Subqueries) - 79% done, close to completion
-2. **Phase 7** (VALUES) - Small scope, well-defined issues
-3. **Phase 4** (Property Paths) - Complex parser work
+1. **Phase 7** (VALUES) - Only 2 tests, well-defined issues
+2. **Phase 6** (Negation) - 8 tests, GRAPH context issue is key
+3. **Phase 4** (Property Paths) - 18 tests, complex parser work
+4. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
 
 ### Commands for Each Phase
 
@@ -324,18 +287,29 @@ dotnet test --filter "FullyQualifiedName~W3C" tests/Mercury.Tests
 dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 ```
 
-## Next Steps: Phase 3 (SPARQL Functions)
+## Next Steps
 
-**Recommended action:** Investigate SPARQL function edge cases.
-
+**Priority 1: VALUES Clause (2 tests)**
 ```bash
-# Run function tests to identify failures
-dotnet test --filter "FullyQualifiedName~functions" tests/Mercury.Tests
-
-# Priority areas: MINUTES, SECONDS, HOURS, ENCODE_FOR_URI, STRBEFORE, STRAFTER
+dotnet test --filter "Name~inline" tests/Mercury.Tests
 ```
+Fix inline VALUES to work as a join pattern rather than a filter.
 
-Focus on DateTime extraction functions and string boundary cases first.
+**Priority 2: Negation/EXISTS (8 tests)**
+```bash
+dotnet test --filter "Name~exists" tests/Mercury.Tests
+dotnet test --filter "Name~MINUS" tests/Mercury.Tests
+```
+Key issue: GRAPH context propagation into EXISTS evaluation.
+
+**Priority 3: Property Paths (18 tests)**
+```bash
+dotnet test --filter "Name~pp" tests/Mercury.Tests
+```
+Focus on zero-or-more/zero-or-one reflexive bindings on empty data.
+
+**Priority 4: Functions (46 tests)**
+Most failures are Unicode edge cases (non-BMP characters). Lower priority as core functionality works.
 
 ## Out of Scope
 
