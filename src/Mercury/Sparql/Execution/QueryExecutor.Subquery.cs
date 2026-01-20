@@ -70,6 +70,9 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private List<MaterializedRow>? ExecuteSubQuerySimpleCore(SubSelect subSelect)
     {
+        ref readonly var pattern = ref _cachedPattern;
+        var hasExists = pattern.HasExists;
+
         var results = new List<MaterializedRow>();
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
@@ -81,7 +84,35 @@ public partial class QueryExecutor
         {
             while (subQueryScan.MoveNext(ref bindingTable))
             {
+                // Apply EXISTS/NOT EXISTS filters
+                if (hasExists)
+                {
+                    bool passesExists = true;
+                    for (int i = 0; i < pattern.ExistsFilterCount; i++)
+                    {
+                        var existsFilter = pattern.GetExistsFilter(i);
+                        var matches = EvaluateExistsFilterWithBindings(existsFilter, bindingTable);
+
+                        // EXISTS: must match at least once
+                        // NOT EXISTS: must not match at all
+                        if (existsFilter.Negated)
+                        {
+                            if (matches) { passesExists = false; break; } // NOT EXISTS failed - found a match
+                        }
+                        else
+                        {
+                            if (!matches) { passesExists = false; break; } // EXISTS failed - no match found
+                        }
+                    }
+                    if (!passesExists)
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                }
+
                 results.Add(new MaterializedRow(bindingTable));
+                bindingTable.Clear();
             }
         }
         finally
@@ -365,6 +396,7 @@ public partial class QueryExecutor
         var bindingTable = new BindingTable(joinBindings, _stringBuffer);
 
         var hasFilters = pattern.FilterCount > 0;
+        var hasExists = pattern.HasExists;
 
         // Note: SubQueryJoinScan still takes pattern by value.
         // This is acceptable since we're only copying once (not recursively).
@@ -395,6 +427,33 @@ public partial class QueryExecutor
                     }
                 }
 
+                // Apply EXISTS/NOT EXISTS filters
+                if (hasExists)
+                {
+                    bool passesExists = true;
+                    for (int i = 0; i < pattern.ExistsFilterCount; i++)
+                    {
+                        var existsFilter = pattern.GetExistsFilter(i);
+                        var matches = EvaluateExistsFilterWithBindings(existsFilter, bindingTable);
+
+                        // EXISTS: must match at least once
+                        // NOT EXISTS: must not match at all
+                        if (existsFilter.Negated)
+                        {
+                            if (matches) { passesExists = false; break; } // NOT EXISTS failed - found a match
+                        }
+                        else
+                        {
+                            if (!matches) { passesExists = false; break; } // EXISTS failed - no match found
+                        }
+                    }
+                    if (!passesExists)
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                }
+
                 // Materialize this row
                 results.Add(new MaterializedRow(bindingTable));
                 bindingTable.Clear();
@@ -407,4 +466,92 @@ public partial class QueryExecutor
 
         return results;
     }
+
+    /// <summary>
+    /// Evaluate an EXISTS filter using current bindings.
+    /// Returns true if ALL patterns in the EXISTS filter match.
+    /// </summary>
+    private bool EvaluateExistsFilterWithBindings(ExistsFilter existsFilter, BindingTable bindingTable)
+    {
+        if (!existsFilter.HasPatterns)
+            return false;
+
+        // For each pattern in EXISTS, substitute bound variables and query the store
+        // All patterns must match for EXISTS to succeed (conjunction)
+        for (int p = 0; p < existsFilter.PatternCount; p++)
+        {
+            var tp = existsFilter.GetPattern(p);
+
+            // Resolve terms - use bound values for variables
+            var subject = ResolveExistsTermFromBindings(tp.Subject, bindingTable);
+            var predicate = ResolveExistsTermFromBindings(tp.Predicate, bindingTable);
+            var obj = ResolveExistsTermFromBindings(tp.Object, bindingTable);
+
+            // Query the store
+            var queryResults = _store.QueryCurrent(subject, predicate, obj);
+            try
+            {
+                if (!queryResults.MoveNext())
+                    return false; // No match for this pattern
+            }
+            finally
+            {
+                queryResults.Dispose();
+            }
+        }
+
+        return true; // All patterns matched
+    }
+
+    /// <summary>
+    /// Resolve a term for EXISTS evaluation, substituting bound variables.
+    /// </summary>
+    private ReadOnlySpan<char> ResolveExistsTermFromBindings(Term term, BindingTable bindingTable)
+    {
+        var termSpan = _source.AsSpan(term.Start, term.Length);
+
+        if (term.IsVariable)
+        {
+            // Look up variable in bindings
+            var idx = bindingTable.FindBinding(termSpan);
+            if (idx >= 0)
+            {
+                return bindingTable.GetString(idx);
+            }
+            // Unbound variable - use wildcard
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        // For constants, expand prefixed names if needed
+        if (_prefixMappings != null && termSpan.Length > 0 &&
+            termSpan[0] != '<' && termSpan[0] != '"')
+        {
+            var colonIdx = termSpan.IndexOf(':');
+            if (colonIdx >= 0)
+            {
+                var prefix = termSpan.Slice(0, colonIdx + 1);
+                var localName = termSpan.Slice(colonIdx + 1);
+
+                foreach (var mapping in _prefixMappings)
+                {
+                    var mappedPrefix = _source.AsSpan(mapping.PrefixStart, mapping.PrefixLength);
+
+                    if (prefix.SequenceEqual(mappedPrefix))
+                    {
+                        var iriNs = _source.AsSpan(mapping.IriStart, mapping.IriLength);
+                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+
+                        // Build expanded IRI
+                        _existsExpandedTerm = string.Concat(nsWithoutClose, localName, ">");
+                        return _existsExpandedTerm.AsSpan();
+                    }
+                }
+            }
+        }
+
+        return termSpan;
+    }
+
+    // Temporary storage for expanded EXISTS terms
+    private string? _existsExpandedTerm;
 }

@@ -781,6 +781,62 @@ public partial class QueryExecutorTests
     }
 
     [Fact]
+    public void SubQuery_Sq10_WithExists_ExecutesCorrectly()
+    {
+        // W3C sq10 test case: Subquery with FILTER EXISTS
+        // The subquery returns ?x, ?y bindings, then EXISTS checks if ?x ex:q ?y exists
+        // Data: in:a ex:p in:b, in:a ex:q in:c
+        // Query binds ?x=in:a, ?y=in:b from subquery, then checks EXISTS {in:a ex:q in:b}
+        // Since in:a ex:q in:b does NOT exist (only in:a ex:q in:c), result should be empty
+
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#p>", "<http://www.example.org/instance#b>");
+        Store.AddCurrent("<http://www.example.org/instance#a>", "<http://www.example.org/schema#q>", "<http://www.example.org/instance#c>");
+
+        Store.AcquireReadLock();
+        try
+        {
+            var query = """
+                prefix ex: <http://www.example.org/schema#>
+                prefix in: <http://www.example.org/instance#>
+
+                select ?x where {
+                    {select * where {?x ex:p ?y}}
+                    filter(exists {?x ex:q ?y})
+                }
+                """;
+
+            var parser = new SparqlParser(query.AsSpan());
+            var parsed = parser.ParseQuery();
+
+            // Verify EXISTS filter is parsed into ExistsFilter (not FilterExpr)
+            var outerPattern = parsed.WhereClause.Pattern;
+            Assert.True(outerPattern.HasExists, "EXISTS should be parsed into ExistsFilter");
+
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
+            var results = executor.Execute();
+
+            var xValues = new List<string>();
+            while (results.MoveNext())
+            {
+                var row = results.Current;
+                var idx = row.FindBinding("?x".AsSpan());
+                if (idx >= 0)
+                {
+                    xValues.Add(row.GetString(idx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Expected: 0 results (because ?y=in:b from subquery, but in:a ex:q in:b doesn't exist)
+            Assert.Empty(xValues);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void SubQuery_NestedSubqueries_ParsesCorrectly()
     {
         // Test parsing of sq09-style nested subqueries:

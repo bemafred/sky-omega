@@ -1994,6 +1994,53 @@ public ref partial struct SparqlParser
         // [68] Constraint ::= BrackettedExpression | BuiltInCall | FunctionCall
         if (Peek() == '(')
         {
+            // Check if this is FILTER( EXISTS ... ) or FILTER( NOT EXISTS ... )
+            // We need to look past the '(' to see if EXISTS/NOT follows
+            var savedPos = _position;
+            Advance(); // Skip '('
+            SkipWhitespace();
+
+            var innerSpan = PeekSpan(10);
+
+            if (innerSpan.Length >= 3 && innerSpan[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
+            {
+                // Check if NOT is followed by EXISTS
+                var checkPos = _position;
+                ConsumeKeyword("NOT");
+                SkipWhitespace();
+                var afterNot = PeekSpan(6);
+                if (afterNot.Length >= 6 && afterNot[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsumeKeyword("EXISTS");
+                    SkipWhitespace();
+                    ParseExistsFilter(ref pattern, true);
+                    // Skip the closing ')'
+                    SkipWhitespace();
+                    if (Peek() == ')') Advance();
+                    return;
+                }
+                // Not followed by EXISTS, restore position and continue with regular filter
+                _position = savedPos;
+            }
+            else if (innerSpan.Length >= 6 && innerSpan[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("EXISTS");
+                SkipWhitespace();
+                ParseExistsFilter(ref pattern, false);
+                // Skip the closing ')'
+                SkipWhitespace();
+                if (Peek() == ')') Advance();
+                return;
+            }
+            else
+            {
+                // Not EXISTS, restore position
+                _position = savedPos;
+            }
+        }
+
+        if (Peek() == '(')
+        {
             // BrackettedExpression: FILTER(expr)
             Advance(); // Skip '('
             start = _position;

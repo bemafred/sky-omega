@@ -152,19 +152,20 @@ public class FilterPushdownTests : PooledStoreTestBase
     [Fact]
     public void GetEarliestApplicablePattern_ExistsNotPushed()
     {
-        // EXISTS filters should return -1 (cannot be pushed)
+        // EXISTS filters are now parsed into ExistsFilter (not FilterExpr), so they're
+        // handled separately and not subject to filter pushdown analysis
         var source = "SELECT * WHERE { ?s ?p ?o . FILTER(EXISTS { ?s <http://ex.org/knows> ?x }) }";
         var parser = new SparqlParser(source.AsSpan());
         var query = parser.ParseQuery();
 
         ref readonly var pattern = ref query.WhereClause.Pattern;
-        Assert.True(pattern.FilterCount > 0);
 
-        var filter = pattern.GetFilter(0);
-        var level = FilterAnalyzer.GetEarliestApplicablePattern(filter, source.AsSpan(), pattern, null);
+        // EXISTS is now parsed as ExistsFilter, not FilterExpr
+        Assert.True(pattern.HasExists, "EXISTS should be parsed into ExistsFilter");
+        Assert.Equal(1, pattern.ExistsFilterCount);
 
-        // EXISTS should not be pushed
-        Assert.Equal(-1, level);
+        // No regular filters should exist
+        Assert.Equal(0, pattern.FilterCount);
     }
 
     [Fact]
@@ -194,19 +195,23 @@ public class FilterPushdownTests : PooledStoreTestBase
     [Fact]
     public void GetUnpushableFilters_IdentifiesExistsFilters()
     {
+        // EXISTS inside parentheses is now parsed as ExistsFilter, not FilterExpr
         var source = "SELECT * WHERE { ?s ?p ?o . FILTER(EXISTS { ?s <http://ex.org/knows> ?x }) }";
         var parser = new SparqlParser(source.AsSpan());
         var query = parser.ParseQuery();
 
         ref readonly var pattern = ref query.WhereClause.Pattern;
 
-        // Verify we have at least one filter
-        Assert.True(pattern.FilterCount >= 1);
+        // EXISTS is now parsed into ExistsFilter (not FilterExpr)
+        Assert.True(pattern.HasExists, "EXISTS should be parsed into ExistsFilter");
+        Assert.Equal(1, pattern.ExistsFilterCount);
 
+        // There should be no regular filters to check
+        Assert.Equal(0, pattern.FilterCount);
+
+        // GetUnpushableFilters only applies to regular FilterExpr, so with no FilterExpr, result is empty
         var unpushable = FilterAnalyzer.GetUnpushableFilters(pattern, source.AsSpan(), null);
-
-        // EXISTS filter should be unpushable
-        Assert.True(unpushable.Count >= 1);
+        Assert.Equal(0, unpushable.Count);
     }
 
     #endregion
