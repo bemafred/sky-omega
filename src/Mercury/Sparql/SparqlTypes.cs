@@ -1011,6 +1011,13 @@ public struct BindExpr
     public int ExprLength;   // Length of expression
     public int VarStart;     // Start of target variable (including ?)
     public int VarLength;    // Length of target variable
+    /// <summary>
+    /// Index of the triple pattern after which this BIND should be evaluated.
+    /// -1 means evaluate before any patterns (rare), 0 means after pattern 0, etc.
+    /// This enables proper BIND semantics where the computed variable can be used
+    /// as a constraint in subsequent patterns.
+    /// </summary>
+    public int AfterPatternIndex;
 }
 
 /// <summary>

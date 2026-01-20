@@ -494,6 +494,15 @@ public ref partial struct QueryResults
             bindsSeen++;
 
             var slot = patterns[i];
+
+            // Skip BINDs that were evaluated inline by MultiPatternScan.
+            // BINDs with AfterPatternIndex >= 0 are evaluated after the specified pattern
+            // during the scan's MoveNext() loop, so they shouldn't be re-evaluated here.
+            // Only skip when actually using MultiPatternScan (_isMultiPattern is true).
+            // For single-pattern queries using TriplePatternScan, BINDs must be evaluated here.
+            if (_isMultiPattern && slot.BindAfterPatternIndex >= 0)
+                continue;
+
             var expr = _source.Slice(slot.BindExprStart, slot.BindExprLength);
             var varName = _source.Slice(slot.BindVarStart, slot.BindVarLength);
 

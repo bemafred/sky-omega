@@ -2783,12 +2783,18 @@ public ref partial struct SparqlParser
         }
 
         // Add the bind expression
+        // Set AfterPatternIndex to current pattern count - 1 so BIND is evaluated after
+        // all patterns added so far. This enables proper BIND semantics where:
+        //   ?s ?p ?o .           # pattern 0
+        //   BIND(?o+1 AS ?z)     # AfterPatternIndex = 0, evaluate after pattern 0
+        //   ?s1 ?p1 ?z           # pattern 1 - now ?z is bound from BIND
         pattern.AddBind(new BindExpr
         {
             ExprStart = exprStart,
             ExprLength = exprLength,
             VarStart = varStart,
-            VarLength = varLength
+            VarLength = varLength,
+            AfterPatternIndex = pattern.PatternCount - 1  // Evaluate after all current patterns
         });
     }
 

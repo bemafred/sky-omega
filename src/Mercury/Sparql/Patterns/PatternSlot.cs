@@ -95,13 +95,19 @@ internal ref struct PatternSlot
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Bind (Kind == Bind)
-    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4] = 20 bytes
+    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4][AfterPatternIndex:4] = 24 bytes
     // ───────────────────────────────────────────────────────────────────────
-    
+
     public ref int BindExprStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
     public ref int BindExprLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
     public ref int BindVarStart => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
     public ref int BindVarLength => ref MemoryMarshal.AsRef<int>(_span.Slice(16, 4));
+    /// <summary>
+    /// Index of the triple pattern after which this BIND should be evaluated.
+    /// -1 means evaluate before any patterns, 0 means after pattern 0, etc.
+    /// BINDs with AfterPatternIndex >= 0 are evaluated inline by MultiPatternScan.
+    /// </summary>
+    public ref int BindAfterPatternIndex => ref MemoryMarshal.AsRef<int>(_span.Slice(20, 4));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: GraphHeader (Kind == GraphHeader)
@@ -253,7 +259,12 @@ internal ref struct PatternArray
     /// <summary>
     /// Add a BIND expression
     /// </summary>
-    public void AddBind(int exprStart, int exprLen, int varStart, int varLen)
+    /// <param name="exprStart">Start offset of the expression in the source</param>
+    /// <param name="exprLen">Length of the expression</param>
+    /// <param name="varStart">Start offset of the target variable (including ?)</param>
+    /// <param name="varLen">Length of the variable name</param>
+    /// <param name="afterPatternIndex">Triple pattern index after which to evaluate (-1 for before any patterns)</param>
+    public void AddBind(int exprStart, int exprLen, int varStart, int varLen, int afterPatternIndex = -1)
     {
         var slot = AllocateSlot();
         slot.Kind = PatternKind.Bind;
@@ -261,6 +272,7 @@ internal ref struct PatternArray
         slot.BindExprLength = exprLen;
         slot.BindVarStart = varStart;
         slot.BindVarLength = varLen;
+        slot.BindAfterPatternIndex = afterPatternIndex;
     }
     
     /// <summary>
@@ -969,7 +981,8 @@ internal sealed class QueryBuffer : IDisposable
                         ExprStart = slot.BindExprStart,
                         ExprLength = slot.BindExprLength,
                         VarStart = slot.BindVarStart,
-                        VarLength = slot.BindVarLength
+                        VarLength = slot.BindVarLength,
+                        AfterPatternIndex = slot.BindAfterPatternIndex
                     });
                     break;
             }
@@ -1391,7 +1404,7 @@ internal static class QueryBufferAdapter
         for (int i = 0; i < gp.BindCount; i++)
         {
             var b = gp.GetBind(i);
-            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength);
+            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength, b.AfterPatternIndex);
         }
 
         // Add GRAPH clauses

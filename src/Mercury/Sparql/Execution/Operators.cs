@@ -1109,6 +1109,13 @@ internal ref struct MultiPatternScan
                     continue;
                 }
 
+                // Evaluate any BIND expressions that should run after this pattern level.
+                // This enables proper BIND semantics where:
+                //   ?s ?p ?o .           # pattern 0
+                //   BIND(?o+1 AS ?z)     # evaluated here, after pattern 0
+                //   ?s1 ?p1 ?z           # pattern 1 - now ?z is bound from BIND
+                EvaluateBindsForLevel(_currentLevel, ref bindings);
+
                 if (_currentLevel == patternCount - 1)
                 {
                     // At deepest level - we have a complete result
@@ -1152,6 +1159,58 @@ internal ref struct MultiPatternScan
             case 9: _init9 = value; break;
             case 10: _init10 = value; break;
             case 11: _init11 = value; break;
+        }
+    }
+
+    /// <summary>
+    /// Evaluate BIND expressions that should run after the pattern at the given level.
+    /// This enables proper BIND semantics where computed variables can be used as constraints
+    /// in subsequent patterns.
+    /// </summary>
+    private void EvaluateBindsForLevel(int level, scoped ref BindingTable bindings)
+    {
+        var pattern = CurrentPattern;
+        if (pattern.BindCount == 0) return;
+
+        // Determine the pattern index at this level (accounting for pattern reordering)
+        var patternIndex = _patternOrder != null && level < _patternOrder.Length
+            ? _patternOrder[level]
+            : level;
+
+        // Evaluate all BINDs whose AfterPatternIndex matches this pattern
+        for (int i = 0; i < pattern.BindCount; i++)
+        {
+            var bind = pattern.GetBind(i);
+            if (bind.AfterPatternIndex != patternIndex) continue;
+
+            // Get expression and variable name from source
+            var expr = _source.Slice(bind.ExprStart, bind.ExprLength);
+            var varName = _source.Slice(bind.VarStart, bind.VarLength);
+
+            // Evaluate the expression
+            var evaluator = new BindExpressionEvaluator(expr,
+                bindings.GetBindings(),
+                bindings.Count,
+                bindings.GetStringBuffer());
+            var value = evaluator.Evaluate();
+
+            // Bind the result to the target variable using typed overloads
+            switch (value.Type)
+            {
+                case ValueType.Integer:
+                    bindings.Bind(varName, value.IntegerValue);
+                    break;
+                case ValueType.Double:
+                    bindings.Bind(varName, value.DoubleValue);
+                    break;
+                case ValueType.Boolean:
+                    bindings.Bind(varName, value.BooleanValue);
+                    break;
+                case ValueType.String:
+                case ValueType.Uri:
+                    bindings.Bind(varName, value.StringValue);
+                    break;
+            }
         }
     }
 
@@ -1583,7 +1642,68 @@ internal ref struct MultiPatternScan
 
         var name = _source.Slice(term.Start, term.Length);
         var index = bindings.FindBinding(name);
-        return index >= 0 ? bindings.GetString(index) : ReadOnlySpan<char>.Empty;
+        if (index < 0)
+            return ReadOnlySpan<char>.Empty;
+
+        // For typed values from BIND, format as proper RDF literal for store matching
+        var bindingType = bindings.GetType(index);
+        if (bindingType == BindingValueType.Integer)
+        {
+            // Format as: "2"^^<http://www.w3.org/2001/XMLSchema#integer>
+            var intVal = bindings.GetInteger(index);
+            var formatted = $"\"{intVal}\"^^<http://www.w3.org/2001/XMLSchema#integer>";
+            switch (position)
+            {
+                case TermPosition.Subject:
+                    _expandedSubject = formatted;
+                    return _expandedSubject.AsSpan();
+                case TermPosition.Predicate:
+                    _expandedPredicate = formatted;
+                    return _expandedPredicate.AsSpan();
+                default:
+                    _expandedObject = formatted;
+                    return _expandedObject.AsSpan();
+            }
+        }
+        else if (bindingType == BindingValueType.Double)
+        {
+            // Format as: "3.14"^^<http://www.w3.org/2001/XMLSchema#double>
+            var doubleVal = bindings.GetDouble(index);
+            var formatted = $"\"{doubleVal}\"^^<http://www.w3.org/2001/XMLSchema#double>";
+            switch (position)
+            {
+                case TermPosition.Subject:
+                    _expandedSubject = formatted;
+                    return _expandedSubject.AsSpan();
+                case TermPosition.Predicate:
+                    _expandedPredicate = formatted;
+                    return _expandedPredicate.AsSpan();
+                default:
+                    _expandedObject = formatted;
+                    return _expandedObject.AsSpan();
+            }
+        }
+        else if (bindingType == BindingValueType.Boolean)
+        {
+            // Format as: "true"^^<http://www.w3.org/2001/XMLSchema#boolean>
+            var boolVal = bindings.GetBoolean(index);
+            var formatted = $"\"{(boolVal ? "true" : "false")}\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            switch (position)
+            {
+                case TermPosition.Subject:
+                    _expandedSubject = formatted;
+                    return _expandedSubject.AsSpan();
+                case TermPosition.Predicate:
+                    _expandedPredicate = formatted;
+                    return _expandedPredicate.AsSpan();
+                default:
+                    _expandedObject = formatted;
+                    return _expandedObject.AsSpan();
+            }
+        }
+
+        // For String and Uri types, return the raw value
+        return bindings.GetString(index);
     }
 
     private TemporalResultEnumerator ExecuteTemporalQuery(
@@ -1652,12 +1772,106 @@ internal ref struct MultiPatternScan
 
         if (existingIndex >= 0)
         {
+            // Check if existing binding is a typed value (Integer, Double, Boolean)
+            // These need semantic comparison with store values (which include type suffixes)
+            var bindingType = bindings.GetType(existingIndex);
+
+            if (bindingType == BindingValueType.Integer)
+            {
+                // Compare integer: existing is numeric, store value is "N"^^<xsd:integer>
+                var existingInt = bindings.GetInteger(existingIndex);
+                // Try to parse incoming value as typed integer literal
+                if (TryParseIntegerLiteral(value, out var parsedInt))
+                {
+                    return existingInt == parsedInt;
+                }
+                return false;
+            }
+            else if (bindingType == BindingValueType.Double)
+            {
+                // Compare double: existing is numeric, store value is "N.N"^^<xsd:double/decimal>
+                var existingDouble = bindings.GetDouble(existingIndex);
+                if (TryParseDoubleLiteral(value, out var parsedDouble))
+                {
+                    return Math.Abs(existingDouble - parsedDouble) < 1e-10;
+                }
+                return false;
+            }
+            else if (bindingType == BindingValueType.Boolean)
+            {
+                // Compare boolean
+                var existingBool = bindings.GetBoolean(existingIndex);
+                if (TryParseBooleanLiteral(value, out var parsedBool))
+                {
+                    return existingBool == parsedBool;
+                }
+                return false;
+            }
+
+            // String comparison for String/Uri types
             var existingValue = bindings.GetString(existingIndex);
             return value.SequenceEqual(existingValue);
         }
 
         bindings.Bind(varName, value);
         return true;
+    }
+
+    // Parse typed integer literal: "N"^^<http://www.w3.org/2001/XMLSchema#integer>
+    private static bool TryParseIntegerLiteral(ReadOnlySpan<char> literal, out long value)
+    {
+        value = 0;
+        if (literal.Length < 3 || literal[0] != '"')
+            return false;
+
+        // Find closing quote
+        var closeQuote = literal.Slice(1).IndexOf('"');
+        if (closeQuote < 0)
+            return false;
+
+        var numberPart = literal.Slice(1, closeQuote);
+        return long.TryParse(numberPart, out value);
+    }
+
+    // Parse typed double literal: "N.N"^^<http://www.w3.org/2001/XMLSchema#double/decimal>
+    private static bool TryParseDoubleLiteral(ReadOnlySpan<char> literal, out double value)
+    {
+        value = 0;
+        if (literal.Length < 3 || literal[0] != '"')
+            return false;
+
+        var closeQuote = literal.Slice(1).IndexOf('"');
+        if (closeQuote < 0)
+            return false;
+
+        var numberPart = literal.Slice(1, closeQuote);
+        return double.TryParse(numberPart, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out value);
+    }
+
+    // Parse typed boolean literal: "true"^^<xsd:boolean> or "false"^^<xsd:boolean>
+    private static bool TryParseBooleanLiteral(ReadOnlySpan<char> literal, out bool value)
+    {
+        value = false;
+        if (literal.Length < 5 || literal[0] != '"')
+            return false;
+
+        var closeQuote = literal.Slice(1).IndexOf('"');
+        if (closeQuote < 0)
+            return false;
+
+        var boolPart = literal.Slice(1, closeQuote);
+        if (boolPart.SequenceEqual("true".AsSpan()))
+        {
+            value = true;
+            return true;
+        }
+        if (boolPart.SequenceEqual("false".AsSpan()))
+        {
+            value = false;
+            return true;
+        }
+        return false;
     }
 
     public void Dispose()
