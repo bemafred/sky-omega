@@ -195,6 +195,7 @@ internal ref struct TriplePatternScan
     // State for sequence within alternative (e.g., p2/:p3 in p1|p2/:p3|p4)
     private bool _inSequencePhase;           // Currently collecting intermediates from first step
     private bool _inSequenceSecondStep;      // Currently executing second step (intermediates → final)
+    private bool _sequenceFirstStepIsInverse; // True if first step of sequence is inverse (^pred)
     private Queue<string>? _sequenceIntermediates; // Intermediate nodes from first step of sequence
     // Note: Second predicate stored in _expandedPredicate as string
 
@@ -270,6 +271,7 @@ internal ref struct TriplePatternScan
         _alternativeRemainingStart = 0;
         _alternativeRemainingLength = 0;
         _inSequencePhase = false;
+        _sequenceFirstStepIsInverse = false;
         _sequenceIntermediates = null;
         _negatedSetPhase = 0;
         _negatedSetHasInverse = false;
@@ -381,8 +383,11 @@ internal ref struct TriplePatternScan
                     // For alternative path, handling depends on whether we're in a sequence phase
                     if (_inSequencePhase && _sequenceIntermediates != null)
                     {
-                        // First step of sequence - collect object as intermediate, don't return yet
-                        _sequenceIntermediates.Enqueue(triple.Object.ToString());
+                        // First step of sequence - collect intermediate, don't return yet
+                        // For inverse first step (^pred), we found ?x pred :start, so collect Subject
+                        // For direct first step, we found :start pred ?x, so collect Object
+                        var intermediate = _sequenceFirstStepIsInverse ? triple.Subject : triple.Object;
+                        _sequenceIntermediates.Enqueue(intermediate.ToString());
                         continue;
                     }
 
@@ -481,6 +486,11 @@ internal ref struct TriplePatternScan
                         var firstPred = currentSegment.Slice(0, slashIdx);
                         var secondPred = currentSegment.Slice(slashIdx + 1);
 
+                        // Check if first predicate is inverse (^pred)
+                        bool firstIsInverse = firstPred.Length > 0 && firstPred[0] == '^';
+                        if (firstIsInverse)
+                            firstPred = firstPred.Slice(1); // Strip ^
+
                         // IMPORTANT: Expand second predicate FIRST and save as string,
                         // because ExpandPathPredicateSpan overwrites _expandedPredicate
                         var expandedSecondPred = ExpandPathPredicateSpan(secondPred).ToString();
@@ -493,16 +503,31 @@ internal ref struct TriplePatternScan
 
                         _inSequencePhase = true;
                         _inSequenceSecondStep = false;  // Reset - starting new sequence first step
+                        _sequenceFirstStepIsInverse = firstIsInverse;
                         _sequenceIntermediates = new Queue<string>();
 
-                        _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
+                        // For inverse first step ^pred from :a, query (*, pred, :a) to find triples where object=:a
+                        // For direct first step from :a, query (:a, pred, *) to find triples where subject=:a
+                        if (firstIsInverse)
+                            _enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, subject);
+                        else
+                            _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
                     }
                     else
                     {
                         // Simple predicate - reset sequence state
                         _inSequenceSecondStep = false;
-                        var predicate = ExpandPathPredicateSpan(currentSegment);
-                        _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+
+                        // Check if predicate is inverse (^pred)
+                        bool isInverse = currentSegment.Length > 0 && currentSegment[0] == '^';
+                        var predSpan = isInverse ? currentSegment.Slice(1) : currentSegment;
+                        var predicate = ExpandPathPredicateSpan(predSpan);
+
+                        // For inverse, swap subject and object in query
+                        if (isInverse)
+                            _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
+                        else
+                            _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
                     }
                     continue;
                 }
@@ -747,20 +772,64 @@ internal ref struct TriplePatternScan
                 var firstPred = leftSpan.Slice(0, slashIdx);
                 var secondPred = leftSpan.Slice(slashIdx + 1);
 
-                predicate = ExpandPathPredicateSpan(firstPred);
-                _inSequencePhase = true;
-                // Store second predicate as string for later use in MoveNext
+                // Store second predicate for later use in MoveNext
                 _expandedPredicate = secondPred.ToString();
                 _sequenceIntermediates = new Queue<string>();
 
-                // Query first step - results will be collected as intermediates
-                _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
+                // Check if first step is a grouped alternative like (:p0|^:p1)
+                if (firstPred.Length > 2 && firstPred[0] == '(' && firstPred[^1] == ')')
+                {
+                    // Grouped alternative - execute each branch and collect all intermediates
+                    var groupInner = firstPred.Slice(1, firstPred.Length - 2);
+                    ExecuteGroupedAlternativeFirstStep(groupInner, subject);
+                    // We've collected all intermediates, skip straight to second step
+                    _inSequencePhase = false;
+                    _inSequenceSecondStep = true;
+                    // Start processing intermediates
+                    if (_sequenceIntermediates.Count > 0)
+                    {
+                        var expandedSecondPred = ExpandPathPredicateSpan(secondPred);
+                        var intermediate = _sequenceIntermediates.Dequeue();
+                        _enumerator = ExecuteTemporalQuery(intermediate.AsSpan(), expandedSecondPred, obj);
+                    }
+                    else
+                    {
+                        // No intermediates - set up empty enumerator
+                        _enumerator = ExecuteTemporalQuery("__no_match__".AsSpan(), "__no_match__".AsSpan(), "__no_match__".AsSpan());
+                    }
+                }
+                else
+                {
+                    // Simple predicate - check if first predicate is inverse (^pred)
+                    bool firstIsInverse = firstPred.Length > 0 && firstPred[0] == '^';
+                    if (firstIsInverse)
+                        firstPred = firstPred.Slice(1); // Strip ^
+
+                    predicate = ExpandPathPredicateSpan(firstPred);
+                    _inSequencePhase = true;
+                    _sequenceFirstStepIsInverse = firstIsInverse;
+
+                    // Query first step - results will be collected as intermediates
+                    // For inverse first step ^pred from :a, query (*, pred, :a) to find triples where object=:a
+                    // For direct first step from :a, query (:a, pred, *) to find triples where subject=:a
+                    if (firstIsInverse)
+                        _enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, subject);
+                    else
+                        _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
+                }
             }
             else
             {
-                // Simple predicate - query directly
-                predicate = ExpandPathPredicate(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-                _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+                // Simple predicate - check for inverse
+                bool isInverse = leftSpan.Length > 0 && leftSpan[0] == '^';
+                var predSpan = isInverse ? leftSpan.Slice(1) : leftSpan;
+                predicate = ExpandPathPredicateSpan(predSpan);
+
+                // For inverse, swap subject and object in query
+                if (isInverse)
+                    _enumerator = ExecuteTemporalQuery(obj, predicate, subject);
+                else
+                    _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
             }
         }
         else if (_isNegatedSet)
@@ -1391,6 +1460,64 @@ internal ref struct TriplePatternScan
         }
 
         return predSpan;
+    }
+
+    /// <summary>
+    /// Execute a grouped alternative as the first step of a sequence.
+    /// Parses alternatives from the group (e.g., ":p0|^:p1") and executes each,
+    /// collecting intermediates from all branches into _sequenceIntermediates.
+    /// </summary>
+    private void ExecuteGroupedAlternativeFirstStep(ReadOnlySpan<char> groupInner, ReadOnlySpan<char> subject)
+    {
+        // Split by | at top level
+        var remaining = groupInner;
+        while (!remaining.IsEmpty)
+        {
+            var pipeIdx = FindTopLevelOperator(remaining, '|');
+            ReadOnlySpan<char> current;
+
+            if (pipeIdx < 0)
+            {
+                current = remaining.Trim();
+                remaining = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                current = remaining[..pipeIdx].Trim();
+                remaining = remaining[(pipeIdx + 1)..];
+            }
+
+            if (current.IsEmpty)
+                continue;
+
+            // Check if this branch is inverse (^pred)
+            bool isInverse = current[0] == '^';
+            var predSpan = isInverse ? current.Slice(1) : current;
+            var predicate = ExpandPathPredicateSpan(predSpan);
+
+            // Execute query for this branch
+            TemporalResultEnumerator enumerator;
+            if (isInverse)
+            {
+                // ^pred from :a: find triples where object=:a, collect subject as intermediate
+                enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, subject);
+            }
+            else
+            {
+                // pred from :a: find triples where subject=:a, collect object as intermediate
+                enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
+            }
+
+            // Collect all results as intermediates
+            while (enumerator.MoveNext())
+            {
+                var triple = enumerator.Current;
+                // For inverse, collect Subject; for direct, collect Object
+                var intermediate = isInverse ? triple.Subject : triple.Object;
+                _sequenceIntermediates!.Enqueue(intermediate.ToString());
+            }
+            enumerator.Dispose();
+        }
     }
 
     /// <summary>

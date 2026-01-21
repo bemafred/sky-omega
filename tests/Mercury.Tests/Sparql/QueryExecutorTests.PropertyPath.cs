@@ -11,6 +11,26 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 
 public partial class QueryExecutorTests
 {
+    #region Grouped Property Path Tests
+
+    [Fact]
+    public void Parse_GroupedSequence_TwoGroups()
+    {
+        // pp31: (:p1|:p2)/(:p3|:p4) - grouped alternative followed by grouped alternative
+        // Use exact W3C format
+        var query = @"prefix :  <http://www.example.org/>
+select ?t
+where {
+  :a (:p1|:p2)/(:p3|:p4) ?t
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsed = parser.ParseQuery();  // Should not throw
+
+        Assert.True(parsed.WhereClause.Pattern.PatternCount > 0);
+    }
+
+    #endregion
+
     #region Property Path Sequence Tests
 
     [Fact]
@@ -1219,6 +1239,155 @@ WHERE {
             Assert.Contains("<http://www.example.org/b>", found);
             Assert.Contains("<http://www.example.org/c>", found);
             Assert.Contains("<http://www.example.org/e>", found);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OperatorPrecedence_PP32_InverseInSequence()
+    {
+        // PP32: :a :p0|^:p1/:p2|:p3 ?t
+        // Parse as: :p0 | (^:p1/:p2) | :p3
+        // Data from W3C test path-p3.ttl:
+        // :a :p0 :c .   -> via :p0 → :c
+        // :a :p3 :b .   -> via :p3 → :b
+        // :d :p1 :a .   -> ^:p1 from :a → :d
+        // :d :p2 :e .   -> :d :p2 → :e (second step after ^:p1)
+        // Expected: :c, :e, :b (3 results)
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p0>", "<http://www.example.org/c>");
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p3>", "<http://www.example.org/b>");
+        Store.AddCurrentBatched("<http://www.example.org/d>", "<http://www.example.org/p1>", "<http://www.example.org/a>");
+        Store.AddCurrentBatched("<http://www.example.org/d>", "<http://www.example.org/p2>", "<http://www.example.org/e>");
+        // Additional data from the file
+        Store.AddCurrentBatched("<http://www.example.org/c>", "<http://www.example.org/p2>", "<http://www.example.org/f>");
+        Store.AddCurrentBatched("<http://www.example.org/c>", "<http://www.example.org/p3>", "<http://www.example.org/g>");
+        Store.CommitBatch();
+
+        var query = @"
+PREFIX : <http://www.example.org/>
+SELECT ?t
+WHERE {
+  :a :p0|^:p1/:p2|:p3 ?t
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Debug: Check parsing
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath, "Should have property path");
+        Assert.Equal(PathType.Alternative, pattern.Path.Type);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var tIdx = results.Current.FindBinding("?t".AsSpan());
+                if (tIdx >= 0)
+                {
+                    var val = results.Current.GetString(tIdx).ToString();
+                    found.Add(val);
+                    System.Console.WriteLine($"PP32 Found: {val}");
+                }
+            }
+            results.Dispose();
+
+            // Debug: show what we found
+            if (found.Count != 3)
+            {
+                var msg = $"Found {found.Count} results: {string.Join(", ", found)}. Expected :c, :e, :b";
+                Assert.Fail(msg);
+            }
+            Assert.Contains("<http://www.example.org/c>", found);  // via :p0
+            Assert.Contains("<http://www.example.org/e>", found);  // via ^:p1/:p2
+            Assert.Contains("<http://www.example.org/b>", found);  // via :p3
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OperatorPrecedence_PP33_GroupedAlternativeWithInverseInSequence()
+    {
+        // PP33: :a (:p0|^:p1)/:p2|:p3 ?t
+        // Parse as: ((:p0|^:p1)/:p2) | :p3
+        // Data from W3C test path-p3.ttl:
+        // :a :p0 :c .   -> :p0 from :a → :c
+        // :d :p1 :a .   -> ^:p1 from :a → :d
+        // :d :p2 :e .   -> :p2 from :d → :e
+        // :c :p2 :f .   -> :p2 from :c → :f
+        // :a :p3 :b .   -> :p3 from :a → :b
+        // Expected: :e (via ^:p1/:p2), :f (via :p0/:p2), :b (via :p3)
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p0>", "<http://www.example.org/c>");
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p3>", "<http://www.example.org/b>");
+        Store.AddCurrentBatched("<http://www.example.org/d>", "<http://www.example.org/p1>", "<http://www.example.org/a>");
+        Store.AddCurrentBatched("<http://www.example.org/d>", "<http://www.example.org/p2>", "<http://www.example.org/e>");
+        Store.AddCurrentBatched("<http://www.example.org/c>", "<http://www.example.org/p2>", "<http://www.example.org/f>");
+        Store.AddCurrentBatched("<http://www.example.org/c>", "<http://www.example.org/p3>", "<http://www.example.org/g>");
+        Store.CommitBatch();
+
+        var query = @"
+PREFIX : <http://www.example.org/>
+SELECT ?t
+WHERE {
+  :a (:p0|^:p1)/:p2|:p3 ?t
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Debug: Check parsing
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath, "Should have property path");
+        // Top-level should be Alternative: ((:p0|^:p1)/:p2) | :p3
+
+        // Debug parsing info
+        var leftSpan = query.AsSpan().Slice(pattern.Path.LeftStart, pattern.Path.LeftLength);
+        var rightSpan = query.AsSpan().Slice(pattern.Path.RightStart, pattern.Path.RightLength);
+        System.Console.WriteLine($"Path type: {pattern.Path.Type}");
+        System.Console.WriteLine($"Left: '{leftSpan}'");
+        System.Console.WriteLine($"Right: '{rightSpan}'");
+
+        Assert.Equal(PathType.Alternative, pattern.Path.Type);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var tIdx = results.Current.FindBinding("?t".AsSpan());
+                if (tIdx >= 0)
+                {
+                    var val = results.Current.GetString(tIdx).ToString();
+                    found.Add(val);
+                    System.Console.WriteLine($"PP33 Found: {val}");
+                }
+            }
+            results.Dispose();
+
+            // Debug: show what we found
+            if (found.Count != 3)
+            {
+                var msg = $"Found {found.Count} results: {string.Join(", ", found)}. Expected :e, :f, :b";
+                Assert.Fail(msg);
+            }
+            Assert.Contains("<http://www.example.org/e>", found);  // via ^:p1/:p2
+            Assert.Contains("<http://www.example.org/f>", found);  // via :p0/:p2
+            Assert.Contains("<http://www.example.org/b>", found);  // via :p3
         }
         finally
         {

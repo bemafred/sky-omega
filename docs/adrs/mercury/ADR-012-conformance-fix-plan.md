@@ -4,15 +4,15 @@
 **Created:** 2026-01-19
 **Updated:** 2026-01-21
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1904 W3C tests, 1817 passing (95%), 71 failing, 16 skipped
+**Current:** 1904 W3C tests, 1818 passing (95%), 70 failing, 16 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 95% W3C conformance (1817/1904 tests). For SPARQL 1.1 Query specifically: 144/224 passing (64%). The remaining 71 failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 95% W3C conformance (1818/1904 tests). For SPARQL 1.1 Query specifically: 147/224 passing (66%). The remaining 68 failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
-| Property Paths | 11 | Grouped paths, named graph context |
+| Property Paths | 6 | Named graph context, grouped modifiers |
 | String Functions | 23 | STRLEN, SUBSTR, STRAFTER, STRBEFORE, CONCAT, ENCODE_FOR_URI, REPLACE |
 | Hash Functions | 10 | MD5, SHA1, SHA256, SHA384, SHA512 (Unicode handling) |
 | RDF Term Functions | 10 | STRDT, STRLANG, BNODE, IRI/URI, UUID/STRUUID |
@@ -98,7 +98,7 @@ dotnet test --filter "FullyQualifiedName~Sparql11_QueryEval" tests/Mercury.Tests
 
 ---
 
-### Phase 4: Property Path Parsing — 11 tests failing (was 18)
+### Phase 4: Property Path Parsing — 6 tests failing (was 18)
 **Target:** Reduce property path failures from 18 to ~5
 **Effort:** Medium-Large
 **Files:** `SparqlParser.cs`, `Operators.cs`
@@ -106,20 +106,22 @@ dotnet test --filter "FullyQualifiedName~Sparql11_QueryEval" tests/Mercury.Tests
 
 **Fixed property path tests:**
 - pp30 ✅ sequence-within-alternative operator precedence (2026-01-21)
+- pp31 ✅ grouped path followed by path continuation (2026-01-21)
+- pp32 ✅ inverse predicate in sequence within alternative (2026-01-21)
+- pp33 ✅ grouped alternative as first step of sequence (2026-01-21)
 
-**Remaining failing property path tests (11 total):**
+**Remaining failing property path tests (6 total):**
 
 | Test | Issue |
 |------|-------|
 | pp06, pp07 | Named graph + sequence path combinations |
-| pp31, pp32, pp33 | Grouped alternative/sequence combinations |
+| pp16 | Duplicate paths and cycles through foaf:knows* |
+| pp28a | Diamond, with loop -- (:p/:p)? |
 | pp34, pp35 | Named graph paths with arbitrary predicates |
-| Negated Property Sets (4) | inverse, direct+inverse, 'a', '^a' |
 
 **Root causes:**
-1. Grouped paths with modifiers like `(p1|p2/p3)` need special handling
-2. Named graph context lost in some path operators
-3. Negated property set parsing doesn't handle mixed direct/inverse correctly
+1. Named graph context lost in some path operators
+2. Grouped sequence modifiers like (:p/:p)? need special handling
 
 **Verification:**
 ```bash
@@ -249,17 +251,17 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
 | 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
 | 3 | SPARQL Functions | 46 | ~10 | In Progress |
-| 4 | Property Paths | 11 | ~5 | In Progress |
+| 4 | Property Paths | 6 | ~5 | ✅ Nearly Done |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 0 | 0 | ✅ Done |
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 71 failing tests total (144 passing, 9 skipped out of 224) — 64% conformance
+**Current Progress:** 68 failing tests total (147 passing, 9 skipped out of 224) — 66% conformance
 
 **Recommended priority:**
-1. **Phase 4** (Property Paths) - 11 tests remaining, grouped paths and named graphs
-2. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
+1. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
+2. **Phase 4** (Property Paths) - 6 tests remaining, mostly named graphs
 
 ### Commands for Each Phase
 
@@ -279,20 +281,21 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 
 ## Next Steps
 
-**Priority 1: Property Paths (11 tests)**
+**Priority 1: Functions (46 tests)**
+Most failures are Unicode edge cases (non-BMP characters). Lower priority as core functionality works.
+
+**Priority 2: Property Paths (6 tests)**
 ```bash
 dotnet test --filter "Name~pp" tests/Mercury.Tests
 ```
 Focus on:
-- pp31-pp33: Grouped alternative/sequence combinations
 - pp06, pp07, pp34, pp35: Named graph + path interactions
-
-**Priority 2: Functions (46 tests)**
-Most failures are Unicode edge cases (non-BMP characters). Lower priority as core functionality works.
+- pp16, pp28a: Grouped sequence modifiers
 
 **Completed:**
 - ✅ Negation/EXISTS (12/12 tests) - GRAPH context, MINUS semantics
 - ✅ pp30 sequence-within-alternative operator precedence
+- ✅ pp31-pp33 grouped alternative/sequence combinations (2026-01-21)
 
 ## Out of Scope
 

@@ -1130,18 +1130,18 @@ public ref partial struct SparqlParser
                 // and mark it as ZeroOrMore with Sequence type inner path
                 if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
                 {
-                    return (innerTerm, PropertyPath.GroupedZeroOrMore(contentStart, contentLength));
+                    return CheckGroupedPathContinuation(innerTerm, PropertyPath.GroupedZeroOrMore(contentStart, contentLength), groupStart);
                 }
-                return (innerTerm, PropertyPath.ZeroOrMore(innerTerm));
+                return CheckGroupedPathContinuation(innerTerm, PropertyPath.ZeroOrMore(innerTerm), groupStart);
             }
             if (ch == '+')
             {
                 Advance();
                 if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
                 {
-                    return (innerTerm, PropertyPath.GroupedOneOrMore(contentStart, contentLength));
+                    return CheckGroupedPathContinuation(innerTerm, PropertyPath.GroupedOneOrMore(contentStart, contentLength), groupStart);
                 }
-                return (innerTerm, PropertyPath.OneOrMore(innerTerm));
+                return CheckGroupedPathContinuation(innerTerm, PropertyPath.OneOrMore(innerTerm), groupStart);
             }
             if (ch == '?')
             {
@@ -1151,14 +1151,15 @@ public ref partial struct SparqlParser
                     Advance();
                     if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
                     {
-                        return (innerTerm, PropertyPath.GroupedZeroOrOne(contentStart, contentLength));
+                        return CheckGroupedPathContinuation(innerTerm, PropertyPath.GroupedZeroOrOne(contentStart, contentLength), groupStart);
                     }
-                    return (innerTerm, PropertyPath.ZeroOrOne(innerTerm));
+                    return CheckGroupedPathContinuation(innerTerm, PropertyPath.ZeroOrOne(innerTerm), groupStart);
                 }
             }
 
-            // No quantifier - just return the inner path
-            return (innerTerm, innerPath);
+            // No quantifier - check for path continuation (/ or |)
+            // This handles cases like (:p1|:p2)/(:p3|:p4) where the group is followed by a path operator
+            return CheckGroupedPathContinuation(innerTerm, innerPath, groupStart);
         }
 
         // Check for inverse path: ^predicate or ^(path)
@@ -1383,6 +1384,115 @@ public ref partial struct SparqlParser
 
         // Simple predicate - no path
         return (term, default);
+    }
+
+    /// <summary>
+    /// Check for path continuation (/ or |) after a grouped path.
+    /// This handles cases like (:p1|:p2)/(:p3|:p4) where a group is followed by a path operator.
+    /// </summary>
+    private (Term predicate, PropertyPath path) CheckGroupedPathContinuation(Term innerTerm, PropertyPath groupPath, int groupStart)
+    {
+        SkipWhitespace();
+        var ch = Peek();
+
+        // If no path operator, return the group as-is
+        if (ch != '/' && ch != '|')
+            return (innerTerm, groupPath);
+
+        // The left side is the entire group span (from groupStart to current position)
+        var leftStart = groupStart;
+        var leftLength = _position - groupStart;
+
+        // Check if there's a '|' at top level (for operator precedence)
+        bool hasTopLevelAlternative = false;
+        if (ch == '|' || ch == '/')
+        {
+            var scanPos = _position;
+            int depth = 0;
+            while (scanPos < _source.Length)
+            {
+                var c = _source[scanPos];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                else if (c == '|' && depth == 0) { hasTopLevelAlternative = true; break; }
+                else if (IsPathTerminator(c) && depth == 0) break;
+                scanPos++;
+            }
+        }
+
+        // Handle alternative (lower precedence - parse first if '|' at top level)
+        if (ch == '|' || (hasTopLevelAlternative && ch == '/'))
+        {
+            if (ch == '|')
+            {
+                Advance(); // Skip '|'
+            }
+            else
+            {
+                // ch == '/' but there's a '|' at top level
+                // Include everything up to the '|' in the left side
+                int depth = 0;
+                while (_position < _source.Length)
+                {
+                    var c = Peek();
+                    if (c == '(') { depth++; Advance(); }
+                    else if (c == ')') { depth--; Advance(); }
+                    else if (c == '|' && depth == 0) break;
+                    else if (IsPathTerminator(c) && depth == 0) break;
+                    else Advance();
+                }
+                leftLength = _position - leftStart;
+                Advance(); // Skip '|'
+            }
+
+            SkipWhitespace();
+            var rightStart = _position;
+            SkipPathElement();
+            var rightEnd = _position;
+
+            // Continue parsing remaining path operators
+            while (true)
+            {
+                SkipWhitespace();
+                var op = Peek();
+                if (op != '|' && op != '/')
+                    break;
+                Advance();
+                SkipWhitespace();
+                SkipPathElement();
+                rightEnd = _position;
+            }
+
+            var rightLength = rightEnd - rightStart;
+            return (innerTerm, PropertyPath.Alternative(leftStart, leftLength, rightStart, rightLength));
+        }
+
+        // Handle sequence (higher precedence - only if no '|' at top level)
+        if (ch == '/')
+        {
+            Advance(); // Skip '/'
+            SkipWhitespace();
+            var rightStart = _position;
+            SkipPathElement();
+            var rightEnd = _position;
+
+            // Continue parsing while we see more '/'
+            while (true)
+            {
+                SkipWhitespace();
+                if (Peek() != '/')
+                    break;
+                Advance();
+                SkipWhitespace();
+                SkipPathElement();
+                rightEnd = _position;
+            }
+
+            var rightLength = rightEnd - rightStart;
+            return (innerTerm, PropertyPath.Sequence(leftStart, leftLength, rightStart, rightLength));
+        }
+
+        return (innerTerm, groupPath);
     }
 
     /// <summary>
