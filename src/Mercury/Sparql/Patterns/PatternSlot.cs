@@ -729,6 +729,7 @@ internal sealed class QueryBuffer : IDisposable
     public int MinusPatternCount { get; set; }
     public int MinusFilterStart { get; set; }
     public int MinusFilterLength { get; set; }
+    public byte MinusOptionalFlags { get; set; }  // Bitmask for optional patterns inside MINUS
     public int ExistsFilterCount { get; set; }
     public int UnionStartIndex { get; set; }  // Index where UNION branch starts
     public bool HasUnionFlag { get; set; }    // True if UNION was encountered
@@ -773,6 +774,12 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasBinds => BindCount > 0;
     public bool HasMinus => MinusPatternCount > 0;
     public bool HasMinusFilter => MinusFilterLength > 0;
+    public bool HasMinusOptionalPatterns => MinusOptionalFlags != 0;
+
+    /// <summary>
+    /// Check if a MINUS pattern at the given index is optional (from OPTIONAL inside MINUS).
+    /// </summary>
+    public bool IsMinusOptional(int index) => (MinusOptionalFlags & (1 << index)) != 0;
     public bool HasExists => ExistsFilterCount > 0;
     public bool HasUnion => HasUnionFlag;
     public bool HasOptionalPatterns => OptionalFlags != 0;
@@ -1300,6 +1307,15 @@ internal static class QueryBufferAdapter
         {
             buffer.MinusFilterStart = gp.MinusFilter.Start;
             buffer.MinusFilterLength = gp.MinusFilter.Length;
+        }
+        if (gp.HasMinusOptionalPatterns)
+        {
+            // Copy the bitmask - GraphPattern uses byte internally
+            for (int i = 0; i < gp.MinusPatternCount; i++)
+            {
+                if (gp.IsMinusOptional(i))
+                    buffer.MinusOptionalFlags |= (byte)(1 << i);
+            }
         }
         buffer.ExistsFilterCount = gp.ExistsFilterCount;
         // UnionStartIndex in QueryBuffer accounts for linearized slot order:

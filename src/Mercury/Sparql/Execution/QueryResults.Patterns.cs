@@ -699,6 +699,12 @@ public ref partial struct QueryResults
     {
         if (_store == null || _buffer == null) return false;
 
+        // If MINUS has OPTIONAL patterns, use the group evaluation logic
+        if (_buffer.HasMinusOptionalPatterns)
+        {
+            return MatchesMinusPatternWithOptional();
+        }
+
         var patterns = _buffer.GetPatterns();
 
         // For MINUS semantics: exclude if ALL MINUS patterns match
@@ -720,6 +726,325 @@ public ref partial struct QueryResults
 
         // All MINUS patterns matched - exclude this solution
         return allMatch && minusFound > 0;
+    }
+
+    /// <summary>
+    /// Check MINUS patterns when there are OPTIONAL patterns inside MINUS.
+    /// Executes MINUS as a group pattern with left-outer-join semantics for OPTIONAL.
+    /// Returns true if any MINUS solution has domain overlap with matching values.
+    /// </summary>
+    private bool MatchesMinusPatternWithOptional()
+    {
+        if (_store == null || _buffer == null) return false;
+
+        var patterns = _buffer.GetPatterns();
+
+        // Collect MINUS pattern slots (both required and optional)
+        Span<int> minusSlotIndices = stackalloc int[8];
+        int minusSlotCount = 0;
+
+        for (int i = 0; i < _buffer.PatternCount && minusSlotCount < 8; i++)
+        {
+            if (patterns[i].Kind == PatternKind.MinusTriple)
+            {
+                minusSlotIndices[minusSlotCount++] = i;
+            }
+        }
+
+        if (minusSlotCount == 0)
+            return false;
+
+        // Separate required and optional patterns
+        Span<int> requiredIndices = stackalloc int[8];
+        Span<int> optionalIndices = stackalloc int[8];
+        int requiredCount = 0;
+        int optionalCount = 0;
+
+        for (int i = 0; i < minusSlotCount; i++)
+        {
+            if (_buffer.IsMinusOptional(i))
+                optionalIndices[optionalCount++] = minusSlotIndices[i];
+            else
+                requiredIndices[requiredCount++] = minusSlotIndices[i];
+        }
+
+        // Execute required patterns first to get base MINUS solutions
+        // For simplicity, we only support one required pattern (the common case)
+        if (requiredCount == 0)
+            return false;
+
+        var requiredSlot = patterns[requiredIndices[0]];
+
+        // Query for required pattern matches
+        var requiredSubject = ResolveSlotTerm(requiredSlot.SubjectType, requiredSlot.SubjectStart, requiredSlot.SubjectLength, SlotTermPosition.Subject);
+        var requiredPredicate = ResolveSlotTerm(requiredSlot.PredicateType, requiredSlot.PredicateStart, requiredSlot.PredicateLength, SlotTermPosition.Predicate);
+        var requiredObject = ResolveSlotTerm(requiredSlot.ObjectType, requiredSlot.ObjectStart, requiredSlot.ObjectLength, SlotTermPosition.Object);
+
+        var requiredResults = _graphContext != null
+            ? _store.QueryCurrent(requiredSubject, requiredPredicate, requiredObject, _graphContext.AsSpan())
+            : _store.QueryCurrent(requiredSubject, requiredPredicate, requiredObject);
+
+        // Use heap-allocated array for MINUS bindings (contains string which is managed)
+        var minusBindings = new MinusBinding[16];
+
+        try
+        {
+            // For each required pattern match, try to extend with optional patterns
+            while (requiredResults.MoveNext())
+            {
+                var requiredTriple = requiredResults.Current;
+
+                // Build MINUS solution from required pattern
+                int minusBindingCount = 0;
+
+                // Add bindings from required pattern
+                AddMinusBindingsFromTriple(requiredSlot, requiredTriple, minusBindings, ref minusBindingCount);
+
+                // Try each optional pattern to extend the MINUS solution
+                for (int i = 0; i < optionalCount; i++)
+                {
+                    var optSlot = patterns[optionalIndices[i]];
+                    TryExtendMinusSolutionWithOptional(optSlot, minusBindings, ref minusBindingCount);
+                }
+
+                // Check if this MINUS solution excludes the main solution
+                if (MinusSolutionExcludesMain(minusBindings, minusBindingCount))
+                {
+                    return true; // Found a MINUS solution that excludes main
+                }
+            }
+        }
+        finally
+        {
+            requiredResults.Dispose();
+        }
+
+        return false; // No MINUS solution excludes the main solution
+    }
+
+    /// <summary>
+    /// Binding in a MINUS solution: variable name hash + value.
+    /// </summary>
+    private struct MinusBinding
+    {
+        public int VariableHash;
+        public int VarStart;
+        public int VarLength;
+        public string Value; // Heap allocation but only for MINUS checking
+    }
+
+    /// <summary>
+    /// Add bindings to MINUS solution from a matched triple.
+    /// </summary>
+    private void AddMinusBindingsFromTriple(PatternSlot slot, in ResolvedTemporalQuad triple,
+        MinusBinding[] bindings, ref int count)
+    {
+        if (slot.SubjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
+            bindings[count++] = new MinusBinding
+            {
+                VariableHash = ComputeVariableHash(varName),
+                VarStart = slot.SubjectStart,
+                VarLength = slot.SubjectLength,
+                Value = triple.Subject.ToString()
+            };
+        }
+        if (slot.PredicateType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
+            bindings[count++] = new MinusBinding
+            {
+                VariableHash = ComputeVariableHash(varName),
+                VarStart = slot.PredicateStart,
+                VarLength = slot.PredicateLength,
+                Value = triple.Predicate.ToString()
+            };
+        }
+        if (slot.ObjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
+            bindings[count++] = new MinusBinding
+            {
+                VariableHash = ComputeVariableHash(varName),
+                VarStart = slot.ObjectStart,
+                VarLength = slot.ObjectLength,
+                Value = triple.Object.ToString()
+            };
+        }
+    }
+
+    /// <summary>
+    /// Try to extend the MINUS solution with an OPTIONAL pattern.
+    /// If the pattern matches, adds bindings; if not, variables remain unbound.
+    /// </summary>
+    private void TryExtendMinusSolutionWithOptional(PatternSlot optSlot,
+        MinusBinding[] bindings, ref int bindingCount)
+    {
+        if (_store == null) return;
+
+        // Resolve terms using MINUS bindings so far
+        var subject = ResolveMinusSlotTerm(optSlot.SubjectType, optSlot.SubjectStart, optSlot.SubjectLength,
+            bindings, bindingCount, SlotTermPosition.Subject);
+        var predicate = ResolveMinusSlotTerm(optSlot.PredicateType, optSlot.PredicateStart, optSlot.PredicateLength,
+            bindings, bindingCount, SlotTermPosition.Predicate);
+        var obj = ResolveMinusSlotTerm(optSlot.ObjectType, optSlot.ObjectStart, optSlot.ObjectLength,
+            bindings, bindingCount, SlotTermPosition.Object);
+
+        var results = _graphContext != null
+            ? _store.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+            : _store.QueryCurrent(subject, predicate, obj);
+
+        try
+        {
+            if (results.MoveNext())
+            {
+                // Pattern matched - add bindings from first match
+                var triple = results.Current;
+                AddMinusBindingsFromTripleIfNew(optSlot, triple, bindings, ref bindingCount);
+            }
+            // If no match, variables from this OPTIONAL remain unbound in MINUS solution
+        }
+        finally
+        {
+            results.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Resolve a slot term using MINUS bindings only (not main bindings).
+    /// This is critical for OPTIONAL patterns inside MINUS: we must NOT constrain
+    /// the OPTIONAL to match main solution values. Instead, OPTIONAL binds freely
+    /// and we check domain overlap AFTER getting the complete MINUS solution.
+    /// </summary>
+    private ReadOnlySpan<char> ResolveMinusSlotTerm(TermType type, int start, int length,
+        MinusBinding[] bindings, int bindingCount, SlotTermPosition pos)
+    {
+        if (type == TermType.Variable)
+        {
+            var varName = _source.Slice(start, length);
+            var varHash = ComputeVariableHash(varName);
+
+            // Check MINUS bindings only - NOT main bindings!
+            // Main bindings would incorrectly constrain OPTIONAL patterns to match main values
+            for (int i = 0; i < bindingCount; i++)
+            {
+                if (bindings[i].VariableHash == varHash)
+                {
+                    return bindings[i].Value.AsSpan();
+                }
+            }
+
+            // Unbound - return empty for wildcard
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        // For non-variables, use normal resolution
+        return ResolveSlotTerm(type, start, length, pos);
+    }
+
+    /// <summary>
+    /// Add bindings from triple only if not already bound.
+    /// </summary>
+    private void AddMinusBindingsFromTripleIfNew(PatternSlot slot, in ResolvedTemporalQuad triple,
+        MinusBinding[] bindings, ref int count)
+    {
+        if (slot.SubjectType == TermType.Variable)
+        {
+            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
+            var varHash = ComputeVariableHash(varName);
+            bool found = false;
+            for (int i = 0; i < count; i++)
+            {
+                if (bindings[i].VariableHash == varHash) { found = true; break; }
+            }
+            if (!found && count < bindings.Length)
+            {
+                bindings[count++] = new MinusBinding
+                {
+                    VariableHash = varHash,
+                    VarStart = slot.SubjectStart,
+                    VarLength = slot.SubjectLength,
+                    Value = triple.Subject.ToString()
+                };
+            }
+        }
+        if (slot.PredicateType == TermType.Variable)
+        {
+            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
+            var varHash = ComputeVariableHash(varName);
+            bool found = false;
+            for (int i = 0; i < count; i++)
+            {
+                if (bindings[i].VariableHash == varHash) { found = true; break; }
+            }
+            if (!found && count < bindings.Length)
+            {
+                bindings[count++] = new MinusBinding
+                {
+                    VariableHash = varHash,
+                    VarStart = slot.PredicateStart,
+                    VarLength = slot.PredicateLength,
+                    Value = triple.Predicate.ToString()
+                };
+            }
+        }
+        if (slot.ObjectType == TermType.Variable)
+        {
+            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
+            var varHash = ComputeVariableHash(varName);
+            bool found = false;
+            for (int i = 0; i < count; i++)
+            {
+                if (bindings[i].VariableHash == varHash) { found = true; break; }
+            }
+            if (!found && count < bindings.Length)
+            {
+                bindings[count++] = new MinusBinding
+                {
+                    VariableHash = varHash,
+                    VarStart = slot.ObjectStart,
+                    VarLength = slot.ObjectLength,
+                    Value = triple.Object.ToString()
+                };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a MINUS solution excludes the main solution.
+    /// Exclusion happens when:
+    /// 1. There is domain overlap (shared variables that are BOUND in BOTH solutions)
+    /// 2. All overlapping variables have the same values
+    /// </summary>
+    private bool MinusSolutionExcludesMain(MinusBinding[] minusBindings, int bindingCount)
+    {
+        bool hasOverlap = false;
+
+        for (int i = 0; i < bindingCount; i++)
+        {
+            var varName = _source.Slice(minusBindings[i].VarStart, minusBindings[i].VarLength);
+
+            // Check if this variable is bound in the main solution
+            var mainIdx = _bindingTable.FindBinding(varName);
+            if (mainIdx >= 0)
+            {
+                // Both bound - check if values match
+                hasOverlap = true;
+                var mainValue = _bindingTable.GetString(mainIdx);
+                var minusValue = minusBindings[i].Value.AsSpan();
+
+                if (!mainValue.SequenceEqual(minusValue))
+                {
+                    // Values differ - no exclusion from this MINUS solution
+                    return false;
+                }
+            }
+            // If variable is only in MINUS (not in main), it doesn't affect domain overlap
+        }
+
+        // Exclude if there was overlap and all overlapping values matched
+        return hasOverlap;
     }
 
     /// <summary>

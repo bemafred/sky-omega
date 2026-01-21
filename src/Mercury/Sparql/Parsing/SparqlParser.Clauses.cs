@@ -2491,7 +2491,7 @@ public ref partial struct SparqlParser
             SkipWhitespace();
 
             // Check for FILTER inside MINUS
-            var span = PeekSpan(6);
+            var span = PeekSpan(8);
             if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
             {
                 ConsumeKeyword("FILTER");
@@ -2524,6 +2524,14 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // Check for OPTIONAL inside MINUS
+            if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseMinusOptional(ref pattern);
+                SkipWhitespace();
+                continue;
+            }
+
             // Try to parse a triple pattern
             var subject = ParseTerm();
             if (subject.Type == TermType.Variable && subject.Length == 0)
@@ -2536,6 +2544,59 @@ public ref partial struct SparqlParser
             var obj = ParseTerm();
 
             pattern.AddMinusPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse OPTIONAL clause inside MINUS: OPTIONAL { patterns }
+    /// Patterns inside are added as optional MINUS patterns.
+    /// </summary>
+    private void ParseMinusOptional(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("OPTIONAL");
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside OPTIONAL and add them as optional MINUS patterns
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            // Add as OPTIONAL MINUS pattern (marked with optional flag)
+            pattern.AddOptionalMinusPattern(new TriplePattern
             {
                 Subject = subject,
                 Predicate = predicate,

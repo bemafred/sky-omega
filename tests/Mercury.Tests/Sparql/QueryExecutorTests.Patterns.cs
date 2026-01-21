@@ -925,6 +925,81 @@ SELECT ?person WHERE {
         }
     }
 
+    [Fact]
+    public void Execute_MinusWithOptionalInside_FullMinuend()
+    {
+        // W3C full-minuend test: MINUS with OPTIONAL patterns
+        // Data setup matches the W3C test case
+        Store.AddCurrent("<http://example/a0>", "<http://example/p1>", "<http://example/b0>");
+        Store.AddCurrent("<http://example/a0>", "<http://example/p2>", "<http://example/c0>");
+        Store.AddCurrent("<http://example/a1>", "<http://example/p1>", "<http://example/b1>");
+        Store.AddCurrent("<http://example/a1>", "<http://example/p2>", "<http://example/c1>");
+        Store.AddCurrent("<http://example/a2>", "<http://example/p1>", "<http://example/b2>");
+        Store.AddCurrent("<http://example/a2>", "<http://example/p2>", "<http://example/c2>");
+        Store.AddCurrent("<http://example/a3>", "<http://example/p1>", "<http://example/b3>");
+        Store.AddCurrent("<http://example/a3>", "<http://example/p2>", "<http://example/c3>");
+
+        // MINUS subtrahend data
+        Store.AddCurrent("<http://example/d0>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Sub>");
+        // d0 has no q1/q2 - OPTIONAL won't match, so ?b/?c unbound in MINUS
+
+        Store.AddCurrent("<http://example/d1>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Sub>");
+        Store.AddCurrent("<http://example/d1>", "<http://example/q1>", "<http://example/b1>");
+        Store.AddCurrent("<http://example/d1>", "<http://example/q2>", "<http://example/c1>");
+        // d1: ?b=b1, ?c=c1 -> excludes a1 (both match)
+
+        Store.AddCurrent("<http://example/d2>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Sub>");
+        Store.AddCurrent("<http://example/d2>", "<http://example/q1>", "<http://example/b2>");
+        // d2: ?b=b2, ?c=unbound -> excludes a2 (?b matches)
+
+        Store.AddCurrent("<http://example/d3>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Sub>");
+        Store.AddCurrent("<http://example/d3>", "<http://example/q1>", "<http://example/b3>");
+        Store.AddCurrent("<http://example/d3>", "<http://example/q2>", "<http://example/cx>");
+        // d3: ?b=b3, ?c=cx -> does NOT exclude a3 (c3 != cx)
+
+        var query = @"PREFIX : <http://example/>
+SELECT ?a ?b ?c {
+  ?a :p1 ?b ; :p2 ?c
+  MINUS {
+    ?d a :Sub
+    OPTIONAL { ?d :q1 ?b }
+    OPTIONAL { ?d :q2 ?c }
+  }
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify OPTIONAL inside MINUS was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasMinusOptionalPatterns);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<string>();
+            while (results.MoveNext())
+            {
+                var aIdx = results.Current.FindBinding("?a".AsSpan());
+                Assert.True(aIdx >= 0);
+                solutions.Add(results.Current.GetString(aIdx).ToString());
+            }
+            results.Dispose();
+
+            // Expected: a0 (d0 has no ?b/?c bindings, domain disjoint) and a3 (?c values differ)
+            Assert.Equal(2, solutions.Count);
+            Assert.Contains(solutions, s => s.Contains("a0"));
+            Assert.Contains(solutions, s => s.Contains("a3"));
+            Assert.DoesNotContain(solutions, s => s.Contains("a1")); // excluded: ?b=b1, ?c=c1 match
+            Assert.DoesNotContain(solutions, s => s.Contains("a2")); // excluded: ?b=b2 matches
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     // ========== ASK Tests ==========
 
 }

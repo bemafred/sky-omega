@@ -346,6 +346,9 @@ public struct GraphPattern
     // MINUS filter expression (for FILTER inside MINUS)
     private FilterExpr _minusFilter;
 
+    // Bitmask for OPTIONAL patterns inside MINUS: bit N = 1 means MINUS pattern N is optional
+    private byte _minusOptionalFlags;
+
     // Inline storage for EXISTS/NOT EXISTS filters (4 * ~100 bytes)
     private ExistsFilter _e0, _e1, _e2, _e3;
 
@@ -375,6 +378,7 @@ public struct GraphPattern
     public readonly bool HasMinus => _minusPatternCount > 0;
     public readonly bool HasMinusFilter => _minusFilter.Length > 0;
     public readonly FilterExpr MinusFilter => _minusFilter;
+    public readonly bool HasMinusOptionalPatterns => _minusOptionalFlags != 0;
     public readonly bool HasExists => _existsFilterCount > 0;
     public readonly bool HasGraph => _graphClauseCount > 0;
     public readonly bool HasSubQueries => _subQueryCount > 0;
@@ -556,6 +560,21 @@ public struct GraphPattern
         if (_minusPatternCount >= MaxMinusPatterns) return;
         SetMinusPattern(_minusPatternCount++, pattern);
     }
+
+    /// <summary>
+    /// Add a pattern from an OPTIONAL clause inside MINUS.
+    /// </summary>
+    public void AddOptionalMinusPattern(TriplePattern pattern)
+    {
+        if (_minusPatternCount >= MaxMinusPatterns) return;
+        _minusOptionalFlags |= (byte)(1 << _minusPatternCount);
+        SetMinusPattern(_minusPatternCount++, pattern);
+    }
+
+    /// <summary>
+    /// Check if a MINUS pattern at the given index is optional.
+    /// </summary>
+    public readonly bool IsMinusOptional(int index) => (_minusOptionalFlags & (1 << index)) != 0;
 
     public readonly TriplePattern GetMinusPattern(int index)
     {
