@@ -110,14 +110,10 @@ public class SparqlConformanceTests
         using var lease = _fixture.Pool.RentScoped();
         var store = lease.Store;
 
-        if (test.DataPath != null && File.Exists(test.DataPath))
-        {
-            await LoadDataAsync(store, test.DataPath);
-            _output.WriteLine($"Loaded data from {test.DataPath}");
-        }
-
         // Load named graph data (qt:graphData)
-        // W3C tests use filename-based graph IRIs like <exists02.ttl>, not full file:// URIs
+        // W3C tests use filename-based graph IRIs like <exists02.ttl>
+        // Use urn:w3c: scheme to create valid absolute URI for base resolution
+        // e.g., "urn:w3c:exists02.ttl" so <> resolves to <urn:w3c:exists02.ttl>
         _output.WriteLine($"GraphDataPaths: {(test.GraphDataPaths == null ? "null" : $"[{string.Join(", ", test.GraphDataPaths)}]")}");
         if (test.GraphDataPaths != null)
         {
@@ -127,14 +123,30 @@ public class SparqlConformanceTests
                 if (File.Exists(graphPath))
                 {
                     var filename = Path.GetFileName(graphPath);
-
-                    // Load with filename as graph IRI (for queries with relative graph IRIs like <exists02.ttl>)
-                    var graphIriFilename = $"<{filename}>";
-                    await LoadDataToNamedGraphAsync(store, graphPath, graphIriFilename);
-                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIriFilename}");
+                    // Use urn:w3c: scheme with filename as both graph IRI and base URI
+                    // This creates a valid absolute URI that the Turtle parser can use for <> resolution
+                    var graphBaseUri = $"urn:w3c:{filename}";
+                    var graphIri = $"<{graphBaseUri}>";
+                    await LoadDataToNamedGraphAsync(store, graphPath, graphIri, baseUri: graphBaseUri);
+                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIri}");
                 }
             }
         }
+
+        // Load default graph data
+        // Use urn:w3c: scheme with filename as base URI so <> resolves correctly
+        // (consistent with named graph IRIs which also use urn:w3c: scheme)
+        if (test.DataPath != null && File.Exists(test.DataPath))
+        {
+            var dataFilename = Path.GetFileName(test.DataPath);
+            var dataBaseUri = $"urn:w3c:{dataFilename}";
+            await LoadDataAsync(store, test.DataPath, baseUri: dataBaseUri);
+            _output.WriteLine($"Loaded data from {test.DataPath}");
+        }
+
+        // Preprocess query to resolve relative GRAPH IRIs
+        // W3C tests use relative IRIs like GRAPH <exists02.ttl> which need to match our file: scheme
+        query = ResolveRelativeGraphIris(query);
 
         // Parse the query
         var parser = new SparqlParser(query.AsSpan());
@@ -403,14 +415,31 @@ public class SparqlConformanceTests
         return await SparqlResultParser.ParseFileAsync(path);
     }
 
-    private async Task LoadDataAsync(QuadStore store, string path)
+    /// <summary>
+    /// Resolve relative GRAPH IRIs in SPARQL queries to use urn:w3c: scheme.
+    /// W3C tests use relative IRIs like GRAPH &lt;exists02.ttl&gt; which need to match
+    /// our named graph loading (urn:w3c:exists02.ttl).
+    /// </summary>
+    private static string ResolveRelativeGraphIris(string query)
+    {
+        // Match GRAPH <filename.ext> where the IRI has no scheme (no :// or single letter followed by :)
+        // Pattern: GRAPH followed by whitespace, then <, then content without :// and not starting with scheme:
+        return System.Text.RegularExpressions.Regex.Replace(
+            query,
+            @"(GRAPH\s+)<([^<>:]+\.[a-zA-Z]+)>",
+            "$1<urn:w3c:$2>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private async Task LoadDataAsync(QuadStore store, string path, string? baseUri = null)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
+        var effectiveBaseUri = baseUri ?? new Uri(path).AbsoluteUri;
 
         if (extension == ".ttl" || extension == ".turtle")
         {
             await using var stream = File.OpenRead(path);
-            using var parser = new TurtleStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+            using var parser = new TurtleStreamParser(stream, baseUri: effectiveBaseUri);
 
             await parser.ParseAsync((s, p, o) =>
             {
@@ -430,7 +459,7 @@ public class SparqlConformanceTests
         else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
         {
             await using var stream = File.OpenRead(path);
-            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: effectiveBaseUri);
 
             await parser.ParseAsync((s, p, o) =>
             {

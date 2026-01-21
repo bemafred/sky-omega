@@ -482,35 +482,181 @@ public ref partial struct QueryResults
         if (_store == null || existsSlot.ExistsChildCount == 0)
             return false;
 
-        // Collect triple patterns from EXISTS block (skip GRAPH headers for now, handle inline)
+        // Collect triple patterns from EXISTS block with their graph context
         int existsStart = existsSlot.ExistsChildStart;
         int existsEnd = existsStart + existsSlot.ExistsChildCount;
 
-        // Count actual triple patterns
+        // Count actual triple patterns (including those inside GRAPH blocks)
         int tripleCount = 0;
         for (int p = existsStart; p < existsEnd; p++)
         {
-            if (patterns[p].Kind == PatternKind.Triple)
+            var kind = patterns[p].Kind;
+            if (kind == PatternKind.Triple)
                 tripleCount++;
+            else if (kind == PatternKind.GraphHeader)
+            {
+                // Count triples within GRAPH block
+                var graphSlot = patterns[p];
+                int childEnd = graphSlot.ChildStartIndex + graphSlot.ChildCount;
+                for (int c = graphSlot.ChildStartIndex; c < childEnd; c++)
+                {
+                    if (patterns[c].Kind == PatternKind.Triple)
+                        tripleCount++;
+                }
+            }
         }
 
         if (tripleCount == 0)
             return false;
 
-        // Collect pattern indices (use heap array to avoid span escape)
-        var patternIndices = new int[tripleCount];
+        // Collect pattern info (index + graph context)
+        var patternInfos = new ExistsPatternInfo[tripleCount];
         int idx = 0;
         for (int p = existsStart; p < existsEnd && idx < tripleCount; p++)
         {
-            if (patterns[p].Kind == PatternKind.Triple)
-                patternIndices[idx++] = p;
+            var kind = patterns[p].Kind;
+            if (kind == PatternKind.Triple)
+            {
+                // Pattern outside any GRAPH clause - use outer _graphContext
+                patternInfos[idx++] = new ExistsPatternInfo
+                {
+                    PatternIndex = p,
+                    GraphContext = null,
+                    HasGraphClause = false
+                };
+            }
+            else if (kind == PatternKind.GraphHeader)
+            {
+                // Resolve the graph term (could be variable bound from outer query or IRI)
+                var graphSlot = patterns[p];
+                string? graphContext = ResolveExistsGraphTerm(
+                    graphSlot.GraphTermType,
+                    graphSlot.GraphTermStart,
+                    graphSlot.GraphTermLength);
+
+                // Collect child triple patterns with the resolved graph context
+                int childEnd = graphSlot.ChildStartIndex + graphSlot.ChildCount;
+                for (int c = graphSlot.ChildStartIndex; c < childEnd && idx < tripleCount; c++)
+                {
+                    if (patterns[c].Kind == PatternKind.Triple)
+                    {
+                        patternInfos[idx++] = new ExistsPatternInfo
+                        {
+                            PatternIndex = c,
+                            GraphContext = graphContext,
+                            HasGraphClause = true
+                        };
+                    }
+                }
+                // Skip past the GraphHeader's children in the outer loop to avoid processing them twice
+                p = childEnd - 1; // -1 because the for loop will increment p
+            }
         }
 
         // Use nested-loop join: try to find ANY consistent binding across all patterns
         var existsBindings = new ExistsBinding[16]; // Max 16 EXISTS-local variables
         int bindingCount = 0;
 
-        return EvaluateExistsJoin(patterns, patternIndices, tripleCount, 0, existsBindings, ref bindingCount);
+        return EvaluateExistsJoinWithGraphContext(patterns, patternInfos, idx, 0, existsBindings, ref bindingCount);
+    }
+
+    /// <summary>
+    /// Resolve graph term for GRAPH clause inside EXISTS.
+    /// Returns resolved graph IRI or null if variable is unbound.
+    /// </summary>
+    private string? ResolveExistsGraphTerm(TermType type, int start, int length)
+    {
+        if (type == TermType.Variable)
+        {
+            // Look up variable binding from outer query
+            var varName = _source.Slice(start, length);
+            var outerIdx = _bindingTable.FindBinding(varName);
+            if (outerIdx >= 0)
+            {
+                var boundValue = _bindingTable.GetString(outerIdx);
+                return boundValue.ToString();
+            }
+            // Variable unbound - return null (will fail matching)
+            return null;
+        }
+
+        // IRI or prefixed name - expand and return
+        var termValue = _source.Slice(start, length);
+        var expanded = ExpandPrefixedName(termValue);
+        return expanded.ToString();
+    }
+
+    /// <summary>
+    /// Recursive nested-loop join for EXISTS patterns with per-pattern graph context.
+    /// Returns true if any consistent binding exists for all patterns.
+    /// </summary>
+    private bool EvaluateExistsJoinWithGraphContext(PatternArray patterns, ExistsPatternInfo[] patternInfos,
+        int patternCount, int currentPattern, ExistsBinding[] bindings, ref int bindingCount)
+    {
+        if (currentPattern >= patternCount)
+            return true; // All patterns matched
+
+        var info = patternInfos[currentPattern];
+        var slot = patterns[info.PatternIndex];
+
+        // If pattern is inside a GRAPH clause but variable was unbound, fail immediately
+        if (info.HasGraphClause && info.GraphContext == null)
+            return false;
+
+        // Resolve terms - use outer bindings AND EXISTS-local bindings
+        var subject = ResolveExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
+            SlotTermPosition.Subject, bindings, bindingCount);
+        var predicate = ResolveExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
+            SlotTermPosition.Predicate, bindings, bindingCount);
+        var obj = ResolveExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
+            SlotTermPosition.Object, bindings, bindingCount);
+
+        // Determine graph context:
+        // - If pattern has GRAPH clause: use its resolved graph context
+        // - Otherwise: use outer _graphContext (default graph if null)
+        TemporalResultEnumerator results;
+        if (info.HasGraphClause)
+        {
+            // Pattern is inside GRAPH clause - use the resolved graph IRI
+            results = _store!.QueryCurrent(subject, predicate, obj, info.GraphContext!.AsSpan());
+        }
+        else if (_graphContext != null)
+        {
+            // Pattern outside GRAPH clause but outer query has graph context
+            results = _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan());
+        }
+        else
+        {
+            // Pattern outside GRAPH clause, no outer context - query default graph
+            results = _store!.QueryCurrent(subject, predicate, obj);
+        }
+
+        try
+        {
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+
+                // Save binding count to restore on backtrack
+                int savedBindingCount = bindingCount;
+
+                // Add bindings from this match for unbound variables
+                AddExistsBindingsFromTriple(slot, triple, bindings, ref bindingCount);
+
+                // Recursively try remaining patterns with extended bindings
+                if (EvaluateExistsJoinWithGraphContext(patterns, patternInfos, patternCount, currentPattern + 1, bindings, ref bindingCount))
+                    return true; // Found a complete match!
+
+                // Backtrack - restore binding count
+                bindingCount = savedBindingCount;
+            }
+        }
+        finally
+        {
+            results.Dispose();
+        }
+
+        return false; // No match found for this pattern with current bindings
     }
 
     /// <summary>
@@ -1952,6 +2098,16 @@ public ref partial struct QueryResults
     {
         public int VariableHash;
         public string Value;
+    }
+
+    /// <summary>
+    /// Info for a pattern within EXISTS block, including its graph context.
+    /// </summary>
+    private struct ExistsPatternInfo
+    {
+        public int PatternIndex;
+        public string? GraphContext; // The resolved graph IRI, or null if variable unbound
+        public bool HasGraphClause;  // true if pattern is inside GRAPH clause
     }
 
     /// <summary>
