@@ -730,6 +730,43 @@ internal sealed class QueryBuffer : IDisposable
     public int MinusFilterStart { get; set; }
     public int MinusFilterLength { get; set; }
     public byte MinusOptionalFlags { get; set; }  // Bitmask for optional patterns inside MINUS
+    public int MinusBlockCount { get; set; }      // Number of distinct MINUS blocks
+    public int MinusBlockBoundary0 { get; set; }  // Pattern index where block 0 ends
+    public int MinusBlockBoundary1 { get; set; }  // Pattern index where block 1 ends
+    public int MinusBlockBoundary2 { get; set; }  // Pattern index where block 2 ends
+    public int MinusBlockBoundary3 { get; set; }  // Pattern index where block 3 ends
+    public int MinusExistsCount { get; set; }     // Count of EXISTS filters inside MINUS
+    public int MinusExistsBlock0 { get; set; }    // Which block owns EXISTS filter 0
+    public int MinusExistsBlock1 { get; set; }    // Which block owns EXISTS filter 1
+    public int MinusExistsBlock2 { get; set; }    // Which block owns EXISTS filter 2
+    public int MinusExistsBlock3 { get; set; }    // Which block owns EXISTS filter 3
+    public ExistsFilter MinusExists0 { get; set; }  // First MINUS EXISTS filter
+    public ExistsFilter MinusExists1 { get; set; }  // Second MINUS EXISTS filter
+    public ExistsFilter MinusExists2 { get; set; }  // Third MINUS EXISTS filter
+    public ExistsFilter MinusExists3 { get; set; }  // Fourth MINUS EXISTS filter
+    public int MinusFilterBlock { get; set; }     // Which MINUS block the filter belongs to
+    public int CompoundExistsRefCount { get; set; }  // Count of compound EXISTS refs
+    public CompoundExistsRef CompoundExistsRef0 { get; set; }  // First compound EXISTS ref
+    public CompoundExistsRef CompoundExistsRef1 { get; set; }  // Second compound EXISTS ref
+
+    // Nested MINUS inside MINUS blocks
+    public int NestedMinusCount { get; set; }         // Count of nested MINUS blocks
+    public int NestedMinusPatternCount { get; set; }  // Total count of nested MINUS patterns
+    public int NestedMinusParent0 { get; set; }       // Which outer MINUS block owns nested MINUS 0
+    public int NestedMinusParent1 { get; set; }       // Which outer MINUS block owns nested MINUS 1
+    public int NestedMinusParent2 { get; set; }       // Which outer MINUS block owns nested MINUS 2
+    public int NestedMinusParent3 { get; set; }       // Which outer MINUS block owns nested MINUS 3
+    public int NestedMinusBoundary0 { get; set; }     // Pattern index where nested block 0 ends
+    public int NestedMinusBoundary1 { get; set; }     // Pattern index where nested block 1 ends
+    public int NestedMinusBoundary2 { get; set; }     // Pattern index where nested block 2 ends
+    public int NestedMinusBoundary3 { get; set; }     // Pattern index where nested block 3 ends
+    public TriplePattern[]? NestedMinusPatterns { get; set; }  // Nested MINUS patterns
+    public byte NestedMinusExistsFlags { get; set; }  // Bitmask: bit N = 1 means nested MINUS N has EXISTS
+    public ExistsFilter NestedMinusExists0 { get; set; }  // EXISTS filter for nested MINUS 0
+    public ExistsFilter NestedMinusExists1 { get; set; }  // EXISTS filter for nested MINUS 1
+    public ExistsFilter NestedMinusExists2 { get; set; }  // EXISTS filter for nested MINUS 2
+    public ExistsFilter NestedMinusExists3 { get; set; }  // EXISTS filter for nested MINUS 3
+
     public int ExistsFilterCount { get; set; }
     public int UnionStartIndex { get; set; }  // Index where UNION branch starts
     public bool HasUnionFlag { get; set; }    // True if UNION was encountered
@@ -775,11 +812,144 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasMinus => MinusPatternCount > 0;
     public bool HasMinusFilter => MinusFilterLength > 0;
     public bool HasMinusOptionalPatterns => MinusOptionalFlags != 0;
+    public bool HasMinusExists => MinusExistsCount > 0;
+    public bool HasCompoundExistsRefs => CompoundExistsRefCount > 0;
+
+    public ExistsFilter GetMinusExistsFilter(int index) => index switch
+    {
+        0 => MinusExists0,
+        1 => MinusExists1,
+        2 => MinusExists2,
+        3 => MinusExists3,
+        _ => default
+    };
+
+    /// <summary>
+    /// Get which MINUS block owns a particular EXISTS filter.
+    /// </summary>
+    public int GetMinusExistsBlock(int existsIndex) => existsIndex switch
+    {
+        0 => MinusExistsBlock0,
+        1 => MinusExistsBlock1,
+        2 => MinusExistsBlock2,
+        3 => MinusExistsBlock3,
+        _ => 0
+    };
+
+    /// <summary>
+    /// Get a compound EXISTS ref by index.
+    /// </summary>
+    public CompoundExistsRef GetCompoundExistsRef(int index) => index switch
+    {
+        0 => CompoundExistsRef0,
+        1 => CompoundExistsRef1,
+        _ => default
+    };
+
+    /// <summary>
+    /// Get the start pattern index for a MINUS block.
+    /// </summary>
+    public int GetMinusBlockStart(int blockIndex)
+    {
+        if (blockIndex == 0) return 0;
+        return blockIndex switch
+        {
+            1 => MinusBlockBoundary0,
+            2 => MinusBlockBoundary1,
+            3 => MinusBlockBoundary2,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Get the end pattern index (exclusive) for a MINUS block.
+    /// </summary>
+    public int GetMinusBlockEnd(int blockIndex) => blockIndex switch
+    {
+        0 => MinusBlockBoundary0,
+        1 => MinusBlockBoundary1,
+        2 => MinusBlockBoundary2,
+        3 => MinusBlockBoundary3,
+        _ => MinusPatternCount
+    };
 
     /// <summary>
     /// Check if a MINUS pattern at the given index is optional (from OPTIONAL inside MINUS).
     /// </summary>
     public bool IsMinusOptional(int index) => (MinusOptionalFlags & (1 << index)) != 0;
+
+    // Nested MINUS accessors
+    public bool HasNestedMinus => NestedMinusCount > 0;
+
+    /// <summary>
+    /// Get which outer MINUS block a nested MINUS block belongs to.
+    /// </summary>
+    public int GetNestedMinusParentBlock(int nestedBlockIndex) => nestedBlockIndex switch
+    {
+        0 => NestedMinusParent0,
+        1 => NestedMinusParent1,
+        2 => NestedMinusParent2,
+        3 => NestedMinusParent3,
+        _ => 0
+    };
+
+    /// <summary>
+    /// Get the start pattern index for a nested MINUS block.
+    /// </summary>
+    public int GetNestedMinusBlockStart(int nestedBlockIndex)
+    {
+        if (nestedBlockIndex == 0) return 0;
+        return nestedBlockIndex switch
+        {
+            1 => NestedMinusBoundary0,
+            2 => NestedMinusBoundary1,
+            3 => NestedMinusBoundary2,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Get the end pattern index (exclusive) for a nested MINUS block.
+    /// </summary>
+    public int GetNestedMinusBlockEnd(int nestedBlockIndex) => nestedBlockIndex switch
+    {
+        0 => NestedMinusBoundary0,
+        1 => NestedMinusBoundary1,
+        2 => NestedMinusBoundary2,
+        3 => NestedMinusBoundary3,
+        _ => NestedMinusPatternCount
+    };
+
+    /// <summary>
+    /// Get a nested MINUS pattern by index.
+    /// </summary>
+    public TriplePattern GetNestedMinusPattern(int index)
+    {
+        if (NestedMinusPatterns == null || index < 0 || index >= NestedMinusPatterns.Length)
+            return default;
+        return NestedMinusPatterns[index];
+    }
+
+    /// <summary>
+    /// Check if a nested MINUS block has an EXISTS filter.
+    /// </summary>
+    public bool HasNestedMinusExistsFilter(int nestedBlockIndex)
+    {
+        return (NestedMinusExistsFlags & (1 << nestedBlockIndex)) != 0;
+    }
+
+    /// <summary>
+    /// Get the EXISTS filter for a nested MINUS block.
+    /// </summary>
+    public ExistsFilter GetNestedMinusExistsFilter(int nestedBlockIndex) => nestedBlockIndex switch
+    {
+        0 => NestedMinusExists0,
+        1 => NestedMinusExists1,
+        2 => NestedMinusExists2,
+        3 => NestedMinusExists3,
+        _ => default
+    };
+
     public bool HasExists => ExistsFilterCount > 0;
     public bool HasUnion => HasUnionFlag;
     public bool HasOptionalPatterns => OptionalFlags != 0;
@@ -1317,6 +1487,114 @@ internal static class QueryBufferAdapter
                     buffer.MinusOptionalFlags |= (byte)(1 << i);
             }
         }
+        // Copy MINUS block boundaries
+        buffer.MinusBlockCount = gp.MinusBlockCount;
+        if (gp.MinusBlockCount > 0)
+        {
+            buffer.MinusBlockBoundary0 = gp.GetMinusBlockEnd(0);
+            if (gp.MinusBlockCount > 1)
+                buffer.MinusBlockBoundary1 = gp.GetMinusBlockEnd(1);
+            if (gp.MinusBlockCount > 2)
+                buffer.MinusBlockBoundary2 = gp.GetMinusBlockEnd(2);
+            if (gp.MinusBlockCount > 3)
+                buffer.MinusBlockBoundary3 = gp.GetMinusBlockEnd(3);
+        }
+        // Copy MINUS EXISTS filters
+        if (gp.HasMinusExists)
+        {
+            buffer.MinusExistsCount = gp.MinusExistsCount;
+            if (gp.MinusExistsCount > 0)
+            {
+                buffer.MinusExists0 = gp.GetMinusExistsFilter(0);
+                buffer.MinusExistsBlock0 = gp.GetMinusExistsBlock(0);
+            }
+            if (gp.MinusExistsCount > 1)
+            {
+                buffer.MinusExists1 = gp.GetMinusExistsFilter(1);
+                buffer.MinusExistsBlock1 = gp.GetMinusExistsBlock(1);
+            }
+            if (gp.MinusExistsCount > 2)
+            {
+                buffer.MinusExists2 = gp.GetMinusExistsFilter(2);
+                buffer.MinusExistsBlock2 = gp.GetMinusExistsBlock(2);
+            }
+            if (gp.MinusExistsCount > 3)
+            {
+                buffer.MinusExists3 = gp.GetMinusExistsFilter(3);
+                buffer.MinusExistsBlock3 = gp.GetMinusExistsBlock(3);
+            }
+        }
+        // Copy MINUS filter block index
+        if (gp.HasMinusFilter)
+        {
+            buffer.MinusFilterBlock = gp.MinusFilterBlock;
+        }
+        // Copy compound EXISTS refs
+        if (gp.HasCompoundExistsRefs)
+        {
+            buffer.CompoundExistsRefCount = gp.CompoundExistsRefCount;
+            if (gp.CompoundExistsRefCount > 0)
+                buffer.CompoundExistsRef0 = gp.GetCompoundExistsRef(0);
+            if (gp.CompoundExistsRefCount > 1)
+                buffer.CompoundExistsRef1 = gp.GetCompoundExistsRef(1);
+        }
+
+        // Copy nested MINUS blocks
+        if (gp.HasNestedMinus)
+        {
+            buffer.NestedMinusCount = gp.NestedMinusCount;
+            buffer.NestedMinusPatternCount = gp.NestedMinusPatternCount;
+
+            // Copy nested MINUS patterns into an array
+            if (gp.NestedMinusPatternCount > 0)
+            {
+                buffer.NestedMinusPatterns = new TriplePattern[gp.NestedMinusPatternCount];
+                for (int i = 0; i < gp.NestedMinusPatternCount; i++)
+                {
+                    buffer.NestedMinusPatterns[i] = gp.GetNestedMinusPattern(i);
+                }
+            }
+
+            // Copy boundaries and parent block info
+            if (gp.NestedMinusCount > 0)
+            {
+                buffer.NestedMinusParent0 = gp.GetNestedMinusParentBlock(0);
+                buffer.NestedMinusBoundary0 = gp.GetNestedMinusBlockEnd(0);
+            }
+            if (gp.NestedMinusCount > 1)
+            {
+                buffer.NestedMinusParent1 = gp.GetNestedMinusParentBlock(1);
+                buffer.NestedMinusBoundary1 = gp.GetNestedMinusBlockEnd(1);
+            }
+            if (gp.NestedMinusCount > 2)
+            {
+                buffer.NestedMinusParent2 = gp.GetNestedMinusParentBlock(2);
+                buffer.NestedMinusBoundary2 = gp.GetNestedMinusBlockEnd(2);
+            }
+            if (gp.NestedMinusCount > 3)
+            {
+                buffer.NestedMinusParent3 = gp.GetNestedMinusParentBlock(3);
+                buffer.NestedMinusBoundary3 = gp.GetNestedMinusBlockEnd(3);
+            }
+
+            // Copy nested MINUS EXISTS filters
+            buffer.NestedMinusExistsFlags = 0;
+            for (int i = 0; i < gp.NestedMinusCount && i < 4; i++)
+            {
+                if (gp.HasNestedMinusExistsFilter(i))
+                {
+                    buffer.NestedMinusExistsFlags |= (byte)(1 << i);
+                    switch (i)
+                    {
+                        case 0: buffer.NestedMinusExists0 = gp.GetNestedMinusExistsFilter(0); break;
+                        case 1: buffer.NestedMinusExists1 = gp.GetNestedMinusExistsFilter(1); break;
+                        case 2: buffer.NestedMinusExists2 = gp.GetNestedMinusExistsFilter(2); break;
+                        case 3: buffer.NestedMinusExists3 = gp.GetNestedMinusExistsFilter(3); break;
+                    }
+                }
+            }
+        }
+
         buffer.ExistsFilterCount = gp.ExistsFilterCount;
         // UnionStartIndex in QueryBuffer accounts for linearized slot order:
         // [all triples] + [all filters] + [all binds]

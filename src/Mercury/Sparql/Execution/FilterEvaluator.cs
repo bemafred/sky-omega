@@ -574,6 +574,16 @@ public ref partial struct FilterEvaluator
 
         SkipWhitespace();
 
+        // Check for boolean literals first
+        if (name.Equals("true", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = true };
+        }
+        if (name.Equals("false", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Value { Type = ValueType.Boolean, BooleanValue = false };
+        }
+
         // If followed by '(', it's a function call - use existing ParseFunctionCall logic
         if (Peek() == '(')
         {

@@ -345,9 +345,40 @@ public struct GraphPattern
 
     // MINUS filter expression (for FILTER inside MINUS)
     private FilterExpr _minusFilter;
+    private byte _minusFilterBlock;  // Which MINUS block the filter belongs to
 
     // Bitmask for OPTIONAL patterns inside MINUS: bit N = 1 means MINUS pattern N is optional
     private byte _minusOptionalFlags;
+
+    // MINUS block tracking: up to 4 MINUS blocks
+    // _minusBlockBoundaries[i] = pattern index where block i ends (exclusive)
+    private byte _minusBlockCount;
+    private byte _minusBlockBoundary0, _minusBlockBoundary1, _minusBlockBoundary2, _minusBlockBoundary3;
+
+    // EXISTS filters inside MINUS (for FILTER NOT EXISTS inside MINUS)
+    // _minusExistsBlockIndex[i] = which MINUS block owns EXISTS filter i
+    private byte _minusExistsCount;
+    private byte _minusExistsBlock0, _minusExistsBlock1, _minusExistsBlock2, _minusExistsBlock3;
+    private ExistsFilter _me0, _me1, _me2, _me3;
+
+    // Compound EXISTS refs inside MINUS filters
+    // These track the position of [NOT] EXISTS embedded in compound expressions like:
+    // FILTER ( ?x = ?y || NOT EXISTS { ... } )
+    private byte _compoundExistsRefCount;
+    private CompoundExistsRef _cer0, _cer1;
+
+    // Nested MINUS inside MINUS blocks (for MINUS { ... MINUS { ... } })
+    // Patterns for nested MINUS are stored separately from outer MINUS patterns
+    private byte _nestedMinusCount;
+    private byte _nestedMinusPatternCount;
+    // Nested MINUS block info: parent block index and pattern boundaries
+    private byte _nestedMinusParent0, _nestedMinusParent1, _nestedMinusParent2, _nestedMinusParent3;
+    private byte _nestedMinusBoundary0, _nestedMinusBoundary1, _nestedMinusBoundary2, _nestedMinusBoundary3;
+    // Inline storage for nested MINUS patterns (8 patterns)
+    private TriplePattern _nmp0, _nmp1, _nmp2, _nmp3, _nmp4, _nmp5, _nmp6, _nmp7;
+    // EXISTS filters inside nested MINUS (1 per nested block, up to 4)
+    private ExistsFilter _nme0, _nme1, _nme2, _nme3;
+    private byte _nestedMinusExistsFlags; // bit N = 1 means nested MINUS N has an EXISTS filter
 
     // Inline storage for EXISTS/NOT EXISTS filters (4 * ~100 bytes)
     private ExistsFilter _e0, _e1, _e2, _e3;
@@ -379,6 +410,14 @@ public struct GraphPattern
     public readonly bool HasMinusFilter => _minusFilter.Length > 0;
     public readonly FilterExpr MinusFilter => _minusFilter;
     public readonly bool HasMinusOptionalPatterns => _minusOptionalFlags != 0;
+    public readonly bool HasMinusExists => _minusExistsCount > 0;
+    public readonly int MinusExistsCount => _minusExistsCount;
+    public readonly int MinusBlockCount => _minusBlockCount;
+    public readonly bool HasCompoundExistsRefs => _compoundExistsRefCount > 0;
+    public readonly int CompoundExistsRefCount => _compoundExistsRefCount;
+    public readonly bool HasNestedMinus => _nestedMinusCount > 0;
+    public readonly int NestedMinusCount => _nestedMinusCount;
+    public readonly int NestedMinusPatternCount => _nestedMinusPatternCount;
     public readonly bool HasExists => _existsFilterCount > 0;
     public readonly bool HasGraph => _graphClauseCount > 0;
     public readonly bool HasSubQueries => _subQueryCount > 0;
@@ -604,6 +643,304 @@ public struct GraphPattern
     public void SetMinusFilter(FilterExpr filter)
     {
         _minusFilter = filter;
+        // Track which block this filter belongs to (current block is _minusBlockCount - 1)
+        _minusFilterBlock = (byte)(_minusBlockCount > 0 ? _minusBlockCount - 1 : 0);
+    }
+
+    /// <summary>
+    /// Get which MINUS block the MINUS filter belongs to.
+    /// </summary>
+    public readonly int MinusFilterBlock => _minusFilterBlock;
+
+    /// <summary>
+    /// Start a new MINUS block. Call before adding patterns for a new MINUS clause.
+    /// </summary>
+    public void StartMinusBlock()
+    {
+        if (_minusBlockCount >= 4) return;  // Max 4 MINUS blocks
+        _minusBlockCount++;
+    }
+
+    /// <summary>
+    /// End the current MINUS block. Records the boundary.
+    /// </summary>
+    public void EndMinusBlock()
+    {
+        if (_minusBlockCount == 0) return;
+        var blockIdx = _minusBlockCount - 1;
+        var endIdx = (byte)_minusPatternCount;
+        switch (blockIdx)
+        {
+            case 0: _minusBlockBoundary0 = endIdx; break;
+            case 1: _minusBlockBoundary1 = endIdx; break;
+            case 2: _minusBlockBoundary2 = endIdx; break;
+            case 3: _minusBlockBoundary3 = endIdx; break;
+        }
+    }
+
+    /// <summary>
+    /// Get the start pattern index for a MINUS block.
+    /// </summary>
+    public readonly int GetMinusBlockStart(int blockIndex)
+    {
+        if (blockIndex == 0) return 0;
+        return blockIndex switch
+        {
+            1 => _minusBlockBoundary0,
+            2 => _minusBlockBoundary1,
+            3 => _minusBlockBoundary2,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Get the end pattern index (exclusive) for a MINUS block.
+    /// </summary>
+    public readonly int GetMinusBlockEnd(int blockIndex)
+    {
+        return blockIndex switch
+        {
+            0 => _minusBlockBoundary0,
+            1 => _minusBlockBoundary1,
+            2 => _minusBlockBoundary2,
+            3 => _minusBlockBoundary3,
+            _ => _minusPatternCount
+        };
+    }
+
+    public void AddMinusExistsFilter(ExistsFilter filter)
+    {
+        if (_minusExistsCount >= 4) return;  // Max 4 EXISTS filters inside MINUS
+        var blockIdx = (byte)(_minusBlockCount > 0 ? _minusBlockCount - 1 : 0);
+        switch (_minusExistsCount++)
+        {
+            case 0:
+                _me0 = filter;
+                _minusExistsBlock0 = blockIdx;
+                break;
+            case 1:
+                _me1 = filter;
+                _minusExistsBlock1 = blockIdx;
+                break;
+            case 2:
+                _me2 = filter;
+                _minusExistsBlock2 = blockIdx;
+                break;
+            case 3:
+                _me3 = filter;
+                _minusExistsBlock3 = blockIdx;
+                break;
+        }
+    }
+
+    public readonly ExistsFilter GetMinusExistsFilter(int index)
+    {
+        return index switch
+        {
+            0 => _me0,
+            1 => _me1,
+            2 => _me2,
+            3 => _me3,
+            _ => default
+        };
+    }
+
+    /// <summary>
+    /// Get which MINUS block owns a particular EXISTS filter.
+    /// </summary>
+    public readonly int GetMinusExistsBlock(int existsIndex)
+    {
+        return existsIndex switch
+        {
+            0 => _minusExistsBlock0,
+            1 => _minusExistsBlock1,
+            2 => _minusExistsBlock2,
+            3 => _minusExistsBlock3,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Add a compound EXISTS reference for tracking EXISTS embedded in compound filter expressions.
+    /// </summary>
+    public void AddCompoundExistsRef(CompoundExistsRef existsRef)
+    {
+        if (_compoundExistsRefCount >= 2) return;  // Max 2 compound EXISTS refs
+        switch (_compoundExistsRefCount++)
+        {
+            case 0: _cer0 = existsRef; break;
+            case 1: _cer1 = existsRef; break;
+        }
+    }
+
+    /// <summary>
+    /// Get a compound EXISTS reference by index.
+    /// </summary>
+    public readonly CompoundExistsRef GetCompoundExistsRef(int index)
+    {
+        return index switch
+        {
+            0 => _cer0,
+            1 => _cer1,
+            _ => default
+        };
+    }
+
+    /// <summary>
+    /// Start a new nested MINUS block inside the current outer MINUS block.
+    /// </summary>
+    public void StartNestedMinusBlock()
+    {
+        if (_nestedMinusCount >= 4) return;  // Max 4 nested MINUS blocks
+        // Record which outer MINUS block this nested block belongs to
+        var parentBlock = (byte)(_minusBlockCount > 0 ? _minusBlockCount - 1 : 0);
+        switch (_nestedMinusCount)
+        {
+            case 0: _nestedMinusParent0 = parentBlock; break;
+            case 1: _nestedMinusParent1 = parentBlock; break;
+            case 2: _nestedMinusParent2 = parentBlock; break;
+            case 3: _nestedMinusParent3 = parentBlock; break;
+        }
+        _nestedMinusCount++;
+    }
+
+    /// <summary>
+    /// End the current nested MINUS block. Records the boundary.
+    /// </summary>
+    public void EndNestedMinusBlock()
+    {
+        if (_nestedMinusCount == 0) return;
+        var blockIdx = _nestedMinusCount - 1;
+        var endIdx = (byte)_nestedMinusPatternCount;
+        switch (blockIdx)
+        {
+            case 0: _nestedMinusBoundary0 = endIdx; break;
+            case 1: _nestedMinusBoundary1 = endIdx; break;
+            case 2: _nestedMinusBoundary2 = endIdx; break;
+            case 3: _nestedMinusBoundary3 = endIdx; break;
+        }
+    }
+
+    /// <summary>
+    /// Add a pattern to the current nested MINUS block.
+    /// </summary>
+    public void AddNestedMinusPattern(TriplePattern pattern)
+    {
+        if (_nestedMinusPatternCount >= 8) return;
+        SetNestedMinusPattern(_nestedMinusPatternCount++, pattern);
+    }
+
+    private void SetNestedMinusPattern(int index, TriplePattern pattern)
+    {
+        switch (index)
+        {
+            case 0: _nmp0 = pattern; break;
+            case 1: _nmp1 = pattern; break;
+            case 2: _nmp2 = pattern; break;
+            case 3: _nmp3 = pattern; break;
+            case 4: _nmp4 = pattern; break;
+            case 5: _nmp5 = pattern; break;
+            case 6: _nmp6 = pattern; break;
+            case 7: _nmp7 = pattern; break;
+        }
+    }
+
+    /// <summary>
+    /// Get a nested MINUS pattern by index.
+    /// </summary>
+    public readonly TriplePattern GetNestedMinusPattern(int index)
+    {
+        return index switch
+        {
+            0 => _nmp0, 1 => _nmp1, 2 => _nmp2, 3 => _nmp3,
+            4 => _nmp4, 5 => _nmp5, 6 => _nmp6, 7 => _nmp7,
+            _ => default
+        };
+    }
+
+    /// <summary>
+    /// Get which outer MINUS block a nested MINUS block belongs to.
+    /// </summary>
+    public readonly int GetNestedMinusParentBlock(int nestedBlockIndex)
+    {
+        return nestedBlockIndex switch
+        {
+            0 => _nestedMinusParent0,
+            1 => _nestedMinusParent1,
+            2 => _nestedMinusParent2,
+            3 => _nestedMinusParent3,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Get the start pattern index for a nested MINUS block.
+    /// </summary>
+    public readonly int GetNestedMinusBlockStart(int nestedBlockIndex)
+    {
+        if (nestedBlockIndex == 0) return 0;
+        return nestedBlockIndex switch
+        {
+            1 => _nestedMinusBoundary0,
+            2 => _nestedMinusBoundary1,
+            3 => _nestedMinusBoundary2,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// Get the end pattern index (exclusive) for a nested MINUS block.
+    /// </summary>
+    public readonly int GetNestedMinusBlockEnd(int nestedBlockIndex)
+    {
+        return nestedBlockIndex switch
+        {
+            0 => _nestedMinusBoundary0,
+            1 => _nestedMinusBoundary1,
+            2 => _nestedMinusBoundary2,
+            3 => _nestedMinusBoundary3,
+            _ => _nestedMinusPatternCount
+        };
+    }
+
+    /// <summary>
+    /// Add an EXISTS filter to the current nested MINUS block.
+    /// </summary>
+    public void AddNestedMinusExistsFilter(ExistsFilter filter)
+    {
+        if (_nestedMinusCount == 0 || _nestedMinusCount > 4) return;
+        var blockIdx = _nestedMinusCount - 1;
+        _nestedMinusExistsFlags |= (byte)(1 << blockIdx);
+        switch (blockIdx)
+        {
+            case 0: _nme0 = filter; break;
+            case 1: _nme1 = filter; break;
+            case 2: _nme2 = filter; break;
+            case 3: _nme3 = filter; break;
+        }
+    }
+
+    /// <summary>
+    /// Check if a nested MINUS block has an EXISTS filter.
+    /// </summary>
+    public readonly bool HasNestedMinusExistsFilter(int nestedBlockIndex)
+    {
+        return (_nestedMinusExistsFlags & (1 << nestedBlockIndex)) != 0;
+    }
+
+    /// <summary>
+    /// Get the EXISTS filter for a nested MINUS block.
+    /// </summary>
+    public readonly ExistsFilter GetNestedMinusExistsFilter(int nestedBlockIndex)
+    {
+        return nestedBlockIndex switch
+        {
+            0 => _nme0,
+            1 => _nme1,
+            2 => _nme2,
+            3 => _nme3,
+            _ => default
+        };
     }
 
     public void AddExistsFilter(ExistsFilter filter)
@@ -937,6 +1274,38 @@ public struct ExistsFilter
         HasGraph = true;
         GraphTerm = graphTerm;
     }
+}
+
+/// <summary>
+/// Reference to an EXISTS pattern embedded within a compound FILTER expression.
+/// Used to track positions of [NOT] EXISTS in expressions like: FILTER ( ?x = ?y || NOT EXISTS { ... } )
+/// </summary>
+public struct CompoundExistsRef
+{
+    /// <summary>
+    /// Start position of the [NOT] EXISTS portion in the filter expression (relative to filter start).
+    /// </summary>
+    public int StartInFilter;
+
+    /// <summary>
+    /// Length of the [NOT] EXISTS portion including the braces.
+    /// </summary>
+    public int Length;
+
+    /// <summary>
+    /// Index of the corresponding ExistsFilter (MinusExistsFilter) that contains the patterns.
+    /// </summary>
+    public int ExistsFilterIndex;
+
+    /// <summary>
+    /// True if this is NOT EXISTS (negate the result).
+    /// </summary>
+    public bool Negated;
+
+    /// <summary>
+    /// Which MINUS block this compound EXISTS ref belongs to.
+    /// </summary>
+    public int BlockIndex;
 }
 
 /// <summary>

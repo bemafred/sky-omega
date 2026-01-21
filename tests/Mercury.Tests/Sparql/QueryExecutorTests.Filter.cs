@@ -551,4 +551,802 @@ WHERE {
         }
     }
 
+    [Fact]
+    public void Execute_NotExistsWithMultipleJoinedPatterns_TemporalProximity()
+    {
+        // W3C temporal-proximity-by-exclusion-nex-1 test
+        // Find the closest pre-operative physical examination (no other exam between it and operation)
+
+        var ex = "http://www.w3.org/2009/sparql/docs/tests/data-sparql11/negation#";
+        var dc = "http://purl.org/dc/elements/1.1/";
+        var xsd = "http://www.w3.org/2001/XMLSchema#";
+        var rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+        // examination1: date 2010-01-10, precedes operation1, follows examination2
+        Store.AddCurrent($"<{ex}examination1>", $"<{rdfType}>", $"<{ex}PhysicalExamination>");
+        Store.AddCurrent($"<{ex}examination1>", $"<{dc}date>", $"\"2010-01-10\"^^<{xsd}date>");
+        Store.AddCurrent($"<{ex}examination1>", $"<{ex}precedes>", $"<{ex}operation1>");
+        Store.AddCurrent($"<{ex}examination1>", $"<{ex}follows>", $"<{ex}examination2>");
+
+        // operation1: date 2010-01-15, follows examination1 and examination2
+        Store.AddCurrent($"<{ex}operation1>", $"<{rdfType}>", $"<{ex}SurgicalProcedure>");
+        Store.AddCurrent($"<{ex}operation1>", $"<{dc}date>", $"\"2010-01-15\"^^<{xsd}date>");
+        Store.AddCurrent($"<{ex}operation1>", $"<{ex}follows>", $"<{ex}examination1>");
+        Store.AddCurrent($"<{ex}operation1>", $"<{ex}follows>", $"<{ex}examination2>");
+
+        // examination2: date 2010-01-02, precedes operation1 and examination1
+        Store.AddCurrent($"<{ex}examination2>", $"<{rdfType}>", $"<{ex}PhysicalExamination>");
+        Store.AddCurrent($"<{ex}examination2>", $"<{dc}date>", $"\"2010-01-02\"^^<{xsd}date>");
+        Store.AddCurrent($"<{ex}examination2>", $"<{ex}precedes>", $"<{ex}operation1>");
+        Store.AddCurrent($"<{ex}examination2>", $"<{ex}precedes>", $"<{ex}examination1>");
+
+        var query = @"PREFIX ex: <http://www.w3.org/2009/sparql/docs/tests/data-sparql11/negation#>
+PREFIX dc: <http://purl.org/dc/elements/1.1/>
+SELECT ?exam ?date {
+  ?exam a ex:PhysicalExamination;
+        dc:date ?date;
+        ex:precedes ex:operation1 .
+  ?op a ex:SurgicalProcedure; dc:date ?opDT .
+  FILTER NOT EXISTS {
+    ?otherExam a ex:PhysicalExamination;
+               ex:follows ?exam;
+               ex:precedes ex:operation1
+  }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify NOT EXISTS was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasExists);
+        var existsFilter = parsedQuery.WhereClause.Pattern.GetExistsFilter(0);
+        Assert.True(existsFilter.Negated);
+        Assert.Equal(3, existsFilter.PatternCount); // Should have 3 patterns in NOT EXISTS
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<(string exam, string date)>();
+            while (results.MoveNext())
+            {
+                var examIdx = results.Current.FindBinding("?exam".AsSpan());
+                var dateIdx = results.Current.FindBinding("?date".AsSpan());
+                Assert.True(examIdx >= 0);
+                Assert.True(dateIdx >= 0);
+                solutions.Add((results.Current.GetString(examIdx).ToString(), results.Current.GetString(dateIdx).ToString()));
+            }
+            results.Dispose();
+
+            // Debug: First run without NOT EXISTS to verify outer patterns match
+            var debugQuery = @"PREFIX ex: <http://www.w3.org/2009/sparql/docs/tests/data-sparql11/negation#>
+PREFIX dc: <http://purl.org/dc/elements/1.1/>
+SELECT ?exam ?date {
+  ?exam a ex:PhysicalExamination;
+        dc:date ?date;
+        ex:precedes ex:operation1 .
+  ?op a ex:SurgicalProcedure; dc:date ?opDT .
+}";
+            var debugParser = new SparqlParser(debugQuery.AsSpan());
+            var debugParsedQuery = debugParser.ParseQuery();
+            var debugExecutor = new QueryExecutor(Store, debugQuery.AsSpan(), debugParsedQuery);
+            var debugResults = debugExecutor.Execute();
+            var debugSolutions = new List<string>();
+            while (debugResults.MoveNext())
+            {
+                var examIdx = debugResults.Current.FindBinding("?exam".AsSpan());
+                debugSolutions.Add(debugResults.Current.GetString(examIdx).ToString());
+            }
+            debugResults.Dispose();
+
+            // Should have 2 results without the FILTER NOT EXISTS
+            Assert.Equal(2, debugSolutions.Count);
+
+            // Logic:
+            // - examination1 precedes operation1 ✓
+            // - examination2 precedes operation1 ✓
+            // - For examination1: NOT EXISTS { ?otherExam follows examination1 AND precedes operation1 } = TRUE
+            //   (nothing follows examination1 that also precedes operation1)
+            // - For examination2: NOT EXISTS { ?otherExam follows examination2 AND precedes operation1 }
+            //   examination1 follows examination2 ✓ AND examination1 precedes operation1 ✓
+            //   So EXISTS succeeds -> NOT EXISTS fails -> examination2 is excluded
+            // Expected: only examination1
+
+            Assert.Single(solutions);
+            Assert.Contains(solutions, s => s.exam.Contains("examination1") && s.date.Contains("2010-01-10"));
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusWithNotExists_SetEquals1()
+    {
+        // W3C set-equals-1 test: Calculate which sets have the same elements
+        // Uses two MINUS blocks, each with FILTER NOT EXISTS
+
+        var ex = "http://example/";
+        var rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+        // Set a: members 1, 2, 3
+        Store.AddCurrent($"<{ex}a>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"2\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"3\"");
+
+        // Set c: members 1, 2 (same as e)
+        Store.AddCurrent($"<{ex}c>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}c>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}c>", $"<{ex}member>", "\"2\"");
+
+        // Set e: members 1, 2 (same as c)
+        Store.AddCurrent($"<{ex}e>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}e>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}e>", $"<{ex}member>", "\"2\"");
+
+        var query = @"PREFIX :    <http://example/>
+PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+SELECT DISTINCT ?s1 ?s2
+WHERE
+{
+    ?s2 rdf:type :Set .
+    ?s1 rdf:type :Set .
+    FILTER(str(?s1) < str(?s2))
+    MINUS
+    {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        ?s1 :member ?x .
+        FILTER NOT EXISTS { ?s2 :member ?x . }
+    }
+    MINUS
+    {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        ?s2 :member ?x .
+        FILTER NOT EXISTS { ?s1 :member ?x . }
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify MINUS with NOT EXISTS was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasMinus);
+        var hasME = parsedQuery.WhereClause.Pattern.HasMinusExists;
+        var meCount = parsedQuery.WhereClause.Pattern.MinusExistsCount;
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<(string s1, string s2)>();
+            while (results.MoveNext())
+            {
+                var s1Idx = results.Current.FindBinding("?s1".AsSpan());
+                var s2Idx = results.Current.FindBinding("?s2".AsSpan());
+                Assert.True(s1Idx >= 0);
+                Assert.True(s2Idx >= 0);
+                solutions.Add((results.Current.GetString(s1Idx).ToString(), results.Current.GetString(s2Idx).ToString()));
+            }
+            results.Dispose();
+
+            // Expected: c=e and e=c, but filtered by str(?s1) < str(?s2) so only (c, e)
+            var output = $"HasMinusExists: {hasME}, MinusExistsCount: {meCount}\n";
+            output += $"Solutions ({solutions.Count}):\n";
+            foreach (var (s1, s2) in solutions.OrderBy(s => s.s1).ThenBy(s => s.s2))
+            {
+                output += $"  {s1} = {s2}\n";
+            }
+
+            // Per W3C: c and e have same members
+            Assert.True(solutions.Count >= 1, output);
+            Assert.Contains(solutions, s => s.s1.Contains("c") && s.s2.Contains("e"));
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusWithNotExists_Subset01()
+    {
+        // W3C subset-01 test: Calculate subsets (include A subsetOf A)
+        // Uses MINUS with FILTER NOT EXISTS inside
+
+        var ex = "http://example/";
+        var rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+        // Set a: members 1, 2, 3
+        Store.AddCurrent($"<{ex}a>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"2\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"3\"");
+
+        // Set b: members 1, 9
+        Store.AddCurrent($"<{ex}b>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", "\"9\"");
+
+        // Set c: members 1, 2
+        Store.AddCurrent($"<{ex}c>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}c>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}c>", $"<{ex}member>", "\"2\"");
+
+        // Set d: members 1, 9
+        Store.AddCurrent($"<{ex}d>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}d>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}d>", $"<{ex}member>", "\"9\"");
+
+        // Set e: members 1, 2
+        Store.AddCurrent($"<{ex}e>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}e>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}e>", $"<{ex}member>", "\"2\"");
+
+        // Empty set
+        Store.AddCurrent($"<{ex}empty>", $"<{rdfType}>", $"<{ex}Set>");
+
+        var query = @"PREFIX :    <http://example/>
+PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT (?s1 AS ?subset) (?s2 AS ?superset)
+WHERE
+{
+    ?s2 rdf:type :Set .
+    ?s1 rdf:type :Set .
+    FILTER(?s1 != ?s2)
+    MINUS
+    {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        FILTER(?s1 != ?s2)
+
+        ?s1 :member ?x .
+        FILTER NOT EXISTS { ?s2 :member ?x . }
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify MINUS pattern was parsed with NOT EXISTS inside
+        Assert.True(parsedQuery.WhereClause.Pattern.HasMinus);
+
+        // Debug: Check if MINUS has EXISTS filter (stored on GraphPattern, not TriplePattern)
+        var hasMinusExists = parsedQuery.WhereClause.Pattern.HasMinusExists;
+        var minusExistsCount = parsedQuery.WhereClause.Pattern.MinusExistsCount;
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<(string subset, string superset)>();
+            while (results.MoveNext())
+            {
+                var subsetIdx = results.Current.FindBinding("?subset".AsSpan());
+                var supersetIdx = results.Current.FindBinding("?superset".AsSpan());
+                Assert.True(subsetIdx >= 0);
+                Assert.True(supersetIdx >= 0);
+                solutions.Add((results.Current.GetString(subsetIdx).ToString(), results.Current.GetString(supersetIdx).ToString()));
+            }
+            results.Dispose();
+
+            // Expected results: proper subsets where all members of s1 are in s2
+            // empty subsetOf everyone (a, b, c, d, e)
+            // c subsetOf a (1,2 are in 1,2,3)
+            // c subsetOf e (1,2 are in 1,2)
+            // e subsetOf a (1,2 are in 1,2,3)
+            // e subsetOf c (1,2 are in 1,2)
+            // b subsetOf d (1,9 are in 1,9) - wait, this IS b = d
+            // d subsetOf b (1,9 are in 1,9)
+
+            // Debug output
+            var output = $"HasMinusExists: {hasMinusExists}, MinusExistsCount: {minusExistsCount}\n";
+            output += $"Solutions ({solutions.Count}):\n";
+            foreach (var (subset, superset) in solutions.OrderBy(s => s.subset).ThenBy(s => s.superset))
+            {
+                output += $"  {subset} subsetOf {superset}\n";
+            }
+
+            // Per W3C expected results:
+            // (:empty, :a), (:empty, :b), (:empty, :c), (:empty, :d), (:empty, :e)
+            // (:c, :a), (:c, :e)
+            // (:e, :a), (:e, :c)
+            // (:b, :d), (:d, :b) - b and d have same members so subset of each other
+            Assert.True(solutions.Count >= 10, output);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Parse_CompoundExistsRef_InMinusFilter()
+    {
+        // Test that compound EXISTS patterns are parsed correctly
+        // Simulates subset-02's FILTER ( ?s1 = ?s2 || NOT EXISTS { ... } )
+
+        var query = @"PREFIX :    <http://example/>
+PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT ?s1 ?s2
+WHERE
+{
+    ?s2 rdf:type :Set .
+    ?s1 rdf:type :Set .
+    MINUS {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        ?s1 :member ?x .
+        FILTER ( ?s1 = ?s2 || NOT EXISTS { ?s2 :member ?x . } )
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+        var gp = parsedQuery.WhereClause.Pattern;
+
+        // Debug: Print the filter expression and compound EXISTS ref positions
+        var filterExprStr = query.Substring(gp.MinusFilter.Start, gp.MinusFilter.Length);
+        var existsRefDebug = gp.GetCompoundExistsRef(0);
+
+        // Build debug message
+        var debugMsg = $"Filter expression: [{filterExprStr}]\n";
+        debugMsg += $"CompoundExistsRef: start={existsRefDebug.StartInFilter}, len={existsRefDebug.Length}, negated={existsRefDebug.Negated}\n";
+        if (existsRefDebug.StartInFilter >= 0 && existsRefDebug.StartInFilter + existsRefDebug.Length <= filterExprStr.Length)
+        {
+            var existsSubstr = filterExprStr.Substring(existsRefDebug.StartInFilter, existsRefDebug.Length);
+            debugMsg += $"Portion to replace: [{existsSubstr}]\n";
+        }
+
+        // Check if the positions are valid before substring
+        Assert.True(existsRefDebug.StartInFilter >= 0 && existsRefDebug.StartInFilter < filterExprStr.Length,
+            $"Invalid StartInFilter: {existsRefDebug.StartInFilter}, filterExpr length: {filterExprStr.Length}\n{debugMsg}");
+        Assert.True(existsRefDebug.StartInFilter + existsRefDebug.Length <= filterExprStr.Length,
+            $"Invalid range: start={existsRefDebug.StartInFilter}, len={existsRefDebug.Length}, filterLen={filterExprStr.Length}\n{debugMsg}");
+
+        // Should have 1 MINUS block
+        Assert.Equal(1, gp.MinusBlockCount);
+
+        // Should have the MINUS filter
+        Assert.True(gp.HasMinusFilter);
+        Assert.Equal(0, gp.MinusFilterBlock);  // Filter belongs to block 0
+
+        // Should have 1 compound EXISTS ref (for the NOT EXISTS inside the filter)
+        Assert.True(gp.HasCompoundExistsRefs);
+        Assert.Equal(1, gp.CompoundExistsRefCount);
+
+        var existsRef = gp.GetCompoundExistsRef(0);
+        Assert.True(existsRef.Negated);  // It's NOT EXISTS
+        Assert.Equal(0, existsRef.BlockIndex);  // Belongs to block 0
+
+        // Should have 1 MinusExistsFilter (the pattern inside NOT EXISTS)
+        Assert.True(gp.HasMinusExists);
+        Assert.Equal(1, gp.MinusExistsCount);
+        var existsFilter = gp.GetMinusExistsFilter(0);
+        Assert.True(existsFilter.Negated);
+        Assert.Equal(1, existsFilter.PatternCount);  // { ?s2 :member ?x }
+
+        // Verify the substitution would work correctly
+        // Create modified expression with "false" substituted for NOT EXISTS
+        var sb = new System.Text.StringBuilder(filterExprStr);
+        sb.Remove(existsRefDebug.StartInFilter, existsRefDebug.Length);
+        sb.Insert(existsRefDebug.StartInFilter, "false");
+        var modifiedExpr = sb.ToString();
+
+        // Debug: show what the modified expression would look like
+        Assert.True(modifiedExpr.Contains("false"),
+            $"Modified expression should contain 'false': [{modifiedExpr}]\nOriginal: [{filterExprStr}]");
+
+        // Verify the modified expression looks correct
+        Assert.True(modifiedExpr.Contains("?s1 = ?s2") || modifiedExpr.Contains("?s1=?s2"),
+            $"Modified expression should still contain ?s1 = ?s2: [{modifiedExpr}]");
+    }
+
+    [Fact]
+    public void Execute_CompoundFilter_ShouldExcludePairs()
+    {
+        // Test subset-02 first MINUS block in isolation
+        // FILTER ( ?s1 = ?s2 || NOT EXISTS { ?s2 :member ?x . } )
+        // For (a, a) where a has members, ?s1 = ?s2 is true, so filter should be true
+        // and the MINUS should exclude (a, a)
+
+        var ex = "http://example/";
+        var rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+        // Set a: members 1, 2
+        Store.AddCurrent($"<{ex}a>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", $"<{ex}one>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", $"<{ex}two>");
+
+        // Set b: members 1, 3 (has 1 but not 2)
+        Store.AddCurrent($"<{ex}b>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", $"<{ex}one>");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", $"<{ex}three>");
+
+        // Query: Get all pairs, minus those where ?s1 = ?s2 OR ?s2 doesn't have ?s1's element
+        var query = @"PREFIX :    <http://example/>
+PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT ?s1 ?s2
+WHERE
+{
+    ?s2 rdf:type :Set .
+    ?s1 rdf:type :Set .
+    MINUS {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        ?s1 :member ?x .
+        FILTER ( ?s1 = ?s2 || NOT EXISTS { ?s2 :member ?x . } )
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<(string s1, string s2)>();
+            while (results.MoveNext())
+            {
+                var s1Idx = results.Current.FindBinding("?s1".AsSpan());
+                var s2Idx = results.Current.FindBinding("?s2".AsSpan());
+                Assert.True(s1Idx >= 0);
+                Assert.True(s2Idx >= 0);
+                solutions.Add((results.Current.GetString(s1Idx).ToString(), results.Current.GetString(s2Idx).ToString()));
+            }
+            results.Dispose();
+
+            // Expected:
+            // (a, a) should be excluded - ?s1 = ?s2 is true
+            // (b, b) should be excluded - ?s1 = ?s2 is true
+            // (a, b) should be excluded - b doesn't have :two (a's member)
+            // (b, a) should be excluded - a doesn't have :three (b's member)
+            // So all pairs should be excluded!
+
+            var output = $"Solutions ({solutions.Count}):\n";
+            foreach (var (s1, s2) in solutions.OrderBy(s => s.s1).ThenBy(s => s.s2))
+            {
+                output += $"  {s1} -> {s2}\n";
+            }
+
+            // Expected:
+            // (a, a) should be excluded - ?s1 = ?s2 is true
+            // (b, b) should be excluded - ?s1 = ?s2 is true
+            // (a, b) should be excluded - b doesn't have :two (a's member)
+            // (b, a) should be excluded - a doesn't have :three (b's member)
+
+            Assert.True(solutions.Count == 0, output);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_SimpleNotExistsInMinusBlock_ExcludesCorrectly()
+    {
+        // Simpler test: MINUS with just NOT EXISTS (no compound expression)
+        var ex = "http://example/";
+        var rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+        // Set a: members 1, 2
+        Store.AddCurrent($"<{ex}a>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", $"<{ex}one>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", $"<{ex}two>");
+
+        // Set b: members 1, 3 (different from a)
+        Store.AddCurrent($"<{ex}b>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", $"<{ex}one>");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", $"<{ex}three>");
+
+        // Query: pairs where s2 contains ALL of s1's members (subset logic without ?s1=?s2 exclusion)
+        var query = @"PREFIX :    <http://example/>
+PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT ?s1 ?s2
+WHERE
+{
+    ?s2 rdf:type :Set .
+    ?s1 rdf:type :Set .
+    FILTER(?s1 != ?s2)
+    MINUS {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        FILTER(?s1 != ?s2)
+        ?s1 :member ?x .
+        FILTER NOT EXISTS { ?s2 :member ?x . }
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<(string s1, string s2)>();
+            while (results.MoveNext())
+            {
+                var s1Idx = results.Current.FindBinding("?s1".AsSpan());
+                var s2Idx = results.Current.FindBinding("?s2".AsSpan());
+                Assert.True(s1Idx >= 0);
+                Assert.True(s2Idx >= 0);
+                solutions.Add((results.Current.GetString(s1Idx).ToString(), results.Current.GetString(s2Idx).ToString()));
+            }
+            results.Dispose();
+
+            var output = $"Solutions ({solutions.Count}):\n";
+            foreach (var (s1, s2) in solutions.OrderBy(s => s.s1).ThenBy(s => s.s2))
+            {
+                output += $"  {s1} -> {s2}\n";
+            }
+
+            // Expected: all pairs where s2 contains all of s1's members (excluding s1=s2)
+            // - (a, b): b has 1, but a has 1,2 and b doesn't have 2 → a NOT subsetOf b → excluded by MINUS
+            // - (b, a): a has 1, but b has 1,3 and a doesn't have 3 → b NOT subsetOf a → excluded by MINUS
+            // So NO pairs should remain!
+            Assert.True(solutions.Count == 0, output);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NestedMinus_Simple()
+    {
+        // Simpler nested MINUS test to verify basic functionality
+        // Query: SELECT ?x WHERE { ?x :p ?y . MINUS { ?x :p ?y . MINUS { ?x :q ?z } } }
+        // This should return subjects that have :p but NOT :q
+
+        var ex = "http://example/";
+
+        // Subject a has :p 1, :q 2 (has both p and q)
+        Store.AddCurrent($"<{ex}a>", $"<{ex}p>", "\"1\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}q>", "\"2\"");
+
+        // Subject b has only :p 1 (no :q)
+        Store.AddCurrent($"<{ex}b>", $"<{ex}p>", "\"1\"");
+
+        // Subject c has only :q 3 (no :p)
+        Store.AddCurrent($"<{ex}c>", $"<{ex}q>", "\"3\"");
+
+        var query = @"PREFIX : <http://example/>
+SELECT ?x
+WHERE
+{
+    ?x :p ?y .
+    MINUS {
+        ?x :p ?y .
+        MINUS { ?x :q ?z }
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        var gp = parsedQuery.WhereClause.Pattern;
+        var output = $"PatternCount: {gp.PatternCount}\n";
+        output += $"HasMinus: {gp.HasMinus}\n";
+        output += $"HasNestedMinus: {gp.HasNestedMinus}\n";
+        output += $"NestedMinusCount: {gp.NestedMinusCount}\n";
+        output += $"NestedMinusPatternCount: {gp.NestedMinusPatternCount}\n";
+        output += $"MinusPatternCount: {gp.MinusPatternCount}\n";
+        output += $"MinusBlockCount: {gp.MinusBlockCount}\n";
+        // Show main patterns
+        for (int i = 0; i < gp.PatternCount; i++)
+        {
+            var p = gp.GetPattern(i);
+            output += $"MainPattern[{i}]: s={query.Substring(p.Subject.Start, p.Subject.Length)}, p={query.Substring(p.Predicate.Start, p.Predicate.Length)}, o={query.Substring(p.Object.Start, p.Object.Length)}\n";
+        }
+        // Show MINUS patterns
+        for (int i = 0; i < gp.MinusPatternCount; i++)
+        {
+            var p = gp.GetMinusPattern(i);
+            output += $"MinusPattern[{i}]: s={query.Substring(p.Subject.Start, p.Subject.Length)}, p={query.Substring(p.Predicate.Start, p.Predicate.Length)}, o={query.Substring(p.Object.Start, p.Object.Length)}\n";
+        }
+        // Show nested MINUS block info
+        for (int i = 0; i < gp.NestedMinusCount; i++)
+        {
+            output += $"NestedMinus[{i}]: parent={gp.GetNestedMinusParentBlock(i)}, start={gp.GetNestedMinusBlockStart(i)}, end={gp.GetNestedMinusBlockEnd(i)}\n";
+            // Show the patterns in this nested MINUS block
+            for (int j = gp.GetNestedMinusBlockStart(i); j < gp.GetNestedMinusBlockEnd(i); j++)
+            {
+                var pattern = gp.GetNestedMinusPattern(j);
+                output += $"  Pattern[{j}]: s={query.Substring(pattern.Subject.Start, pattern.Subject.Length)}, p={query.Substring(pattern.Predicate.Start, pattern.Predicate.Length)}, o={query.Substring(pattern.Object.Start, pattern.Object.Length)}\n";
+            }
+        }
+        // Show outer MINUS block info
+        for (int i = 0; i < gp.MinusBlockCount; i++)
+        {
+            output += $"MinusBlock[{i}]: start={gp.GetMinusBlockStart(i)}, end={gp.GetMinusBlockEnd(i)}\n";
+        }
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<string>();
+            while (results.MoveNext())
+            {
+                var xIdx = results.Current.FindBinding("?x".AsSpan());
+                Assert.True(xIdx >= 0);
+                solutions.Add(results.Current.GetString(xIdx).ToString());
+            }
+            results.Dispose();
+
+            output += $"Solutions ({solutions.Count}): {string.Join(", ", solutions)}\n";
+
+            // Expected: only 'b' should be returned
+            // - 'a' has :p AND :q, so the inner MINUS { ?x :q ?z } matches
+            //   which means the outer MINUS { ... MINUS { ?x :q ?z } } doesn't match
+            //   so 'a' is NOT excluded → 'a' should survive?
+            // Wait, let me think again...
+            //
+            // Outer MINUS content: { ?x :p ?y . MINUS { ?x :q ?z } }
+            // For 'a': ?x :p ?y matches (a, p, 1)
+            //          MINUS { ?x :q ?z } → a has :q 2, so this matches and removes 'a' from content
+            //          Content is EMPTY for 'a'
+            //          Outer MINUS doesn't match → 'a' survives
+            // For 'b': ?x :p ?y matches (b, p, 1)
+            //          MINUS { ?x :q ?z } → b has no :q, so this doesn't match
+            //          Content is {b} (one solution for 'b')
+            //          Outer MINUS matches → 'b' is excluded
+            //
+            // So expected result is: only 'a' (b is excluded, c has no :p)
+
+            Assert.True(solutions.Count == 1, output);
+            Assert.Contains(solutions, s => s.Contains("/a"));
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_NestedMinus_Subset03()
+    {
+        // W3C subset-03 test: Calculate proper subsets (exclude equal sets)
+        // Uses nested MINUS inside MINUS to find pairs with same elements
+
+        var ex = "http://example/";
+        var rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+        // Set a: members 1, 2, 3
+        Store.AddCurrent($"<{ex}a>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"2\"");
+        Store.AddCurrent($"<{ex}a>", $"<{ex}member>", "\"3\"");
+
+        // Set b: members 1, 9
+        Store.AddCurrent($"<{ex}b>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}b>", $"<{ex}member>", "\"9\"");
+
+        // Set c: members 1, 2
+        Store.AddCurrent($"<{ex}c>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}c>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}c>", $"<{ex}member>", "\"2\"");
+
+        // Set d: members 1, 9 (same as b)
+        Store.AddCurrent($"<{ex}d>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}d>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}d>", $"<{ex}member>", "\"9\"");
+
+        // Set e: members 1, 2 (same as c)
+        Store.AddCurrent($"<{ex}e>", $"<{rdfType}>", $"<{ex}Set>");
+        Store.AddCurrent($"<{ex}e>", $"<{ex}member>", "\"1\"");
+        Store.AddCurrent($"<{ex}e>", $"<{ex}member>", "\"2\"");
+
+        // Empty set
+        Store.AddCurrent($"<{ex}empty>", $"<{rdfType}>", $"<{ex}Set>");
+
+        // W3C subset-03 query: proper subsets (exclude equal sets)
+        var query = @"PREFIX :    <http://example/>
+PREFIX  rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT (?s1 AS ?subset) (?s2 AS ?superset)
+WHERE
+{
+    ?s2 rdf:type :Set .
+    ?s1 rdf:type :Set .
+    MINUS {
+        ?s1 rdf:type :Set .
+        ?s2 rdf:type :Set .
+        ?s1 :member ?x .
+        FILTER ( NOT EXISTS { ?s2 :member ?x . } )
+    }
+    MINUS {
+        ?s2 rdf:type :Set .
+        ?s1 rdf:type :Set .
+        MINUS
+        {
+            ?s1 rdf:type :Set .
+            ?s2 rdf:type :Set .
+            ?s1 :member ?x .
+            FILTER NOT EXISTS { ?s2 :member ?x . }
+        }
+        MINUS
+        {
+            ?s1 rdf:type :Set .
+            ?s2 rdf:type :Set .
+            ?s2 :member ?x .
+            FILTER NOT EXISTS { ?s1 :member ?x . }
+        }
+    }
+}";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify nested MINUS was parsed
+        Assert.True(parsedQuery.WhereClause.Pattern.HasMinus, "Should have MINUS");
+        Assert.True(parsedQuery.WhereClause.Pattern.HasNestedMinus, "Should have nested MINUS");
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var solutions = new List<(string subset, string superset)>();
+            while (results.MoveNext())
+            {
+                var subsetIdx = results.Current.FindBinding("?subset".AsSpan());
+                var supersetIdx = results.Current.FindBinding("?superset".AsSpan());
+                Assert.True(subsetIdx >= 0);
+                Assert.True(supersetIdx >= 0);
+                solutions.Add((results.Current.GetString(subsetIdx).ToString(), results.Current.GetString(supersetIdx).ToString()));
+            }
+            results.Dispose();
+
+            // Debug output
+            var output = $"NestedMinusCount: {parsedQuery.WhereClause.Pattern.NestedMinusCount}\n";
+            output += $"NestedMinusPatternCount: {parsedQuery.WhereClause.Pattern.NestedMinusPatternCount}\n";
+            output += $"Solutions ({solutions.Count}):\n";
+            foreach (var (subset, superset) in solutions.OrderBy(s => s.subset).ThenBy(s => s.superset))
+            {
+                output += $"  {subset} subsetOf {superset}\n";
+            }
+
+            // Per W3C expected results (7 pairs - proper subsets, not equal sets):
+            // (:empty, :a), (:empty, :b), (:empty, :c), (:empty, :d), (:empty, :e)
+            // (:c, :a), (:e, :a)
+            // Note: (b, d), (d, b), (c, e), (e, c) are EXCLUDED because those are equal sets
+            Assert.True(solutions.Count == 7, output);
+
+            // Verify specific expected pairs
+            Assert.Contains(solutions, s => s.subset.Contains("empty") && s.superset.Contains("/a"));
+            Assert.Contains(solutions, s => s.subset.Contains("empty") && s.superset.Contains("/b"));
+            Assert.Contains(solutions, s => s.subset.Contains("empty") && s.superset.Contains("/c"));
+            Assert.Contains(solutions, s => s.subset.Contains("empty") && s.superset.Contains("/d"));
+            Assert.Contains(solutions, s => s.subset.Contains("empty") && s.superset.Contains("/e"));
+            Assert.Contains(solutions, s => s.subset.Contains("/c") && s.superset.Contains("/a"));
+            Assert.Contains(solutions, s => s.subset.Contains("/e") && s.superset.Contains("/a"));
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
 }

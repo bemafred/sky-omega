@@ -475,89 +475,184 @@ public ref partial struct QueryResults
 
     /// <summary>
     /// Check if an EXISTS pattern has at least one match with current bindings.
+    /// Uses nested-loop join semantics: patterns share variables within the EXISTS block.
     /// </summary>
     private bool EvaluateExistsPatternFromSlot(PatternSlot existsSlot, PatternArray patterns)
     {
         if (_store == null || existsSlot.ExistsChildCount == 0)
             return false;
 
-        // For each pattern in EXISTS block, substitute bound variables and query the store
-        // All patterns must match for EXISTS to succeed (conjunction)
+        // Collect triple patterns from EXISTS block (skip GRAPH headers for now, handle inline)
         int existsStart = existsSlot.ExistsChildStart;
         int existsEnd = existsStart + existsSlot.ExistsChildCount;
 
-        // Track current graph context for GRAPH patterns inside EXISTS
-        string? existsGraphContext = _graphContext;
-
+        // Count actual triple patterns
+        int tripleCount = 0;
         for (int p = existsStart; p < existsEnd; p++)
         {
-            var patternSlot = patterns[p];
+            if (patterns[p].Kind == PatternKind.Triple)
+                tripleCount++;
+        }
 
-            // Handle GRAPH patterns inside EXISTS - resolve graph variable from outer bindings
-            if (patternSlot.Kind == PatternKind.GraphHeader)
+        if (tripleCount == 0)
+            return false;
+
+        // Collect pattern indices (use heap array to avoid span escape)
+        var patternIndices = new int[tripleCount];
+        int idx = 0;
+        for (int p = existsStart; p < existsEnd && idx < tripleCount; p++)
+        {
+            if (patterns[p].Kind == PatternKind.Triple)
+                patternIndices[idx++] = p;
+        }
+
+        // Use nested-loop join: try to find ANY consistent binding across all patterns
+        var existsBindings = new ExistsBinding[16]; // Max 16 EXISTS-local variables
+        int bindingCount = 0;
+
+        return EvaluateExistsJoin(patterns, patternIndices, tripleCount, 0, existsBindings, ref bindingCount);
+    }
+
+    /// <summary>
+    /// Recursive nested-loop join for EXISTS patterns.
+    /// Returns true if any consistent binding exists for all patterns.
+    /// </summary>
+    private bool EvaluateExistsJoin(PatternArray patterns, int[] patternIndices, int patternCount,
+        int currentPattern, ExistsBinding[] bindings, ref int bindingCount)
+    {
+        if (currentPattern >= patternCount)
+            return true; // All patterns matched
+
+        var slot = patterns[patternIndices[currentPattern]];
+
+        // Resolve terms - use outer bindings AND EXISTS-local bindings
+        var subject = ResolveExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
+            SlotTermPosition.Subject, bindings, bindingCount);
+        var predicate = ResolveExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
+            SlotTermPosition.Predicate, bindings, bindingCount);
+        var obj = ResolveExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
+            SlotTermPosition.Object, bindings, bindingCount);
+
+        // Query the store
+        var results = _graphContext != null
+            ? _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+            : _store!.QueryCurrent(subject, predicate, obj);
+
+        try
+        {
+            while (results.MoveNext())
             {
-                // Resolve the graph term - could be a variable bound in outer query
-                var graphTerm = ResolveSlotTerm(patternSlot.GraphTermType, patternSlot.GraphTermStart, patternSlot.GraphTermLength, SlotTermPosition.Graph);
+                var triple = results.Current;
 
-                // Set graph context for child patterns
-                // Empty string (<>) means default graph - use null context
-                existsGraphContext = graphTerm.Length == 0 ? null : graphTerm.ToString();
+                // Save binding count to restore on backtrack
+                int savedBindingCount = bindingCount;
 
-                // Now evaluate child patterns of this GRAPH clause
-                int graphChildStart = patternSlot.ChildStartIndex;
-                int graphChildEnd = graphChildStart + patternSlot.ChildCount;
+                // Add bindings from this match for unbound variables
+                AddExistsBindingsFromTriple(slot, triple, bindings, ref bindingCount);
 
-                for (int gc = graphChildStart; gc < graphChildEnd; gc++)
-                {
-                    var childSlot = patterns[gc];
-                    if (childSlot.Kind != PatternKind.Triple) continue;
+                // Recursively try remaining patterns with extended bindings
+                if (EvaluateExistsJoin(patterns, patternIndices, patternCount, currentPattern + 1, bindings, ref bindingCount))
+                    return true; // Found a complete match!
 
-                    var subject = ResolveSlotTerm(childSlot.SubjectType, childSlot.SubjectStart, childSlot.SubjectLength, SlotTermPosition.Subject);
-                    var predicate = ResolveSlotTerm(childSlot.PredicateType, childSlot.PredicateStart, childSlot.PredicateLength, SlotTermPosition.Predicate);
-                    var obj = ResolveSlotTerm(childSlot.ObjectType, childSlot.ObjectStart, childSlot.ObjectLength, SlotTermPosition.Object);
+                // Backtrack - restore binding count
+                bindingCount = savedBindingCount;
+            }
+        }
+        finally
+        {
+            results.Dispose();
+        }
 
-                    var results = existsGraphContext != null
-                        ? _store.QueryCurrent(subject, predicate, obj, existsGraphContext.AsSpan())
-                        : _store.QueryCurrent(subject, predicate, obj);
-                    try
-                    {
-                        if (!results.MoveNext())
-                            return false; // No match for this pattern in the specified graph
-                    }
-                    finally
-                    {
-                        results.Dispose();
-                    }
-                }
+        return false; // No match found for this pattern with current bindings
+    }
 
-                // Skip past the graph children in the main loop (they're already processed)
-                p = graphChildEnd - 1;
-                continue;
+    /// <summary>
+    /// Resolve a term in EXISTS pattern using both outer bindings and EXISTS-local bindings.
+    /// </summary>
+    private ReadOnlySpan<char> ResolveExistsTerm(TermType type, int start, int length,
+        SlotTermPosition pos, ExistsBinding[] existsBindings, int bindingCount)
+    {
+        if (type == TermType.Variable)
+        {
+            var varName = _source.Slice(start, length);
+            var varHash = ComputeVariableHash(varName);
+
+            // First check EXISTS-local bindings
+            for (int i = 0; i < bindingCount; i++)
+            {
+                if (existsBindings[i].VariableHash == varHash)
+                    return existsBindings[i].Value.AsSpan();
             }
 
-            if (patternSlot.Kind != PatternKind.Triple) continue;
+            // Then check outer query bindings
+            var outerIdx = _bindingTable.FindBinding(varName);
+            if (outerIdx >= 0)
+                return _bindingTable.GetString(outerIdx);
 
-            // Resolve terms - use bound values for variables, expand prefixed names
-            var subject2 = ResolveSlotTerm(patternSlot.SubjectType, patternSlot.SubjectStart, patternSlot.SubjectLength, SlotTermPosition.Subject);
-            var predicate2 = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength, SlotTermPosition.Predicate);
-            var obj2 = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength, SlotTermPosition.Object);
+            // Unbound - return empty for wildcard query
+            return ReadOnlySpan<char>.Empty;
+        }
 
-            // Query the store - use graph context if inside a GRAPH clause
-            var results2 = existsGraphContext != null
-                ? _store.QueryCurrent(subject2, predicate2, obj2, existsGraphContext.AsSpan())
-                : _store.QueryCurrent(subject2, predicate2, obj2);
-            try
+        // Non-variable: use standard resolution
+        return ResolveSlotTerm(type, start, length, pos);
+    }
+
+    /// <summary>
+    /// Add bindings from a matched triple to EXISTS binding set.
+    /// Only adds bindings for variables that are not yet bound.
+    /// </summary>
+    private void AddExistsBindingsFromTriple(PatternSlot slot, in ResolvedTemporalQuad triple,
+        ExistsBinding[] bindings, ref int count)
+    {
+        // Subject
+        if (slot.SubjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
+            var varHash = ComputeVariableHash(varName);
+
+            // Only add if not already bound (in EXISTS or outer)
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
             {
-                if (!results2.MoveNext())
-                    return false; // No match for this pattern
-            }
-            finally
-            {
-                results2.Dispose();
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Subject.ToString() };
             }
         }
 
-        return true; // All patterns matched
+        // Predicate
+        if (slot.PredicateType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
+            var varHash = ComputeVariableHash(varName);
+
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Predicate.ToString() };
+            }
+        }
+
+        // Object
+        if (slot.ObjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
+            var varHash = ComputeVariableHash(varName);
+
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Object.ToString() };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a variable is already bound in EXISTS bindings.
+    /// </summary>
+    private static bool IsExistsVariableBound(int varHash, ExistsBinding[] bindings, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            if (bindings[i].VariableHash == varHash)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -692,12 +787,14 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Check if current bindings match all MINUS patterns.
-    /// Returns true if any MINUS pattern matches (solution should be excluded).
+    /// Check if current bindings match any MINUS block.
+    /// Returns true if any MINUS block matches (solution should be excluded).
+    /// Handles multiple MINUS blocks by evaluating each block independently.
     /// </summary>
     private bool MatchesMinusPattern()
     {
         if (_store == null || _buffer == null) return false;
+
 
         // If MINUS has OPTIONAL patterns, use the group evaluation logic
         if (_buffer.HasMinusOptionalPatterns)
@@ -705,9 +802,15 @@ public ref partial struct QueryResults
             return MatchesMinusPatternWithOptional();
         }
 
+        // If there are multiple blocks, EXISTS filters, compound EXISTS refs, or nested MINUS, evaluate each block separately
+        if (_buffer.MinusBlockCount > 1 || _buffer.HasMinusExists || _buffer.HasCompoundExistsRefs || _buffer.HasNestedMinus)
+        {
+            return MatchesMinusPatternMultiBlock();
+        }
+
         var patterns = _buffer.GetPatterns();
 
-        // For MINUS semantics: exclude if ALL MINUS patterns match
+        // Single block: For MINUS semantics: exclude if ALL MINUS patterns match
         bool allMatch = true;
         int minusFound = 0;
 
@@ -726,6 +829,1015 @@ public ref partial struct QueryResults
 
         // All MINUS patterns matched - exclude this solution
         return allMatch && minusFound > 0;
+    }
+
+    /// <summary>
+    /// Evaluate multiple MINUS blocks independently.
+    /// A solution is excluded if ANY block matches.
+    /// </summary>
+    private bool MatchesMinusPatternMultiBlock()
+    {
+        if (_store == null || _buffer == null) return false;
+
+        int blockCount = Math.Max(1, _buffer.MinusBlockCount);
+
+        // Evaluate each MINUS block independently
+        for (int block = 0; block < blockCount; block++)
+        {
+            if (MatchesSingleMinusBlock(block))
+                return true; // This block matched - exclude the solution
+        }
+
+        return false; // No block matched - keep the solution
+    }
+
+    /// <summary>
+    /// Evaluate a single MINUS block.
+    /// Returns true if all patterns in the block match AND EXISTS filters pass.
+    /// </summary>
+    private bool MatchesSingleMinusBlock(int blockIndex)
+    {
+        if (_store == null || _buffer == null) return false;
+
+        int patternStart = _buffer.GetMinusBlockStart(blockIndex);
+        int patternEnd = _buffer.GetMinusBlockEnd(blockIndex);
+
+        if (patternEnd <= patternStart) return false; // Empty block
+
+        var patterns = _buffer.GetPatterns();
+
+        // Collect pattern indices for this block
+        var blockPatternIndices = new int[8];
+        int blockPatternCount = 0;
+
+        for (int i = 0; i < _buffer.PatternCount && blockPatternCount < 8; i++)
+        {
+            if (patterns[i].Kind != PatternKind.MinusTriple) continue;
+
+            // Check if this pattern belongs to this block by counting MINUS patterns
+            int minusIdx = 0;
+            for (int j = 0; j < i; j++)
+            {
+                if (patterns[j].Kind == PatternKind.MinusTriple) minusIdx++;
+            }
+
+            if (minusIdx >= patternStart && minusIdx < patternEnd)
+            {
+                blockPatternIndices[blockPatternCount++] = i;
+            }
+        }
+
+        if (blockPatternCount == 0) return false;
+
+        // Check if this block has EXISTS filters
+        bool hasBlockExists = false;
+        for (int i = 0; i < _buffer.MinusExistsCount; i++)
+        {
+            if (_buffer.GetMinusExistsBlock(i) == blockIndex)
+            {
+                hasBlockExists = true;
+                break;
+            }
+        }
+
+        // Use nested-loop join to evaluate the block
+        var minusBindings = new ExistsBinding[16];
+        int bindingCount = 0;
+
+        return EvaluateMinusBlockJoin(patterns, blockPatternIndices, blockPatternCount, 0,
+            minusBindings, ref bindingCount, blockIndex, hasBlockExists);
+    }
+
+    /// <summary>
+    /// Recursive nested-loop join for a single MINUS block.
+    /// </summary>
+    private bool EvaluateMinusBlockJoin(PatternArray patterns, int[] patternIndices, int patternCount,
+        int currentPattern, ExistsBinding[] bindings, ref int bindingCount, int blockIndex, bool hasBlockExists)
+    {
+        if (currentPattern >= patternCount)
+        {
+            // All patterns in this block matched - now evaluate EXISTS filters for this block
+            if (hasBlockExists && !EvaluateMinusBlockExistsFilters(bindings, bindingCount, blockIndex))
+                return false; // EXISTS filter failed - this MINUS solution doesn't exclude
+
+            // Check if this block has a compound filter with EXISTS
+            if (_buffer != null && _buffer.HasMinusFilter && _buffer.MinusFilterBlock == blockIndex)
+            {
+                if (!EvaluateMinusBlockFilter(bindings, bindingCount, blockIndex))
+                    return false; // Filter failed - this MINUS solution doesn't exclude
+            }
+
+            // Check if this block has nested MINUS blocks
+            // If a nested MINUS excludes the solution, then the outer MINUS doesn't match
+            // (the nested MINUS removes it from the outer MINUS's result set)
+            if (_buffer != null && _buffer.HasNestedMinus)
+            {
+                if (IsExcludedByNestedMinus(bindings, bindingCount, blockIndex))
+                    return false; // Nested MINUS excluded this - outer MINUS doesn't match
+            }
+
+            // Check domain overlap
+            return HasMinusDomainOverlap(bindings, bindingCount);
+        }
+
+        var slot = patterns[patternIndices[currentPattern]];
+
+        // Resolve terms using outer bindings AND MINUS-local bindings
+        var subject = ResolveMinusExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
+            SlotTermPosition.Subject, bindings, bindingCount);
+        var predicate = ResolveMinusExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
+            SlotTermPosition.Predicate, bindings, bindingCount);
+        var obj = ResolveMinusExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
+            SlotTermPosition.Object, bindings, bindingCount);
+
+        // Query the store
+        var results = _graphContext != null
+            ? _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+            : _store!.QueryCurrent(subject, predicate, obj);
+
+        try
+        {
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+                int savedBindingCount = bindingCount;
+
+                // Add bindings from this match for unbound variables
+                AddMinusExistsBindings(slot, triple, bindings, ref bindingCount);
+
+                // Recursively try remaining patterns
+                if (EvaluateMinusBlockJoin(patterns, patternIndices, patternCount, currentPattern + 1,
+                    bindings, ref bindingCount, blockIndex, hasBlockExists))
+                    return true;
+
+                // Backtrack
+                bindingCount = savedBindingCount;
+            }
+        }
+        finally
+        {
+            results.Dispose();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Evaluate EXISTS filters that belong to a specific MINUS block.
+    /// </summary>
+    private bool EvaluateMinusBlockExistsFilters(ExistsBinding[] minusBindings, int minusBindingCount, int blockIndex)
+    {
+        if (_buffer == null || !_buffer.HasMinusExists)
+            return true;
+
+        for (int i = 0; i < _buffer.MinusExistsCount; i++)
+        {
+            // Only evaluate EXISTS filters that belong to this block
+            if (_buffer.GetMinusExistsBlock(i) != blockIndex)
+                continue;
+
+            // Skip EXISTS filters that are part of compound expressions
+            // (they'll be evaluated during EvaluateMinusBlockFilter)
+            if (IsExistsFilterPartOfCompoundExpression(i, blockIndex))
+                continue;
+
+            var existsFilter = _buffer.GetMinusExistsFilter(i);
+            if (existsFilter.PatternCount == 0)
+                continue;
+
+            // Evaluate EXISTS patterns with combined bindings
+            bool matches = EvaluateMinusExistsPatterns(existsFilter, minusBindings, minusBindingCount);
+
+            // For NOT EXISTS: should NOT match
+            // For EXISTS: should match
+            if (existsFilter.Negated)
+            {
+                if (matches) return false; // NOT EXISTS failed - found a match
+            }
+            else
+            {
+                if (!matches) return false; // EXISTS failed - no match
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Check if a MinusExistsFilter is referenced by a CompoundExistsRef.
+    /// </summary>
+    private bool IsExistsFilterPartOfCompoundExpression(int existsFilterIndex, int blockIndex)
+    {
+        if (_buffer == null || !_buffer.HasCompoundExistsRefs)
+            return false;
+
+        for (int i = 0; i < _buffer.CompoundExistsRefCount; i++)
+        {
+            var existsRef = _buffer.GetCompoundExistsRef(i);
+            if (existsRef.BlockIndex == blockIndex && existsRef.ExistsFilterIndex == existsFilterIndex)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check if the current solution is excluded by any nested MINUS block belonging to the given outer block.
+    /// </summary>
+    /// <remarks>
+    /// For a MINUS block with content: { base_patterns MINUS nested_1 MINUS nested_2 }
+    /// The semantics are: solutions from base_patterns EXCEPT those matching nested_1 EXCEPT those matching nested_2.
+    /// If a nested MINUS matches the solution, it removes it from the outer MINUS result set.
+    /// </remarks>
+    private bool IsExcludedByNestedMinus(ExistsBinding[] outerBindings, int outerBindingCount, int outerBlockIndex)
+    {
+        if (_buffer == null || !_buffer.HasNestedMinus || _store == null)
+            return false;
+
+        // Check each nested MINUS block that belongs to this outer block
+        for (int nestedIdx = 0; nestedIdx < _buffer.NestedMinusCount; nestedIdx++)
+        {
+            var parentBlock = _buffer.GetNestedMinusParentBlock(nestedIdx);
+
+            if (parentBlock != outerBlockIndex)
+                continue;
+
+            // This nested MINUS belongs to our outer block - evaluate it
+            if (EvaluateNestedMinusBlock(nestedIdx, outerBindings, outerBindingCount))
+            {
+                // Nested MINUS matched - this solution is excluded from outer MINUS
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Evaluate a single nested MINUS block to check if it matches the current solution.
+    /// </summary>
+    private bool EvaluateNestedMinusBlock(int nestedBlockIndex, ExistsBinding[] outerBindings, int outerBindingCount)
+    {
+        if (_buffer == null || _store == null)
+            return false;
+
+        int patternStart = _buffer.GetNestedMinusBlockStart(nestedBlockIndex);
+        int patternEnd = _buffer.GetNestedMinusBlockEnd(nestedBlockIndex);
+
+        if (patternEnd <= patternStart)
+            return false; // Empty block
+
+        int patternCount = patternEnd - patternStart;
+
+        // Use nested-loop join to evaluate the nested MINUS patterns
+        var nestedBindings = new ExistsBinding[16];
+        int nestedBindingCount = 0;
+
+        // Copy outer bindings as starting point
+        for (int i = 0; i < outerBindingCount && i < 16; i++)
+        {
+            nestedBindings[nestedBindingCount++] = outerBindings[i];
+        }
+
+        return EvaluateNestedMinusJoin(nestedBlockIndex, patternStart, patternEnd, 0,
+            nestedBindings, ref nestedBindingCount);
+    }
+
+    /// <summary>
+    /// Recursive nested-loop join for a nested MINUS block.
+    /// </summary>
+    private bool EvaluateNestedMinusJoin(int nestedBlockIndex, int patternStart, int patternEnd,
+        int currentPatternOffset, ExistsBinding[] bindings, ref int bindingCount)
+    {
+        if (_buffer == null || _store == null)
+            return false;
+
+        int currentPatternIdx = patternStart + currentPatternOffset;
+        if (currentPatternIdx >= patternEnd)
+        {
+            // All patterns matched - now check EXISTS filter if present
+            if (_buffer.HasNestedMinusExistsFilter(nestedBlockIndex))
+            {
+                var existsFilter = _buffer.GetNestedMinusExistsFilter(nestedBlockIndex);
+                if (existsFilter.PatternCount > 0)
+                {
+                    bool matches = EvaluateMinusExistsPatterns(existsFilter, bindings, bindingCount);
+
+                    // For NOT EXISTS: should NOT match
+                    // For EXISTS: should match
+                    if (existsFilter.Negated)
+                    {
+                        if (matches) return false; // NOT EXISTS failed - found a match
+                    }
+                    else
+                    {
+                        if (!matches) return false; // EXISTS failed - no match
+                    }
+                }
+            }
+
+            // All patterns matched and EXISTS filter passed (if any)
+            // The nested MINUS matched this solution
+            return true;
+        }
+
+        var pattern = _buffer.GetNestedMinusPattern(currentPatternIdx);
+
+        // Resolve terms using current bindings (outer + nested-local)
+        var subject = ResolveNestedMinusTerm(pattern.Subject, bindings, bindingCount);
+        var predicate = ResolveNestedMinusTerm(pattern.Predicate, bindings, bindingCount);
+        var obj = ResolveNestedMinusTerm(pattern.Object, bindings, bindingCount);
+
+        // Query the store
+        var results = _graphContext != null
+            ? _store.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+            : _store.QueryCurrent(subject, predicate, obj);
+
+        try
+        {
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+                int savedBindingCount = bindingCount;
+
+                // Add bindings from this match for unbound variables
+                AddNestedMinusBindings(pattern, triple, bindings, ref bindingCount);
+
+                // Recursively try remaining patterns
+                if (EvaluateNestedMinusJoin(nestedBlockIndex, patternStart, patternEnd,
+                    currentPatternOffset + 1, bindings, ref bindingCount))
+                    return true;
+
+                // Backtrack
+                bindingCount = savedBindingCount;
+            }
+        }
+        finally
+        {
+            results.Dispose();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resolve a term from a nested MINUS pattern using current bindings.
+    /// </summary>
+    private ReadOnlySpan<char> ResolveNestedMinusTerm(Term term, ExistsBinding[] bindings, int bindingCount)
+    {
+        if (term.Type == TermType.Variable)
+        {
+            var varName = _source.Slice(term.Start, term.Length);
+            int varHash = ComputeVariableHash(varName);
+
+            // First check outer query bindings
+            var outerIdx = _bindingTable.FindBinding(varName);
+            if (outerIdx >= 0)
+            {
+                return _bindingTable.GetString(outerIdx);
+            }
+
+            // Then check nested bindings
+            for (int i = 0; i < bindingCount; i++)
+            {
+                if (bindings[i].VariableHash == varHash)
+                {
+                    return bindings[i].Value.AsSpan();
+                }
+            }
+
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        // For IRIs and literals, expand prefixed names
+        var termValue = _source.Slice(term.Start, term.Length);
+        return ExpandPrefixedName(termValue);
+    }
+
+    /// <summary>
+    /// Add bindings from a nested MINUS pattern match.
+    /// </summary>
+    private void AddNestedMinusBindings(TriplePattern pattern, in ResolvedTemporalQuad triple,
+        ExistsBinding[] bindings, ref int bindingCount)
+    {
+        if (pattern.Subject.Type == TermType.Variable && bindingCount < bindings.Length)
+        {
+            var varName = _source.Slice(pattern.Subject.Start, pattern.Subject.Length);
+            int varHash = ComputeVariableHash(varName);
+            if (!HasNestedMinusBinding(varName, varHash, bindings, bindingCount))
+            {
+                bindings[bindingCount++] = new ExistsBinding
+                {
+                    VariableHash = varHash,
+                    Value = triple.Subject.ToString()
+                };
+            }
+        }
+
+        if (pattern.Predicate.Type == TermType.Variable && bindingCount < bindings.Length)
+        {
+            var varName = _source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
+            int varHash = ComputeVariableHash(varName);
+            if (!HasNestedMinusBinding(varName, varHash, bindings, bindingCount))
+            {
+                bindings[bindingCount++] = new ExistsBinding
+                {
+                    VariableHash = varHash,
+                    Value = triple.Predicate.ToString()
+                };
+            }
+        }
+
+        if (pattern.Object.Type == TermType.Variable && bindingCount < bindings.Length)
+        {
+            var varName = _source.Slice(pattern.Object.Start, pattern.Object.Length);
+            int varHash = ComputeVariableHash(varName);
+            if (!HasNestedMinusBinding(varName, varHash, bindings, bindingCount))
+            {
+                bindings[bindingCount++] = new ExistsBinding
+                {
+                    VariableHash = varHash,
+                    Value = triple.Object.ToString()
+                };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a variable already has a binding in nested MINUS context.
+    /// </summary>
+    private bool HasNestedMinusBinding(ReadOnlySpan<char> varName, int varHash, ExistsBinding[] bindings, int bindingCount)
+    {
+        // Check outer query bindings first
+        if (_bindingTable.FindBinding(varName) >= 0)
+            return true;
+
+        // Check nested bindings by hash
+        for (int i = 0; i < bindingCount; i++)
+        {
+            if (bindings[i].VariableHash == varHash)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check domain overlap for nested MINUS.
+    /// Returns true if there's overlap between nested bindings and outer query bindings.
+    /// </summary>
+    private bool HasMinusDomainOverlapWithBindings(ExistsBinding[] bindings, int bindingCount)
+    {
+        // For nested MINUS, we consider there's overlap if there are any bindings
+        // The outer query already established bindings, and the nested MINUS extends them
+        return bindingCount > 0;
+    }
+
+    /// <summary>
+    /// Evaluate the MINUS filter expression for a specific block.
+    /// Handles compound EXISTS refs by pre-evaluating them and substituting results.
+    /// </summary>
+    private bool EvaluateMinusBlockFilter(ExistsBinding[] minusBindings, int minusBindingCount, int blockIndex)
+    {
+        if (_buffer == null || !_buffer.HasMinusFilter)
+            return true;
+
+        // Get the filter expression
+        var filterExpr = _source.Slice(_buffer.MinusFilterStart, _buffer.MinusFilterLength);
+
+        // Build combined bindings (outer + MINUS-local)
+        int totalBindings = _bindingTable.Count + minusBindingCount;
+        int existingStringLen = _bindingTable.StringBufferLength;
+        int extraStringLen = 0;
+
+        // Calculate extra string space needed for MINUS bindings
+        for (int i = 0; i < minusBindingCount; i++)
+        {
+            extraStringLen += minusBindings[i].Value?.Length ?? 0;
+        }
+
+        int totalStringLen = existingStringLen + extraStringLen;
+
+        var rentedBindings = System.Buffers.ArrayPool<Binding>.Shared.Rent(totalBindings);
+        var rentedStrings = System.Buffers.ArrayPool<char>.Shared.Rent(Math.Max(1, totalStringLen));
+
+        try
+        {
+            int bindIdx = 0;
+
+            // Copy outer bindings
+            for (int i = 0; i < _bindingTable.Count; i++)
+            {
+                rentedBindings[bindIdx++] = _bindingTable.Get(i);
+            }
+
+            // Copy existing string buffer
+            if (existingStringLen > 0)
+            {
+                _bindingTable.CopyStringsTo(rentedStrings.AsSpan());
+            }
+            int strPos = existingStringLen;
+
+            // Add MINUS-local bindings
+            for (int i = 0; i < minusBindingCount; i++)
+            {
+                var existsBinding = minusBindings[i];
+                var value = existsBinding.Value ?? "";
+                value.AsSpan().CopyTo(rentedStrings.AsSpan(strPos));
+
+                rentedBindings[bindIdx++] = new Binding
+                {
+                    VariableNameHash = existsBinding.VariableHash,
+                    Type = BindingValueType.String,
+                    StringOffset = strPos,
+                    StringLength = value.Length
+                };
+                strPos += value.Length;
+            }
+
+            // Check for compound EXISTS refs that need substitution
+            if (_buffer.HasCompoundExistsRefs && _buffer.CompoundExistsRefCount > 0)
+            {
+                return EvaluateMinusBlockFilterWithCompoundExists(
+                    filterExpr, rentedBindings.AsSpan(0, bindIdx), bindIdx,
+                    rentedStrings.AsSpan(0, strPos), minusBindings, minusBindingCount, blockIndex);
+            }
+
+            // No compound EXISTS - evaluate filter directly
+            var evaluator = new FilterEvaluator(filterExpr);
+            return evaluator.Evaluate(rentedBindings.AsSpan(0, bindIdx), bindIdx,
+                rentedStrings.AsSpan(0, strPos), _buffer?.Prefixes, _source);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<Binding>.Shared.Return(rentedBindings);
+            System.Buffers.ArrayPool<char>.Shared.Return(rentedStrings);
+        }
+    }
+
+    /// <summary>
+    /// Evaluate MINUS filter with compound EXISTS patterns.
+    /// Pre-evaluates EXISTS patterns and substitutes "true"/"false" into the filter expression.
+    /// </summary>
+    private bool EvaluateMinusBlockFilterWithCompoundExists(
+        ReadOnlySpan<char> filterExpr,
+        ReadOnlySpan<Binding> bindings, int bindingCount,
+        ReadOnlySpan<char> stringBuffer,
+        ExistsBinding[] minusBindings, int minusBindingCount,
+        int blockIndex)
+    {
+        if (_buffer == null) return true;
+
+        // Pre-evaluate all compound EXISTS refs for this block
+        // Build a list of (position, length, result) for substitution
+        Span<(int Start, int Length, bool Result)> substitutions = stackalloc (int, int, bool)[2];
+        int substitutionCount = 0;
+
+        for (int i = 0; i < _buffer.CompoundExistsRefCount && substitutionCount < 2; i++)
+        {
+            var existsRef = _buffer.GetCompoundExistsRef(i);
+            if (existsRef.BlockIndex != blockIndex)
+                continue;
+
+            // Get the EXISTS filter patterns
+            var existsFilter = _buffer.GetMinusExistsFilter(existsRef.ExistsFilterIndex);
+
+            // Evaluate the EXISTS patterns
+            bool matches = EvaluateMinusExistsPatterns(existsFilter, minusBindings, minusBindingCount);
+
+            // For NOT EXISTS, invert the result
+            bool result = existsRef.Negated ? !matches : matches;
+
+            substitutions[substitutionCount++] = (existsRef.StartInFilter, existsRef.Length, result);
+        }
+
+        if (substitutionCount == 0)
+        {
+            // No compound EXISTS for this block - evaluate directly
+            var evaluator = new FilterEvaluator(filterExpr);
+            return evaluator.Evaluate(bindings, bindingCount, stringBuffer, _buffer?.Prefixes, _source);
+        }
+
+        // Build modified filter expression with substitutions
+        // Sort substitutions by position (descending) to avoid offset issues
+        if (substitutionCount > 1 && substitutions[0].Start < substitutions[1].Start)
+        {
+            (substitutions[0], substitutions[1]) = (substitutions[1], substitutions[0]);
+        }
+
+        // Calculate new expression length
+        var originalExpr = filterExpr.ToString();
+        var sb = new System.Text.StringBuilder(originalExpr);
+
+        // Apply substitutions from end to start
+        for (int i = 0; i < substitutionCount; i++)
+        {
+            var (start, length, result) = substitutions[i];
+            string replacement = result ? "true" : "false";
+            sb.Remove(start, length);
+            sb.Insert(start, replacement);
+        }
+
+        var modifiedExpr = sb.ToString().AsSpan();
+
+        // Evaluate the modified filter expression
+        var evalMod = new FilterEvaluator(modifiedExpr);
+        return evalMod.Evaluate(bindings, bindingCount, stringBuffer, _buffer?.Prefixes, _source);
+    }
+
+    /// <summary>
+    /// Check MINUS patterns when EXISTS/NOT EXISTS is inside MINUS.
+    /// Uses nested-loop join to find valid MINUS solutions, then evaluates EXISTS filters.
+    /// Returns true if any MINUS solution (satisfying all patterns AND EXISTS filters) has domain overlap.
+    /// </summary>
+    private bool MatchesMinusPatternWithExists()
+    {
+        if (_store == null || _buffer == null) return false;
+
+        var patterns = _buffer.GetPatterns();
+
+        // Collect MINUS pattern slots
+        var minusSlotIndices = new int[8];
+        int minusSlotCount = 0;
+
+        for (int i = 0; i < _buffer.PatternCount && minusSlotCount < 8; i++)
+        {
+            if (patterns[i].Kind == PatternKind.MinusTriple)
+                minusSlotIndices[minusSlotCount++] = i;
+        }
+
+        if (minusSlotCount == 0)
+            return false;
+
+        // Use nested-loop join to enumerate all MINUS solutions
+        var minusBindings = new ExistsBinding[16];
+        int bindingCount = 0;
+
+        return EvaluateMinusJoinWithExists(patterns, minusSlotIndices, minusSlotCount, 0, minusBindings, ref bindingCount);
+    }
+
+    /// <summary>
+    /// Recursive nested-loop join for MINUS patterns with EXISTS evaluation.
+    /// Returns true if any valid MINUS solution (with matching EXISTS filters) has domain overlap.
+    /// </summary>
+    private bool EvaluateMinusJoinWithExists(PatternArray patterns, int[] patternIndices, int patternCount,
+        int currentPattern, ExistsBinding[] bindings, ref int bindingCount)
+    {
+        if (currentPattern >= patternCount)
+        {
+            // All MINUS patterns matched - now evaluate EXISTS filters
+            if (!EvaluateMinusExistsFilters(bindings, bindingCount))
+                return false; // EXISTS filter failed - this MINUS solution doesn't exclude
+
+            // MINUS solution is valid - check domain overlap
+            return HasMinusDomainOverlap(bindings, bindingCount);
+        }
+
+        var slot = patterns[patternIndices[currentPattern]];
+
+        // Resolve terms using outer bindings AND MINUS-local bindings
+        var subject = ResolveMinusExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
+            SlotTermPosition.Subject, bindings, bindingCount);
+        var predicate = ResolveMinusExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
+            SlotTermPosition.Predicate, bindings, bindingCount);
+        var obj = ResolveMinusExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
+            SlotTermPosition.Object, bindings, bindingCount);
+
+        // Query the store
+        var results = _graphContext != null
+            ? _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
+            : _store!.QueryCurrent(subject, predicate, obj);
+
+        try
+        {
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+
+                // Save binding count to restore on backtrack
+                int savedBindingCount = bindingCount;
+
+                // Add bindings from this match for unbound variables
+                AddMinusExistsBindings(slot, triple, bindings, ref bindingCount);
+
+                // Recursively try remaining patterns
+                if (EvaluateMinusJoinWithExists(patterns, patternIndices, patternCount, currentPattern + 1, bindings, ref bindingCount))
+                    return true; // Found a valid MINUS solution that excludes
+
+                // Backtrack
+                bindingCount = savedBindingCount;
+            }
+        }
+        finally
+        {
+            results.Dispose();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resolve a term for MINUS evaluation using outer bindings and MINUS-local bindings.
+    /// </summary>
+    private ReadOnlySpan<char> ResolveMinusExistsTerm(TermType type, int start, int length,
+        SlotTermPosition pos, ExistsBinding[] minusBindings, int bindingCount)
+    {
+        if (type == TermType.Variable)
+        {
+            var varName = _source.Slice(start, length);
+            var varHash = ComputeVariableHash(varName);
+
+            // First check MINUS-local bindings
+            for (int i = 0; i < bindingCount; i++)
+            {
+                if (minusBindings[i].VariableHash == varHash)
+                    return minusBindings[i].Value.AsSpan();
+            }
+
+            // Then check outer query bindings
+            var outerIdx = _bindingTable.FindBinding(varName);
+            if (outerIdx >= 0)
+                return _bindingTable.GetString(outerIdx);
+
+            // Unbound - return empty for wildcard query
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        return ResolveSlotTerm(type, start, length, pos);
+    }
+
+    /// <summary>
+    /// Add bindings from a matched triple to MINUS binding set.
+    /// </summary>
+    private void AddMinusExistsBindings(PatternSlot slot, in ResolvedTemporalQuad triple,
+        ExistsBinding[] bindings, ref int count)
+    {
+        // Subject
+        if (slot.SubjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
+            var varHash = ComputeVariableHash(varName);
+
+            // Only add if not already bound (in MINUS or outer)
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Subject.ToString() };
+            }
+        }
+
+        // Predicate
+        if (slot.PredicateType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
+            var varHash = ComputeVariableHash(varName);
+
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Predicate.ToString() };
+            }
+        }
+
+        // Object
+        if (slot.ObjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
+            var varHash = ComputeVariableHash(varName);
+
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Object.ToString() };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Evaluate EXISTS filters inside MINUS with combined outer + MINUS bindings.
+    /// Returns true if all EXISTS filters pass (for NOT EXISTS, no match should exist).
+    /// </summary>
+    private bool EvaluateMinusExistsFilters(ExistsBinding[] minusBindings, int minusBindingCount)
+    {
+        if (_buffer == null || !_buffer.HasMinusExists)
+            return true;
+
+        for (int i = 0; i < _buffer.MinusExistsCount; i++)
+        {
+            var existsFilter = _buffer.GetMinusExistsFilter(i);
+            if (existsFilter.PatternCount == 0)
+                continue;
+
+            // Evaluate EXISTS patterns with combined bindings
+            bool matches = EvaluateMinusExistsPatterns(existsFilter, minusBindings, minusBindingCount);
+
+            // For NOT EXISTS: should NOT match
+            // For EXISTS: should match
+            if (existsFilter.Negated)
+            {
+                if (matches) return false; // NOT EXISTS failed - found a match
+            }
+            else
+            {
+                if (!matches) return false; // EXISTS failed - no match
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Check if EXISTS patterns match with combined outer + MINUS bindings.
+    /// </summary>
+    private bool EvaluateMinusExistsPatterns(ExistsFilter existsFilter, ExistsBinding[] minusBindings, int minusBindingCount)
+    {
+        if (_store == null || existsFilter.PatternCount == 0)
+            return false;
+
+        // Collect pattern indices (use inline storage since ExistsFilter has max 4 patterns)
+        int patternCount = existsFilter.PatternCount;
+        if (patternCount == 0)
+            return false;
+
+        // Use nested-loop join for EXISTS patterns
+        var existsBindings = new ExistsBinding[16];
+        int existsBindingCount = 0;
+
+        // Copy MINUS bindings as starting point for EXISTS evaluation
+        for (int i = 0; i < minusBindingCount && i < existsBindings.Length; i++)
+        {
+            existsBindings[existsBindingCount++] = minusBindings[i];
+        }
+
+        return EvaluateMinusExistsJoin(existsFilter, 0, existsBindings, ref existsBindingCount);
+    }
+
+    /// <summary>
+    /// Recursive join for EXISTS patterns inside MINUS.
+    /// </summary>
+    private bool EvaluateMinusExistsJoin(ExistsFilter existsFilter, int currentPattern,
+        ExistsBinding[] bindings, ref int bindingCount)
+    {
+        if (currentPattern >= existsFilter.PatternCount)
+            return true; // All patterns matched
+
+        var pattern = existsFilter.GetPattern(currentPattern);
+
+        // Resolve terms using outer + MINUS + EXISTS bindings
+        var subject = ResolveMinusExistsFilterTerm(pattern.Subject, bindings, bindingCount);
+        var predicate = ResolveMinusExistsFilterTerm(pattern.Predicate, bindings, bindingCount);
+        var obj = ResolveMinusExistsFilterTerm(pattern.Object, bindings, bindingCount);
+
+        var results = _store!.QueryCurrent(subject, predicate, obj);
+        try
+        {
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+                int savedBindingCount = bindingCount;
+
+                // Add bindings for unbound variables
+                AddMinusExistsFilterBindings(pattern, triple, bindings, ref bindingCount);
+
+                // Recursively try remaining patterns
+                if (EvaluateMinusExistsJoin(existsFilter, currentPattern + 1, bindings, ref bindingCount))
+                    return true;
+
+                bindingCount = savedBindingCount;
+            }
+        }
+        finally
+        {
+            results.Dispose();
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Resolve term for EXISTS filter inside MINUS using combined bindings.
+    /// </summary>
+    private ReadOnlySpan<char> ResolveMinusExistsFilterTerm(Term term, ExistsBinding[] bindings, int bindingCount)
+    {
+        if (term.Type == TermType.Variable)
+        {
+            var varName = _source.Slice(term.Start, term.Length);
+            var varHash = ComputeVariableHash(varName);
+
+            // Check combined bindings (MINUS + EXISTS)
+            for (int i = 0; i < bindingCount; i++)
+            {
+                if (bindings[i].VariableHash == varHash)
+                    return bindings[i].Value.AsSpan();
+            }
+
+            // Check outer bindings
+            var outerIdx = _bindingTable.FindBinding(varName);
+            if (outerIdx >= 0)
+                return _bindingTable.GetString(outerIdx);
+
+            return ReadOnlySpan<char>.Empty;
+        }
+
+        // Non-variable - expand if needed
+        var termSpan = _source.Slice(term.Start, term.Length);
+
+        // Handle 'a' shorthand
+        if (termSpan.Length == 1 && termSpan[0] == 'a')
+            return SyntheticTermHelper.RdfType.AsSpan();
+
+        // Handle prefixed names
+        if (_buffer?.Prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
+        {
+            var colonIdx = termSpan.IndexOf(':');
+            if (colonIdx >= 0)
+            {
+                var prefix = termSpan.Slice(0, colonIdx + 1);
+                var localName = termSpan.Slice(colonIdx + 1);
+
+                foreach (var mapping in _buffer.Prefixes)
+                {
+                    var mappingPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+                    if (prefix.SequenceEqual(mappingPrefix))
+                    {
+                        var iriBase = _source.Slice(mapping.IriStart, mapping.IriLength);
+                        // Strip angle brackets and build expanded IRI
+                        var iriContent = iriBase;
+                        if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
+                            iriContent = iriContent.Slice(1, iriContent.Length - 2);
+                        // Store in _expandedSubject and return span
+                        _expandedSubject = $"<{iriContent.ToString()}{localName.ToString()}>";
+                        return _expandedSubject.AsSpan();
+                    }
+                }
+            }
+        }
+
+        return termSpan;
+    }
+
+    /// <summary>
+    /// Add bindings from EXISTS filter pattern match.
+    /// </summary>
+    private void AddMinusExistsFilterBindings(TriplePattern pattern, in ResolvedTemporalQuad triple,
+        ExistsBinding[] bindings, ref int count)
+    {
+        if (pattern.Subject.Type == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(pattern.Subject.Start, pattern.Subject.Length);
+            var varHash = ComputeVariableHash(varName);
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Subject.ToString() };
+            }
+        }
+
+        if (pattern.Predicate.Type == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
+            var varHash = ComputeVariableHash(varName);
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Predicate.ToString() };
+            }
+        }
+
+        if (pattern.Object.Type == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(pattern.Object.Start, pattern.Object.Length);
+            var varHash = ComputeVariableHash(varName);
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Object.ToString() };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if a MINUS solution has domain overlap with the outer query result.
+    /// Domain overlap means all shared variables have the same values.
+    /// </summary>
+    private bool HasMinusDomainOverlap(ExistsBinding[] minusBindings, int minusBindingCount)
+    {
+        // Check each MINUS binding against outer bindings
+        for (int i = 0; i < minusBindingCount; i++)
+        {
+            var varHash = minusBindings[i].VariableHash;
+            var minusValue = minusBindings[i].Value;
+
+            // Check if this variable is bound in outer query by hash
+            var outerIdx = _bindingTable.FindBindingByHash(varHash);
+            if (outerIdx >= 0)
+            {
+                // Shared variable - check values match
+                var outerValue = _bindingTable.GetString(outerIdx);
+                if (!minusValue.AsSpan().Equals(outerValue, StringComparison.Ordinal))
+                {
+                    // Values don't match - no domain overlap for this solution
+                    return false;
+                }
+            }
+        }
+
+        // All shared variables have matching values - domain overlap exists
+        return true;
     }
 
     /// <summary>
@@ -831,6 +1943,15 @@ public ref partial struct QueryResults
         public int VarStart;
         public int VarLength;
         public string Value; // Heap allocation but only for MINUS checking
+    }
+
+    /// <summary>
+    /// Binding for variables within EXISTS block during join evaluation.
+    /// </summary>
+    private struct ExistsBinding
+    {
+        public int VariableHash;
+        public string Value;
     }
 
     /// <summary>

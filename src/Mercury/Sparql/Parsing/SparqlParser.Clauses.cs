@@ -2326,6 +2326,36 @@ public ref partial struct SparqlParser
             Object = obj
         });
 
+        SkipWhitespace();
+
+        // Handle semicolon shorthand: ?s p1 o1 ; p2 o2 ; p3 o3
+        // Semicolon means same subject, new predicate-object pair
+        while (Peek() == ';')
+        {
+            Advance(); // Skip ';'
+            SkipWhitespace();
+
+            // Check for end of pattern (trailing semicolon before '.')
+            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                break;
+
+            var nextPredicate = ParseTerm();
+            if (nextPredicate.Type == TermType.Variable && nextPredicate.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var nextObj = ParseTerm();
+
+            filter.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = nextPredicate,
+                Object = nextObj
+            });
+
+            SkipWhitespace();
+        }
+
         return true;
     }
 
@@ -2482,6 +2512,9 @@ public ref partial struct SparqlParser
         if (Peek() != '{')
             return;
 
+        // Start a new MINUS block for block-aware evaluation
+        pattern.StartMinusBlock();
+
         Advance(); // Skip '{'
         SkipWhitespace();
 
@@ -2497,19 +2530,150 @@ public ref partial struct SparqlParser
                 ConsumeKeyword("FILTER");
                 SkipWhitespace();
 
-                // Parse FILTER expression and store it for MINUS evaluation
+                // Check for NOT EXISTS / EXISTS inside MINUS
+                var notExistsSpan = PeekSpan(10);
+                bool negated = false;
+                if (notExistsSpan.Length >= 3 && notExistsSpan[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsumeKeyword("NOT");
+                    SkipWhitespace();
+                    negated = true;
+                }
+
+                var existsSpan = PeekSpan(6);
+                if (existsSpan.Length >= 6 && existsSpan[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsumeKeyword("EXISTS");
+                    SkipWhitespace();
+                    ParseMinusExistsFilter(ref pattern, negated);
+                    SkipWhitespace();
+                    continue;
+                }
+
+                // Parse regular FILTER expression and store it for MINUS evaluation
                 if (Peek() == '(')
                 {
                     int filterStart = _position;
                     Advance(); // Skip '('
+                    SkipWhitespace();
 
-                    // Find matching ')' - handle nested parentheses
+                    // Check if this is FILTER ( NOT EXISTS ... ) or FILTER ( EXISTS ... )
+                    var innerSpan = PeekSpan(10);
+                    bool innerNegated = false;
+                    if (innerSpan.Length >= 3 && innerSpan[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var savedPos = _position;
+                        ConsumeKeyword("NOT");
+                        SkipWhitespace();
+                        var afterNot = PeekSpan(6);
+                        if (afterNot.Length >= 6 && afterNot[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ConsumeKeyword("EXISTS");
+                            SkipWhitespace();
+                            ParseMinusExistsFilter(ref pattern, true);
+                            SkipWhitespace();
+                            if (Peek() == ')') Advance(); // Skip closing ')'
+                            SkipWhitespace();
+                            continue;
+                        }
+                        // Not EXISTS after NOT, restore position
+                        _position = savedPos;
+                    }
+                    else if (innerSpan.Length >= 6 && innerSpan[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ConsumeKeyword("EXISTS");
+                        SkipWhitespace();
+                        ParseMinusExistsFilter(ref pattern, false);
+                        SkipWhitespace();
+                        if (Peek() == ')') Advance();
+                        SkipWhitespace();
+                        continue;
+                    }
+
+                    // Regular filter expression - restore to filterStart and scan for embedded EXISTS
+                    _position = filterStart;
+                    Advance(); // Skip '('
+
+                    // Scan the filter expression for embedded [NOT] EXISTS patterns
+                    // while tracking the end position
+                    int filterContentStart = _position;
                     int depth = 1;
                     while (!IsAtEnd() && depth > 0)
                     {
                         var c = Peek();
                         if (c == '(') depth++;
                         else if (c == ')') depth--;
+
+                        // Look for NOT EXISTS or EXISTS at current position
+                        if (depth > 0 && (c == 'N' || c == 'n' || c == 'E' || c == 'e'))
+                        {
+                            var remainingSpan = PeekSpan(12); // "NOT EXISTS {" = 12 chars
+                            bool foundNot = false;
+                            int existsStartPos = _position;
+
+                            // Check for "NOT"
+                            if (remainingSpan.Length >= 3 &&
+                                remainingSpan[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var savedPos = _position;
+                                ConsumeKeyword("NOT");
+                                SkipWhitespace();
+                                remainingSpan = PeekSpan(7);
+                                if (remainingSpan.Length >= 6 &&
+                                    remainingSpan[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    foundNot = true;
+                                    // Continue to EXISTS parsing below
+                                }
+                                else
+                                {
+                                    _position = savedPos;
+                                    Advance();
+                                    continue;
+                                }
+                            }
+
+                            // Check for "EXISTS"
+                            remainingSpan = PeekSpan(7);
+                            if (remainingSpan.Length >= 6 &&
+                                remainingSpan[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                            {
+                                ConsumeKeyword("EXISTS");
+                                SkipWhitespace();
+
+                                // Parse the EXISTS pattern
+                                if (Peek() == '{')
+                                {
+                                    // Calculate position relative to filter start (for CompoundExistsRef)
+                                    int existsPosInFilter = existsStartPos - filterStart;
+
+                                    // Record the EXISTS filter index before adding
+                                    int existsFilterIndex = pattern.MinusExistsCount;
+
+                                    // Parse the EXISTS pattern and add it
+                                    ParseMinusExistsFilter(ref pattern, foundNot);
+
+                                    // Calculate the length of the [NOT] EXISTS {...} portion
+                                    int existsLength = _position - existsStartPos;
+
+                                    // Store a reference for later substitution
+                                    // Block index is the current block being parsed (MinusBlockCount - 1)
+                                    int currentBlock = pattern.MinusBlockCount > 0 ? pattern.MinusBlockCount - 1 : 0;
+                                    pattern.AddCompoundExistsRef(new CompoundExistsRef
+                                    {
+                                        StartInFilter = existsPosInFilter,
+                                        Length = existsLength,
+                                        ExistsFilterIndex = existsFilterIndex,
+                                        Negated = foundNot,
+                                        BlockIndex = currentBlock
+                                    });
+
+                                    // Continue scanning from here (don't call Advance)
+                                    continue;
+                                }
+                            }
+                        }
+
                         Advance();
                     }
 
@@ -2528,6 +2692,14 @@ public ref partial struct SparqlParser
             if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
             {
                 ParseMinusOptional(ref pattern);
+                SkipWhitespace();
+                continue;
+            }
+
+            // Check for nested MINUS inside MINUS
+            if (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseNestedMinus(ref pattern);
                 SkipWhitespace();
                 continue;
             }
@@ -2556,6 +2728,9 @@ public ref partial struct SparqlParser
             if (Peek() == '.')
                 Advance();
         }
+
+        // End this MINUS block before closing
+        pattern.EndMinusBlock();
 
         SkipWhitespace();
         if (Peek() == '}')
@@ -2613,6 +2788,226 @@ public ref partial struct SparqlParser
         SkipWhitespace();
         if (Peek() == '}')
             Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse nested MINUS clause inside MINUS: MINUS { ... MINUS { ... } }
+    /// Patterns inside are added to nested MINUS pattern storage.
+    /// </summary>
+    private void ParseNestedMinus(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("MINUS");
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            return;
+
+        // Start a new nested MINUS block
+        pattern.StartNestedMinusBlock();
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside nested MINUS
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Check for FILTER inside nested MINUS
+            var span = PeekSpan(8);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("FILTER");
+                SkipWhitespace();
+
+                // Check for NOT EXISTS / EXISTS inside nested MINUS
+                var notExistsSpan = PeekSpan(10);
+                bool negated = false;
+                if (notExistsSpan.Length >= 3 && notExistsSpan[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsumeKeyword("NOT");
+                    SkipWhitespace();
+                    negated = true;
+                }
+
+                var existsSpan = PeekSpan(6);
+                if (existsSpan.Length >= 6 && existsSpan[..6].Equals("EXISTS", StringComparison.OrdinalIgnoreCase))
+                {
+                    ConsumeKeyword("EXISTS");
+                    SkipWhitespace();
+                    ParseNestedMinusExistsFilter(ref pattern, negated);
+                    SkipWhitespace();
+                    continue;
+                }
+
+                // Skip other filter expressions inside nested MINUS for now
+                // (may need to be expanded later)
+                SkipWhitespace();
+                continue;
+            }
+
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            // Try to parse a triple pattern
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            pattern.AddNestedMinusPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        // End this nested MINUS block
+        pattern.EndNestedMinusBlock();
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+    }
+
+    /// <summary>
+    /// Parse EXISTS/NOT EXISTS filter inside nested MINUS block.
+    /// </summary>
+    private void ParseNestedMinusExistsFilter(ref GraphPattern pattern, bool negated)
+    {
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        var existsFilter = new ExistsFilter { Negated = negated };
+
+        // Parse patterns inside the EXISTS block
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            // Try to parse a triple pattern
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            existsFilter.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
+
+            SkipWhitespace();
+
+            // Optional dot after triple pattern
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        // Add the EXISTS filter to the current nested MINUS block
+        pattern.AddNestedMinusExistsFilter(existsFilter);
+    }
+
+    /// <summary>
+    /// Parse EXISTS/NOT EXISTS filter inside MINUS block.
+    /// </summary>
+    private void ParseMinusExistsFilter(ref GraphPattern pattern, bool negated)
+    {
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        var existsFilter = new ExistsFilter { Negated = negated };
+
+        // Parse patterns inside the EXISTS block
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            // Try to parse a triple pattern with semicolon shorthand support
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            existsFilter.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
+
+            SkipWhitespace();
+
+            // Handle semicolon shorthand
+            while (Peek() == ';')
+            {
+                Advance(); // Skip ';'
+                SkipWhitespace();
+
+                if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                    break;
+
+                var nextPredicate = ParseTerm();
+                if (nextPredicate.Type == TermType.Variable && nextPredicate.Length == 0)
+                    break;
+
+                SkipWhitespace();
+                var nextObj = ParseTerm();
+
+                existsFilter.AddPattern(new TriplePattern
+                {
+                    Subject = subject,
+                    Predicate = nextPredicate,
+                    Object = nextObj
+                });
+
+                SkipWhitespace();
+            }
+
+            // Skip optional '.'
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
+
+        pattern.AddMinusExistsFilter(existsFilter);
     }
 
     /// <summary>
