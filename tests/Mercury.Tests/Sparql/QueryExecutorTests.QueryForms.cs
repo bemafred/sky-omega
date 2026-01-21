@@ -676,7 +676,7 @@ WHERE {
         }
     }
 
-    [Fact]
+    [Fact]  // Testing stack overflow fix
     public void Execute_PostQueryValues_W3C_AllVariablePredicates()
     {
         // Test that replicates W3C values03 EXACTLY:

@@ -185,8 +185,9 @@ public ref partial struct SparqlParser
         // Simple term (IRI, prefixed name, etc.)
         ParseTerm();
 
-        // Check for quantifier suffix on simple term
-        SkipWhitespace();
+        // Check for quantifier suffix on simple term (WITHOUT skipping whitespace first)
+        // We must not skip whitespace here because callers rely on _position being
+        // at the end of the path element content, not after any trailing whitespace.
         ch = Peek();
         if (ch == '*' || ch == '+')
             Advance();
@@ -1276,7 +1277,83 @@ public ref partial struct SparqlParser
             }
         }
 
-        // Check for sequence: iri1/iri2/iri3... (parse entire right side span for nested sequences)
+        // SPARQL operator precedence: '/' binds tighter than '|'
+        // So we need to check for '|' at top level first (lower precedence = parse first)
+        // Then '/' is handled within each alternative segment
+
+        // First, check if there's a '|' at top level (not inside parentheses)
+        bool hasTopLevelAlternative = false;
+        if (ch == '|' || ch == '/')
+        {
+            var scanPos = _position;
+            int depth = 0;
+            while (scanPos < _source.Length)
+            {
+                var c = _source[scanPos];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                else if (c == '|' && depth == 0) { hasTopLevelAlternative = true; break; }
+                else if (IsPathTerminator(c) && depth == 0) break;
+                scanPos++;
+            }
+        }
+
+        // Check for alternative: parse as Alternative if we see '|' OR if there's a '|' at top level
+        // This handles both "p1|p2" and "p1/p2|p3" (the latter has '/' first but '|' at top level)
+        if (ch == '|' || (hasTopLevelAlternative && ch == '/'))
+        {
+            var leftStart = term.Start;
+            var leftLength = term.Length;
+
+            if (ch == '|')
+            {
+                // Direct '|' - just skip past it
+                Advance(); // Skip '|'
+            }
+            else
+            {
+                // ch == '/' but there's a '|' at top level
+                // Find the first top-level '|' and include everything before it in left side
+                int depth = 0;
+                var searchStart = _position;
+                while (_position < _source.Length)
+                {
+                    var c = Peek();
+                    if (c == '(') { depth++; Advance(); }
+                    else if (c == ')') { depth--; Advance(); }
+                    else if (c == '|' && depth == 0) break;
+                    else if (IsPathTerminator(c) && depth == 0) break;
+                    else Advance();
+                }
+                // Now _position is at '|', left side spans from term.Start to here
+                leftLength = _position - leftStart;
+                Advance(); // Skip '|'
+            }
+
+            SkipWhitespace();
+            var rightStart = _position;
+            SkipPathElement();  // Skip first right element
+            var rightEnd = _position;
+
+            // Continue parsing while we see more path operators ('|' or '/')
+            // This captures the entire remaining path expression
+            while (true)
+            {
+                SkipWhitespace();
+                var op = Peek();
+                if (op != '|' && op != '/')
+                    break;
+                Advance(); // Skip operator
+                SkipWhitespace();
+                SkipPathElement();  // Skip next element
+                rightEnd = _position;
+            }
+
+            var rightLength = rightEnd - rightStart;
+            return (term, PropertyPath.Alternative(leftStart, leftLength, rightStart, rightLength));
+        }
+
+        // Check for sequence: iri1/iri2/iri3... (only if no '|' at top level)
         if (ch == '/')
         {
             var leftStart = term.Start;
@@ -1302,33 +1379,6 @@ public ref partial struct SparqlParser
 
             var rightLength = rightEnd - rightStart;  // Use end position, not current position
             return (term, PropertyPath.Sequence(leftStart, leftLength, rightStart, rightLength));
-        }
-
-        // Check for alternative: iri1|iri2|iri3... (parse entire right side span for nested alternatives)
-        if (ch == '|')
-        {
-            var leftStart = term.Start;
-            var leftLength = term.Length;
-            Advance(); // Skip '|'
-            SkipWhitespace();
-            var rightStart = _position;
-            SkipPathElement();  // Skip first right element
-            var rightEnd = _position;  // Track end before whitespace
-
-            // Continue parsing while we see more '|' to capture the entire span
-            while (true)
-            {
-                SkipWhitespace();
-                if (Peek() != '|')
-                    break;
-                Advance(); // Skip '|'
-                SkipWhitespace();
-                SkipPathElement();  // Skip next element
-                rightEnd = _position;  // Update end position after each element
-            }
-
-            var rightLength = rightEnd - rightStart;  // Use end position, not current position
-            return (term, PropertyPath.Alternative(leftStart, leftLength, rightStart, rightLength));
         }
 
         // Simple predicate - no path
@@ -1954,6 +2004,15 @@ public ref partial struct SparqlParser
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsLetterOrDigit(char ch) => IsLetter(ch) || IsDigit(ch);
+
+    /// <summary>
+    /// Check if character terminates a property path expression.
+    /// Path terminators: whitespace, '.', ';', '}', ')', end of input
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsPathTerminator(char ch) =>
+        ch == '\0' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' ||
+        ch == '.' || ch == ';' || ch == '}' || ch == ')' || ch == ',';
 
     private SolutionModifier ParseSolutionModifier()
     {

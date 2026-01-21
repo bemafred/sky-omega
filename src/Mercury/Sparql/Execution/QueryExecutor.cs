@@ -552,7 +552,23 @@ public partial class QueryExecutor : IDisposable
         }
 
         // Multiple required patterns - need join
-        return ExecuteWithJoins();
+        // Note: This can cause stack overflow with very large cross-products (e.g., variable predicates)
+        // due to the ~4KB GraphPattern struct being copied in hot loops. See ADR-009 for details.
+        return new QueryResults(
+            new MultiPatternScan(_store, _source, pattern, false, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, null, _buffer.Prefixes),
+            _buffer,
+            _source,
+            _store,
+            bindings,
+            stringBuffer,
+            _buffer.Limit,
+            _buffer.Offset,
+            _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(),
+            _buffer.GetGroupByClause(),
+            _buffer.GetSelectClause(),
+            _buffer.GetHavingClause());
     }
 
     /// <summary>
@@ -798,38 +814,6 @@ public partial class QueryExecutor : IDisposable
         }
 
         return new DescribeResults(_store, queryResults, bindings, stringBuffer, describeAll);
-    }
-
-    /// <remarks>
-    /// ADR-009: [NoInlining] isolates the stack frame for the 22KB QueryResults return value.
-    /// Without this, stack frames merge and multiple Execute calls exhaust the 1MB Windows stack.
-    /// </remarks>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private QueryResults ExecuteWithJoins()
-    {
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-
-        // Access pattern via ref to avoid copying
-        ref readonly var pattern = ref _cachedPattern;
-
-        // Use nested loop join for required patterns only
-        // Pass optimized pattern order if available for join reordering
-        return new QueryResults(
-            new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, null, _buffer.Prefixes),
-            _buffer,
-            _source,
-            _store,
-            bindings,
-            stringBuffer,
-            _buffer.Limit,
-            _buffer.Offset,
-            _buffer.SelectDistinct,
-            _buffer.GetOrderByClause(),
-            _buffer.GetGroupByClause(),
-            _buffer.GetSelectClause(),
-            _buffer.GetHavingClause());
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array

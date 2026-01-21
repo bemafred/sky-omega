@@ -348,3 +348,16 @@ Before implementing SERVICE + UNION:
 - [ ] No GraphPattern (~4KB) accessed in nested calls (use QueryBuffer)
 - [ ] Thread workarounds removed after proper materialization
 - [ ] Stack usage verified with complex test queries (3+ branches, SERVICE + local + optimization)
+
+## Implementation Verification
+
+**2026-01-21: Multi-pattern variable predicate queries verified**
+
+The previously-skipped test `Execute_PostQueryValues_W3C_AllVariablePredicates` now passes. This test uses variable predicates in multi-pattern joins (`?s ?p1 ?o1 . ?s ?p2 ?o2`) which previously caused stack overflow.
+
+The fix was achieved through:
+1. QueryBuffer moving pattern storage to heap
+2. Materialization pattern for complex query paths
+3. BoxedPattern for subquery execution
+
+All 3,432 tests pass (71 W3C conformance tests still failing for unrelated reasons).

@@ -186,8 +186,17 @@ internal ref struct TriplePatternScan
     private bool _inReflexivePhase;         // True when emitting reflexive bindings
     private List<string>? _reflexiveList;   // List of all nodes for reflexive iteration
 
-    // State for alternative path traversal (p1|p2)
-    private int _alternativePhase; // 0 = first predicate, 1 = second predicate
+    // State for alternative path traversal (p1|p2|p3|...)
+    // Supports n-ary alternatives by tracking remaining span to process
+    private int _alternativePhase; // Current phase (0 = first segment, 1+ = subsequent segments)
+    private int _alternativeRemainingStart;  // Start of remaining right span
+    private int _alternativeRemainingLength; // Length of remaining right span
+
+    // State for sequence within alternative (e.g., p2/:p3 in p1|p2/:p3|p4)
+    private bool _inSequencePhase;           // Currently collecting intermediates from first step
+    private bool _inSequenceSecondStep;      // Currently executing second step (intermediates → final)
+    private Queue<string>? _sequenceIntermediates; // Intermediate nodes from first step of sequence
+    // Note: Second predicate stored in _expandedPredicate as string
 
     // State for negated property set with inverse predicates
     // 0 = direct scan (check direct predicates), 1 = inverse scan (check inverse predicates, swap bindings)
@@ -258,6 +267,10 @@ internal ref struct TriplePatternScan
         _inReflexivePhase = false;
         _reflexiveList = null;
         _alternativePhase = 0;
+        _alternativeRemainingStart = 0;
+        _alternativeRemainingLength = 0;
+        _inSequencePhase = false;
+        _sequenceIntermediates = null;
         _negatedSetPhase = 0;
         _negatedSetHasInverse = false;
         _negatedSetHasDirect = false;
@@ -363,6 +376,29 @@ internal ref struct TriplePatternScan
                             continue;
                     }
                 }
+                else if (_isAlternative)
+                {
+                    // For alternative path, handling depends on whether we're in a sequence phase
+                    if (_inSequencePhase && _sequenceIntermediates != null)
+                    {
+                        // First step of sequence - collect object as intermediate, don't return yet
+                        _sequenceIntermediates.Enqueue(triple.Object.ToString());
+                        continue;
+                    }
+
+                    // For second step of sequence, only bind object (subject is intermediate, not pattern subject)
+                    if (!_inSequenceSecondStep)
+                    {
+                        if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
+                        {
+                            continue;
+                        }
+                    }
+                    if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                    {
+                        continue;
+                    }
+                }
                 else
                 {
                     // Normal binding
@@ -377,20 +413,99 @@ internal ref struct TriplePatternScan
                 return true;
             }
 
-            // Current predicate exhausted - check for alternative path
-            if (_isAlternative && _alternativePhase == 0)
+            // Current predicate/phase exhausted - check for alternative path transitions
+            if (_isAlternative)
             {
-                // Switch to second predicate in the alternative
-                _alternativePhase = 1;
-                _enumerator.Dispose();
+                // If we were collecting sequence intermediates, now query the second step
+                if (_inSequencePhase && _sequenceIntermediates != null && _sequenceIntermediates.Count > 0)
+                {
+                    _enumerator.Dispose();
+                    _inSequencePhase = false;
+                    _inSequenceSecondStep = true;  // Mark that we're in second step (skip subject binding)
 
-                // Re-initialize with second predicate from path's Right offsets
-                var subject = ResolveTermForQuery(_pattern.Subject);
-                var obj = ResolveTermForQuery(_pattern.Object);
-                var predicate2 = _source.Slice(_pattern.Path.RightStart, _pattern.Path.RightLength);
+                    // Get the second predicate of the sequence (stored in _expandedPredicate)
+                    var secondPred = _expandedPredicate != null ? _expandedPredicate.AsSpan() : ReadOnlySpan<char>.Empty;
+                    secondPred = ExpandPathPredicateSpan(secondPred);
+                    var obj = ResolveTermForQuery(_pattern.Object);
 
-                _enumerator = ExecuteTemporalQuery(subject, predicate2, obj);
-                continue; // Try again with second predicate
+                    // Query from each intermediate to the final object
+                    // We'll process intermediates one at a time
+                    var intermediate = _sequenceIntermediates.Dequeue();
+                    _enumerator = ExecuteTemporalQuery(intermediate.AsSpan(), secondPred, obj);
+                    continue;
+                }
+
+                // If we have more intermediates to process (from sequence), do them
+                if (!_inSequencePhase && _sequenceIntermediates != null && _sequenceIntermediates.Count > 0)
+                {
+                    _enumerator.Dispose();
+                    var secondPred = _expandedPredicate != null ? _expandedPredicate.AsSpan() : ReadOnlySpan<char>.Empty;
+                    secondPred = ExpandPathPredicateSpan(secondPred);
+                    var obj = ResolveTermForQuery(_pattern.Object);
+                    var intermediate = _sequenceIntermediates.Dequeue();
+                    _enumerator = ExecuteTemporalQuery(intermediate.AsSpan(), secondPred, obj);
+                    continue;
+                }
+
+                // Current segment exhausted - move to next segment in remaining span
+                if (_alternativeRemainingLength > 0)
+                {
+                    _alternativePhase++;
+                    _enumerator.Dispose();
+
+                    // Find next segment (up to next | or end)
+                    var remainingSpan = _source.Slice(_alternativeRemainingStart, _alternativeRemainingLength);
+                    var pipeIdx = FindTopLevelOperator(remainingSpan, '|');
+
+                    ReadOnlySpan<char> currentSegment;
+                    if (pipeIdx >= 0)
+                    {
+                        currentSegment = remainingSpan.Slice(0, pipeIdx);
+                        _alternativeRemainingStart += pipeIdx + 1;
+                        _alternativeRemainingLength -= pipeIdx + 1;
+                    }
+                    else
+                    {
+                        currentSegment = remainingSpan;
+                        _alternativeRemainingLength = 0; // No more segments
+                    }
+
+                    // Check if this segment is a sequence
+                    var slashIdx = FindTopLevelOperator(currentSegment, '/');
+                    var subject = ResolveTermForQuery(_pattern.Subject);
+                    var obj = ResolveTermForQuery(_pattern.Object);
+
+                    if (slashIdx >= 0)
+                    {
+                        // Sequence segment - execute first step, collect intermediates
+                        var firstPred = currentSegment.Slice(0, slashIdx);
+                        var secondPred = currentSegment.Slice(slashIdx + 1);
+
+                        // IMPORTANT: Expand second predicate FIRST and save as string,
+                        // because ExpandPathPredicateSpan overwrites _expandedPredicate
+                        var expandedSecondPred = ExpandPathPredicateSpan(secondPred).ToString();
+
+                        // Now expand first predicate (this will overwrite _expandedPredicate internally)
+                        var predicate = ExpandPathPredicateSpan(firstPred);
+
+                        // NOW store the second predicate (after first pred expansion is done)
+                        _expandedPredicate = expandedSecondPred;
+
+                        _inSequencePhase = true;
+                        _inSequenceSecondStep = false;  // Reset - starting new sequence first step
+                        _sequenceIntermediates = new Queue<string>();
+
+                        _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
+                    }
+                    else
+                    {
+                        // Simple predicate - reset sequence state
+                        _inSequenceSecondStep = false;
+                        var predicate = ExpandPathPredicateSpan(currentSegment);
+                        _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+                    }
+                    continue;
+                }
             }
 
             // Current scan exhausted - check for negated set inverse phase
@@ -617,9 +732,36 @@ internal ref struct TriplePatternScan
         }
         else if (_isAlternative)
         {
-            // For alternative path (p1|p2), start with first predicate from Left offsets
-            predicate = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-            _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+            // For alternative path (p1|p2|...), start with first segment from Left offsets
+            // Store remaining right span for subsequent phases (supports n-ary alternatives)
+            _alternativeRemainingStart = _pattern.Path.RightStart;
+            _alternativeRemainingLength = _pattern.Path.RightLength;
+
+            // Check if the left segment is a sequence (contains / at top level)
+            var leftSpan = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+            var slashIdx = FindTopLevelOperator(leftSpan, '/');
+
+            if (slashIdx >= 0)
+            {
+                // Left segment is a sequence - execute first step, collect intermediates
+                var firstPred = leftSpan.Slice(0, slashIdx);
+                var secondPred = leftSpan.Slice(slashIdx + 1);
+
+                predicate = ExpandPathPredicateSpan(firstPred);
+                _inSequencePhase = true;
+                // Store second predicate as string for later use in MoveNext
+                _expandedPredicate = secondPred.ToString();
+                _sequenceIntermediates = new Queue<string>();
+
+                // Query first step - results will be collected as intermediates
+                _enumerator = ExecuteTemporalQuery(subject, predicate, ReadOnlySpan<char>.Empty);
+            }
+            else
+            {
+                // Simple predicate - query directly
+                predicate = ExpandPathPredicate(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+                _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
+            }
         }
         else if (_isNegatedSet)
         {
@@ -1166,6 +1308,115 @@ internal ref struct TriplePatternScan
     }
 
     /// <summary>
+    /// Expand a path predicate (from raw start/length offsets) with prefix expansion.
+    /// Used for Alternative path predicates which are stored as offsets rather than Term structs.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPathPredicate(int start, int length)
+    {
+        var predSpan = _source.Slice(start, length);
+
+        // Handle 'a' shorthand for rdf:type
+        if (predSpan.Length == 1 && predSpan[0] == 'a')
+        {
+            return SyntheticTermHelper.RdfType.AsSpan();
+        }
+
+        // Check if this is a prefixed name that needs expansion
+        if (_prefixes != null && predSpan.Length > 0 && predSpan[0] != '<' && predSpan[0] != '"')
+        {
+            var colonIdx = predSpan.IndexOf(':');
+            if (colonIdx >= 0)
+            {
+                var prefix = predSpan.Slice(0, colonIdx + 1);
+                var localName = predSpan.Slice(colonIdx + 1);
+
+                for (int i = 0; i < _prefixes.Length; i++)
+                {
+                    var mapping = _prefixes[i];
+                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+                    if (prefix.SequenceEqual(mappedPrefix))
+                    {
+                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+
+                        // Store expanded IRI in _expandedPredicate field
+                        _expandedPredicate = string.Concat(nsWithoutClose, localName, ">");
+                        return _expandedPredicate.AsSpan();
+                    }
+                }
+            }
+        }
+
+        return predSpan;
+    }
+
+    /// <summary>
+    /// Expand a path predicate from a span with prefix expansion.
+    /// Used for path segments extracted during n-ary alternative processing.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPathPredicateSpan(ReadOnlySpan<char> predSpan)
+    {
+        // Handle 'a' shorthand for rdf:type
+        if (predSpan.Length == 1 && predSpan[0] == 'a')
+        {
+            return SyntheticTermHelper.RdfType.AsSpan();
+        }
+
+        // Check if this is a prefixed name that needs expansion
+        if (_prefixes != null && predSpan.Length > 0 && predSpan[0] != '<' && predSpan[0] != '"')
+        {
+            var colonIdx = predSpan.IndexOf(':');
+            if (colonIdx >= 0)
+            {
+                var prefix = predSpan.Slice(0, colonIdx + 1);
+                var localName = predSpan.Slice(colonIdx + 1);
+
+                for (int i = 0; i < _prefixes.Length; i++)
+                {
+                    var mapping = _prefixes[i];
+                    var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+                    if (prefix.SequenceEqual(mappedPrefix))
+                    {
+                        var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+                        var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+
+                        // Store expanded IRI in _expandedPredicate field
+                        _expandedPredicate = string.Concat(nsWithoutClose, localName, ">");
+                        return _expandedPredicate.AsSpan();
+                    }
+                }
+            }
+        }
+
+        return predSpan;
+    }
+
+    /// <summary>
+    /// Find the first top-level occurrence of an operator in a path span.
+    /// Returns -1 if not found. Skips operators inside parentheses and IRIs.
+    /// </summary>
+    private static int FindTopLevelOperator(ReadOnlySpan<char> span, char op)
+    {
+        int depth = 0;
+        bool inIri = false;
+        for (int i = 0; i < span.Length; i++)
+        {
+            var ch = span[i];
+            if (ch == '<' && !inIri) inIri = true;
+            else if (ch == '>' && inIri) inIri = false;
+            else if (!inIri)
+            {
+                if (ch == '(') depth++;
+                else if (ch == ')') depth--;
+                else if (ch == op && depth == 0) return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>
     /// Check if a predicate is in the DIRECT elements of the negated property set.
     /// Direct elements are those NOT starting with '^'.
     /// </summary>
@@ -1363,8 +1614,9 @@ internal ref struct TriplePatternScan
     {
         if (!term.IsVariable)
         {
-            // Constant - verify it matches (should already match from query)
-            return true;
+            // Constant - verify it matches the expected value
+            var expected = ResolveTermForQuery(term);
+            return value.SequenceEqual(expected);
         }
 
         // Handle synthetic variables (from SPARQL-star expansion)
@@ -1485,9 +1737,13 @@ internal ref struct MultiPatternScan
 
     /// <summary>
     /// Get the current pattern (from boxed or inline storage).
+    /// Note: This copies the ~4KB struct - call sparingly and cache locally.
     /// </summary>
     private readonly GraphPattern CurrentPattern =>
         _useBoxedPattern ? _boxedPattern!.Pattern : _pattern;
+
+    // Cached pattern count to avoid repeated CurrentPattern access
+    private int _cachedPatternCount;
 
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode = false, ReadOnlySpan<char> graph = default, PrefixMapping[]? prefixes = null)
@@ -1541,6 +1797,9 @@ internal ref struct MultiPatternScan
         _f6_0 = _f6_1 = _f6_2 = _f6_3 = 0;
         _f7_0 = _f7_1 = _f7_2 = _f7_3 = 0;
         _hasPushedFilters = false;
+
+        // Cache pattern count for boxed pattern
+        _cachedPatternCount = boxedPattern.Pattern.RequiredPatternCount;
     }
 
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
@@ -1617,6 +1876,9 @@ internal ref struct MultiPatternScan
                     SetLevelFilter(level, i, filters[i]);
             }
         }
+
+        // Cache pattern count to avoid repeated struct copying in hot path
+        _cachedPatternCount = unionMode ? pattern.UnionBranchPatternCount : pattern.RequiredPatternCount;
     }
 
     /// <summary>
@@ -1636,14 +1898,10 @@ internal ref struct MultiPatternScan
     }
 
     /// <summary>
-    /// Get the number of patterns to process.
+    /// Get the number of patterns to process (uses cached value).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private int GetPatternCount()
-    {
-        var pattern = CurrentPattern;
-        return _unionMode ? pattern.UnionBranchPatternCount : pattern.RequiredPatternCount;
-    }
+    private int GetPatternCount() => _cachedPatternCount;
 
     #region Pushed Filter Helpers
 
@@ -1743,10 +2001,11 @@ internal ref struct MultiPatternScan
         if (count == 0)
             return true;
 
+        var pattern = CurrentPattern;
         for (int i = 0; i < count; i++)
         {
             var filterIndex = GetLevelFilter(level, i);
-            var filter = CurrentPattern.GetFilter(filterIndex);
+            var filter = pattern.GetFilter(filterIndex);
             var filterExpr = _source.Slice(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
             if (!evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()))

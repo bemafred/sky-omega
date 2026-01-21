@@ -1098,4 +1098,133 @@ public partial class QueryExecutorTests
     }
 
     #endregion
+
+    #region Property Path Operator Precedence Tests
+
+    [Fact]
+    public void Execute_OperatorPrecedence_SimpleAlternative()
+    {
+        // First verify that simple alternative works: :a :p1|:p2 ?t
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p1>", "<http://www.example.org/b>");
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p2>", "<http://www.example.org/c>");
+        Store.CommitBatch();
+
+        var query = @"
+PREFIX : <http://www.example.org/>
+SELECT ?t
+WHERE {
+  :a :p1|:p2 ?t
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Debug: Check parsing
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath, "Should have property path");
+        Assert.Equal(PathType.Alternative, pattern.Path.Type);
+
+        // Check that the path slices are correct
+        var leftPred = query.AsSpan().Slice(pattern.Path.LeftStart, pattern.Path.LeftLength).ToString();
+        var rightPred = query.AsSpan().Slice(pattern.Path.RightStart, pattern.Path.RightLength).ToString();
+        Assert.Equal(":p1", leftPred);
+        Assert.Equal(":p2", rightPred);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var tIdx = results.Current.FindBinding("?t".AsSpan());
+                if (tIdx >= 0)
+                {
+                    found.Add(results.Current.GetString(tIdx).ToString());
+                }
+            }
+            results.Dispose();
+
+            // Expected: b, c
+            Assert.Equal(2, found.Count);
+            Assert.Contains("<http://www.example.org/b>", found);
+            Assert.Contains("<http://www.example.org/c>", found);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_OperatorPrecedence_PP30_SequenceWithinAlternative()
+    {
+        // PP30: :a :p1|:p2/:p3|:p4 ?t
+        // Expected: :b, :c, :e (p1 gives b and e, p2/:p3 gives c, p4 gives nothing)
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p1>", "<http://www.example.org/b>");
+        Store.AddCurrentBatched("<http://www.example.org/b>", "<http://www.example.org/p4>", "<http://www.example.org/c>");
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p2>", "<http://www.example.org/d>");
+        Store.AddCurrentBatched("<http://www.example.org/d>", "<http://www.example.org/p3>", "<http://www.example.org/c>");
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p1>", "<http://www.example.org/e>");
+        Store.CommitBatch();
+
+        var query = @"
+PREFIX : <http://www.example.org/>
+SELECT ?t
+WHERE {
+  :a :p1|:p2/:p3|:p4 ?t
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Debug: Check parsing
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.True(pattern.HasPropertyPath, "Should have property path");
+        Assert.Equal(PathType.Alternative, pattern.Path.Type);
+
+        // Check that the path slices are correct
+        var leftPred = query.AsSpan().Slice(pattern.Path.LeftStart, pattern.Path.LeftLength).ToString();
+        var rightPred = query.AsSpan().Slice(pattern.Path.RightStart, pattern.Path.RightLength).ToString();
+        Assert.Equal(":p1", leftPred);
+        Assert.Equal(":p2/:p3|:p4", rightPred);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var tIdx = results.Current.FindBinding("?t".AsSpan());
+                if (tIdx >= 0)
+                {
+                    var val = results.Current.GetString(tIdx).ToString();
+                    found.Add(val);
+                    System.Console.WriteLine($"Found: {val}");
+                }
+            }
+            results.Dispose();
+
+            // Debug: show what we found
+            if (found.Count != 3)
+            {
+                var msg = $"Found {found.Count} results: {string.Join(", ", found)}";
+                Assert.Fail(msg);
+            }
+            Assert.Contains("<http://www.example.org/b>", found);
+            Assert.Contains("<http://www.example.org/c>", found);
+            Assert.Contains("<http://www.example.org/e>", found);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    #endregion
 }
