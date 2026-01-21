@@ -919,5 +919,79 @@ SELECT ?s WHERE {
         }
     }
 
+    [Fact]
+    public void Execute_MinusInsideGraph_DisjointVariables_DoesNotExclude()
+    {
+        // Test case based on W3C graph-minus
+        // GRAPH ?g { ?a :p :o MINUS { ?b :p :o } }
+        // Since ?a and ?b are different variables (disjoint domains),
+        // MINUS should NOT exclude any results
+
+        Store.BeginBatch();
+        // Named graph has one triple
+        Store.AddCurrentBatched("<http://example/subj>", "<http://example/pred>", "<http://example/obj>", "<http://example/graph1>");
+        Store.CommitBatch();
+
+        // First, verify the GRAPH query works without MINUS
+        var queryNoMinus = @"SELECT ?a WHERE {
+    GRAPH <http://example/graph1> {
+        ?a <http://example/pred> <http://example/obj>
+    }
+}";
+        var bufferNoMinus = ParseToBuffer(queryNoMinus);
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executorNoMinus = new QueryExecutor(Store, queryNoMinus.AsSpan(), bufferNoMinus);
+            var resultsNoMinus = executorNoMinus.ExecuteGraphToMaterialized();
+
+            int count = 0;
+            while (resultsNoMinus.MoveNext())
+            {
+                count++;
+            }
+            resultsNoMinus.Dispose();
+
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+
+        // Now test with MINUS (disjoint variables)
+        var query = @"SELECT ?a WHERE {
+    GRAPH <http://example/graph1> {
+        ?a <http://example/pred> <http://example/obj>
+        MINUS {
+            ?b <http://example/pred> <http://example/obj>
+        }
+    }
+}";
+        var buffer = ParseToBuffer(query);
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
+            var results = executor.ExecuteGraphToMaterialized();
+
+            int count = 0;
+            while (results.MoveNext())
+            {
+                count++;
+            }
+            results.Dispose();
+
+            // ?a and ?b are disjoint (different variables), so MINUS should NOT exclude
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

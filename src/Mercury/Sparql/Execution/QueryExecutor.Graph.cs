@@ -161,6 +161,9 @@ public partial class QueryExecutor
         // Get variable name from source
         var varName = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength);
 
+        // Check if there are MINUS patterns to evaluate
+        bool hasMinus = _buffer.HasMinus;
+
         // Iterate all named graphs (or FROM NAMED restricted graphs)
         if (_namedGraphs != null && _namedGraphs.Length > 0)
         {
@@ -175,18 +178,33 @@ public partial class QueryExecutor
 
                 // Execute patterns in this graph
                 var children = patterns.GetChildren(headerIndex);
+                var tempResults = new List<MaterializedRow>();
 
                 if (children.Count == 1)
                 {
                     var childSlot = children[0];
                     if (childSlot.IsTriple)
                     {
-                        ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, results);
+                        ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, tempResults);
                     }
                 }
                 else
                 {
-                    ExecuteMultiPatternSlotBased(children, ref bindingTable, graphStr, results);
+                    ExecuteMultiPatternSlotBased(children, ref bindingTable, graphStr, tempResults);
+                }
+
+                // Apply MINUS filtering before adding to results
+                if (hasMinus)
+                {
+                    foreach (var row in tempResults)
+                    {
+                        if (!MatchesMinusPatternForRow(patterns, row, graphStr))
+                            results.Add(row);
+                    }
+                }
+                else
+                {
+                    results.AddRange(tempResults);
                 }
             }
             return results;
@@ -202,6 +220,7 @@ public partial class QueryExecutor
             // Execute patterns in this graph
             var children = patterns.GetChildren(headerIndex);
             var graphStr = graphIri.ToString();
+            var tempResults = new List<MaterializedRow>();
 
             if (children.Count == 1)
             {
@@ -209,17 +228,130 @@ public partial class QueryExecutor
                 var childSlot = children[0];
                 if (childSlot.IsTriple)
                 {
-                    ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, results);
+                    ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, tempResults);
                 }
             }
             else
             {
                 // Multiple patterns - use nested loops
-                ExecuteMultiPatternSlotBased(children, ref bindingTable, graphStr, results);
+                ExecuteMultiPatternSlotBased(children, ref bindingTable, graphStr, tempResults);
+            }
+
+            // Apply MINUS filtering before adding to results
+            if (hasMinus)
+            {
+                foreach (var row in tempResults)
+                {
+                    if (!MatchesMinusPatternForRow(patterns, row, graphStr))
+                        results.Add(row);
+                }
+            }
+            else
+            {
+                results.AddRange(tempResults);
             }
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Check if a materialized row matches MINUS patterns (should be excluded).
+    /// Uses domain disjointness check: if no shared variables, never excludes.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private bool MatchesMinusPatternForRow(PatternArray patterns, MaterializedRow row, string? graphContext)
+    {
+        bool allMatch = true;
+        int minusFound = 0;
+
+        for (int i = 0; i < patterns.Count; i++)
+        {
+            var slot = patterns[i];
+            if (slot.Kind != Patterns.PatternKind.MinusTriple) continue;
+            minusFound++;
+
+            if (!MatchesSingleMinusPatternForRow(slot, row, graphContext))
+            {
+                allMatch = false;
+                break;
+            }
+        }
+
+        // All MINUS patterns matched - should exclude this row
+        return allMatch && minusFound > 0;
+    }
+
+    /// <summary>
+    /// Check if a single MINUS pattern matches the row (should contribute to exclusion).
+    /// First checks domain disjointness - if no shared variables, returns false (don't exclude).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private bool MatchesSingleMinusPatternForRow(PatternSlot slot, MaterializedRow row, string? graphContext)
+    {
+        // First check for domain disjointness - if no shared variables, don't exclude
+        // Per SPARQL spec: dom(μ) ∩ dom(μ') = ∅ means solution is kept
+        bool hasSharedVariable = false;
+
+        if (slot.SubjectType == TermType.Variable)
+        {
+            var varName = _source.AsSpan().Slice(slot.SubjectStart, slot.SubjectLength);
+            if (!row.GetValueByName(varName).IsEmpty)
+                hasSharedVariable = true;
+        }
+        if (!hasSharedVariable && slot.PredicateType == TermType.Variable)
+        {
+            var varName = _source.AsSpan().Slice(slot.PredicateStart, slot.PredicateLength);
+            if (!row.GetValueByName(varName).IsEmpty)
+                hasSharedVariable = true;
+        }
+        if (!hasSharedVariable && slot.ObjectType == TermType.Variable)
+        {
+            var varName = _source.AsSpan().Slice(slot.ObjectStart, slot.ObjectLength);
+            if (!row.GetValueByName(varName).IsEmpty)
+                hasSharedVariable = true;
+        }
+
+        // Domain disjointness: no shared variables means solution is never excluded
+        if (!hasSharedVariable)
+            return false;
+
+        // Resolve terms using row bindings
+        var subject = ResolveTermFromRow(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, row);
+        var predicate = ResolveTermFromRow(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, row);
+        var obj = ResolveTermFromRow(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, row);
+
+        // Query the store to see if this pattern matches
+        var results = graphContext != null
+            ? _store.QueryCurrent(subject, predicate, obj, graphContext.AsSpan())
+            : _store.QueryCurrent(subject, predicate, obj);
+        try
+        {
+            return results.MoveNext(); // Match if at least one triple found
+        }
+        finally
+        {
+            results.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Resolve a term from a materialized row's bindings.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private ReadOnlySpan<char> ResolveTermFromRow(TermType type, int start, int length, MaterializedRow row)
+    {
+        if (type == TermType.Variable)
+        {
+            var varName = _source.AsSpan().Slice(start, length);
+            var value = row.GetValueByName(varName);
+            if (!value.IsEmpty)
+                return value;
+            return ReadOnlySpan<char>.Empty; // Unbound variable
+        }
+
+        // Fixed term - return from source
+        return _source.AsSpan().Slice(start, length);
     }
 
     /// <summary>

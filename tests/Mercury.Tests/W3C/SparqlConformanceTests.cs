@@ -117,10 +117,7 @@ public class SparqlConformanceTests
         }
 
         // Load named graph data (qt:graphData)
-        // We need to handle two cases:
-        // 1. Query uses relative IRI like <exists02.ttl> - need filename as graph IRI
-        // 2. Query uses variable bound to <> which resolves to full file:// URI - need full URI as graph IRI
-        // Solution: Load the graph with both IRIs (filename and full URI) to cover both cases
+        // W3C tests use filename-based graph IRIs like <exists02.ttl>, not full file:// URIs
         _output.WriteLine($"GraphDataPaths: {(test.GraphDataPaths == null ? "null" : $"[{string.Join(", ", test.GraphDataPaths)}]")}");
         if (test.GraphDataPaths != null)
         {
@@ -130,17 +127,11 @@ public class SparqlConformanceTests
                 if (File.Exists(graphPath))
                 {
                     var filename = Path.GetFileName(graphPath);
-                    var fullUri = new Uri(graphPath).AbsoluteUri;
 
                     // Load with filename as graph IRI (for queries with relative graph IRIs like <exists02.ttl>)
                     var graphIriFilename = $"<{filename}>";
                     await LoadDataToNamedGraphAsync(store, graphPath, graphIriFilename);
                     _output.WriteLine($"Loaded graph data from {graphPath} into {graphIriFilename}");
-
-                    // Also load with full file:// URI (for queries where variable is bound to <> resolved value)
-                    var graphIriFullUri = $"<{fullUri}>";
-                    await LoadDataToNamedGraphAsync(store, graphPath, graphIriFullUri);
-                    _output.WriteLine($"Also loaded into {graphIriFullUri}");
                 }
             }
         }

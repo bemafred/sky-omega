@@ -343,6 +343,9 @@ public struct GraphPattern
     // Inline storage for MINUS patterns (8 * 24 bytes = 192 bytes)
     private TriplePattern _m0, _m1, _m2, _m3, _m4, _m5, _m6, _m7;
 
+    // MINUS filter expression (for FILTER inside MINUS)
+    private FilterExpr _minusFilter;
+
     // Inline storage for EXISTS/NOT EXISTS filters (4 * ~100 bytes)
     private ExistsFilter _e0, _e1, _e2, _e3;
 
@@ -370,6 +373,8 @@ public struct GraphPattern
     public readonly int ServiceClauseCount => _serviceClauseCount;
     public readonly bool HasBinds => _bindCount > 0;
     public readonly bool HasMinus => _minusPatternCount > 0;
+    public readonly bool HasMinusFilter => _minusFilter.Length > 0;
+    public readonly FilterExpr MinusFilter => _minusFilter;
     public readonly bool HasExists => _existsFilterCount > 0;
     public readonly bool HasGraph => _graphClauseCount > 0;
     public readonly bool HasSubQueries => _subQueryCount > 0;
@@ -571,6 +576,15 @@ public struct GraphPattern
             case 4: _m4 = pattern; break; case 5: _m5 = pattern; break;
             case 6: _m6 = pattern; break; case 7: _m7 = pattern; break;
         }
+    }
+
+    /// <summary>
+    /// Set the filter expression for MINUS clause.
+    /// This filter is evaluated for each matching MINUS pattern.
+    /// </summary>
+    public void SetMinusFilter(FilterExpr filter)
+    {
+        _minusFilter = filter;
     }
 
     public void AddExistsFilter(ExistsFilter filter)
@@ -1927,6 +1941,24 @@ public ref struct BindingTable
     /// Get the string buffer for direct access.
     /// </summary>
     public readonly ReadOnlySpan<char> GetStringBuffer() => _stringBuffer.Slice(0, _stringOffset);
+
+    /// <summary>
+    /// Get a binding at the specified index.
+    /// </summary>
+    public readonly Binding Get(int index) => _bindings[index];
+
+    /// <summary>
+    /// Get the current length of the string buffer (bytes used).
+    /// </summary>
+    public readonly int StringBufferLength => _stringOffset;
+
+    /// <summary>
+    /// Copy the string buffer contents to a destination span.
+    /// </summary>
+    public readonly void CopyStringsTo(Span<char> destination)
+    {
+        _stringBuffer.Slice(0, _stringOffset).CopyTo(destination);
+    }
 
     private static int ComputeHash(ReadOnlySpan<char> value)
     {

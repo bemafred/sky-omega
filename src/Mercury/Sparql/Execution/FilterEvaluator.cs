@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
@@ -21,6 +22,11 @@ public ref partial struct FilterEvaluator
     private ReadOnlySpan<char> _bindingStrings;
     private int _bindingCount;
 
+    // Prefix expansion support (optional)
+    private PrefixMapping[]? _prefixes;
+    private ReadOnlySpan<char> _source;
+    private string? _expandedPrefixBuffer;
+
     public FilterEvaluator(ReadOnlySpan<char> expression)
     {
         _expression = expression;
@@ -28,6 +34,9 @@ public ref partial struct FilterEvaluator
         _bindingData = ReadOnlySpan<Binding>.Empty;
         _bindingStrings = ReadOnlySpan<char>.Empty;
         _bindingCount = 0;
+        _prefixes = null;
+        _source = ReadOnlySpan<char>.Empty;
+        _expandedPrefixBuffer = null;
     }
 
     /// <summary>
@@ -39,6 +48,23 @@ public ref partial struct FilterEvaluator
         _bindingData = bindings;
         _bindingCount = bindingCount;
         _bindingStrings = stringBuffer;
+        _prefixes = null;
+        _source = ReadOnlySpan<char>.Empty;
+        return EvaluateOrExpression();
+    }
+
+    /// <summary>
+    /// Evaluate FILTER expression against current bindings with prefix expansion support.
+    /// </summary>
+    internal bool Evaluate(ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer,
+        PrefixMapping[]? prefixes, ReadOnlySpan<char> source)
+    {
+        _position = 0;
+        _bindingData = bindings;
+        _bindingCount = bindingCount;
+        _bindingStrings = stringBuffer;
+        _prefixes = prefixes;
+        _source = source;
         return EvaluateOrExpression();
     }
 
@@ -316,10 +342,16 @@ public ref partial struct FilterEvaluator
 
         var ch = Peek();
 
-        // Function call
+        // Full URI: <...>
+        if (ch == '<')
+        {
+            return ParseFullUri();
+        }
+
+        // Function call or prefixed name (both start with letter)
         if (IsLetter(ch))
         {
-            return ParseFunctionCall();
+            return ParseFunctionOrPrefixedName();
         }
 
         // Variable reference
@@ -506,6 +538,82 @@ public ref partial struct FilterEvaluator
         }
         
         return new Value { Type = ValueType.Unbound };
+    }
+
+    /// <summary>
+    /// Parse a full URI enclosed in angle brackets: &lt;http://example.org/foo&gt;
+    /// </summary>
+    private Value ParseFullUri()
+    {
+        var start = _position;
+        Advance(); // Skip '<'
+
+        while (!IsAtEnd() && Peek() != '>')
+            Advance();
+
+        if (!IsAtEnd())
+            Advance(); // Skip '>'
+
+        var uri = _expression.Slice(start, _position - start);
+        return new Value { Type = ValueType.Uri, StringValue = uri };
+    }
+
+    /// <summary>
+    /// Parse either a function call (followed by '(') or a prefixed name (prefix:localName).
+    /// For prefixed names, expands using the _prefixes array if available.
+    /// </summary>
+    private Value ParseFunctionOrPrefixedName()
+    {
+        var start = _position;
+
+        // Allow letters, digits, underscore, and colon
+        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
+            Advance();
+
+        var name = _expression.Slice(start, _position - start);
+
+        SkipWhitespace();
+
+        // If followed by '(', it's a function call - use existing ParseFunctionCall logic
+        if (Peek() == '(')
+        {
+            // Reset position and let ParseFunctionCall handle it
+            _position = start;
+            return ParseFunctionCall();
+        }
+
+        // Otherwise, it's a prefixed name - try to expand it
+        var colonIndex = name.IndexOf(':');
+        if (colonIndex > 0 && _prefixes != null && !_source.IsEmpty)
+        {
+            // Include the colon in the prefix to match the stored format "ex:"
+            var prefix = name.Slice(0, colonIndex + 1);
+            var localName = name.Slice(colonIndex + 1);
+
+            // Find matching prefix mapping
+            foreach (var mapping in _prefixes)
+            {
+                var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+                if (mappedPrefix.SequenceEqual(prefix))
+                {
+                    // Found a match - construct full URI
+                    var baseIri = _source.Slice(mapping.IriStart, mapping.IriLength);
+
+                    // baseIri is like "<http://example.org/>" - strip angle brackets
+                    if (baseIri.Length >= 2 && baseIri[0] == '<' && baseIri[^1] == '>')
+                    {
+                        baseIri = baseIri.Slice(1, baseIri.Length - 2);
+                    }
+
+                    // Build expanded URI: <baseIri + localName>
+                    _expandedPrefixBuffer = $"<{baseIri}{localName}>";
+                    return new Value { Type = ValueType.Uri, StringValue = _expandedPrefixBuffer.AsSpan() };
+                }
+            }
+        }
+
+        // No prefix match or not a prefixed name - return as-is (URI without brackets)
+        return new Value { Type = ValueType.Uri, StringValue = name };
     }
 
     private Value ParseFunctionCall()
@@ -1708,8 +1816,16 @@ public ref partial struct FilterEvaluator
                 ValueType.Double => Math.Abs(left.DoubleValue - right.DoubleValue) < 1e-10,
                 ValueType.Boolean => left.BooleanValue == right.BooleanValue,
                 ValueType.String => left.StringValue.SequenceEqual(right.StringValue),
+                ValueType.Uri => left.StringValue.SequenceEqual(right.StringValue),
                 _ => false
             };
+        }
+
+        // URI and String are comparable
+        if ((left.Type == ValueType.Uri && right.Type == ValueType.String) ||
+            (left.Type == ValueType.String && right.Type == ValueType.Uri))
+        {
+            return left.StringValue.SequenceEqual(right.StringValue);
         }
 
         // Type coercion for numeric comparisons
@@ -1743,6 +1859,7 @@ public ref partial struct FilterEvaluator
                 ValueType.Integer => left.IntegerValue < right.IntegerValue,
                 ValueType.Double => left.DoubleValue < right.DoubleValue,
                 ValueType.String => left.StringValue.SequenceCompareTo(right.StringValue) < 0,
+                ValueType.Uri => left.StringValue.SequenceCompareTo(right.StringValue) < 0,
                 _ => false
             };
         }

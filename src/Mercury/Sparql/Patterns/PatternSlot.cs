@@ -727,6 +727,8 @@ internal sealed class QueryBuffer : IDisposable
     public int BindCount { get; set; }
     public int FirstBranchBindCount { get; set; }  // BINDs in first UNION branch
     public int MinusPatternCount { get; set; }
+    public int MinusFilterStart { get; set; }
+    public int MinusFilterLength { get; set; }
     public int ExistsFilterCount { get; set; }
     public int UnionStartIndex { get; set; }  // Index where UNION branch starts
     public bool HasUnionFlag { get; set; }    // True if UNION was encountered
@@ -770,6 +772,7 @@ internal sealed class QueryBuffer : IDisposable
     public bool HasFilters => FilterCount > 0;
     public bool HasBinds => BindCount > 0;
     public bool HasMinus => MinusPatternCount > 0;
+    public bool HasMinusFilter => MinusFilterLength > 0;
     public bool HasExists => ExistsFilterCount > 0;
     public bool HasUnion => HasUnionFlag;
     public bool HasOptionalPatterns => OptionalFlags != 0;
@@ -1293,6 +1296,11 @@ internal static class QueryBufferAdapter
         buffer.BindCount = gp.BindCount;
         buffer.FirstBranchBindCount = gp.FirstBranchBindCount;
         buffer.MinusPatternCount = gp.MinusPatternCount;
+        if (gp.HasMinusFilter)
+        {
+            buffer.MinusFilterStart = gp.MinusFilter.Start;
+            buffer.MinusFilterLength = gp.MinusFilter.Length;
+        }
         buffer.ExistsFilterCount = gp.ExistsFilterCount;
         // UnionStartIndex in QueryBuffer accounts for linearized slot order:
         // [all triples] + [all filters] + [all binds]

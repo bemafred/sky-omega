@@ -832,6 +832,99 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
+    public void Execute_MinusWithFilterInside_ExcludesMatchingByFilter()
+    {
+        // Add extra data for this specific test - different types for Alice, Bob, Charlie
+        // We'll use "role" predicate with values that we can filter on
+        Store.AddCurrent("<http://example.org/Alice>", "<http://example.org/role>", "<http://example.org/Manager>");
+        Store.AddCurrent("<http://example.org/Bob>", "<http://example.org/role>", "<http://example.org/Developer>");
+        Store.AddCurrent("<http://example.org/Charlie>", "<http://example.org/role>", "<http://example.org/Intern>");
+
+        // Query: find people with names MINUS those with role Developer OR Intern
+        // Expected: only Alice (Manager)
+        // Using full URIs in FILTER instead of prefixes to simplify testing
+        var query = @"SELECT ?person WHERE {
+  ?person <http://xmlns.com/foaf/0.1/name> ?name
+  MINUS {
+    ?person <http://example.org/role> ?role
+    FILTER(?role = <http://example.org/Developer> || ?role = <http://example.org/Intern>)
+  }
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice should remain (Manager is not Developer or Intern)
+            Assert.Single(persons);
+            Assert.Contains("Alice", persons[0]);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_MinusWithFilterInsidePrefixed_ExcludesMatchingByFilter()
+    {
+        // Same test but with prefixed names to verify prefix expansion works in MINUS FILTER
+        Store.AddCurrent("<http://example.org/Alice>", "<http://example.org/role>", "<http://example.org/Manager>");
+        Store.AddCurrent("<http://example.org/Bob>", "<http://example.org/role>", "<http://example.org/Developer>");
+        Store.AddCurrent("<http://example.org/Charlie>", "<http://example.org/role>", "<http://example.org/Intern>");
+
+        // Query with prefixes: find people with names MINUS those with role Developer OR Intern
+        var query = @"PREFIX ex: <http://example.org/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+SELECT ?person WHERE {
+  ?person foaf:name ?name
+  MINUS {
+    ?person ex:role ?role
+    FILTER(?role = ex:Developer || ?role = ex:Intern)
+  }
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var persons = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?person".AsSpan());
+                Assert.True(idx >= 0);
+                persons.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Only Alice should remain (Manager is not Developer or Intern)
+            Assert.Single(persons);
+            Assert.Contains("Alice", persons[0]);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     // ========== ASK Tests ==========
 
 }

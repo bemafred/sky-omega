@@ -2472,6 +2472,7 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Parse MINUS clause: MINUS { GroupGraphPattern }
     /// Patterns inside MINUS are used to exclude matching solutions.
+    /// Supports FILTER inside MINUS for conditional exclusion.
     /// </summary>
     private void ParseMinus(ref GraphPattern pattern)
     {
@@ -2488,6 +2489,40 @@ public ref partial struct SparqlParser
         while (!IsAtEnd() && Peek() != '}')
         {
             SkipWhitespace();
+
+            // Check for FILTER inside MINUS
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase))
+            {
+                ConsumeKeyword("FILTER");
+                SkipWhitespace();
+
+                // Parse FILTER expression and store it for MINUS evaluation
+                if (Peek() == '(')
+                {
+                    int filterStart = _position;
+                    Advance(); // Skip '('
+
+                    // Find matching ')' - handle nested parentheses
+                    int depth = 1;
+                    while (!IsAtEnd() && depth > 0)
+                    {
+                        var c = Peek();
+                        if (c == '(') depth++;
+                        else if (c == ')') depth--;
+                        Advance();
+                    }
+
+                    // Store the filter expression (including outer parens)
+                    pattern.SetMinusFilter(new FilterExpr
+                    {
+                        Start = filterStart,
+                        Length = _position - filterStart
+                    });
+                }
+                SkipWhitespace();
+                continue;
+            }
 
             // Try to parse a triple pattern
             var subject = ParseTerm();
@@ -3041,6 +3076,15 @@ public ref partial struct SparqlParser
             {
                 // TODO: Handle OPTIONAL inside GRAPH properly
                 ParseOptional(ref pattern);
+                continue;
+            }
+
+            // Check for MINUS inside GRAPH
+            if (span.Length >= 5 && span[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase))
+            {
+                // Add MINUS patterns to parent pattern for later evaluation
+                // The graph context will be set during GRAPH clause execution
+                ParseMinus(ref pattern);
                 continue;
             }
 

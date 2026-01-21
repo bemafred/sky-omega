@@ -724,15 +724,75 @@ public ref partial struct QueryResults
 
     /// <summary>
     /// Check if a single MINUS pattern matches the current bindings.
+    /// SPARQL MINUS semantics: exclude only if domains overlap AND pattern matches.
+    /// If there are no shared variables between current bindings and MINUS pattern,
+    /// the solution is NOT excluded (domain disjointness rule).
+    /// If MINUS has a FILTER, only exclude if both pattern matches AND filter evaluates to true.
     /// </summary>
     private bool MatchesSingleMinusPatternFromSlot(PatternSlot slot)
     {
-        if (_store == null) return false;
+        if (_store == null || _buffer == null) return false;
+
+        // First check for domain disjointness - if no shared variables, don't exclude
+        // Per SPARQL spec: dom(μ) ∩ dom(μ') = ∅ means solution is kept
+        bool hasSharedVariable = false;
+
+        // Track which variables in MINUS pattern are unbound (need their values from matches)
+        bool subjectIsUnbound = false;
+        bool predicateIsUnbound = false;
+        bool objectIsUnbound = false;
+        int subjectVarStart = 0, subjectVarLen = 0;
+        int predicateVarStart = 0, predicateVarLen = 0;
+        int objectVarStart = 0, objectVarLen = 0;
+
+        if (slot.SubjectType == TermType.Variable)
+        {
+            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
+            if (_bindingTable.FindBinding(varName) >= 0)
+                hasSharedVariable = true;
+            else
+            {
+                subjectIsUnbound = true;
+                subjectVarStart = slot.SubjectStart;
+                subjectVarLen = slot.SubjectLength;
+            }
+        }
+        if (slot.PredicateType == TermType.Variable)
+        {
+            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
+            if (_bindingTable.FindBinding(varName) >= 0)
+                hasSharedVariable = true;
+            else
+            {
+                predicateIsUnbound = true;
+                predicateVarStart = slot.PredicateStart;
+                predicateVarLen = slot.PredicateLength;
+            }
+        }
+        if (slot.ObjectType == TermType.Variable)
+        {
+            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
+            if (_bindingTable.FindBinding(varName) >= 0)
+                hasSharedVariable = true;
+            else
+            {
+                objectIsUnbound = true;
+                objectVarStart = slot.ObjectStart;
+                objectVarLen = slot.ObjectLength;
+            }
+        }
+
+        // Domain disjointness: no shared variables means solution is never excluded
+        if (!hasSharedVariable)
+            return false;
 
         // Resolve terms using current bindings, expand prefixed names
         var subject = ResolveSlotTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, SlotTermPosition.Subject);
         var predicate = ResolveSlotTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, SlotTermPosition.Predicate);
         var obj = ResolveSlotTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, SlotTermPosition.Object);
+
+        // Check if MINUS has a filter that needs evaluation
+        bool hasMinusFilter = _buffer.HasMinusFilter;
 
         // Query the store to see if this pattern matches - use graph context if inside a GRAPH clause
         var results = _graphContext != null
@@ -740,12 +800,149 @@ public ref partial struct QueryResults
             : _store.QueryCurrent(subject, predicate, obj);
         try
         {
-            return results.MoveNext(); // Match if at least one triple found
+            if (!hasMinusFilter)
+            {
+                // No filter - just check if any match exists
+                return results.MoveNext();
+            }
+
+            // With FILTER: iterate over all matches and evaluate filter for each
+            var filterExpr = _source.Slice(_buffer.MinusFilterStart, _buffer.MinusFilterLength);
+
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+
+                // Evaluate the MINUS filter with combined bindings
+                if (EvaluateMinusFilterWithTriple(filterExpr, triple, subjectIsUnbound, subjectVarStart, subjectVarLen,
+                    predicateIsUnbound, predicateVarStart, predicateVarLen, objectIsUnbound, objectVarStart, objectVarLen))
+                {
+                    return true; // Filter matched - exclude this solution
+                }
+            }
+
+            // No match satisfied the filter - don't exclude
+            return false;
         }
         finally
         {
             results.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Evaluate MINUS filter expression with a matched triple's bindings.
+    /// Creates combined bindings from current bindings + MINUS pattern bindings.
+    /// </summary>
+    private bool EvaluateMinusFilterWithTriple(
+        ReadOnlySpan<char> filterExpr,
+        in ResolvedTemporalQuad triple,
+        bool subjectIsUnbound, int subjectVarStart, int subjectVarLen,
+        bool predicateIsUnbound, int predicateVarStart, int predicateVarLen,
+        bool objectIsUnbound, int objectVarStart, int objectVarLen)
+    {
+        // Get string values for unbound variables from matched triple
+        ReadOnlySpan<char> subjectValue = subjectIsUnbound ? triple.Subject : default;
+        ReadOnlySpan<char> predicateValue = predicateIsUnbound ? triple.Predicate : default;
+        ReadOnlySpan<char> objectValue = objectIsUnbound ? triple.Object : default;
+
+        // Calculate combined buffer size
+        int extraBufferSize = subjectValue.Length + predicateValue.Length + objectValue.Length;
+        int newBindingCount = (subjectIsUnbound ? 1 : 0) + (predicateIsUnbound ? 1 : 0) + (objectIsUnbound ? 1 : 0);
+        int totalBindings = _bindingTable.Count + newBindingCount;
+        int existingStringLen = _bindingTable.StringBufferLength;
+        int totalStringLen = existingStringLen + extraBufferSize;
+
+        // Use ArrayPool for both bindings and strings (stackalloc can't be passed to FilterEvaluator)
+        var rentedBindings = System.Buffers.ArrayPool<Binding>.Shared.Rent(totalBindings);
+        var rentedStrings = System.Buffers.ArrayPool<char>.Shared.Rent(Math.Max(1, totalStringLen));
+
+        try
+        {
+            int bindIdx = 0;
+
+            // Copy current bindings
+            for (int i = 0; i < _bindingTable.Count; i++)
+            {
+                rentedBindings[bindIdx++] = _bindingTable.Get(i);
+            }
+
+            // Copy existing string buffer
+            if (existingStringLen > 0)
+            {
+                _bindingTable.CopyStringsTo(rentedStrings.AsSpan());
+            }
+            int strPos = existingStringLen;
+
+            // Add new MINUS variable bindings with correct Binding struct fields
+            if (subjectIsUnbound && subjectVarLen > 0)
+            {
+                subjectValue.CopyTo(rentedStrings.AsSpan(strPos));
+                var varName = _source.Slice(subjectVarStart, subjectVarLen);
+                rentedBindings[bindIdx++] = new Binding
+                {
+                    VariableNameHash = ComputeVariableHash(varName),
+                    Type = BindingValueType.Uri,
+                    StringOffset = strPos,
+                    StringLength = subjectValue.Length
+                };
+                strPos += subjectValue.Length;
+            }
+            if (predicateIsUnbound && predicateVarLen > 0)
+            {
+                predicateValue.CopyTo(rentedStrings.AsSpan(strPos));
+                var varName = _source.Slice(predicateVarStart, predicateVarLen);
+                rentedBindings[bindIdx++] = new Binding
+                {
+                    VariableNameHash = ComputeVariableHash(varName),
+                    Type = BindingValueType.Uri,
+                    StringOffset = strPos,
+                    StringLength = predicateValue.Length
+                };
+                strPos += predicateValue.Length;
+            }
+            if (objectIsUnbound && objectVarLen > 0)
+            {
+                objectValue.CopyTo(rentedStrings.AsSpan(strPos));
+                var varName = _source.Slice(objectVarStart, objectVarLen);
+                // Determine type - could be URI or literal
+                var valueType = objectValue.Length > 0 && objectValue[0] == '<'
+                    ? BindingValueType.Uri
+                    : BindingValueType.String;
+                rentedBindings[bindIdx++] = new Binding
+                {
+                    VariableNameHash = ComputeVariableHash(varName),
+                    Type = valueType,
+                    StringOffset = strPos,
+                    StringLength = objectValue.Length
+                };
+                strPos += objectValue.Length;
+            }
+
+            // Evaluate the filter expression with prefix expansion support
+            var evaluator = new FilterEvaluator(filterExpr);
+            return evaluator.Evaluate(rentedBindings.AsSpan(0, bindIdx), bindIdx, rentedStrings.AsSpan(0, strPos),
+                _buffer?.Prefixes, _source);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<Binding>.Shared.Return(rentedBindings);
+            System.Buffers.ArrayPool<char>.Shared.Return(rentedStrings);
+        }
+    }
+
+    /// <summary>
+    /// Compute FNV-1a hash for variable name (matches BindingTable and FilterEvaluator).
+    /// </summary>
+    private static int ComputeVariableHash(ReadOnlySpan<char> value)
+    {
+        uint hash = 2166136261;
+        foreach (var ch in value)
+        {
+            hash ^= ch;
+            hash *= 16777619;
+        }
+        return (int)hash;
     }
 
     /// <summary>
