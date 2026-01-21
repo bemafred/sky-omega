@@ -117,6 +117,108 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// Skip past a path element in a property path expression.
+    /// Handles: ^element (inverse), (path) (grouped), !(iri|iri) (negated), or simple term.
+    /// </summary>
+    private void SkipPathElement()
+    {
+        SkipWhitespace();
+        var ch = Peek();
+
+        // Inverse: ^element
+        if (ch == '^')
+        {
+            Advance(); // Skip '^'
+            SkipWhitespace();
+            SkipPathElement(); // Recursively skip the inner element
+            return;
+        }
+
+        // Grouped: (path) with optional *+? suffix
+        if (ch == '(')
+        {
+            Advance(); // Skip '('
+            int depth = 1;
+            while (!IsAtEnd() && depth > 0)
+            {
+                ch = Peek();
+                if (ch == '(') depth++;
+                else if (ch == ')') depth--;
+                Advance();
+            }
+            // Skip any trailing quantifier (*+?)
+            SkipWhitespace();
+            ch = Peek();
+            if (ch == '*' || ch == '+')
+                Advance();
+            else if (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_')
+                Advance();
+            return;
+        }
+
+        // Negated: !element or !(iri|^iri|...)
+        if (ch == '!')
+        {
+            Advance(); // Skip '!'
+            SkipWhitespace();
+            if (Peek() == '(')
+            {
+                // !(iri|^iri|...)
+                Advance(); // Skip '('
+                int depth = 1;
+                while (!IsAtEnd() && depth > 0)
+                {
+                    ch = Peek();
+                    if (ch == '(') depth++;
+                    else if (ch == ')') depth--;
+                    Advance();
+                }
+            }
+            else
+            {
+                // !iri or !^iri
+                ParseNegatedSetElement();
+            }
+            return;
+        }
+
+        // Simple term (IRI, prefixed name, etc.)
+        ParseTerm();
+
+        // Check for quantifier suffix on simple term
+        SkipWhitespace();
+        ch = Peek();
+        if (ch == '*' || ch == '+')
+            Advance();
+        else if (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_')
+            Advance();
+    }
+
+    /// <summary>
+    /// Parse a single element in a negated property set.
+    /// Per SPARQL 1.1 grammar [95] PathOneInPropertySet ::= iri | 'a' | '^' ( iri | 'a' )
+    /// Handles: iri, a, ^iri, or ^a
+    /// </summary>
+    private void ParseNegatedSetElement()
+    {
+        SkipWhitespace();
+        var ch = Peek();
+
+        // Check for inverse: ^iri or ^a
+        if (ch == '^')
+        {
+            Advance(); // Skip '^'
+            SkipWhitespace();
+            // Parse the term after ^ (iri or 'a')
+            ParseTerm();
+            return;
+        }
+
+        // Regular term: iri or 'a'
+        ParseTerm();
+    }
+
+    /// <summary>
     /// [1] QueryUnit ::= Query
     /// </summary>
     public Query ParseQuery()
@@ -994,16 +1096,104 @@ public ref partial struct SparqlParser
         SkipWhitespace();
         var ch = Peek();
 
-        // Check for inverse path: ^predicate
+        // Check for grouped path: (path)*|+|?
+        // e.g., (p1/p2/p3)* means zero-or-more repetitions of the sequence
+        if (ch == '(')
+        {
+            var groupStart = _position;
+            Advance(); // Skip '('
+            SkipWhitespace();
+
+            // Parse the inner path expression
+            var (innerTerm, innerPath) = ParsePredicateOrPath();
+
+            SkipWhitespace();
+            if (Peek() != ')')
+                throw new SparqlParseException("Expected ')' after grouped path expression");
+            Advance(); // Skip ')'
+            var groupEnd = _position;
+
+            // Check for quantifier after the grouped path
+            SkipWhitespace();
+            ch = Peek();
+
+            // Create a path with the group span stored for later re-parsing during execution
+            // The group content is stored in LeftStart/LeftLength
+            int contentStart = groupStart + 1; // After '('
+            int contentLength = groupEnd - 1 - contentStart; // Before ')'
+
+            if (ch == '*')
+            {
+                Advance();
+                // For grouped sequence like (p1/p2/p3)*, we store the group content
+                // and mark it as ZeroOrMore with Sequence type inner path
+                if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
+                {
+                    return (innerTerm, PropertyPath.GroupedZeroOrMore(contentStart, contentLength));
+                }
+                return (innerTerm, PropertyPath.ZeroOrMore(innerTerm));
+            }
+            if (ch == '+')
+            {
+                Advance();
+                if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
+                {
+                    return (innerTerm, PropertyPath.GroupedOneOrMore(contentStart, contentLength));
+                }
+                return (innerTerm, PropertyPath.OneOrMore(innerTerm));
+            }
+            if (ch == '?')
+            {
+                var next = PeekAt(1);
+                if (!IsLetter(next) && next != '_')
+                {
+                    Advance();
+                    if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
+                    {
+                        return (innerTerm, PropertyPath.GroupedZeroOrOne(contentStart, contentLength));
+                    }
+                    return (innerTerm, PropertyPath.ZeroOrOne(innerTerm));
+                }
+            }
+
+            // No quantifier - just return the inner path
+            return (innerTerm, innerPath);
+        }
+
+        // Check for inverse path: ^predicate or ^(path)
         if (ch == '^')
         {
             Advance(); // Skip '^'
             SkipWhitespace();
+
+            // Check for inverse of grouped path: ^(p1/p2)
+            if (Peek() == '(')
+            {
+                var groupStart = _position;
+                Advance(); // Skip '('
+                SkipWhitespace();
+
+                // Parse the inner path expression
+                var (innerTerm, innerPath) = ParsePredicateOrPath();
+
+                SkipWhitespace();
+                if (Peek() != ')')
+                    throw new SparqlParseException("Expected ')' after inverse grouped path expression");
+                Advance(); // Skip ')'
+
+                // Store the group content for inverse sequence execution
+                int contentStart = groupStart + 1;
+                int contentLength = _position - 1 - contentStart;
+
+                return (innerTerm, PropertyPath.InverseGroup(contentStart, contentLength));
+            }
+
             var iri = ParseTerm();
             return (iri, PropertyPath.Inverse(iri));
         }
 
-        // Check for negated property set: !(iri1|iri2|...) or !iri
+        // Check for negated property set: !(iri1|^iri2|...) or !iri or !^iri
+        // Per SPARQL 1.1 grammar [95] PathOneInPropertySet ::= iri | 'a' | '^' ( iri | 'a' )
         if (ch == '!')
         {
             Advance(); // Skip '!'
@@ -1012,17 +1202,17 @@ public ref partial struct SparqlParser
 
             if (ch == '(')
             {
-                // Parse !(iri1|iri2|...)
+                // Parse !(iri1|^iri2|...)
                 Advance(); // Skip '('
                 SkipWhitespace();
 
                 // Record start of negated set content
                 var contentStart = _position;
 
-                // Parse first IRI
-                var firstIri = ParseTerm();
+                // Parse first element (iri, a, ^iri, or ^a)
+                ParseNegatedSetElement();
 
-                // Parse additional IRIs separated by |
+                // Parse additional elements separated by |
                 while (true)
                 {
                     SkipWhitespace();
@@ -1031,13 +1221,14 @@ public ref partial struct SparqlParser
                     {
                         var contentLength = _position - contentStart;
                         Advance(); // Skip ')'
-                        return (firstIri, PropertyPath.NegatedSet(contentStart, contentLength));
+                        // Use a placeholder term since the actual content is in contentStart/contentLength
+                        return (default, PropertyPath.NegatedSet(contentStart, contentLength));
                     }
                     if (ch == '|')
                     {
                         Advance(); // Skip '|'
                         SkipWhitespace();
-                        ParseTerm(); // Parse next IRI (we just need to advance past it)
+                        ParseNegatedSetElement(); // Parse next element (may be ^iri or iri)
                     }
                     else
                     {
@@ -1047,11 +1238,11 @@ public ref partial struct SparqlParser
             }
             else
             {
-                // Parse !iri (single negated predicate)
+                // Parse !iri or !^iri (single negated predicate)
                 var contentStart = _position;
-                var iri = ParseTerm();
+                ParseNegatedSetElement();
                 var contentLength = _position - contentStart;
-                return (iri, PropertyPath.NegatedSet(contentStart, contentLength));
+                return (default, PropertyPath.NegatedSet(contentStart, contentLength));
             }
         }
 
@@ -1093,7 +1284,7 @@ public ref partial struct SparqlParser
             Advance(); // Skip '/'
             SkipWhitespace();
             var rightStart = _position;
-            ParseTerm();  // Parse first right term
+            SkipPathElement();  // Skip first right element (may be ^iri, (path), !iri, or term)
             var rightEnd = _position;  // Track end before whitespace
 
             // Continue parsing while we see more '/' to capture the entire span
@@ -1105,8 +1296,8 @@ public ref partial struct SparqlParser
                     break;
                 Advance(); // Skip '/'
                 SkipWhitespace();
-                ParseTerm();  // Parse next term
-                rightEnd = _position;  // Update end position after each term
+                SkipPathElement();  // Skip next element
+                rightEnd = _position;  // Update end position after each element
             }
 
             var rightLength = rightEnd - rightStart;  // Use end position, not current position
@@ -1121,7 +1312,7 @@ public ref partial struct SparqlParser
             Advance(); // Skip '|'
             SkipWhitespace();
             var rightStart = _position;
-            ParseTerm();  // Parse first right term
+            SkipPathElement();  // Skip first right element
             var rightEnd = _position;  // Track end before whitespace
 
             // Continue parsing while we see more '|' to capture the entire span
@@ -1132,8 +1323,8 @@ public ref partial struct SparqlParser
                     break;
                 Advance(); // Skip '|'
                 SkipWhitespace();
-                ParseTerm();  // Parse next term
-                rightEnd = _position;  // Update end position after each term
+                SkipPathElement();  // Skip next element
+                rightEnd = _position;  // Update end position after each element
             }
 
             var rightLength = rightEnd - rightStart;  // Use end position, not current position

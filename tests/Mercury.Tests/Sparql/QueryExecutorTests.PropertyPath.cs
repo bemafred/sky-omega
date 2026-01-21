@@ -1057,5 +1057,45 @@ public partial class QueryExecutorTests
         Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
     }
 
+    [Fact]
+    public void Parse_NegatedPropertySet_InverseA()
+    {
+        // Test !^a which means "not inverse rdf:type"
+        // Per SPARQL 1.1 grammar [95] PathOneInPropertySet ::= iri | 'a' | '^' ( iri | 'a' )
+        var query = "SELECT ?s ?o WHERE { ?s !^a ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Check that the pattern has the negated set path type
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void Parse_NegatedPropertySet_DirectA()
+    {
+        // Test !a which means "not rdf:type"
+        var query = "SELECT ?s ?o WHERE { ?s !a ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Check that the pattern has the negated set path type
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
+    }
+
+    [Fact]
+    public void Parse_NegatedPropertySet_MixedDirectAndInverse()
+    {
+        // Test !(a|^ex:foo) which mixes direct and inverse
+        var query = "PREFIX ex: <http://example.org/> SELECT ?s ?o WHERE { ?s !(a|^ex:foo) ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Check that the pattern has the negated set path type
+        var pattern = parsedQuery.WhereClause.Pattern.GetPattern(0);
+        Assert.Equal(PathType.NegatedSet, pattern.Path.Type);
+    }
+
     #endregion
 }

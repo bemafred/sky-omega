@@ -1146,6 +1146,34 @@ public struct PropertyPath
     /// </summary>
     public static PropertyPath NegatedSet(int contentStart, int contentLength) =>
         new() { Type = PathType.NegatedSet, LeftStart = contentStart, LeftLength = contentLength };
+
+    /// <summary>
+    /// Creates a grouped zero-or-more path: (path)* - e.g., (p1/p2/p3)*
+    /// The content span contains the inner path expression.
+    /// </summary>
+    public static PropertyPath GroupedZeroOrMore(int contentStart, int contentLength) =>
+        new() { Type = PathType.GroupedZeroOrMore, LeftStart = contentStart, LeftLength = contentLength };
+
+    /// <summary>
+    /// Creates a grouped one-or-more path: (path)+ - e.g., (p1/p2/p3)+
+    /// The content span contains the inner path expression.
+    /// </summary>
+    public static PropertyPath GroupedOneOrMore(int contentStart, int contentLength) =>
+        new() { Type = PathType.GroupedOneOrMore, LeftStart = contentStart, LeftLength = contentLength };
+
+    /// <summary>
+    /// Creates a grouped zero-or-one path: (path)? - e.g., (p1/p2)?
+    /// The content span contains the inner path expression.
+    /// </summary>
+    public static PropertyPath GroupedZeroOrOne(int contentStart, int contentLength) =>
+        new() { Type = PathType.GroupedZeroOrOne, LeftStart = contentStart, LeftLength = contentLength };
+
+    /// <summary>
+    /// Creates an inverse grouped path: ^(path) - e.g., ^(p1/p2)
+    /// The content span contains the inner path expression.
+    /// </summary>
+    public static PropertyPath InverseGroup(int contentStart, int contentLength) =>
+        new() { Type = PathType.InverseGroup, LeftStart = contentStart, LeftLength = contentLength };
 }
 
 /// <summary>
@@ -1160,7 +1188,11 @@ public enum PathType : byte
     ZeroOrOne,       // iri? - zero or one hop
     Sequence,        // path1/path2 - sequence of paths
     Alternative,     // path1|path2 - alternative paths
-    NegatedSet       // !(iri1|iri2|...) - matches any predicate except those listed
+    NegatedSet,      // !(iri1|iri2|...) - matches any predicate except those listed
+    GroupedZeroOrMore, // (path)* - zero or more repetitions of grouped path
+    GroupedOneOrMore,  // (path)+ - one or more repetitions of grouped path
+    GroupedZeroOrOne,  // (path)? - zero or one occurrence of grouped path
+    InverseGroup       // ^(path) - inverse of grouped path
 }
 
 /// <summary>

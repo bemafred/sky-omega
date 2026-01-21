@@ -167,6 +167,10 @@ internal ref struct TriplePatternScan
     private readonly bool _isZeroOrOne;
     private readonly bool _isAlternative;
     private readonly bool _isNegatedSet;
+    private readonly bool _isGroupedZeroOrMore;
+    private readonly bool _isGroupedOneOrMore;
+    private readonly bool _isGroupedZeroOrOne;
+    private readonly bool _isInverseGroup;
 
     // State for transitive path traversal
     private HashSet<string>? _visited;
@@ -175,8 +179,24 @@ internal ref struct TriplePatternScan
     private string? _startNode;  // Original start node for binding
     private bool _emittedReflexive;
 
+    // State for multi-start transitive path (when both subject and object are unbound)
+    private Queue<string>? _startingNodes;  // All potential starting nodes to process
+    private HashSet<string>? _allNodes;     // All nodes seen (for reflexive emissions)
+    private int _reflexiveIndex;            // Index for iterating through reflexive emissions
+    private bool _inReflexivePhase;         // True when emitting reflexive bindings
+    private List<string>? _reflexiveList;   // List of all nodes for reflexive iteration
+
     // State for alternative path traversal (p1|p2)
     private int _alternativePhase; // 0 = first predicate, 1 = second predicate
+
+    // State for negated property set with inverse predicates
+    // 0 = direct scan (check direct predicates), 1 = inverse scan (check inverse predicates, swap bindings)
+    private int _negatedSetPhase;
+    private bool _negatedSetHasInverse;  // True if set contains inverse predicates
+    private bool _negatedSetHasDirect;   // True if set contains direct predicates
+
+    // State for grouped sequence path traversal ((p1/p2/p3)*)
+    private Queue<string>? _groupedResults; // Results from executing grouped sequence
 
     // Prefix mappings for expansion
     private readonly PrefixMapping[]? _prefixes;
@@ -222,13 +242,26 @@ internal ref struct TriplePatternScan
         _isZeroOrOne = pattern.Path.Type == PathType.ZeroOrOne;
         _isAlternative = pattern.Path.Type == PathType.Alternative;
         _isNegatedSet = pattern.Path.Type == PathType.NegatedSet;
+        _isGroupedZeroOrMore = pattern.Path.Type == PathType.GroupedZeroOrMore;
+        _isGroupedOneOrMore = pattern.Path.Type == PathType.GroupedOneOrMore;
+        _isGroupedZeroOrOne = pattern.Path.Type == PathType.GroupedZeroOrOne;
+        _isInverseGroup = pattern.Path.Type == PathType.InverseGroup;
 
         _visited = null;
         _frontier = null;
         _currentNode = null;
         _startNode = null;
         _emittedReflexive = false;
+        _startingNodes = null;
+        _allNodes = null;
+        _reflexiveIndex = 0;
+        _inReflexivePhase = false;
+        _reflexiveList = null;
         _alternativePhase = 0;
+        _negatedSetPhase = 0;
+        _negatedSetHasInverse = false;
+        _negatedSetHasDirect = false;
+        _groupedResults = null;
 
         _prefixes = prefixes;
         _expandedSubject = null;
@@ -245,9 +278,36 @@ internal ref struct TriplePatternScan
         }
 
         // Handle transitive paths with BFS
-        if (_isZeroOrMore || _isOneOrMore)
+        if (_isZeroOrMore || _isOneOrMore || _isGroupedZeroOrMore || _isGroupedOneOrMore)
         {
             return MoveNextTransitive(ref bindings);
+        }
+
+        // Handle inverse grouped path ^(p1/p2) - iterate over pre-computed results
+        if (_isInverseGroup && _groupedResults != null)
+        {
+            while (_groupedResults.Count > 0)
+            {
+                var result = _groupedResults.Dequeue();
+                bindings.TruncateTo(_initialBindingsCount);
+
+                // For ^(path), the subject in the pattern is where we started,
+                // and the result is what we found - bind appropriately
+                var subject = ResolveTermForQuery(_pattern.Subject);
+                if (!subject.IsEmpty)
+                {
+                    // Subject was bound (e.g., in:c ^(p1/p2) ?x) - bind result to object
+                    if (TryBindVariable(_pattern.Object, result.AsSpan(), ref bindings))
+                        return true;
+                }
+                else
+                {
+                    // Object was bound (e.g., ?x ^(p1/p2) in:c) - bind result to subject
+                    if (TryBindVariable(_pattern.Subject, result.AsSpan(), ref bindings))
+                        return true;
+                }
+            }
+            return false;
         }
 
         while (true)
@@ -271,15 +331,37 @@ internal ref struct TriplePatternScan
                 }
                 else if (_isNegatedSet)
                 {
-                    // For negated property set, filter out predicates that ARE in the negated set
-                    if (IsPredicateInNegatedSet(triple.Predicate))
-                        continue;
+                    // Negated property sets support both direct and inverse predicates.
+                    // Direct predicates (e.g., !ex:p) filter ?s ?p ?o with normal binding
+                    // Inverse predicates (e.g., !^ex:p) filter ?s ?p ?o with inverted binding (?s←o, ?o←s)
+                    if (_negatedSetPhase == 0)
+                    {
+                        // Direct phase: exclude triples where predicate matches direct negated set
+                        if (_negatedSetHasDirect && IsPredicateInDirectNegatedSet(triple.Predicate))
+                            continue;
 
-                    // Bind subject and object (no predicate binding for negated sets)
-                    if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
-                        continue;
-                    if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
-                        continue;
+                        // Skip direct phase entirely if set has ONLY inverse predicates
+                        if (!_negatedSetHasDirect)
+                            continue;
+
+                        // Bind normally: subject → subject, object → object
+                        if (!TryBindVariable(_pattern.Subject, triple.Subject, ref bindings))
+                            continue;
+                        if (!TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                            continue;
+                    }
+                    else
+                    {
+                        // Inverse phase: exclude triples where predicate matches inverse negated set
+                        if (IsPredicateInInverseNegatedSet(triple.Predicate))
+                            continue;
+
+                        // Bind inverted: subject → object, object → subject
+                        if (!TryBindVariable(_pattern.Subject, triple.Object, ref bindings))
+                            continue;
+                        if (!TryBindVariable(_pattern.Object, triple.Subject, ref bindings))
+                            continue;
+                    }
                 }
                 else
                 {
@@ -311,7 +393,22 @@ internal ref struct TriplePatternScan
                 continue; // Try again with second predicate
             }
 
-            break; // No more alternatives
+            // Current scan exhausted - check for negated set inverse phase
+            if (_isNegatedSet && _negatedSetPhase == 0 && _negatedSetHasInverse)
+            {
+                // Switch to inverse phase
+                _negatedSetPhase = 1;
+                _enumerator.Dispose();
+
+                // Re-initialize with same query (scan all triples again for inverse bindings)
+                var subject = ResolveTermForQuery(_pattern.Subject);
+                var obj = ResolveTermForQuery(_pattern.Object);
+
+                _enumerator = ExecuteTemporalQuery(subject, ReadOnlySpan<char>.Empty, obj);
+                continue; // Try again with inverse bindings
+            }
+
+            break; // No more alternatives or phases
         }
 
         // For zero-or-one, also emit reflexive case if subject == object and not yet emitted
@@ -320,13 +417,31 @@ internal ref struct TriplePatternScan
             _emittedReflexive = true;
             bindings.TruncateTo(_initialBindingsCount);
 
-            // Only emit reflexive if subject variable is bound or is concrete
+            // Get subject and object values
             var subjectSpan = ResolveTermForQuery(_pattern.Subject);
+            var objectSpan = ResolveTermForQuery(_pattern.Object);
+
+            // For reflexive: if subject is bound, use it; if subject is unbound but object is bound, use object
+            // This handles queries like "?s :p? :o" where the reflexive case should bind ?s = :o
+            ReadOnlySpan<char> reflexiveValue;
             if (!subjectSpan.IsEmpty)
             {
-                // Bind subject to both subject and object positions
-                if (TryBindVariable(_pattern.Subject, subjectSpan, ref bindings) &&
-                    TryBindVariable(_pattern.Object, subjectSpan, ref bindings))
+                reflexiveValue = subjectSpan;
+            }
+            else if (!objectSpan.IsEmpty)
+            {
+                reflexiveValue = objectSpan;
+            }
+            else
+            {
+                reflexiveValue = ReadOnlySpan<char>.Empty;
+            }
+
+            if (!reflexiveValue.IsEmpty)
+            {
+                // Bind both subject and object to the same value (reflexive)
+                if (TryBindVariable(_pattern.Subject, reflexiveValue, ref bindings) &&
+                    TryBindVariable(_pattern.Object, reflexiveValue, ref bindings))
                 {
                     return true;
                 }
@@ -338,14 +453,35 @@ internal ref struct TriplePatternScan
 
     private bool MoveNextTransitive(ref BindingTable bindings)
     {
-        // For zero-or-more (p*), emit reflexive case first: start node matches itself at 0 hops
-        if (_isZeroOrMore && !_emittedReflexive)
+        var isGrouped = _isGroupedZeroOrMore || _isGroupedOneOrMore;
+
+        // For multi-start mode (both subject and object unbound), emit all reflexive bindings first
+        if (_inReflexivePhase && _reflexiveList != null)
+        {
+            while (_reflexiveIndex < _reflexiveList.Count)
+            {
+                var node = _reflexiveList[_reflexiveIndex++];
+                bindings.TruncateTo(_initialBindingsCount);
+
+                // Bind subject and object to same node (reflexive)
+                if (TryBindVariable(_pattern.Subject, node.AsSpan(), ref bindings) &&
+                    TryBindVariable(_pattern.Object, node.AsSpan(), ref bindings))
+                {
+                    return true;
+                }
+            }
+            _inReflexivePhase = false;
+        }
+
+        // For single-start zero-or-more, emit reflexive for just the start node
+        if ((_isZeroOrMore || _isGroupedZeroOrMore) && !_emittedReflexive && _reflexiveList == null)
         {
             _emittedReflexive = true;
             bindings.TruncateTo(_initialBindingsCount);
 
             // Bind subject to start node, object to start node (reflexive)
-            if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
+            if (!string.IsNullOrEmpty(_startNode) &&
+                TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
                 TryBindVariable(_pattern.Object, _startNode.AsSpan(), ref bindings))
             {
                 return true;
@@ -357,47 +493,110 @@ internal ref struct TriplePatternScan
         {
             QueryCancellation.ThrowIfCancellationRequested();
 
-            // Try to get next result from current frontier node
-            while (_enumerator.MoveNext())
+            if (isGrouped)
             {
-                var triple = _enumerator.Current;
-                var targetNode = triple.Object.ToString();
-
-                if (!_visited!.Contains(targetNode))
+                // For grouped paths, iterate over pre-computed sequence results
+                while (_groupedResults != null && _groupedResults.Count > 0)
                 {
-                    _visited.Add(targetNode);
-                    _frontier!.Enqueue(targetNode);
+                    var targetNode = _groupedResults.Dequeue();
 
-                    bindings.TruncateTo(_initialBindingsCount);
-                    // Bind subject to original start node, object to the discovered target
-                    if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
-                        TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                    if (!_visited!.Contains(targetNode))
                     {
-                        return true;
+                        _visited.Add(targetNode);
+                        _frontier!.Enqueue(targetNode);
+
+                        bindings.TruncateTo(_initialBindingsCount);
+                        // Bind subject to original start node, object to the discovered target
+                        if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
+                            TryBindVariable(_pattern.Object, targetNode.AsSpan(), ref bindings))
+                        {
+                            return true;
+                        }
                     }
                 }
             }
+            else
+            {
+                // For simple paths, use the enumerator
+                while (_enumerator.MoveNext())
+                {
+                    var triple = _enumerator.Current;
+                    var targetNode = triple.Object.ToString();
+
+                    if (!_visited!.Contains(targetNode))
+                    {
+                        _visited.Add(targetNode);
+                        _frontier!.Enqueue(targetNode);
+
+                        bindings.TruncateTo(_initialBindingsCount);
+                        // Bind subject to original start node, object to the discovered target
+                        if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
+                            TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                _enumerator.Dispose();
+            }
 
             // Move to next frontier node
-            _enumerator.Dispose();
-            if (_frontier!.Count == 0)
-                return false;
+            if (_frontier!.Count > 0)
+            {
+                _currentNode = _frontier.Dequeue();
 
-            _currentNode = _frontier.Dequeue();
-            var predicate = _pattern.HasPropertyPath
-                ? ResolveTermForQuery(_pattern.Path.Iri)
-                : ResolveTermForQuery(_pattern.Predicate);
+                if (isGrouped)
+                {
+                    _groupedResults = new Queue<string>(ExecuteGroupedSequence(_currentNode));
+                }
+                else
+                {
+                    var predicate = _pattern.HasPropertyPath
+                        ? ResolveTermForQuery(_pattern.Path.Iri)
+                        : ResolveTermForQuery(_pattern.Predicate);
 
-            _enumerator = ExecuteTemporalQuery(
-                _currentNode.AsSpan(),
-                predicate,
-                ReadOnlySpan<char>.Empty);
+                    _enumerator = ExecuteTemporalQuery(
+                        _currentNode.AsSpan(),
+                        predicate,
+                        ReadOnlySpan<char>.Empty);
+                }
+                continue;
+            }
+
+            // Frontier exhausted - check for more starting nodes (multi-start mode)
+            if (_startingNodes != null && _startingNodes.Count > 0)
+            {
+                _startNode = _startingNodes.Dequeue();
+                _visited!.Clear();
+                _visited.Add(_startNode);
+                _frontier!.Clear();
+                _currentNode = _startNode;
+
+                if (isGrouped)
+                {
+                    _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+                }
+                else
+                {
+                    var predicate = _pattern.HasPropertyPath
+                        ? ResolveTermForQuery(_pattern.Path.Iri)
+                        : ResolveTermForQuery(_pattern.Predicate);
+
+                    _enumerator = ExecuteTemporalQuery(
+                        _startNode.AsSpan(),
+                        predicate,
+                        ReadOnlySpan<char>.Empty);
+                }
+                continue;
+            }
+
+            return false;
         }
     }
 
     private void Initialize()
     {
-        if (_isZeroOrMore || _isOneOrMore)
+        if (_isZeroOrMore || _isOneOrMore || _isGroupedZeroOrMore || _isGroupedOneOrMore)
         {
             InitializeTransitive();
             return;
@@ -424,9 +623,22 @@ internal ref struct TriplePatternScan
         }
         else if (_isNegatedSet)
         {
-            // For negated property set !(p1|p2|...), query all predicates (wildcard)
-            // and filter in MoveNext
+            // For negated property set !(p1|^p2|...), query all predicates (wildcard)
+            // and filter in MoveNext. Analyze set for direct vs inverse predicates.
+            _negatedSetHasDirect = NegatedSetHasDirectPredicates();
+            _negatedSetHasInverse = NegatedSetHasInversePredicates();
+            _negatedSetPhase = 0;  // Start with direct scan phase
             _enumerator = ExecuteTemporalQuery(subject, ReadOnlySpan<char>.Empty, obj);
+        }
+        else if (_isInverseGroup)
+        {
+            // For inverse grouped path ^(p1/p2), execute the sequence in reverse
+            // The subject is the start node, results go to _groupedResults for iteration in MoveNext
+            // Expand prefixed names to full IRIs for store queries
+            var startNodeSpan = subject.IsEmpty ? obj : subject;
+            var expandedStart = ExpandPrefixedName(startNodeSpan);
+            var startNode = expandedStart.ToString();
+            _groupedResults = new Queue<string>(ExecuteInverseGroupedSequence(startNode));
         }
         else
         {
@@ -452,29 +664,350 @@ internal ref struct TriplePatternScan
         };
     }
 
+    /// <summary>
+    /// Executes a grouped sequence path from a given start node.
+    /// For example, for (p1/p2/p3)*, this executes the full sequence p1→p2→p3
+    /// and returns all nodes reachable at the end of the sequence.
+    /// </summary>
+    private List<string> ExecuteGroupedSequence(string startNode)
+    {
+        var results = new List<string>();
+
+        // Get the inner content of the grouped path
+        var innerContent = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+
+        // Parse the sequence into individual predicates
+        var predicates = new List<ReadOnlyMemory<char>>();
+        var contentStr = innerContent.ToString();
+        var start = 0;
+        var depth = 0;
+
+        for (int i = 0; i < contentStr.Length; i++)
+        {
+            var ch = contentStr[i];
+            if (ch == '<') depth++;
+            else if (ch == '>') depth--;
+            else if (ch == '/' && depth == 0)
+            {
+                if (i > start)
+                {
+                    predicates.Add(contentStr.AsMemory(start, i - start));
+                }
+                start = i + 1;
+            }
+        }
+        // Add the last predicate
+        if (start < contentStr.Length)
+        {
+            predicates.Add(contentStr.AsMemory(start, contentStr.Length - start));
+        }
+
+        if (predicates.Count == 0)
+            return results;
+
+        // Execute the sequence: start with the start node, execute each predicate in turn
+        var currentNodes = new List<string> { startNode };
+
+        foreach (var predicateMem in predicates)
+        {
+            var nextNodes = new List<string>();
+            var predicate = ExpandPrefixedName(predicateMem.Span);
+
+            foreach (var node in currentNodes)
+            {
+                var enumerator = ExecuteTemporalQuery(
+                    node.AsSpan(),
+                    predicate,
+                    ReadOnlySpan<char>.Empty);
+
+                while (enumerator.MoveNext())
+                {
+                    var triple = enumerator.Current;
+                    nextNodes.Add(triple.Object.ToString());
+                }
+                enumerator.Dispose();
+            }
+
+            currentNodes = nextNodes;
+            if (currentNodes.Count == 0)
+                break;
+        }
+
+        results.AddRange(currentNodes);
+        return results;
+    }
+
+    /// <summary>
+    /// Executes an inverse grouped sequence path from a given start node.
+    /// For example, for ^(p1/p2), this executes the sequence in reverse with inverse predicates: ^p2→^p1.
+    /// This finds nodes that lead TO the start node via the original sequence.
+    /// </summary>
+    private List<string> ExecuteInverseGroupedSequence(string startNode)
+    {
+        var results = new List<string>();
+
+        // Get the inner content of the grouped path
+        var innerContent = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+
+        // Parse the sequence into individual predicates
+        var predicates = new List<ReadOnlyMemory<char>>();
+        var contentStr = innerContent.ToString();
+        var start = 0;
+        var depth = 0;
+
+        for (int i = 0; i < contentStr.Length; i++)
+        {
+            var ch = contentStr[i];
+            if (ch == '<') depth++;
+            else if (ch == '>') depth--;
+            else if (ch == '/' && depth == 0)
+            {
+                if (i > start)
+                {
+                    predicates.Add(contentStr.AsMemory(start, i - start));
+                }
+                start = i + 1;
+            }
+        }
+        // Add the last predicate
+        if (start < contentStr.Length)
+        {
+            predicates.Add(contentStr.AsMemory(start, contentStr.Length - start));
+        }
+
+        if (predicates.Count == 0)
+            return results;
+
+        // REVERSE the predicate order for inverse execution
+        predicates.Reverse();
+
+        // Execute the sequence: start with the start node, execute each predicate in INVERSE direction
+        var currentNodes = new List<string> { startNode };
+
+        foreach (var predicateMem in predicates)
+        {
+            var nextNodes = new List<string>();
+            var predicate = ExpandPrefixedName(predicateMem.Span);
+
+            foreach (var node in currentNodes)
+            {
+                // INVERSE: query with node as OBJECT to find subjects
+                var enumerator = ExecuteTemporalQuery(
+                    ReadOnlySpan<char>.Empty,
+                    predicate,
+                    node.AsSpan());
+
+                while (enumerator.MoveNext())
+                {
+                    var triple = enumerator.Current;
+                    nextNodes.Add(triple.Subject.ToString());
+                }
+                enumerator.Dispose();
+            }
+
+            currentNodes = nextNodes;
+            if (currentNodes.Count == 0)
+                break;
+        }
+
+        results.AddRange(currentNodes);
+        return results;
+    }
+
+    /// <summary>
+    /// Discovers all starting nodes that have the first predicate of a grouped sequence.
+    /// Returns (subjects, allNodes) where subjects can start the sequence and allNodes
+    /// includes all nodes seen (for reflexive bindings in zero-or-more).
+    /// </summary>
+    private (HashSet<string> subjects, HashSet<string> allNodes) DiscoverGroupedSequenceStartNodes()
+    {
+        var subjects = new HashSet<string>();
+        var allNodes = new HashSet<string>();
+
+        // Get the inner content and find the first predicate
+        var innerContent = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+        var contentStr = innerContent.ToString();
+
+        // Find the first predicate (up to the first / at depth 0)
+        var depth = 0;
+        var firstPredicateEnd = contentStr.Length;
+        for (int i = 0; i < contentStr.Length; i++)
+        {
+            var ch = contentStr[i];
+            if (ch == '<') depth++;
+            else if (ch == '>') depth--;
+            else if (ch == '/' && depth == 0)
+            {
+                firstPredicateEnd = i;
+                break;
+            }
+        }
+
+        var firstPredicate = ExpandPrefixedName(contentStr.AsSpan(0, firstPredicateEnd));
+
+        // Query all triples with the first predicate
+        var enumerator = ExecuteTemporalQuery(
+            ReadOnlySpan<char>.Empty,
+            firstPredicate,
+            ReadOnlySpan<char>.Empty);
+
+        while (enumerator.MoveNext())
+        {
+            var triple = enumerator.Current;
+            var subjectStr = triple.Subject.ToString();
+            var objectStr = triple.Object.ToString();
+
+            allNodes.Add(subjectStr);
+            allNodes.Add(objectStr);
+            subjects.Add(subjectStr);
+        }
+        enumerator.Dispose();
+
+        return (subjects, allNodes);
+    }
+
     private void InitializeTransitive()
     {
         _visited = new HashSet<string>();
         _frontier = new Queue<string>();
 
         var subject = ResolveTermForQuery(_pattern.Subject);
-        _startNode = subject.ToString();
+        var obj = ResolveTermForQuery(_pattern.Object);
 
-        // For zero-or-more, we'll emit reflexive first in MoveNextTransitive
-        // For one-or-more, we skip the reflexive case
-        _emittedReflexive = false;
+        // For grouped paths, we use ExecuteGroupedSequence instead of a single predicate query
+        var isGrouped = _isGroupedZeroOrMore || _isGroupedOneOrMore;
 
-        _visited.Add(_startNode);
-        _currentNode = _startNode;
+        var predicate = ReadOnlySpan<char>.Empty;
+        if (!isGrouped)
+        {
+            predicate = _pattern.HasPropertyPath
+                ? ResolveTermForQuery(_pattern.Path.Iri)
+                : ResolveTermForQuery(_pattern.Predicate);
+        }
 
-        var predicate = _pattern.HasPropertyPath
-            ? ResolveTermForQuery(_pattern.Path.Iri)
-            : ResolveTermForQuery(_pattern.Predicate);
+        // Case 1: Both subject and object are unbound - need to discover all starting nodes
+        if (subject.IsEmpty && obj.IsEmpty)
+        {
+            _startingNodes = new Queue<string>();
+            _allNodes = new HashSet<string>();
+            HashSet<string> subjects;
 
-        _enumerator = ExecuteTemporalQuery(
-            _startNode.AsSpan(),
-            predicate,
-            ReadOnlySpan<char>.Empty);
+            if (isGrouped)
+            {
+                // For grouped paths, use the helper to discover starting nodes
+                (subjects, _allNodes) = DiscoverGroupedSequenceStartNodes();
+            }
+            else
+            {
+                subjects = new HashSet<string>();
+                // Query all triples with the predicate to discover all subjects and objects
+                var discoveryEnumerator = ExecuteTemporalQuery(
+                    ReadOnlySpan<char>.Empty,
+                    predicate,
+                    ReadOnlySpan<char>.Empty);
+
+                while (discoveryEnumerator.MoveNext())
+                {
+                    var triple = discoveryEnumerator.Current;
+                    var subjectStr = triple.Subject.ToString();
+                    var objectStr = triple.Object.ToString();
+
+                    // Track all nodes (for reflexive)
+                    _allNodes.Add(subjectStr);
+                    _allNodes.Add(objectStr);
+
+                    // Track subjects separately for starting nodes
+                    subjects.Add(subjectStr);
+                }
+                discoveryEnumerator.Dispose();
+            }
+
+            // Add all subjects as starting nodes
+            foreach (var s in subjects)
+            {
+                _startingNodes.Enqueue(s);
+            }
+
+            // For zero-or-more, we'll emit reflexive for ALL nodes first
+            _emittedReflexive = false;
+            _inReflexivePhase = _isZeroOrMore || _isGroupedZeroOrMore;
+            if (_isZeroOrMore || _isGroupedZeroOrMore)
+            {
+                _reflexiveList = new List<string>(_allNodes);
+                _reflexiveIndex = 0;
+            }
+
+            // Start processing first starting node (if any)
+            if (_startingNodes.Count > 0)
+            {
+                _startNode = _startingNodes.Dequeue();
+                _visited.Clear();
+                _visited.Add(_startNode);
+                _currentNode = _startNode;
+
+                if (isGrouped)
+                {
+                    // For grouped paths, execute the sequence and queue results
+                    _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+                }
+                else
+                {
+                    _enumerator = ExecuteTemporalQuery(
+                        _startNode.AsSpan(),
+                        predicate,
+                        ReadOnlySpan<char>.Empty);
+                }
+            }
+            else
+            {
+                // No triples found - just emit reflexive if zero-or-more
+                _startNode = "";
+                _enumerator = default;
+                _groupedResults = new Queue<string>();
+            }
+        }
+        // Case 2: Subject is unbound but object is bound - use object as start
+        else if (subject.IsEmpty && !obj.IsEmpty)
+        {
+            _startNode = obj.ToString();
+            _emittedReflexive = false;
+
+            _visited.Add(_startNode);
+            _currentNode = _startNode;
+
+            if (isGrouped)
+            {
+                _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+            }
+            else
+            {
+                _enumerator = ExecuteTemporalQuery(
+                    _startNode.AsSpan(),
+                    predicate,
+                    ReadOnlySpan<char>.Empty);
+            }
+        }
+        // Case 3: Subject is bound (normal case)
+        else
+        {
+            _startNode = subject.ToString();
+            _emittedReflexive = false;
+
+            _visited.Add(_startNode);
+            _currentNode = _startNode;
+
+            if (isGrouped)
+            {
+                _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+            }
+            else
+            {
+                _enumerator = ExecuteTemporalQuery(
+                    _startNode.AsSpan(),
+                    predicate,
+                    ReadOnlySpan<char>.Empty);
+            }
+        }
     }
 
     /// <summary>
@@ -633,18 +1166,16 @@ internal ref struct TriplePatternScan
     }
 
     /// <summary>
-    /// Check if a predicate is in the negated property set.
-    /// The negated set content is stored as IRIs separated by '|'.
+    /// Check if a predicate is in the DIRECT elements of the negated property set.
+    /// Direct elements are those NOT starting with '^'.
     /// </summary>
-    private bool IsPredicateInNegatedSet(ReadOnlySpan<char> predicate)
+    private bool IsPredicateInDirectNegatedSet(ReadOnlySpan<char> predicate)
     {
         var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
 
-        // Parse the content looking for IRIs separated by '|'
         var remaining = content;
         while (!remaining.IsEmpty)
         {
-            // Find next separator or end
             var sepIndex = remaining.IndexOf('|');
             ReadOnlySpan<char> current;
 
@@ -659,12 +1190,172 @@ internal ref struct TriplePatternScan
                 remaining = remaining[(sepIndex + 1)..];
             }
 
-            // Compare with predicate (exact match)
-            if (current.SequenceEqual(predicate))
+            // Skip inverse predicates (those starting with ^)
+            if (current.Length > 0 && current[0] == '^')
+                continue;
+
+            // Expand and compare
+            var expandedCurrent = ExpandPrefixedName(current);
+
+            // Handle 'a' shorthand for rdf:type
+            if (current.Length == 1 && current[0] == 'a')
+                expandedCurrent = SyntheticTermHelper.RdfType.AsSpan();
+
+            if (expandedCurrent.SequenceEqual(predicate))
                 return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Check if a predicate is in the INVERSE elements of the negated property set.
+    /// Inverse elements are those starting with '^'.
+    /// </summary>
+    private bool IsPredicateInInverseNegatedSet(ReadOnlySpan<char> predicate)
+    {
+        var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+
+        var remaining = content;
+        while (!remaining.IsEmpty)
+        {
+            var sepIndex = remaining.IndexOf('|');
+            ReadOnlySpan<char> current;
+
+            if (sepIndex < 0)
+            {
+                current = remaining.Trim();
+                remaining = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                current = remaining[..sepIndex].Trim();
+                remaining = remaining[(sepIndex + 1)..];
+            }
+
+            // Only process inverse predicates (those starting with ^)
+            if (current.Length == 0 || current[0] != '^')
+                continue;
+
+            // Get the predicate after ^
+            var innerPred = current.Slice(1).Trim();
+
+            // Handle ^a shorthand for inverse rdf:type
+            ReadOnlySpan<char> expandedInner;
+            if (innerPred.Length == 1 && innerPred[0] == 'a')
+                expandedInner = SyntheticTermHelper.RdfType.AsSpan();
+            else
+                expandedInner = ExpandPrefixedName(innerPred);
+
+            if (expandedInner.SequenceEqual(predicate))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check if the negated set has any direct (non-inverse) predicates.
+    /// </summary>
+    private bool NegatedSetHasDirectPredicates()
+    {
+        var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+
+        var remaining = content;
+        while (!remaining.IsEmpty)
+        {
+            var sepIndex = remaining.IndexOf('|');
+            ReadOnlySpan<char> current;
+
+            if (sepIndex < 0)
+            {
+                current = remaining.Trim();
+                remaining = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                current = remaining[..sepIndex].Trim();
+                remaining = remaining[(sepIndex + 1)..];
+            }
+
+            if (current.Length > 0 && current[0] != '^')
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check if the negated set has any inverse predicates.
+    /// </summary>
+    private bool NegatedSetHasInversePredicates()
+    {
+        var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+
+        var remaining = content;
+        while (!remaining.IsEmpty)
+        {
+            var sepIndex = remaining.IndexOf('|');
+            ReadOnlySpan<char> current;
+
+            if (sepIndex < 0)
+            {
+                current = remaining.Trim();
+                remaining = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                current = remaining[..sepIndex].Trim();
+                remaining = remaining[(sepIndex + 1)..];
+            }
+
+            if (current.Length > 0 && current[0] == '^')
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Expands a prefixed name (e.g., "ex:p1") to a full IRI (e.g., "&lt;http://example.org/p1&gt;").
+    /// Returns the original span if not a prefixed name or no matching prefix found.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
+    {
+        // If already a full IRI (starts with <), return as-is
+        if (term.Length > 0 && term[0] == '<')
+            return term;
+
+        // If no prefixes available, return as-is
+        if (_prefixes == null)
+            return term;
+
+        // Look for colon to identify prefixed name
+        var colonIdx = term.IndexOf(':');
+        if (colonIdx < 0)
+            return term;
+
+        var prefix = term.Slice(0, colonIdx + 1);
+        var localName = term.Slice(colonIdx + 1);
+
+        // Find matching prefix
+        for (int i = 0; i < _prefixes.Length; i++)
+        {
+            var mapping = _prefixes[i];
+            var mappedPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+
+            if (prefix.SequenceEqual(mappedPrefix))
+            {
+                var iriNs = _source.Slice(mapping.IriStart, mapping.IriLength);
+                var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
+
+                // Build expanded IRI and store for span lifetime
+                _expandedPredicate = string.Concat(nsWithoutClose, localName, ">");
+                return _expandedPredicate.AsSpan();
+            }
+        }
+
+        return term;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
