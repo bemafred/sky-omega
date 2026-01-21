@@ -866,6 +866,11 @@ public struct ExistsFilter
     // Inline storage for up to 4 triple patterns
     private TriplePattern _p0, _p1, _p2, _p3;
 
+    // Graph context for patterns inside GRAPH clause
+    // If HasGraph is true, all patterns should be evaluated against this graph
+    public bool HasGraph;
+    public Term GraphTerm;  // The graph IRI or variable
+
     public readonly int PatternCount => _patternCount;
     public readonly bool HasPatterns => _patternCount > 0;
 
@@ -892,6 +897,12 @@ public struct ExistsFilter
             3 => _p3,
             _ => default
         };
+    }
+
+    public void SetGraphContext(Term graphTerm)
+    {
+        HasGraph = true;
+        GraphTerm = graphTerm;
     }
 }
 

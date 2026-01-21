@@ -868,5 +868,56 @@ SELECT * WHERE {
         }
     }
 
+    [Fact]
+    public void Execute_ExistsWithGraphVariable_BindsFromOuter()
+    {
+        // Test case based on W3C exists-graph-variable
+        // Data in default graph: :s1 :p <graph1> and :s2 :p :o2
+        // Data in named graph <graph1>: :s2 :p :o2
+        // Query: SELECT ?s WHERE { ?s :p ?g . FILTER EXISTS { GRAPH ?g { ?s2 :p ?o2 } } }
+        // Expected: :s1 (because ?g = <graph1> and that graph has matching triples)
+
+        Store.BeginBatch();
+        // Default graph: s1 points to graph1, s2 points to o2
+        Store.AddCurrentBatched("<http://www.example.org/s1>", "<http://www.example.org/p>", "<http://example.org/graph1>");
+        Store.AddCurrentBatched("<http://www.example.org/s2>", "<http://www.example.org/p>", "<http://www.example.org/o2>");
+        // Named graph graph1 has matching triples
+        Store.AddCurrentBatched("<http://www.example.org/s2>", "<http://www.example.org/p>", "<http://www.example.org/o2>", "<http://example.org/graph1>");
+        Store.CommitBatch();
+
+        var query = @"PREFIX : <http://www.example.org/>
+SELECT ?s WHERE {
+    ?s :p ?g .
+    FILTER EXISTS { GRAPH ?g { ?s2 :p ?o2 } }
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var subjects = new System.Collections.Generic.List<string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                if (sIdx >= 0)
+                    subjects.Add(results.Current.GetString(sIdx).ToString());
+            }
+            results.Dispose();
+
+            // Only :s1 should match because ?g = <graph1> which exists and has matching triples
+            // :s2 has ?g = :o2 which is not a named graph, so EXISTS fails
+            Assert.Single(subjects);
+            Assert.Contains("<http://www.example.org/s1>", subjects);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

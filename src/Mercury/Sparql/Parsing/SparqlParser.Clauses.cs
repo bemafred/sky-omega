@@ -2197,6 +2197,7 @@ public ref partial struct SparqlParser
 
     /// <summary>
     /// Parse EXISTS or NOT EXISTS filter: [NOT] EXISTS { pattern }
+    /// Also handles GRAPH inside EXISTS: EXISTS { GRAPH ?g { pattern } }
     /// </summary>
     private void ParseExistsFilter(ref GraphPattern pattern, bool negated)
     {
@@ -2208,10 +2209,19 @@ public ref partial struct SparqlParser
 
         var existsFilter = new ExistsFilter { Negated = negated };
 
-        // Parse triple patterns inside the EXISTS block
+        // Parse patterns inside the EXISTS block
         while (!IsAtEnd() && Peek() != '}')
         {
             SkipWhitespace();
+
+            // Check for GRAPH keyword inside EXISTS
+            var span = PeekSpan(5);
+            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+            {
+                ParseExistsGraphPattern(ref existsFilter);
+                SkipWhitespace();
+                continue;
+            }
 
             // Try to parse a triple pattern
             if (!TryParseExistsTriplePattern(ref existsFilter))
@@ -2229,6 +2239,65 @@ public ref partial struct SparqlParser
             Advance(); // Skip '}'
 
         pattern.AddExistsFilter(existsFilter);
+    }
+
+    /// <summary>
+    /// Parse GRAPH pattern inside an EXISTS block: GRAPH &lt;iri&gt;|?var { patterns }
+    /// </summary>
+    private void ParseExistsGraphPattern(ref ExistsFilter filter)
+    {
+        ConsumeKeyword("GRAPH");
+        SkipWhitespace();
+
+        // Parse graph term (IRI or variable)
+        var graphTerm = ParseTerm();
+        if (graphTerm.Type == TermType.Variable && graphTerm.Length == 0)
+            return;
+
+        filter.SetGraphContext(graphTerm);
+
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            return;
+
+        Advance(); // Skip '{'
+        SkipWhitespace();
+
+        // Parse patterns inside the GRAPH block
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var predicate = ParseTerm();
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            filter.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = predicate,
+                Object = obj
+            });
+
+            SkipWhitespace();
+
+            // Skip optional '.'
+            if (Peek() == '.')
+                Advance();
+        }
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance(); // Skip '}'
     }
 
     /// <summary>

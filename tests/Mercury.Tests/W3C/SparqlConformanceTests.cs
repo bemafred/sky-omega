@@ -117,8 +117,10 @@ public class SparqlConformanceTests
         }
 
         // Load named graph data (qt:graphData)
-        // Use the filename as the graph IRI to match W3C test query conventions
-        // (queries typically use relative IRIs like <exists02.ttl> rather than full file:// URIs)
+        // We need to handle two cases:
+        // 1. Query uses relative IRI like <exists02.ttl> - need filename as graph IRI
+        // 2. Query uses variable bound to <> which resolves to full file:// URI - need full URI as graph IRI
+        // Solution: Load the graph with both IRIs (filename and full URI) to cover both cases
         _output.WriteLine($"GraphDataPaths: {(test.GraphDataPaths == null ? "null" : $"[{string.Join(", ", test.GraphDataPaths)}]")}");
         if (test.GraphDataPaths != null)
         {
@@ -127,12 +129,18 @@ public class SparqlConformanceTests
                 _output.WriteLine($"  Checking graphPath: {graphPath}, exists: {File.Exists(graphPath)}");
                 if (File.Exists(graphPath))
                 {
-                    // Use filename as graph IRI WITH angle brackets to match SPARQL parser
-                    // (parser's ParseTermIriRef includes angle brackets for consistency with stored IRIs)
                     var filename = Path.GetFileName(graphPath);
-                    var graphIri = $"<{filename}>";
-                    await LoadDataToNamedGraphAsync(store, graphPath, graphIri);
-                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIri}");
+                    var fullUri = new Uri(graphPath).AbsoluteUri;
+
+                    // Load with filename as graph IRI (for queries with relative graph IRIs like <exists02.ttl>)
+                    var graphIriFilename = $"<{filename}>";
+                    await LoadDataToNamedGraphAsync(store, graphPath, graphIriFilename);
+                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIriFilename}");
+
+                    // Also load with full file:// URI (for queries where variable is bound to <> resolved value)
+                    var graphIriFullUri = $"<{fullUri}>";
+                    await LoadDataToNamedGraphAsync(store, graphPath, graphIriFullUri);
+                    _output.WriteLine($"Also loaded into {graphIriFullUri}");
                 }
             }
         }
@@ -441,14 +449,16 @@ public class SparqlConformanceTests
         // Add more formats as needed
     }
 
-    private async Task LoadDataToNamedGraphAsync(QuadStore store, string path, string graphIri)
+    private async Task LoadDataToNamedGraphAsync(QuadStore store, string path, string graphIri, string? baseUri = null)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
+        // Use provided base URI, or default to full file path
+        var effectiveBaseUri = baseUri ?? new Uri(path).AbsoluteUri;
 
         if (extension == ".ttl" || extension == ".turtle")
         {
             await using var stream = File.OpenRead(path);
-            using var parser = new TurtleStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+            using var parser = new TurtleStreamParser(stream, baseUri: effectiveBaseUri);
 
             await parser.ParseAsync((s, p, o) =>
             {
@@ -468,7 +478,7 @@ public class SparqlConformanceTests
         else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
         {
             await using var stream = File.OpenRead(path);
-            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: effectiveBaseUri);
 
             await parser.ParseAsync((s, p, o) =>
             {

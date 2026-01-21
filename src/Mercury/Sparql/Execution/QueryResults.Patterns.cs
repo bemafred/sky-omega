@@ -65,7 +65,7 @@ public ref partial struct QueryResults
     /// <summary>
     /// Term position for prefix expansion.
     /// </summary>
-    private enum SlotTermPosition { Subject, Predicate, Object }
+    private enum SlotTermPosition { Subject, Predicate, Object, Graph }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<char> ResolveSlotTerm(TermType termType, int start, int length, SlotTermPosition position = SlotTermPosition.Subject)
@@ -486,28 +486,74 @@ public ref partial struct QueryResults
         int existsStart = existsSlot.ExistsChildStart;
         int existsEnd = existsStart + existsSlot.ExistsChildCount;
 
+        // Track current graph context for GRAPH patterns inside EXISTS
+        string? existsGraphContext = _graphContext;
+
         for (int p = existsStart; p < existsEnd; p++)
         {
             var patternSlot = patterns[p];
+
+            // Handle GRAPH patterns inside EXISTS - resolve graph variable from outer bindings
+            if (patternSlot.Kind == PatternKind.GraphHeader)
+            {
+                // Resolve the graph term - could be a variable bound in outer query
+                var graphTerm = ResolveSlotTerm(patternSlot.GraphTermType, patternSlot.GraphTermStart, patternSlot.GraphTermLength, SlotTermPosition.Graph);
+
+                // Set graph context for child patterns
+                // Empty string (<>) means default graph - use null context
+                existsGraphContext = graphTerm.Length == 0 ? null : graphTerm.ToString();
+
+                // Now evaluate child patterns of this GRAPH clause
+                int graphChildStart = patternSlot.ChildStartIndex;
+                int graphChildEnd = graphChildStart + patternSlot.ChildCount;
+
+                for (int gc = graphChildStart; gc < graphChildEnd; gc++)
+                {
+                    var childSlot = patterns[gc];
+                    if (childSlot.Kind != PatternKind.Triple) continue;
+
+                    var subject = ResolveSlotTerm(childSlot.SubjectType, childSlot.SubjectStart, childSlot.SubjectLength, SlotTermPosition.Subject);
+                    var predicate = ResolveSlotTerm(childSlot.PredicateType, childSlot.PredicateStart, childSlot.PredicateLength, SlotTermPosition.Predicate);
+                    var obj = ResolveSlotTerm(childSlot.ObjectType, childSlot.ObjectStart, childSlot.ObjectLength, SlotTermPosition.Object);
+
+                    var results = existsGraphContext != null
+                        ? _store.QueryCurrent(subject, predicate, obj, existsGraphContext.AsSpan())
+                        : _store.QueryCurrent(subject, predicate, obj);
+                    try
+                    {
+                        if (!results.MoveNext())
+                            return false; // No match for this pattern in the specified graph
+                    }
+                    finally
+                    {
+                        results.Dispose();
+                    }
+                }
+
+                // Skip past the graph children in the main loop (they're already processed)
+                p = graphChildEnd - 1;
+                continue;
+            }
+
             if (patternSlot.Kind != PatternKind.Triple) continue;
 
             // Resolve terms - use bound values for variables, expand prefixed names
-            var subject = ResolveSlotTerm(patternSlot.SubjectType, patternSlot.SubjectStart, patternSlot.SubjectLength, SlotTermPosition.Subject);
-            var predicate = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength, SlotTermPosition.Predicate);
-            var obj = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength, SlotTermPosition.Object);
+            var subject2 = ResolveSlotTerm(patternSlot.SubjectType, patternSlot.SubjectStart, patternSlot.SubjectLength, SlotTermPosition.Subject);
+            var predicate2 = ResolveSlotTerm(patternSlot.PredicateType, patternSlot.PredicateStart, patternSlot.PredicateLength, SlotTermPosition.Predicate);
+            var obj2 = ResolveSlotTerm(patternSlot.ObjectType, patternSlot.ObjectStart, patternSlot.ObjectLength, SlotTermPosition.Object);
 
             // Query the store - use graph context if inside a GRAPH clause
-            var results = _graphContext != null
-                ? _store.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
-                : _store.QueryCurrent(subject, predicate, obj);
+            var results2 = existsGraphContext != null
+                ? _store.QueryCurrent(subject2, predicate2, obj2, existsGraphContext.AsSpan())
+                : _store.QueryCurrent(subject2, predicate2, obj2);
             try
             {
-                if (!results.MoveNext())
+                if (!results2.MoveNext())
                     return false; // No match for this pattern
             }
             finally
             {
-                results.Dispose();
+                results2.Dispose();
             }
         }
 

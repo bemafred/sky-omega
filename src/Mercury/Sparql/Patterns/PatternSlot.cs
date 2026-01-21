@@ -1434,6 +1434,15 @@ internal static class QueryBufferAdapter
             var ef = gp.GetExistsFilter(i);
             int headerIndex = patterns.BeginExists(ef.Negated);
 
+            // If EXISTS has a GRAPH context, add GraphHeader inside EXISTS
+            int graphHeaderIndex = -1;
+            if (ef.HasGraph)
+            {
+                graphHeaderIndex = patterns.BeginGraph(
+                    ef.GraphTerm.Type, ef.GraphTerm.Start, ef.GraphTerm.Length
+                );
+            }
+
             for (int j = 0; j < ef.PatternCount; j++)
             {
                 var tp = ef.GetPattern(j);
@@ -1442,6 +1451,12 @@ internal static class QueryBufferAdapter
                     tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
                     tp.Object.Type, tp.Object.Start, tp.Object.Length
                 );
+            }
+
+            // Close GRAPH header if we opened one
+            if (graphHeaderIndex >= 0)
+            {
+                patterns.EndGraph(graphHeaderIndex);
             }
 
             patterns.EndExists(headerIndex);
