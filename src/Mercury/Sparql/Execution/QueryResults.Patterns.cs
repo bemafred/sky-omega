@@ -75,6 +75,31 @@ public ref partial struct QueryResults
             // Constant - check if it's a prefixed name that needs expansion
             var termSpan = _source.Slice(start, length);
 
+            // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+            if (termSpan.Length == 1 && termSpan[0] == 'a')
+            {
+                return SyntheticTermHelper.RdfType.AsSpan();
+            }
+
+            // Handle numeric literals (integers and decimals)
+            // Query literal like "9" needs to match stored "9"^^<xsd:integer>
+            if (termSpan.Length > 0 && IsNumericLiteral(termSpan))
+            {
+                var expanded = ExpandNumericLiteral(termSpan);
+                switch (position)
+                {
+                    case SlotTermPosition.Subject:
+                        _expandedSubject = expanded;
+                        return _expandedSubject.AsSpan();
+                    case SlotTermPosition.Predicate:
+                        _expandedPredicate = expanded;
+                        return _expandedPredicate.AsSpan();
+                    default:
+                        _expandedObject = expanded;
+                        return _expandedObject.AsSpan();
+                }
+            }
+
             // Check for prefixed name: not starting with < or ", contains :
             if (_buffer?.Prefixes != null && termSpan.Length > 0 &&
                 termSpan[0] != '<' && termSpan[0] != '"')
@@ -142,6 +167,44 @@ public ref partial struct QueryResults
         if (_bindingTable.FindBinding(varName) < 0)
         {
             _bindingTable.Bind(varName, value);
+        }
+    }
+
+    /// <summary>
+    /// Check if a term is a numeric literal (integer or decimal).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsNumericLiteral(ReadOnlySpan<char> term)
+    {
+        if (term.IsEmpty) return false;
+
+        var first = term[0];
+        // Numeric literals start with digit, +, or -
+        // But not if it looks like a prefixed name (contains :) or IRI (<)
+        if (first == '+' || first == '-')
+        {
+            return term.Length > 1 && char.IsDigit(term[1]);
+        }
+        return char.IsDigit(first);
+    }
+
+    /// <summary>
+    /// Expand a numeric literal to its typed RDF form.
+    /// Integer: "9" -> "\"9\"^^&lt;http://www.w3.org/2001/XMLSchema#integer&gt;"
+    /// Decimal: "9.5" -> "\"9.5\"^^&lt;http://www.w3.org/2001/XMLSchema#decimal&gt;"
+    /// </summary>
+    private static string ExpandNumericLiteral(ReadOnlySpan<char> term)
+    {
+        // Check if it's a decimal (contains .)
+        var hasDecimal = term.Contains('.') || term.Contains('e') || term.Contains('E');
+
+        if (hasDecimal)
+        {
+            return string.Concat("\"", term, "\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        }
+        else
+        {
+            return string.Concat("\"", term, "\"^^<http://www.w3.org/2001/XMLSchema#integer>");
         }
     }
 
@@ -760,13 +823,38 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Compare a bound value with a VALUES value, handling quoted strings.
+    /// Compare a bound value with a VALUES value, handling quoted strings and numeric literals.
     /// </summary>
     private static bool CompareValuesMatch(ReadOnlySpan<char> boundValue, ReadOnlySpan<char> valuesValue)
     {
         // Direct match
         if (boundValue.SequenceEqual(valuesValue))
             return true;
+
+        // Handle numeric literals in VALUES (e.g., 25, 30) matching typed literals (e.g., "25"^^<xsd:integer>)
+        if (valuesValue.Length > 0 && IsNumericLiteral(valuesValue))
+        {
+            // Bound value might be a typed literal like "25"^^<xsd:integer>
+            if (boundValue.Length >= 2 && boundValue[0] == '"')
+            {
+                // Find the second quote (end of literal value)
+                int endQuote = -1;
+                for (int i = 1; i < boundValue.Length; i++)
+                {
+                    if (boundValue[i] == '"')
+                    {
+                        endQuote = i;
+                        break;
+                    }
+                }
+                if (endQuote > 1)
+                {
+                    var boundNumeric = boundValue.Slice(1, endQuote - 1);
+                    if (boundNumeric.SequenceEqual(valuesValue))
+                        return true;
+                }
+            }
+        }
 
         // Handle quoted string literals - strip quotes for comparison
         if (valuesValue.Length >= 2 && valuesValue[0] == '"')

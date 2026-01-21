@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -223,9 +224,9 @@ public partial class QueryExecutorTests
 
             // Verify we have both names and ages
             Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && r.obj == "\"Alice\"");
-            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && r.obj == "30");
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Alice>" && ExtractNumericValue(r.obj) == "30");
             Assert.Contains(foundResults, r => r.subject == "<http://example.org/Bob>" && r.obj == "\"Bob\"");
-            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Bob>" && r.obj == "25");
+            Assert.Contains(foundResults, r => r.subject == "<http://example.org/Bob>" && ExtractNumericValue(r.obj) == "25");
         }
         finally
         {
@@ -258,7 +259,7 @@ public partial class QueryExecutorTests
             // Alice has name "Alice" and age 30
             Assert.Equal(2, foundValues.Count);
             Assert.Contains("\"Alice\"", foundValues);
-            Assert.Contains("30", foundValues);
+            Assert.True(foundValues.Any(v => ExtractNumericValue(v) == "30"));
         }
         finally
         {

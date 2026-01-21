@@ -42,4 +42,28 @@ public abstract class PooledStoreTestBase : IDisposable
     {
         _lease.Dispose();
     }
+
+    /// <summary>
+    /// Extracts the numeric value from a typed literal string.
+    /// Handles both plain values ("30") and typed literals ("30"^^&lt;xsd:integer&gt;).
+    /// </summary>
+    /// <param name="value">The literal value, possibly with type annotation</param>
+    /// <returns>The numeric portion of the literal</returns>
+    protected static string ExtractNumericValue(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return value;
+
+        // If it starts with a quote, it's a typed literal: "30"^^<...>
+        if (value.StartsWith('"'))
+        {
+            // Find the closing quote
+            int endQuote = value.IndexOf('"', 1);
+            if (endQuote > 1)
+                return value.Substring(1, endQuote - 1);
+        }
+
+        // Plain numeric value
+        return value;
+    }
 }

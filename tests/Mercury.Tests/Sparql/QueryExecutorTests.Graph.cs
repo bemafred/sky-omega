@@ -18,7 +18,7 @@ public partial class QueryExecutorTests
         // Add data to a named graph
         Store.BeginBatch();
         Store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/name>", "\"David\"", "<http://example.org/graph1>");
-        Store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/graph1>");
+        Store.AddCurrentBatched("<http://example.org/David>", "<http://xmlns.com/foaf/0.1/age>", "\"40\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/graph1>");
         Store.CommitBatch();
 
         var query = "SELECT * WHERE { GRAPH <http://example.org/graph1> { ?s ?p ?o } }";
@@ -124,7 +124,7 @@ public partial class QueryExecutorTests
         // Add data to a named graph
         Store.BeginBatch();
         Store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/name>", "\"Grace\"", "<http://example.org/graph4>");
-        Store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/age>", "28", "<http://example.org/graph4>");
+        Store.AddCurrentBatched("<http://example.org/Grace>", "<http://xmlns.com/foaf/0.1/age>", "\"28\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/graph4>");
         Store.CommitBatch();
 
         var query = "SELECT ?name ?age WHERE { GRAPH <http://example.org/graph4> { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
@@ -144,7 +144,7 @@ public partial class QueryExecutorTests
                 Assert.True(nameIdx >= 0);
                 Assert.True(ageIdx >= 0);
                 Assert.Equal("\"Grace\"", results.Current.GetString(nameIdx).ToString());
-                Assert.Equal("28", results.Current.GetString(ageIdx).ToString());
+                Assert.Equal("28", ExtractNumericValue(results.Current.GetString(ageIdx).ToString()));
                 count++;
             }
             results.Dispose();
@@ -310,7 +310,7 @@ public partial class QueryExecutorTests
         // Add person with name and age to named graph
         Store.BeginBatch();
         Store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/name>", "\"Mary\"", "<http://example.org/graphM>");
-        Store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/age>", "32", "<http://example.org/graphM>");
+        Store.AddCurrentBatched("<http://example.org/Mary>", "<http://xmlns.com/foaf/0.1/age>", "\"32\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/graphM>");
         Store.CommitBatch();
 
         var query = "SELECT ?g ?name ?age WHERE { GRAPH ?g { ?person <http://xmlns.com/foaf/0.1/name> ?name . ?person <http://xmlns.com/foaf/0.1/age> ?age } }";
@@ -333,7 +333,7 @@ public partial class QueryExecutorTests
                 Assert.True(ageIdx >= 0);
                 Assert.Equal("<http://example.org/graphM>", results.Current.GetString(gIdx).ToString());
                 Assert.Equal("\"Mary\"", results.Current.GetString(nameIdx).ToString());
-                Assert.Equal("32", results.Current.GetString(ageIdx).ToString());
+                Assert.Equal("32", ExtractNumericValue(results.Current.GetString(ageIdx).ToString()));
                 count++;
             }
             results.Dispose();
@@ -352,7 +352,7 @@ public partial class QueryExecutorTests
         // Add data to two different named graphs with a shared subject
         Store.BeginBatch();
         Store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"", "<http://example.org/namesGraph>");
-        Store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/age>", "30", "<http://example.org/agesGraph>");
+        Store.AddCurrentBatched("<http://example.org/Person1>", "<http://xmlns.com/foaf/0.1/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/agesGraph>");
         Store.AddCurrentBatched("<http://example.org/Person2>", "<http://xmlns.com/foaf/0.1/name>", "\"Bob\"", "<http://example.org/namesGraph>");
         // Person2 has no age in agesGraph - should not appear in join
         Store.CommitBatch();
@@ -384,7 +384,7 @@ public partial class QueryExecutorTests
             // Only Person1 should appear (has both name and age)
             Assert.Single(found);
             Assert.Equal("\"Alice\"", found[0].name);
-            Assert.Equal("30", found[0].age);
+            Assert.Equal("30", ExtractNumericValue(found[0].age));
         }
         finally
         {
@@ -675,10 +675,10 @@ public partial class QueryExecutorTests
     {
         // Add data with varying ages to graphs
         Store.BeginBatch();
-        Store.AddCurrentBatched("<http://example.org/FilterPerson1>", "<http://xmlns.com/foaf/0.1/age>", "20", "<http://example.org/filterGraph1>");
-        Store.AddCurrentBatched("<http://example.org/FilterPerson2>", "<http://xmlns.com/foaf/0.1/age>", "40", "<http://example.org/filterGraph1>");
-        Store.AddCurrentBatched("<http://example.org/FilterPerson3>", "<http://xmlns.com/foaf/0.1/age>", "15", "<http://example.org/filterGraph2>");
-        Store.AddCurrentBatched("<http://example.org/FilterPerson4>", "<http://xmlns.com/foaf/0.1/age>", "50", "<http://example.org/filterGraph2>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson1>", "<http://xmlns.com/foaf/0.1/age>", "\"20\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/filterGraph1>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson2>", "<http://xmlns.com/foaf/0.1/age>", "\"40\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/filterGraph1>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson3>", "<http://xmlns.com/foaf/0.1/age>", "\"15\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/filterGraph2>");
+        Store.AddCurrentBatched("<http://example.org/FilterPerson4>", "<http://xmlns.com/foaf/0.1/age>", "\"50\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/filterGraph2>");
         Store.CommitBatch();
 
         // Query with FROM and FILTER
@@ -720,7 +720,7 @@ public partial class QueryExecutorTests
         // Add related data across graphs
         Store.BeginBatch();
         Store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/name>", "\"JoinPerson\"", "<http://example.org/joinGraph1>");
-        Store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/age>", "35", "<http://example.org/joinGraph2>");
+        Store.AddCurrentBatched("<http://example.org/JoinPerson>", "<http://xmlns.com/foaf/0.1/age>", "\"35\"^^<http://www.w3.org/2001/XMLSchema#integer>", "<http://example.org/joinGraph2>");
         Store.CommitBatch();
 
         // Query joining data from both graphs
@@ -745,7 +745,7 @@ public partial class QueryExecutorTests
                 if (nameIdx >= 0 && ageIdx >= 0)
                 {
                     var name = results.Current.GetString(nameIdx).ToString();
-                    var age = results.Current.GetString(ageIdx).ToString();
+                    var age = ExtractNumericValue(results.Current.GetString(ageIdx).ToString());
                     if (name == "\"JoinPerson\"" && age == "35")
                         foundJoin = true;
                 }
@@ -754,6 +754,113 @@ public partial class QueryExecutorTests
 
             // Should successfully join data across graphs
             Assert.True(foundJoin);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_GraphWithExistsFilter_FiltersCorrectly()
+    {
+        // Test case based on W3C exists03
+        // Named graph has: :a :p :o1 and :b :p :o1, :o2
+        // Query: GRAPH <g> { ?s ?p ex:o1 FILTER EXISTS { ?s ?p ex:o2 } }
+        // Only :b should match (has both :o1 and :o2)
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://www.example.org/a>", "<http://www.example.org/p>", "<http://www.example.org/o1>", "<http://example.org/testgraph>");
+        Store.AddCurrentBatched("<http://www.example.org/b>", "<http://www.example.org/p>", "<http://www.example.org/o1>", "<http://example.org/testgraph>");
+        Store.AddCurrentBatched("<http://www.example.org/b>", "<http://www.example.org/p>", "<http://www.example.org/o2>", "<http://example.org/testgraph>");
+        Store.CommitBatch();
+
+        // First test: verify data is in named graph (no EXISTS filter)
+        var simpleQuery = @"SELECT * WHERE {
+    GRAPH <http://example.org/testgraph> {
+        ?s ?p ?o
+    }
+}";
+        var simpleParser = new SparqlParser(simpleQuery.AsSpan());
+        var simpleParsedQuery = simpleParser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var simpleExecutor = new QueryExecutor(Store, simpleQuery.AsSpan(), simpleParsedQuery);
+            var simpleResults = simpleExecutor.Execute();
+            int simpleCount = 0;
+            while (simpleResults.MoveNext())
+            {
+                simpleCount++;
+            }
+            simpleResults.Dispose();
+
+            // Should have 3 triples in the graph
+            Assert.Equal(3, simpleCount);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+
+        // Second test: with EXISTS filter
+        var query = @"PREFIX ex: <http://www.example.org/>
+SELECT * WHERE {
+    GRAPH <http://example.org/testgraph> {
+        ?s ?p ex:o1
+        FILTER EXISTS { ?s ?p ex:o2 }
+    }
+}";
+        // Use the standard parsed query path which supports EXISTS
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify parser detected EXISTS
+        Assert.True(parsedQuery.WhereClause.Pattern.ExistsFilterCount > 0,
+            $"Parser should detect EXISTS filter, but ExistsFilterCount={parsedQuery.WhereClause.Pattern.ExistsFilterCount}");
+
+        // Verify buffer is created with EXISTS count
+        var buffer = SkyOmega.Mercury.Sparql.Patterns.QueryBufferAdapter.FromQuery(in parsedQuery, query.AsSpan());
+        Assert.True(buffer.ExistsFilterCount > 0,
+            $"Buffer should have ExistsFilterCount > 0, but got {buffer.ExistsFilterCount}, HasExists={buffer.HasExists}");
+        // Also check the GRAPH execution path conditions
+        Assert.True(buffer.HasGraph, $"Buffer should have HasGraph=true, but got {buffer.HasGraph}");
+        Assert.Equal(0, buffer.TriplePatternCount); // No top-level triple patterns
+        Assert.False(buffer.HasSubQueries, $"Buffer should NOT have HasSubQueries, but it does");
+        buffer.Dispose();
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+
+            // Verify executor's buffer has EXISTS and correct path conditions
+            Assert.True(executor.BufferHasExists,
+                $"Executor buffer should have HasExists=true, ExistsFilterCount={executor.BufferExistsFilterCount}");
+
+            // Verify GRAPH execution path conditions
+            Assert.True(executor.BufferHasGraph, "Executor buffer should have HasGraph=true");
+            Assert.Equal(0, executor.BufferTriplePatternCount);
+            Assert.False(executor.BufferHasSubQueries, "Executor buffer should not have subqueries");
+
+            var results = executor.Execute();
+
+            // Verify EXISTS handling is enabled
+            Assert.True(results.HasExists,
+                $"Results should have HasExists=true, HasOrderBy={results.HasOrderBy}");
+
+            var subjects = new System.Collections.Generic.List<string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                if (sIdx >= 0)
+                    subjects.Add(results.Current.GetString(sIdx).ToString());
+            }
+            results.Dispose();
+
+            // Only :b has both :o1 and :o2
+            Assert.Single(subjects);
+            Assert.Contains("<http://www.example.org/b>", subjects);
         }
         finally
         {

@@ -80,6 +80,10 @@ public ref partial struct QueryResults
     // EXISTS/NOT EXISTS support
     private readonly bool _hasExists;
 
+    // Debug properties
+    internal bool HasExists => _hasExists;
+    internal bool HasOrderBy => _hasOrderBy;
+
     // Expanded term storage for prefix resolution in EXISTS/MINUS evaluation
     private string? _expandedSubject;
     private string? _expandedPredicate;
@@ -221,7 +225,7 @@ public ref partial struct QueryResults
         _hasMinus = false;
         _hasValues = false;
         _hasPostQueryValues = false;
-        _hasExists = false;
+        _hasExists = buffer?.HasExists ?? false;
         _groupBy = groupBy;
         _selectClause = selectClause;
         // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)

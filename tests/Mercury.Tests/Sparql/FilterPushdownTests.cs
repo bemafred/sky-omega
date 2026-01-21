@@ -27,17 +27,17 @@ public class FilterPushdownTests : PooledStoreTestBase
     private void SetupTestData()
     {
         Store.BeginBatch();
-        // Use numeric literals for age comparisons
+        // Use typed numeric literals for age comparisons
         Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/name>", "\"Alice\"");
-        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/age>", "30");
+        Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/age>", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>");
         Store.AddCurrentBatched("<http://ex.org/alice>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
 
         Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/name>", "\"Bob\"");
-        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/age>", "25");
+        Store.AddCurrentBatched("<http://ex.org/bob>", "<http://ex.org/age>", "\"25\"^^<http://www.w3.org/2001/XMLSchema#integer>");
         Store.AddCurrentBatched("<http://ex.org/bob>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
 
         Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/name>", "\"Charlie\"");
-        Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/age>", "35");
+        Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://ex.org/age>", "\"35\"^^<http://www.w3.org/2001/XMLSchema#integer>");
         Store.AddCurrentBatched("<http://ex.org/charlie>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://ex.org/Person>");
 
         Store.AddCurrentBatched("<http://ex.org/alice>", "<http://ex.org/knows>", "<http://ex.org/bob>");

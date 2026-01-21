@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -177,8 +178,8 @@ public partial class QueryExecutorTests
 
             // Only Alice (30) and Bob (25), Charlie (35) is excluded
             Assert.Equal(2, ages.Count);
-            Assert.Contains("25", ages);
-            Assert.Contains("30", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
         }
         finally
         {
@@ -211,7 +212,7 @@ public partial class QueryExecutorTests
 
             // Only Charlie (35)
             Assert.Single(ages);
-            Assert.Equal("35", ages[0]);
+            Assert.Equal("35", ExtractNumericValue(ages[0]));
         }
         finally
         {
@@ -336,8 +337,8 @@ public partial class QueryExecutorTests
 
             // VALUES allows 25, 30, 35 but FILTER excludes 25
             Assert.Equal(2, ages.Count);
-            Assert.Contains("30", ages);
-            Assert.Contains("35", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
         }
         finally
         {
@@ -381,8 +382,8 @@ VALUES ?age { 25 30 }";
 
             // Only Alice (30) and Bob (25), Charlie (35) is excluded
             Assert.Equal(2, ages.Count);
-            Assert.Contains("25", ages);
-            Assert.Contains("30", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
         }
         finally
         {

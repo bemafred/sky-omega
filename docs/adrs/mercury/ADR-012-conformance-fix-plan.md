@@ -2,8 +2,9 @@
 
 **Status:** In Progress
 **Created:** 2026-01-19
-**Updated:** 2026-01-20
+**Updated:** 2026-01-21
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
+**Current:** 3795 tests total, 3686 passing (97%), 93 failing, 16 skipped
 
 ## Context
 

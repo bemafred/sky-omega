@@ -79,6 +79,14 @@ public partial class QueryExecutor : IDisposable
     private readonly QueryPlanner? _planner;
     private readonly int[]? _optimizedPatternOrder;
 
+    // Debug properties for testing
+    internal bool BufferHasExists => _buffer.HasExists;
+    internal int BufferExistsFilterCount => _buffer.ExistsFilterCount;
+    internal bool BufferHasGraph => _buffer.HasGraph;
+    internal int BufferTriplePatternCount => _buffer.TriplePatternCount;
+    internal bool BufferHasSubQueries => _buffer.HasSubQueries;
+    internal int BufferHashCode => _buffer.GetHashCode();
+
     public QueryExecutor(QuadStore store, ReadOnlySpan<char> source, in Query query)
         : this(store, source, in query, null, null, null, DefaultMaxJoinDepth) { }
 
@@ -456,6 +464,7 @@ public partial class QueryExecutor : IDisposable
         if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
         {
             var graphResults = ExecuteGraphClausesToList();
+
             if (graphResults == null || graphResults.Count == 0)
                 return QueryResults.Empty();
 
@@ -475,14 +484,10 @@ public partial class QueryExecutor : IDisposable
                 }
             }
 
-            if (graphContext != null)
-            {
-                return QueryResults.FromMaterializedWithGraphContext(graphResults, _buffer, _source.AsSpan(), _store, graphBindings, _stringBuffer,
-                    graphContext, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
-            }
-
-            return QueryResults.FromMaterializedList(graphResults, graphBindings, _stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+            // Always use FromMaterializedWithGraphContext to support EXISTS/MINUS filters
+            // graphContext can be null - EXISTS will still work against default graph
+            return QueryResults.FromMaterializedWithGraphContext(graphResults, _buffer, _source.AsSpan(), _store, graphBindings, _stringBuffer,
+                graphContext, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
         }
 
         // Check for SERVICE clauses - use _buffer

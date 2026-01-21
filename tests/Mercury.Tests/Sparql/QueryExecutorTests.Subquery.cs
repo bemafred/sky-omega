@@ -373,9 +373,9 @@ public partial class QueryExecutorTests
 
             // All three persons have both name and age
             Assert.Equal(3, resultList.Count);
-            Assert.Contains(resultList, r => r.person == "<http://example.org/Alice>" && r.age == "30");
-            Assert.Contains(resultList, r => r.person == "<http://example.org/Bob>" && r.age == "25");
-            Assert.Contains(resultList, r => r.person == "<http://example.org/Charlie>" && r.age == "35");
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Alice>" && ExtractNumericValue(r.age) == "30");
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Bob>" && ExtractNumericValue(r.age) == "25");
+            Assert.Contains(resultList, r => r.person == "<http://example.org/Charlie>" && ExtractNumericValue(r.age) == "35");
         }
         finally
         {
@@ -535,7 +535,7 @@ public partial class QueryExecutorTests
             Assert.Single(resultList);
             Assert.Equal("<http://example.org/Alice>", resultList[0].person);
             Assert.Equal("\"Alice\"", resultList[0].name);
-            Assert.Equal("30", resultList[0].age);
+            Assert.Equal("30", ExtractNumericValue(resultList[0].age));
         }
         finally
         {

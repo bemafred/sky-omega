@@ -117,14 +117,20 @@ public class SparqlConformanceTests
         }
 
         // Load named graph data (qt:graphData)
-        // The graph IRI is the file path converted to a file:// URI
+        // Use the filename as the graph IRI to match W3C test query conventions
+        // (queries typically use relative IRIs like <exists02.ttl> rather than full file:// URIs)
+        _output.WriteLine($"GraphDataPaths: {(test.GraphDataPaths == null ? "null" : $"[{string.Join(", ", test.GraphDataPaths)}]")}");
         if (test.GraphDataPaths != null)
         {
             foreach (var graphPath in test.GraphDataPaths)
             {
+                _output.WriteLine($"  Checking graphPath: {graphPath}, exists: {File.Exists(graphPath)}");
                 if (File.Exists(graphPath))
                 {
-                    var graphIri = $"<{new Uri(graphPath).AbsoluteUri}>";
+                    // Use filename as graph IRI WITH angle brackets to match SPARQL parser
+                    // (parser's ParseTermIriRef includes angle brackets for consistency with stored IRIs)
+                    var filename = Path.GetFileName(graphPath);
+                    var graphIri = $"<{filename}>";
                     await LoadDataToNamedGraphAsync(store, graphPath, graphIri);
                     _output.WriteLine($"Loaded graph data from {graphPath} into {graphIri}");
                 }

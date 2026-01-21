@@ -236,8 +236,9 @@ public partial class QueryExecutor
             Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength }
         };
 
+        // Pass prefix mappings to enable expansion of prefixed names (e.g., ex:o1 -> <http://...>)
         var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graph.AsSpan(),
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixMappings);
         try
         {
             while (scan.MoveNext(ref bindingTable))
@@ -476,8 +477,9 @@ public partial class QueryExecutor
     {
         if (!initialized)
         {
+            // Pass prefix mappings to enable expansion of prefixed names (e.g., ex:o1 -> <http://...>)
             scan = new TriplePatternScan(_store, _source, pattern, bindingTable, graph,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixMappings);
             initialized = true;
         }
         return scan.MoveNext(ref bindingTable);

@@ -30,6 +30,20 @@ public ref partial struct QueryResults
                 _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
             }
 
+            // Apply EXISTS/NOT EXISTS filters (for pre-materialized results from GRAPH clauses)
+            if (_hasExists)
+            {
+                if (!EvaluateExistsFilters())
+                    continue; // EXISTS condition failed
+            }
+
+            // Apply MINUS - exclude matching rows
+            if (_hasMinus)
+            {
+                if (MatchesMinusPattern())
+                    continue; // Matches MINUS, skip this row
+            }
+
             // Apply DISTINCT - skip duplicate rows
             // This must happen after loading bindings so we can compute the hash
             if (_distinct)

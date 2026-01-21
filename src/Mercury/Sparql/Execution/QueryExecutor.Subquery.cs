@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
@@ -522,6 +523,19 @@ public partial class QueryExecutor
             return ReadOnlySpan<char>.Empty;
         }
 
+        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+        if (termSpan.Length == 1 && termSpan[0] == 'a')
+        {
+            return SyntheticTermHelper.RdfType.AsSpan();
+        }
+
+        // Handle numeric literals (integer or decimal)
+        if (IsNumericLiteral(termSpan))
+        {
+            _existsExpandedTerm = ExpandNumericLiteral(termSpan);
+            return _existsExpandedTerm.AsSpan();
+        }
+
         // For constants, expand prefixed names if needed
         if (_prefixMappings != null && termSpan.Length > 0 &&
             termSpan[0] != '<' && termSpan[0] != '"')
@@ -554,4 +568,34 @@ public partial class QueryExecutor
 
     // Temporary storage for expanded EXISTS terms
     private string? _existsExpandedTerm;
+
+    /// <summary>
+    /// Check if a term is a numeric literal (integer or decimal).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsNumericLiteral(ReadOnlySpan<char> term)
+    {
+        if (term.IsEmpty) return false;
+
+        var first = term[0];
+        // Numeric literals start with digit, +, or -
+        if (first == '+' || first == '-')
+        {
+            return term.Length > 1 && char.IsDigit(term[1]);
+        }
+        return char.IsDigit(first);
+    }
+
+    /// <summary>
+    /// Expand a numeric literal to its typed RDF form.
+    /// </summary>
+    private static string ExpandNumericLiteral(ReadOnlySpan<char> term)
+    {
+        var hasDecimal = term.Contains('.') || term.Contains('e') || term.Contains('E');
+        if (hasDecimal)
+        {
+            return string.Concat("\"", term, "\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        }
+        return string.Concat("\"", term, "\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+    }
 }

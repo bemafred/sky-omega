@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -212,8 +213,8 @@ public partial class QueryExecutorTests
             // Bob is 25, Charlie is 35 - both match
             // Alice is 30 - excluded
             Assert.Equal(2, ages.Count);
-            Assert.Contains("25", ages);
-            Assert.Contains("35", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
         }
         finally
         {
@@ -246,7 +247,7 @@ public partial class QueryExecutorTests
 
             // Alice is 30 - only one NOT in (25, 35)
             Assert.Single(ages);
-            Assert.Contains("30", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
         }
         finally
         {
@@ -279,8 +280,8 @@ public partial class QueryExecutorTests
 
             // Both 25 and 30 are in list and >= 25
             Assert.Equal(2, ages.Count);
-            Assert.Contains("25", ages);
-            Assert.Contains("30", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
         }
         finally
         {
@@ -382,8 +383,8 @@ public partial class QueryExecutorTests
 
             // Alice is 30, Charlie is 35 - both >= 30
             Assert.Equal(2, ages.Count);
-            Assert.Contains("30", ages);
-            Assert.Contains("35", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
         }
         finally
         {
@@ -485,6 +486,68 @@ public partial class QueryExecutorTests
         finally
         {
             Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_ExistsWithPrefixedNamesAndAKeyword()
+    {
+        // Reproduce W3C test "Positive EXISTS 1" from negation/exists-01.rq
+        // Data: Sets with members, filter for sets that have member 9
+        using var lease = _fixture.Pool.RentScoped();
+        var store = lease.Store;
+
+        // Add data similar to W3C set-data.ttl
+        // :a, :c, :e - sets without member 9
+        // :b, :d - sets with member 9
+        // Use typed literals as Turtle parser would produce them
+        store.BeginBatch();
+        store.AddCurrentBatched("<http://example/a>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Set>");
+        store.AddCurrentBatched("<http://example/a>", "<http://example/member>", "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        store.AddCurrentBatched("<http://example/b>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Set>");
+        store.AddCurrentBatched("<http://example/b>", "<http://example/member>", "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        store.AddCurrentBatched("<http://example/c>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Set>");
+        store.AddCurrentBatched("<http://example/c>", "<http://example/member>", "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        store.AddCurrentBatched("<http://example/d>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Set>");
+        store.AddCurrentBatched("<http://example/d>", "<http://example/member>", "\"9\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        store.AddCurrentBatched("<http://example/e>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://example/Set>");
+        store.AddCurrentBatched("<http://example/e>", "<http://example/member>", "\"3\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        store.CommitBatch();
+
+        // Query using 'a' keyword and prefixed names
+        var query = @"PREFIX : <http://example/>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+SELECT ?set
+WHERE {
+    ?set a :Set .
+    FILTER EXISTS { ?set :member 9 }
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var sets = new List<string>();
+            while (results.MoveNext())
+            {
+                var idx = results.Current.FindBinding("?set".AsSpan());
+                Assert.True(idx >= 0);
+                sets.Add(results.Current.GetString(idx).ToString());
+            }
+            results.Dispose();
+
+            // Should return :b and :d (the sets with member 9)
+            Assert.Equal(2, sets.Count);
+            Assert.Contains("<http://example/b>", sets);
+            Assert.Contains("<http://example/d>", sets);
+        }
+        finally
+        {
+            store.ReleaseReadLock();
         }
     }
 

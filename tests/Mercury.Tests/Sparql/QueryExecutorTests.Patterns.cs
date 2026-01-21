@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -190,7 +191,7 @@ public partial class QueryExecutorTests
             Assert.Equal(6, count);
             // Should have both name and age values
             Assert.Contains("\"Alice\"", values);
-            Assert.Contains("30", values);
+            Assert.True(values.Any(v => ExtractNumericValue(v) == "30"));
         }
         finally
         {
@@ -499,7 +500,7 @@ public partial class QueryExecutorTests
                 var computedIdx = results.Current.FindBinding("?agePlus10".AsSpan());
                 Assert.True(computedIdx >= 0, "?agePlus10 should be bound");
 
-                var age = results.Current.GetString(ageIdx).ToString();
+                var age = ExtractNumericValue(results.Current.GetString(ageIdx).ToString());
                 var agePlus10 = results.Current.GetString(computedIdx).ToString();
                 computed[age] = agePlus10;
             }
@@ -507,9 +508,9 @@ public partial class QueryExecutorTests
 
             // Alice=30 -> 40, Bob=25 -> 35, Charlie=35 -> 45
             Assert.Equal(3, computed.Count);
-            Assert.Equal("40", computed["30"]);
-            Assert.Equal("35", computed["25"]);
-            Assert.Equal("45", computed["35"]);
+            Assert.Equal("40", ExtractNumericValue(computed["30"]));
+            Assert.Equal("35", ExtractNumericValue(computed["25"]));
+            Assert.Equal("45", ExtractNumericValue(computed["35"]));
         }
         finally
         {
@@ -538,7 +539,7 @@ public partial class QueryExecutorTests
                 var computedIdx = results.Current.FindBinding("?doubled".AsSpan());
                 Assert.True(computedIdx >= 0, "?doubled should be bound");
 
-                var age = results.Current.GetString(ageIdx).ToString();
+                var age = ExtractNumericValue(results.Current.GetString(ageIdx).ToString());
                 var doubled = results.Current.GetString(computedIdx).ToString();
                 computed[age] = doubled;
             }
@@ -546,9 +547,9 @@ public partial class QueryExecutorTests
 
             // Alice=30 -> 60, Bob=25 -> 50, Charlie=35 -> 70
             Assert.Equal(3, computed.Count);
-            Assert.Equal("60", computed["30"]);
-            Assert.Equal("50", computed["25"]);
-            Assert.Equal("70", computed["35"]);
+            Assert.Equal("60", ExtractNumericValue(computed["30"]));
+            Assert.Equal("50", ExtractNumericValue(computed["25"]));
+            Assert.Equal("70", ExtractNumericValue(computed["35"]));
         }
         finally
         {
@@ -577,7 +578,7 @@ public partial class QueryExecutorTests
                 var computedIdx = results.Current.FindBinding("?computed".AsSpan());
                 Assert.True(computedIdx >= 0, "?computed should be bound");
 
-                var age = results.Current.GetString(ageIdx).ToString();
+                var age = ExtractNumericValue(results.Current.GetString(ageIdx).ToString());
                 var result = results.Current.GetString(computedIdx).ToString();
                 computed[age] = result;
             }
@@ -587,9 +588,9 @@ public partial class QueryExecutorTests
             // Bob=25 -> (25+5)*2 = 60
             // Charlie=35 -> (35+5)*2 = 80
             Assert.Equal(3, computed.Count);
-            Assert.Equal("70", computed["30"]);
-            Assert.Equal("60", computed["25"]);
-            Assert.Equal("80", computed["35"]);
+            Assert.Equal("70", ExtractNumericValue(computed["30"]));
+            Assert.Equal("60", ExtractNumericValue(computed["25"]));
+            Assert.Equal("80", ExtractNumericValue(computed["35"]));
         }
         finally
         {
@@ -654,7 +655,7 @@ public partial class QueryExecutorTests
             // 30*2=60 (not > 60), 25*2=50 (no), 35*2=70 (yes)
             // Only Charlie with age=35 should pass
             Assert.Single(ages);
-            Assert.Equal("35", ages[0]);
+            Assert.Equal("35", ExtractNumericValue(ages[0]));
         }
         finally
         {
@@ -822,8 +823,8 @@ public partial class QueryExecutorTests
             // Alice knows Bob, so Alice is excluded
             // Remaining: Bob=25, Charlie=35
             Assert.Equal(2, ages.Count);
-            Assert.Contains("25", ages);
-            Assert.Contains("35", ages);
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
+            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
         }
         finally
         {

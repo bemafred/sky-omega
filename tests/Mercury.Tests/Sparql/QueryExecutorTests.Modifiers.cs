@@ -397,9 +397,9 @@ public partial class QueryExecutorTests
 
             // Should be sorted ascending: 25, 30, 35
             Assert.Equal(3, ages.Count);
-            Assert.Equal("25", ages[0]);
-            Assert.Equal("30", ages[1]);
-            Assert.Equal("35", ages[2]);
+            Assert.Equal("25", ExtractNumericValue(ages[0]));
+            Assert.Equal("30", ExtractNumericValue(ages[1]));
+            Assert.Equal("35", ExtractNumericValue(ages[2]));
         }
         finally
         {
@@ -435,9 +435,9 @@ public partial class QueryExecutorTests
 
             // Should be sorted descending: 35, 30, 25
             Assert.Equal(3, ages.Count);
-            Assert.Equal("35", ages[0]);
-            Assert.Equal("30", ages[1]);
-            Assert.Equal("25", ages[2]);
+            Assert.Equal("35", ExtractNumericValue(ages[0]));
+            Assert.Equal("30", ExtractNumericValue(ages[1]));
+            Assert.Equal("25", ExtractNumericValue(ages[2]));
         }
         finally
         {
@@ -473,8 +473,8 @@ public partial class QueryExecutorTests
 
             // Should be first 2 sorted: 25, 30
             Assert.Equal(2, ages.Count);
-            Assert.Equal("25", ages[0]);
-            Assert.Equal("30", ages[1]);
+            Assert.Equal("25", ExtractNumericValue(ages[0]));
+            Assert.Equal("30", ExtractNumericValue(ages[1]));
         }
         finally
         {
@@ -510,8 +510,8 @@ public partial class QueryExecutorTests
 
             // Should skip smallest, get: 30, 35
             Assert.Equal(2, ages.Count);
-            Assert.Equal("30", ages[0]);
-            Assert.Equal("35", ages[1]);
+            Assert.Equal("30", ExtractNumericValue(ages[0]));
+            Assert.Equal("35", ExtractNumericValue(ages[1]));
         }
         finally
         {
@@ -585,8 +585,8 @@ public partial class QueryExecutorTests
 
             // Only Alice (30) and Charlie (35), sorted descending
             Assert.Equal(2, ages.Count);
-            Assert.Equal("35", ages[0]);
-            Assert.Equal("30", ages[1]);
+            Assert.Equal("35", ExtractNumericValue(ages[0]));
+            Assert.Equal("30", ExtractNumericValue(ages[1]));
         }
         finally
         {
