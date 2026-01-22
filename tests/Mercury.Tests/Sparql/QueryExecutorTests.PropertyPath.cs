@@ -1395,5 +1395,59 @@ WHERE {
         }
     }
 
+    [Fact]
+    public void Execute_SequencePath_InNamedGraph_PP07()
+    {
+        // PP07: graph ?g {in:a ex:p1/ex:p2 ?x}
+        // Data in single named graph: in:a ex:p1 in:b, in:b ex:p2 in:c
+        // Expected: in:c (sequence completes within the named graph)
+        var graphName = "<http://example.org/graph1>";
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://www.example.org/instance#a>", "<http://www.example.org/schema#p1>", "<http://www.example.org/instance#b>", graphName);
+        Store.AddCurrentBatched("<http://www.example.org/instance#b>", "<http://www.example.org/schema#p2>", "<http://www.example.org/instance#c>", graphName);
+        Store.CommitBatch();
+
+        var query = @"
+PREFIX ex: <http://www.example.org/schema#>
+PREFIX in: <http://www.example.org/instance#>
+SELECT ?x WHERE {
+  GRAPH ?g { in:a ex:p1/ex:p2 ?x }
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var found = new HashSet<string>();
+            while (results.MoveNext())
+            {
+                var xIdx = results.Current.FindBinding("?x".AsSpan());
+                if (xIdx >= 0)
+                {
+                    var val = results.Current.GetString(xIdx).ToString();
+                    found.Add(val);
+                    System.Console.WriteLine($"PP07 Found: {val}");
+                }
+            }
+            results.Dispose();
+
+            // Should find in:c via the sequence ex:p1/ex:p2 within the named graph
+            if (found.Count != 1)
+            {
+                var msg = $"Found {found.Count} results: {string.Join(", ", found)}. Expected in:c";
+                Assert.Fail(msg);
+            }
+            Assert.Contains("<http://www.example.org/instance#c>", found);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

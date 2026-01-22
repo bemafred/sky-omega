@@ -417,18 +417,18 @@ public class SparqlConformanceTests
 
     /// <summary>
     /// Resolve relative GRAPH IRIs in SPARQL queries to use urn:w3c: scheme.
-    /// W3C tests use relative IRIs like GRAPH &lt;exists02.ttl&gt; which need to match
-    /// our named graph loading (urn:w3c:exists02.ttl).
+    /// W3C tests use relative IRIs like GRAPH &lt;exists02.ttl&gt; or in FILTER clauses
+    /// which need to match our named graph loading (urn:w3c:exists02.ttl).
     /// </summary>
     private static string ResolveRelativeGraphIris(string query)
     {
-        // Match GRAPH <filename.ext> where the IRI has no scheme (no :// or single letter followed by :)
-        // Pattern: GRAPH followed by whitespace, then <, then content without :// and not starting with scheme:
+        // Match any <filename.ext> where the IRI has no scheme (no ://)
+        // This handles both GRAPH <file.ttl> and FILTER (?g = <file.ttl>) patterns
+        // Pattern: < followed by content without :// that ends with .extension >
         return System.Text.RegularExpressions.Regex.Replace(
             query,
-            @"(GRAPH\s+)<([^<>:]+\.[a-zA-Z]+)>",
-            "$1<urn:w3c:$2>",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            @"<([^<>:]+\.[a-zA-Z]+)>",
+            "<urn:w3c:$1>");
     }
 
     private async Task LoadDataAsync(QuadStore store, string path, string? baseUri = null)

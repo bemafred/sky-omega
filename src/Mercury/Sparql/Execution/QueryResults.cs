@@ -202,7 +202,7 @@ public ref partial struct QueryResults
         _bindings = bindings;
         _stringBuffer = stringBuffer;
         _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = false; // Filters already applied during materialization
+        _hasFilters = buffer?.HasFilters ?? false; // Evaluate filters for GRAPH clause results
         _hasOptional = false;
         _hasUnion = false;
         _isMultiPattern = false;
@@ -834,14 +834,16 @@ public ref partial struct QueryResults
 
         int rowCount = postValues.RowCount;
 
+        // Allocate once outside loop to avoid CA2014 warning (stackalloc in loop)
+        // Track which variable indices need bindings introduced (unbound in solution, non-UNDEF in VALUES)
+        Span<int> unboundVarIndices = stackalloc int[varCount];
+
         // Continue from where we left off
         while (_valuesJoinRowIndex < rowCount)
         {
             int row = _valuesJoinRowIndex++;
 
             bool rowMatches = true;
-            // Track which variable indices need bindings introduced (unbound in solution, non-UNDEF in VALUES)
-            Span<int> unboundVarIndices = stackalloc int[varCount];
             int unboundCount = 0;
 
             for (int varIdx = 0; varIdx < varCount; varIdx++)

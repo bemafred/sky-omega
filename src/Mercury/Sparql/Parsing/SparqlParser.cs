@@ -1004,6 +1004,55 @@ public ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// Expand a sequence path into a GraphClause (for patterns inside GRAPH { } blocks).
+    /// Similar to ExpandSequencePath but targets GraphClause instead of GraphPattern.
+    /// </summary>
+    private void ExpandSequencePathIntoGraphClause(ref GraphClause graphClause, Term subject, Term obj, PropertyPath path)
+    {
+        // Generate synthetic intermediate variable
+        var seqIndex = _seqVarCounter++;
+        var intermediateTerm = Term.Variable(-(seqIndex + 200), 0);
+
+        // Re-parse left and right path segments
+        var (leftPredicate, leftPath) = ParsePathSegment(path.LeftStart, path.LeftLength);
+        var (rightPredicate, rightPath) = ParsePathSegment(path.RightStart, path.RightLength);
+
+        // Add left pattern: subject -> intermediate
+        if (leftPath.Type == PathType.Sequence)
+        {
+            // Recursively expand nested sequence on left side
+            ExpandSequencePathIntoGraphClause(ref graphClause, subject, intermediateTerm, leftPath);
+        }
+        else
+        {
+            graphClause.AddPattern(new TriplePattern
+            {
+                Subject = subject,
+                Predicate = leftPredicate,
+                Object = intermediateTerm,
+                Path = leftPath
+            });
+        }
+
+        // Add right pattern: intermediate -> object
+        if (rightPath.Type == PathType.Sequence)
+        {
+            // Recursively expand nested sequence on right side
+            ExpandSequencePathIntoGraphClause(ref graphClause, intermediateTerm, obj, rightPath);
+        }
+        else
+        {
+            graphClause.AddPattern(new TriplePattern
+            {
+                Subject = intermediateTerm,
+                Predicate = rightPredicate,
+                Object = obj,
+                Path = rightPath
+            });
+        }
+    }
+
+    /// <summary>
     /// Re-parse a path segment from source offsets.
     /// Handles nested sequences/alternatives within the segment bounds.
     /// </summary>

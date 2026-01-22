@@ -365,7 +365,8 @@ public partial class QueryExecutor
         {
             Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
             Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
-            Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength }
+            Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
+            Path = new PropertyPath { Type = slot.PathKind, Iri = new Term { Start = slot.PathIriStart, Length = slot.PathIriLength } }
         };
 
         // Pass prefix mappings to enable expansion of prefixed names (e.g., ex:o1 -> <http://...>)
@@ -486,7 +487,8 @@ public partial class QueryExecutor
                 {
                     Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },
                     Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
-                    Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength }
+                    Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
+                    Path = new PropertyPath { Type = slot.PathKind, Iri = new Term { Start = slot.PathIriStart, Length = slot.PathIriLength } }
                 };
             }
         }

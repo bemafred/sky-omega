@@ -3578,16 +3578,26 @@ public ref partial struct SparqlParser
                             break;
 
                         SkipWhitespace();
-                        var nestedPredicate = ParseTerm();
+                        // Parse predicate or property path (handles sequences, alternatives, inverse, etc.)
+                        var (nestedPredicate, nestedPath) = ParsePredicateOrPath();
                         SkipWhitespace();
                         var nestedObj = ParseTerm();
 
-                        graphClause.AddPattern(new TriplePattern
+                        // Handle sequence paths: expand to multiple patterns with intermediate variables
+                        if (nestedPath.Type == PathType.Sequence)
                         {
-                            Subject = nestedSubject,
-                            Predicate = nestedPredicate,
-                            Object = nestedObj
-                        });
+                            ExpandSequencePathIntoGraphClause(ref graphClause, nestedSubject, nestedObj, nestedPath);
+                        }
+                        else
+                        {
+                            graphClause.AddPattern(new TriplePattern
+                            {
+                                Subject = nestedSubject,
+                                Predicate = nestedPredicate,
+                                Object = nestedObj,
+                                Path = nestedPath
+                            });
+                        }
 
                         SkipWhitespace();
                         if (Peek() == '.')
@@ -3609,17 +3619,27 @@ public ref partial struct SparqlParser
                 break;
 
             SkipWhitespace();
-            var predicate = ParseTerm();
+            // Parse predicate or property path (handles sequences, alternatives, inverse, etc.)
+            var (predicate, path) = ParsePredicateOrPath();
 
             SkipWhitespace();
             var obj = ParseTerm();
 
-            graphClause.AddPattern(new TriplePattern
+            // Handle sequence paths: expand to multiple patterns with intermediate variables
+            if (path.Type == PathType.Sequence)
             {
-                Subject = subject,
-                Predicate = predicate,
-                Object = obj
-            });
+                ExpandSequencePathIntoGraphClause(ref graphClause, subject, obj, path);
+            }
+            else
+            {
+                graphClause.AddPattern(new TriplePattern
+                {
+                    Subject = subject,
+                    Predicate = predicate,
+                    Object = obj,
+                    Path = path
+                });
+            }
 
             SkipWhitespace();
 

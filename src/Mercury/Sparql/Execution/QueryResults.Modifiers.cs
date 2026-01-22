@@ -30,6 +30,13 @@ public ref partial struct QueryResults
                 _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
             }
 
+            // Apply regular FILTER clauses (for pre-materialized results from GRAPH clauses)
+            if (_hasFilters)
+            {
+                if (!EvaluateFilters())
+                    continue; // FILTER condition failed
+            }
+
             // Apply EXISTS/NOT EXISTS filters (for pre-materialized results from GRAPH clauses)
             if (_hasExists)
             {
