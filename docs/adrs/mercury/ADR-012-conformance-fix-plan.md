@@ -4,15 +4,15 @@
 **Created:** 2026-01-19
 **Updated:** 2026-01-22
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1904 W3C tests, 1845 passing (97%), 43 failing, 16 skipped
+**Current:** 1904 W3C tests, 1847 passing (97%), 41 failing, 16 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 97% W3C conformance (1845/1904 tests). For SPARQL 1.1 Query specifically: 172/224 passing (77%). The remaining 44 failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 97% W3C conformance (1847/1904 tests). For SPARQL 1.1 Query specifically: 174/224 passing (78%). The remaining 43 failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
-| Property Paths | 2 | Named graph context (pp16), grouped sequence modifiers (pp28a) |
+| Property Paths | ✅ 0 | All property path tests pass (pp16, pp28a fixed 2026-01-22) |
 | String Functions | ~12 | STRBEFORE/STRAFTER datatyping, CONCAT, REPLACE, non-BMP Unicode |
 | Hash Functions | ✅ 0 | All hash function tests pass |
 | RDF Term Functions | ~6 | IRI/URI edge cases, UUID/STRUUID pattern matching |
@@ -108,30 +108,25 @@ dotnet test --filter "FullyQualifiedName~Sparql11_QueryEval" tests/Mercury.Tests
 
 ---
 
-### Phase 4: Property Path Parsing — 6 tests failing (was 18)
-**Target:** Reduce property path failures from 18 to ~5
+### Phase 4: Property Path Parsing — ✅ COMPLETED
+**Target:** All property path tests passing
 **Effort:** Medium-Large
-**Files:** `SparqlParser.cs`, `Operators.cs`
-**Updated:** 2026-01-21
+**Files:** `SparqlParser.cs`, `Operators.cs`, `QueryResults.Modifiers.cs`
+**Completed:** 2026-01-22
 
 **Fixed property path tests:**
 - pp30 ✅ sequence-within-alternative operator precedence (2026-01-21)
 - pp31 ✅ grouped path followed by path continuation (2026-01-21)
 - pp32 ✅ inverse predicate in sequence within alternative (2026-01-21)
 - pp33 ✅ grouped alternative as first step of sequence (2026-01-21)
+- pp06, pp07, pp34, pp35 ✅ Named graph paths (2026-01-21)
+- pp16 ✅ Zero-or-more reflexive pairs for all graph nodes (2026-01-22)
+- pp28a ✅ Grouped zero-or-one path (:p/:p)? (2026-01-22)
 
-**Remaining failing property path tests (6 total):**
-
-| Test | Issue |
-|------|-------|
-| pp06, pp07 | Named graph + sequence path combinations |
-| pp16 | Duplicate paths and cycles through foaf:knows* |
-| pp28a | Diamond, with loop -- (:p/:p)? |
-| pp34, pp35 | Named graph paths with arbitrary predicates |
-
-**Root causes:**
-1. Named graph context lost in some path operators
-2. Grouped sequence modifiers like (:p/:p)? need special handling
+**Fixes applied (2026-01-22):**
+1. Implemented `_isGroupedZeroOrOne` handling in Operators.cs
+2. Fixed zero-or-more (`*`) to discover ALL nodes in graph for reflexive pairs
+3. Fixed ORDER BY term type ordering (IRIs < Literals per SPARQL spec)
 
 **Verification:**
 ```bash
@@ -261,17 +256,16 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
 | 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
 | 3 | SPARQL Functions | ~18 | ~10 | In Progress (was 46) |
-| 4 | Property Paths | 2 | 0 | ✅ Nearly Done (was 6) |
+| 4 | Property Paths | 0 | 0 | ✅ Done (was 6) |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 0 | 0 | ✅ Done |
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 44 failing tests total (172 passing, 8 skipped out of 224) — 77% conformance
+**Current Progress:** 43 failing tests total (174 passing, 7 skipped out of 224) — 78% conformance
 
 **Recommended priority:**
-1. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
-2. **Phase 4** (Property Paths) - 6 tests remaining, mostly named graphs
+1. **Phase 3** (Functions) - ~18 tests, STRBEFORE/STRAFTER datatyping, REPLACE, UUID/STRUUID
 
 ### Commands for Each Phase
 
@@ -298,15 +292,9 @@ Focus areas:
 - UUID/STRUUID pattern matching
 - IF/COALESCE error propagation
 
-**Priority 2: Property Paths (2 tests)**
-```bash
-dotnet test --filter "Name~pp" tests/Mercury.Tests
-```
-Focus on:
-- pp16: Duplicate paths and cycles through foaf:knows*
-- pp28a: Diamond, with loop -- (:p/:p)?
-
 **Recently Completed (2026-01-22):**
+- ✅ Property paths: pp16 (zero-or-more reflexive for all graph nodes), pp28a (grouped zero-or-one)
+- ✅ ORDER BY: Fixed term type ordering (IRIs < Literals per SPARQL spec)
 - ✅ String functions: UCASE/LCASE/STRBEFORE/STRAFTER/SUBSTR language tag preservation
 - ✅ Hash functions: MD5, SHA1, SHA256, SHA384, SHA512 all pass
 - ✅ Empty string handling for STRBEFORE/STRAFTER

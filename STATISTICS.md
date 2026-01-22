@@ -79,9 +79,9 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | N-Quads 1.2 | 87 | 87 | **100%** | Full conformance |
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
 | SPARQL 1.1 Syntax | 102 | 103 | **99%** | 63/63 positive, 39/40 negative |
-| SPARQL 1.1 Query | 172 | 224 | **77%** | 8 skipped, 44 failing; String functions ✓, Property paths in progress (see [ADR-012](docs/adrs/mercury/ADR-012-conformance-fix-plan.md)) |
+| SPARQL 1.1 Query | 174 | 224 | **78%** | 7 skipped, 43 failing; Property paths fixed (pp16, pp28a) (see [ADR-012](docs/adrs/mercury/ADR-012-conformance-fix-plan.md)) |
 | SPARQL 1.1 Update | 94 | 94 | **100%** | Full conformance |
-| **Total** | **1,845** | **1,904** | **97%** | SPARQL Query conformance in progress |
+| **Total** | **1,847** | **1,904** | **97%** | SPARQL Query conformance in progress |
 
 ## Benchmark Summary
 
