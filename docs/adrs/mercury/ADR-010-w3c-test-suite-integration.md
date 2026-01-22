@@ -351,9 +351,9 @@ public static class W3CTestContext
 | Update silent  | ~10                 | Low      |
 
 **Success criteria:**
-- [ ] Syntax tests: 100% pass rate
-- [ ] Query evaluation: >90% pass rate
-- [ ] Update evaluation: >85% pass rate
+- [x] Syntax tests: 100% pass rate (102/103, 1 skipped)
+- [ ] Query evaluation: 100% pass rate (currently 78%, 174/224)
+- [x] Update evaluation: 100% pass rate (94/94)
 - [ ] All failures documented in skip list with reasons
 
 ### Phase 4: RDF-star and JSON-LD (Optional)
@@ -438,12 +438,13 @@ Most previously-skipped categories are now running. Current status:
 | Category | Status | Notes |
 |----------|--------|-------|
 | aggregates/ | ✅ Running | Core aggregates pass, 2 error propagation edge cases fail |
-| property-path/ | ⚠️ Partial | 13/33 passing, complex paths need work |
-| negation/ | ⚠️ Partial | 7/22 passing, EXISTS/MINUS edge cases |
-| subquery/ | ✅ Most pass | 11/14 passing, blank node property list syntax issues |
-| exists/ | ✅ Running | 6/6 basic cases pass |
+| property-path/ | ✅ Complete | All property path tests pass (pp16, pp28a fixed) |
+| negation/ | ✅ Complete | 12/12 passing |
+| subquery/ | ✅ Most pass | 11/14 passing (2 CONSTRUCT skipped) |
+| exists/ | ✅ Complete | 6/6 basic cases pass |
+| functions/ | ⚠️ Partial | ~18 failing (REPLACE, UUID, IF/COALESCE) |
 
-**Progress:** SPARQL Query tests improved from ~46% to **53%** (118/224 passing, 97 failing, 9 skipped).
+**Progress:** SPARQL Query tests at **78%** (174/224 passing, 43 failing, 7 skipped).
 
 ## Risks and Mitigations
 
@@ -469,16 +470,16 @@ Most previously-skipped categories are now running. Current status:
 |-------|------------------|--------|-------|
 | N-Triples | 100% | **100%** | 70/70 passed |
 | N-Quads | 100% | **100%** | 87/87 passed |
-| Turtle | >95% | **100%** | 309/309 passed |
-| TriG | >95% | **100%** | 352/352 passed |
-| RDF/XML | >90% | **100%** | 166/166 passed |
-| JSON-LD toRdf | >80% | **100%** | 461/467 (6 skipped: 1.0-only, generalized RDF) |
+| Turtle | 100% | **100%** | 309/309 passed |
+| TriG | 100% | **100%** | 352/352 passed |
+| RDF/XML | 100% | **100%** | 166/166 passed |
+| JSON-LD toRdf | 100% | **100%** | 461/467 (6 skipped: 1.0-only, generalized RDF) |
 | SPARQL Syntax (positive) | 100% | **100%** | 63/63 passed |
 | SPARQL Syntax (negative) | 100% | **98%** | 39/40 passed (1 skipped) |
-| SPARQL Query | >90% | **53%** | 118/224 passed, 97 failing, 9 skipped |
-| SPARQL Update | >85% | **100%** | 94/94 passed |
+| SPARQL Query | 100% | **78%** | 174/224 passed, 43 failing, 7 skipped |
+| SPARQL Update | 100% | **100%** | 94/94 passed |
 | RDF-star | >90% | - | After Phase 4 |
-| **Total** | | **94%** | 1,791/1,904 passed |
+| **Total** | | **97%** | 1,847/1,904 passed |
 
 ### Documentation
 - [ ] Conformance report published with each release
