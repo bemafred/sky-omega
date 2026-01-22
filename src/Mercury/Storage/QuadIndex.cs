@@ -709,13 +709,23 @@ internal sealed unsafe class QuadIndex : IDisposable
             insertPos++;
         }
 
-        // Check for updates (same SPO, overlapping time)
+        // Check for updates (same GSPO, overlapping time)
         if (insertPos > 0)
         {
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameGSPO(key, prevEntry.Key))
             {
-                // Handle temporal update
+                // If both entries are "current" (ValidTo is far future), treat as duplicate.
+                // RDF semantics: adding a duplicate triple should be idempotent.
+                // Do NOT truncate the existing entry - just skip the insert.
+                // Note: DateTimeOffset.MaxValue.ToUnixTimeMilliseconds() = 253402300799999L
+                // We use a threshold of year 9000 (253370764800000L) to catch both long.MaxValue
+                // and DateTimeOffset.MaxValue conversions.
+                const long FarFutureThreshold = 253370764800000L; // Year 9000 in Unix ms
+                if (prevEntry.Key.ValidTo >= FarFutureThreshold && key.ValidTo >= FarFutureThreshold)
+                    return default; // Skip duplicate, existing entry remains valid
+
+                // Otherwise handle temporal update (truncate existing for new version)
                 HandleTemporalUpdate(page, insertPos - 1, key);
                 return default; // No split for updates
             }

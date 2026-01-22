@@ -814,4 +814,209 @@ public partial class QueryExecutorTests
         Assert.True(parsed2.SelectClause.GetAggregate(0).Distinct);
     }
 
+    [Fact]
+    public void Execute_CountDistinct_WithDuplicates()
+    {
+        // Add test data for COUNT(DISTINCT) testing
+        // RDF stores deduplicate identical triples, so we need 3 DIFFERENT values
+        // but with a pattern that produces 3 rows total with 2 distinct objects
+        // Use multiple subjects to create the scenario
+        Store.AddCurrent("<http://example.org/s1>", "<http://example.org/val>", "\"A\"");
+        Store.AddCurrent("<http://example.org/s1>", "<http://example.org/val>", "\"B\"");
+        Store.AddCurrent("<http://example.org/s2>", "<http://example.org/val>", "\"A\"");  // Different subject
+
+        // First verify the data exists with a simple query
+        var simpleQuery = @"SELECT ?s ?o WHERE { ?s <http://example.org/val> ?o }";
+        var simpleParser = new SparqlParser(simpleQuery.AsSpan());
+        var simpleParsed = simpleParser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var simpleExecutor = new QueryExecutor(Store, simpleQuery.AsSpan(), simpleParsed);
+            var simpleResults = simpleExecutor.Execute();
+            var rows = new List<string>();
+            while (simpleResults.MoveNext())
+            {
+                var oIdx = simpleResults.Current.FindBinding("?o".AsSpan());
+                if (oIdx >= 0)
+                    rows.Add(simpleResults.Current.GetString(oIdx).ToString());
+            }
+            simpleResults.Dispose();
+
+            // Should have 3 rows (s1->A, s1->B, s2->A)
+            Assert.Equal(3, rows.Count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+
+        // Query COUNT(DISTINCT ?o) across all subjects (no GROUP BY)
+        // Should count distinct objects: "A" and "B" = 2
+        var query = @"SELECT (COUNT(DISTINCT ?o) AS ?count) WHERE { ?s <http://example.org/val> ?o }";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify DISTINCT was parsed
+        Assert.True(parsedQuery.SelectClause.HasAggregates);
+        var agg = parsedQuery.SelectClause.GetAggregate(0);
+        Assert.Equal(AggregateFunction.Count, agg.Function);
+        Assert.True(agg.Distinct);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            Assert.True(results.MoveNext());
+            var countIdx = results.Current.FindBinding("?count".AsSpan());
+            Assert.True(countIdx >= 0);
+
+            var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
+
+            // Data has 3 rows but only 2 distinct values for ?o ("A" and "B")
+            Assert.Equal("2", count);
+
+            Assert.False(results.MoveNext());
+            results.Dispose();
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void Execute_CountDistinct_WithGroupBy_W3C_Scenario()
+    {
+        // Mimic the W3C agg-numeric-duplicates.ttl data
+        // Use a specific predicate to isolate from fixture data
+        // :ints :val 1, 2 (deduplicated)
+        // :decimals :val 1.0, 2.2 (deduplicated)
+        // :doubles :val 1.0E2, 2.0E3 (deduplicated)
+        // :mixed1 :val 1 ; :val 2.2
+        Store.AddCurrent("<http://test.example.org/ints>", "<http://test.example.org/val>", "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://test.example.org/ints>", "<http://test.example.org/val>", "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://test.example.org/decimals>", "<http://test.example.org/val>", "\"1.0\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        Store.AddCurrent("<http://test.example.org/decimals>", "<http://test.example.org/val>", "\"2.2\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+        Store.AddCurrent("<http://test.example.org/doubles>", "<http://test.example.org/val>", "\"1.0E2\"^^<http://www.w3.org/2001/XMLSchema#double>");
+        Store.AddCurrent("<http://test.example.org/doubles>", "<http://test.example.org/val>", "\"2.0E3\"^^<http://www.w3.org/2001/XMLSchema#double>");
+        Store.AddCurrent("<http://test.example.org/mixed1>", "<http://test.example.org/val>", "\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        Store.AddCurrent("<http://test.example.org/mixed1>", "<http://test.example.org/val>", "\"2.2\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
+
+        // Query using specific predicate to only match our test data
+        var query = @"SELECT ?s (COUNT(DISTINCT ?o) AS ?count) WHERE {
+                ?s <http://test.example.org/val> ?o
+            } GROUP BY ?s";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var countIdx = results.Current.FindBinding("?count".AsSpan());
+                if (sIdx >= 0 && countIdx >= 0)
+                {
+                    var s = results.Current.GetString(sIdx).ToString();
+                    var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
+                    groups[s] = count;
+                }
+            }
+            results.Dispose();
+
+            // Verify we got the right number of groups
+            Assert.Equal(4, groups.Count);
+
+            // Each group should have count=2
+            Assert.Equal("2", groups["<http://test.example.org/ints>"]);
+            Assert.Equal("2", groups["<http://test.example.org/decimals>"]);
+            Assert.Equal("2", groups["<http://test.example.org/doubles>"]);
+            Assert.Equal("2", groups["<http://test.example.org/mixed1>"]);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    /// <summary>
+    /// Regression test: Verifies that duplicate triples with same (S, P) but different O
+    /// are stored correctly when loaded via Turtle parser.
+    ///
+    /// This tests the fix for a bug where temporal update logic incorrectly truncated
+    /// the validity of existing entries when adding duplicate "current" triples.
+    /// </summary>
+    [Fact]
+    public async Task Execute_CountDistinct_ViaFullTurtleParsing()
+    {
+        // W3C-style test data: multiple objects per (subject, predicate) with duplicates
+        var turtleData = @"
+@prefix : <http://www.example.org/> .
+:ints :int 1, 2, 2 .
+:decimals :dec 1.0, 2.2, 2.2 .
+:doubles :double 1.0E2, 2.0E3, 2.0E3 .
+:mixed1 :int 1 ; :dec 2.2 .
+";
+
+        // Create a fresh store for this test
+        using var lease = _fixture.Pool.RentScoped();
+        var store = lease.Store;
+
+        // Load via Turtle parser callback (this is how W3C tests load data)
+        using (var stream = new System.IO.MemoryStream(System.Text.Encoding.UTF8.GetBytes(turtleData)))
+        using (var parser = new Mercury.Rdf.Turtle.TurtleStreamParser(stream))
+        {
+            await parser.ParseAsync((s, p, o) =>
+            {
+                store.AddCurrent(s.ToString(), p.ToString(), o.ToString());
+            });
+        }
+
+        // Run COUNT DISTINCT query
+        store.AcquireReadLock();
+        try
+        {
+            var query = "SELECT ?s (COUNT(DISTINCT ?o) AS ?count) WHERE { ?s ?p ?o } GROUP BY ?s";
+            var parser = new SparqlParser(query.AsSpan());
+            var parsed = parser.ParseQuery();
+            var executor = new QueryExecutor(store, query.AsSpan(), parsed);
+            var results = executor.Execute();
+
+            var groups = new Dictionary<string, string>();
+            while (results.MoveNext())
+            {
+                var sIdx = results.Current.FindBinding("?s".AsSpan());
+                var countIdx = results.Current.FindBinding("?count".AsSpan());
+                if (sIdx >= 0 && countIdx >= 0)
+                {
+                    var s = results.Current.GetString(sIdx).ToString();
+                    var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
+                    groups[s] = count;
+                }
+            }
+            results.Dispose();
+
+            // Each subject should have 2 distinct objects (duplicates deduplicated by storage)
+            Assert.Equal(4, groups.Count);
+            Assert.Equal("2", groups["<http://www.example.org/ints>"]);      // "1" and "2"
+            Assert.Equal("2", groups["<http://www.example.org/decimals>"]);  // "1.0" and "2.2"
+            Assert.Equal("2", groups["<http://www.example.org/doubles>"]);   // "1.0E2" and "2.0E3"
+            Assert.Equal("2", groups["<http://www.example.org/mixed1>"]);    // "1" (via :int) and "2.2" (via :dec)
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
 }
