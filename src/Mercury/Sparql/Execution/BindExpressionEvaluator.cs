@@ -448,24 +448,30 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            // UCASE function - convert to uppercase (of lexical form)
+            // UCASE function - convert to uppercase, preserving language tag/datatype
             if (name.Equals("UCASE", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
                 {
-                    var upper = arg.GetLexicalForm().ToString().ToUpperInvariant();
-                    return new Value { Type = ValueType.String, StringValue = upper.AsSpan() };
+                    var lexical = arg.GetLexicalForm().ToString().ToUpperInvariant();
+                    var suffix = arg.GetLangTagOrDatatype();
+                    // Only add quotes if there's a suffix to preserve, otherwise return plain string
+                    var result = suffix.IsEmpty ? lexical : $"\"{lexical}\"{suffix.ToString()}";
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
                 }
                 return arg;
             }
 
-            // LCASE function - convert to lowercase (of lexical form)
+            // LCASE function - convert to lowercase, preserving language tag/datatype
             if (name.Equals("LCASE", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
                 {
-                    var lower = arg.GetLexicalForm().ToString().ToLowerInvariant();
-                    return new Value { Type = ValueType.String, StringValue = lower.AsSpan() };
+                    var lexical = arg.GetLexicalForm().ToString().ToLowerInvariant();
+                    var suffix = arg.GetLangTagOrDatatype();
+                    // Only add quotes if there's a suffix to preserve, otherwise return plain string
+                    var result = suffix.IsEmpty ? lexical : $"\"{lexical}\"{suffix.ToString()}";
+                    return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
                 }
                 return arg;
             }
@@ -1114,13 +1120,17 @@ internal ref struct BindExpressionEvaluator
             length = str.Length - start;
         }
 
-        // Return as new allocated string since we need to slice
+        // Preserve language tag/datatype from the first argument
         var result = str.Slice(start, length).ToString();
-        return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+        var suffix = stringArg.GetLangTagOrDatatype();
+        // Only add quotes if there's a suffix to preserve, otherwise return plain string
+        _stringResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
+        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
     }
 
     /// <summary>
     /// Parse STRBEFORE(string, delimiter) - returns substring before first occurrence of delimiter
+    /// Preserves language tag/datatype from first arg.
     /// </summary>
     private Value ParseStrBeforeFunction()
     {
@@ -1133,7 +1143,8 @@ internal ref struct BindExpressionEvaluator
             while (!IsAtEnd() && Peek() != ')')
                 Advance();
             if (Peek() == ')') Advance();
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
         }
 
         Advance(); // Skip ','
@@ -1144,26 +1155,39 @@ internal ref struct BindExpressionEvaluator
         if (Peek() == ')') Advance();
 
         if (stringArg.Type != ValueType.String || delimiterArg.Type != ValueType.String)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        {
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
 
-        var str = ExtractLexicalValue(stringArg.StringValue);
-        var delimiter = ExtractLexicalValue(delimiterArg.StringValue);
+        var str = stringArg.GetLexicalForm();
+        var delimiter = delimiterArg.GetLexicalForm();
 
-        // Empty delimiter returns empty string
+        // Empty delimiter returns empty string literal
         if (delimiter.IsEmpty)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        {
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
 
         var index = str.IndexOf(delimiter);
         if (index < 0)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        {
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
 
-        // Return quoted result
-        _stringResult = $"\"{str.Slice(0, index).ToString()}\"";
+        // Preserve language tag/datatype from the first argument
+        var result = str.Slice(0, index).ToString();
+        var suffix = stringArg.GetLangTagOrDatatype();
+        // Only add quotes if there's a suffix to preserve, otherwise return plain string
+        _stringResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
         return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
     }
 
     /// <summary>
     /// Parse STRAFTER(string, delimiter) - returns substring after first occurrence of delimiter
+    /// Preserves language tag/datatype from first arg.
     /// </summary>
     private Value ParseStrAfterFunction()
     {
@@ -1175,7 +1199,8 @@ internal ref struct BindExpressionEvaluator
             while (!IsAtEnd() && Peek() != ')')
                 Advance();
             if (Peek() == ')') Advance();
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
         }
 
         Advance(); // Skip ','
@@ -1186,24 +1211,34 @@ internal ref struct BindExpressionEvaluator
         if (Peek() == ')') Advance();
 
         if (stringArg.Type != ValueType.String || delimiterArg.Type != ValueType.String)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        {
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
 
-        var str = ExtractLexicalValue(stringArg.StringValue);
-        var delimiter = ExtractLexicalValue(delimiterArg.StringValue);
+        var str = stringArg.GetLexicalForm();
+        var delimiter = delimiterArg.GetLexicalForm();
+        var suffix = stringArg.GetLangTagOrDatatype();
 
-        // Empty delimiter returns full string (per SPARQL spec)
+        // Empty delimiter returns full string with preserved suffix (per SPARQL spec)
         if (delimiter.IsEmpty)
         {
-            _stringResult = $"\"{str.ToString()}\"";
+            // Only add quotes if there's a suffix to preserve, otherwise return plain string
+            _stringResult = suffix.IsEmpty ? str.ToString() : $"\"{str.ToString()}\"{suffix.ToString()}";
             return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
         }
 
         var index = str.IndexOf(delimiter);
         if (index < 0)
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+        {
+            _stringResult = "\"\"";  // Quoted empty string literal
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
 
-        // Return quoted result
-        _stringResult = $"\"{str.Slice(index + delimiter.Length).ToString()}\"";
+        // Preserve language tag/datatype from the first argument
+        var result = str.Slice(index + delimiter.Length).ToString();
+        // Only add quotes if there's a suffix to preserve, otherwise return plain string
+        _stringResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
         return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
     }
 

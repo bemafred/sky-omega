@@ -982,12 +982,15 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // UCASE - convert string to uppercase (of lexical form)
+        // UCASE - convert string to uppercase (of lexical form), preserving language tag/datatype
         if (funcName.Equals("ucase", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                _caseResult = arg1.GetLexicalForm().ToString().ToUpperInvariant();
+                var lexical = arg1.GetLexicalForm().ToString().ToUpperInvariant();
+                var suffix = arg1.GetLangTagOrDatatype();
+                // Only add quotes if there's a suffix to preserve, otherwise return plain string
+                _caseResult = suffix.IsEmpty ? lexical : $"\"{lexical}\"{suffix.ToString()}";
                 return new Value
                 {
                     Type = ValueType.String,
@@ -997,12 +1000,15 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // LCASE - convert string to lowercase (of lexical form)
+        // LCASE - convert string to lowercase (of lexical form), preserving language tag/datatype
         if (funcName.Equals("lcase", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                _caseResult = arg1.GetLexicalForm().ToString().ToLowerInvariant();
+                var lexical = arg1.GetLexicalForm().ToString().ToLowerInvariant();
+                var suffix = arg1.GetLangTagOrDatatype();
+                // Only add quotes if there's a suffix to preserve, otherwise return plain string
+                _caseResult = suffix.IsEmpty ? lexical : $"\"{lexical}\"{suffix.ToString()}";
                 return new Value
                 {
                     Type = ValueType.String,
@@ -1345,6 +1351,9 @@ public ref partial struct FilterEvaluator
 
     // Storage for STRLANG result to keep span valid
     private string _strlangResult = string.Empty;
+    private string _strbeforeResult = string.Empty;
+    private string _strafterResult = string.Empty;
+    private string _substrResult = string.Empty;
 
     // Storage for BNODE result to keep span valid
     private string _bnodeResult = string.Empty;
@@ -2074,6 +2083,31 @@ public ref struct Value
         }
 
         return StringValue;
+    }
+
+    /// <summary>
+    /// Get the language tag or datatype suffix from a string literal.
+    /// For "hello"@en returns @en, for "hello"^^&lt;type&gt; returns ^^&lt;type&gt;.
+    /// Returns empty span if no suffix.
+    /// </summary>
+    public readonly ReadOnlySpan<char> GetLangTagOrDatatype()
+    {
+        if (Type != ValueType.String || StringValue.Length < 2)
+            return ReadOnlySpan<char>.Empty;
+
+        // Check for quoted literal: "value" or "value"@lang or "value"^^<type>
+        if (StringValue[0] == '"')
+        {
+            var closeQuote = StringValue.Slice(1).IndexOf('"');
+            if (closeQuote > 0)
+            {
+                var afterQuote = 1 + closeQuote + 1; // position after closing quote
+                if (afterQuote < StringValue.Length)
+                    return StringValue.Slice(afterQuote);
+            }
+        }
+
+        return ReadOnlySpan<char>.Empty;
     }
 }
 

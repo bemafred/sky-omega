@@ -525,7 +525,7 @@ public ref partial struct FilterEvaluator
 
     /// <summary>
     /// Parse STRBEFORE(string, delimiter) - returns substring before first occurrence of delimiter
-    /// Returns empty string if delimiter not found
+    /// Returns empty string if delimiter not found. Preserves language tag/datatype from first arg.
     /// </summary>
     private Value ParseStrBeforeFunction()
     {
@@ -567,16 +567,21 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
+        // Preserve language tag/datatype from the first argument
+        var result = str.Slice(0, index).ToString();
+        var suffix = stringArg.GetLangTagOrDatatype();
+        // Only add quotes if there's a suffix to preserve, otherwise return plain string
+        _strbeforeResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
         return new Value
         {
             Type = ValueType.String,
-            StringValue = str.Slice(0, index)
+            StringValue = _strbeforeResult.AsSpan()
         };
     }
 
     /// <summary>
     /// Parse STRAFTER(string, delimiter) - returns substring after first occurrence of delimiter
-    /// Returns empty string if delimiter not found
+    /// Returns empty string if delimiter not found. Preserves language tag/datatype from first arg.
     /// </summary>
     private Value ParseStrAfterFunction()
     {
@@ -605,11 +610,14 @@ public ref partial struct FilterEvaluator
 
         var str = stringArg.GetLexicalForm();
         var delimiter = delimiterArg.GetLexicalForm();
+        var suffix = stringArg.GetLangTagOrDatatype();
 
-        // Empty delimiter returns full string (per SPARQL spec)
+        // Empty delimiter returns full string with preserved suffix (per SPARQL spec)
         if (delimiter.IsEmpty)
         {
-            return new Value { Type = ValueType.String, StringValue = str };
+            // Only add quotes if there's a suffix to preserve, otherwise return plain string
+            _strafterResult = suffix.IsEmpty ? str.ToString() : $"\"{str.ToString()}\"{suffix.ToString()}";
+            return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
         }
 
         var index = str.IndexOf(delimiter);
@@ -618,10 +626,14 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
+        // Preserve language tag/datatype from the first argument
+        var result = str.Slice(index + delimiter.Length).ToString();
+        // Only add quotes if there's a suffix to preserve, otherwise return plain string
+        _strafterResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
         return new Value
         {
             Type = ValueType.String,
-            StringValue = str.Slice(index + delimiter.Length)
+            StringValue = _strafterResult.AsSpan()
         };
     }
 
@@ -717,7 +729,7 @@ public ref partial struct FilterEvaluator
 
     /// <summary>
     /// Parse SUBSTR(string, start [, length]) - returns substring
-    /// Note: SPARQL uses 1-based indexing
+    /// Note: SPARQL uses 1-based indexing. Preserves language tag/datatype from first arg.
     /// </summary>
     private Value ParseSubstrFunction()
     {
@@ -775,10 +787,15 @@ public ref partial struct FilterEvaluator
             length = str.Length - start;
         }
 
+        // Preserve language tag/datatype from the first argument
+        var result = str.Slice(start, length).ToString();
+        var suffix = stringArg.GetLangTagOrDatatype();
+        // Only add quotes if there's a suffix to preserve, otherwise return plain string
+        _substrResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
         return new Value
         {
             Type = ValueType.String,
-            StringValue = str.Slice(start, length)
+            StringValue = _substrResult.AsSpan()
         };
     }
 
