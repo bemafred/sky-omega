@@ -1027,12 +1027,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // MD5 - compute MD5 hash
+        // MD5 - compute MD5 hash of lexical form
         if (funcName.Equals("md5", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
                 var hash = MD5.HashData(bytes);
                 _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
                 return new Value
@@ -1044,12 +1044,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // SHA1 - compute SHA-1 hash
+        // SHA1 - compute SHA-1 hash of lexical form
         if (funcName.Equals("sha1", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
                 var hash = SHA1.HashData(bytes);
                 _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
                 return new Value
@@ -1061,12 +1061,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // SHA256 - compute SHA-256 hash
+        // SHA256 - compute SHA-256 hash of lexical form
         if (funcName.Equals("sha256", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
                 var hash = SHA256.HashData(bytes);
                 _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
                 return new Value
@@ -1078,12 +1078,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // SHA384 - compute SHA-384 hash
+        // SHA384 - compute SHA-384 hash of lexical form
         if (funcName.Equals("sha384", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
                 var hash = SHA384.HashData(bytes);
                 _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
                 return new Value
@@ -1095,12 +1095,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // SHA512 - compute SHA-512 hash
+        // SHA512 - compute SHA-512 hash of lexical form
         if (funcName.Equals("sha512", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                var bytes = Encoding.UTF8.GetBytes(arg1.StringValue.ToString());
+                var bytes = Encoding.UTF8.GetBytes(arg1.GetLexicalForm().ToString());
                 var hash = SHA512.HashData(bytes);
                 _hashResult = Convert.ToHexString(hash).ToLowerInvariant();
                 return new Value
@@ -2045,13 +2045,35 @@ public ref struct Value
                     return new Value { Type = ValueType.String, StringValue = value };
                 }
 
-                // Plain literal with quotes but no datatype - return as-is (keep quotes for REGEX etc.)
+                // Plain literal with quotes but no datatype - keep full form for LANG/DATATYPE functions
+                // Hash functions will extract lexical form themselves
                 return new Value { Type = ValueType.String, StringValue = str };
             }
         }
 
         // Not a typed literal - return as-is
         return new Value { Type = ValueType.String, StringValue = str };
+    }
+
+    /// <summary>
+    /// Get the lexical form of a string literal (without enclosing quotes and without language tag).
+    /// For URIs or non-literals, returns the StringValue as-is.
+    /// For quoted literals like "hello" or "hello"@en, returns just hello.
+    /// </summary>
+    public readonly ReadOnlySpan<char> GetLexicalForm()
+    {
+        if (Type != ValueType.String || StringValue.Length < 2)
+            return StringValue;
+
+        // Check for quoted literal: "value" or "value"@lang or "value"^^<type>
+        if (StringValue[0] == '"')
+        {
+            var closeQuote = StringValue.Slice(1).IndexOf('"');
+            if (closeQuote > 0)
+                return StringValue.Slice(1, closeQuote);
+        }
+
+        return StringValue;
     }
 }
 

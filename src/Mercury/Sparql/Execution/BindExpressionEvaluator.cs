@@ -481,12 +481,12 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            // Hash functions - compute hash of string
+            // Hash functions - compute hash of lexical form
             if (name.Equals("MD5", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var bytes = Encoding.UTF8.GetBytes(arg.GetLexicalForm().ToString());
                     var hash = System.Security.Cryptography.MD5.HashData(bytes);
                     var result = Convert.ToHexString(hash).ToLowerInvariant();
                     return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
@@ -498,7 +498,7 @@ internal ref struct BindExpressionEvaluator
             {
                 if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var bytes = Encoding.UTF8.GetBytes(arg.GetLexicalForm().ToString());
                     var hash = System.Security.Cryptography.SHA1.HashData(bytes);
                     var result = Convert.ToHexString(hash).ToLowerInvariant();
                     return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
@@ -510,7 +510,7 @@ internal ref struct BindExpressionEvaluator
             {
                 if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var bytes = Encoding.UTF8.GetBytes(arg.GetLexicalForm().ToString());
                     var hash = System.Security.Cryptography.SHA256.HashData(bytes);
                     var result = Convert.ToHexString(hash).ToLowerInvariant();
                     return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
@@ -522,7 +522,7 @@ internal ref struct BindExpressionEvaluator
             {
                 if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var bytes = Encoding.UTF8.GetBytes(arg.GetLexicalForm().ToString());
                     var hash = System.Security.Cryptography.SHA384.HashData(bytes);
                     var result = Convert.ToHexString(hash).ToLowerInvariant();
                     return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
@@ -534,7 +534,7 @@ internal ref struct BindExpressionEvaluator
             {
                 if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
                 {
-                    var bytes = Encoding.UTF8.GetBytes(arg.StringValue.ToString());
+                    var bytes = Encoding.UTF8.GetBytes(arg.GetLexicalForm().ToString());
                     var hash = System.Security.Cryptography.SHA512.HashData(bytes);
                     var result = Convert.ToHexString(hash).ToLowerInvariant();
                     return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
