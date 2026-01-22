@@ -129,19 +129,19 @@ public ref partial struct FilterEvaluator
         if (Peek() == ')')
             Advance();
 
-        // Get string value
+        // Get string value (lexical form)
         ReadOnlySpan<char> stringValue;
         if (stringArg.Type == ValueType.String || stringArg.Type == ValueType.Uri)
-            stringValue = stringArg.StringValue;
+            stringValue = stringArg.GetLexicalForm();
         else if (stringArg.Type == ValueType.Unbound)
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
         else
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
 
-        // Get pattern value
+        // Get pattern value (lexical form)
         ReadOnlySpan<char> pattern;
         if (patternArg.Type == ValueType.String)
-            pattern = patternArg.StringValue;
+            pattern = patternArg.GetLexicalForm();
         else
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
 
@@ -235,9 +235,9 @@ public ref partial struct FilterEvaluator
         if (replacementArg.Type != ValueType.String)
             return new Value { Type = ValueType.Unbound };
 
-        var stringValue = stringArg.StringValue;
-        var pattern = patternArg.StringValue;
-        var replacement = replacementArg.StringValue;
+        var stringValue = stringArg.GetLexicalForm();
+        var pattern = patternArg.GetLexicalForm();
+        var replacement = replacementArg.GetLexicalForm();
 
         // Build regex options from flags
         var options = RegexOptions.None;
@@ -307,7 +307,8 @@ public ref partial struct FilterEvaluator
 
         // Case-insensitive contains check (handles Unicode including Swedish å, ä, ö)
         // Use CurrentCultureIgnoreCase for proper Unicode case-folding
-        var matches = textArg.StringValue.Contains(queryArg.StringValue, StringComparison.CurrentCultureIgnoreCase);
+        // Use lexical form to strip quotes from RDF literals
+        var matches = textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.CurrentCultureIgnoreCase);
         return new Value { Type = ValueType.Boolean, BooleanValue = matches };
     }
 
@@ -339,7 +340,7 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
         }
 
-        var contains = arg1.StringValue.Contains(arg2.StringValue, StringComparison.Ordinal);
+        var contains = arg1.GetLexicalForm().Contains(arg2.GetLexicalForm(), StringComparison.Ordinal);
         return new Value { Type = ValueType.Boolean, BooleanValue = contains };
     }
 
@@ -371,7 +372,7 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
         }
 
-        var startsWith = arg1.StringValue.StartsWith(arg2.StringValue, StringComparison.Ordinal);
+        var startsWith = arg1.GetLexicalForm().StartsWith(arg2.GetLexicalForm(), StringComparison.Ordinal);
         return new Value { Type = ValueType.Boolean, BooleanValue = startsWith };
     }
 
@@ -403,7 +404,7 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
         }
 
-        var endsWith = arg1.StringValue.EndsWith(arg2.StringValue, StringComparison.Ordinal);
+        var endsWith = arg1.GetLexicalForm().EndsWith(arg2.GetLexicalForm(), StringComparison.Ordinal);
         return new Value { Type = ValueType.Boolean, BooleanValue = endsWith };
     }
 
@@ -551,8 +552,8 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
-        var str = stringArg.StringValue;
-        var delimiter = delimiterArg.StringValue;
+        var str = stringArg.GetLexicalForm();
+        var delimiter = delimiterArg.GetLexicalForm();
 
         // Empty delimiter returns empty string
         if (delimiter.IsEmpty)
@@ -602,8 +603,8 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
-        var str = stringArg.StringValue;
-        var delimiter = delimiterArg.StringValue;
+        var str = stringArg.GetLexicalForm();
+        var delimiter = delimiterArg.GetLexicalForm();
 
         // Empty delimiter returns full string (per SPARQL spec)
         if (delimiter.IsEmpty)
@@ -754,7 +755,7 @@ public ref partial struct FilterEvaluator
         if (startArg.Type != ValueType.Integer)
             return new Value { Type = ValueType.Unbound };
 
-        var str = stringArg.StringValue;
+        var str = stringArg.GetLexicalForm();
         var start = (int)startArg.IntegerValue - 1; // SPARQL is 1-based
 
         if (start < 0) start = 0;
@@ -801,7 +802,7 @@ public ref partial struct FilterEvaluator
             }
 
             if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
-                parts.Add(arg.StringValue.ToString());
+                parts.Add(arg.GetLexicalForm().ToString());
             else if (arg.Type == ValueType.Integer)
                 parts.Add(arg.IntegerValue.ToString());
             else if (arg.Type == ValueType.Double)

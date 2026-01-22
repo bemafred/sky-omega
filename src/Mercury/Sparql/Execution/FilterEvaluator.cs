@@ -968,7 +968,7 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Uri, StringValue = datatypeIri };
         }
 
-        // STRLEN - returns string length
+        // STRLEN - returns string length of lexical form
         if (funcName.Equals("strlen", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
@@ -976,18 +976,18 @@ public ref partial struct FilterEvaluator
                 return new Value
                 {
                     Type = ValueType.Integer,
-                    IntegerValue = arg1.StringValue.Length
+                    IntegerValue = arg1.GetLexicalForm().Length
                 };
             }
             return new Value { Type = ValueType.Unbound };
         }
 
-        // UCASE - convert string to uppercase
+        // UCASE - convert string to uppercase (of lexical form)
         if (funcName.Equals("ucase", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                _caseResult = arg1.StringValue.ToString().ToUpperInvariant();
+                _caseResult = arg1.GetLexicalForm().ToString().ToUpperInvariant();
                 return new Value
                 {
                     Type = ValueType.String,
@@ -997,12 +997,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // LCASE - convert string to lowercase
+        // LCASE - convert string to lowercase (of lexical form)
         if (funcName.Equals("lcase", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                _caseResult = arg1.StringValue.ToString().ToLowerInvariant();
+                _caseResult = arg1.GetLexicalForm().ToString().ToLowerInvariant();
                 return new Value
                 {
                     Type = ValueType.String,
@@ -1012,12 +1012,12 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
         }
 
-        // ENCODE_FOR_URI - percent-encode string for use in URI
+        // ENCODE_FOR_URI - percent-encode string for use in URI (of lexical form)
         if (funcName.Equals("encode_for_uri", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
             {
-                _encodeResult = Uri.EscapeDataString(arg1.StringValue.ToString());
+                _encodeResult = Uri.EscapeDataString(arg1.GetLexicalForm().ToString());
                 return new Value
                 {
                     Type = ValueType.String,

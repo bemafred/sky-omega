@@ -2158,26 +2158,28 @@ public class FilterEvaluatorTests
     [Fact]
     public void StrDt_ConstructsTypedLiteral()
     {
-        // STRDT creates a typed literal with ^^<datatype> syntax
-        // Check that it contains both the quoted value and the datatype
+        // STRDT creates a typed literal - verify lexical form is preserved
+        // Per SPARQL spec, string functions operate on lexical form only
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#integer\"), \"42\") && CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#integer\"), \"^^<http://www.w3.org/2001/XMLSchema#integer>\")",
+            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#integer\"), \"42\")",
             "?x", "42"));
     }
 
     [Fact]
     public void StrDt_WithXsdString()
     {
+        // STRDT creates typed literal, lexical form is just "hello"
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#string\"), \"^^<http://www.w3.org/2001/XMLSchema#string>\")",
+            "CONTAINS(STRDT(?x, \"http://www.w3.org/2001/XMLSchema#string\"), \"hello\")",
             "?x", "hello"));
     }
 
     [Fact]
     public void StrDt_WithCustomDatatype()
     {
+        // Verify lexical form is preserved with custom datatype
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRDT(?x, \"http://example.org/mytype\"), \"^^<http://example.org/mytype>\")",
+            "CONTAINS(STRDT(?x, \"http://example.org/mytype\"), \"value\")",
             "?x", "value"));
     }
 
@@ -2192,8 +2194,9 @@ public class FilterEvaluatorTests
     [Fact]
     public void StrDt_CaseInsensitive()
     {
+        // Verify case-insensitivity of function name and lexical form preservation
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(strdt(?x, \"http://example.org/type\"), \"^^\")",
+            "CONTAINS(strdt(?x, \"http://example.org/type\"), \"test\")",
             "?x", "test"));
     }
 
@@ -2204,26 +2207,28 @@ public class FilterEvaluatorTests
     [Fact]
     public void StrLang_ConstructsLanguageTaggedLiteral()
     {
-        // STRLANG creates a language-tagged literal with @lang syntax
-        // Check that it contains both the value and the language tag
+        // STRLANG creates a language-tagged literal
+        // Per SPARQL spec, string functions operate on lexical form only (not including @lang)
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRLANG(?x, \"en\"), \"hello\") && STRENDS(STRLANG(?x, \"en\"), \"@en\")",
+            "CONTAINS(STRLANG(?x, \"en\"), \"hello\")",
             "?x", "hello"));
     }
 
     [Fact]
     public void StrLang_WithFullLanguageTag()
     {
+        // Verify lexical form is preserved with extended language tag
         Assert.True(EvaluateWithStringBinding(
-            "STRENDS(STRLANG(?x, \"en-US\"), \"@en-US\")",
+            "CONTAINS(STRLANG(?x, \"en-US\"), \"hello\")",
             "?x", "hello"));
     }
 
     [Fact]
     public void StrLang_WithGermanTag()
     {
+        // Verify lexical form with German language tag
         Assert.True(EvaluateWithStringBinding(
-            "STRENDS(STRLANG(?x, \"de\"), \"@de\")",
+            "CONTAINS(STRLANG(?x, \"de\"), \"hallo\")",
             "?x", "hallo"));
     }
 
@@ -2238,17 +2243,19 @@ public class FilterEvaluatorTests
     [Fact]
     public void StrLang_CaseInsensitive()
     {
+        // Verify case-insensitivity of function name
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(strlang(?x, \"en\"), \"@en\")",
+            "CONTAINS(strlang(?x, \"en\"), \"test\")",
             "?x", "test"));
     }
 
     [Fact]
     public void StrLang_ContainsAtSymbol()
     {
+        // Verify lexical form containing @ is preserved
         Assert.True(EvaluateWithStringBinding(
-            "CONTAINS(STRLANG(?x, \"es\"), \"@\")",
-            "?x", "hola"));
+            "CONTAINS(STRLANG(?x, \"es\"), \"email@example\")",
+            "?x", "email@example"));
     }
 
     #endregion

@@ -399,11 +399,11 @@ internal ref struct BindExpressionEvaluator
             if (name.Equals("STR", StringComparison.OrdinalIgnoreCase))
                 return arg;
 
-            // STRLEN function
+            // STRLEN function - length of lexical form
             if (name.Equals("STRLEN", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
-                    return new Value { Type = ValueType.Integer, IntegerValue = arg.StringValue.Length };
+                    return new Value { Type = ValueType.Integer, IntegerValue = arg.GetLexicalForm().Length };
                 return new Value { Type = ValueType.Unbound };
             }
 
@@ -448,34 +448,34 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            // UCASE function - convert to uppercase
+            // UCASE function - convert to uppercase (of lexical form)
             if (name.Equals("UCASE", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
                 {
-                    var upper = arg.StringValue.ToString().ToUpperInvariant();
+                    var upper = arg.GetLexicalForm().ToString().ToUpperInvariant();
                     return new Value { Type = ValueType.String, StringValue = upper.AsSpan() };
                 }
                 return arg;
             }
 
-            // LCASE function - convert to lowercase
+            // LCASE function - convert to lowercase (of lexical form)
             if (name.Equals("LCASE", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
                 {
-                    var lower = arg.StringValue.ToString().ToLowerInvariant();
+                    var lower = arg.GetLexicalForm().ToString().ToLowerInvariant();
                     return new Value { Type = ValueType.String, StringValue = lower.AsSpan() };
                 }
                 return arg;
             }
 
-            // ENCODE_FOR_URI - percent-encode string for use in URI
+            // ENCODE_FOR_URI - percent-encode string for use in URI (of lexical form)
             if (name.Equals("ENCODE_FOR_URI", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
                 {
-                    var encoded = Uri.EscapeDataString(arg.StringValue.ToString());
+                    var encoded = Uri.EscapeDataString(arg.GetLexicalForm().ToString());
                     return new Value { Type = ValueType.String, StringValue = encoded.AsSpan() };
                 }
                 return new Value { Type = ValueType.Unbound };
@@ -1007,10 +1007,10 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            // Convert value to string
+            // Convert value to string (using lexical form for string literals)
             if (value.Type == ValueType.String)
             {
-                parts.Add(value.StringValue.ToString());
+                parts.Add(value.GetLexicalForm().ToString());
             }
             else if (value.Type == ValueType.Integer)
             {
@@ -1026,7 +1026,7 @@ internal ref struct BindExpressionEvaluator
             }
             else if (value.Type == ValueType.Uri)
             {
-                parts.Add(value.StringValue.ToString());
+                parts.Add(value.GetLexicalForm().ToString());
             }
 
             SkipWhitespace();
@@ -1086,7 +1086,7 @@ internal ref struct BindExpressionEvaluator
         if (startArg.Type != ValueType.Integer && startArg.Type != ValueType.Double)
             return new Value { Type = ValueType.Unbound };
 
-        var str = stringArg.StringValue;
+        var str = stringArg.GetLexicalForm();
         var startVal = startArg.Type == ValueType.Integer ? startArg.IntegerValue : (long)startArg.DoubleValue;
         var start = (int)startVal - 1; // SPARQL is 1-based
 
