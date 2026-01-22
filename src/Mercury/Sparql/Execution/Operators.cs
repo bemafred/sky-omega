@@ -325,6 +325,39 @@ internal ref struct TriplePatternScan
             return false;
         }
 
+        // Handle grouped zero-or-one path (p1/p2)? - iterate over sequence results, then emit reflexive
+        if (_isGroupedZeroOrOne)
+        {
+            // First, iterate over the sequence results (one occurrence of the path)
+            while (_groupedResults != null && _groupedResults.Count > 0)
+            {
+                var result = _groupedResults.Dequeue();
+                bindings.TruncateTo(_initialBindingsCount);
+
+                // Bind the result to the object variable
+                if (TryBindVariable(_pattern.Subject, _startNode!.AsSpan(), ref bindings) &&
+                    TryBindVariable(_pattern.Object, result.AsSpan(), ref bindings))
+                {
+                    return true;
+                }
+            }
+
+            // Then emit the reflexive case (zero occurrences: subject = object)
+            if (!_emittedReflexive && !string.IsNullOrEmpty(_startNode))
+            {
+                _emittedReflexive = true;
+                bindings.TruncateTo(_initialBindingsCount);
+
+                if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
+                    TryBindVariable(_pattern.Object, _startNode.AsSpan(), ref bindings))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         while (true)
         {
             QueryCancellation.ThrowIfCancellationRequested();
@@ -841,6 +874,20 @@ internal ref struct TriplePatternScan
             _negatedSetPhase = 0;  // Start with direct scan phase
             _enumerator = ExecuteTemporalQuery(subject, ReadOnlySpan<char>.Empty, obj);
         }
+        else if (_isGroupedZeroOrOne)
+        {
+            // For grouped zero-or-one path (p1/p2)?, execute the sequence once
+            // and store results in _groupedResults. Also need to emit reflexive case (subject=object).
+            // Property paths use set semantics, so deduplicate the results.
+            var startNodeSpan = subject.IsEmpty ? obj : subject;
+            var expandedStart = ExpandPrefixedName(startNodeSpan);
+            _startNode = expandedStart.ToString();
+            var sequenceResults = ExecuteGroupedSequence(_startNode);
+            // Deduplicate and exclude reflexive (we'll emit it separately)
+            // Note: Copy _startNode to local to avoid capturing 'this' in lambda
+            var startNode = _startNode;
+            _groupedResults = new Queue<string>(sequenceResults.Where(r => r != startNode).Distinct());
+        }
         else if (_isInverseGroup)
         {
             // For inverse grouped path ^(p1/p2), execute the sequence in reverse
@@ -1131,6 +1178,25 @@ internal ref struct TriplePatternScan
                     subjects.Add(subjectStr);
                 }
                 discoveryEnumerator.Dispose();
+
+                // For zero-or-more (*) paths, SPARQL spec requires reflexive pairs for ALL nodes
+                // in the graph, not just those connected by the predicate. Query all triples
+                // to discover all nodes in the graph.
+                if (_isZeroOrMore)
+                {
+                    var allTriplesEnumerator = ExecuteTemporalQuery(
+                        ReadOnlySpan<char>.Empty,
+                        ReadOnlySpan<char>.Empty,
+                        ReadOnlySpan<char>.Empty);
+
+                    while (allTriplesEnumerator.MoveNext())
+                    {
+                        var triple = allTriplesEnumerator.Current;
+                        _allNodes.Add(triple.Subject.ToString());
+                        _allNodes.Add(triple.Object.ToString());
+                    }
+                    allTriplesEnumerator.Dispose();
+                }
             }
 
             // Add all subjects as starting nodes

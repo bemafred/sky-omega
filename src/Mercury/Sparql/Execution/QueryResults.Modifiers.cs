@@ -681,11 +681,58 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
 
     private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
     {
-        if (double.TryParse(a, NumberStyles.Float, CultureInfo.InvariantCulture, out var aNum) &&
-            double.TryParse(b, NumberStyles.Float, CultureInfo.InvariantCulture, out var bNum))
+        // SPARQL ORDER BY term type ordering: Unbound < Blank nodes < IRIs < Literals
+        var aType = GetTermType(a);
+        var bType = GetTermType(b);
+
+        if (aType != bType)
         {
-            return aNum.CompareTo(bNum);
+            return aType.CompareTo(bType);
         }
+
+        // Same type - compare by value
+        // For numeric literals, compare numerically
+        if (aType == TermSortType.Literal)
+        {
+            var aLex = GetLexicalForm(a);
+            var bLex = GetLexicalForm(b);
+
+            if (double.TryParse(aLex, NumberStyles.Float, CultureInfo.InvariantCulture, out var aNum) &&
+                double.TryParse(bLex, NumberStyles.Float, CultureInfo.InvariantCulture, out var bNum))
+            {
+                return aNum.CompareTo(bNum);
+            }
+
+            // Non-numeric literals - compare lexical forms
+            return aLex.SequenceCompareTo(bLex);
+        }
+
+        // For IRIs and blank nodes, compare the full representation
         return a.SequenceCompareTo(b);
+    }
+
+    private enum TermSortType { Unbound = 0, BlankNode = 1, Iri = 2, Literal = 3 }
+
+    private static TermSortType GetTermType(ReadOnlySpan<char> term)
+    {
+        if (term.IsEmpty) return TermSortType.Unbound;
+        if (term.Length > 0 && term[0] == '<') return TermSortType.Iri;
+        if (term.Length > 1 && term[0] == '_' && term[1] == ':') return TermSortType.BlankNode;
+        return TermSortType.Literal; // Includes quoted strings and plain literals
+    }
+
+    private static ReadOnlySpan<char> GetLexicalForm(ReadOnlySpan<char> literal)
+    {
+        // Extract lexical form from quoted literal: "value"@lang or "value"^^<type>
+        if (literal.Length >= 2 && literal[0] == '"')
+        {
+            // Find closing quote
+            var closeQuote = literal.LastIndexOf('"');
+            if (closeQuote > 0)
+            {
+                return literal.Slice(1, closeQuote - 1);
+            }
+        }
+        return literal;
     }
 }
