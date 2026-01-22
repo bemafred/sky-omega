@@ -2,27 +2,28 @@
 
 **Status:** In Progress
 **Created:** 2026-01-19
-**Updated:** 2026-01-21
+**Updated:** 2026-01-22
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1904 W3C tests, 1818 passing (95%), 70 failing, 16 skipped
+**Current:** 1904 W3C tests, 1845 passing (97%), 43 failing, 16 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 95% W3C conformance (1818/1904 tests). For SPARQL 1.1 Query specifically: 147/224 passing (66%). The remaining 68 failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 97% W3C conformance (1845/1904 tests). For SPARQL 1.1 Query specifically: 172/224 passing (77%). The remaining 44 failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
-| Property Paths | 6 | Named graph context, grouped modifiers |
-| String Functions | 23 | STRLEN, SUBSTR, STRAFTER, STRBEFORE, CONCAT, ENCODE_FOR_URI, REPLACE |
-| Hash Functions | 10 | MD5, SHA1, SHA256, SHA384, SHA512 (Unicode handling) |
-| RDF Term Functions | 10 | STRDT, STRLANG, BNODE, IRI/URI, UUID/STRUUID |
+| Property Paths | 2 | Named graph context (pp16), grouped sequence modifiers (pp28a) |
+| String Functions | ~12 | STRBEFORE/STRAFTER datatyping, CONCAT, REPLACE, non-BMP Unicode |
+| Hash Functions | ✅ 0 | All hash function tests pass |
+| RDF Term Functions | ~6 | IRI/URI edge cases, UUID/STRUUID pattern matching |
 | DateTime Functions | 3 | NOW, TIMEZONE, TZ |
 | MINUS/NOT EXISTS | ✅ 0 | All 12 tests pass |
-| Aggregates DISTINCT | 6 | DISTINCT with GROUP BY |
-| GROUP BY / HAVING | 3 | Built-in functions in GROUP BY, HAVING conditions |
+| Aggregates | ~4 | Error propagation in AVG, aggregate edge cases |
+| GROUP BY / HAVING | ~3 | Built-in functions in GROUP BY, HAVING conditions |
 | EXISTS edge cases | ✅ 0 | All 6 tests pass |
 | VALUES | ✅ 0 | All tests pass |
-| Other | ~15 | BIND scoping, IF/COALESCE error cases, IN/NOT IN |
+| Project expressions | ~3 | Expression error handling, unbound variables |
+| Other | ~8 | IF/COALESCE error propagation |
 
 ## Plan: Phased Approach
 
@@ -66,30 +67,39 @@ Mercury's SPARQL engine has achieved 95% W3C conformance (1818/1904 tests). For 
 
 ---
 
-### Phase 3: SPARQL Functions — 46 tests failing
+### Phase 3: SPARQL Functions — ~18 tests failing (was 46)
 **Target:** Reduce function failures from 46 to ~10
 **Effort:** Medium-Large
-**Files:** `FilterEvaluator.Functions.cs`, `BindExpressionEvaluator.cs`
-**Updated:** 2026-01-20
+**Files:** `FilterEvaluator.Functions.cs`, `BindExpressionEvaluator.cs`, `FilterEvaluator.cs`
+**Updated:** 2026-01-22
 
-**Current failing function tests (46 total):**
+**Fixed (2026-01-22):**
+- ✅ STRBEFORE/STRAFTER basic tests pass (language tag preservation)
+- ✅ UCASE/LCASE preserve language tags
+- ✅ SUBSTR preserves language tags
+- ✅ Hash functions (MD5, SHA1, SHA256, SHA384, SHA512) all pass
+- ✅ Added `GetLangTagOrDatatype()` method to Value struct
+
+**Current failing function tests (~18 total):**
 
 | Category | Failing Tests | Notes |
 |----------|--------------|-------|
-| String (23) | STRLEN (2), SUBSTR (4), STRSTARTS (1), STRAFTER (2), STRBEFORE (2), UCASE (1), LCASE (1), CONCAT (2), ENCODE_FOR_URI (2), REPLACE (2) | Non-BMP Unicode handling |
-| Hash (10) | MD5 (2), SHA1 (2), SHA256 (2), SHA384 (2), SHA512 (2) | Unicode input handling |
-| RDF Terms (10) | STRDT (2), STRLANG (2), BNODE (2), IRI/URI (2), UUID (2), STRUUID (1) | Type error handling |
+| String (~8) | STRBEFORE/STRAFTER datatyping (2), CONCAT (2), REPLACE (2), non-BMP (2) | Argument compatibility rules |
+| RDF Terms (~6) | IRI/URI edge cases (2), UUID (2), STRUUID (1), BNODE (1) | Pattern matching, type errors |
 | DateTime (3) | NOW (1), TIMEZONE (1), TZ (1) | Format/binding issues |
+| Error handling (~4) | IF (1), COALESCE (1), AVG error (2) | Error propagation |
 
 **Root causes:**
-1. Non-BMP Unicode (surrogate pairs) not handled correctly in string functions
-2. Hash functions may have encoding issues with Unicode input
-3. Type error propagation in STRDT/STRLANG
-4. UUID/STRUUID not yet implemented in BIND expressions
+1. STRBEFORE/STRAFTER datatyping: Argument compatibility rules for language tags and typed strings
+2. REPLACE: Regex replacement not yet implemented in BindExpressionEvaluator
+3. UUID/STRUUID: Pattern matching test expects specific UUID format validation
+4. IF/COALESCE: Error propagation semantics
 
-**Previously completed:**
-- Basic CONCAT, SUBSTR, UCASE, LCASE work in FILTER expressions
-- CEIL, FLOOR, ROUND, ABS added to BindExpressionEvaluator
+**Completed:**
+- Basic CONCAT, SUBSTR, UCASE, LCASE work in FILTER and SELECT expressions
+- CEIL, FLOOR, ROUND, ABS in BindExpressionEvaluator
+- Language tag preservation for UCASE/LCASE/STRBEFORE/STRAFTER/SUBSTR
+- Empty string result handling (quoted `""` for SELECT projections)
 
 **Verification:**
 ```bash
@@ -250,14 +260,14 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 |-------|-------------|---------|------------------|--------|
 | 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
 | 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
-| 3 | SPARQL Functions | 46 | ~10 | In Progress |
-| 4 | Property Paths | 6 | ~5 | ✅ Nearly Done |
+| 3 | SPARQL Functions | ~18 | ~10 | In Progress (was 46) |
+| 4 | Property Paths | 2 | 0 | ✅ Nearly Done (was 6) |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 0 | 0 | ✅ Done |
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 68 failing tests total (147 passing, 9 skipped out of 224) — 66% conformance
+**Current Progress:** 44 failing tests total (172 passing, 8 skipped out of 224) — 77% conformance
 
 **Recommended priority:**
 1. **Phase 3** (Functions) - 46 tests, mostly Unicode edge cases
@@ -281,21 +291,30 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 
 ## Next Steps
 
-**Priority 1: Functions (46 tests)**
-Most failures are Unicode edge cases (non-BMP characters). Lower priority as core functionality works.
+**Priority 1: Remaining Functions (~18 tests)**
+Focus areas:
+- STRBEFORE/STRAFTER datatyping (argument compatibility for language tags)
+- REPLACE function implementation in BindExpressionEvaluator
+- UUID/STRUUID pattern matching
+- IF/COALESCE error propagation
 
-**Priority 2: Property Paths (6 tests)**
+**Priority 2: Property Paths (2 tests)**
 ```bash
 dotnet test --filter "Name~pp" tests/Mercury.Tests
 ```
 Focus on:
-- pp06, pp07, pp34, pp35: Named graph + path interactions
-- pp16, pp28a: Grouped sequence modifiers
+- pp16: Duplicate paths and cycles through foaf:knows*
+- pp28a: Diamond, with loop -- (:p/:p)?
 
-**Completed:**
+**Recently Completed (2026-01-22):**
+- ✅ String functions: UCASE/LCASE/STRBEFORE/STRAFTER/SUBSTR language tag preservation
+- ✅ Hash functions: MD5, SHA1, SHA256, SHA384, SHA512 all pass
+- ✅ Empty string handling for STRBEFORE/STRAFTER
+
+**Previously Completed:**
 - ✅ Negation/EXISTS (12/12 tests) - GRAPH context, MINUS semantics
-- ✅ pp30 sequence-within-alternative operator precedence
-- ✅ pp31-pp33 grouped alternative/sequence combinations (2026-01-21)
+- ✅ pp30-pp33 property path grouping and sequences (2026-01-21)
+- ✅ pp06, pp07, pp34, pp35 named graph paths (2026-01-21)
 
 ## Out of Scope
 
