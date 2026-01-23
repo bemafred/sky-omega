@@ -900,6 +900,23 @@ public ref partial struct FilterEvaluator
 
         if (funcName.Equals("str", StringComparison.OrdinalIgnoreCase))
         {
+            // Handle numeric types by converting to string representation
+            if (arg1.Type == ValueType.Integer)
+            {
+                _strResult = arg1.IntegerValue.ToString(CultureInfo.InvariantCulture);
+                return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
+            }
+            if (arg1.Type == ValueType.Double)
+            {
+                _strResult = arg1.DoubleValue.ToString("G", CultureInfo.InvariantCulture);
+                return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
+            }
+            if (arg1.Type == ValueType.Boolean)
+            {
+                _strResult = arg1.BooleanValue ? "true" : "false";
+                return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
+            }
+
             var strVal = arg1.StringValue;
             // For URIs, strip angle brackets: <http://...> -> http://...
             if (arg1.Type == ValueType.Uri && strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
@@ -1342,6 +1359,9 @@ public ref partial struct FilterEvaluator
 
     // Storage for ENCODE_FOR_URI result to keep span valid
     private string _encodeResult = string.Empty;
+
+    // Storage for STR() numeric conversion result to keep span valid
+    private string _strResult = string.Empty;
 
     // Storage for hash function results to keep span valid
     private string _hashResult = string.Empty;
