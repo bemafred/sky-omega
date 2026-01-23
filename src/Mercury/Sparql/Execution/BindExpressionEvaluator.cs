@@ -1146,9 +1146,9 @@ internal ref struct BindExpressionEvaluator
 
         if (Peek() == ')') Advance();
 
-        // Concatenate all parts
-        var result = string.Concat(parts);
-        return new Value { Type = ValueType.String, StringValue = result.AsSpan() };
+        // Concatenate all parts - store in _stringResult to keep span valid
+        _stringResult = string.Concat(parts);
+        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
     }
 
     /// <summary>
