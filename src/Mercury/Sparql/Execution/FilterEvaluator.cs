@@ -900,10 +900,16 @@ public ref partial struct FilterEvaluator
 
         if (funcName.Equals("str", StringComparison.OrdinalIgnoreCase))
         {
+            var strVal = arg1.StringValue;
+            // For URIs, strip angle brackets: <http://...> -> http://...
+            if (arg1.Type == ValueType.Uri && strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
+            {
+                strVal = strVal.Slice(1, strVal.Length - 2);
+            }
             return new Value
             {
                 Type = ValueType.String,
-                StringValue = arg1.StringValue
+                StringValue = strVal
             };
         }
 

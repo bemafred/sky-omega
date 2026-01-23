@@ -103,11 +103,70 @@ public ref partial struct QueryResults
     private readonly bool _hasHaving;
     private readonly HavingClause _having;
 
+    // Empty pattern support (for queries like SELECT (expr AS ?x) WHERE { BIND(...) })
+    private readonly bool _isEmptyPattern;
+    private bool _emptyPatternReturned;
+
     public static QueryResults Empty()
     {
         var result = new QueryResults();
         result._isEmpty = true;
         return result;
+    }
+
+    /// <summary>
+    /// Create QueryResults for an empty pattern (WHERE {}) that still evaluates BIND/FILTER/SELECT expressions.
+    /// Returns exactly one row with the computed expression values.
+    /// </summary>
+    internal static QueryResults EmptyPattern(Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
+        Binding[] bindings, char[] stringBuffer, SelectClause selectClause, QuadStore? store = null)
+    {
+        return new QueryResults(buffer, source, bindings, stringBuffer, selectClause, store, isEmptyPattern: true);
+    }
+
+    /// <summary>
+    /// Private constructor for empty pattern results (WHERE {}) with BIND/FILTER/SELECT expressions.
+    /// </summary>
+    private QueryResults(Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
+        Binding[] bindings, char[] stringBuffer, SelectClause selectClause, QuadStore? store, bool isEmptyPattern)
+    {
+        _isEmptyPattern = isEmptyPattern;
+        _emptyPatternReturned = false;
+        _buffer = buffer;
+        _source = source;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _selectClause = selectClause;
+        _store = store;
+        _hasBinds = buffer.HasBinds;
+        _hasFilters = buffer.HasFilters;
+        _hasExists = buffer.HasExists;
+        var groupBy = buffer.GetGroupByClause();
+        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
+        _groupBy = groupBy;
+        var having = buffer.GetHavingClause();
+        _having = having;
+        _hasHaving = having.HasHaving;
+        // Initialize other required fields to defaults
+        _isEmpty = false;
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
+        _limit = 0;
+        _offset = 0;
+        _distinct = false;
+        _orderBy = default;
+        _hasOrderBy = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasPostQueryValues = false;
+        _isMaterialized = false;
+        _firstBranchBindCount = 0;
+        _hasUnionBindsOnly = false;
     }
 
     /// <summary>
@@ -637,6 +696,46 @@ public ref partial struct QueryResults
     public bool MoveNext()
     {
         if (_isEmpty) return false;
+
+        // Empty pattern (WHERE { BIND(...) }) - return exactly one row with computed expressions
+        if (_isEmptyPattern)
+        {
+            if (_emptyPatternReturned)
+                return false;
+
+            _emptyPatternReturned = true;
+
+            // Evaluate BIND expressions first (e.g., BIND(UUID() AS ?uuid))
+            if (_hasBinds)
+            {
+                EvaluateBindExpressions();
+            }
+
+            // Evaluate SELECT expressions (e.g., (STRLEN(STR(?uuid)) AS ?length))
+            EvaluateSelectExpressions();
+
+            // Apply FILTER - if fails, return empty result set
+            if (_hasFilters)
+            {
+                if (!EvaluateFilters())
+                {
+                    _bindingTable.Clear();
+                    return false;
+                }
+            }
+
+            // Apply EXISTS/NOT EXISTS filters
+            if (_hasExists)
+            {
+                if (!EvaluateExistsFilters())
+                {
+                    _bindingTable.Clear();
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         // GROUP BY requires collecting all results first, then grouping
         if (_hasGroupBy)

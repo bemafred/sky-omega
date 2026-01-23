@@ -377,6 +377,37 @@ internal ref struct BindExpressionEvaluator
                 return ParseSubstrFunction();
             }
 
+            // UUID() - generate a fresh IRI with UUID v7
+            if (name.Equals("UUID", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Peek() == ')') Advance();
+                _stringResult = $"<urn:uuid:{Guid.CreateVersion7():D}>";
+                return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+            }
+
+            // STRUUID() - generate a fresh UUID v7 string (without urn:uuid: prefix)
+            if (name.Equals("STRUUID", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Peek() == ')') Advance();
+                _stringResult = $"\"{Guid.CreateVersion7():D}\"";
+                return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+            }
+
+            // NOW() - current datetime
+            if (name.Equals("NOW", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Peek() == ')') Advance();
+                _stringResult = $"\"{DateTime.UtcNow:O}\"^^<http://www.w3.org/2001/XMLSchema#dateTime>";
+                return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+            }
+
+            // RAND() - random number between 0 and 1
+            if (name.Equals("RAND", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Peek() == ')') Advance();
+                return new Value { Type = ValueType.Double, DoubleValue = Random.Shared.NextDouble() };
+            }
+
             var arg = ParseAdditive();
             SkipWhitespace();
 
@@ -395,9 +426,18 @@ internal ref struct BindExpressionEvaluator
             if (name.Equals("BOUND", StringComparison.OrdinalIgnoreCase))
                 return new Value { Type = ValueType.Boolean, BooleanValue = arg.Type != ValueType.Unbound };
 
-            // STR function
+            // STR function - converts value to string representation
             if (name.Equals("STR", StringComparison.OrdinalIgnoreCase))
-                return arg;
+            {
+                var strVal = arg.StringValue;
+                // For URIs, strip angle brackets: <http://...> -> http://...
+                if (arg.Type == ValueType.Uri && strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
+                {
+                    _stringResult = strVal.Slice(1, strVal.Length - 2).ToString();
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                }
+                return new Value { Type = ValueType.String, StringValue = strVal };
+            }
 
             // STRLEN function - length of lexical form
             if (name.Equals("STRLEN", StringComparison.OrdinalIgnoreCase))
@@ -1318,7 +1358,11 @@ internal ref struct BindExpressionEvaluator
         try
         {
             var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
-            _stringResult = $"\"{regex.Replace(str.ToString(), replacement.ToString())}\"";
+            var result = regex.Replace(str.ToString(), replacement.ToString());
+
+            // Preserve language tag or datatype from input string
+            var suffix = stringArg.GetLangTagOrDatatype();
+            _stringResult = suffix.IsEmpty ? $"\"{result}\"" : $"\"{result}\"{suffix.ToString()}";
             return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
         }
         catch

@@ -505,7 +505,18 @@ public partial class QueryExecutor : IDisposable
         }
 
         if (_buffer.TriplePatternCount == 0)
+        {
+            // Check if there are BIND, FILTER, EXISTS, or SELECT expressions to evaluate
+            // (e.g., SELECT (REPLACE(...) AS ?new) WHERE {} or SELECT ?x WHERE { BIND(UUID() AS ?x) })
+            var selectClause = _buffer.GetSelectClause();
+            if (selectClause.AggregateCount > 0 || _buffer.HasBinds || _buffer.HasFilters || _buffer.HasExists)
+            {
+                // Empty pattern with expressions - return one row with computed values
+                var emptyBindings = new Binding[16];
+                return QueryResults.EmptyPattern(_buffer, _source.AsSpan(), emptyBindings, _stringBuffer, selectClause, _store);
+            }
             return QueryResults.Empty();
+        }
 
         // Check for FROM clauses (default graph dataset)
         if (_defaultGraphs != null && _defaultGraphs.Length > 0)

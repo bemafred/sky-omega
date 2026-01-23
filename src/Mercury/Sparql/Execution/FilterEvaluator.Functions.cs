@@ -256,7 +256,11 @@ public ref partial struct FilterEvaluator
         try
         {
             var regex = new Regex(pattern.ToString(), options, TimeSpan.FromMilliseconds(100));
-            _replaceResult = regex.Replace(stringValue.ToString(), replacement.ToString());
+            var result = regex.Replace(stringValue.ToString(), replacement.ToString());
+
+            // Preserve language tag or datatype from the first argument
+            var suffix = stringArg.GetLangTagOrDatatype();
+            _replaceResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
             return new Value
             {
                 Type = ValueType.String,
