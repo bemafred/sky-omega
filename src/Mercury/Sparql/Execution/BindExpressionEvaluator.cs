@@ -377,6 +377,18 @@ internal ref struct BindExpressionEvaluator
                 return ParseSubstrFunction();
             }
 
+            // STRDT(lexicalForm, datatypeIRI) - construct typed literal
+            if (name.Equals("STRDT", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseStrDtFunction();
+            }
+
+            // STRLANG(lexicalForm, langTag) - construct language-tagged literal
+            if (name.Equals("STRLANG", StringComparison.OrdinalIgnoreCase))
+            {
+                return ParseStrLangFunction();
+            }
+
             // UUID() - generate a fresh IRI with UUID v7
             if (name.Equals("UUID", StringComparison.OrdinalIgnoreCase))
             {
@@ -426,17 +438,41 @@ internal ref struct BindExpressionEvaluator
             if (name.Equals("BOUND", StringComparison.OrdinalIgnoreCase))
                 return new Value { Type = ValueType.Boolean, BooleanValue = arg.Type != ValueType.Unbound };
 
-            // STR function - converts value to string representation
+            // STR function - converts value to string representation (lexical form)
             if (name.Equals("STR", StringComparison.OrdinalIgnoreCase))
             {
-                var strVal = arg.StringValue;
-                // For URIs, strip angle brackets: <http://...> -> http://...
-                if (arg.Type == ValueType.Uri && strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
+                // Handle numeric types by converting to string representation
+                if (arg.Type == ValueType.Integer)
                 {
-                    _stringResult = strVal.Slice(1, strVal.Length - 2).ToString();
+                    _stringResult = arg.IntegerValue.ToString(CultureInfo.InvariantCulture);
                     return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
                 }
-                return new Value { Type = ValueType.String, StringValue = strVal };
+                if (arg.Type == ValueType.Double)
+                {
+                    _stringResult = arg.DoubleValue.ToString("G", CultureInfo.InvariantCulture);
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                }
+                if (arg.Type == ValueType.Boolean)
+                {
+                    _stringResult = arg.BooleanValue ? "true" : "false";
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                }
+
+                // For URIs, strip angle brackets: <http://...> -> http://...
+                if (arg.Type == ValueType.Uri)
+                {
+                    var uriVal = arg.StringValue;
+                    if (uriVal.Length >= 2 && uriVal[0] == '<' && uriVal[^1] == '>')
+                    {
+                        _stringResult = uriVal.Slice(1, uriVal.Length - 2).ToString();
+                        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                    }
+                    return new Value { Type = ValueType.String, StringValue = uriVal };
+                }
+
+                // For strings, extract lexical form (strip quotes and language tag/datatype)
+                _stringResult = arg.GetLexicalForm().ToString();
+                return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
             }
 
             // STRLEN function - length of lexical form
@@ -673,6 +709,31 @@ internal ref struct BindExpressionEvaluator
             {
                 return CastToString(arg);
             }
+        }
+
+        // Handle prefixed names as IRIs when not used as function calls
+        // xsd: prefix -> expand to full XSD namespace
+        if (name.StartsWith("xsd:", StringComparison.OrdinalIgnoreCase))
+        {
+            var localName = name.Slice(4);
+            _stringResult = $"http://www.w3.org/2001/XMLSchema#{localName.ToString()}";
+            return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+        }
+
+        // rdf: prefix -> expand to full RDF namespace
+        if (name.StartsWith("rdf:", StringComparison.OrdinalIgnoreCase))
+        {
+            var localName = name.Slice(4);
+            _stringResult = $"http://www.w3.org/1999/02/22-rdf-syntax-ns#{localName.ToString()}";
+            return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+        }
+
+        // rdfs: prefix -> expand to full RDFS namespace
+        if (name.StartsWith("rdfs:", StringComparison.OrdinalIgnoreCase))
+        {
+            var localName = name.Slice(5);
+            _stringResult = $"http://www.w3.org/2000/01/rdf-schema#{localName.ToString()}";
+            return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
         }
 
         return new Value { Type = ValueType.Unbound };
@@ -1165,6 +1226,111 @@ internal ref struct BindExpressionEvaluator
         var suffix = stringArg.GetLangTagOrDatatype();
         // Only add quotes if there's a suffix to preserve, otherwise return plain string
         _stringResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
+        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+    }
+
+    /// <summary>
+    /// Parse STRDT(lexicalForm, datatypeIRI) - constructs a typed literal
+    /// Returns a literal with the specified datatype
+    /// Per SPARQL spec: first argument must be a simple literal (no language tag, no datatype except xsd:string)
+    /// Per RDF 1.1: xsd:string typed literals are equivalent to simple literals
+    /// </summary>
+    private Value ParseStrDtFunction()
+    {
+        var lexicalArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var datatypeArg = ParseAdditive();
+        SkipWhitespace();
+        if (Peek() == ')') Advance();
+
+        // Lexical form must be a simple literal (string without language tag)
+        if (lexicalArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        // Check that the first argument is a simple literal (no language tag)
+        var langTag = lexicalArg.GetLangTagOrDatatype();
+        if (!langTag.IsEmpty && langTag[0] == '@')
+            return new Value { Type = ValueType.Unbound }; // Language-tagged literal not allowed
+
+        // Datatype must be an IRI
+        if (datatypeArg.Type != ValueType.Uri && datatypeArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        var lexical = lexicalArg.GetLexicalForm();
+        var datatype = datatypeArg.GetLexicalForm();
+
+        // Per RDF 1.1: xsd:string typed literals are simple literals (no datatype suffix)
+        const string xsdString = "http://www.w3.org/2001/XMLSchema#string";
+        if (datatype.Equals(xsdString.AsSpan(), StringComparison.Ordinal))
+        {
+            _stringResult = lexical.ToString();
+            return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+        }
+
+        // Construct typed literal: "lexical"^^<datatype>
+        _stringResult = $"\"{lexical}\"^^<{datatype}>";
+        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+    }
+
+    /// <summary>
+    /// Parse STRLANG(lexicalForm, langTag) - constructs a language-tagged literal
+    /// Returns a literal with the specified language tag
+    /// Per SPARQL spec: first argument must be a simple literal (no language tag, no datatype except xsd:string)
+    /// </summary>
+    private Value ParseStrLangFunction()
+    {
+        var lexicalArg = ParseAdditive();
+        SkipWhitespace();
+
+        if (Peek() != ',')
+        {
+            while (!IsAtEnd() && Peek() != ')')
+                Advance();
+            if (Peek() == ')') Advance();
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        Advance(); // Skip ','
+        SkipWhitespace();
+
+        var langArg = ParseAdditive();
+        SkipWhitespace();
+        if (Peek() == ')') Advance();
+
+        // Lexical form must be a simple literal (string without language tag)
+        if (lexicalArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        // Check that the first argument is a simple literal (no language tag)
+        var existingLangTag = lexicalArg.GetLangTagOrDatatype();
+        if (!existingLangTag.IsEmpty && existingLangTag[0] == '@')
+            return new Value { Type = ValueType.Unbound }; // Language-tagged literal not allowed
+
+        // Language tag must be a string
+        if (langArg.Type != ValueType.String)
+            return new Value { Type = ValueType.Unbound };
+
+        var lexical = lexicalArg.GetLexicalForm();
+        var lang = langArg.GetLexicalForm();
+
+        // Language tag must not be empty
+        if (lang.IsEmpty)
+            return new Value { Type = ValueType.Unbound };
+
+        // Construct language-tagged literal: "lexical"@lang
+        _stringResult = $"\"{lexical}\"@{lang}";
         return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
     }
 

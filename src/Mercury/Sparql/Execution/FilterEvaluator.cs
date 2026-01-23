@@ -917,17 +917,20 @@ public ref partial struct FilterEvaluator
                 return new Value { Type = ValueType.String, StringValue = _strResult.AsSpan() };
             }
 
-            var strVal = arg1.StringValue;
             // For URIs, strip angle brackets: <http://...> -> http://...
-            if (arg1.Type == ValueType.Uri && strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
+            if (arg1.Type == ValueType.Uri)
             {
-                strVal = strVal.Slice(1, strVal.Length - 2);
+                var strVal = arg1.StringValue;
+                if (strVal.Length >= 2 && strVal[0] == '<' && strVal[^1] == '>')
+                {
+                    strVal = strVal.Slice(1, strVal.Length - 2);
+                }
+                return new Value { Type = ValueType.String, StringValue = strVal };
             }
-            return new Value
-            {
-                Type = ValueType.String,
-                StringValue = strVal
-            };
+
+            // For strings, extract lexical form (strip quotes and language tag/datatype)
+            // "foo"@en -> foo, "bar"^^<xsd:string> -> bar
+            return new Value { Type = ValueType.String, StringValue = arg1.GetLexicalForm() };
         }
 
         // IRI/URI - construct IRI from string
