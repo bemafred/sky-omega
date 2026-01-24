@@ -316,11 +316,17 @@ public class SparqlConformanceTests
     /// <summary>
     /// Parses a literal value that may contain datatype or language tag.
     /// Handles formats like: "value", "value"@lang, "value"^^<datatype>, <uri>, _:bnode
+    /// Note: Empty string "" is a valid literal, not unbound.
     /// </summary>
     private static SparqlBinding ParseLiteralBinding(string value)
     {
-        if (string.IsNullOrEmpty(value))
+        // null means unbound, but empty string is a valid literal (e.g., CONCAT() returns "")
+        if (value is null)
             return SparqlBinding.Unbound;
+
+        // Empty string is a valid plain literal
+        if (value.Length == 0)
+            return SparqlBinding.Literal("");
 
         // Check for URI (stored with angle brackets)
         if (value.StartsWith('<') && value.EndsWith('>'))
