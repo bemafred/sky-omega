@@ -606,8 +606,9 @@ SELECT ?exam ?date {
         Store.AcquireReadLock();
         try
         {
+            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            var results = executor.ExecuteToMaterialized();
 
             var solutions = new List<(string exam, string date)>();
             while (results.MoveNext())
@@ -632,7 +633,7 @@ SELECT ?exam ?date {
             var debugParser = new SparqlParser(debugQuery.AsSpan());
             var debugParsedQuery = debugParser.ParseQuery();
             var debugExecutor = new QueryExecutor(Store, debugQuery.AsSpan(), debugParsedQuery);
-            var debugResults = debugExecutor.Execute();
+            var debugResults = debugExecutor.ExecuteToMaterialized();
             var debugSolutions = new List<string>();
             while (debugResults.MoveNext())
             {

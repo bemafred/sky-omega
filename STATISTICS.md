@@ -2,7 +2,7 @@
 
 Codebase metrics tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-22
+**Last updated:** 2026-01-24
 
 ## Line Counts
 

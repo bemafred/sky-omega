@@ -471,7 +471,9 @@ public partial class QueryExecutor
     /// <summary>
     /// Evaluate an EXISTS filter using current bindings.
     /// Returns true if ALL patterns in the EXISTS filter match.
+    /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool EvaluateExistsFilterWithBindings(ExistsFilter existsFilter, BindingTable bindingTable)
     {
         if (!existsFilter.HasPatterns)
@@ -506,7 +508,9 @@ public partial class QueryExecutor
 
     /// <summary>
     /// Resolve a term for EXISTS evaluation, substituting bound variables.
+    /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private ReadOnlySpan<char> ResolveExistsTermFromBindings(Term term, BindingTable bindingTable)
     {
         var termSpan = _source.AsSpan(term.Start, term.Length);

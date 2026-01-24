@@ -107,6 +107,7 @@ public ref partial struct QueryResults
     private readonly bool _isEmptyPattern;
     private bool _emptyPatternReturned;
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public static QueryResults Empty()
     {
         var result = new QueryResults();
@@ -117,7 +118,9 @@ public ref partial struct QueryResults
     /// <summary>
     /// Create QueryResults for an empty pattern (WHERE {}) that still evaluates BIND/FILTER/SELECT expressions.
     /// Returns exactly one row with the computed expression values.
+    /// NoInlining prevents stack frame merging with caller (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults EmptyPattern(Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
         Binding[] bindings, char[] stringBuffer, SelectClause selectClause, QuadStore? store = null)
     {
@@ -172,7 +175,9 @@ public ref partial struct QueryResults
     /// <summary>
     /// Create QueryResults from pre-materialized rows.
     /// Used for subquery joins where results are collected eagerly to avoid stack overflow.
+    /// NoInlining prevents stack frame merging with caller (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterialized(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
@@ -192,10 +197,12 @@ public ref partial struct QueryResults
     /// <summary>
     /// Create QueryResults from pre-materialized rows with graph context for EXISTS/MINUS evaluation.
     /// Used for GRAPH clause results where EXISTS filters need to query the named graph.
+    /// NoInlining prevents stack frame merging with caller (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedWithGraphContext(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        string graphContext, int limit = 0, int offset = 0, bool distinct = false)
+        string? graphContext, int limit = 0, int offset = 0, bool distinct = false)
     {
         var result = new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
             limit, offset, distinct, default, default, default, default);
@@ -206,7 +213,9 @@ public ref partial struct QueryResults
     /// <summary>
     /// Create QueryResults from pre-materialized rows without requiring the full GraphPattern.
     /// This overload avoids stack overflow by not passing the large GraphPattern struct.
+    /// NoInlining prevents stack frame merging with caller (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedSimple(List<MaterializedRow> rows,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,

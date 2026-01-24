@@ -7,6 +7,12 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 
 public ref partial struct QueryResults
 {
+    /// <summary>
+    /// Move to next result for ORDER BY queries.
+    /// Collects all results on first call, sorts them, then iterates.
+    /// NoInlining prevents stack frame merging (ADR-003).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool MoveNextOrdered()
     {
         // First call - collect and sort all results
@@ -76,7 +82,9 @@ public ref partial struct QueryResults
 
     /// <summary>
     /// Collect all results and sort them according to ORDER BY.
+    /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private void CollectAndSortResults()
     {
         _sortedResults = new List<MaterializedRow>();
@@ -147,7 +155,9 @@ public ref partial struct QueryResults
 
     /// <summary>
     /// MoveNext variant for collecting results (no LIMIT/OFFSET applied).
+    /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool MoveNextUnorderedForCollection()
     {
         while (true)
@@ -259,7 +269,9 @@ public ref partial struct QueryResults
     /// <summary>
     /// Move to next result for GROUP BY queries.
     /// Collects all results on first call, groups them, then iterates.
+    /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool MoveNextGrouped()
     {
         // First call - collect and group results
@@ -307,7 +319,9 @@ public ref partial struct QueryResults
 
     /// <summary>
     /// Collect all results and group them according to GROUP BY.
+    /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private void CollectAndGroupResults()
     {
         var groups = new Dictionary<string, GroupedRow>();

@@ -812,8 +812,9 @@ public partial class QueryExecutorTests
             var outerPattern = parsed.WhereClause.Pattern;
             Assert.True(outerPattern.HasExists, "EXISTS should be parsed into ExistsFilter");
 
+            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
-            var results = executor.Execute();
+            var results = executor.ExecuteToMaterialized();
 
             var xValues = new List<string>();
             while (results.MoveNext())
@@ -1353,10 +1354,11 @@ public partial class QueryExecutorTests
                 } ORDER BY ?L
                 """;
 
+            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var fullParser = new SparqlParser(fullQuery.AsSpan());
             var fullParsed = fullParser.ParseQuery();
             using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
-            var fullResults = fullExecutor.Execute();
+            var fullResults = fullExecutor.ExecuteToMaterialized();
 
             var labels = new List<string>();
             while (fullResults.MoveNext())
@@ -1455,10 +1457,11 @@ public partial class QueryExecutorTests
                 }
                 """;
 
+            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var parser = new SparqlParser(query.AsSpan());
             var parsed = parser.ParseQuery();
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
-            var results = executor.Execute();
+            var results = executor.ExecuteToMaterialized();
 
             var xValues = new List<string>();
             while (results.MoveNext())

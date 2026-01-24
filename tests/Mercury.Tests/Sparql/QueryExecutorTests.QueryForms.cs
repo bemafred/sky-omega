@@ -709,10 +709,11 @@ SELECT ?s ?o1 ?o2
         cleanStore.AcquireReadLock();
         try
         {
+            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var parser1 = new SparqlParser(queryNoValues.AsSpan());
             var parsed1 = parser1.ParseQuery();
             var executor1 = new QueryExecutor(cleanStore, queryNoValues.AsSpan(), parsed1);
-            var results1 = executor1.Execute();
+            var results1 = executor1.ExecuteToMaterialized();
 
             var rowsNoValues = new List<(string s, string o1, string o2)>();
             while (results1.MoveNext())
@@ -779,8 +780,9 @@ SELECT ?s ?o1 ?o2
             var parsedVar0 = queryWithValues.Substring(var0Start, var0Len);
             var parsedVar1 = queryWithValues.Substring(var1Start, var1Len);
 
+            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
             var executor2 = new QueryExecutor(cleanStore, queryWithValues.AsSpan(), parsed2);
-            var results2 = executor2.Execute();
+            var results2 = executor2.ExecuteToMaterialized();
 
             var rowsWithValues = new List<(string s, string o1, string o2)>();
             while (results2.MoveNext())

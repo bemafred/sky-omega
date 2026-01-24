@@ -443,6 +443,7 @@ public ref partial struct QueryResults
     /// Evaluate all EXISTS/NOT EXISTS filters.
     /// Returns true if all filters pass, false if any filter fails.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool EvaluateExistsFilters()
     {
         if (_store == null || _buffer == null) return true;
@@ -477,6 +478,7 @@ public ref partial struct QueryResults
     /// Check if an EXISTS pattern has at least one match with current bindings.
     /// Uses nested-loop join semantics: patterns share variables within the EXISTS block.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool EvaluateExistsPatternFromSlot(PatternSlot existsSlot, PatternArray patterns)
     {
         if (_store == null || existsSlot.ExistsChildCount == 0)
@@ -564,6 +566,7 @@ public ref partial struct QueryResults
     /// Resolve graph term for GRAPH clause inside EXISTS.
     /// Returns resolved graph IRI or null if variable is unbound.
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private string? ResolveExistsGraphTerm(TermType type, int start, int length)
     {
         if (type == TermType.Variable)
@@ -587,129 +590,328 @@ public ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Recursive nested-loop join for EXISTS patterns with per-pattern graph context.
+    /// Iterative nested-loop join for EXISTS patterns with per-pattern graph context.
     /// Returns true if any consistent binding exists for all patterns.
+    /// Converted from recursive to iterative to avoid stack overflow (ADR-003).
+    ///
+    /// TERMINATION GUARANTEES:
+    /// 1. Stack depth is bounded by patternCount (finite)
+    /// 2. ResultIndex only increases (never resets within same state)
+    /// 3. stackTop increases only when advancing to next pattern
+    /// 4. stackTop decreases when results exhausted (backtracking)
+    /// 5. Loop exits when: all patterns matched (true) OR stack empty (false)
     /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool EvaluateExistsJoinWithGraphContext(PatternArray patterns, ExistsPatternInfo[] patternInfos,
         int patternCount, int currentPattern, ExistsBinding[] bindings, ref int bindingCount)
     {
-        if (currentPattern >= patternCount)
-            return true; // All patterns matched
+        // Handle edge case: no patterns to match
+        if (patternCount == 0 || currentPattern >= patternCount)
+            return true;
 
-        var info = patternInfos[currentPattern];
-        var slot = patterns[info.PatternIndex];
+        // Allocate state stack on heap (bounded by patternCount, typically small: 1-5)
+        var stateStack = new ExistsJoinState[patternCount];
+        int stackTop = 0;
 
-        // If pattern is inside a GRAPH clause but variable was unbound, fail immediately
-        if (info.HasGraphClause && info.GraphContext == null)
-            return false;
+        // Initialize first pattern state
+        stateStack[0] = new ExistsJoinState
+        {
+            PatternIndex = currentPattern,
+            BindingCountBefore = bindingCount,
+            Results = null,
+            ResultIndex = -1
+        };
+        stackTop = 1;
 
-        // Resolve terms - use outer bindings AND EXISTS-local bindings
-        var subject = ResolveExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
-            SlotTermPosition.Subject, bindings, bindingCount);
-        var predicate = ResolveExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
-            SlotTermPosition.Predicate, bindings, bindingCount);
-        var obj = ResolveExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
-            SlotTermPosition.Object, bindings, bindingCount);
+        // Main iteration loop
+        while (stackTop > 0)
+        {
+            ref var state = ref stateStack[stackTop - 1];
 
-        // Determine graph context:
-        // - If pattern has GRAPH clause: use its resolved graph context
-        // - Otherwise: use outer _graphContext (default graph if null)
-        TemporalResultEnumerator results;
+            // Initialize results if not yet done (materialize query to list)
+            if (state.Results == null)
+            {
+                var info = patternInfos[state.PatternIndex];
+                var slot = patterns[info.PatternIndex];
+
+                // Check graph context - if GRAPH clause but variable unbound, fail this branch
+                if (info.HasGraphClause && info.GraphContext == null)
+                {
+                    stackTop--;
+                    if (stackTop > 0)
+                        bindingCount = stateStack[stackTop - 1].BindingCountBefore;
+                    continue;
+                }
+
+                // Resolve terms using current bindings
+                var subject = ResolveExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
+                    SlotTermPosition.Subject, bindings, bindingCount);
+                var predicate = ResolveExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
+                    SlotTermPosition.Predicate, bindings, bindingCount);
+                var obj = ResolveExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
+                    SlotTermPosition.Object, bindings, bindingCount);
+
+                // Materialize query results to list (avoids ref struct lifetime issues)
+                state.Results = MaterializeExistsQuery(subject, predicate, obj, info);
+                state.ResultIndex = -1;
+                state.BindingCountBefore = bindingCount;
+            }
+
+            // Advance to next result (PROGRESS: ResultIndex increases)
+            state.ResultIndex++;
+
+            // Check if we have more results to try
+            if (state.ResultIndex < state.Results.Count)
+            {
+                var triple = state.Results[state.ResultIndex];
+                var info = patternInfos[state.PatternIndex];
+                var slot = patterns[info.PatternIndex];
+
+                // Restore bindings to state before this pattern, then add new bindings
+                bindingCount = state.BindingCountBefore;
+                AddExistsBindingsFromMaterialized(slot, triple, bindings, ref bindingCount);
+
+                // Check if we've matched all patterns
+                if (state.PatternIndex + 1 >= patternCount)
+                {
+                    return true; // SUCCESS!
+                }
+
+                // Push next pattern onto stack (PROGRESS: PatternIndex increases)
+                stateStack[stackTop] = new ExistsJoinState
+                {
+                    PatternIndex = state.PatternIndex + 1,
+                    BindingCountBefore = bindingCount,
+                    Results = null,
+                    ResultIndex = -1
+                };
+                stackTop++;
+            }
+            else
+            {
+                // Results exhausted - backtrack (PROGRESS: stackTop decreases)
+                stackTop--;
+                if (stackTop > 0)
+                    bindingCount = stateStack[stackTop - 1].BindingCountBefore;
+            }
+        }
+
+        return false; // Stack empty, no complete match found
+    }
+
+    /// <summary>
+    /// Materialize EXISTS query results to a list.
+    /// This allows iterative traversal without ref struct lifetime issues.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedTriple> MaterializeExistsQuery(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> obj, ExistsPatternInfo info)
+    {
+        var results = new List<MaterializedTriple>();
+
+        TemporalResultEnumerator enumerator;
         if (info.HasGraphClause)
         {
-            // Pattern is inside GRAPH clause - use the resolved graph IRI
-            results = _store!.QueryCurrent(subject, predicate, obj, info.GraphContext!.AsSpan());
+            enumerator = _store!.QueryCurrent(subject, predicate, obj, info.GraphContext!.AsSpan());
         }
         else if (_graphContext != null)
         {
-            // Pattern outside GRAPH clause but outer query has graph context
-            results = _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan());
+            enumerator = _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan());
         }
         else
         {
-            // Pattern outside GRAPH clause, no outer context - query default graph
-            results = _store!.QueryCurrent(subject, predicate, obj);
+            enumerator = _store!.QueryCurrent(subject, predicate, obj);
         }
 
         try
         {
-            while (results.MoveNext())
+            while (enumerator.MoveNext())
             {
-                var triple = results.Current;
-
-                // Save binding count to restore on backtrack
-                int savedBindingCount = bindingCount;
-
-                // Add bindings from this match for unbound variables
-                AddExistsBindingsFromTriple(slot, triple, bindings, ref bindingCount);
-
-                // Recursively try remaining patterns with extended bindings
-                if (EvaluateExistsJoinWithGraphContext(patterns, patternInfos, patternCount, currentPattern + 1, bindings, ref bindingCount))
-                    return true; // Found a complete match!
-
-                // Backtrack - restore binding count
-                bindingCount = savedBindingCount;
+                var triple = enumerator.Current;
+                results.Add(new MaterializedTriple
+                {
+                    Subject = triple.Subject.ToString(),
+                    Predicate = triple.Predicate.ToString(),
+                    Object = triple.Object.ToString()
+                });
             }
         }
         finally
         {
-            results.Dispose();
+            enumerator.Dispose();
         }
 
-        return false; // No match found for this pattern with current bindings
+        return results;
     }
 
     /// <summary>
-    /// Recursive nested-loop join for EXISTS patterns.
-    /// Returns true if any consistent binding exists for all patterns.
+    /// Add bindings from a materialized triple to EXISTS binding set.
     /// </summary>
+    private void AddExistsBindingsFromMaterialized(PatternSlot slot, MaterializedTriple triple,
+        ExistsBinding[] bindings, ref int count)
+    {
+        if (slot.SubjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.SubjectStart, slot.SubjectLength);
+            var varHash = ComputeVariableHash(varName);
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Subject };
+            }
+        }
+
+        if (slot.PredicateType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.PredicateStart, slot.PredicateLength);
+            var varHash = ComputeVariableHash(varName);
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Predicate };
+            }
+        }
+
+        if (slot.ObjectType == TermType.Variable && count < bindings.Length)
+        {
+            var varName = _source.Slice(slot.ObjectStart, slot.ObjectLength);
+            var varHash = ComputeVariableHash(varName);
+            if (!IsExistsVariableBound(varHash, bindings, count) && _bindingTable.FindBinding(varName) < 0)
+            {
+                bindings[count++] = new ExistsBinding { VariableHash = varHash, Value = triple.Object };
+            }
+        }
+    }
+
+    /// <summary>
+    /// Iterative nested-loop join for EXISTS patterns.
+    /// Returns true if any consistent binding exists for all patterns.
+    /// Converted from recursive to iterative to avoid stack overflow (ADR-003).
+    ///
+    /// TERMINATION GUARANTEES:
+    /// 1. Stack depth is bounded by patternCount (finite)
+    /// 2. ResultIndex only increases (never resets within same state)
+    /// 3. stackTop increases only when advancing to next pattern
+    /// 4. stackTop decreases when results exhausted (backtracking)
+    /// 5. Loop exits when: all patterns matched (true) OR stack empty (false)
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool EvaluateExistsJoin(PatternArray patterns, int[] patternIndices, int patternCount,
         int currentPattern, ExistsBinding[] bindings, ref int bindingCount)
     {
-        if (currentPattern >= patternCount)
-            return true; // All patterns matched
+        // Handle edge case: no patterns to match
+        if (patternCount == 0 || currentPattern >= patternCount)
+            return true;
 
-        var slot = patterns[patternIndices[currentPattern]];
+        // Allocate state stack on heap (bounded by patternCount, typically small: 1-5)
+        var stateStack = new ExistsJoinState[patternCount];
+        int stackTop = 0;
 
-        // Resolve terms - use outer bindings AND EXISTS-local bindings
-        var subject = ResolveExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
-            SlotTermPosition.Subject, bindings, bindingCount);
-        var predicate = ResolveExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
-            SlotTermPosition.Predicate, bindings, bindingCount);
-        var obj = ResolveExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
-            SlotTermPosition.Object, bindings, bindingCount);
+        // Initialize first pattern state
+        stateStack[0] = new ExistsJoinState
+        {
+            PatternIndex = currentPattern,
+            BindingCountBefore = bindingCount,
+            Results = null,
+            ResultIndex = -1
+        };
+        stackTop = 1;
 
-        // Query the store
-        var results = _graphContext != null
+        // Main iteration loop
+        while (stackTop > 0)
+        {
+            ref var state = ref stateStack[stackTop - 1];
+
+            // Initialize results if not yet done (materialize query to list)
+            if (state.Results == null)
+            {
+                var slot = patterns[patternIndices[state.PatternIndex]];
+
+                // Resolve terms using current bindings
+                var subject = ResolveExistsTerm(slot.SubjectType, slot.SubjectStart, slot.SubjectLength,
+                    SlotTermPosition.Subject, bindings, bindingCount);
+                var predicate = ResolveExistsTerm(slot.PredicateType, slot.PredicateStart, slot.PredicateLength,
+                    SlotTermPosition.Predicate, bindings, bindingCount);
+                var obj = ResolveExistsTerm(slot.ObjectType, slot.ObjectStart, slot.ObjectLength,
+                    SlotTermPosition.Object, bindings, bindingCount);
+
+                // Materialize query results to list
+                state.Results = MaterializeExistsQuerySimple(subject, predicate, obj);
+                state.ResultIndex = -1;
+                state.BindingCountBefore = bindingCount;
+            }
+
+            // Advance to next result (PROGRESS: ResultIndex increases)
+            state.ResultIndex++;
+
+            // Check if we have more results to try
+            if (state.ResultIndex < state.Results.Count)
+            {
+                var triple = state.Results[state.ResultIndex];
+                var slot = patterns[patternIndices[state.PatternIndex]];
+
+                // Restore bindings to state before this pattern, then add new bindings
+                bindingCount = state.BindingCountBefore;
+                AddExistsBindingsFromMaterialized(slot, triple, bindings, ref bindingCount);
+
+                // Check if we've matched all patterns
+                if (state.PatternIndex + 1 >= patternCount)
+                {
+                    return true; // SUCCESS!
+                }
+
+                // Push next pattern onto stack (PROGRESS: PatternIndex increases)
+                stateStack[stackTop] = new ExistsJoinState
+                {
+                    PatternIndex = state.PatternIndex + 1,
+                    BindingCountBefore = bindingCount,
+                    Results = null,
+                    ResultIndex = -1
+                };
+                stackTop++;
+            }
+            else
+            {
+                // Results exhausted - backtrack (PROGRESS: stackTop decreases)
+                stackTop--;
+                if (stackTop > 0)
+                    bindingCount = stateStack[stackTop - 1].BindingCountBefore;
+            }
+        }
+
+        return false; // Stack empty, no complete match found
+    }
+
+    /// <summary>
+    /// Materialize EXISTS query results to a list (simple version without graph info).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private List<MaterializedTriple> MaterializeExistsQuerySimple(ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+    {
+        var results = new List<MaterializedTriple>();
+
+        var enumerator = _graphContext != null
             ? _store!.QueryCurrent(subject, predicate, obj, _graphContext.AsSpan())
             : _store!.QueryCurrent(subject, predicate, obj);
 
         try
         {
-            while (results.MoveNext())
+            while (enumerator.MoveNext())
             {
-                var triple = results.Current;
-
-                // Save binding count to restore on backtrack
-                int savedBindingCount = bindingCount;
-
-                // Add bindings from this match for unbound variables
-                AddExistsBindingsFromTriple(slot, triple, bindings, ref bindingCount);
-
-                // Recursively try remaining patterns with extended bindings
-                if (EvaluateExistsJoin(patterns, patternIndices, patternCount, currentPattern + 1, bindings, ref bindingCount))
-                    return true; // Found a complete match!
-
-                // Backtrack - restore binding count
-                bindingCount = savedBindingCount;
+                var triple = enumerator.Current;
+                results.Add(new MaterializedTriple
+                {
+                    Subject = triple.Subject.ToString(),
+                    Predicate = triple.Predicate.ToString(),
+                    Object = triple.Object.ToString()
+                });
             }
         }
         finally
         {
-            results.Dispose();
+            enumerator.Dispose();
         }
 
-        return false; // No match found for this pattern with current bindings
+        return results;
     }
 
     /// <summary>
@@ -2108,6 +2310,30 @@ public ref partial struct QueryResults
         public int PatternIndex;
         public string? GraphContext; // The resolved graph IRI, or null if variable unbound
         public bool HasGraphClause;  // true if pattern is inside GRAPH clause
+    }
+
+    /// <summary>
+    /// State for iterative EXISTS join evaluation.
+    /// Replaces recursive call stack to avoid stack overflow (ADR-003).
+    /// Uses materialized results (List) instead of ref struct enumerator.
+    /// </summary>
+    private struct ExistsJoinState
+    {
+        public int PatternIndex;           // Which pattern we're processing (0 to patternCount-1)
+        public int BindingCountBefore;     // Binding count before this pattern (for backtrack)
+        public List<MaterializedTriple>? Results;  // Materialized query results
+        public int ResultIndex;            // Current position in Results (-1 = not started)
+    }
+
+    /// <summary>
+    /// Materialized triple for EXISTS evaluation.
+    /// Stores resolved strings to avoid ref struct lifetime issues.
+    /// </summary>
+    private struct MaterializedTriple
+    {
+        public string Subject;
+        public string Predicate;
+        public string Object;
     }
 
     /// <summary>

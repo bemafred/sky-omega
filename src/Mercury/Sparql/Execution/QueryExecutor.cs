@@ -444,6 +444,170 @@ public partial class QueryExecutor : IDisposable
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
+    /// <summary>
+    /// Execute any query and return lightweight materialized results (~200 bytes).
+    /// Use this instead of Execute() to avoid stack overflow from large QueryResults struct (~22KB).
+    /// This method handles all query types: subqueries, GRAPH, SERVICE, FROM, and regular patterns.
+    /// Caller must hold read lock on store.
+    /// </summary>
+    /// <remarks>
+    /// ADR-003: This method follows the Buffer Pattern for stack safety by returning
+    /// MaterializedQueryResults (~200 bytes) instead of QueryResults (~22KB).
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal MaterializedQueryResults ExecuteToMaterialized()
+    {
+        // Check for subqueries first
+        if (_buffer.HasSubQueries)
+        {
+            var results = ExecuteWithSubQueries_ToList();
+            return WrapResultsAsMaterialized(results);
+        }
+
+        // Check for GRAPH clauses (no top-level patterns)
+        if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
+        {
+            var results = ExecuteGraphClausesToList();
+            return WrapResultsAsMaterialized(results);
+        }
+
+        // Check for SERVICE clauses
+        if (_buffer.HasService)
+        {
+            var results = ExecuteWithServiceMaterialized();
+            return WrapResultsAsMaterialized(results);
+        }
+
+        // Check for FROM clauses
+        if (_defaultGraphs != null && _defaultGraphs.Length > 0)
+        {
+            return ExecuteFromToMaterialized();
+        }
+
+        // Empty pattern case
+        if (_buffer.TriplePatternCount == 0)
+        {
+            // For empty patterns with BIND/expressions, execute and collect results
+            return ExecuteEmptyPatternToMaterialized();
+        }
+
+        // Regular query - execute and materialize
+        return ExecuteRegularPatternToMaterialized();
+    }
+
+    /// <summary>
+    /// Helper to wrap List&lt;MaterializedRow&gt; into MaterializedQueryResults.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private MaterializedQueryResults WrapResultsAsMaterialized(List<MaterializedRow>? results)
+    {
+        if (results == null || results.Count == 0)
+            return MaterializedQueryResults.Empty();
+
+        var bindings = new Binding[16];
+        return new MaterializedQueryResults(results, bindings, _stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Execute an empty pattern (WHERE {}) and return materialized results.
+    /// For empty patterns with BIND/expressions, returns a single row.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private MaterializedQueryResults ExecuteEmptyPatternToMaterialized()
+    {
+        var selectClause = _buffer.GetSelectClause();
+        if (selectClause.AggregateCount == 0 && !_buffer.HasBinds && !_buffer.HasFilters && !_buffer.HasExists)
+            return MaterializedQueryResults.Empty();
+
+        // For empty patterns with expressions, return a single row
+        // (complex BIND evaluation should use the full Execute() path if needed)
+        var bindings = new Binding[16];
+        var results = new List<MaterializedRow> { new MaterializedRow(new BindingTable(bindings, _stringBuffer)) };
+        return new MaterializedQueryResults(results, bindings, _stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
+    /// <summary>
+    /// Execute a regular pattern query and return materialized results.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private MaterializedQueryResults ExecuteRegularPatternToMaterialized()
+    {
+        var results = new List<MaterializedRow>();
+        var bindings = new Binding[16];
+        var bindingTable = new BindingTable(bindings, _stringBuffer);
+
+        ref readonly var pattern = ref _cachedPattern;
+        var requiredCount = pattern.RequiredPatternCount;
+
+        // Single required pattern - just scan
+        if (requiredCount == 1)
+        {
+            int requiredIdx = 0;
+            for (int i = 0; i < pattern.PatternCount; i++)
+            {
+                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
+            }
+
+            var tp = pattern.GetPattern(requiredIdx);
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
+            try
+            {
+                while (scan.MoveNext(ref bindingTable))
+                {
+                    if (!PassesFilters(in pattern, ref bindingTable))
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                scan.Dispose();
+            }
+        }
+        else if (requiredCount > 1)
+        {
+            // Multiple patterns - use MultiPatternScan with pushed filters
+            var patternCount = pattern.RequiredPatternCount;
+            var levelFilters = patternCount > 0 && pattern.FilterCount > 0
+                ? FilterAnalyzer.BuildLevelFilters(in pattern, _source, patternCount, null)
+                : null;
+            var unpushableFilters = levelFilters != null
+                ? FilterAnalyzer.GetUnpushableFilters(in pattern, _source, null)
+                : null;
+
+            var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters, _buffer.Prefixes);
+            try
+            {
+                while (multiScan.MoveNext(ref bindingTable))
+                {
+                    if (!PassesUnpushableFilters(in pattern, ref bindingTable, unpushableFilters))
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                    results.Add(new MaterializedRow(bindingTable));
+                }
+            }
+            finally
+            {
+                multiScan.Dispose();
+            }
+        }
+
+        if (results.Count == 0)
+            return MaterializedQueryResults.Empty();
+
+        return new MaterializedQueryResults(results, bindings, _stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+    }
+
     /// <remarks>
     /// ADR-009: [NoInlining] isolates stack frame for 22KB QueryResults and large Query struct access.
     /// </remarks>

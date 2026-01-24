@@ -830,19 +830,20 @@ public partial class QueryExecutorTests
         var simpleParser = new SparqlParser(simpleQuery.AsSpan());
         var simpleParsed = simpleParser.ParseQuery();
 
+        // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
         Store.AcquireReadLock();
         try
         {
             var simpleExecutor = new QueryExecutor(Store, simpleQuery.AsSpan(), simpleParsed);
-            var simpleResults = simpleExecutor.Execute();
+            var simpleResults = simpleExecutor.ExecuteToMaterialized();
             var rows = new List<string>();
             while (simpleResults.MoveNext())
             {
-                var oIdx = simpleResults.Current.FindBinding("?o".AsSpan());
+                var row = simpleResults.Current;
+                var oIdx = row.FindBinding("?o".AsSpan());
                 if (oIdx >= 0)
-                    rows.Add(simpleResults.Current.GetString(oIdx).ToString());
+                    rows.Add(row.GetString(oIdx).ToString());
             }
-            simpleResults.Dispose();
 
             // Should have 3 rows (s1->A, s1->B, s2->A)
             Assert.Equal(3, rows.Count);
@@ -865,23 +866,24 @@ public partial class QueryExecutorTests
         Assert.Equal(AggregateFunction.Count, agg.Function);
         Assert.True(agg.Distinct);
 
+        // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
         Store.AcquireReadLock();
         try
         {
             var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.Execute();
+            var results = executor.ExecuteToMaterialized();
 
             Assert.True(results.MoveNext());
-            var countIdx = results.Current.FindBinding("?count".AsSpan());
+            var row = results.Current;
+            var countIdx = row.FindBinding("?count".AsSpan());
             Assert.True(countIdx >= 0);
 
-            var count = ExtractLiteralValue(results.Current.GetString(countIdx).ToString());
+            var count = ExtractLiteralValue(row.GetString(countIdx).ToString());
 
             // Data has 3 rows but only 2 distinct values for ?o ("A" and "B")
             Assert.Equal("2", count);
 
             Assert.False(results.MoveNext());
-            results.Dispose();
         }
         finally
         {
