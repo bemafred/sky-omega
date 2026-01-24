@@ -372,7 +372,7 @@ public sealed partial class TurtleStreamParser
             if (ch == '\\')
             {
                 Consume();
-                _sb.Append(ParseEscapeSequence());
+                ParseAndAppendEscapeToSb();
             }
             else
             {
@@ -416,7 +416,7 @@ public sealed partial class TurtleStreamParser
             if (ch == '\\')
             {
                 Consume();
-                _sb.Append(ParseEscapeSequence());
+                ParseAndAppendEscapeToSb();
             }
             else
             {
@@ -427,7 +427,7 @@ public sealed partial class TurtleStreamParser
 
         return _sb.ToString();
     }
-    
+
     /// <summary>
     /// [21] NumericLiteral ::= INTEGER | DECIMAL | DOUBLE
     /// </summary>
@@ -1173,7 +1173,7 @@ public sealed partial class TurtleStreamParser
             if (ch == '\\')
             {
                 Consume();
-                AppendToOutput(ParseEscapeSequence());
+                ParseAndAppendEscapeToOutput();
             }
             else
             {
@@ -1214,7 +1214,7 @@ public sealed partial class TurtleStreamParser
             if (ch == '\\')
             {
                 Consume();
-                AppendToOutput(ParseEscapeSequence());
+                ParseAndAppendEscapeToOutput();
             }
             else
             {

@@ -475,11 +475,12 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
             }
 
-            // STRLEN function - length of lexical form
+            // STRLEN function - length in Unicode code points (not UTF-16 code units)
+            // Characters outside BMP (like emoji) count as 1, not 2
             if (name.Equals("STRLEN", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
-                    return new Value { Type = ValueType.Integer, IntegerValue = arg.GetLexicalForm().Length };
+                    return new Value { Type = ValueType.Integer, IntegerValue = UnicodeHelper.GetCodePointCount(arg.GetLexicalForm()) };
                 return new Value { Type = ValueType.Unbound };
             }
 
@@ -1153,7 +1154,7 @@ internal ref struct BindExpressionEvaluator
 
     /// <summary>
     /// Parse SUBSTR(string, start [, length]) - returns substring
-    /// Note: SPARQL uses 1-based indexing
+    /// Note: SPARQL uses 1-based indexing in Unicode code points (not UTF-16 units).
     /// </summary>
     private Value ParseSubstrFunction()
     {
@@ -1195,34 +1196,35 @@ internal ref struct BindExpressionEvaluator
 
         var str = stringArg.GetLexicalForm();
         var startVal = startArg.Type == ValueType.Integer ? startArg.IntegerValue : (long)startArg.DoubleValue;
-        var start = (int)startVal - 1; // SPARQL is 1-based
+        var startCodePoint = (int)startVal; // SPARQL is 1-based, keep as-is for helper
 
-        if (start < 0) start = 0;
-        if (start >= str.Length)
+        // Get code point count for bounds checking
+        var codePointCount = UnicodeHelper.GetCodePointCount(str);
+
+        if (startCodePoint < 1) startCodePoint = 1;
+        if (startCodePoint > codePointCount)
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
 
-        int length;
+        int lengthCodePoints;
         if (lengthArg.Type == ValueType.Integer)
         {
-            length = (int)lengthArg.IntegerValue;
-            if (length < 0) length = 0;
-            if (start + length > str.Length)
-                length = str.Length - start;
+            lengthCodePoints = (int)lengthArg.IntegerValue;
+            if (lengthCodePoints < 0) lengthCodePoints = 0;
         }
         else if (lengthArg.Type == ValueType.Double)
         {
-            length = (int)lengthArg.DoubleValue;
-            if (length < 0) length = 0;
-            if (start + length > str.Length)
-                length = str.Length - start;
+            lengthCodePoints = (int)lengthArg.DoubleValue;
+            if (lengthCodePoints < 0) lengthCodePoints = 0;
         }
         else
         {
-            length = str.Length - start;
+            lengthCodePoints = -1; // Take remainder
         }
 
+        // Use code point-based substring
+        var result = UnicodeHelper.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
+
         // Preserve language tag/datatype from the first argument
-        var result = str.Slice(start, length).ToString();
         var suffix = stringArg.GetLangTagOrDatatype();
         // Only add quotes if there's a suffix to preserve, otherwise return plain string
         _stringResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";

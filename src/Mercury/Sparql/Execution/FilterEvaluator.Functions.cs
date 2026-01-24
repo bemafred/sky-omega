@@ -733,7 +733,8 @@ public ref partial struct FilterEvaluator
 
     /// <summary>
     /// Parse SUBSTR(string, start [, length]) - returns substring
-    /// Note: SPARQL uses 1-based indexing. Preserves language tag/datatype from first arg.
+    /// Note: SPARQL uses 1-based indexing in Unicode code points (not UTF-16 units).
+    /// Preserves language tag/datatype from first arg.
     /// </summary>
     private Value ParseSubstrFunction()
     {
@@ -772,27 +773,30 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Unbound };
 
         var str = stringArg.GetLexicalForm();
-        var start = (int)startArg.IntegerValue - 1; // SPARQL is 1-based
+        var startCodePoint = (int)startArg.IntegerValue; // SPARQL is 1-based, keep as-is for helper
 
-        if (start < 0) start = 0;
-        if (start >= str.Length)
+        // Get code point count for bounds checking
+        var codePointCount = UnicodeHelper.GetCodePointCount(str);
+
+        if (startCodePoint < 1) startCodePoint = 1;
+        if (startCodePoint > codePointCount)
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
 
-        int length;
+        int lengthCodePoints;
         if (lengthArg.Type == ValueType.Integer)
         {
-            length = (int)lengthArg.IntegerValue;
-            if (length < 0) length = 0;
-            if (start + length > str.Length)
-                length = str.Length - start;
+            lengthCodePoints = (int)lengthArg.IntegerValue;
+            if (lengthCodePoints < 0) lengthCodePoints = 0;
         }
         else
         {
-            length = str.Length - start;
+            lengthCodePoints = -1; // Take remainder
         }
 
+        // Use code point-based substring
+        var result = UnicodeHelper.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
+
         // Preserve language tag/datatype from the first argument
-        var result = str.Slice(start, length).ToString();
         var suffix = stringArg.GetLangTagOrDatatype();
         // Only add quotes if there's a suffix to preserve, otherwise return plain string
         _substrResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";

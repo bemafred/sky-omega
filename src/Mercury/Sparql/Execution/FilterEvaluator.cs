@@ -1009,7 +1009,8 @@ public ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Uri, StringValue = datatypeIri };
         }
 
-        // STRLEN - returns string length of lexical form
+        // STRLEN - returns string length in Unicode code points (not UTF-16 code units)
+        // Characters outside BMP (like emoji) count as 1, not 2
         if (funcName.Equals("strlen", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
@@ -1017,7 +1018,7 @@ public ref partial struct FilterEvaluator
                 return new Value
                 {
                     Type = ValueType.Integer,
-                    IntegerValue = arg1.GetLexicalForm().Length
+                    IntegerValue = UnicodeHelper.GetCodePointCount(arg1.GetLexicalForm())
                 };
             }
             return new Value { Type = ValueType.Unbound };

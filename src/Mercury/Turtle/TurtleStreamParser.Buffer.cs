@@ -405,42 +405,99 @@ public sealed partial class TurtleStreamParser
     }
 
     /// <summary>
-    /// Append a Unicode code point to the output buffer, handling surrogate pairs for code points > 0xFFFF.
+    /// Append a Unicode code point to the output buffer using Rune for proper surrogate pair handling.
     /// </summary>
     private void AppendCodePoint(int codePoint)
     {
-        if (codePoint <= 0xFFFF)
+        var rune = new Rune(codePoint);
+        Span<char> chars = stackalloc char[2];
+        int charsWritten = rune.EncodeToUtf16(chars);
+        for (int i = 0; i < charsWritten; i++)
         {
-            AppendToOutput((char)codePoint);
-        }
-        else
-        {
-            // Encode as surrogate pair
-            codePoint -= 0x10000;
-            var highSurrogate = (char)(0xD800 + (codePoint >> 10));
-            var lowSurrogate = (char)(0xDC00 + (codePoint & 0x3FF));
-            AppendToOutput(highSurrogate);
-            AppendToOutput(lowSurrogate);
+            AppendToOutput(chars[i]);
         }
     }
 
     /// <summary>
-    /// Append a Unicode code point to StringBuilder, handling surrogate pairs for code points > 0xFFFF.
+    /// Append a Unicode code point to StringBuilder using Rune for proper surrogate pair handling.
     /// </summary>
     private void AppendCodePointToSb(int codePoint)
     {
-        if (codePoint <= 0xFFFF)
+        var rune = new Rune(codePoint);
+        Span<char> chars = stackalloc char[2];
+        int charsWritten = rune.EncodeToUtf16(chars);
+        _sb.Append(chars[..charsWritten]);
+    }
+
+    /// <summary>
+    /// Parse an escape sequence and append it to StringBuilder.
+    /// Handles \U escapes that may produce surrogate pairs for code points > 0xFFFF.
+    /// </summary>
+    private void ParseAndAppendEscapeToSb()
+    {
+        var ch = Peek();
+
+        if (ch == -1)
+            throw ParserException("Unexpected end of input in escape sequence");
+
+        Consume();
+
+        switch ((char)ch)
         {
-            _sb.Append((char)codePoint);
+            case 't': _sb.Append('\t'); break;
+            case 'b': _sb.Append('\b'); break;
+            case 'n': _sb.Append('\n'); break;
+            case 'r': _sb.Append('\r'); break;
+            case 'f': _sb.Append('\f'); break;
+            case '"': _sb.Append('"'); break;
+            case '\'': _sb.Append('\''); break;
+            case '\\': _sb.Append('\\'); break;
+            case 'u':
+                _sb.Append(ParseUnicodeEscape(4));
+                break;
+            case 'U':
+                // \U can produce code points > 0xFFFF, need surrogate pair handling
+                var codePoint = ParseUnicodeCodePoint(8);
+                AppendCodePointToSb(codePoint);
+                break;
+            default:
+                throw ParserException($"Invalid escape sequence: \\{(char)ch}");
         }
-        else
+    }
+
+    /// <summary>
+    /// Parse an escape sequence and append it to the output buffer.
+    /// Handles \U escapes that may produce surrogate pairs for code points > 0xFFFF.
+    /// </summary>
+    private void ParseAndAppendEscapeToOutput()
+    {
+        var ch = Peek();
+
+        if (ch == -1)
+            throw ParserException("Unexpected end of input in escape sequence");
+
+        Consume();
+
+        switch ((char)ch)
         {
-            // Encode as surrogate pair
-            codePoint -= 0x10000;
-            var highSurrogate = (char)(0xD800 + (codePoint >> 10));
-            var lowSurrogate = (char)(0xDC00 + (codePoint & 0x3FF));
-            _sb.Append(highSurrogate);
-            _sb.Append(lowSurrogate);
+            case 't': AppendToOutput('\t'); break;
+            case 'b': AppendToOutput('\b'); break;
+            case 'n': AppendToOutput('\n'); break;
+            case 'r': AppendToOutput('\r'); break;
+            case 'f': AppendToOutput('\f'); break;
+            case '"': AppendToOutput('"'); break;
+            case '\'': AppendToOutput('\''); break;
+            case '\\': AppendToOutput('\\'); break;
+            case 'u':
+                AppendToOutput(ParseUnicodeEscape(4));
+                break;
+            case 'U':
+                // \U can produce code points > 0xFFFF, need surrogate pair handling
+                var codePoint = ParseUnicodeCodePoint(8);
+                AppendCodePoint(codePoint);
+                break;
+            default:
+                throw ParserException($"Invalid escape sequence: \\{(char)ch}");
         }
     }
 
