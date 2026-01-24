@@ -4,11 +4,11 @@
 **Created:** 2026-01-19
 **Updated:** 2026-01-24
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1904 W3C tests, 1856 passing (97%), 34 failing, 14 skipped
+**Current:** 1905 W3C tests, 1869 passing (98%), 22 failing, 14 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 97% W3C conformance (1856/1904 tests). For SPARQL 1.1 Query specifically: 183/224 passing (82%). The remaining failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 98% W3C conformance (1869/1905 tests). For SPARQL 1.1 Query specifically: 197/224 passing (88%). The remaining failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
@@ -67,7 +67,7 @@ Mercury's SPARQL engine has achieved 97% W3C conformance (1856/1904 tests). For 
 
 ---
 
-### Phase 3: SPARQL Functions — ~15 tests failing (was 46)
+### Phase 3: SPARQL Functions — ~20 tests failing (was 46)
 **Target:** Reduce function failures from 46 to ~10
 **Effort:** Medium-Large
 **Files:** `FilterEvaluator.Functions.cs`, `BindExpressionEvaluator.cs`, `FilterEvaluator.cs`
@@ -87,7 +87,7 @@ Mercury's SPARQL engine has achieved 97% W3C conformance (1856/1904 tests). For 
 - ✅ Hash functions (MD5, SHA1, SHA256, SHA384, SHA512) all pass
 - ✅ Added `GetLangTagOrDatatype()` method to Value struct
 
-**Current failing function tests (~15 total):**
+**Current failing function tests (~20 total):**
 
 | Category | Failing Tests | Notes |
 |----------|--------------|-------|
@@ -264,14 +264,14 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 |-------|-------------|---------|------------------|--------|
 | 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
 | 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
-| 3 | SPARQL Functions | ~15 | ~10 | In Progress (was 46) |
+| 3 | SPARQL Functions | ~20 | ~10 | In Progress (was 46) |
 | 4 | Property Paths | 0 | 0 | ✅ Done (was 6) |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 0 | 0 | ✅ Done |
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 34 failing tests total (183 passing, 7 skipped out of 224) — 82% conformance
+**Current Progress:** 20 failing tests total (197 passing, 7 skipped out of 224) — 88% conformance
 
 **Recommended priority:**
 1. **Phase 3** (Functions) - ~18 tests, STRBEFORE/STRAFTER datatyping, REPLACE, UUID/STRUUID
@@ -294,7 +294,7 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 
 ## Next Steps
 
-**Priority 1: Remaining Functions (~15 tests)**
+**Priority 1: Remaining Functions (~20 tests)**
 Focus areas:
 - STRBEFORE/STRAFTER datatyping (argument compatibility for language tags)
 - REPLACE function implementation in BindExpressionEvaluator
