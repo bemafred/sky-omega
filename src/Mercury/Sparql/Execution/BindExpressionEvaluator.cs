@@ -35,7 +35,146 @@ internal ref struct BindExpressionEvaluator
     public Value Evaluate()
     {
         _position = 0;
-        return ParseAdditive();
+        return ParseComparison();
+    }
+
+    /// <summary>
+    /// Comparison := Additive (ComparisonOp Additive)?
+    /// Handles =, ==, !=, <, >, <=, >=
+    /// </summary>
+    private Value ParseComparison()
+    {
+        var left = ParseAdditive();
+        SkipWhitespace();
+
+        if (IsAtEnd()) return left;
+
+        // Check for comparison operators
+        var op = PeekComparisonOperator();
+        if (op == ComparisonOp.None)
+            return left;
+
+        ConsumeComparisonOperator(op);
+        SkipWhitespace();
+
+        var right = ParseAdditive();
+
+        // Evaluate comparison and return boolean
+        return EvaluateComparison(left, op, right);
+    }
+
+    private enum ComparisonOp { None, Equal, NotEqual, Less, Greater, LessOrEqual, GreaterOrEqual }
+
+    private ComparisonOp PeekComparisonOperator()
+    {
+        if (_position >= _expression.Length) return ComparisonOp.None;
+
+        var ch = _expression[_position];
+        if (_position + 1 < _expression.Length)
+        {
+            var next = _expression[_position + 1];
+            if (ch == '=' && next == '=') return ComparisonOp.Equal;
+            if (ch == '!' && next == '=') return ComparisonOp.NotEqual;
+            if (ch == '<' && next == '=') return ComparisonOp.LessOrEqual;
+            if (ch == '>' && next == '=') return ComparisonOp.GreaterOrEqual;
+        }
+        if (ch == '=') return ComparisonOp.Equal;
+        if (ch == '<') return ComparisonOp.Less;
+        if (ch == '>') return ComparisonOp.Greater;
+        return ComparisonOp.None;
+    }
+
+    private void ConsumeComparisonOperator(ComparisonOp op)
+    {
+        switch (op)
+        {
+            case ComparisonOp.Equal:
+                if (_position + 1 < _expression.Length && _expression[_position + 1] == '=')
+                    _position += 2;
+                else
+                    _position += 1;
+                break;
+            case ComparisonOp.NotEqual:
+            case ComparisonOp.LessOrEqual:
+            case ComparisonOp.GreaterOrEqual:
+                _position += 2;
+                break;
+            case ComparisonOp.Less:
+            case ComparisonOp.Greater:
+                _position += 1;
+                break;
+        }
+    }
+
+    private Value EvaluateComparison(Value left, ComparisonOp op, Value right)
+    {
+        // Compare based on types
+        bool result;
+
+        if (left.Type == ValueType.Integer && right.Type == ValueType.Integer)
+        {
+            result = op switch
+            {
+                ComparisonOp.Equal => left.IntegerValue == right.IntegerValue,
+                ComparisonOp.NotEqual => left.IntegerValue != right.IntegerValue,
+                ComparisonOp.Less => left.IntegerValue < right.IntegerValue,
+                ComparisonOp.Greater => left.IntegerValue > right.IntegerValue,
+                ComparisonOp.LessOrEqual => left.IntegerValue <= right.IntegerValue,
+                ComparisonOp.GreaterOrEqual => left.IntegerValue >= right.IntegerValue,
+                _ => false
+            };
+        }
+        else if ((left.Type == ValueType.Double || left.Type == ValueType.Integer) &&
+                 (right.Type == ValueType.Double || right.Type == ValueType.Integer))
+        {
+            var leftVal = left.Type == ValueType.Double ? left.DoubleValue : left.IntegerValue;
+            var rightVal = right.Type == ValueType.Double ? right.DoubleValue : right.IntegerValue;
+            result = op switch
+            {
+                ComparisonOp.Equal => Math.Abs(leftVal - rightVal) < 1e-10,
+                ComparisonOp.NotEqual => Math.Abs(leftVal - rightVal) >= 1e-10,
+                ComparisonOp.Less => leftVal < rightVal,
+                ComparisonOp.Greater => leftVal > rightVal,
+                ComparisonOp.LessOrEqual => leftVal <= rightVal,
+                ComparisonOp.GreaterOrEqual => leftVal >= rightVal,
+                _ => false
+            };
+        }
+        else if (left.Type == ValueType.String && right.Type == ValueType.String)
+        {
+            var cmp = left.StringValue.CompareTo(right.StringValue, StringComparison.Ordinal);
+            result = op switch
+            {
+                ComparisonOp.Equal => cmp == 0,
+                ComparisonOp.NotEqual => cmp != 0,
+                ComparisonOp.Less => cmp < 0,
+                ComparisonOp.Greater => cmp > 0,
+                ComparisonOp.LessOrEqual => cmp <= 0,
+                ComparisonOp.GreaterOrEqual => cmp >= 0,
+                _ => false
+            };
+        }
+        else if (left.Type == ValueType.Boolean && right.Type == ValueType.Boolean)
+        {
+            result = op switch
+            {
+                ComparisonOp.Equal => left.BooleanValue == right.BooleanValue,
+                ComparisonOp.NotEqual => left.BooleanValue != right.BooleanValue,
+                _ => false
+            };
+        }
+        else
+        {
+            // Type mismatch - for = and != we can compare, otherwise unbound
+            if (op == ComparisonOp.Equal)
+                result = false;
+            else if (op == ComparisonOp.NotEqual)
+                result = true;
+            else
+                return new Value { Type = ValueType.Unbound };
+        }
+
+        return new Value { Type = ValueType.Boolean, BooleanValue = result };
     }
 
     /// <summary>
@@ -132,11 +271,11 @@ internal ref struct BindExpressionEvaluator
 
         var ch = Peek();
 
-        // Parenthesized expression
+        // Parenthesized expression - recurse to ParseComparison to handle comparisons inside parens
         if (ch == '(')
         {
             Advance();
-            var result = ParseAdditive();
+            var result = ParseComparison();
             SkipWhitespace();
             if (Peek() == ')') Advance();
             return result;
