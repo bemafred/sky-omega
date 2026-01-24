@@ -211,7 +211,7 @@ public class FilterPushdownTests : PooledStoreTestBase
 
         // GetUnpushableFilters only applies to regular FilterExpr, so with no FilterExpr, result is empty
         var unpushable = FilterAnalyzer.GetUnpushableFilters(pattern, source.AsSpan(), null);
-        Assert.Equal(0, unpushable.Count);
+        Assert.Empty(unpushable);
     }
 
     #endregion

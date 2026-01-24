@@ -928,7 +928,7 @@ public partial class QueryExecutorTests
             // Verify direct BoxedSubQueryExecutor works
             var directExecutor = new BoxedSubQueryExecutor(Store, doubleNestedQuery, middleSq, prefixes);
             var directResults = directExecutor.Execute();
-            Assert.Equal(1, directResults.Count);
+            Assert.Single(directResults);
 
             // Now test through QueryExecutor
             using var doubleExecutor = new QueryExecutor(Store, doubleNestedQuery.AsSpan(), doubleParsed);
@@ -1175,8 +1175,7 @@ public partial class QueryExecutorTests
 
             // Check results
             Assert.NotNull(results);
-            Assert.True(results.Count > 0, $"BoxedSubQueryExecutor should return results. Got: {results.Count}");
-            Assert.Equal(1, results.Count);
+            Assert.Single(results);
 
             // Verify the result has ?x binding
             var row = results[0];
@@ -1252,8 +1251,7 @@ public partial class QueryExecutorTests
             }
 
             // Check results
-            Assert.True(results.Count > 0, $"SubQueryScan should return results. Got: {results.Count}");
-            Assert.Equal(1, results.Count);
+            Assert.Single(results);
         }
         finally
         {

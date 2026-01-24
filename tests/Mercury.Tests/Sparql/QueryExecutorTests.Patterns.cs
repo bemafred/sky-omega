@@ -191,7 +191,7 @@ public partial class QueryExecutorTests
             Assert.Equal(6, count);
             // Should have both name and age values
             Assert.Contains("\"Alice\"", values);
-            Assert.True(values.Any(v => ExtractNumericValue(v) == "30"));
+            Assert.Contains(values, v => ExtractNumericValue(v) == "30");
         }
         finally
         {
@@ -823,8 +823,8 @@ public partial class QueryExecutorTests
             // Alice knows Bob, so Alice is excluded
             // Remaining: Bob=25, Charlie=35
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "25");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "35");
         }
         finally
         {

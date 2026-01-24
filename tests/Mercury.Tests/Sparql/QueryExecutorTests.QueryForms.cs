@@ -178,8 +178,8 @@ public partial class QueryExecutorTests
 
             // Only Alice (30) and Bob (25), Charlie (35) is excluded
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "25");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "30");
         }
         finally
         {
@@ -337,8 +337,8 @@ public partial class QueryExecutorTests
 
             // VALUES allows 25, 30, 35 but FILTER excludes 25
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "30");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "35");
         }
         finally
         {
@@ -382,8 +382,8 @@ VALUES ?age { 25 30 }";
 
             // Only Alice (30) and Bob (25), Charlie (35) is excluded
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "25");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "30");
         }
         finally
         {

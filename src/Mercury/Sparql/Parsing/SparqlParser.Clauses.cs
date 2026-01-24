@@ -2559,7 +2559,7 @@ public ref partial struct SparqlParser
 
                     // Check if this is FILTER ( NOT EXISTS ... ) or FILTER ( EXISTS ... )
                     var innerSpan = PeekSpan(10);
-                    bool innerNegated = false;
+                    // Variable tracks negation state for EXISTS patterns (used implicitly via parsing path)
                     if (innerSpan.Length >= 3 && innerSpan[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase))
                     {
                         var savedPos = _position;

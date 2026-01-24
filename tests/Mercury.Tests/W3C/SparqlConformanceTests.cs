@@ -29,7 +29,7 @@ public class SparqlConformanceTests
 
     [SkippableTheory]
     [MemberData(nameof(GetPositiveSyntaxTests))]
-    public void Sparql11_PositiveSyntax(string name, W3CTestCase test)
+    public void Sparql11_PositiveSyntax(string _, W3CTestCase test)
     {
         Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
         Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
@@ -53,7 +53,7 @@ public class SparqlConformanceTests
 
     [SkippableTheory]
     [MemberData(nameof(GetNegativeSyntaxTests))]
-    public void Sparql11_NegativeSyntax(string name, W3CTestCase test)
+    public void Sparql11_NegativeSyntax(string _, W3CTestCase test)
     {
         Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
         Skip.IfNot(File.Exists(test.ActionPath), $"Test file not found: {test.ActionPath}");
@@ -80,7 +80,7 @@ public class SparqlConformanceTests
 
     [SkippableTheory]
     [MemberData(nameof(GetQueryEvalTests))]
-    public async Task Sparql11_QueryEval(string name, W3CTestCase test)
+    public async Task Sparql11_QueryEval(string _, W3CTestCase test)
     {
         Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
 
@@ -558,7 +558,7 @@ public class SparqlConformanceTests
 
     [SkippableTheory]
     [MemberData(nameof(GetUpdateEvalTests))]
-    public async Task Sparql11_UpdateEval(string name, W3CTestCase test)
+    public async Task Sparql11_UpdateEval(string _, W3CTestCase test)
     {
         Skip.IfNot(W3CTestContext.IsAvailable, "W3C test suite not available");
 

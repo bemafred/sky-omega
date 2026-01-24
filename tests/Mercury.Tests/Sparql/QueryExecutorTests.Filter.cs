@@ -213,8 +213,8 @@ public partial class QueryExecutorTests
             // Bob is 25, Charlie is 35 - both match
             // Alice is 30 - excluded
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "25");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "35");
         }
         finally
         {
@@ -247,7 +247,7 @@ public partial class QueryExecutorTests
 
             // Alice is 30 - only one NOT in (25, 35)
             Assert.Single(ages);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "30");
         }
         finally
         {
@@ -280,8 +280,8 @@ public partial class QueryExecutorTests
 
             // Both 25 and 30 are in list and >= 25
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "25"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "25");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "30");
         }
         finally
         {
@@ -383,8 +383,8 @@ public partial class QueryExecutorTests
 
             // Alice is 30, Charlie is 35 - both >= 30
             Assert.Equal(2, ages.Count);
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "30"));
-            Assert.True(ages.Any(a => ExtractNumericValue(a) == "35"));
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "30");
+            Assert.Contains(ages, a => ExtractNumericValue(a) == "35");
         }
         finally
         {

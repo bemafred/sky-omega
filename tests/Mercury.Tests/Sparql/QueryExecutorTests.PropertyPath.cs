@@ -279,7 +279,7 @@ where {
             // Alice has name "Alice" and age 30
             Assert.Equal(2, foundValues.Count);
             Assert.Contains("\"Alice\"", foundValues);
-            Assert.True(foundValues.Any(v => ExtractNumericValue(v) == "30"));
+            Assert.Contains(foundValues, v => ExtractNumericValue(v) == "30");
         }
         finally
         {
