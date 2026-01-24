@@ -1058,11 +1058,17 @@ public ref partial struct QueryResults
             var expr = _source.Slice(slot.BindExprStart, slot.BindExprLength);
             var varName = _source.Slice(slot.BindVarStart, slot.BindVarLength);
 
+            // Get base IRI for relative IRI resolution (buffer is non-null at this point)
+            var baseIri = _buffer!.BaseUriLength > 0
+                ? _source.Slice(_buffer.BaseUriStart, _buffer.BaseUriLength)
+                : ReadOnlySpan<char>.Empty;
+
             // Evaluate the expression
             var evaluator = new BindExpressionEvaluator(expr,
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
-                _bindingTable.GetStringBuffer());
+                _bindingTable.GetStringBuffer(),
+                baseIri);
             var value = evaluator.Evaluate();
 
             // Bind the result to the target variable using typed overloads
@@ -1107,11 +1113,17 @@ public ref partial struct QueryResults
             var expr = _source.Slice(agg.VariableStart, agg.VariableLength);
             var aliasName = _source.Slice(agg.AliasStart, agg.AliasLength);
 
+            // Get base IRI for relative IRI resolution
+            var baseIri = _buffer != null && _buffer.BaseUriLength > 0
+                ? _source.Slice(_buffer.BaseUriStart, _buffer.BaseUriLength)
+                : ReadOnlySpan<char>.Empty;
+
             // Evaluate the expression using BindExpressionEvaluator
             var evaluator = new BindExpressionEvaluator(expr,
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
-                _bindingTable.GetStringBuffer());
+                _bindingTable.GetStringBuffer(),
+                baseIri);
             var value = evaluator.Evaluate();
 
             // Bind the result to the alias variable

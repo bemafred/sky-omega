@@ -998,10 +998,10 @@ public ref partial struct FilterEvaluator
             // Return XSD datatype based on value type
             ReadOnlySpan<char> datatypeIri = arg1.Type switch
             {
-                ValueType.Integer => "http://www.w3.org/2001/XMLSchema#integer".AsSpan(),
-                ValueType.Double => "http://www.w3.org/2001/XMLSchema#double".AsSpan(),
-                ValueType.Boolean => "http://www.w3.org/2001/XMLSchema#boolean".AsSpan(),
-                ValueType.String => GetStringDatatype(arg1.StringValue),
+                ValueType.Integer => "<http://www.w3.org/2001/XMLSchema#integer>".AsSpan(),
+                ValueType.Double => "<http://www.w3.org/2001/XMLSchema#double>".AsSpan(),
+                ValueType.Boolean => "<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan(),
+                ValueType.String => GetStringDatatypeWithBrackets(arg1.StringValue),
                 _ => ReadOnlySpan<char>.Empty
             };
             if (datatypeIri.IsEmpty)
@@ -1409,23 +1409,26 @@ public ref partial struct FilterEvaluator
     // Storage for TIMEZONE result to keep span valid
     private string _timezoneResult = string.Empty;
 
-    // XSD namespace for datatype URIs
-    private const string XsdString = "http://www.w3.org/2001/XMLSchema#string";
-    private const string RdfLangString = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+    // XSD namespace for datatype URIs (with angle brackets for DATATYPE function)
+    private const string XsdStringBracketed = "<http://www.w3.org/2001/XMLSchema#string>";
+    private const string RdfLangStringBracketed = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
 
     /// <summary>
-    /// Get the datatype IRI for a string literal
+    /// Get the datatype IRI for a string literal with angle brackets.
+    /// Used by DATATYPE function to match prefix-expanded URIs.
     /// </summary>
-    private static ReadOnlySpan<char> GetStringDatatype(ReadOnlySpan<char> str)
+    private static ReadOnlySpan<char> GetStringDatatypeWithBrackets(ReadOnlySpan<char> str)
     {
         // Check for explicit datatype: "value"^^<datatype>
-        var caretIndex = str.LastIndexOf('^');
-        if (caretIndex > 0 && caretIndex < str.Length - 2 && str[caretIndex + 1] == '^')
+        // LastIndexOf finds position of "^^" pattern
+        var caretIndex = str.LastIndexOf("^^".AsSpan());
+        if (caretIndex > 0 && caretIndex < str.Length - 3)
         {
             var datatypePart = str.Slice(caretIndex + 2);
-            // Remove angle brackets if present
+            // If already has angle brackets, return as-is
             if (datatypePart.Length >= 2 && datatypePart[0] == '<' && datatypePart[^1] == '>')
-                return datatypePart.Slice(1, datatypePart.Length - 2);
+                return datatypePart;
+            // Otherwise return as-is (shouldn't normally happen)
             return datatypePart;
         }
 
@@ -1435,11 +1438,11 @@ public ref partial struct FilterEvaluator
         {
             var beforeAt = str.Slice(0, atIndex);
             if (beforeAt.Length >= 2 && beforeAt[^1] == '"')
-                return RdfLangString.AsSpan();
+                return RdfLangStringBracketed.AsSpan();
         }
 
         // Plain literal defaults to xsd:string
-        return XsdString.AsSpan();
+        return XsdStringBracketed.AsSpan();
     }
 
     /// <summary>
@@ -2095,8 +2098,9 @@ public ref struct Value
                         return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
                     }
 
-                    // For other typed literals (like xsd:string), return as string with just the value
-                    return new Value { Type = ValueType.String, StringValue = value };
+                    // For other typed literals (like xsd:dateTime, xsd:string), keep full form
+                    // so DATATYPE function can extract the datatype annotation
+                    return new Value { Type = ValueType.String, StringValue = str };
                 }
 
                 // Plain literal with quotes but no datatype - keep full form for LANG/DATATYPE functions

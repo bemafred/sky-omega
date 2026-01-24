@@ -18,6 +18,7 @@ internal ref struct BindExpressionEvaluator
     private ReadOnlySpan<Binding> _bindingData;
     private ReadOnlySpan<char> _bindingStrings;
     private int _bindingCount;
+    private ReadOnlySpan<char> _baseIri;
 
     public BindExpressionEvaluator(ReadOnlySpan<char> expression,
         ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer)
@@ -27,6 +28,19 @@ internal ref struct BindExpressionEvaluator
         _bindingData = bindings;
         _bindingCount = bindingCount;
         _bindingStrings = stringBuffer;
+        _baseIri = default;
+    }
+
+    public BindExpressionEvaluator(ReadOnlySpan<char> expression,
+        ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer,
+        ReadOnlySpan<char> baseIri)
+    {
+        _expression = expression;
+        _position = 0;
+        _bindingData = bindings;
+        _bindingCount = bindingCount;
+        _bindingStrings = stringBuffer;
+        _baseIri = baseIri;
     }
 
     /// <summary>
@@ -293,6 +307,12 @@ internal ref struct BindExpressionEvaluator
             return ParseStringLiteral();
         }
 
+        // IRI literal <...>
+        if (ch == '<')
+        {
+            return ParseIriLiteral();
+        }
+
         // Numeric literal
         if (IsDigit(ch))
         {
@@ -306,6 +326,21 @@ internal ref struct BindExpressionEvaluator
         }
 
         return new Value { Type = ValueType.Unbound };
+    }
+
+    private Value ParseIriLiteral()
+    {
+        var start = _position;
+        Advance(); // Skip '<'
+
+        while (!IsAtEnd() && Peek() != '>')
+            Advance();
+
+        if (Peek() == '>') Advance();
+
+        // Return the IRI including angle brackets
+        var iri = _expression.Slice(start, _position - start);
+        return new Value { Type = ValueType.Uri, StringValue = iri };
     }
 
     private Value ParseVariable()
@@ -693,15 +728,52 @@ internal ref struct BindExpressionEvaluator
             }
 
             // IRI/URI - construct IRI from string
-            // Note: Should resolve relative IRIs against base, but base IRI is not available in this context
+            // Resolves relative IRIs against base IRI if available
             if (name.Equals("IRI", StringComparison.OrdinalIgnoreCase) ||
                 name.Equals("URI", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.Uri)
-                    return arg; // Already an IRI
+                {
+                    // Check if it's a relative IRI that needs resolution
+                    var uriVal = arg.StringValue;
+                    // Remove angle brackets if present
+                    if (uriVal.Length >= 2 && uriVal[0] == '<' && uriVal[^1] == '>')
+                        uriVal = uriVal.Slice(1, uriVal.Length - 2);
+                    // If it's an absolute IRI, return unchanged
+                    if (uriVal.Contains("://".AsSpan(), StringComparison.Ordinal))
+                        return arg;
+                    // Relative IRI - resolve against base
+                    if (_baseIri.Length > 0)
+                    {
+                        var baseStr = _baseIri;
+                        if (baseStr.Length >= 2 && baseStr[0] == '<' && baseStr[^1] == '>')
+                            baseStr = baseStr.Slice(1, baseStr.Length - 2);
+                        _stringResult = $"<{baseStr}{uriVal}>";
+                        return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                    }
+                    return arg; // No base, return unchanged
+                }
                 if (arg.Type == ValueType.String)
                 {
                     var lexical = arg.GetLexicalForm();
+                    // Check if it's an absolute IRI (contains scheme)
+                    if (lexical.Contains("://".AsSpan(), StringComparison.Ordinal))
+                    {
+                        _stringResult = $"<{lexical}>";
+                        return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                    }
+                    // Relative IRI - resolve against base if available
+                    if (_baseIri.Length > 0)
+                    {
+                        // Remove angle brackets from base if present
+                        var baseStr = _baseIri;
+                        if (baseStr.Length >= 2 && baseStr[0] == '<' && baseStr[^1] == '>')
+                            baseStr = baseStr.Slice(1, baseStr.Length - 2);
+                        // Simple resolution: append to base (handles most common case)
+                        _stringResult = $"<{baseStr}{lexical}>";
+                        return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                    }
+                    // No base - just wrap as IRI
                     _stringResult = $"<{lexical}>";
                     return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
                 }

@@ -843,10 +843,50 @@ public partial class QueryExecutor : IDisposable
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Empty pattern: if there are filters, evaluate them over empty binding
-        // ASK { FILTER(2 IN (1, 2, 3)) } should return true
+        // Empty pattern: if there are binds/filters, evaluate them
+        // ASK { BIND(RAND() AS ?r) FILTER(DATATYPE(?r) = xsd:double) } should work
         if (pattern.PatternCount == 0)
         {
+            // First evaluate any BIND expressions
+            if (_buffer.BindCount > 0)
+            {
+                var baseIri = _buffer.BaseUriLength > 0
+                    ? _source.AsSpan(_buffer.BaseUriStart, _buffer.BaseUriLength)
+                    : ReadOnlySpan<char>.Empty;
+
+                for (int i = 0; i < _buffer.BindCount; i++)
+                {
+                    var bind = pattern.GetBind(i);
+                    var expr = _source.AsSpan(bind.ExprStart, bind.ExprLength);
+                    var varName = _source.AsSpan(bind.VarStart, bind.VarLength);
+
+                    var evaluator = new BindExpressionEvaluator(expr,
+                        bindings.AsSpan(0, bindingTable.Count),
+                        bindingTable.Count,
+                        stringBuffer,
+                        baseIri);
+                    var value = evaluator.Evaluate();
+
+                    // Bind the result using typed overloads
+                    switch (value.Type)
+                    {
+                        case ValueType.Integer:
+                            bindingTable.Bind(varName, value.IntegerValue);
+                            break;
+                        case ValueType.Double:
+                            bindingTable.Bind(varName, value.DoubleValue);
+                            break;
+                        case ValueType.Boolean:
+                            bindingTable.Bind(varName, value.BooleanValue);
+                            break;
+                        case ValueType.String:
+                        case ValueType.Uri:
+                            bindingTable.Bind(varName, value.StringValue);
+                            break;
+                    }
+                }
+            }
+
             if (_buffer.FilterCount > 0)
             {
                 // Evaluate all filters - all must pass for ASK to return true
@@ -855,11 +895,14 @@ public partial class QueryExecutor : IDisposable
                     var filter = pattern.GetFilter(i);
                     var filterExpr = _source.AsSpan(filter.Start, filter.Length);
                     var evaluator = new FilterEvaluator(filterExpr);
-                    if (!evaluator.Evaluate(bindings.AsSpan(0, 0), 0, stringBuffer, _buffer.Prefixes, _source))
+                    if (!evaluator.Evaluate(bindings.AsSpan(0, bindingTable.Count), bindingTable.Count, stringBuffer, _buffer.Prefixes, _source))
                         return false;
                 }
                 return true;
             }
+            // Has BINDs but no filters - return true if we got here
+            if (_buffer.BindCount > 0)
+                return true;
             return false;
         }
 
