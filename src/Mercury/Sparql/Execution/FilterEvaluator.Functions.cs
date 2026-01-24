@@ -529,7 +529,9 @@ public ref partial struct FilterEvaluator
 
     /// <summary>
     /// Parse STRBEFORE(string, delimiter) - returns substring before first occurrence of delimiter
-    /// Returns empty string if delimiter not found. Preserves language tag/datatype from first arg.
+    /// Returns empty simple literal if delimiter not found.
+    /// Arguments must be compatible (same language tag or both plain/xsd:string).
+    /// Preserves language tag from first arg (but not xsd:string datatype).
     /// </summary>
     private Value ParseStrBeforeFunction()
     {
@@ -539,7 +541,7 @@ public ref partial struct FilterEvaluator
         if (Peek() != ',')
         {
             SkipToCloseParen();
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            return new Value { Type = ValueType.Unbound };
         }
 
         Advance(); // Skip ','
@@ -553,39 +555,72 @@ public ref partial struct FilterEvaluator
         if ((stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri) ||
             (delimiterArg.Type != ValueType.String && delimiterArg.Type != ValueType.Uri))
         {
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            return new Value { Type = ValueType.Unbound };
         }
 
         var str = stringArg.GetLexicalForm();
         var delimiter = delimiterArg.GetLexicalForm();
 
-        // Empty delimiter returns empty string
+        // Get language tags/datatypes for compatibility check
+        var arg1Suffix = stringArg.GetLangTagOrDatatype();
+        var arg2Suffix = delimiterArg.GetLangTagOrDatatype();
+
+        // Extract just the language tag part (after @)
+        var arg1Lang = GetLangTag(arg1Suffix);
+        var arg2Lang = GetLangTag(arg2Suffix);
+
+        // Check argument compatibility: if arg2 has a language tag, arg1 must have the same tag
+        if (!arg2Lang.IsEmpty && !arg1Lang.Equals(arg2Lang, StringComparison.OrdinalIgnoreCase))
+        {
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // Empty delimiter returns empty string with preserved language tag
         if (delimiter.IsEmpty)
         {
+            if (!arg1Lang.IsEmpty)
+            {
+                _strbeforeResult = $"\"\"@{arg1Lang.ToString()}";
+                return new Value { Type = ValueType.String, StringValue = _strbeforeResult.AsSpan() };
+            }
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
         var index = str.IndexOf(delimiter);
         if (index < 0)
         {
+            // Delimiter not found returns empty simple literal (no language tag per SPARQL spec)
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
-        // Preserve language tag/datatype from the first argument
+        // Preserve language tag from the first argument (but not xsd:string)
         var result = str.Slice(0, index).ToString();
-        var suffix = stringArg.GetLangTagOrDatatype();
-        // Only add quotes if there's a suffix to preserve, otherwise return plain string
-        _strbeforeResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
-        return new Value
+        if (!arg1Lang.IsEmpty)
         {
-            Type = ValueType.String,
-            StringValue = _strbeforeResult.AsSpan()
-        };
+            _strbeforeResult = $"\"{result}\"@{arg1Lang.ToString()}";
+            return new Value { Type = ValueType.String, StringValue = _strbeforeResult.AsSpan() };
+        }
+        // Plain result (no suffix)
+        _strbeforeResult = result;
+        return new Value { Type = ValueType.String, StringValue = _strbeforeResult.AsSpan() };
+    }
+
+    /// <summary>
+    /// Extract the language tag from a suffix like @en or @en-US.
+    /// Returns empty span if suffix is a datatype (^^...) or empty.
+    /// </summary>
+    private static ReadOnlySpan<char> GetLangTag(ReadOnlySpan<char> suffix)
+    {
+        if (suffix.Length > 1 && suffix[0] == '@')
+            return suffix.Slice(1);
+        return ReadOnlySpan<char>.Empty;
     }
 
     /// <summary>
     /// Parse STRAFTER(string, delimiter) - returns substring after first occurrence of delimiter
-    /// Returns empty string if delimiter not found. Preserves language tag/datatype from first arg.
+    /// Returns empty simple literal if delimiter not found.
+    /// Arguments must be compatible (same language tag or both plain/xsd:string).
+    /// Preserves language tag from first arg (but not xsd:string datatype).
     /// </summary>
     private Value ParseStrAfterFunction()
     {
@@ -595,7 +630,7 @@ public ref partial struct FilterEvaluator
         if (Peek() != ',')
         {
             SkipToCloseParen();
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            return new Value { Type = ValueType.Unbound };
         }
 
         Advance(); // Skip ','
@@ -609,36 +644,52 @@ public ref partial struct FilterEvaluator
         if ((stringArg.Type != ValueType.String && stringArg.Type != ValueType.Uri) ||
             (delimiterArg.Type != ValueType.String && delimiterArg.Type != ValueType.Uri))
         {
-            return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
+            return new Value { Type = ValueType.Unbound };
         }
 
         var str = stringArg.GetLexicalForm();
         var delimiter = delimiterArg.GetLexicalForm();
-        var suffix = stringArg.GetLangTagOrDatatype();
 
-        // Empty delimiter returns full string with preserved suffix (per SPARQL spec)
+        // Get language tags for compatibility check
+        var arg1Suffix = stringArg.GetLangTagOrDatatype();
+        var arg2Suffix = delimiterArg.GetLangTagOrDatatype();
+        var arg1Lang = GetLangTag(arg1Suffix);
+        var arg2Lang = GetLangTag(arg2Suffix);
+
+        // Check argument compatibility: if arg2 has a language tag, arg1 must have the same tag
+        if (!arg2Lang.IsEmpty && !arg1Lang.Equals(arg2Lang, StringComparison.OrdinalIgnoreCase))
+        {
+            return new Value { Type = ValueType.Unbound };
+        }
+
+        // Empty delimiter returns full string with preserved language tag (per SPARQL spec)
         if (delimiter.IsEmpty)
         {
-            // Only add quotes if there's a suffix to preserve, otherwise return plain string
-            _strafterResult = suffix.IsEmpty ? str.ToString() : $"\"{str.ToString()}\"{suffix.ToString()}";
+            if (!arg1Lang.IsEmpty)
+            {
+                _strafterResult = $"\"{str.ToString()}\"@{arg1Lang.ToString()}";
+                return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
+            }
+            _strafterResult = str.ToString();
             return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
         }
 
         var index = str.IndexOf(delimiter);
         if (index < 0)
         {
+            // Delimiter not found returns empty simple literal (no language tag per SPARQL spec)
             return new Value { Type = ValueType.String, StringValue = ReadOnlySpan<char>.Empty };
         }
 
-        // Preserve language tag/datatype from the first argument
+        // Preserve language tag from the first argument (but not xsd:string)
         var result = str.Slice(index + delimiter.Length).ToString();
-        // Only add quotes if there's a suffix to preserve, otherwise return plain string
-        _strafterResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
-        return new Value
+        if (!arg1Lang.IsEmpty)
         {
-            Type = ValueType.String,
-            StringValue = _strafterResult.AsSpan()
-        };
+            _strafterResult = $"\"{result}\"@{arg1Lang.ToString()}";
+            return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
+        }
+        _strafterResult = result;
+        return new Value { Type = ValueType.String, StringValue = _strafterResult.AsSpan() };
     }
 
     /// <summary>
@@ -809,12 +860,18 @@ public ref partial struct FilterEvaluator
 
     /// <summary>
     /// Parse CONCAT(string1, string2, ...) - concatenates strings
+    /// Only accepts string literals (not integers, URIs, etc.).
+    /// If all arguments have the same language tag, result preserves that tag.
+    /// If mixed language tags, result is a plain literal.
     /// Note: Allocates a string (exception to zero-GC for this function)
     /// </summary>
     private Value ParseConcatFunction()
     {
-        // Collect string parts - this function allocates
+        // Collect string parts and language tags - this function allocates
         var parts = new System.Collections.Generic.List<string>();
+        string? commonLangTag = null;
+        bool firstArg = true;
+        bool mixedLangTags = false;
 
         while (!IsAtEnd() && Peek() != ')')
         {
@@ -826,12 +883,39 @@ public ref partial struct FilterEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            if (arg.Type == ValueType.String || arg.Type == ValueType.Uri)
-                parts.Add(arg.GetLexicalForm().ToString());
-            else if (arg.Type == ValueType.Integer)
-                parts.Add(arg.IntegerValue.ToString());
-            else if (arg.Type == ValueType.Double)
-                parts.Add(arg.DoubleValue.ToString());
+            // CONCAT only accepts string literals - integers, URIs etc. are errors
+            if (arg.Type != ValueType.String)
+            {
+                SkipToCloseParen();
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            parts.Add(arg.GetLexicalForm().ToString());
+
+            // Track language tags for result
+            var suffix = arg.GetLangTagOrDatatype();
+            var langTag = GetLangTag(suffix);
+            var langStr = langTag.IsEmpty ? null : langTag.ToString();
+
+            if (firstArg)
+            {
+                commonLangTag = langStr;
+                firstArg = false;
+            }
+            else if (!mixedLangTags)
+            {
+                // Check if language tags differ
+                if (commonLangTag != langStr &&
+                    !(commonLangTag == null && langStr == null))
+                {
+                    if (commonLangTag == null || langStr == null ||
+                        !commonLangTag.Equals(langStr, StringComparison.OrdinalIgnoreCase))
+                    {
+                        mixedLangTags = true;
+                        commonLangTag = null;
+                    }
+                }
+            }
 
             SkipWhitespace();
             if (Peek() == ',')
@@ -845,7 +929,15 @@ public ref partial struct FilterEvaluator
             Advance();
 
         // Store concatenated result - allocates but keeps span valid
-        _concatResult = string.Concat(parts);
+        var concatenated = string.Concat(parts);
+        if (!mixedLangTags && commonLangTag != null)
+        {
+            _concatResult = $"\"{concatenated}\"@{commonLangTag}";
+        }
+        else
+        {
+            _concatResult = concatenated;
+        }
         return new Value
         {
             Type = ValueType.String,

@@ -511,7 +511,7 @@ public partial class QueryExecutor : IDisposable
 
     /// <summary>
     /// Execute an empty pattern (WHERE {}) and return materialized results.
-    /// For empty patterns with BIND/expressions, returns a single row.
+    /// For empty patterns with BIND/expressions, returns a single row with evaluated expressions.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private MaterializedQueryResults ExecuteEmptyPatternToMaterialized()
@@ -520,10 +520,110 @@ public partial class QueryExecutor : IDisposable
         if (selectClause.AggregateCount == 0 && !_buffer.HasBinds && !_buffer.HasFilters && !_buffer.HasExists)
             return MaterializedQueryResults.Empty();
 
-        // For empty patterns with expressions, return a single row
-        // (complex BIND evaluation should use the full Execute() path if needed)
+        // For empty patterns with expressions, return a single row with evaluated expressions
         var bindings = new Binding[16];
-        var results = new List<MaterializedRow> { new MaterializedRow(new BindingTable(bindings, _stringBuffer)) };
+        var bindingTable = new BindingTable(bindings, _stringBuffer);
+
+        // Get base IRI for relative IRI resolution
+        var baseIri = _buffer.BaseUriLength > 0
+            ? _source.AsSpan(_buffer.BaseUriStart, _buffer.BaseUriLength)
+            : ReadOnlySpan<char>.Empty;
+
+        // Evaluate BIND expressions first (e.g., BIND(UUID() AS ?uuid))
+        if (_buffer.HasBinds)
+        {
+            ref readonly var pattern = ref _cachedPattern;
+            for (int i = 0; i < _buffer.BindCount; i++)
+            {
+                var bind = pattern.GetBind(i);
+                var expr = _source.AsSpan(bind.ExprStart, bind.ExprLength);
+                var varName = _source.AsSpan(bind.VarStart, bind.VarLength);
+
+                var evaluator = new BindExpressionEvaluator(expr,
+                    bindings.AsSpan(0, bindingTable.Count),
+                    bindingTable.Count,
+                    _stringBuffer,
+                    baseIri);
+                var value = evaluator.Evaluate();
+
+                // Bind the result using typed overloads
+                switch (value.Type)
+                {
+                    case ValueType.Integer:
+                        bindingTable.Bind(varName, value.IntegerValue);
+                        break;
+                    case ValueType.Double:
+                        bindingTable.Bind(varName, value.DoubleValue);
+                        break;
+                    case ValueType.Boolean:
+                        bindingTable.Bind(varName, value.BooleanValue);
+                        break;
+                    case ValueType.String:
+                    case ValueType.Uri:
+                        bindingTable.Bind(varName, value.StringValue);
+                        break;
+                }
+            }
+        }
+
+        // Evaluate SELECT expressions (e.g., (BNODE() AS ?b1))
+        for (int i = 0; i < selectClause.AggregateCount; i++)
+        {
+            var agg = selectClause.GetAggregate(i);
+
+            // Only evaluate non-aggregate expressions (Function == None)
+            if (agg.Function != AggregateFunction.None) continue;
+
+            // Skip if no expression to evaluate
+            if (agg.VariableLength == 0) continue;
+
+            // Get expression and alias
+            var expr = _source.AsSpan(agg.VariableStart, agg.VariableLength);
+            var aliasName = _source.AsSpan(agg.AliasStart, agg.AliasLength);
+
+            // Evaluate the expression
+            var evaluator = new BindExpressionEvaluator(expr,
+                bindings.AsSpan(0, bindingTable.Count),
+                bindingTable.Count,
+                _stringBuffer,
+                baseIri);
+            var value = evaluator.Evaluate();
+
+            // Bind the result to the alias variable
+            switch (value.Type)
+            {
+                case ValueType.Integer:
+                    bindingTable.Bind(aliasName, value.IntegerValue);
+                    break;
+                case ValueType.Double:
+                    bindingTable.Bind(aliasName, value.DoubleValue);
+                    break;
+                case ValueType.Boolean:
+                    bindingTable.Bind(aliasName, value.BooleanValue);
+                    break;
+                case ValueType.String:
+                case ValueType.Uri:
+                    bindingTable.Bind(aliasName, value.StringValue);
+                    break;
+            }
+        }
+
+        // Evaluate FILTER if any (may reject the single row)
+        if (_buffer.HasFilters)
+        {
+            ref readonly var pattern = ref _cachedPattern;
+            for (int i = 0; i < pattern.FilterCount; i++)
+            {
+                var filter = pattern.GetFilter(i);
+                var filterExpr = _source.AsSpan(filter.Start, filter.Length);
+                var filterEvaluator = new FilterEvaluator(filterExpr);
+                if (!filterEvaluator.Evaluate(bindings.AsSpan(0, bindingTable.Count),
+                    bindingTable.Count, _stringBuffer, _buffer.Prefixes, _source))
+                    return MaterializedQueryResults.Empty();
+            }
+        }
+
+        var results = new List<MaterializedRow> { new MaterializedRow(bindingTable) };
         return new MaterializedQueryResults(results, bindings, _stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
