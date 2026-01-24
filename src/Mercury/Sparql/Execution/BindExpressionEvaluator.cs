@@ -420,6 +420,30 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.Double, DoubleValue = Random.Shared.NextDouble() };
             }
 
+            // BNODE - construct blank node (0 or 1 argument)
+            if (name.Equals("BNODE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Peek() == ')')
+                {
+                    // BNODE() - no argument, generate fresh blank node
+                    Advance();
+                    _bnodeCounter++;
+                    _stringResult = $"_:b{_bnodeCounter}";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+                // BNODE(label) - with string argument
+                var labelArg = ParseAdditive();
+                SkipWhitespace();
+                if (Peek() == ')') Advance();
+
+                var label = labelArg.GetLexicalForm();
+                if (label.IsEmpty)
+                    return new Value { Type = ValueType.Unbound };
+
+                _stringResult = $"_:{label.ToString()}";
+                return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+            }
+
             var arg = ParseAdditive();
             SkipWhitespace();
 
@@ -671,6 +695,38 @@ internal ref struct BindExpressionEvaluator
             {
                 if (arg.Type == ValueType.String && TryParseDateTime(arg.StringValue, out _, out _, out _, out _, out _, out var seconds))
                     return new Value { Type = ValueType.Double, DoubleValue = seconds };
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // TZ - extract timezone string from xsd:dateTime
+            // Returns "Z" for UTC, "+HH:MM" or "-HH:MM" for offsets, "" for no timezone
+            if (name.Equals("TZ", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String)
+                {
+                    var tzStr = ExtractTimezone(arg.StringValue);
+                    _stringResult = $"\"{tzStr}\"";
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // TIMEZONE - extract timezone as xsd:dayTimeDuration
+            // Returns "PT0S" for UTC, "PT5H30M" for +05:30, "-PT8H" for -08:00, unbound for no timezone
+            if (name.Equals("TIMEZONE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.String)
+                {
+                    var tzStr = ExtractTimezone(arg.StringValue);
+                    if (string.IsNullOrEmpty(tzStr))
+                    {
+                        // No timezone specified - return unbound per SPARQL spec
+                        return new Value { Type = ValueType.Unbound };
+                    }
+                    var duration = ConvertToXsdDuration(tzStr);
+                    _stringResult = $"\"{duration}\"^^<http://www.w3.org/2001/XMLSchema#dayTimeDuration>";
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                }
                 return new Value { Type = ValueType.Unbound };
             }
 
@@ -1017,6 +1073,85 @@ internal ref struct BindExpressionEvaluator
             return false;
 
         return true;
+    }
+
+    /// <summary>
+    /// Extract timezone string from xsd:dateTime
+    /// Returns "Z" for UTC, "+HH:MM" or "-HH:MM" for offsets, "" for no timezone
+    /// </summary>
+    private static string ExtractTimezone(ReadOnlySpan<char> str)
+    {
+        if (str.IsEmpty)
+            return "";
+
+        // Handle RDF typed literals: extract lexical value from quotes
+        var parseSpan = str;
+        if (str.Length > 2 && str[0] == '"')
+        {
+            var endQuote = str.Slice(1).IndexOf('"');
+            if (endQuote > 0)
+            {
+                parseSpan = str.Slice(1, endQuote);
+            }
+        }
+
+        // Check for Z (UTC)
+        if (parseSpan[^1] == 'Z')
+            return "Z";
+
+        // Look for +/- timezone offset at end
+        // Format: +HH:MM or -HH:MM (6 chars)
+        if (parseSpan.Length >= 6)
+        {
+            var potentialTz = parseSpan.Slice(parseSpan.Length - 6);
+            if ((potentialTz[0] == '+' || potentialTz[0] == '-') && potentialTz[3] == ':')
+            {
+                return potentialTz.ToString();
+            }
+        }
+
+        // No timezone specified
+        return "";
+    }
+
+    /// <summary>
+    /// Convert timezone string to xsd:dayTimeDuration format
+    /// "Z" → "PT0S", "+05:30" → "PT5H30M", "-08:00" → "-PT8H"
+    /// </summary>
+    private static string ConvertToXsdDuration(string tz)
+    {
+        if (tz == "Z")
+            return "PT0S";
+
+        if (tz.Length != 6)
+            return "PT0S";
+
+        var sign = tz[0];
+        if (sign != '+' && sign != '-')
+            return "PT0S";
+
+        // Parse hours and minutes from +HH:MM or -HH:MM
+        if (!int.TryParse(tz.AsSpan(1, 2), out var hours))
+            return "PT0S";
+        if (!int.TryParse(tz.AsSpan(4, 2), out var minutes))
+            return "PT0S";
+
+        // Build duration string
+        var result = new StringBuilder();
+        if (sign == '-')
+            result.Append('-');
+        result.Append("PT");
+
+        if (hours > 0)
+            result.Append($"{hours}H");
+        if (minutes > 0)
+            result.Append($"{minutes}M");
+
+        // If both are zero, return PT0S
+        if (hours == 0 && minutes == 0)
+            return "PT0S";
+
+        return result.ToString();
     }
 
     /// <summary>
@@ -1562,6 +1697,9 @@ internal ref struct BindExpressionEvaluator
 
     // Field to hold string results to prevent GC of span backing memory
     private string _stringResult = "";
+
+    // Counter for generating unique blank node identifiers
+    private int _bnodeCounter = 0;
 
     /// <summary>
     /// Coerce a Value to a number. Strings are parsed as numbers.
