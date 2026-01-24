@@ -638,6 +638,76 @@ internal ref struct BindExpressionEvaluator
                 return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
             }
 
+            // DATATYPE - returns the datatype IRI of a literal
+            // Returns Unbound for non-literals (IRIs, blank nodes)
+            if (name.Equals("DATATYPE", StringComparison.OrdinalIgnoreCase))
+            {
+                // IRIs and blank nodes have no datatype - return unbound
+                if (arg.Type == ValueType.Uri)
+                    return new Value { Type = ValueType.Unbound };
+
+                // Return XSD datatype based on value type
+                if (arg.Type == ValueType.Integer)
+                {
+                    _stringResult = "<http://www.w3.org/2001/XMLSchema#integer>";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+                if (arg.Type == ValueType.Double)
+                {
+                    _stringResult = "<http://www.w3.org/2001/XMLSchema#double>";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+                if (arg.Type == ValueType.Boolean)
+                {
+                    _stringResult = "<http://www.w3.org/2001/XMLSchema#boolean>";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+                if (arg.Type == ValueType.String)
+                {
+                    // Check for explicit datatype: "value"^^<datatype>
+                    var str = arg.StringValue;
+                    var caretIdx = str.LastIndexOf("^^".AsSpan());
+                    if (caretIdx > 0)
+                    {
+                        var dtPart = str.Slice(caretIdx + 2);
+                        // Extract IRI from <...>
+                        if (dtPart.Length >= 2 && dtPart[0] == '<' && dtPart[^1] == '>')
+                        {
+                            _stringResult = dtPart.ToString();
+                            return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                        }
+                    }
+                    // Check for language tag: "value"@lang - return unbound (lang-tagged literals have no datatype per RDF 1.0)
+                    // Actually per RDF 1.1, language-tagged strings have datatype rdf:langString
+                    var atIdx = str.LastIndexOf('@');
+                    if (atIdx > 0 && str.Slice(0, atIdx).EndsWith("\""))
+                    {
+                        _stringResult = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
+                        return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                    }
+                    // Plain literal - xsd:string
+                    _stringResult = "<http://www.w3.org/2001/XMLSchema#string>";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            // IRI/URI - construct IRI from string
+            // Note: Should resolve relative IRIs against base, but base IRI is not available in this context
+            if (name.Equals("IRI", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("URI", StringComparison.OrdinalIgnoreCase))
+            {
+                if (arg.Type == ValueType.Uri)
+                    return arg; // Already an IRI
+                if (arg.Type == ValueType.String)
+                {
+                    var lexical = arg.GetLexicalForm();
+                    _stringResult = $"<{lexical}>";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+                return new Value { Type = ValueType.Unbound };
+            }
+
             // STRLEN function - length in Unicode code points (not UTF-16 code units)
             // Characters outside BMP (like emoji) count as 1, not 2
             if (name.Equals("STRLEN", StringComparison.OrdinalIgnoreCase))
