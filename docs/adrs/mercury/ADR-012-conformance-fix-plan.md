@@ -2,27 +2,27 @@
 
 **Status:** In Progress
 **Created:** 2026-01-19
-**Updated:** 2026-01-22
+**Updated:** 2026-01-24
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1904 W3C tests, 1847 passing (97%), 41 failing, 16 skipped
+**Current:** 1904 W3C tests, 1856 passing (97%), 34 failing, 14 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 97% W3C conformance (1847/1904 tests). For SPARQL 1.1 Query specifically: 174/224 passing (78%). The remaining 43 failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 97% W3C conformance (1856/1904 tests). For SPARQL 1.1 Query specifically: 183/224 passing (82%). The remaining failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
 | Property Paths | ✅ 0 | All property path tests pass (pp16, pp28a fixed 2026-01-22) |
-| String Functions | ~12 | STRBEFORE/STRAFTER datatyping, CONCAT, REPLACE, non-BMP Unicode |
+| String Functions | ~10 | STRBEFORE/STRAFTER datatyping, CONCAT, REPLACE, non-BMP Unicode |
 | Hash Functions | ✅ 0 | All hash function tests pass |
-| RDF Term Functions | ~6 | IRI/URI edge cases, UUID/STRUUID pattern matching |
-| DateTime Functions | 3 | NOW, TIMEZONE, TZ |
+| RDF Term Functions | ~5 | IRI/URI edge cases, UUID/STRUUID pattern matching, BNODE |
+| DateTime Functions | ✅ 1 | NOW (dynamic value); TZ/TIMEZONE fixed 2026-01-24 |
 | MINUS/NOT EXISTS | ✅ 0 | All 12 tests pass |
 | Aggregates | ~4 | Error propagation in AVG, aggregate edge cases |
 | GROUP BY / HAVING | ~3 | Built-in functions in GROUP BY, HAVING conditions |
 | EXISTS edge cases | ✅ 0 | All 6 tests pass |
 | VALUES | ✅ 0 | All tests pass |
-| Project expressions | ~3 | Expression error handling, unbound variables |
+| Project expressions | ✅ ~2 | Comparison operators fixed 2026-01-24 |
 | Other | ~8 | IF/COALESCE error propagation |
 
 ## Plan: Phased Approach
@@ -67,11 +67,18 @@ Mercury's SPARQL engine has achieved 97% W3C conformance (1847/1904 tests). For 
 
 ---
 
-### Phase 3: SPARQL Functions — ~18 tests failing (was 46)
+### Phase 3: SPARQL Functions — ~15 tests failing (was 46)
 **Target:** Reduce function failures from 46 to ~10
 **Effort:** Medium-Large
 **Files:** `FilterEvaluator.Functions.cs`, `BindExpressionEvaluator.cs`, `FilterEvaluator.cs`
-**Updated:** 2026-01-22
+**Updated:** 2026-01-24
+
+**Fixed (2026-01-24):**
+- ✅ TZ function in BindExpressionEvaluator - extracts timezone string ("Z", "+HH:MM", "-HH:MM")
+- ✅ TIMEZONE function in BindExpressionEvaluator - returns xsd:dayTimeDuration
+- ✅ Comparison operators (=, ==, !=, <, >, <=, >=) in SELECT expressions
+- ✅ Parenthesized comparison expressions now evaluate correctly
+- ✅ BNODE function added (counter state issue remains for multi-expression queries)
 
 **Fixed (2026-01-22):**
 - ✅ STRBEFORE/STRAFTER basic tests pass (language tag preservation)
@@ -80,19 +87,19 @@ Mercury's SPARQL engine has achieved 97% W3C conformance (1847/1904 tests). For 
 - ✅ Hash functions (MD5, SHA1, SHA256, SHA384, SHA512) all pass
 - ✅ Added `GetLangTagOrDatatype()` method to Value struct
 
-**Current failing function tests (~18 total):**
+**Current failing function tests (~15 total):**
 
 | Category | Failing Tests | Notes |
 |----------|--------------|-------|
 | String (~8) | STRBEFORE/STRAFTER datatyping (2), CONCAT (2), REPLACE (2), non-BMP (2) | Argument compatibility rules |
-| RDF Terms (~6) | IRI/URI edge cases (2), UUID (2), STRUUID (1), BNODE (1) | Pattern matching, type errors |
-| DateTime (3) | NOW (1), TIMEZONE (1), TZ (1) | Format/binding issues |
+| RDF Terms (~4) | IRI/URI edge cases (2), UUID (1), BNODE (1) | Pattern matching, BNODE counter state |
+| DateTime (1) | NOW (1) | Dynamic value comparison |
 | Error handling (~4) | IF (1), COALESCE (1), AVG error (2) | Error propagation |
 
 **Root causes:**
 1. STRBEFORE/STRAFTER datatyping: Argument compatibility rules for language tags and typed strings
 2. REPLACE: Regex replacement not yet implemented in BindExpressionEvaluator
-3. UUID/STRUUID: Pattern matching test expects specific UUID format validation
+3. BNODE: Counter state not shared across multiple SELECT expressions in same query
 4. IF/COALESCE: Error propagation semantics
 
 **Completed:**
@@ -100,6 +107,8 @@ Mercury's SPARQL engine has achieved 97% W3C conformance (1847/1904 tests). For 
 - CEIL, FLOOR, ROUND, ABS in BindExpressionEvaluator
 - Language tag preservation for UCASE/LCASE/STRBEFORE/STRAFTER/SUBSTR
 - Empty string result handling (quoted `""` for SELECT projections)
+- TZ/TIMEZONE functions for datetime values
+- Comparison operators in SELECT/BIND expressions
 
 **Verification:**
 ```bash
@@ -255,14 +264,14 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 |-------|-------------|---------|------------------|--------|
 | 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
 | 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
-| 3 | SPARQL Functions | ~18 | ~10 | In Progress (was 46) |
+| 3 | SPARQL Functions | ~15 | ~10 | In Progress (was 46) |
 | 4 | Property Paths | 0 | 0 | ✅ Done (was 6) |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 0 | 0 | ✅ Done |
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 43 failing tests total (174 passing, 7 skipped out of 224) — 78% conformance
+**Current Progress:** 34 failing tests total (183 passing, 7 skipped out of 224) — 82% conformance
 
 **Recommended priority:**
 1. **Phase 3** (Functions) - ~18 tests, STRBEFORE/STRAFTER datatyping, REPLACE, UUID/STRUUID
@@ -285,21 +294,27 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 
 ## Next Steps
 
-**Priority 1: Remaining Functions (~18 tests)**
+**Priority 1: Remaining Functions (~15 tests)**
 Focus areas:
 - STRBEFORE/STRAFTER datatyping (argument compatibility for language tags)
 - REPLACE function implementation in BindExpressionEvaluator
-- UUID/STRUUID pattern matching
+- BNODE counter state sharing across SELECT expressions
 - IF/COALESCE error propagation
 
-**Recently Completed (2026-01-22):**
+**Recently Completed (2026-01-24):**
+- ✅ TZ function: Extracts timezone string from xsd:dateTime values
+- ✅ TIMEZONE function: Returns xsd:dayTimeDuration from xsd:dateTime values
+- ✅ Comparison operators (=, ==, !=, <, >, <=, >=) in BindExpressionEvaluator
+- ✅ Parenthesized comparison expressions: `(?x = ?y)` now evaluates correctly
+- ✅ UUID/STRUUID: Now use time-ordered UUID v7 format
+- ✅ NOW/RAND: Dynamic value functions added
+
+**Previously Completed (2026-01-22):**
 - ✅ Property paths: pp16 (zero-or-more reflexive for all graph nodes), pp28a (grouped zero-or-one)
 - ✅ ORDER BY: Fixed term type ordering (IRIs < Literals per SPARQL spec)
 - ✅ String functions: UCASE/LCASE/STRBEFORE/STRAFTER/SUBSTR language tag preservation
 - ✅ Hash functions: MD5, SHA1, SHA256, SHA384, SHA512 all pass
 - ✅ Empty string handling for STRBEFORE/STRAFTER
-
-**Previously Completed:**
 - ✅ Negation/EXISTS (12/12 tests) - GRAPH context, MINUS semantics
 - ✅ pp30-pp33 property path grouping and sequences (2026-01-21)
 - ✅ pp06, pp07, pp34, pp35 named graph paths (2026-01-21)
