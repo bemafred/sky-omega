@@ -234,14 +234,26 @@ public ref partial struct FilterEvaluator
         // Parse value list
         while (!IsAtEnd() && Peek() != ')')
         {
+            var startPos = _position;
             scoped var listValue = ParseTerm();
             SkipWhitespace();
 
-            // Check if left matches this list value
-            if (!found && CompareEqual(left, listValue))
+            // Check if we made progress - if not, skip to next comma or closing paren
+            // This handles expressions like 1/0 that ParseTerm can't parse
+            if (_position == startPos || listValue.Type == ValueType.Unbound)
             {
-                found = true;
-                // Continue parsing to consume the rest of the list
+                // Skip to next comma or closing paren (treats unparseable as error/non-match)
+                while (!IsAtEnd() && Peek() != ',' && Peek() != ')')
+                    Advance();
+            }
+            else
+            {
+                // Check if left matches this list value
+                if (!found && CompareEqual(left, listValue))
+                {
+                    found = true;
+                    // Continue parsing to consume the rest of the list
+                }
             }
 
             // Skip comma if present
@@ -256,7 +268,10 @@ public ref partial struct FilterEvaluator
         if (Peek() == ')')
             Advance();
 
-        // IN returns true if found, NOT IN returns true if not found
+        // SPARQL semantics for IN/NOT IN with errors:
+        // - IN: if any value matches, return true; if error and no match, return error (treat as false)
+        // - NOT IN: if any value matches, return false; if all non-error values don't match, return true
+        // For simplicity, we treat errors as non-matching values
         return negated ? !found : found;
     }
 

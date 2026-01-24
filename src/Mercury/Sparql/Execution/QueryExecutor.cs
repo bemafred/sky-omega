@@ -838,13 +838,30 @@ public partial class QueryExecutor : IDisposable
 
         ref readonly var pattern = ref _cachedPattern;
 
-        if (pattern.PatternCount == 0)
-            return false;
-
-        // Build binding storage
+        // Build binding storage (needed for empty pattern with filters too)
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
+
+        // Empty pattern: if there are filters, evaluate them over empty binding
+        // ASK { FILTER(2 IN (1, 2, 3)) } should return true
+        if (pattern.PatternCount == 0)
+        {
+            if (_buffer.FilterCount > 0)
+            {
+                // Evaluate all filters - all must pass for ASK to return true
+                for (int i = 0; i < _buffer.FilterCount; i++)
+                {
+                    var filter = pattern.GetFilter(i);
+                    var filterExpr = _source.AsSpan(filter.Start, filter.Length);
+                    var evaluator = new FilterEvaluator(filterExpr);
+                    if (!evaluator.Evaluate(bindings.AsSpan(0, 0), 0, stringBuffer, _buffer.Prefixes, _source))
+                        return false;
+                }
+                return true;
+            }
+            return false;
+        }
 
         var requiredCount = pattern.RequiredPatternCount;
 
