@@ -18,7 +18,7 @@
     <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
     
     <!-- Warnings -->
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningLevel>5</WarningLevel>
   </PropertyGroup>
 
