@@ -400,8 +400,11 @@ internal ref struct BindExpressionEvaluator
 
     private Value ParseStringLiteral()
     {
+        // Capture start position (including opening quote) for full literal preservation
+        var literalStart = _position;
+
         Advance(); // Skip '"'
-        var start = _position;
+        var contentStart = _position;
 
         while (!IsAtEnd() && Peek() != '"')
         {
@@ -410,7 +413,7 @@ internal ref struct BindExpressionEvaluator
         }
 
         // Capture string content before moving past closing quote
-        var str = _expression.Slice(start, _position - start);
+        var str = _expression.Slice(contentStart, _position - contentStart);
 
         if (!IsAtEnd()) Advance(); // Skip closing '"'
 
@@ -424,6 +427,10 @@ internal ref struct BindExpressionEvaluator
                 Advance(); // Skip '@'
                 while (!IsAtEnd() && (IsLetter(Peek()) || Peek() == '-'))
                     Advance();
+
+                // Capture full literal with language tag for preservation
+                var fullLiteral = _expression.Slice(literalStart, _position - literalStart);
+                return new Value { Type = ValueType.String, StringValue = fullLiteral };
             }
             else if (Peek() == '^' && _position + 1 < _expression.Length &&
                      _expression[_position + 1] == '^')
@@ -434,15 +441,21 @@ internal ref struct BindExpressionEvaluator
 
                 if (!IsAtEnd() && Peek() == '<')
                 {
-                    // Full IRI: <http://...>
+                    // Full IRI datatype: <http://...>
                     Advance(); // Skip '<'
                     while (!IsAtEnd() && Peek() != '>')
                         Advance();
                     if (!IsAtEnd()) Advance(); // Skip '>'
+
+                    // Capture full literal with datatype for preservation
+                    var fullLiteral = _expression.Slice(literalStart, _position - literalStart);
+                    return new Value { Type = ValueType.String, StringValue = fullLiteral };
                 }
                 else
                 {
-                    // Prefixed name: prefix:local
+                    // Prefixed name datatype: prefix:local
+                    // Expand common prefixes for output
+                    var prefixStart = _position;
                     while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
                         Advance();
                     if (!IsAtEnd() && Peek() == ':')
@@ -451,12 +464,61 @@ internal ref struct BindExpressionEvaluator
                         while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-'))
                             Advance();
                     }
+
+                    // Try to expand known prefixes
+                    var prefixedName = _expression.Slice(prefixStart, _position - prefixStart);
+                    var expandedIri = ExpandCommonPrefix(prefixedName);
+
+                    if (!expandedIri.IsEmpty)
+                    {
+                        // Return with expanded IRI
+                        _stringResult = $"\"{str}\"^^<{expandedIri}>";
+                        return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
+                    }
+
+                    // Unknown prefix - return full literal as-is
+                    var fullLiteral = _expression.Slice(literalStart, _position - literalStart);
+                    return new Value { Type = ValueType.String, StringValue = fullLiteral };
                 }
             }
         }
 
-        // Return the string content (without quotes) as the value
+        // Return the string content (without quotes) as the value for plain literals
         return new Value { Type = ValueType.String, StringValue = str };
+    }
+
+    /// <summary>
+    /// Expand common prefixes used in SPARQL typed literals.
+    /// </summary>
+    private static ReadOnlySpan<char> ExpandCommonPrefix(ReadOnlySpan<char> prefixedName)
+    {
+        if (prefixedName.StartsWith("xsd:", StringComparison.OrdinalIgnoreCase))
+        {
+            var local = prefixedName.Slice(4);
+            if (local.Equals("date", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#date".AsSpan();
+            if (local.Equals("dateTime", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#dateTime".AsSpan();
+            if (local.Equals("integer", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#integer".AsSpan();
+            if (local.Equals("decimal", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#decimal".AsSpan();
+            if (local.Equals("double", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#double".AsSpan();
+            if (local.Equals("float", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#float".AsSpan();
+            if (local.Equals("boolean", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#boolean".AsSpan();
+            if (local.Equals("string", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#string".AsSpan();
+            if (local.Equals("time", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#time".AsSpan();
+            if (local.Equals("gYear", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#gYear".AsSpan();
+            if (local.Equals("gYearMonth", StringComparison.OrdinalIgnoreCase))
+                return "http://www.w3.org/2001/XMLSchema#gYearMonth".AsSpan();
+        }
+        return ReadOnlySpan<char>.Empty;
     }
 
     private Value ParseNumericLiteral()
@@ -684,7 +746,34 @@ internal ref struct BindExpressionEvaluator
                 if (arg.Type == ValueType.Uri)
                     return new Value { Type = ValueType.Unbound };
 
-                // Return XSD datatype based on value type
+                // Check if StringValue contains an explicit datatype annotation first
+                // This handles the case where a numeric value was parsed from a typed literal
+                // (e.g., "1.0"^^<xsd:decimal> was parsed to Double but StringValue preserved)
+                if (!arg.StringValue.IsEmpty)
+                {
+                    var str = arg.StringValue;
+                    var caretIdx = str.LastIndexOf("^^".AsSpan());
+                    if (caretIdx > 0)
+                    {
+                        var dtPart = str.Slice(caretIdx + 2);
+                        // Extract IRI from <...>
+                        if (dtPart.Length >= 2 && dtPart[0] == '<' && dtPart[^1] == '>')
+                        {
+                            _stringResult = dtPart.ToString();
+                            return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                        }
+                    }
+                    // Check for language tag: "value"@lang
+                    // Per RDF 1.1, language-tagged strings have datatype rdf:langString
+                    var atIdx = str.LastIndexOf('@');
+                    if (atIdx > 0 && str.Slice(0, atIdx).EndsWith("\""))
+                    {
+                        _stringResult = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
+                        return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                    }
+                }
+
+                // Fall back to XSD datatype based on value type
                 if (arg.Type == ValueType.Integer)
                 {
                     _stringResult = "<http://www.w3.org/2001/XMLSchema#integer>";
@@ -702,27 +791,6 @@ internal ref struct BindExpressionEvaluator
                 }
                 if (arg.Type == ValueType.String)
                 {
-                    // Check for explicit datatype: "value"^^<datatype>
-                    var str = arg.StringValue;
-                    var caretIdx = str.LastIndexOf("^^".AsSpan());
-                    if (caretIdx > 0)
-                    {
-                        var dtPart = str.Slice(caretIdx + 2);
-                        // Extract IRI from <...>
-                        if (dtPart.Length >= 2 && dtPart[0] == '<' && dtPart[^1] == '>')
-                        {
-                            _stringResult = dtPart.ToString();
-                            return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
-                        }
-                    }
-                    // Check for language tag: "value"@lang - return unbound (lang-tagged literals have no datatype per RDF 1.0)
-                    // Actually per RDF 1.1, language-tagged strings have datatype rdf:langString
-                    var atIdx = str.LastIndexOf('@');
-                    if (atIdx > 0 && str.Slice(0, atIdx).EndsWith("\""))
-                    {
-                        _stringResult = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString>";
-                        return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
-                    }
                     // Plain literal - xsd:string
                     _stringResult = "<http://www.w3.org/2001/XMLSchema#string>";
                     return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };

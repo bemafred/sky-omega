@@ -4,26 +4,26 @@
 **Created:** 2026-01-19
 **Updated:** 2026-01-25
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1905 W3C tests, 1876 passing (98%), 15 failing, 14 skipped
+**Current:** 1905 W3C tests, 1885 passing (99%), 4 failing, 16 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 98% W3C conformance (1876/1905 tests). For SPARQL 1.1 Query specifically: 204/224 passing (91%). The remaining failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 99% W3C conformance (1885/1905 tests). For SPARQL 1.1 Query specifically: 212/224 passing (95%). The remaining failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
 | Property Paths | ✅ 0 | All property path tests pass (pp16, pp28a fixed 2026-01-22) |
-| String Functions | ~10 | STRBEFORE/STRAFTER datatyping, CONCAT, REPLACE, non-BMP Unicode |
+| String Functions | ✅ 0 | All string function tests pass (STRBEFORE/STRAFTER fixed 2026-01-25) |
 | Hash Functions | ✅ 0 | All hash function tests pass |
-| RDF Term Functions | ~5 | IRI/URI edge cases, UUID/STRUUID pattern matching, BNODE |
-| DateTime Functions | ✅ 1 | NOW (dynamic value); TZ/TIMEZONE fixed 2026-01-24 |
-| MINUS/NOT EXISTS | ✅ 0 | All 12 tests pass |
-| Aggregates | ~2 | AVG error propagation (partial fix), aggregate edge cases |
-| GROUP BY / HAVING | ~2 | Built-in functions in GROUP BY, DATATYPE precision |
+| RDF Term Functions | ✅ 0 | All RDF term function tests pass |
+| DateTime Functions | ✅ 0 | All datetime function tests pass |
+| MINUS/NOT EXISTS | ✅ 0 | All 12 tests pass; ExecuteToMaterialized EXISTS fixed 2026-01-25 |
+| Aggregates | ~2 | Expressions inside aggregates (agg-err-01, agg-err-02) |
+| GROUP BY / HAVING | ✅ 0 | agg-group-builtin, group04 fixed 2026-01-25 |
 | EXISTS edge cases | ✅ 0 | All 6 tests pass |
 | VALUES | ✅ 0 | All tests pass |
-| Project expressions | ✅ ~2 | Comparison operators fixed 2026-01-24 |
-| Other | ~8 | IF/COALESCE error propagation |
+| Project expressions | ✅ 0 | Comparison operators fixed 2026-01-24 |
+| BIND scoping | ~1 | Variable scoping in nested groups (bind10) |
 
 ## Plan: Phased Approach
 
@@ -264,17 +264,18 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 |-------|-------------|---------|------------------|--------|
 | 1 | Numeric Aggregates | 0 | 0 | ✅ Done |
 | 2 | GROUP_CONCAT | 0 | 0 | ✅ Done |
-| 3 | SPARQL Functions | ~20 | ~10 | In Progress (was 46) |
+| 3 | SPARQL Functions | 0 | 0 | ✅ Done (was 46) |
 | 4 | Property Paths | 0 | 0 | ✅ Done (was 6) |
 | 5 | Subquery Scope | 1 (+2 skip) | 0 | ✅ Nearly Done |
 | 6 | Negation (EXISTS/MINUS) | 0 | 0 | ✅ Done |
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 12 failing tests total (204 passing, 8 skipped out of 224) — 91% conformance
+**Current Progress:** 3 failing tests total (212 passing, 9 skipped out of 224) — 95% conformance for SPARQL 1.1 Query
 
-**Recommended priority:**
-1. **Phase 3** (Functions) - ~18 tests, STRBEFORE/STRAFTER datatyping, REPLACE, UUID/STRUUID
+**Remaining failures:**
+- agg-err-01, agg-err-02: Expressions inside aggregates (e.g., `AVG(IF(...))`)
+- bind10: BIND variable scoping in nested groups
 
 ### Commands for Each Phase
 
@@ -294,14 +295,21 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 
 ## Next Steps
 
-**Priority 1: Remaining Functions (~20 tests)**
-Focus areas:
-- STRBEFORE/STRAFTER datatyping (argument compatibility for language tags)
-- REPLACE function implementation in BindExpressionEvaluator
-- BNODE counter state sharing across SELECT expressions
-- IF/COALESCE error propagation
+**Priority 1: Expressions inside aggregates (~2 tests)**
+- agg-err-01: `(MIN(?p) + MAX(?p)) / 2 AS ?c` - post-aggregation expression evaluation
+- agg-err-02: `AVG(IF(isNumeric(?p), ?p, COALESCE(...)))` - expressions inside aggregate functions
+
+**Root cause:** The `GroupedRow.UpdateAggregates` method looks up values by variable hash, but when the aggregate argument is an expression (not a simple variable), the hash lookup fails. Fix requires evaluating expressions per-row during aggregation.
+
+**Priority 2: BIND scoping (1 test)**
+- bind10: Variables bound by BIND in outer scope should not be visible inside nested groups at filter evaluation time
+
+**Root cause:** SPARQL requires nested groups to be evaluated as independent units. Variables bound by BIND in the outer scope should not propagate into nested groups' filter evaluation context.
 
 **Recently Completed (2026-01-25):**
+- ✅ STRBEFORE/STRAFTER datatyping: Fixed `GetLexicalForm()` to handle empty string literals like `""@en`
+- ✅ agg-group-builtin: DATATYPE function in GROUP BY now preserves original datatype
+- ✅ group04: COALESCE with typed literals preserves datatype annotations
 - ✅ HAVING with multiple conditions: `(COUNT(*) > 1) (COUNT(*) < 3)` now works
 - ✅ AVG error propagation: Non-numeric values (blank nodes) cause no binding
 - ✅ BNODE per-row seed: Correct blank node identity across result rows

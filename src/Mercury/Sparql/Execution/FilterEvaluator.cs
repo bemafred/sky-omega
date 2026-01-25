@@ -2071,6 +2071,7 @@ public ref struct Value
                     var datatype = suffix.Slice(2);
 
                     // Check if it's a numeric datatype
+                    // Also preserve the original string in StringValue for DATATYPE function
                     if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
                         datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
                         datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
@@ -2079,7 +2080,7 @@ public ref struct Value
                     {
                         if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
                         {
-                            return new Value { Type = ValueType.Integer, IntegerValue = intVal };
+                            return new Value { Type = ValueType.Integer, IntegerValue = intVal, StringValue = str };
                         }
                     }
 
@@ -2089,7 +2090,7 @@ public ref struct Value
                     {
                         if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
                         {
-                            return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
+                            return new Value { Type = ValueType.Double, DoubleValue = doubleVal, StringValue = str };
                         }
                     }
 
@@ -2097,7 +2098,7 @@ public ref struct Value
                     {
                         var boolVal = value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                                       value.Equals("1", StringComparison.Ordinal);
-                        return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
+                        return new Value { Type = ValueType.Boolean, BooleanValue = boolVal, StringValue = str };
                     }
 
                     // For other typed literals (like xsd:dateTime, xsd:string), keep full form
@@ -2129,7 +2130,7 @@ public ref struct Value
         if (StringValue[0] == '"')
         {
             var closeQuote = StringValue.Slice(1).IndexOf('"');
-            if (closeQuote > 0)
+            if (closeQuote >= 0)
                 return StringValue.Slice(1, closeQuote);
         }
 

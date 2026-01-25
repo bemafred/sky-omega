@@ -664,16 +664,28 @@ public ref partial struct QueryResults
             var value = evaluator.Evaluate();
 
             // Bind the result to the alias variable
+            // Prefer StringValue if available (preserves original datatype annotation)
             switch (value.Type)
             {
                 case ValueType.Integer:
-                    _bindingTable.Bind(aliasVar, value.IntegerValue);
+                    // Use original string if available (preserves datatype), otherwise format as xsd:integer
+                    if (!value.StringValue.IsEmpty)
+                        _bindingTable.Bind(aliasVar, value.StringValue);
+                    else
+                        _bindingTable.Bind(aliasVar, $"\"{value.IntegerValue}\"^^<http://www.w3.org/2001/XMLSchema#integer>".AsSpan());
                     break;
                 case ValueType.Double:
-                    _bindingTable.Bind(aliasVar, value.DoubleValue);
+                    // Use original string if available (preserves decimal vs double distinction)
+                    if (!value.StringValue.IsEmpty)
+                        _bindingTable.Bind(aliasVar, value.StringValue);
+                    else
+                        _bindingTable.Bind(aliasVar, $"\"{value.DoubleValue.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"^^<http://www.w3.org/2001/XMLSchema#double>".AsSpan());
                     break;
                 case ValueType.Boolean:
-                    _bindingTable.Bind(aliasVar, value.BooleanValue);
+                    if (!value.StringValue.IsEmpty)
+                        _bindingTable.Bind(aliasVar, value.StringValue);
+                    else
+                        _bindingTable.Bind(aliasVar, value.BooleanValue);
                     break;
                 case ValueType.String:
                 case ValueType.Uri:
