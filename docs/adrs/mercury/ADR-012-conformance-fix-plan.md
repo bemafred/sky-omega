@@ -2,13 +2,13 @@
 
 **Status:** In Progress
 **Created:** 2026-01-19
-**Updated:** 2026-01-24
+**Updated:** 2026-01-25
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1905 W3C tests, 1869 passing (98%), 22 failing, 14 skipped
+**Current:** 1905 W3C tests, 1876 passing (98%), 15 failing, 14 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 98% W3C conformance (1869/1905 tests). For SPARQL 1.1 Query specifically: 197/224 passing (88%). The remaining failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 98% W3C conformance (1876/1905 tests). For SPARQL 1.1 Query specifically: 204/224 passing (91%). The remaining failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
@@ -18,8 +18,8 @@ Mercury's SPARQL engine has achieved 98% W3C conformance (1869/1905 tests). For 
 | RDF Term Functions | ~5 | IRI/URI edge cases, UUID/STRUUID pattern matching, BNODE |
 | DateTime Functions | ✅ 1 | NOW (dynamic value); TZ/TIMEZONE fixed 2026-01-24 |
 | MINUS/NOT EXISTS | ✅ 0 | All 12 tests pass |
-| Aggregates | ~4 | Error propagation in AVG, aggregate edge cases |
-| GROUP BY / HAVING | ~3 | Built-in functions in GROUP BY, HAVING conditions |
+| Aggregates | ~2 | AVG error propagation (partial fix), aggregate edge cases |
+| GROUP BY / HAVING | ~2 | Built-in functions in GROUP BY, DATATYPE precision |
 | EXISTS edge cases | ✅ 0 | All 6 tests pass |
 | VALUES | ✅ 0 | All tests pass |
 | Project expressions | ✅ ~2 | Comparison operators fixed 2026-01-24 |
@@ -271,7 +271,7 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 20 failing tests total (197 passing, 7 skipped out of 224) — 88% conformance
+**Current Progress:** 12 failing tests total (204 passing, 8 skipped out of 224) — 91% conformance
 
 **Recommended priority:**
 1. **Phase 3** (Functions) - ~18 tests, STRBEFORE/STRAFTER datatyping, REPLACE, UUID/STRUUID
@@ -301,7 +301,13 @@ Focus areas:
 - BNODE counter state sharing across SELECT expressions
 - IF/COALESCE error propagation
 
-**Recently Completed (2026-01-24):**
+**Recently Completed (2026-01-25):**
+- ✅ HAVING with multiple conditions: `(COUNT(*) > 1) (COUNT(*) < 3)` now works
+- ✅ AVG error propagation: Non-numeric values (blank nodes) cause no binding
+- ✅ BNODE per-row seed: Correct blank node identity across result rows
+- ✅ Expression aggregate evaluation framework added
+
+**Previously Completed (2026-01-24):**
 - ✅ TZ function: Extracts timezone string from xsd:dateTime values
 - ✅ TIMEZONE function: Returns xsd:dayTimeDuration from xsd:dateTime values
 - ✅ Comparison operators (=, ==, !=, <, >, <=, >=) in BindExpressionEvaluator
@@ -316,8 +322,7 @@ Focus areas:
 - ✅ Hash functions: MD5, SHA1, SHA256, SHA384, SHA512 all pass
 - ✅ Empty string handling for STRBEFORE/STRAFTER
 - ✅ Negation/EXISTS (12/12 tests) - GRAPH context, MINUS semantics
-- ✅ pp30-pp33 property path grouping and sequences (2026-01-21)
-- ✅ pp06, pp07, pp34, pp35 named graph paths (2026-01-21)
+- ✅ pp30-pp35 property path grouping, sequences, and named graph paths (2026-01-21)
 
 ## Out of Scope
 
