@@ -704,6 +704,14 @@ public partial class QueryExecutor : IDisposable
         if (results.Count == 0)
             return MaterializedQueryResults.Empty();
 
+        // Apply EXISTS/NOT EXISTS filters (must be done after pattern matching)
+        if (_buffer.HasExists && _buffer.ExistsFilterCount > 0)
+        {
+            results = FilterResultsByExists(results, null);
+            if (results.Count == 0)
+                return MaterializedQueryResults.Empty();
+        }
+
         return new MaterializedQueryResults(results, bindings, _stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }

@@ -304,7 +304,11 @@ public class SparqlConformanceTests
 
         return type switch
         {
-            BindingValueType.Uri => SparqlBinding.Uri(value),
+            // Strip angle brackets from URIs (internal format includes them, W3C format doesn't)
+            BindingValueType.Uri => SparqlBinding.Uri(
+                value.Length >= 2 && value[0] == '<' && value[^1] == '>'
+                    ? value[1..^1]
+                    : value),
             BindingValueType.String => ParseLiteralBinding(value),
             BindingValueType.Integer => SparqlBinding.TypedLiteral(value, "http://www.w3.org/2001/XMLSchema#integer"),
             BindingValueType.Double => SparqlBinding.TypedLiteral(value, "http://www.w3.org/2001/XMLSchema#double"),

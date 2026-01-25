@@ -11,6 +11,11 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// </summary>
 public partial class QueryExecutor
 {
+    // Storage for expanded prefix terms in EXISTS evaluation (prevents span-over-temporary)
+    private string? _existsExpandedSubject;
+    private string? _existsExpandedPredicate;
+    private string? _existsExpandedObject;
+
     /// <summary>
     /// Execute a GRAPH-only query and return lightweight materialized results.
     /// Use this for queries with GRAPH clauses to avoid stack overflow from large QueryResults struct.
@@ -343,13 +348,8 @@ public partial class QueryExecutor
             if (state.Results == null)
             {
                 var (patternIdx, graphCtx) = patternInfos[stackTop - 1];
-                if (graphCtx == null && stackTop > 1)
-                {
-                    // Check if graph context is from a variable that's now bound locally
-                    // For now, fail this branch
-                    stackTop--;
-                    continue;
-                }
+                // Note: graphCtx being null is normal for default graph queries.
+                // Only skip if there's a specific issue with graph variable resolution.
 
                 var slot = patterns[patternIdx];
                 state.Results = MaterializeExistsQueryForRow(slot, outerBindings, state.LocalBindings, graphCtx);
@@ -399,9 +399,9 @@ public partial class QueryExecutor
     {
         var results = new List<(string S, string P, string O)>();
 
-        var subject = ResolveExistsTermForRow(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, outerBindings, localBindings);
-        var predicate = ResolveExistsTermForRow(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, outerBindings, localBindings);
-        var obj = ResolveExistsTermForRow(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, outerBindings, localBindings);
+        var subject = ResolveExistsTermForRow(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, outerBindings, localBindings, ExistsTermPosition.Subject);
+        var predicate = ResolveExistsTermForRow(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, outerBindings, localBindings, ExistsTermPosition.Predicate);
+        var obj = ResolveExistsTermForRow(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, outerBindings, localBindings, ExistsTermPosition.Object);
 
         var enumerator = graphContext != null
             ? _store.QueryCurrent(subject, predicate, obj, graphContext.AsSpan())
@@ -424,16 +424,28 @@ public partial class QueryExecutor
     }
 
     /// <summary>
+    /// Term position for EXISTS prefix expansion storage.
+    /// </summary>
+    private enum ExistsTermPosition { Subject, Predicate, Object }
+
+    /// <summary>
     /// Resolve a term for EXISTS evaluation using outer bindings and local bindings.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private ReadOnlySpan<char> ResolveExistsTermForRow(TermType type, int start, int length,
-        BindingTable outerBindings, Dictionary<int, string>? localBindings)
+        BindingTable outerBindings, Dictionary<int, string>? localBindings,
+        ExistsTermPosition position = ExistsTermPosition.Subject)
     {
         if (type != TermType.Variable)
         {
             // Constant - return as-is (with prefix expansion if needed)
             var termSpan = _source.AsSpan().Slice(start, length);
+
+            // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+            if (termSpan.Length == 1 && termSpan[0] == 'a')
+            {
+                return SyntheticTermHelper.RdfType.AsSpan();
+            }
 
             // Handle prefixed names
             if (_buffer?.Prefixes != null && termSpan.Length > 0 && termSpan[0] != '<' && termSpan[0] != '"')
@@ -450,7 +462,20 @@ public partial class QueryExecutor
                         {
                             var iriNs = _source.AsSpan().Slice(mapping.IriStart, mapping.IriLength);
                             var nsWithoutClose = iriNs.Slice(0, iriNs.Length - 1);
-                            return string.Concat(nsWithoutClose, localName, ">").AsSpan();
+                            // Store expanded IRI in position-specific field to keep string alive
+                            var expanded = string.Concat(nsWithoutClose, localName, ">");
+                            switch (position)
+                            {
+                                case ExistsTermPosition.Subject:
+                                    _existsExpandedSubject = expanded;
+                                    return _existsExpandedSubject.AsSpan();
+                                case ExistsTermPosition.Predicate:
+                                    _existsExpandedPredicate = expanded;
+                                    return _existsExpandedPredicate.AsSpan();
+                                default:
+                                    _existsExpandedObject = expanded;
+                                    return _existsExpandedObject.AsSpan();
+                            }
                         }
                     }
                 }
@@ -559,9 +584,9 @@ public partial class QueryExecutor
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private bool QueryExistsPattern(PatternSlot slot, BindingTable bindingTable, string? graphContext)
     {
-        var subject = ResolveExistsTermForRow(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, bindingTable, null);
-        var predicate = ResolveExistsTermForRow(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, bindingTable, null);
-        var obj = ResolveExistsTermForRow(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, bindingTable, null);
+        var subject = ResolveExistsTermForRow(slot.SubjectType, slot.SubjectStart, slot.SubjectLength, bindingTable, null, ExistsTermPosition.Subject);
+        var predicate = ResolveExistsTermForRow(slot.PredicateType, slot.PredicateStart, slot.PredicateLength, bindingTable, null, ExistsTermPosition.Predicate);
+        var obj = ResolveExistsTermForRow(slot.ObjectType, slot.ObjectStart, slot.ObjectLength, bindingTable, null, ExistsTermPosition.Object);
 
         var enumerator = graphContext != null
             ? _store.QueryCurrent(subject, predicate, obj, graphContext.AsSpan())
