@@ -1240,7 +1240,22 @@ internal sealed class GroupedRow
             // Handle DISTINCT
             if (_distinctSets[i] != null)
             {
-                var val = valueStr ?? "";
+                string val;
+                if (varHash == ComputeHash("*".AsSpan()))
+                {
+                    // COUNT(DISTINCT *) - build key from all bound variables in the row
+                    var keyBuilder = new System.Text.StringBuilder();
+                    for (int j = 0; j < bindings.Count; j++)
+                    {
+                        if (j > 0) keyBuilder.Append('\0');
+                        keyBuilder.Append(bindings.GetString(j));
+                    }
+                    val = keyBuilder.ToString();
+                }
+                else
+                {
+                    val = valueStr ?? "";
+                }
                 if (!_distinctSets[i]!.Add(val))
                     continue; // Already seen this value
             }

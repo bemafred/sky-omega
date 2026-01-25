@@ -3544,6 +3544,27 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // Check for SELECT directly inside GRAPH (subquery without extra braces)
+            // W3C test: GRAPH ?g {SELECT (count(*) AS ?c) WHERE { ?s :p ?x }}
+            if (span.Length >= 6 && span[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                // Parse subquery with graph context
+                var subSelect = ParseSubSelect();
+                subSelect.GraphContext = graphTerm;  // Set the graph context
+                pattern.AddSubQuery(subSelect);
+                continue;
+            }
+
+            // Check for VALUES directly inside GRAPH
+            // W3C test: GRAPH ?g { VALUES (?g ?t) { ... } }
+            if (span.Length >= 6 && span[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase))
+            {
+                // Parse VALUES and add to parent pattern
+                // The graph context is already set via the GRAPH clause
+                ParseValues(ref pattern);
+                continue;
+            }
+
             // Check for nested group { ... } which might be a subquery
             if (Peek() == '{')
             {

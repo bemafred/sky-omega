@@ -780,9 +780,10 @@ SELECT ?s ?o1 ?o2
             var parsedVar0 = queryWithValues.Substring(var0Start, var0Len);
             var parsedVar1 = queryWithValues.Substring(var1Start, var1Len);
 
-            // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
+            // Note: Post-query VALUES requires Execute() not ExecuteToMaterialized()
+            // because MaterializedQueryResults doesn't support VALUES filtering
             var executor2 = new QueryExecutor(cleanStore, queryWithValues.AsSpan(), parsed2);
-            var results2 = executor2.ExecuteToMaterialized();
+            var results2 = executor2.Execute();
 
             var rowsWithValues = new List<(string s, string o1, string o2)>();
             while (results2.MoveNext())

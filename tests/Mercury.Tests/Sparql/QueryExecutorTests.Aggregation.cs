@@ -866,12 +866,13 @@ public partial class QueryExecutorTests
         Assert.Equal(AggregateFunction.Count, agg.Function);
         Assert.True(agg.Distinct);
 
-        // Use ExecuteToMaterialized() to avoid stack overflow from ~22KB QueryResults struct
+        // Note: Aggregation queries require Execute() not ExecuteToMaterialized()
+        // because MaterializedQueryResults doesn't support GROUP BY / aggregation
         Store.AcquireReadLock();
         try
         {
             var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteToMaterialized();
+            var results = executor.Execute();
 
             Assert.True(results.MoveNext());
             var row = results.Current;
@@ -884,6 +885,7 @@ public partial class QueryExecutorTests
             Assert.Equal("2", count);
 
             Assert.False(results.MoveNext());
+            results.Dispose();
         }
         finally
         {

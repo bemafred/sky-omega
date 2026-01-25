@@ -426,8 +426,8 @@ public partial class QueryExecutorTests
     [Fact]
     public void Execute_FilterWithRegex_MatchesPattern()
     {
-        // Match names starting with 'A' (stored as "Alice" with quotes, so pattern is ^.A)
-        var query = "SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER(REGEX(?name, \"^.A\")) }";
+        // Match names starting with 'A' (GetLexicalForm strips quotes, so value is just "Alice")
+        var query = "SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name FILTER(REGEX(?name, \"^A\")) }";
         var parser = new SparqlParser(query.AsSpan());
         var parsedQuery = parser.ParseQuery();
 
@@ -446,7 +446,7 @@ public partial class QueryExecutorTests
             }
             results.Dispose();
 
-            // Only Alice's name starts with A (stored as "Alice" with quotes)
+            // Only Alice's name starts with A
             Assert.Single(names);
             Assert.Contains("Alice", names[0]);
         }

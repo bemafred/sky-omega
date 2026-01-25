@@ -309,9 +309,15 @@ public ref partial struct QueryResults
             }
 
             // Bind the aggregate results
+            // Skip empty values - they indicate errors (e.g., AVG with non-numeric values)
+            // Per W3C SPARQL semantics, aggregates with errors should return UNBOUND (no binding)
             for (int i = 0; i < group.AggregateCount; i++)
             {
-                _bindingTable.BindWithHash(group.GetAggregateHash(i), group.GetAggregateValue(i));
+                var value = group.GetAggregateValue(i);
+                if (value.Length > 0)
+                {
+                    _bindingTable.BindWithHash(group.GetAggregateHash(i), value);
+                }
             }
 
             // Evaluate non-aggregate SELECT expressions that may contain aggregate functions

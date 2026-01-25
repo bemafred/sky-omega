@@ -883,14 +883,32 @@ public ref partial struct FilterEvaluator
                 return new Value { Type = ValueType.Unbound };
             }
 
-            // CONCAT only accepts string literals - integers, URIs etc. are errors
-            if (arg.Type != ValueType.String)
+            // Get string representation based on type
+            string partStr;
+            if (arg.Type == ValueType.String)
             {
+                partStr = arg.GetLexicalForm().ToString();
+            }
+            else if (arg.Type == ValueType.Integer)
+            {
+                partStr = arg.IntegerValue.ToString();
+            }
+            else if (arg.Type == ValueType.Double)
+            {
+                partStr = arg.DoubleValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (arg.Type == ValueType.Boolean)
+            {
+                partStr = arg.BooleanValue ? "true" : "false";
+            }
+            else
+            {
+                // URIs, blank nodes, etc. are errors per SPARQL spec
                 SkipToCloseParen();
                 return new Value { Type = ValueType.Unbound };
             }
 
-            parts.Add(arg.GetLexicalForm().ToString());
+            parts.Add(partStr);
 
             // Track language tags for result
             var suffix = arg.GetLangTagOrDatatype();
