@@ -1350,4 +1350,46 @@ WHERE
         }
     }
 
+    [Fact]
+    public void Execute_FilterWithEmptyPrefixedName_Works()
+    {
+        // Test FILTER comparison with empty prefix (e.g., :s1) - W3C bnode01 test
+        Store.AddCurrent("<http://example.org/s1>", "<http://example.org/str>", "\"foo\"");
+        Store.AddCurrent("<http://example.org/s3>", "<http://example.org/str>", "\"BAZ\"");
+
+        // Query with FILTER comparing variable to empty prefixed name
+        var query = @"PREFIX : <http://example.org/>
+SELECT ?a ?s1 WHERE { ?a :str ?s1 FILTER (?a = :s1) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteToMaterialized();
+
+            int count = 0;
+            var bindings = new List<string>();
+            while (results.MoveNext())
+            {
+                var aIdx = results.Current.FindBinding("?a".AsSpan());
+                if (aIdx >= 0)
+                {
+                    bindings.Add(results.Current.GetString(aIdx).ToString());
+                }
+                count++;
+            }
+            results.Dispose();
+
+            // Should match only :s1
+            Assert.Equal(1, count);
+            Assert.Contains("<http://example.org/s1>", bindings);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
 }

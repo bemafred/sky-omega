@@ -429,10 +429,13 @@ public ref partial struct QueryResults
             var filterExpr = _source.Slice(slot.FilterStart, slot.FilterLength);
 
             _filterEvaluator = new FilterEvaluator(filterExpr);
+            // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
             var result = _filterEvaluator.Evaluate(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
-                _bindingTable.GetStringBuffer());
+                _bindingTable.GetStringBuffer(),
+                _buffer.Prefixes,
+                _source);
 
             if (!result) return false;
         }

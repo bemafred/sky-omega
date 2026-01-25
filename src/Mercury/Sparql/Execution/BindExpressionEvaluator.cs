@@ -601,11 +601,12 @@ internal ref struct BindExpressionEvaluator
                 {
                     // BNODE() - no argument, generate fresh blank node
                     Advance();
-                    _bnodeCounter++;
-                    _stringResult = $"_:b{_bnodeCounter}";
+                    var counter = System.Threading.Interlocked.Increment(ref s_bnodeCounter);
+                    _stringResult = $"_:b{counter}";
                     return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
                 }
                 // BNODE(label) - with string argument
+                // Same string in same row returns same bnode, but different rows get different bnodes
                 var labelArg = ParseAdditive();
                 SkipWhitespace();
                 if (Peek() == ')') Advance();
@@ -614,7 +615,9 @@ internal ref struct BindExpressionEvaluator
                 if (label.IsEmpty)
                     return new Value { Type = ValueType.Unbound };
 
-                _stringResult = $"_:{label.ToString()}";
+                // Include row seed so different rows get different bnodes for the same label
+                var rowSeed = s_bnodeRowSeed;
+                _stringResult = $"_:r{rowSeed}_{label.ToString()}";
                 return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
             }
 
@@ -2056,8 +2059,23 @@ internal ref struct BindExpressionEvaluator
     // Field to hold string results to prevent GC of span backing memory
     private string _stringResult = "";
 
-    // Counter for generating unique blank node identifiers
-    private int _bnodeCounter = 0;
+    // Static counter for generating unique blank node identifiers across all evaluations
+    // Uses Interlocked for thread-safety
+    private static int s_bnodeCounter = 0;
+
+    // Per-row seed for BNODE(str) - ensures same string in same row gets same bnode,
+    // but different rows get different bnodes for the same string
+    // Uses Interlocked for thread-safety
+    private static int s_bnodeRowSeed = 0;
+
+    /// <summary>
+    /// Increments the bnode row seed. Call this before processing each new row's SELECT expressions
+    /// to ensure BNODE(str) produces different bnodes for different rows.
+    /// </summary>
+    public static void IncrementBnodeRowSeed()
+    {
+        System.Threading.Interlocked.Increment(ref s_bnodeRowSeed);
+    }
 
     /// <summary>
     /// Coerce a Value to a number. Strings are parsed as numbers.

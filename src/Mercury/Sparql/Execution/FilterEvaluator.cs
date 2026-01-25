@@ -364,7 +364,8 @@ public ref partial struct FilterEvaluator
         }
 
         // Function call or prefixed name (both start with letter)
-        if (IsLetter(ch))
+        // Also handle empty prefix case (:localName) which starts with colon
+        if (IsLetter(ch) || ch == ':')
         {
             return ParseFunctionOrPrefixedName();
         }
@@ -609,7 +610,8 @@ public ref partial struct FilterEvaluator
 
         // Otherwise, it's a prefixed name - try to expand it
         var colonIndex = name.IndexOf(':');
-        if (colonIndex > 0 && _prefixes != null && !_source.IsEmpty)
+        // colonIndex >= 0 handles empty prefix (e.g., :s1 where colon is at index 0)
+        if (colonIndex >= 0 && _prefixes != null && !_source.IsEmpty)
         {
             // Include the colon in the prefix to match the stored format "ex:"
             var prefix = name.Slice(0, colonIndex + 1);
@@ -763,8 +765,8 @@ public ref partial struct FilterEvaluator
             {
                 // BNODE() - no argument, generate fresh blank node
                 Advance();
-                _bnodeCounter++;
-                _bnodeResult = $"_:b{_bnodeCounter}";
+                var counter = System.Threading.Interlocked.Increment(ref s_bnodeCounter);
+                _bnodeResult = $"_:b{counter}";
                 return new Value
                 {
                     Type = ValueType.Uri,
@@ -1403,8 +1405,8 @@ public ref partial struct FilterEvaluator
     // Storage for BNODE result to keep span valid
     private string _bnodeResult = string.Empty;
 
-    // Counter for generating unique blank node identifiers
-    private int _bnodeCounter = 0;
+    // Static counter for generating unique blank node identifiers across all evaluations
+    private static int s_bnodeCounter = 0;
 
     // Storage for TIMEZONE result to keep span valid
     private string _timezoneResult = string.Empty;

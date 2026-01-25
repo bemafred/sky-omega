@@ -714,6 +714,10 @@ public ref partial struct QueryResults
 
             _emptyPatternReturned = true;
 
+            // Increment bnode row seed for this new row - ensures BNODE(str) produces
+            // different bnodes for different rows (same string in same row → same bnode)
+            BindExpressionEvaluator.IncrementBnodeRowSeed();
+
             // Evaluate BIND expressions first (e.g., BIND(UUID() AS ?uuid))
             if (_hasBinds)
             {
@@ -849,6 +853,10 @@ public ref partial struct QueryResults
             {
                 TryMatchOptionalPatterns();
             }
+
+            // Increment bnode row seed for this new row - ensures BNODE(str) produces
+            // different bnodes for different rows (same string in same row → same bnode)
+            BindExpressionEvaluator.IncrementBnodeRowSeed();
 
             // Evaluate BIND expressions before FILTER (BIND may create variables used in FILTER)
             if (_hasBinds)
@@ -1113,9 +1121,14 @@ internal sealed class GroupedRow
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
     private readonly string[] _separators;           // For GROUP_CONCAT
     private readonly string?[] _sampleValues;        // For SAMPLE
+    private readonly bool[] _hasError;               // True if aggregate encountered error (e.g., non-numeric for AVG/SUM)
+
+    // Row count for HAVING COUNT(*) when not in SELECT
+    private long _rowCount;
 
     public int KeyCount => _keyCount;
     public int AggregateCount => _aggCount;
+    public long RowCount => _rowCount;
 
     public GroupedRow(GroupByClause groupBy, SelectClause selectClause, BindingTable bindings, string source)
     {
@@ -1151,6 +1164,7 @@ internal sealed class GroupedRow
         _concatValues = new List<string>?[_aggCount];
         _separators = new string[_aggCount];
         _sampleValues = new string?[_aggCount];
+        _hasError = new bool[_aggCount];
 
         for (int i = 0; i < _aggCount; i++)
         {
@@ -1190,6 +1204,9 @@ internal sealed class GroupedRow
 
     public void UpdateAggregates(BindingTable bindings, string source)
     {
+        // Track total rows for HAVING COUNT(*) when not in SELECT aggregates
+        _rowCount++;
+
         for (int i = 0; i < _aggCount; i++)
         {
             var func = _aggFunctions[i];
@@ -1244,6 +1261,11 @@ internal sealed class GroupedRow
                         _sums[i] += numValue;
                         _decimalSums[i] += decimalValue;
                     }
+                    else if (valueStr != null)
+                    {
+                        // Bound but not numeric - SPARQL error propagation
+                        _hasError[i] = true;
+                    }
                     break;
                 case AggregateFunction.Avg:
                     if (hasNumValue)
@@ -1251,6 +1273,11 @@ internal sealed class GroupedRow
                         _sums[i] += numValue;
                         _decimalSums[i] += decimalValue;
                         _counts[i]++;
+                    }
+                    else if (valueStr != null)
+                    {
+                        // Bound but not numeric - SPARQL error propagation
+                        _hasError[i] = true;
                     }
                     break;
                 case AggregateFunction.Min:
@@ -1261,6 +1288,11 @@ internal sealed class GroupedRow
                         if (decimalValue < _decimalMins[i])
                             _decimalMins[i] = decimalValue;
                     }
+                    else if (valueStr != null)
+                    {
+                        // Bound but not numeric - SPARQL error propagation
+                        _hasError[i] = true;
+                    }
                     break;
                 case AggregateFunction.Max:
                     if (hasNumValue)
@@ -1269,6 +1301,11 @@ internal sealed class GroupedRow
                             _maxes[i] = numValue;
                         if (decimalValue > _decimalMaxes[i])
                             _decimalMaxes[i] = decimalValue;
+                    }
+                    else if (valueStr != null)
+                    {
+                        // Bound but not numeric - SPARQL error propagation
+                        _hasError[i] = true;
                     }
                     break;
                 case AggregateFunction.GroupConcat:
@@ -1288,6 +1325,18 @@ internal sealed class GroupedRow
     {
         for (int i = 0; i < _aggCount; i++)
         {
+            // Check for error first - return empty (no binding) for numeric aggregates with errors
+            if (_hasError[i])
+            {
+                var func = _aggFunctions[i];
+                if (func == AggregateFunction.Sum || func == AggregateFunction.Avg ||
+                    func == AggregateFunction.Min || func == AggregateFunction.Max)
+                {
+                    _aggValues[i] = "";
+                    continue;
+                }
+            }
+
             _aggValues[i] = _aggFunctions[i] switch
             {
                 AggregateFunction.Count => FormatTypedLiteral(_counts[i].ToString(), XsdInteger),

@@ -216,6 +216,10 @@ public ref partial struct QueryResults
                 TryMatchOptionalPatterns();
             }
 
+            // Increment bnode row seed for this new row - ensures BNODE(str) produces
+            // different bnodes for different rows (same string in same row → same bnode)
+            BindExpressionEvaluator.IncrementBnodeRowSeed();
+
             // Evaluate BIND expressions before FILTER (BIND may create variables used in FILTER)
             if (_hasBinds)
             {
@@ -309,6 +313,10 @@ public ref partial struct QueryResults
             {
                 _bindingTable.BindWithHash(group.GetAggregateHash(i), group.GetAggregateValue(i));
             }
+
+            // Evaluate non-aggregate SELECT expressions that may contain aggregate functions
+            // e.g., ((MIN(?p) + MAX(?p)) / 2 AS ?c)
+            EvaluateGroupedSelectExpressions(group);
 
             _returned++;
             return true;
@@ -535,6 +543,17 @@ public ref partial struct QueryResults
                     }
                 }
 
+                // If aggregate not found in SELECT, handle HAVING-only aggregates
+                if (computedValue == null)
+                {
+                    // COUNT(*) in HAVING but not in SELECT - use row count
+                    if (funcName.Equals("COUNT", StringComparison.OrdinalIgnoreCase) &&
+                        aggExpr.Contains("*"))
+                    {
+                        computedValue = group.RowCount.ToString();
+                    }
+                }
+
                 if (computedValue != null)
                 {
                     // Replace the aggregate expression with the computed value
@@ -661,6 +680,139 @@ public ref partial struct QueryResults
     /// <summary>
     /// Move to next result for non-ORDER BY queries (streaming).
     /// </summary>
+
+    /// <summary>
+    /// Evaluate non-aggregate SELECT expressions in grouped results.
+    /// For expressions containing aggregate functions (e.g., (MIN(?p) + MAX(?p)) / 2 AS ?c),
+    /// this method substitutes computed aggregate values and evaluates the expression.
+    /// </summary>
+    private void EvaluateGroupedSelectExpressions(GroupedRow group)
+    {
+        var sourceStr = _source.ToString();
+
+        for (int i = 0; i < _selectClause.AggregateCount; i++)
+        {
+            var agg = _selectClause.GetAggregate(i);
+
+            // Only process expressions (Function == None), not regular aggregates
+            if (agg.Function != AggregateFunction.None) continue;
+
+            // Skip if no expression to evaluate
+            if (agg.VariableLength == 0) continue;
+
+            // Get expression and alias
+            var expr = _source.Slice(agg.VariableStart, agg.VariableLength).ToString();
+            var aliasName = _source.Slice(agg.AliasStart, agg.AliasLength);
+
+            // Substitute aggregate expressions with computed values
+            // This handles expressions like (MIN(?p) + MAX(?p)) / 2
+            var substitutedExpr = SubstituteAggregatesInExpression(expr, group, sourceStr);
+
+            // If substitution failed (aggregate not found), leave unbound
+            if (string.IsNullOrEmpty(substitutedExpr))
+                continue;
+
+            // Evaluate the expression
+            var evaluator = new BindExpressionEvaluator(
+                substitutedExpr.AsSpan(),
+                _bindingTable.GetBindings(),
+                _bindingTable.Count,
+                _bindingTable.GetStringBuffer(),
+                ReadOnlySpan<char>.Empty);
+            var value = evaluator.Evaluate();
+
+            // Bind the result if valid
+            switch (value.Type)
+            {
+                case ValueType.Integer:
+                    _bindingTable.Bind(aliasName, value.IntegerValue);
+                    break;
+                case ValueType.Double:
+                    _bindingTable.Bind(aliasName, value.DoubleValue);
+                    break;
+                case ValueType.Boolean:
+                    _bindingTable.Bind(aliasName, value.BooleanValue);
+                    break;
+                case ValueType.String:
+                case ValueType.Uri:
+                    _bindingTable.Bind(aliasName, value.StringValue);
+                    break;
+                // Unbound values are not bound (leave the variable unset)
+            }
+        }
+    }
+
+    /// <summary>
+    /// Substitute aggregate expressions in an expression with their computed values.
+    /// Returns null if any aggregate produces an error.
+    /// </summary>
+    private string? SubstituteAggregatesInExpression(string expr, GroupedRow group, string source)
+    {
+        var aggregateFunctions = new[] { "COUNT", "SUM", "AVG", "MIN", "MAX", "SAMPLE", "GROUP_CONCAT" };
+
+        foreach (var funcName in aggregateFunctions)
+        {
+            int searchStart = 0;
+            while (true)
+            {
+                int funcIdx = expr.IndexOf(funcName, searchStart, StringComparison.OrdinalIgnoreCase);
+                if (funcIdx < 0) break;
+
+                // Find opening paren
+                int parenStart = funcIdx + funcName.Length;
+                while (parenStart < expr.Length && char.IsWhiteSpace(expr[parenStart]))
+                    parenStart++;
+
+                if (parenStart >= expr.Length || expr[parenStart] != '(')
+                {
+                    searchStart = funcIdx + 1;
+                    continue;
+                }
+
+                // Find matching closing paren
+                int depth = 1;
+                int parenEnd = parenStart + 1;
+                while (parenEnd < expr.Length && depth > 0)
+                {
+                    if (expr[parenEnd] == '(') depth++;
+                    else if (expr[parenEnd] == ')') depth--;
+                    parenEnd++;
+                }
+                parenEnd--; // Back to the closing paren
+
+                var aggExpr = expr.Substring(funcIdx, parenEnd - funcIdx + 1);
+
+                // Try to find matching aggregate in the group
+                string? computedValue = null;
+                for (int i = 0; i < group.AggregateCount; i++)
+                {
+                    var selectAgg = GetAggregateExpressionString(i, source);
+                    if (selectAgg != null && AggregateExpressionsMatch(aggExpr, selectAgg))
+                    {
+                        var aggValue = group.GetAggregateValue(i).ToString();
+                        // If aggregate has error (empty), return null to indicate error
+                        if (string.IsNullOrEmpty(aggValue))
+                            return null;
+                        computedValue = aggValue;
+                        break;
+                    }
+                }
+
+                if (computedValue != null)
+                {
+                    expr = expr.Substring(0, funcIdx) + computedValue + expr.Substring(parenEnd + 1);
+                    searchStart = funcIdx + computedValue.Length;
+                }
+                else
+                {
+                    // Aggregate not found in tracked aggregates - can't evaluate
+                    return null;
+                }
+            }
+        }
+
+        return expr;
+    }
 }
 
 /// <summary>

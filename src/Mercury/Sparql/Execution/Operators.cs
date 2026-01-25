@@ -2201,7 +2201,9 @@ internal ref struct MultiPatternScan
             var filter = pattern.GetFilter(filterIndex);
             var filterExpr = _source.Slice(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
-            if (!evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer()))
+            // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
+            if (!evaluator.Evaluate(bindings.GetBindings(), bindings.Count, bindings.GetStringBuffer(),
+                _prefixes, _source))
             {
                 return false;
             }

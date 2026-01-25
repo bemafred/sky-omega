@@ -1320,7 +1320,9 @@ public partial class QueryExecutor : IDisposable
             var filter = pattern.GetFilter(i);
             var filterExpr = _source.AsSpan(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
-            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+            // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
+            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer(),
+                _buffer.Prefixes, _source.AsSpan()))
             {
                 return false;
             }
@@ -1348,7 +1350,9 @@ public partial class QueryExecutor : IDisposable
             var filter = pattern.GetFilter(filterIndex);
             var filterExpr = _source.AsSpan(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
-            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+            // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
+            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer(),
+                _buffer.Prefixes, _source.AsSpan()))
             {
                 return false;
             }
