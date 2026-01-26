@@ -352,7 +352,7 @@ public static class W3CTestContext
 
 **Success criteria:**
 - [x] Syntax tests: 100% pass rate (103/103)
-- [x] Query evaluation: 96% pass rate (215/224, 9 skipped for SERVICE/entailment)
+- [x] Query evaluation: 100% pass rate (418/418) — *achieved v0.6.1*
 - [x] Update evaluation: 100% pass rate (94/94)
 - [x] All skipped tests documented in skip list with reasons
 

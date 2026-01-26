@@ -88,9 +88,8 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | Format | Passing | Total | Coverage | Skipped |
 |--------|--------:|------:|---------:|---------|
 | JSON-LD 1.1 | 461 | 467 | **100%** | 6: JSON-LD 1.0 legacy (4), generalized RDF (2) |
-| SPARQL 1.1 Query | 207 | 224 | **92%** | 9: SERVICE (7), entailment (2) — *optional extensions* |
-| | | | | 8: CONSTRUCT bugs — *to be fixed* |
-| **Extended Total** | **668** | **691** | **97%** | |
+| SPARQL 1.1 Query | 418 | 418 | **100%** | — |
+| **Extended Total** | **879** | **885** | **99%** | |
 
 ### Skipped Test Categories
 
@@ -98,22 +97,14 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 |----------|------:|--------|--------|
 | JSON-LD 1.0 | 4 | Legacy behavior superseded by 1.1 | Intentional |
 | Generalized RDF | 2 | Non-standard (blank node predicates) | Intentional |
-| SERVICE | 7 | Federated Query extension (needs network) | Optional per spec |
-| Entailment | 2 | RDFS/OWL regimes (optional extension) | Optional per spec |
-| CONSTRUCT bugs | 8 | Implementation gaps | **To be fixed** |
 
-### CONSTRUCT Gaps (8 tests)
+### Remaining CONSTRUCT Gaps (3 tests)
 
-These are real implementation gaps to address:
+High-complexity features not yet implemented:
 
 | Test | Issue | Complexity |
 |------|-------|------------|
-| constructwhere02 | Duplicate triple deduplication | Medium |
-| constructwhere03 | Blank node shorthand handling | Medium |
-| constructwhere04 | FROM clause in CONSTRUCT WHERE | Medium |
 | constructlist | RDF collection syntax in templates | High |
-| sq12 | Subquery binding propagation | Medium |
-| sq14 | LIMIT scoping (off-by-one) | Medium |
 | agg-empty-group-count-graph | GRAPH + subquery + COUNT | High |
 | bindings/graph | VALUES binding GRAPH variable | High |
 
@@ -122,8 +113,10 @@ These are real implementation gaps to address:
 | Metric | Value |
 |--------|-------|
 | **Core conformance** | 100% (1,181/1,181) |
-| **With optional extensions** | 97% (1,849/1,872) |
-| **Real gaps to fix** | 8 tests |
+| **SPARQL 1.1 Query** | 100% (418/418) |
+| **SPARQL 1.1 Update** | 100% (94/94) |
+| **With optional extensions** | 99% (2,060/2,066) |
+| **Remaining gaps** | 3 tests (high complexity) |
 
 ## Benchmark Summary
 

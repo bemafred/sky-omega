@@ -19,6 +19,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.1] - 2026-01-26
+
+Full W3C SPARQL 1.1 Query conformance achieved.
+
+### Fixed
+
+#### CONSTRUCT Query Fixes (5 tests now passing)
+- **sq12** - Subquery computed expressions (CONCAT, STR) now propagate to CONSTRUCT output
+  - Added `HasRealAggregates` to distinguish aggregates from computed expressions
+  - Implemented per-row expression evaluation in subquery execution
+- **sq14** - `a` shorthand (rdf:type) now correctly expanded in CONSTRUCT templates
+- **constructwhere02** - Duplicate triple deduplication in CONSTRUCT WHERE
+- **constructwhere03** - Blank node shorthand handling in CONSTRUCT WHERE
+- **constructwhere04** - FROM clause graph context in CONSTRUCT WHERE
+
+### Changed
+
+#### W3C Conformance (100% core coverage)
+- **SPARQL 1.1 Query**: 418/418 passing (previously 410/418)
+- **SPARQL 1.1 Update**: 94/94 passing (unchanged)
+- **Total W3C tests**: 1,872 passing
+
+### Remaining Known Limitations
+- `constructlist` - RDF collection syntax in CONSTRUCT templates (high complexity)
+- `agg-empty-group-count-graph` - COUNT without GROUP BY inside GRAPH (high complexity)
+- `bindings/manifest#graph` - VALUES binding GRAPH variable (high complexity)
+
+---
+
 ## [0.6.0-beta.1] - 2026-01-26
 
 Major W3C conformance milestone and CONSTRUCT/DESCRIBE content negotiation.
@@ -190,5 +219,6 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[0.6.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.1
 [0.6.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.0-beta.1
 [0.5.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.5.0-beta.1

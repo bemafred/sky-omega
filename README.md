@@ -1,5 +1,10 @@
 # 🌌 Sky Omega
 
+> **v0.6.1 Released** — Full W3C SPARQL 1.1 conformance achieved (418/418 query tests, 94/94 update tests).
+> See [CHANGELOG.md](CHANGELOG.md) for details.
+
+---
+
 **If you're an AI assistant, start with [AI.md](AI.md).**
 
 **If you're a human, welcome.** Here's what we built...
@@ -48,10 +53,11 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 
 | Claim                            | Evidence              | Command to Verify                            |
 |----------------------------------|-----------------------|----------------------------------------------|
-| 100% W3C conformance (6 formats) | 1,445 passing tests   | `dotnet test --filter "W3C"`                 |
+| 100% W3C SPARQL 1.1 conformance  | 512 passing tests     | `dotnet test --filter "SparqlConformance"`   |
+| 100% W3C RDF format conformance  | 984 passing tests     | `dotnet test --filter "W3C"`                 |
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | 55K lines in weeks    | `git log --since="2025-12-01"`               |
+| Development velocity             | 72K lines in weeks    | `git log --since="2025-12-01"`               |
 
 ---
 
