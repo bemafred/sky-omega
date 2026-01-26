@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed
+**Ready for Implementation** (Plan approved)
+
+See [ADR-011-implementation-plan.md](ADR-011-implementation-plan.md) for detailed implementation steps.
 
 ## Context
 
