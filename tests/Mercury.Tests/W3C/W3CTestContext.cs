@@ -44,17 +44,7 @@ public static class W3CTestContext
         // CONSTRUCT/DESCRIBE features not yet fully implemented
         ["agg-empty-group-count-graph"] = "COUNT without GROUP BY inside GRAPH not implemented",
         ["bindings/manifest#graph"] = "VALUES inside GRAPH binding same variable as graph name not implemented",
-        ["constructwhere02"] = "CONSTRUCT WHERE duplicate triple handling not implemented",
-        ["constructwhere03"] = "CONSTRUCT WHERE shortcut with blank nodes not implemented",
-        ["constructwhere04"] = "CONSTRUCT WHERE with DatasetClause not implemented",
         ["constructlist"] = "RDF collection construction in CONSTRUCT not implemented",
-        ["subquery12"] = "CONCAT in CONSTRUCT template not working (returns empty)",
-        ["subquery14"] = "Subquery LIMIT per resource not implemented correctly",
-
-        // Re-enabled after adding CancellationToken support in operators (357f410)
-        // and subquery aggregation support (be3a46e)
-        // Re-enabled test_62a (syntax-BINDscope8) after fixing nested group parsing in
-        // ParseNestedGroupGraphPattern to handle nested { } patterns
     };
 
     /// <summary>

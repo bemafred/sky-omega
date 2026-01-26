@@ -3225,8 +3225,9 @@ internal sealed class BoxedSubQueryExecutor
 
         try
         {
-            // If subquery has aggregates, use aggregation path
-            if (_subSelect.HasAggregates)
+            // If subquery has REAL aggregates (COUNT, SUM, etc.), use aggregation path
+            // Non-aggregate computed expressions (CONCAT, STR, etc.) are handled in ProcessAndAddResult
+            if (_subSelect.HasRealAggregates)
             {
                 return ExecuteWithAggregation(ref bindingTable);
             }
@@ -4179,6 +4180,13 @@ internal sealed class BoxedSubQueryExecutor
                 return false;
         }
 
+        // Evaluate non-aggregate computed expressions (e.g., CONCAT(?F, " ", ?L) AS ?FullName)
+        // These are stored with AggregateFunction.None and need to be evaluated per-row
+        if (_subSelect.HasAggregates && !_subSelect.HasRealAggregates)
+        {
+            EvaluateComputedExpressions(ref innerBindings, source);
+        }
+
         // Apply OFFSET
         if (skipped < _subSelect.Offset)
         {
@@ -4199,6 +4207,57 @@ internal sealed class BoxedSubQueryExecutor
         results.Add(projectedRow);
         returned++;
         return true;
+    }
+
+    /// <summary>
+    /// Evaluates non-aggregate computed expressions (e.g., CONCAT, STR) per-row
+    /// and binds the results to their alias variables.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EvaluateComputedExpressions(ref BindingTable bindings, ReadOnlySpan<char> source)
+    {
+        var stringBuffer = bindings.GetStringBuffer();
+
+        for (int i = 0; i < _subSelect.AggregateCount; i++)
+        {
+            var agg = _subSelect.GetAggregate(i);
+
+            // Only evaluate non-aggregate expressions (Function == None)
+            if (agg.Function != AggregateFunction.None) continue;
+
+            // Skip if no expression to evaluate
+            if (agg.VariableLength == 0) continue;
+
+            // Get expression and alias
+            var expr = source.Slice(agg.VariableStart, agg.VariableLength);
+            var aliasName = source.Slice(agg.AliasStart, agg.AliasLength);
+
+            // Evaluate the expression using BindExpressionEvaluator
+            var evaluator = new BindExpressionEvaluator(expr,
+                bindings.GetBindings(),
+                bindings.Count,
+                stringBuffer,
+                ReadOnlySpan<char>.Empty);  // No base IRI in subquery context
+            var value = evaluator.Evaluate();
+
+            // Bind the result to the alias variable
+            switch (value.Type)
+            {
+                case ValueType.Integer:
+                    bindings.Bind(aliasName, value.IntegerValue);
+                    break;
+                case ValueType.Double:
+                    bindings.Bind(aliasName, value.DoubleValue);
+                    break;
+                case ValueType.Boolean:
+                    bindings.Bind(aliasName, value.BooleanValue);
+                    break;
+                case ValueType.String:
+                case ValueType.Uri:
+                    bindings.Bind(aliasName, value.StringValue);
+                    break;
+            }
+        }
     }
 
     private int ComputeProjectedBindingsHash(ref BindingTable innerBindings, ReadOnlySpan<char> source)

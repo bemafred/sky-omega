@@ -1070,7 +1070,7 @@ public partial class QueryExecutor : IDisposable
         ref readonly var pattern = ref _cachedPattern;
         var template = _buffer.GetConstructTemplate();
 
-        if (pattern.PatternCount == 0 || !template.HasPatterns)
+        if (!template.HasPatterns)
             return ConstructResults.Empty();
 
         // Build binding storage
@@ -1078,7 +1078,25 @@ public partial class QueryExecutor : IDisposable
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
+        // Check for subqueries first (e.g., CONSTRUCT { ?x ?p ?y } WHERE { SELECT ... })
+        if (_buffer.HasSubQueries)
+        {
+            var subResults = ExecuteWithSubQueries();
+            return new ConstructResults(subResults, template, _source, bindings, stringBuffer, _buffer.Prefixes);
+        }
+
+        // If no patterns and no subqueries, return empty
+        if (pattern.PatternCount == 0)
+            return ConstructResults.Empty();
+
         var requiredCount = pattern.RequiredPatternCount;
+
+        // Get graph context from FROM clause if present
+        ReadOnlySpan<char> graphIri = default;
+        if (_defaultGraphs != null && _defaultGraphs.Length == 1)
+        {
+            graphIri = _defaultGraphs[0].AsSpan();
+        }
 
         // Single required pattern - just scan
         if (requiredCount == 1)
@@ -1090,11 +1108,11 @@ public partial class QueryExecutor : IDisposable
             }
 
             var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
+            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
             var queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
 
-            return new ConstructResults(queryResults, template, _source, bindings, stringBuffer);
+            return new ConstructResults(queryResults, template, _source, bindings, stringBuffer, _buffer.Prefixes);
         }
 
         // No required patterns
@@ -1104,10 +1122,11 @@ public partial class QueryExecutor : IDisposable
         }
 
         // Multiple required patterns - need join
-        var multiScan = new MultiPatternScan(_store, _source, pattern, false, default, _buffer.Prefixes);
+        var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri,
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null, _buffer.Prefixes);
         var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
 
-        return new ConstructResults(multiResults, template, _source, bindings, stringBuffer);
+        return new ConstructResults(multiResults, template, _source, bindings, stringBuffer, _buffer.Prefixes);
     }
 
     /// <summary>

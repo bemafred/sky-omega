@@ -1673,6 +1673,23 @@ public struct SubSelect
     public readonly bool HasFilters => _filterCount > 0;
     public readonly bool HasOrderBy => OrderBy.HasOrderBy;
     public readonly bool HasAggregates => _aggregateCount > 0;
+    /// <summary>
+    /// Returns true if there are any real aggregate functions (COUNT, SUM, AVG, etc.).
+    /// Non-aggregate computed expressions (CONCAT, STR, etc.) with AggregateFunction.None
+    /// do not count as real aggregates and should not trigger implicit grouping.
+    /// </summary>
+    public readonly bool HasRealAggregates
+    {
+        get
+        {
+            for (int i = 0; i < _aggregateCount; i++)
+            {
+                if (GetAggregate(i).Function != AggregateFunction.None)
+                    return true;
+            }
+            return false;
+        }
+    }
     public readonly bool HasGroupBy => GroupBy.HasGroupBy;
     public readonly bool HasHaving => Having.HasHaving;
     public readonly int FirstBranchPatternCount => HasUnion ? UnionStartIndex : PatternCount;

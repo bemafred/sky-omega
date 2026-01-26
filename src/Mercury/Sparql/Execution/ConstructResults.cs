@@ -1,6 +1,8 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
@@ -16,6 +18,15 @@ internal ref struct ConstructResults
     private Binding[]? _bindings;
     private char[]? _stringBuffer;
     private bool _isEmpty;
+
+    // Prefix mappings for expanding prefixed names in template
+    private PrefixMapping[]? _prefixes;
+
+    // Storage for expanded prefixed names
+    private string? _expandedTerm;
+
+    // Deduplication: track seen triples (CONSTRUCT returns a SET, not a bag)
+    private HashSet<string>? _seenTriples;
 
     // Current template pattern index and whether we need a new row
     private int _templateIndex;
@@ -38,13 +49,17 @@ internal ref struct ConstructResults
     }
 
     internal ConstructResults(QueryResults queryResults, ConstructTemplate template,
-        ReadOnlySpan<char> source, Binding[] bindings, char[] stringBuffer)
+        ReadOnlySpan<char> source, Binding[] bindings, char[] stringBuffer,
+        PrefixMapping[]? prefixes = null)
     {
         _queryResults = queryResults;
         _template = template;
         _source = source;
         _bindings = bindings;
         _stringBuffer = stringBuffer;
+        _prefixes = prefixes;
+        _expandedTerm = null;
+        _seenTriples = new HashSet<string>();
         _isEmpty = false;
         _templateIndex = 0;
         _needNewRow = true;
@@ -102,10 +117,17 @@ internal ref struct ConstructResults
                 if (_subjectLen == 0 || _predicateLen == 0 || _objectLen == 0)
                     continue;
 
-                _current = new ConstructedTriple(
-                    _outputBuffer.AsSpan(_subjectStart, _subjectLen),
-                    _outputBuffer.AsSpan(_predicateStart, _predicateLen),
-                    _outputBuffer.AsSpan(_objectStart, _objectLen));
+                // Build triple key for deduplication
+                var subject = _outputBuffer.AsSpan(_subjectStart, _subjectLen);
+                var predicate = _outputBuffer.AsSpan(_predicateStart, _predicateLen);
+                var obj = _outputBuffer.AsSpan(_objectStart, _objectLen);
+
+                // CONSTRUCT returns a SET - skip duplicate triples
+                var tripleKey = $"{subject.ToString()} {predicate.ToString()} {obj.ToString()}";
+                if (_seenTriples != null && !_seenTriples.Add(tripleKey))
+                    continue; // Already seen this triple
+
+                _current = new ConstructedTriple(subject, predicate, obj);
 
                 return true;
             }
@@ -131,11 +153,60 @@ internal ref struct ConstructResults
         }
         else
         {
-            // Constant term - copy from source
+            // Constant term - expand prefixed names and copy
             var value = _source.Slice(term.Start, term.Length);
-            value.CopyTo(_outputBuffer.AsSpan(writePos));
-            return writePos + value.Length;
+            var expanded = ExpandPrefixedName(value);
+            expanded.CopyTo(_outputBuffer.AsSpan(writePos));
+            return writePos + expanded.Length;
         }
+    }
+
+    /// <summary>
+    /// Expands a prefixed name to its full IRI using the prefix mappings.
+    /// Also handles 'a' shorthand for rdf:type.
+    /// Returns the original span if not a prefixed name or no matching prefix found.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
+    {
+        // Skip if already a full IRI, literal, or blank node
+        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
+            return term;
+
+        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+        if (term.Length == 1 && term[0] == 'a')
+            return SyntheticTermHelper.RdfType.AsSpan();
+
+        // Look for colon indicating prefixed name
+        var colonIdx = term.IndexOf(':');
+        if (colonIdx < 0 || _prefixes == null)
+            return term;
+
+        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
+        var prefixWithColon = term.Slice(0, colonIdx + 1);
+        var localPart = term.Slice(colonIdx + 1);
+
+        // Find matching prefix in mappings
+        foreach (var mapping in _prefixes)
+        {
+            var mappingPrefix = _source.Slice(mapping.PrefixStart, mapping.PrefixLength);
+            if (prefixWithColon.SequenceEqual(mappingPrefix))
+            {
+                // Found matching prefix, expand to full IRI
+                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
+                var iriBase = _source.Slice(mapping.IriStart, mapping.IriLength);
+
+                // Strip angle brackets from IRI base if present, then build full IRI
+                var iriContent = iriBase;
+                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
+                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
+
+                // Build full IRI: <base + localPart>
+                _expandedTerm = $"<{iriContent.ToString()}{localPart.ToString()}>";
+                return _expandedTerm.AsSpan();
+            }
+        }
+
+        return term;
     }
 
     public void Dispose()

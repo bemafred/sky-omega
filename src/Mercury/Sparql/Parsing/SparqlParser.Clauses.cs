@@ -1403,7 +1403,9 @@ public ref partial struct SparqlParser
                     }
                     else if (agg.AliasLength > 0)
                     {
-                        // It's a non-aggregate expression with alias - just add as projected variable
+                        // It's a non-aggregate expression with alias - store both for evaluation
+                        // (e.g., CONCAT(?F, " ", ?L) AS ?FullName)
+                        subSelect.AddAggregate(agg);
                         subSelect.AddProjectedVariable(agg.AliasStart, agg.AliasLength);
                     }
                 }
