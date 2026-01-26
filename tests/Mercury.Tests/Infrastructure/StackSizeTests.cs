@@ -130,26 +130,36 @@ public class StackSizeTests
     [Fact]
     public void AllScanTypes_PrintSizes()
     {
-        var sizes = new (string Name, int Size)[]
-        {
-            ("QueryResults", Unsafe.SizeOf<QueryResults>()),
-            ("MultiPatternScan", Unsafe.SizeOf<MultiPatternScan>()),
-            ("DefaultGraphUnionScan", Unsafe.SizeOf<DefaultGraphUnionScan>()),
-            ("CrossGraphMultiPatternScan", Unsafe.SizeOf<CrossGraphMultiPatternScan>()),
-            ("SubQueryScan", Unsafe.SizeOf<SubQueryScan>()),
-            ("TriplePatternScan", Unsafe.SizeOf<TriplePatternScan>()),
-        };
+        var queryResultsSize = Unsafe.SizeOf<QueryResults>();
+        var multiPatternScanSize = Unsafe.SizeOf<MultiPatternScan>();
+        var defaultGraphUnionScanSize = Unsafe.SizeOf<DefaultGraphUnionScan>();
+        var crossGraphSize = Unsafe.SizeOf<CrossGraphMultiPatternScan>();
+        var subQuerySize = Unsafe.SizeOf<SubQueryScan>();
+        var triplePatternSize = Unsafe.SizeOf<TriplePatternScan>();
 
-        // This test always passes but documents sizes in test output
-        foreach (var (name, size) in sizes)
-        {
-            // Output via Assert message (visible in detailed test output)
-            Assert.True(true, $"{name}: {size:N0} bytes ({size / 1024.0:F1} KB)");
-        }
+        // Output all sizes in the test output
+        var message = $@"
+=== STACK SIZE MEASUREMENTS ===
+QueryResults:              {queryResultsSize,8:N0} bytes ({queryResultsSize / 1024.0:F1} KB)
+MultiPatternScan:          {multiPatternScanSize,8:N0} bytes ({multiPatternScanSize / 1024.0:F1} KB)
+DefaultGraphUnionScan:     {defaultGraphUnionScanSize,8:N0} bytes ({defaultGraphUnionScanSize / 1024.0:F1} KB)
+CrossGraphMultiPatternScan:{crossGraphSize,8:N0} bytes ({crossGraphSize / 1024.0:F1} KB)
+SubQueryScan:              {subQuerySize,8:N0} bytes ({subQuerySize / 1024.0:F1} KB)
+TriplePatternScan:         {triplePatternSize,8:N0} bytes ({triplePatternSize / 1024.0:F1} KB)
+===============================
+";
 
-        // Verify total is concerning (documents why ADR-011 is critical)
-        var total = Unsafe.SizeOf<QueryResults>();
-        Assert.True(total > 50000, $"QueryResults at {total} bytes should be large enough to cause stack overflow concerns");
+        // Verify sizes meet new baselines after ADR-011 pooling
+        Assert.True(queryResultsSize > 0, message);
+
+        // ADR-011: MultiPatternScan reduced from ~18KB to ~15KB by pooling enumerators
+        // Further reduction requires boxing GraphPattern (~4KB)
+        Assert.True(multiPatternScanSize < 20000,
+            $"MultiPatternScan at {multiPatternScanSize} bytes exceeds post-ADR-011 baseline. {message}");
+
+        // ADR-011: QueryResults reduced from ~90KB to ~80KB
+        Assert.True(queryResultsSize < 85000,
+            $"QueryResults at {queryResultsSize} bytes exceeds post-ADR-011 baseline. {message}");
     }
 
     // ============================================================

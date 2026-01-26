@@ -1897,18 +1897,10 @@ internal ref struct MultiPatternScan
     private string? _expandedObject;
 
     // Current state for each pattern level (support up to 12 patterns for SPARQL-star with multiple annotations)
-    private TemporalResultEnumerator _enum0;
-    private TemporalResultEnumerator _enum1;
-    private TemporalResultEnumerator _enum2;
-    private TemporalResultEnumerator _enum3;
-    private TemporalResultEnumerator _enum4;
-    private TemporalResultEnumerator _enum5;
-    private TemporalResultEnumerator _enum6;
-    private TemporalResultEnumerator _enum7;
-    private TemporalResultEnumerator _enum8;
-    private TemporalResultEnumerator _enum9;
-    private TemporalResultEnumerator _enum10;
-    private TemporalResultEnumerator _enum11;
+    // ADR-011: Changed from 12 inline fields to pooled array to reduce stack size from ~18KB to ~15KB
+    // Note: Nullable because default-constructed struct (as field in another struct) will have null
+    private TemporalResultEnumerator[]? _enumerators;
+    private const int MaxPatternLevels = 12;
 
     private int _currentLevel;
     private bool _init0, _init1, _init2, _init3;
@@ -1987,9 +1979,8 @@ internal ref struct MultiPatternScan
         _init4 = _init5 = _init6 = _init7 = false;
         _init8 = _init9 = _init10 = _init11 = false;
         _exhausted = false;
-        _enum0 = default; _enum1 = default; _enum2 = default; _enum3 = default;
-        _enum4 = default; _enum5 = default; _enum6 = default; _enum7 = default;
-        _enum8 = default; _enum9 = default; _enum10 = default; _enum11 = default;
+        // ADR-011: Rent enumerator array from pool instead of inline storage
+        _enumerators = System.Buffers.ArrayPool<TemporalResultEnumerator>.Shared.Rent(MaxPatternLevels);
         _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
         _bindingCount4 = _bindingCount5 = _bindingCount6 = _bindingCount7 = 0;
         _bindingCount8 = _bindingCount9 = _bindingCount10 = _bindingCount11 = 0;
@@ -2037,18 +2028,8 @@ internal ref struct MultiPatternScan
         _init4 = _init5 = _init6 = _init7 = false;
         _init8 = _init9 = _init10 = _init11 = false;
         _exhausted = false;
-        _enum0 = default;
-        _enum1 = default;
-        _enum2 = default;
-        _enum3 = default;
-        _enum4 = default;
-        _enum5 = default;
-        _enum6 = default;
-        _enum7 = default;
-        _enum8 = default;
-        _enum9 = default;
-        _enum10 = default;
-        _enum11 = default;
+        // ADR-011: Rent enumerator array from pool instead of inline storage
+        _enumerators = System.Buffers.ArrayPool<TemporalResultEnumerator>.Shared.Rent(MaxPatternLevels);
         _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
         _bindingCount4 = _bindingCount5 = _bindingCount6 = _bindingCount7 = 0;
         _bindingCount8 = _bindingCount9 = _bindingCount10 = _bindingCount11 = 0;
@@ -2389,7 +2370,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount0);
         }
 
-        return TryAdvanceEnumerator(ref _enum0, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![0], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel1(scoped ref BindingTable bindings)
@@ -2412,7 +2393,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount1);
         }
 
-        return TryAdvanceEnumerator(ref _enum1, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![1], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel2(scoped ref BindingTable bindings)
@@ -2434,7 +2415,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount2);
         }
 
-        return TryAdvanceEnumerator(ref _enum2, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![2], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel3(scoped ref BindingTable bindings)
@@ -2456,7 +2437,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount3);
         }
 
-        return TryAdvanceEnumerator(ref _enum3, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![3], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel4(scoped ref BindingTable bindings)
@@ -2477,7 +2458,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount4);
         }
 
-        return TryAdvanceEnumerator(ref _enum4, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![4], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel5(scoped ref BindingTable bindings)
@@ -2498,7 +2479,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount5);
         }
 
-        return TryAdvanceEnumerator(ref _enum5, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![5], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel6(scoped ref BindingTable bindings)
@@ -2519,7 +2500,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount6);
         }
 
-        return TryAdvanceEnumerator(ref _enum6, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![6], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel7(scoped ref BindingTable bindings)
@@ -2540,7 +2521,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount7);
         }
 
-        return TryAdvanceEnumerator(ref _enum7, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![7], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel8(scoped ref BindingTable bindings)
@@ -2561,7 +2542,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount8);
         }
 
-        return TryAdvanceEnumerator(ref _enum8, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![8], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel9(scoped ref BindingTable bindings)
@@ -2582,7 +2563,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount9);
         }
 
-        return TryAdvanceEnumerator(ref _enum9, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![9], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel10(scoped ref BindingTable bindings)
@@ -2603,7 +2584,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount10);
         }
 
-        return TryAdvanceEnumerator(ref _enum10, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![10], pattern, ref bindings);
     }
 
     private bool TryAdvanceLevel11(scoped ref BindingTable bindings)
@@ -2624,7 +2605,7 @@ internal ref struct MultiPatternScan
             bindings.TruncateTo(_bindingCount11);
         }
 
-        return TryAdvanceEnumerator(ref _enum11, pattern, ref bindings);
+        return TryAdvanceEnumerator(ref _enumerators![11], pattern, ref bindings);
     }
 
     // Each init method resolves terms and creates the enumerator.
@@ -2632,62 +2613,62 @@ internal ref struct MultiPatternScan
     // Bound variables need their value copied to avoid span escaping issues.
     private void InitializeEnumerator0(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum0);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![0]);
     }
 
     private void InitializeEnumerator1(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum1);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![1]);
     }
 
     private void InitializeEnumerator2(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum2);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![2]);
     }
 
     private void InitializeEnumerator3(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum3);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![3]);
     }
 
     private void InitializeEnumerator4(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum4);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![4]);
     }
 
     private void InitializeEnumerator5(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum5);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![5]);
     }
 
     private void InitializeEnumerator6(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum6);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![6]);
     }
 
     private void InitializeEnumerator7(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum7);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![7]);
     }
 
     private void InitializeEnumerator8(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum8);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![8]);
     }
 
     private void InitializeEnumerator9(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum9);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![9]);
     }
 
     private void InitializeEnumerator10(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum10);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![10]);
     }
 
     private void InitializeEnumerator11(TriplePattern pattern, scoped ref BindingTable bindings)
     {
-        ResolveAndQuery(pattern, ref bindings, out _enum11);
+        ResolveAndQuery(pattern, ref bindings, out _enumerators![11]);
     }
 
     private void ResolveAndQuery(TriplePattern pattern, scoped ref BindingTable bindings, out TemporalResultEnumerator enumerator)
@@ -3038,18 +3019,17 @@ internal ref struct MultiPatternScan
 
     public void Dispose()
     {
-        _enum0.Dispose();
-        _enum1.Dispose();
-        _enum2.Dispose();
-        _enum3.Dispose();
-        _enum4.Dispose();
-        _enum5.Dispose();
-        _enum6.Dispose();
-        _enum7.Dispose();
-        _enum8.Dispose();
-        _enum9.Dispose();
-        _enum10.Dispose();
-        _enum11.Dispose();
+        // ADR-011: Dispose enumerators in pooled array and return array to pool
+        // Note: _enumerators can be null if this is a default-constructed struct (e.g., field in another struct)
+        if (_enumerators != null && _enumerators.Length > 0)
+        {
+            for (int i = 0; i < MaxPatternLevels; i++)
+            {
+                _enumerators![i].Dispose();
+            }
+            System.Buffers.ArrayPool<TemporalResultEnumerator>.Shared.Return(_enumerators);
+            _enumerators = Array.Empty<TemporalResultEnumerator>();
+        }
     }
 }
 
