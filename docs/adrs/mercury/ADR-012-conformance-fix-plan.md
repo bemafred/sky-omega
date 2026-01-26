@@ -1,10 +1,10 @@
 # ADR-012: W3C SPARQL Conformance Fix Plan
 
-**Status:** In Progress
+**Status:** Accepted
 **Created:** 2026-01-19
 **Updated:** 2026-01-26
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1905 W3C tests, 1886 passing (99%), 3 failing, 16 skipped
+**Current:** 1872 W3C tests, 1857 passing (99%), 0 failing, 15 skipped
 
 ## Context
 
@@ -18,12 +18,12 @@ Mercury's SPARQL engine has achieved 99% W3C conformance (1886/1905 tests). For 
 | RDF Term Functions | ✅ 0 | All RDF term function tests pass |
 | DateTime Functions | ✅ 0 | All datetime function tests pass |
 | MINUS/NOT EXISTS | ✅ 0 | All 12 tests pass; ExecuteToMaterialized EXISTS fixed 2026-01-25 |
-| Aggregates | ~2 | Expressions inside aggregates (agg-err-01, agg-err-02) |
+| Aggregates | ✅ 0 | agg-err-01, agg-err-02 fixed 2026-01-26 (expression evaluation in aggregates) |
 | GROUP BY / HAVING | ✅ 0 | agg-group-builtin, group04 fixed 2026-01-25 |
 | EXISTS edge cases | ✅ 0 | All 6 tests pass |
 | VALUES | ✅ 0 | All tests pass |
 | Project expressions | ✅ 0 | Comparison operators fixed 2026-01-24 |
-| BIND scoping | ~1 | Variable scoping in nested groups (bind10) |
+| BIND scoping | ✅ 0 | bind10 fixed 2026-01-26 (scope depth tracking), syntax-BINDscope8 fixed 2026-01-26 |
 
 ## Plan: Phased Approach
 
@@ -271,11 +271,12 @@ dotnet test --filter "Name~pp" tests/Mercury.Tests
 | 7 | VALUES Clause | 0 | 0 | ✅ Done |
 | 8 | XSD Cast Functions | 0 | 0 | ✅ Done |
 
-**Current Progress:** 3 failing tests total (212 passing, 9 skipped out of 224) — 95% conformance for SPARQL 1.1 Query
+**Current Progress:** 0 failing tests (215 passing, 9 skipped out of 224) — 96% conformance for SPARQL 1.1 Query
 
-**Remaining failures:**
-- agg-err-01, agg-err-02: Expressions inside aggregates (e.g., `AVG(IF(...))`)
-- bind10: BIND variable scoping in nested groups
+**All issues resolved (2026-01-26):**
+- ✅ agg-err-01, agg-err-02: Fixed with `ExtractEmbeddedAggregates` and per-row expression evaluation in aggregates
+- ✅ bind10: Fixed with scope depth tracking in parser and filter evaluation
+- ✅ syntax-BINDscope8 (test_62a): Fixed nested group parsing in `ParseNestedGroupGraphPattern`
 
 ### Commands for Each Phase
 
@@ -293,20 +294,18 @@ dotnet test --filter "FullyQualifiedName~W3C" tests/Mercury.Tests
 dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 ```
 
-## Next Steps
+## Completed
 
-**Priority 1: Expressions inside aggregates (~2 tests)**
-- agg-err-01: `(MIN(?p) + MAX(?p)) / 2 AS ?c` - post-aggregation expression evaluation
-- agg-err-02: `AVG(IF(isNumeric(?p), ?p, COALESCE(...)))` - expressions inside aggregate functions
-
-**Root cause:** The `GroupedRow.UpdateAggregates` method looks up values by variable hash, but when the aggregate argument is an expression (not a simple variable), the hash lookup fails. Fix requires evaluating expressions per-row during aggregation.
-
-**Priority 2: BIND scoping (1 test)**
-- bind10: Variables bound by BIND in outer scope should not be visible inside nested groups at filter evaluation time
-
-**Root cause:** SPARQL requires nested groups to be evaluated as independent units. Variables bound by BIND in the outer scope should not propagate into nested groups' filter evaluation context.
+All SPARQL 1.1 conformance issues have been resolved. The remaining 9 skipped Query tests are for SERVICE (requires network) and entailment regimes (not implemented).
 
 **Recently Completed (2026-01-26):**
+- ✅ syntax-BINDscope8 (test_62a): Fixed nested group parsing in `ParseNestedGroupGraphPattern` to handle `{ { } UNION { } }` patterns
+- ✅ agg-err-01: Fixed with `ExtractEmbeddedAggregates` to find MIN/MAX inside expressions
+- ✅ agg-err-02: Fixed with per-row expression evaluation in `UpdateAggregates` using `BindExpressionEvaluator`
+- ✅ bind10: Fixed with scope depth tracking - `ScopeDepth` field in `FilterExpr`/`BindExpr`, `BindScopeDepth` in `Binding`
+- ✅ SPARQL 1.1 Syntax: Now 100% conformance (103/103 tests)
+
+**Previously Completed (2026-01-26):**
 - ✅ Unicode Rune support in N-Triples parser: `\UXXXXXXXX` escapes for supplementary characters (> U+FFFF) now use `System.Text.Rune`
 - ✅ Unicode Rune support in Turtle parser: Fixed 8 locations truncating supplementary characters via `(char)ch` cast
   - `AppendToOutput((char)ch)` → `AppendCodePoint(ch)` in TurtleStreamParser.Terminals.cs (6 locations)
