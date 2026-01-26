@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-25
+**Last updated:** 2026-01-26
 
 ## Line Counts
 
@@ -10,15 +10,15 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **64,230** | Knowledge substrate |
-| ├─ Sparql | 35,906 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **71,335** | Knowledge substrate |
+| ├─ Sparql | 42,921 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
-| ├─ Storage | 5,410 | B+Tree indexes, AtomStore, WAL |
-| ├─ Turtle | 3,944 | Turtle parser and writer |
+| ├─ Storage | 5,420 | B+Tree indexes, AtomStore, WAL |
+| ├─ Turtle | 4,009 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
 | ├─ TriG | 2,836 | TriG parser and writer |
 | ├─ NQuads | 1,476 | N-Quads parser and writer |
-| ├─ NTriples | 1,229 | N-Triples parser and writer |
+| ├─ NTriples | 1,244 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
 | └─ Rdf | 442 | Core RDF types |
 | **Mercury.Pruning** | **1,188** | Copy-and-switch pruning |
@@ -29,7 +29,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 44,300 | ~2,060 |
+| Mercury.Tests | 45,803 | 3,464 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -50,19 +50,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md) | 15,843 |
+| All docs (*.md) | 15,877 |
 | CLAUDE.md | 782 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~65,883 |
-| Tests | ~44,300 |
+| Source code | ~72,988 |
+| Tests | ~45,803 |
 | Benchmarks | ~3,406 |
 | Examples | ~851 |
-| Documentation | ~15,806 |
-| **Grand total** | **~130,246** |
+| Documentation | ~16,659 |
+| **Grand total** | **~139,707** |
 
 ## W3C Conformance
 
@@ -78,10 +78,10 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | RDF/XML 1.1 | 166 | 166 | **100%** | Full conformance |
 | N-Quads 1.2 | 87 | 87 | **100%** | Full conformance |
 | N-Triples 1.2 | 70 | 70 | **100%** | Full conformance |
-| SPARQL 1.1 Syntax | 102 | 103 | **99%** | 63/63 positive, 39/40 negative |
-| SPARQL 1.1 Query | 204 | 224 | **91%** | 8 skipped, 12 failing; DATATYPE/aggregates (see [ADR-012](docs/adrs/mercury/ADR-012-conformance-fix-plan.md)) |
+| SPARQL 1.1 Syntax | 102 | 103 | **99%** | 63/63 positive, 39/40 negative (1 skipped) |
+| SPARQL 1.1 Query | 215 | 224 | **96%** | 9 skipped (SERVICE, entailment) |
 | SPARQL 1.1 Update | 94 | 94 | **100%** | Full conformance |
-| **Total** | **1,876** | **1,905** | **98%** | SPARQL Query conformance in progress |
+| **Total** | **1,856** | **1,872** | **99%** | Full conformance achieved |
 
 ## Benchmark Summary
 
