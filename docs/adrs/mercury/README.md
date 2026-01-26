@@ -11,6 +11,7 @@
 | [ADR-007](ADR-007-union-service-execution.md) | UNION SERVICE Execution | Accepted |
 | [ADR-008](ADR-008-quadstore-pool-unified.md) | QuadStore Pool Unified | Proposed |
 | [ADR-009](ADR-009-stack-overflow-mitigation.md) | Stack Overflow Mitigation Strategy | Accepted |
-| [ADR-010](ADR-010-w3c-test-suite-integration.md) | W3C Test Suite Integration | In Progress |
+| [ADR-010](ADR-010-w3c-test-suite-integration.md) | W3C Test Suite Integration | Accepted |
 | [ADR-011](ADR-011-queryresults-stack-reduction.md) | QueryResults Stack Reduction | Proposed |
-| [ADR-012](ADR-012-conformance-fix-plan.md) | W3C SPARQL Conformance Fix Plan | In Progress |
+| [ADR-012](ADR-012-conformance-fix-plan.md) | W3C SPARQL Conformance Fix Plan | Accepted |
+| [ADR-013](ADR-013-remaining-w3c-sparql-gaps.md) | Remaining W3C SPARQL Gaps | Proposed |
