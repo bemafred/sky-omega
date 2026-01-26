@@ -1,32 +1,32 @@
-# ADR-011: QueryResults Stack Reduction via Discriminated Union
+# ADR-011: QueryResults Stack Reduction via Pooled Enumerators
 
 ## Status
 
-**Blocked** - StructLayout.Explicit approach not feasible
+**In Progress** - Phase 1 complete (enumerator pooling)
 
-### Investigation Findings (2026-01-26)
+### Progress (2026-01-26)
 
-**Actual measured sizes** (3-4x larger than estimates):
-- `QueryResults`: **89,640 bytes (~90KB)** - not 22KB
-- `MultiPatternScan`: **18,080 bytes (~18KB)** - not 7.2KB
-- `DefaultGraphUnionScan`: **33,456 bytes (~33KB)** - not 8KB
-- `CrossGraphMultiPatternScan`: **15,800 bytes (~16KB)** - not 1.5KB
+**Phase 1 Complete: Enumerator Pooling**
 
-**Why StructLayout.Explicit fails**:
+Changed `TemporalQuadEnumerator` and `TemporalResultEnumerator` from `ref struct` to `struct` to enable pooled array storage. Replaced 12 inline enumerator fields in `MultiPatternScan` with `ArrayPool<TemporalResultEnumerator>.Shared`.
+
+**Measured sizes after Phase 1**:
+- `QueryResults`: **80,736 bytes (~79KB)** - reduced from 90KB
+- `MultiPatternScan`: **15,112 bytes (~15KB)** - reduced from 18KB
+- `DefaultGraphUnionScan`: **30,488 bytes (~30KB)** - reduced from 33KB
+- `CrossGraphMultiPatternScan`: **15,800 bytes (~16KB)** - unchanged (has own inline enumerators)
+
+**Next steps (Phase 2)**:
+1. Apply same pooling pattern to `CrossGraphMultiPatternScan` (4 enumerators)
+2. Apply same pooling pattern to `DefaultGraphUnionScan` (embeds MultiPatternScan)
+3. Box `GraphPattern` (~4KB) to move it off the stack
+
+### Original Investigation Findings
+
+**Why StructLayout.Explicit approach was abandoned**:
 1. QueryResults contains `ReadOnlySpan<char>` fields which cannot have `[FieldOffset]` attributes
-2. All scan types are `ref struct` because they contain Span fields
-3. ref structs cannot be boxed or stored in heap-allocated classes
-4. C# has no mechanism to conditionally include fields in a struct
-
-**Alternative approaches blocked by C# constraints**:
-- Boxing scan types: ref structs cannot be boxed
-- Interface-based polymorphism: ref structs cannot implement interfaces in heap-polymorphic way
-- InlineArray union: Still reserves same stack space
-
-**Practical workarounds available**:
-1. Configure test runners with larger stack (short-term)
-2. More aggressive early materialization in QueryExecutor (medium-term)
-3. Major architectural refactor to remove Span from scan types (long-term, breaks zero-GC)
+2. However, `TemporalQuadEnumerator` and `TemporalResultEnumerator` do NOT contain Span fields
+3. These could be changed from `ref struct` to `struct`, enabling pooled array storage
 
 See [ADR-011-implementation-plan.md](ADR-011-implementation-plan.md) for detailed investigation notes.
 
