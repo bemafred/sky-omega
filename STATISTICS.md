@@ -10,7 +10,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **71,335** | Knowledge substrate |
+| **Mercury (total)** | **71,567** | Knowledge substrate |
 | ├─ Sparql | 42,921 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 5,420 | B+Tree indexes, AtomStore, WAL |
@@ -29,7 +29,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 45,803 | 3,464 |
+| Mercury.Tests | 46,202 | 3,460 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -57,12 +57,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~72,988 |
-| Tests | ~45,803 |
+| Source code | ~73,220 |
+| Tests | ~46,202 |
 | Benchmarks | ~3,406 |
 | Examples | ~851 |
 | Documentation | ~16,659 |
-| **Grand total** | **~139,707** |
+| **Grand total** | **~140,338** |
 
 ## W3C Conformance
 
