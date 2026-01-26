@@ -2,13 +2,13 @@
 
 **Status:** In Progress
 **Created:** 2026-01-19
-**Updated:** 2026-01-25
+**Updated:** 2026-01-26
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped
-**Current:** 1905 W3C tests, 1885 passing (99%), 4 failing, 16 skipped
+**Current:** 1905 W3C tests, 1886 passing (99%), 3 failing, 16 skipped
 
 ## Context
 
-Mercury's SPARQL engine has achieved 99% W3C conformance (1885/1905 tests). For SPARQL 1.1 Query specifically: 212/224 passing (95%). The remaining failing tests cluster around specific areas:
+Mercury's SPARQL engine has achieved 99% W3C conformance (1886/1905 tests). For SPARQL 1.1 Query specifically: 221/224 passing (99%). The remaining failing tests cluster around specific areas:
 
 | Category | Failures | Root Cause |
 |----------|----------|------------|
@@ -305,6 +305,15 @@ dotnet test --filter "Name~SUM" tests/Mercury.Tests -v d
 - bind10: Variables bound by BIND in outer scope should not be visible inside nested groups at filter evaluation time
 
 **Root cause:** SPARQL requires nested groups to be evaluated as independent units. Variables bound by BIND in the outer scope should not propagate into nested groups' filter evaluation context.
+
+**Recently Completed (2026-01-26):**
+- ✅ Unicode Rune support in N-Triples parser: `\UXXXXXXXX` escapes for supplementary characters (> U+FFFF) now use `System.Text.Rune`
+- ✅ Unicode Rune support in Turtle parser: Fixed 8 locations truncating supplementary characters via `(char)ch` cast
+  - `AppendToOutput((char)ch)` → `AppendCodePoint(ch)` in TurtleStreamParser.Terminals.cs (6 locations)
+  - `_sb.Append((char)ch)` → `AppendCodePointToSb(ch)` in TurtleStreamParser.Structures.cs (2 locations)
+- ✅ All UTF8 boundary tests pass: localName_with_assigned_nfc, localName_with_nfc, LITERAL1/2/LONG1/LONG2_with_UTF8_boundaries
+- ✅ prefix_with_PN_CHARS_BASE_character_boundaries: Prefix names with supplementary Unicode characters
+- ✅ turtle-subm-16: Long literals with Cuneiform escapes (`\U00012451`)
 
 **Recently Completed (2026-01-25):**
 - ✅ STRBEFORE/STRAFTER datatyping: Fixed `GetLexicalForm()` to handle empty string literals like `""@en`

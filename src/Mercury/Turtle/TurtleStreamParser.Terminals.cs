@@ -770,7 +770,8 @@ public sealed partial class TurtleStreamParser
             }
 
             Consume();
-            AppendToOutput((char)ch);
+            // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)
+            AppendCodePoint(ch);
         }
 
         var iriSpan = GetOutputSpan(start);
@@ -895,7 +896,8 @@ public sealed partial class TurtleStreamParser
                 }
 
                 Consume();
-                AppendToOutput((char)ch);
+                // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)
+                AppendCodePoint(ch);
             }
         }
 
@@ -988,7 +990,8 @@ public sealed partial class TurtleStreamParser
             if (IsPnChars(ch) || ch == ':')
             {
                 Consume();
-                AppendToOutput((char)ch);
+                // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)
+                AppendCodePoint(ch);
             }
             else if (ch == '.')
             {
@@ -1178,7 +1181,8 @@ public sealed partial class TurtleStreamParser
             else
             {
                 Consume();
-                AppendToOutput((char)ch);
+                // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)
+                AppendCodePoint(ch);
             }
         }
 
@@ -1219,7 +1223,8 @@ public sealed partial class TurtleStreamParser
             else
             {
                 Consume();
-                AppendToOutput((char)ch);
+                // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)
+                AppendCodePoint(ch);
             }
         }
 
@@ -1371,7 +1376,8 @@ public sealed partial class TurtleStreamParser
             if (IsPnCharsU(ch) || char.IsDigit((char)ch) || IsPnChars(ch))
             {
                 Consume();
-                AppendToOutput((char)ch);
+                // Use AppendCodePoint for proper handling of supplementary characters (> U+FFFF)
+                AppendCodePoint(ch);
             }
             else if (ch == '.')
             {

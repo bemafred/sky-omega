@@ -115,7 +115,8 @@ public sealed partial class TurtleStreamParser
             throw ParserException("Invalid prefix name");
 
         Consume();
-        _sb.Append((char)firstCh);
+        // Use AppendCodePointToSb for proper handling of supplementary characters (> U+FFFF)
+        AppendCodePointToSb(firstCh);
 
         while (true)
         {
@@ -142,10 +143,11 @@ public sealed partial class TurtleStreamParser
                 throw ParserException("Invalid prefix name");
 
             Consume();
-            _sb.Append((char)ch);
+            // Use AppendCodePointToSb for proper handling of supplementary characters (> U+FFFF)
+            AppendCodePointToSb(ch);
         }
     }
-    
+
     /// <summary>
     /// [5] base ::= '@base' IRIREF '.'
     /// [8] sparqlBase ::= "BASE" IRIREF
