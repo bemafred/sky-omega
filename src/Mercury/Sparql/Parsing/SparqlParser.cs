@@ -27,6 +27,7 @@ public ref partial struct SparqlParser
     private int _blankNodePropListCounter; // Counter for generating synthetic blank nodes for [ ] property lists
     private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
     private readonly int _maxDepth; // Maximum allowed recursion depth
+    private int _scopeDepth; // Current nested group scope depth for BIND/FILTER scoping
 
     // Default maximum query depth (subqueries, property paths, quoted triples)
     public const int DefaultMaxDepth = 10;

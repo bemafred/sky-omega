@@ -1106,6 +1106,7 @@ internal sealed class GroupedRow
     private readonly string[] _aggValues;      // Final computed values
     private readonly AggregateFunction[] _aggFunctions;
     private readonly int[] _aggVarHashes;      // Hash of source variable name
+    private readonly string?[] _aggExpressions;  // Expression string for complex expressions (null if simple variable)
     private readonly int _aggCount;
 
     // Aggregate accumulators
@@ -1152,6 +1153,7 @@ internal sealed class GroupedRow
         _aggValues = new string[_aggCount];
         _aggFunctions = new AggregateFunction[_aggCount];
         _aggVarHashes = new int[_aggCount];
+        _aggExpressions = new string?[_aggCount];
         _counts = new long[_aggCount];
         _sums = new double[_aggCount];
         _mins = new double[_aggCount];
@@ -1175,9 +1177,18 @@ internal sealed class GroupedRow
             var aliasName = source.AsSpan(agg.AliasStart, agg.AliasLength);
             _aggHashes[i] = ComputeHash(aliasName);
 
-            // Hash of source variable
+            // Hash of source variable/expression
             var varName = source.AsSpan(agg.VariableStart, agg.VariableLength);
             _aggVarHashes[i] = ComputeHash(varName);
+
+            // Check if this is a complex expression (not a simple variable)
+            // Simple variables start with ? or $, or are just *
+            var trimmed = varName.Trim();
+            bool isSimpleVariable = trimmed.Length == 0 ||
+                                    trimmed[0] == '?' ||
+                                    trimmed[0] == '$' ||
+                                    (trimmed.Length == 1 && trimmed[0] == '*');
+            _aggExpressions[i] = isSimpleVariable ? null : varName.ToString();
 
             // Initialize accumulators
             _mins[i] = double.MaxValue;
@@ -1222,18 +1233,72 @@ internal sealed class GroupedRow
             // For COUNT(*), we don't need a specific variable
             if (varHash != ComputeHash("*".AsSpan()))
             {
-                var idx = bindings.FindBindingByHash(varHash);
-                if (idx >= 0)
+                // Check if we have a complex expression that needs evaluation
+                var expr = _aggExpressions[i];
+                if (expr != null)
                 {
-                    valueStr = bindings.GetString(idx).ToString();
-                    // Use RDF-aware numeric parsing to handle typed literals like "1"^^<xsd:integer>
-                    hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
+                    // Evaluate the complex expression (e.g., IF(isNumeric(?p), ?p, COALESCE(...)))
+                    var evaluator = new BindExpressionEvaluator(
+                        expr.AsSpan(),
+                        bindings.GetBindings(),
+                        bindings.Count,
+                        bindings.GetStringBuffer());
+                    var value = evaluator.Evaluate();
+
+                    // Convert the evaluated value to the format expected by aggregation
+                    switch (value.Type)
+                    {
+                        case ValueType.Integer:
+                            valueStr = $"\"{value.IntegerValue}\"^^<http://www.w3.org/2001/XMLSchema#integer>";
+                            numValue = value.IntegerValue;
+                            decimalValue = value.IntegerValue;
+                            hasNumValue = true;
+                            isDouble = false;
+                            break;
+                        case ValueType.Double:
+                            valueStr = $"\"{value.DoubleValue.ToString(CultureInfo.InvariantCulture)}\"^^<http://www.w3.org/2001/XMLSchema#double>";
+                            numValue = value.DoubleValue;
+                            // Store decimal approximation for decimal mode
+                            try { decimalValue = (decimal)value.DoubleValue; }
+                            catch { decimalValue = 0; }
+                            hasNumValue = true;
+                            isDouble = true;
+                            break;
+                        case ValueType.Boolean:
+                            valueStr = value.BooleanValue ? "true" : "false";
+                            break;
+                        case ValueType.Uri:
+                        case ValueType.String:
+                            valueStr = value.StringValue.ToString();
+                            // Try to parse as numeric
+                            if (valueStr != null)
+                            {
+                                hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
+                            }
+                            break;
+                        case ValueType.Unbound:
+                            // Expression evaluated to error/unbound - skip for most aggregates
+                            if (func != AggregateFunction.Count)
+                                continue;
+                            break;
+                    }
                 }
                 else
                 {
-                    // Variable not bound - skip for most aggregates
-                    if (func != AggregateFunction.Count)
-                        continue;
+                    // Simple variable lookup
+                    var idx = bindings.FindBindingByHash(varHash);
+                    if (idx >= 0)
+                    {
+                        valueStr = bindings.GetString(idx).ToString();
+                        // Use RDF-aware numeric parsing to handle typed literals like "1"^^<xsd:integer>
+                        hasNumValue = TryParseRdfNumeric(valueStr, out numValue, out decimalValue, out isDouble);
+                    }
+                    else
+                    {
+                        // Variable not bound - skip for most aggregates
+                        if (func != AggregateFunction.Count)
+                            continue;
+                    }
                 }
             }
 

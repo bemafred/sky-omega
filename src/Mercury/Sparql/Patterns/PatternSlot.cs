@@ -87,15 +87,20 @@ internal ref struct PatternSlot
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Filter (Kind == Filter)
-    // Layout: [Kind:1][pad:3][Start:4][Length:4] = 12 bytes
+    // Layout: [Kind:1][pad:3][Start:4][Length:4][ScopeDepth:4] = 16 bytes
     // ───────────────────────────────────────────────────────────────────────
-    
+
     public ref int FilterStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
     public ref int FilterLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
+    /// <summary>
+    /// Scope depth of this filter (0 = top level, 1 = first nested group, etc.)
+    /// Used to exclude BIND variables from outer scopes per SPARQL scoping rules.
+    /// </summary>
+    public ref int FilterScopeDepth => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Bind (Kind == Bind)
-    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4][AfterPatternIndex:4] = 24 bytes
+    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4][AfterPatternIndex:4][ScopeDepth:4] = 28 bytes
     // ───────────────────────────────────────────────────────────────────────
 
     public ref int BindExprStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
@@ -108,6 +113,11 @@ internal ref struct PatternSlot
     /// BINDs with AfterPatternIndex >= 0 are evaluated inline by MultiPatternScan.
     /// </summary>
     public ref int BindAfterPatternIndex => ref MemoryMarshal.AsRef<int>(_span.Slice(20, 4));
+    /// <summary>
+    /// Scope depth of this BIND (0 = top level, 1 = first nested group, etc.)
+    /// Used to exclude this binding from filters in deeper scopes per SPARQL scoping rules.
+    /// </summary>
+    public ref int BindScopeDepth => ref MemoryMarshal.AsRef<int>(_span.Slice(24, 4));
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: GraphHeader (Kind == GraphHeader)
@@ -248,12 +258,16 @@ internal ref struct PatternArray
     /// <summary>
     /// Add a filter expression
     /// </summary>
-    public void AddFilter(int start, int length)
+    /// <param name="start">Start offset of the filter expression in the source</param>
+    /// <param name="length">Length of the filter expression</param>
+    /// <param name="scopeDepth">Scope depth (0 = top level, 1 = first nested group, etc.)</param>
+    public void AddFilter(int start, int length, int scopeDepth = 0)
     {
         var slot = AllocateSlot();
         slot.Kind = PatternKind.Filter;
         slot.FilterStart = start;
         slot.FilterLength = length;
+        slot.FilterScopeDepth = scopeDepth;
     }
     
     /// <summary>
@@ -264,7 +278,8 @@ internal ref struct PatternArray
     /// <param name="varStart">Start offset of the target variable (including ?)</param>
     /// <param name="varLen">Length of the variable name</param>
     /// <param name="afterPatternIndex">Triple pattern index after which to evaluate (-1 for before any patterns)</param>
-    public void AddBind(int exprStart, int exprLen, int varStart, int varLen, int afterPatternIndex = -1)
+    /// <param name="scopeDepth">Scope depth (0 = top level, 1 = first nested group, etc.)</param>
+    public void AddBind(int exprStart, int exprLen, int varStart, int varLen, int afterPatternIndex = -1, int scopeDepth = 0)
     {
         var slot = AllocateSlot();
         slot.Kind = PatternKind.Bind;
@@ -273,6 +288,7 @@ internal ref struct PatternArray
         slot.BindVarStart = varStart;
         slot.BindVarLength = varLen;
         slot.BindAfterPatternIndex = afterPatternIndex;
+        slot.BindScopeDepth = scopeDepth;
     }
     
     /// <summary>
@@ -1699,14 +1715,14 @@ internal static class QueryBufferAdapter
         for (int i = 0; i < gp.FilterCount; i++)
         {
             var f = gp.GetFilter(i);
-            patterns.AddFilter(f.Start, f.Length);
+            patterns.AddFilter(f.Start, f.Length, f.ScopeDepth);
         }
 
         // Add binds
         for (int i = 0; i < gp.BindCount; i++)
         {
             var b = gp.GetBind(i);
-            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength, b.AfterPatternIndex);
+            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength, b.AfterPatternIndex, b.ScopeDepth);
         }
 
         // Add GRAPH clauses

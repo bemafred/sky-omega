@@ -27,6 +27,10 @@ public ref partial struct FilterEvaluator
     private ReadOnlySpan<char> _source;
     private string? _expandedPrefixBuffer;
 
+    // BIND scope depth filtering (for nested group scoping)
+    // When >= 0, exclude bindings from BINDs with BindScopeDepth < this value
+    private int _filterScopeDepth;
+
     public FilterEvaluator(ReadOnlySpan<char> expression)
     {
         _expression = expression;
@@ -37,6 +41,7 @@ public ref partial struct FilterEvaluator
         _prefixes = null;
         _source = ReadOnlySpan<char>.Empty;
         _expandedPrefixBuffer = null;
+        _filterScopeDepth = -1; // Disabled by default
     }
 
     /// <summary>
@@ -65,6 +70,25 @@ public ref partial struct FilterEvaluator
         _bindingStrings = stringBuffer;
         _prefixes = prefixes;
         _source = source;
+        _filterScopeDepth = -1; // No scope filtering
+        return EvaluateOrExpression();
+    }
+
+    /// <summary>
+    /// Evaluate FILTER expression against current bindings with prefix expansion and scope depth support.
+    /// Bindings from BINDs with scope depth less than filterScopeDepth are excluded from lookup.
+    /// This implements SPARQL semantics where variables from outer BIND don't affect nested group filters.
+    /// </summary>
+    internal bool Evaluate(ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer,
+        PrefixMapping[]? prefixes, ReadOnlySpan<char> source, int filterScopeDepth)
+    {
+        _position = 0;
+        _bindingData = bindings;
+        _bindingCount = bindingCount;
+        _bindingStrings = stringBuffer;
+        _prefixes = prefixes;
+        _source = source;
+        _filterScopeDepth = filterScopeDepth;
         return EvaluateOrExpression();
     }
 
@@ -431,7 +455,18 @@ public ref partial struct FilterEvaluator
         for (int i = 0; i < _bindingCount; i++)
         {
             if (_bindingData[i].VariableNameHash == hash)
+            {
+                // Check BIND scope depth compatibility
+                // If _filterScopeDepth is set (>= 0), exclude bindings from BINDs at shallower scopes
+                // A binding is from a BIND if BindScopeDepth >= 0, otherwise it's from a triple pattern (-1)
+                var bindingScopeDepth = _bindingData[i].BindScopeDepth;
+                if (_filterScopeDepth >= 0 && bindingScopeDepth >= 0 && bindingScopeDepth < _filterScopeDepth)
+                {
+                    // This binding is from a BIND at a shallower scope - skip it
+                    continue;
+                }
                 return i;
+            }
         }
         return -1;
     }

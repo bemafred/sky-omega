@@ -427,15 +427,18 @@ public ref partial struct QueryResults
 
             var slot = patterns[i];
             var filterExpr = _source.Slice(slot.FilterStart, slot.FilterLength);
+            var filterScopeDepth = slot.FilterScopeDepth;
 
             _filterEvaluator = new FilterEvaluator(filterExpr);
             // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
+            // Also pass filter scope depth to exclude BIND variables from outer scopes
             var result = _filterEvaluator.Evaluate(
                 _bindingTable.GetBindings(),
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 _buffer.Prefixes,
-                _source);
+                _source,
+                filterScopeDepth);
 
             if (!result) return false;
         }
@@ -1079,16 +1082,20 @@ public ref partial struct QueryResults
             {
                 case ValueType.Integer:
                     _bindingTable.Bind(varName, value.IntegerValue);
+                    _bindingTable.SetLastBindScopeDepth(slot.BindScopeDepth);
                     break;
                 case ValueType.Double:
                     _bindingTable.Bind(varName, value.DoubleValue);
+                    _bindingTable.SetLastBindScopeDepth(slot.BindScopeDepth);
                     break;
                 case ValueType.Boolean:
                     _bindingTable.Bind(varName, value.BooleanValue);
+                    _bindingTable.SetLastBindScopeDepth(slot.BindScopeDepth);
                     break;
                 case ValueType.String:
                 case ValueType.Uri:
                     _bindingTable.Bind(varName, value.StringValue);
+                    _bindingTable.SetLastBindScopeDepth(slot.BindScopeDepth);
                     break;
             }
         }

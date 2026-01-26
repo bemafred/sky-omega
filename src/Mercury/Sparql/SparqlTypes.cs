@@ -1250,8 +1250,9 @@ public enum TermType : byte
 /// </summary>
 public struct FilterExpr
 {
-    public int Start;   // Offset into source (after "FILTER")
-    public int Length;  // Length of expression
+    public int Start;      // Offset into source (after "FILTER")
+    public int Length;     // Length of expression
+    public int ScopeDepth; // Scope depth (0 = top level, 1 = first nested group, etc.)
 }
 
 /// <summary>
@@ -1463,6 +1464,11 @@ public struct BindExpr
     /// as a constraint in subsequent patterns.
     /// </summary>
     public int AfterPatternIndex;
+    /// <summary>
+    /// Scope depth (0 = top level, 1 = first nested group, etc.)
+    /// Used to exclude this binding from filters in deeper scopes per SPARQL scoping rules.
+    /// </summary>
+    public int ScopeDepth;
 }
 
 /// <summary>
@@ -2137,6 +2143,7 @@ public ref struct BindingTable
         binding.IntegerValue = value;
         binding.StringOffset = _stringOffset;
         binding.StringLength = written;
+        binding.BindScopeDepth = -1; // From triple pattern, not BIND
         _stringOffset += written;
     }
 
@@ -2162,6 +2169,7 @@ public ref struct BindingTable
         binding.DoubleValue = value;
         binding.StringOffset = _stringOffset;
         binding.StringLength = written;
+        binding.BindScopeDepth = -1; // From triple pattern, not BIND
         _stringOffset += written;
     }
 
@@ -2185,6 +2193,7 @@ public ref struct BindingTable
         binding.BooleanValue = value;
         binding.StringOffset = _stringOffset;
         binding.StringLength = len;
+        binding.BindScopeDepth = -1; // From triple pattern, not BIND
         _stringOffset += len;
     }
 
@@ -2205,6 +2214,7 @@ public ref struct BindingTable
         binding.Type = BindingValueType.String;
         binding.StringOffset = _stringOffset;
         binding.StringLength = value.Length;
+        binding.BindScopeDepth = -1; // From triple pattern, not BIND
 
         _stringOffset += value.Length;
     }
@@ -2226,6 +2236,7 @@ public ref struct BindingTable
         binding.Type = BindingValueType.Uri;
         binding.StringOffset = _stringOffset;
         binding.StringLength = value.Length;
+        binding.BindScopeDepth = -1; // From triple pattern, not BIND
 
         _stringOffset += value.Length;
     }
@@ -2247,8 +2258,22 @@ public ref struct BindingTable
         binding.Type = BindingValueType.String;
         binding.StringOffset = _stringOffset;
         binding.StringLength = value.Length;
+        binding.BindScopeDepth = -1; // From triple pattern, not BIND
 
         _stringOffset += value.Length;
+    }
+
+    /// <summary>
+    /// Set the scope depth of the last added binding.
+    /// Call this after Bind() when adding a binding from a BIND expression.
+    /// </summary>
+    /// <param name="scopeDepth">The scope depth of the BIND expression</param>
+    public void SetLastBindScopeDepth(int scopeDepth)
+    {
+        if (_count > 0)
+        {
+            _bindings[_count - 1].BindScopeDepth = scopeDepth;
+        }
     }
 
     /// <summary>
@@ -2418,6 +2443,13 @@ public struct Binding
     public bool BooleanValue;
     public int StringOffset;
     public int StringLength;
+    /// <summary>
+    /// Scope depth where this binding was created.
+    /// -1 = from triple pattern match, >= 0 = from BIND at that scope depth.
+    /// Used for BIND scoping rules where filters in nested groups should not
+    /// see BIND variables from outer scopes.
+    /// </summary>
+    public int BindScopeDepth;
 }
 
 /// <summary>

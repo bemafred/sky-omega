@@ -874,4 +874,44 @@ public class SparqlParserTests
     }
 
     #endregion
+
+    #region Embedded Aggregate Extraction
+
+    [Fact]
+    public void EmbeddedAggregates_ExtractsMinMaxFromExpression()
+    {
+        // This tests that embedded aggregates like MIN(?p) and MAX(?p) inside an expression
+        // are extracted and tracked separately for computation
+        var query = @"PREFIX : <http://example.com/data/#>
+SELECT ?g (AVG(?p) AS ?avg) ((MIN(?p) + MAX(?p)) / 2 AS ?c)
+WHERE { ?g :p ?p }
+GROUP BY ?g";
+
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        // Should have 4 aggregates:
+        // 1. AVG(?p) AS ?avg
+        // 2. (MIN(?p) + MAX(?p)) / 2 AS ?c (the expression itself, Function=None)
+        // 3. MIN(?p) - extracted hidden aggregate
+        // 4. MAX(?p) - extracted hidden aggregate
+        Assert.True(result.SelectClause.AggregateCount >= 4,
+            $"Expected at least 4 aggregates, got {result.SelectClause.AggregateCount}");
+
+        // Verify we have AVG, MIN, MAX tracked
+        bool hasAvg = false, hasMin = false, hasMax = false;
+        for (int i = 0; i < result.SelectClause.AggregateCount; i++)
+        {
+            var agg = result.SelectClause.GetAggregate(i);
+            if (agg.Function == AggregateFunction.Avg) hasAvg = true;
+            if (agg.Function == AggregateFunction.Min) hasMin = true;
+            if (agg.Function == AggregateFunction.Max) hasMax = true;
+        }
+
+        Assert.True(hasAvg, "Missing AVG aggregate");
+        Assert.True(hasMin, "Missing MIN aggregate (should be extracted from expression)");
+        Assert.True(hasMax, "Missing MAX aggregate (should be extracted from expression)");
+    }
+
+    #endregion
 }

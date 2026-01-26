@@ -709,6 +709,10 @@ public ref partial struct SparqlParser
 
                             // Also add to aggregates list so scope validation can find the alias
                             clause.AddAggregate(agg);
+
+                            // Extract embedded aggregates from the expression (e.g., MIN(?p), MAX(?p) in "(MIN(?p) + MAX(?p)) / 2")
+                            // These need to be tracked separately so they can be computed during aggregation
+                            ExtractEmbeddedAggregates(agg.VariableStart, agg.VariableLength, ref clause);
                         }
                     }
                 }
@@ -1049,6 +1053,176 @@ public ref partial struct SparqlParser
             Advance();
 
         return agg;
+    }
+
+    /// <summary>
+    /// Extracts embedded aggregate function calls from an expression and adds them to the SelectClause.
+    /// For example, "(MIN(?p) + MAX(?p)) / 2" contains MIN(?p) and MAX(?p) which need to be tracked.
+    /// </summary>
+    private void ExtractEmbeddedAggregates(int exprStart, int exprLength, ref SelectClause clause)
+    {
+        var expr = _source.Slice(exprStart, exprLength);
+
+        var aggregateFunctions = new[] { ("COUNT", 5), ("SUM", 3), ("AVG", 3), ("MIN", 3), ("MAX", 3), ("SAMPLE", 6), ("GROUP_CONCAT", 12) };
+
+        int searchStart = 0;
+        while (searchStart < expr.Length)
+        {
+            // Find the next aggregate function
+            int bestMatch = -1;
+            int bestMatchLen = 0;
+            AggregateFunction bestFunc = AggregateFunction.None;
+
+            foreach (var (funcName, funcLen) in aggregateFunctions)
+            {
+                if (searchStart + funcLen > expr.Length) continue;
+
+                var slice = expr.Slice(searchStart);
+                int idx = slice.ToString().IndexOf(funcName, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0) continue;
+
+                int absIdx = searchStart + idx;
+                // Verify it's followed by '(' and not part of a longer identifier
+                if (absIdx + funcLen < expr.Length)
+                {
+                    // Skip whitespace between function name and '('
+                    int parenIdx = absIdx + funcLen;
+                    while (parenIdx < expr.Length && char.IsWhiteSpace(expr[parenIdx]))
+                        parenIdx++;
+
+                    if (parenIdx < expr.Length && expr[parenIdx] == '(')
+                    {
+                        // Check it's not part of a longer identifier (letter before)
+                        if (absIdx > 0 && char.IsLetterOrDigit(expr[absIdx - 1]))
+                            continue;
+
+                        if (bestMatch < 0 || absIdx < bestMatch)
+                        {
+                            bestMatch = absIdx;
+                            bestMatchLen = funcLen;
+                            bestFunc = funcName switch
+                            {
+                                "COUNT" => AggregateFunction.Count,
+                                "SUM" => AggregateFunction.Sum,
+                                "AVG" => AggregateFunction.Avg,
+                                "MIN" => AggregateFunction.Min,
+                                "MAX" => AggregateFunction.Max,
+                                "SAMPLE" => AggregateFunction.Sample,
+                                "GROUP_CONCAT" => AggregateFunction.GroupConcat,
+                                _ => AggregateFunction.None
+                            };
+                        }
+                    }
+                }
+            }
+
+            if (bestMatch < 0)
+            {
+                break; // No more aggregates found - this is expected
+            }
+
+            // Found an aggregate at bestMatch - parse its argument
+            int funcStart = bestMatch;
+            int parenStart = funcStart + bestMatchLen;
+            while (parenStart < expr.Length && char.IsWhiteSpace(expr[parenStart]))
+                parenStart++;
+
+            if (parenStart >= expr.Length || expr[parenStart] != '(')
+            {
+                searchStart = bestMatch + 1;
+                continue;
+            }
+
+            // Find matching closing paren
+            int depth = 1;
+            int parenEnd = parenStart + 1;
+            while (parenEnd < expr.Length && depth > 0)
+            {
+                if (expr[parenEnd] == '(') depth++;
+                else if (expr[parenEnd] == ')') depth--;
+                parenEnd++;
+            }
+
+            if (depth != 0)
+            {
+                searchStart = bestMatch + 1;
+                continue;
+            }
+
+            // Extract the variable/argument (skip DISTINCT if present)
+            // Work with positions, not strings, to get correct offsets
+            int argStart = parenStart + 1;
+            int argEnd = parenEnd - 1; // Position of ')'
+
+            // Skip leading whitespace
+            while (argStart < argEnd && char.IsWhiteSpace(expr[argStart]))
+                argStart++;
+
+            // Skip trailing whitespace
+            while (argEnd > argStart && char.IsWhiteSpace(expr[argEnd - 1]))
+                argEnd--;
+
+            // Check for DISTINCT keyword
+            bool isDistinct = false;
+            var argSlice = expr.Slice(argStart, argEnd - argStart);
+            if (argSlice.Length >= 8)
+            {
+                var distinctCheck = argSlice.Slice(0, 8);
+                if (distinctCheck.Equals("DISTINCT", StringComparison.OrdinalIgnoreCase))
+                {
+                    isDistinct = true;
+                    argStart += 8;
+                    // Skip whitespace after DISTINCT
+                    while (argStart < argEnd && char.IsWhiteSpace(expr[argStart]))
+                        argStart++;
+                }
+            }
+
+            // Now argStart..argEnd points to the actual variable/expression (without DISTINCT)
+            int varLength = argEnd - argStart;
+            if (varLength <= 0)
+            {
+                searchStart = parenEnd;
+                continue;
+            }
+
+            // Create a hidden aggregate entry
+            var embeddedAgg = new AggregateExpression
+            {
+                Function = bestFunc,
+                VariableStart = exprStart + argStart,
+                VariableLength = varLength,
+                Distinct = isDistinct,
+                // No alias - this is a hidden aggregate
+                AliasStart = 0,
+                AliasLength = 0
+            };
+
+            // Add if not already present (check by function + variable)
+            bool alreadyExists = false;
+            for (int i = 0; i < clause.AggregateCount; i++)
+            {
+                var existing = clause.GetAggregate(i);
+                if (existing.Function == embeddedAgg.Function &&
+                    existing.Distinct == embeddedAgg.Distinct)
+                {
+                    var existingVar = _source.Slice(existing.VariableStart, existing.VariableLength);
+                    var newVar = _source.Slice(embeddedAgg.VariableStart, embeddedAgg.VariableLength);
+                    if (existingVar.Equals(newVar, StringComparison.Ordinal))
+                    {
+                        alreadyExists = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!alreadyExists)
+            {
+                clause.AddAggregate(embeddedAgg);
+            }
+
+            searchStart = parenEnd;
+        }
     }
 
     /// <summary>
@@ -2003,6 +2177,9 @@ public ref partial struct SparqlParser
         Advance(); // Skip '{'
         SkipWhitespace();
 
+        // Increment scope depth - patterns inside nested groups have higher scope depth
+        _scopeDepth++;
+
         // Record pattern and bind counts at start of nested group for BIND scope validation
         // BIND inside a nested { } only checks variables from this scope, not outer
         int nestedScopeStart = pattern.PatternCount;
@@ -2017,6 +2194,7 @@ public ref partial struct SparqlParser
             SkipWhitespace();
             if (Peek() == '}')
                 Advance(); // Skip '}'
+            _scopeDepth--; // Decrement scope depth before returning
             return;
         }
 
@@ -2067,6 +2245,9 @@ public ref partial struct SparqlParser
         SkipWhitespace();
         if (Peek() == '}')
             Advance(); // Skip '}'
+
+        // Decrement scope depth - leaving nested group
+        _scopeDepth--;
     }
 
     /// <summary>
@@ -2163,7 +2344,7 @@ public ref partial struct SparqlParser
                 else if (ch == ')') depth--;
             }
             var length = _position - start - 1; // Exclude closing ')'
-            pattern.AddFilter(new FilterExpr { Start = start, Length = length });
+            pattern.AddFilter(new FilterExpr { Start = start, Length = length, ScopeDepth = _scopeDepth });
         }
         else if (char.IsLetter(Peek()))
         {
@@ -2191,7 +2372,7 @@ public ref partial struct SparqlParser
             }
 
             var length = _position - start;
-            pattern.AddFilter(new FilterExpr { Start = start, Length = length });
+            pattern.AddFilter(new FilterExpr { Start = start, Length = length, ScopeDepth = _scopeDepth });
         }
     }
 
@@ -3354,7 +3535,8 @@ public ref partial struct SparqlParser
             ExprLength = exprLength,
             VarStart = varStart,
             VarLength = varLength,
-            AfterPatternIndex = pattern.PatternCount - 1  // Evaluate after all current patterns
+            AfterPatternIndex = pattern.PatternCount - 1,  // Evaluate after all current patterns
+            ScopeDepth = _scopeDepth  // Track scope depth for BIND scoping
         });
     }
 
