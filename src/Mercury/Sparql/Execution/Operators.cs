@@ -1319,7 +1319,14 @@ internal ref struct TriplePatternScan
         }
 
         if (term.IsBlankNode)
-            return ReadOnlySpan<char>.Empty;
+        {
+            // Named blank nodes (_:name) should match the literal value
+            // Anonymous blank nodes ([]) act as wildcards
+            var bnSpan = _source.Slice(term.Start, term.Length);
+            if (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':')
+                return bnSpan; // Return the actual blank node label
+            return ReadOnlySpan<char>.Empty; // Anonymous blank node - wildcard
+        }
 
         var termSpan = _source.Slice(term.Start, term.Length);
 
@@ -1402,7 +1409,14 @@ internal ref struct TriplePatternScan
         }
 
         if (term.IsBlankNode)
-            return ReadOnlySpan<char>.Empty;
+        {
+            // Named blank nodes (_:name) should match the literal value
+            // Anonymous blank nodes ([]) act as wildcards
+            var bnSpan = _source.Slice(term.Start, term.Length);
+            if (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':')
+                return bnSpan; // Return the actual blank node label
+            return ReadOnlySpan<char>.Empty; // Anonymous blank node - wildcard
+        }
 
         var termSpan = _source.Slice(term.Start, term.Length);
 
@@ -2725,10 +2739,13 @@ internal ref struct MultiPatternScan
             return SyntheticTermHelper.GetSyntheticIri(term.Start);
         }
 
-        // Blank nodes in patterns (e.g., [] or _:b) act as wildcards - they match any value
+        // Blank nodes in patterns: named (_:b) match literal, anonymous ([]) are wildcards
         if (term.IsBlankNode)
         {
-            return ReadOnlySpan<char>.Empty;
+            var bnSpan = _source.Slice(term.Start, term.Length);
+            if (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':')
+                return bnSpan; // Named blank node - match literal value
+            return ReadOnlySpan<char>.Empty; // Anonymous blank node - wildcard
         }
 
         if (!term.IsVariable)
@@ -5468,9 +5485,12 @@ internal ref struct CrossGraphMultiPatternScan
     {
         ReadOnlySpan<char> subject, predicate, obj;
 
-        // Resolve subject - blank nodes act as wildcards (match any value)
+        // Resolve subject - named blank nodes (_:name) match literal, anonymous ([]) are wildcards
         if (pattern.Subject.IsBlankNode)
-            subject = ReadOnlySpan<char>.Empty;
+        {
+            var bnSpan = _source.Slice(pattern.Subject.Start, pattern.Subject.Length);
+            subject = (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':') ? bnSpan : ReadOnlySpan<char>.Empty;
+        }
         else if (!pattern.Subject.IsVariable)
             subject = _source.Slice(pattern.Subject.Start, pattern.Subject.Length);
         else
@@ -5480,9 +5500,12 @@ internal ref struct CrossGraphMultiPatternScan
             subject = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
         }
 
-        // Resolve predicate - blank nodes act as wildcards
+        // Resolve predicate - named blank nodes match literal, anonymous are wildcards
         if (pattern.Predicate.IsBlankNode)
-            predicate = ReadOnlySpan<char>.Empty;
+        {
+            var bnSpan = _source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
+            predicate = (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':') ? bnSpan : ReadOnlySpan<char>.Empty;
+        }
         else if (!pattern.Predicate.IsVariable)
             predicate = _source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
         else
@@ -5492,9 +5515,12 @@ internal ref struct CrossGraphMultiPatternScan
             predicate = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
         }
 
-        // Resolve object - blank nodes act as wildcards
+        // Resolve object - named blank nodes match literal, anonymous are wildcards
         if (pattern.Object.IsBlankNode)
-            obj = ReadOnlySpan<char>.Empty;
+        {
+            var bnSpan = _source.Slice(pattern.Object.Start, pattern.Object.Length);
+            obj = (bnSpan.Length >= 2 && bnSpan[0] == '_' && bnSpan[1] == ':') ? bnSpan : ReadOnlySpan<char>.Empty;
+        }
         else if (!pattern.Object.IsVariable)
             obj = _source.Slice(pattern.Object.Start, pattern.Object.Length);
         else

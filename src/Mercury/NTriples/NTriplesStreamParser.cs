@@ -9,6 +9,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Rdf;
@@ -367,13 +368,13 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(4);
-                    AppendToOutput(escaped);
+                    AppendRune(escaped);
                 }
                 else if (next == 'U')
                 {
                     Consume();
                     var escaped = ParseUnicodeEscape(8);
-                    AppendToOutput(escaped);
+                    AppendRune(escaped);
                 }
                 else
                 {
@@ -484,7 +485,7 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
             {
                 Consume();
                 var escaped = ParseEscapeSequence();
-                AppendToOutput(escaped);
+                AppendRune(escaped);
             }
             else
             {
@@ -547,7 +548,7 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
     /// <summary>
     /// Parse string escape sequence (N-Triples escapes).
     /// </summary>
-    private char ParseEscapeSequence()
+    private Rune ParseEscapeSequence()
     {
         var ch = Peek();
 
@@ -558,14 +559,14 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
 
         return (char)ch switch
         {
-            't' => '\t',
-            'b' => '\b',
-            'n' => '\n',
-            'r' => '\r',
-            'f' => '\f',
-            '"' => '"',
-            '\'' => '\'',
-            '\\' => '\\',
+            't' => new Rune('\t'),
+            'b' => new Rune('\b'),
+            'n' => new Rune('\n'),
+            'r' => new Rune('\r'),
+            'f' => new Rune('\f'),
+            '"' => new Rune('"'),
+            '\'' => new Rune('\''),
+            '\\' => new Rune('\\'),
             'u' => ParseUnicodeEscape(4),
             'U' => ParseUnicodeEscape(8),
             _ => throw ParserException($"Invalid escape sequence: \\{(char)ch}")
@@ -574,8 +575,9 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Parse unicode escape (\uXXXX or \UXXXXXXXX).
+    /// Returns a Rune representing the Unicode scalar value.
     /// </summary>
-    private char ParseUnicodeEscape(int digits = 4)
+    private Rune ParseUnicodeEscape(int digits = 4)
     {
         var value = 0;
 
@@ -598,11 +600,11 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
             value = (value << 4) | hexValue;
         }
 
-        // Reject surrogate code points
-        if (value >= 0xD800 && value <= 0xDFFF)
-            throw ParserException($"Invalid unicode: surrogate U+{value:X4}");
+        // Rune.TryCreate validates the codepoint (rejects surrogates and values > 0x10FFFF)
+        if (!Rune.TryCreate(value, out var rune))
+            throw ParserException($"Invalid unicode codepoint: U+{value:X}");
 
-        return (char)value;
+        return rune;
     }
 
     #endregion
@@ -768,6 +770,19 @@ public sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
         if (_outputOffset >= _outputBuffer.Length)
             GrowOutputBuffer();
         _outputBuffer[_outputOffset++] = c;
+    }
+
+    /// <summary>
+    /// Append a Unicode codepoint to output using Rune for proper UTF-16 encoding.
+    /// </summary>
+    private void AppendRune(Rune rune)
+    {
+        // Ensure we have space for up to 2 chars (surrogate pair)
+        if (_outputOffset + 2 > _outputBuffer.Length)
+            GrowOutputBuffer();
+
+        var charsWritten = rune.EncodeToUtf16(_outputBuffer.AsSpan(_outputOffset));
+        _outputOffset += charsWritten;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
