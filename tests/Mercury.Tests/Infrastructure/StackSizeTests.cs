@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Execution;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace SkyOmega.Mercury.Tests.Infrastructure;
 
@@ -8,20 +9,35 @@ namespace SkyOmega.Mercury.Tests.Infrastructure;
 /// Tests documenting and enforcing stack size constraints for ref structs.
 /// These tests track progress on ADR-011 (QueryResults Stack Reduction).
 ///
-/// ACTUAL BASELINE MEASUREMENTS (2024-01-26):
-/// - QueryResults:              89,640 bytes (~90KB) - CRITICAL!
+/// BASELINE MEASUREMENTS (pre-ADR-011):
+/// - QueryResults:              89,640 bytes (~90KB) - caused stack overflow!
 /// - MultiPatternScan:          18,080 bytes (~18KB)
 /// - DefaultGraphUnionScan:     33,456 bytes (~33KB)
 /// - CrossGraphMultiPatternScan: 15,800 bytes (~16KB)
 /// - SubQueryScan:               1,976 bytes (~2KB)
 /// - TriplePatternScan:           ~500 bytes
 ///
-/// Phase targets:
-/// - Phase 2 target: QueryResults &lt; 35KB (discriminated union)
-/// - Phase 3 target: QueryResults &lt; 5KB (pooled enumerators)
+/// POST-ADR-011 MEASUREMENTS (2026-01-26):
+/// - QueryResults:               6,128 bytes (~6KB) - 93% reduction!
+/// - MultiPatternScan:             384 bytes (~0.4KB) - 98% reduction!
+/// - DefaultGraphUnionScan:      1,040 bytes (~1KB) - 97% reduction!
+/// - CrossGraphMultiPatternScan:    96 bytes (~0.1KB) - 99% reduction!
+/// - SubQueryScan:               1,976 bytes (~2KB) - unchanged
+/// - TriplePatternScan:            608 bytes (~0.6KB) - unchanged
+///
+/// Key changes:
+/// - Changed TemporalResultEnumerator from ref struct to struct
+/// - Pooled enumerator arrays in MultiPatternScan and CrossGraphMultiPatternScan
+/// - Boxed GraphPattern (~4KB) to move from stack to heap
 /// </summary>
 public class StackSizeTests
 {
+    private readonly ITestOutputHelper _output;
+
+    public StackSizeTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
     /// <summary>
     /// Documents the current QueryResults size.
     /// BASELINE: 89,640 bytes (~90KB!) - this causes stack overflow on Windows (1MB stack).
@@ -148,18 +164,26 @@ SubQueryScan:              {subQuerySize,8:N0} bytes ({subQuerySize / 1024.0:F1}
 TriplePatternScan:         {triplePatternSize,8:N0} bytes ({triplePatternSize / 1024.0:F1} KB)
 ===============================
 ";
+        _output.WriteLine(message);
 
-        // Verify sizes meet new baselines after ADR-011 pooling
+        // Verify sizes meet new baselines after ADR-011 implementation
         Assert.True(queryResultsSize > 0, message);
 
-        // ADR-011: MultiPatternScan reduced from ~18KB to ~15KB by pooling enumerators
-        // Further reduction requires boxing GraphPattern (~4KB)
-        Assert.True(multiPatternScanSize < 20000,
-            $"MultiPatternScan at {multiPatternScanSize} bytes exceeds post-ADR-011 baseline. {message}");
+        // ADR-011: MultiPatternScan reduced from ~18KB to ~0.4KB by pooling enumerators + boxing GraphPattern
+        Assert.True(multiPatternScanSize < 1000,
+            $"MultiPatternScan at {multiPatternScanSize} bytes exceeds post-ADR-011 target of 1KB. {message}");
 
-        // ADR-011: QueryResults reduced from ~90KB to ~80KB
-        Assert.True(queryResultsSize < 85000,
-            $"QueryResults at {queryResultsSize} bytes exceeds post-ADR-011 baseline. {message}");
+        // ADR-011: QueryResults reduced from ~90KB to ~6KB
+        Assert.True(queryResultsSize < 10000,
+            $"QueryResults at {queryResultsSize} bytes exceeds post-ADR-011 target of 10KB. {message}");
+
+        // ADR-011: DefaultGraphUnionScan reduced from ~33KB to ~1KB
+        Assert.True(defaultGraphUnionScanSize < 2000,
+            $"DefaultGraphUnionScan at {defaultGraphUnionScanSize} bytes exceeds post-ADR-011 target of 2KB. {message}");
+
+        // ADR-011: CrossGraphMultiPatternScan reduced from ~16KB to ~0.1KB
+        Assert.True(crossGraphSize < 500,
+            $"CrossGraphMultiPatternScan at {crossGraphSize} bytes exceeds post-ADR-011 target of 500B. {message}");
     }
 
     // ============================================================

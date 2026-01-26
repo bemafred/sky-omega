@@ -1873,10 +1873,9 @@ internal ref struct MultiPatternScan
 
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
-    // Pattern can be stored inline (for main queries) or via reference (for subqueries)
-    private readonly GraphPattern _pattern;
-    private readonly BoxedPattern? _boxedPattern;
-    private readonly bool _useBoxedPattern;
+    // ADR-011: Pattern always stored via reference to reduce stack size by ~4KB
+    // Boxing the pattern allocates ~4KB on heap but saves ~4KB on stack per scan
+    private readonly BoxedPattern _boxedPattern;
     private readonly bool _unionMode;
     private readonly ReadOnlySpan<char> _graph;
     private readonly int[]? _patternOrder;  // Optimized pattern execution order
@@ -1935,11 +1934,10 @@ internal ref struct MultiPatternScan
     private enum TermPosition { Subject, Predicate, Object }
 
     /// <summary>
-    /// Get the current pattern (from boxed or inline storage).
+    /// Get the current pattern from boxed storage.
     /// Note: This copies the ~4KB struct - call sparingly and cache locally.
     /// </summary>
-    private readonly GraphPattern CurrentPattern =>
-        _useBoxedPattern ? _boxedPattern!.Pattern : _pattern;
+    private readonly GraphPattern CurrentPattern => _boxedPattern.Pattern;
 
     // Cached pattern count to avoid repeated CurrentPattern access
     private int _cachedPatternCount;
@@ -1960,9 +1958,7 @@ internal ref struct MultiPatternScan
     {
         _store = store;
         _source = source;
-        _pattern = default;  // Not used when boxed
         _boxedPattern = boxedPattern;
-        _useBoxedPattern = true;
         _unionMode = false;
         _graph = default;
         _patternOrder = null;
@@ -2009,9 +2005,8 @@ internal ref struct MultiPatternScan
     {
         _store = store;
         _source = source;
-        _pattern = pattern;
-        _boxedPattern = null;
-        _useBoxedPattern = false;
+        // ADR-011: Always box pattern to reduce stack size by ~4KB
+        _boxedPattern = new BoxedPattern { Pattern = pattern };
         _unionMode = unionMode;
         _graph = graph;
         _patternOrder = patternOrder;
@@ -5142,7 +5137,8 @@ internal ref struct DefaultGraphUnionScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
-    private readonly GraphPattern _pattern;
+    // ADR-011: Pattern stored via reference to reduce stack size by ~4KB
+    private readonly MultiPatternScan.BoxedPattern _boxedPattern;
     private readonly string[] _defaultGraphs;
     private int _currentGraphIndex;
     private TriplePatternScan _singleScan;
@@ -5155,7 +5151,8 @@ internal ref struct DefaultGraphUnionScan
     {
         _store = store;
         _source = source;
-        _pattern = pattern;
+        // ADR-011: Box pattern to reduce stack size
+        _boxedPattern = new MultiPatternScan.BoxedPattern { Pattern = pattern };
         _defaultGraphs = defaultGraphs;
         _currentGraphIndex = 0;
         _singleScan = default;
@@ -5212,20 +5209,21 @@ internal ref struct DefaultGraphUnionScan
 
     private void InitializeScan(ReadOnlySpan<char> graphIri, ref BindingTable bindings)
     {
+        ref readonly var pattern = ref _boxedPattern.Pattern;
         if (_isMultiPattern)
         {
-            _multiScan = new MultiPatternScan(_store, _source, _pattern, false, graphIri);
+            _multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri);
         }
         else
         {
             // Find the first required pattern
             int requiredIdx = 0;
-            for (int i = 0; i < _pattern.PatternCount; i++)
+            for (int i = 0; i < pattern.PatternCount; i++)
             {
-                if (!_pattern.IsOptional(i)) { requiredIdx = i; break; }
+                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
             }
 
-            var tp = _pattern.GetPattern(requiredIdx);
+            var tp = pattern.GetPattern(requiredIdx);
             _singleScan = new TriplePatternScan(_store, _source, tp, bindings, graphIri);
         }
     }
@@ -5257,14 +5255,14 @@ internal ref struct CrossGraphMultiPatternScan
 {
     private readonly QuadStore _store;
     private readonly ReadOnlySpan<char> _source;
-    private readonly GraphPattern _pattern;
+    // ADR-011: Pattern stored via reference to reduce stack size by ~4KB
+    private readonly MultiPatternScan.BoxedPattern _boxedPattern;
     private readonly string[] _graphs;
 
     // Current state for each pattern level
-    private TemporalResultEnumerator _enum0;
-    private TemporalResultEnumerator _enum1;
-    private TemporalResultEnumerator _enum2;
-    private TemporalResultEnumerator _enum3;
+    // ADR-011 Phase 2: Pooled array instead of inline fields
+    private TemporalResultEnumerator[]? _enumerators;
+    private const int MaxCrossGraphLevels = 4;
 
     // Current graph index at each level
     private int _graphIndex0, _graphIndex1, _graphIndex2, _graphIndex3;
@@ -5280,15 +5278,14 @@ internal ref struct CrossGraphMultiPatternScan
     {
         _store = store;
         _source = source;
-        _pattern = pattern;
+        // ADR-011: Box pattern to reduce stack size by ~4KB
+        _boxedPattern = new MultiPatternScan.BoxedPattern { Pattern = pattern };
         _graphs = graphs;
         _currentLevel = 0;
         _init0 = _init1 = _init2 = _init3 = false;
         _exhausted = false;
-        _enum0 = default;
-        _enum1 = default;
-        _enum2 = default;
-        _enum3 = default;
+        // ADR-011 Phase 2: Rent enumerator array from pool
+        _enumerators = System.Buffers.ArrayPool<TemporalResultEnumerator>.Shared.Rent(MaxCrossGraphLevels);
         _graphIndex0 = _graphIndex1 = _graphIndex2 = _graphIndex3 = 0;
         _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
     }
@@ -5298,7 +5295,7 @@ internal ref struct CrossGraphMultiPatternScan
         if (_exhausted)
             return false;
 
-        var patternCount = Math.Min(_pattern.RequiredPatternCount, 4);
+        var patternCount = Math.Min(_boxedPattern.Pattern.RequiredPatternCount, 4);
         if (patternCount == 0)
             return false;
 
@@ -5381,7 +5378,7 @@ internal ref struct CrossGraphMultiPatternScan
                 _bindingCount0 = bindings.Count;
                 if (_graphIndex0 >= _graphs.Length)
                     return false; // All graphs exhausted at this level
-                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex0].AsSpan(), out _enum0);
+                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex0].AsSpan(), out _enumerators![0]);
                 _init0 = true;
             }
             else
@@ -5390,11 +5387,11 @@ internal ref struct CrossGraphMultiPatternScan
                 bindings.TruncateTo(_bindingCount0);
             }
 
-            if (TryAdvanceEnumerator(ref _enum0, pattern, ref bindings))
+            if (TryAdvanceEnumerator(ref _enumerators![0], pattern, ref bindings))
                 return true;
 
             // Current graph exhausted, try next graph
-            _enum0.Dispose();
+            _enumerators![0].Dispose();
             _graphIndex0++;
             _init0 = false;
 
@@ -5416,7 +5413,7 @@ internal ref struct CrossGraphMultiPatternScan
                 _bindingCount1 = bindings.Count;
                 if (_graphIndex1 >= _graphs.Length)
                     return false;
-                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex1].AsSpan(), out _enum1);
+                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex1].AsSpan(), out _enumerators![1]);
                 _init1 = true;
             }
             else
@@ -5424,10 +5421,10 @@ internal ref struct CrossGraphMultiPatternScan
                 bindings.TruncateTo(_bindingCount1);
             }
 
-            if (TryAdvanceEnumerator(ref _enum1, pattern, ref bindings))
+            if (TryAdvanceEnumerator(ref _enumerators![1], pattern, ref bindings))
                 return true;
 
-            _enum1.Dispose();
+            _enumerators![1].Dispose();
             _graphIndex1++;
             _init1 = false;
 
@@ -5449,7 +5446,7 @@ internal ref struct CrossGraphMultiPatternScan
                 _bindingCount2 = bindings.Count;
                 if (_graphIndex2 >= _graphs.Length)
                     return false;
-                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex2].AsSpan(), out _enum2);
+                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex2].AsSpan(), out _enumerators![2]);
                 _init2 = true;
             }
             else
@@ -5457,10 +5454,10 @@ internal ref struct CrossGraphMultiPatternScan
                 bindings.TruncateTo(_bindingCount2);
             }
 
-            if (TryAdvanceEnumerator(ref _enum2, pattern, ref bindings))
+            if (TryAdvanceEnumerator(ref _enumerators![2], pattern, ref bindings))
                 return true;
 
-            _enum2.Dispose();
+            _enumerators![2].Dispose();
             _graphIndex2++;
             _init2 = false;
 
@@ -5482,7 +5479,7 @@ internal ref struct CrossGraphMultiPatternScan
                 _bindingCount3 = bindings.Count;
                 if (_graphIndex3 >= _graphs.Length)
                     return false;
-                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex3].AsSpan(), out _enum3);
+                InitializeEnumerator(pattern, ref bindings, _graphs[_graphIndex3].AsSpan(), out _enumerators![3]);
                 _init3 = true;
             }
             else
@@ -5490,10 +5487,10 @@ internal ref struct CrossGraphMultiPatternScan
                 bindings.TruncateTo(_bindingCount3);
             }
 
-            if (TryAdvanceEnumerator(ref _enum3, pattern, ref bindings))
+            if (TryAdvanceEnumerator(ref _enumerators![3], pattern, ref bindings))
                 return true;
 
-            _enum3.Dispose();
+            _enumerators![3].Dispose();
             _graphIndex3++;
             _init3 = false;
 
@@ -5506,13 +5503,14 @@ internal ref struct CrossGraphMultiPatternScan
     private TriplePattern GetRequiredPattern(int index)
     {
         // Find the nth required (non-optional) pattern
+        ref readonly var pattern = ref _boxedPattern.Pattern;
         int found = 0;
-        for (int i = 0; i < _pattern.PatternCount; i++)
+        for (int i = 0; i < pattern.PatternCount; i++)
         {
-            if (!_pattern.IsOptional(i))
+            if (!pattern.IsOptional(i))
             {
                 if (found == index)
-                    return _pattern.GetPattern(i);
+                    return pattern.GetPattern(i);
                 found++;
             }
         }
@@ -5611,10 +5609,16 @@ internal ref struct CrossGraphMultiPatternScan
 
     public void Dispose()
     {
-        if (_init0) _enum0.Dispose();
-        if (_init1) _enum1.Dispose();
-        if (_init2) _enum2.Dispose();
-        if (_init3) _enum3.Dispose();
+        // ADR-011 Phase 2: Dispose enumerators and return array to pool
+        if (_enumerators != null && _enumerators.Length > 0)
+        {
+            if (_init0) _enumerators[0].Dispose();
+            if (_init1) _enumerators[1].Dispose();
+            if (_init2) _enumerators[2].Dispose();
+            if (_init3) _enumerators[3].Dispose();
+            System.Buffers.ArrayPool<TemporalResultEnumerator>.Shared.Return(_enumerators);
+            _enumerators = null;
+        }
     }
 }
 

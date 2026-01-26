@@ -2,24 +2,36 @@
 
 ## Status
 
-**In Progress** - Phase 1 complete (enumerator pooling)
+**Accepted** - Implementation complete (2026-01-26)
 
-### Progress (2026-01-26)
+### Results Summary
 
-**Phase 1 Complete: Enumerator Pooling**
+Stack overflow issue resolved. All W3C conformance tests now pass (1896/1896).
 
-Changed `TemporalQuadEnumerator` and `TemporalResultEnumerator` from `ref struct` to `struct` to enable pooled array storage. Replaced 12 inline enumerator fields in `MultiPatternScan` with `ArrayPool<TemporalResultEnumerator>.Shared`.
+**Final measurements** (compared to baseline):
 
-**Measured sizes after Phase 1**:
-- `QueryResults`: **80,736 bytes (~79KB)** - reduced from 90KB
-- `MultiPatternScan`: **15,112 bytes (~15KB)** - reduced from 18KB
-- `DefaultGraphUnionScan`: **30,488 bytes (~30KB)** - reduced from 33KB
-- `CrossGraphMultiPatternScan`: **15,800 bytes (~16KB)** - unchanged (has own inline enumerators)
+| Struct | Baseline | Final | Reduction |
+|--------|----------|-------|-----------|
+| QueryResults | 89,640 bytes | **6,128 bytes** | **93%** |
+| MultiPatternScan | 18,080 bytes | **384 bytes** | **98%** |
+| DefaultGraphUnionScan | 33,456 bytes | **1,040 bytes** | **97%** |
+| CrossGraphMultiPatternScan | 15,800 bytes | **96 bytes** | **99%** |
+| SubQueryScan | 1,976 bytes | 1,976 bytes | unchanged |
+| TriplePatternScan | 608 bytes | 608 bytes | unchanged |
 
-**Next steps (Phase 2)**:
-1. Apply same pooling pattern to `CrossGraphMultiPatternScan` (4 enumerators)
-2. Apply same pooling pattern to `DefaultGraphUnionScan` (embeds MultiPatternScan)
-3. Box `GraphPattern` (~4KB) to move it off the stack
+### Implementation Details (2026-01-26)
+
+**Phase 1: Enumerator Struct Change + Pooling**
+- Changed `TemporalQuadEnumerator` and `TemporalResultEnumerator` from `ref struct` to `struct`
+- Replaced 12 inline enumerator fields in `MultiPatternScan` with `ArrayPool<TemporalResultEnumerator>.Shared.Rent(12)`
+- Replaced 4 inline enumerator fields in `CrossGraphMultiPatternScan` with pooled array
+
+**Phase 2: GraphPattern Boxing**
+- Modified `MultiPatternScan` to always use `BoxedPattern` (heap reference) instead of inline storage
+- Applied same pattern to `DefaultGraphUnionScan` and `CrossGraphMultiPatternScan`
+- Each scan now allocates ~4KB on heap instead of stack
+
+**Key insight**: The original enumerators were `ref struct` only for lifetime enforcement, not because they contained `Span<T>` fields. Changing to `struct` enabled pooled array storage without functional changes.
 
 ### Original Investigation Findings
 
