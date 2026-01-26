@@ -2233,6 +2233,14 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // Check for nested group { ... } which might be a subquery or UNION
+            // This enables patterns like { { :s :p ?Y } UNION { :s :p ?Z } }
+            if (Peek() == '{')
+            {
+                ParseGroupOrUnionGraphPattern(ref pattern);
+                continue;
+            }
+
             // Parse triple pattern
             if (!TryParseTriplePattern(ref pattern))
                 break;

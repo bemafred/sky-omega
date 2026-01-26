@@ -41,13 +41,10 @@ public static class W3CTestContext
         // Known limitations
         ["nfc"] = "NFC normalization not enforced on IRIs",
 
-        // BIND scope checking limitations
-        // syntax-BINDscope8 (test_62a): BIND scope validation doesn't recursively check variables
-        // from nested groups with UNION. Requires implementing deep scope analysis.
-        ["test_62a"] = "BIND scope validation for nested UNION groups not implemented",
-
         // Re-enabled after adding CancellationToken support in operators (357f410)
         // and subquery aggregation support (be3a46e)
+        // Re-enabled test_62a (syntax-BINDscope8) after fixing nested group parsing in
+        // ParseNestedGroupGraphPattern to handle nested { } patterns
     };
 
     /// <summary>
