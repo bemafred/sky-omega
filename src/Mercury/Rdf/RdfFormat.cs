@@ -215,6 +215,80 @@ public static class RdfFormatNegotiator
     };
 
     /// <summary>
+    /// Parse an Accept header and return the preferred RDF format.
+    /// Supports quality values (q=) for content negotiation.
+    /// </summary>
+    /// <param name="acceptHeader">The Accept header value.</param>
+    /// <param name="defaultFormat">Default format if none specified or recognized.</param>
+    /// <returns>The preferred format based on the Accept header.</returns>
+    public static RdfFormat FromAcceptHeader(ReadOnlySpan<char> acceptHeader, RdfFormat defaultFormat = RdfFormat.Turtle)
+    {
+        if (acceptHeader.IsEmpty)
+            return defaultFormat;
+
+        // Handle wildcard
+        if (acceptHeader.Equals("*/*".AsSpan(), StringComparison.Ordinal))
+            return defaultFormat;
+
+        RdfFormat bestFormat = RdfFormat.Unknown;
+        double bestQuality = -1;
+
+        // Split by comma and process each media type
+        int start = 0;
+        while (start < acceptHeader.Length)
+        {
+            // Find next comma or end
+            int end = acceptHeader.Slice(start).IndexOf(',');
+            if (end < 0)
+                end = acceptHeader.Length - start;
+
+            var part = acceptHeader.Slice(start, end).Trim();
+            start += end + 1;
+
+            if (part.IsEmpty)
+                continue;
+
+            // Extract media type and quality
+            double quality = 1.0;
+            var semicolonIndex = part.IndexOf(';');
+            ReadOnlySpan<char> mediaType;
+
+            if (semicolonIndex >= 0)
+            {
+                mediaType = part.Slice(0, semicolonIndex).Trim();
+                var qualityPart = part.Slice(semicolonIndex + 1).Trim();
+
+                // Look for q=
+                if (qualityPart.StartsWith("q=".AsSpan(), StringComparison.OrdinalIgnoreCase))
+                {
+                    var qValue = qualityPart.Slice(2);
+                    // Remove any additional parameters
+                    var nextSemi = qValue.IndexOf(';');
+                    if (nextSemi >= 0)
+                        qValue = qValue.Slice(0, nextSemi);
+
+                    if (double.TryParse(qValue, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var q))
+                        quality = q;
+                }
+            }
+            else
+            {
+                mediaType = part;
+            }
+
+            var format = FromContentType(mediaType);
+            if (format != RdfFormat.Unknown && quality > bestQuality)
+            {
+                bestFormat = format;
+                bestQuality = quality;
+            }
+        }
+
+        return bestFormat != RdfFormat.Unknown ? bestFormat : defaultFormat;
+    }
+
+    /// <summary>
     /// Try to detect format from content type first, then fall back to path extension.
     /// </summary>
     /// <param name="contentType">Content-Type header (may be null or empty).</param>

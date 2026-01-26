@@ -167,18 +167,87 @@ public class SparqlConformanceTests
             }
         }
 
-        // Parse expected results BEFORE acquiring lock to avoid thread-affinity issues
-        // (ReaderWriterLockSlim requires release on same thread as acquire)
-        var expected = await ParseExpectedResultSetAsync(test.ResultPath!);
-        _output.WriteLine($"Expected {expected.Count} results");
-
         // Check for CONSTRUCT/DESCRIBE results (RDF graph format)
         var resultExt = Path.GetExtension(test.ResultPath!).ToLowerInvariant();
         if (resultExt == ".ttl" || resultExt == ".nt" || resultExt == ".rdf")
         {
-            // CONSTRUCT/DESCRIBE results - skip for now (need graph comparison)
-            Skip.If(true, "CONSTRUCT/DESCRIBE result validation not yet implemented");
+            // CONSTRUCT/DESCRIBE query - use graph comparison
+            var expectedGraph = await ParseExpectedGraphAsync(test.ResultPath!);
+            _output.WriteLine($"Expected {expectedGraph.Count} triples");
+
+            var actualGraph = RunOnLargeStack(() =>
+            {
+                var graph = new SparqlGraphResult();
+
+                store.AcquireReadLock();
+                try
+                {
+                    using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
+
+                    if (parsed.Type == QueryType.Construct)
+                    {
+                        var results = executor.ExecuteConstruct();
+                        try
+                        {
+                            while (results.MoveNext())
+                            {
+                                var triple = results.Current;
+                                graph.AddTriple(
+                                    ParseTermToBinding(triple.Subject.ToString()),
+                                    ParseTermToBinding(triple.Predicate.ToString()),
+                                    ParseTermToBinding(triple.Object.ToString()));
+                            }
+                        }
+                        finally
+                        {
+                            results.Dispose();
+                        }
+                    }
+                    else if (parsed.Type == QueryType.Describe)
+                    {
+                        var results = executor.ExecuteDescribe();
+                        try
+                        {
+                            while (results.MoveNext())
+                            {
+                                var triple = results.Current;
+                                graph.AddTriple(
+                                    ParseTermToBinding(triple.Subject.ToString()),
+                                    ParseTermToBinding(triple.Predicate.ToString()),
+                                    ParseTermToBinding(triple.Object.ToString()));
+                            }
+                        }
+                        finally
+                        {
+                            results.Dispose();
+                        }
+                    }
+
+                    return graph;
+                }
+                finally
+                {
+                    store.ReleaseReadLock();
+                }
+            });
+
+            _output.WriteLine($"Got {actualGraph.Count} triples");
+
+            var graphError = SparqlResultComparer.CompareGraphs(expectedGraph, actualGraph);
+            if (graphError != null)
+            {
+                _output.WriteLine("Graph comparison failed:");
+                _output.WriteLine(graphError);
+            }
+
+            Assert.Null(graphError);
+            return;
         }
+
+        // Parse expected results BEFORE acquiring lock to avoid thread-affinity issues
+        // (ReaderWriterLockSlim requires release on same thread as acquire)
+        var expected = await ParseExpectedResultSetAsync(test.ResultPath!);
+        _output.WriteLine($"Expected {expected.Count} results");
 
         // Check if this is an ORDER BY query (results must match in order)
         var hasOrderBy = query.Contains("ORDER BY", StringComparison.OrdinalIgnoreCase);
@@ -423,6 +492,105 @@ public class SparqlConformanceTests
         }
 
         return await SparqlResultParser.ParseFileAsync(path);
+    }
+
+    /// <summary>
+    /// Parses expected RDF graph from .ttl, .nt, or .rdf file.
+    /// </summary>
+    private static async Task<SparqlGraphResult> ParseExpectedGraphAsync(string path)
+    {
+        var graph = new SparqlGraphResult();
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        var baseUri = new Uri(path).AbsoluteUri;
+
+        if (extension == ".ttl" || extension == ".turtle")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new TurtleStreamParser(stream, baseUri: baseUri);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                graph.AddTriple(
+                    ParseTermToBinding(s.ToString()),
+                    ParseTermToBinding(p.ToString()),
+                    ParseTermToBinding(o.ToString()));
+            });
+        }
+        else if (extension == ".nt" || extension == ".ntriples")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new Mercury.NTriples.NTriplesStreamParser(stream);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                graph.AddTriple(
+                    ParseTermToBinding(s.ToString()),
+                    ParseTermToBinding(p.ToString()),
+                    ParseTermToBinding(o.ToString()));
+            });
+        }
+        else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
+        {
+            await using var stream = File.OpenRead(path);
+            using var parser = new Mercury.RdfXml.RdfXmlStreamParser(stream, baseUri: baseUri);
+
+            await parser.ParseAsync((s, p, o) =>
+            {
+                graph.AddTriple(
+                    ParseTermToBinding(s.ToString()),
+                    ParseTermToBinding(p.ToString()),
+                    ParseTermToBinding(o.ToString()));
+            });
+        }
+
+        return graph;
+    }
+
+    /// <summary>
+    /// Parses an RDF term string into a SparqlBinding.
+    /// Handles IRIs (<...>), blank nodes (_:...), and literals ("..."^^datatype, "..."@lang).
+    /// </summary>
+    private static SparqlBinding ParseTermToBinding(string term)
+    {
+        if (string.IsNullOrEmpty(term))
+            return SparqlBinding.Unbound;
+
+        // IRI - strip angle brackets
+        if (term.StartsWith('<') && term.EndsWith('>'))
+            return SparqlBinding.Uri(term[1..^1]);
+
+        // Blank node
+        if (term.StartsWith("_:"))
+            return SparqlBinding.BNode(term[2..]);
+
+        // Literal with possible datatype or language tag
+        if (term.StartsWith('"'))
+        {
+            var closeQuote = FindClosingQuote(term);
+            if (closeQuote > 0)
+            {
+                var value = UnescapeLiteral(term[1..closeQuote]);
+                var suffix = term[(closeQuote + 1)..];
+
+                if (suffix.StartsWith("^^"))
+                {
+                    var datatype = suffix[2..];
+                    if (datatype.StartsWith('<') && datatype.EndsWith('>'))
+                        datatype = datatype[1..^1];
+                    return SparqlBinding.TypedLiteral(value, datatype);
+                }
+
+                if (suffix.StartsWith('@'))
+                {
+                    return SparqlBinding.LangLiteral(value, suffix[1..]);
+                }
+
+                return SparqlBinding.Literal(value);
+            }
+        }
+
+        // Plain value - treat as literal
+        return SparqlBinding.Literal(term);
     }
 
     /// <summary>

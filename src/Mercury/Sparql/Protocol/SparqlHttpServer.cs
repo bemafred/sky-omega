@@ -12,10 +12,15 @@ using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.NTriples;
+using SkyOmega.Mercury.Rdf.Turtle;
+using SkyOmega.Mercury.RdfXml;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Storage;
+using RdfFormat = SkyOmega.Mercury.Rdf.RdfFormat;
+using RdfFormatNegotiator = SkyOmega.Mercury.Rdf.RdfFormatNegotiator;
 
 namespace SkyOmega.Mercury.Sparql.Protocol;
 
@@ -229,8 +234,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
 
         // Determine output format from Accept header
-        var acceptHeader = request.Headers["Accept"] ?? "application/sparql-results+json";
-        var format = SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
+        var acceptHeader = request.Headers["Accept"] ?? "";
 
         // Parse and execute query
         try
@@ -238,12 +242,29 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             var parser = new SparqlParser(queryString.AsSpan());
             var query = parser.ParseQuery();
 
-            response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
+            // CONSTRUCT/DESCRIBE return RDF graphs, SELECT/ASK return SPARQL results
+            if (query.Type == QueryType.Construct || query.Type == QueryType.Describe)
+            {
+                // Use RDF format negotiation for graph results
+                var rdfFormat = RdfFormatNegotiator.FromAcceptHeader(
+                    acceptHeader.AsSpan(),
+                    RdfFormat.Turtle); // Default to Turtle for readability
+                response.ContentType = RdfFormatNegotiator.GetContentType(rdfFormat);
 
-            // Execute query synchronously (ref structs can't cross await boundary)
-            var resultBytes = ExecuteQuerySync(queryString, query, format);
+                var resultBytes = ExecuteGraphQuerySync(queryString, query, rdfFormat);
+                await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                // Use SPARQL result format negotiation for SELECT/ASK
+                var format = string.IsNullOrEmpty(acceptHeader)
+                    ? SparqlResultFormat.Json
+                    : SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
+                response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
 
-            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+                var resultBytes = ExecuteQuerySync(queryString, query, format);
+                await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+            }
         }
         catch (SparqlParseException ex)
         {
@@ -272,16 +293,41 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
                     WriteAskResult(executor, format, writer);
                     break;
 
+                default:
+                    throw new InvalidOperationException($"Query type {query.Type} should use ExecuteGraphQuerySync");
+            }
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+
+        writer.Flush();
+        return memStream.ToArray();
+    }
+
+    private byte[] ExecuteGraphQuerySync(string queryString, Query query, RdfFormat rdfFormat)
+    {
+        using var memStream = new MemoryStream();
+        using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
+
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, queryString.AsSpan(), query);
+
+            switch (query.Type)
+            {
                 case QueryType.Construct:
-                    WriteConstructResults(executor, writer);
+                    WriteConstructResults(executor, rdfFormat, writer);
                     break;
 
                 case QueryType.Describe:
-                    WriteDescribeResults(executor, writer);
+                    WriteDescribeResults(executor, rdfFormat, writer);
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unsupported query type: {query.Type}");
+                    throw new InvalidOperationException($"Query type {query.Type} should use ExecuteQuerySync");
             }
         }
         finally
@@ -494,21 +540,73 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
     }
 
-    private static void WriteConstructResults(QueryExecutor executor, StreamWriter writer)
+    private static void WriteConstructResults(QueryExecutor executor, RdfFormat rdfFormat, StreamWriter writer)
     {
         var results = executor.ExecuteConstruct();
 
         try
         {
-            while (results.MoveNext())
+            switch (rdfFormat)
             {
-                var triple = results.Current;
-                writer.Write(triple.Subject.ToString());
-                writer.Write(' ');
-                writer.Write(triple.Predicate.ToString());
-                writer.Write(' ');
-                writer.Write(triple.Object.ToString());
-                writer.WriteLine(" .");
+                case RdfFormat.NTriples:
+                    {
+                        using var ntWriter = new NTriplesStreamWriter(writer);
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            ntWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                    }
+                    break;
+
+                case RdfFormat.Turtle:
+                    {
+                        using var turtleWriter = new TurtleStreamWriter(writer);
+                        turtleWriter.WritePrefixes();
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            turtleWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                    }
+                    break;
+
+                case RdfFormat.RdfXml:
+                    {
+                        using var rdfXmlWriter = new RdfXmlStreamWriter(writer);
+                        rdfXmlWriter.WriteStartDocument();
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            rdfXmlWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                        rdfXmlWriter.WriteEndDocument();
+                    }
+                    break;
+
+                default:
+                    // Default to N-Triples for unknown/unsupported formats
+                    {
+                        using var defaultWriter = new NTriplesStreamWriter(writer);
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            defaultWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                    }
+                    break;
             }
         }
         finally
@@ -517,21 +615,73 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
     }
 
-    private static void WriteDescribeResults(QueryExecutor executor, StreamWriter writer)
+    private static void WriteDescribeResults(QueryExecutor executor, RdfFormat rdfFormat, StreamWriter writer)
     {
         var results = executor.ExecuteDescribe();
 
         try
         {
-            while (results.MoveNext())
+            switch (rdfFormat)
             {
-                var triple = results.Current;
-                writer.Write(triple.Subject.ToString());
-                writer.Write(' ');
-                writer.Write(triple.Predicate.ToString());
-                writer.Write(' ');
-                writer.Write(triple.Object.ToString());
-                writer.WriteLine(" .");
+                case RdfFormat.NTriples:
+                    {
+                        using var ntWriter = new NTriplesStreamWriter(writer);
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            ntWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                    }
+                    break;
+
+                case RdfFormat.Turtle:
+                    {
+                        using var turtleWriter = new TurtleStreamWriter(writer);
+                        turtleWriter.WritePrefixes();
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            turtleWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                    }
+                    break;
+
+                case RdfFormat.RdfXml:
+                    {
+                        using var rdfXmlWriter = new RdfXmlStreamWriter(writer);
+                        rdfXmlWriter.WriteStartDocument();
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            rdfXmlWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                        rdfXmlWriter.WriteEndDocument();
+                    }
+                    break;
+
+                default:
+                    // Default to N-Triples for unknown/unsupported formats
+                    {
+                        using var defaultWriter = new NTriplesStreamWriter(writer);
+                        while (results.MoveNext())
+                        {
+                            var triple = results.Current;
+                            defaultWriter.WriteTriple(
+                                triple.Subject.ToString().AsSpan(),
+                                triple.Predicate.ToString().AsSpan(),
+                                triple.Object.ToString().AsSpan());
+                        }
+                    }
+                    break;
             }
         }
         finally

@@ -596,5 +596,97 @@ public class SparqlHttpServerTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task QueryEndpoint_ConstructQuery_AcceptNTriples_ReturnsNTriples()
+    {
+        if (!TryStartServer(out var server))
+        {
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.Add("Accept", "application/n-triples");
+
+            var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/n-triples", response.Content.Headers.ContentType?.MediaType);
+
+            var content = await response.Content.ReadAsStringAsync();
+            // N-Triples uses full IRIs with angle brackets
+            Assert.Contains("<http://", content);
+            Assert.Contains(" .", content);
+        }
+        finally
+        {
+            await server.StopAsync();
+            server.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_ConstructQuery_AcceptRdfXml_ReturnsRdfXml()
+    {
+        if (!TryStartServer(out var server))
+        {
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.Add("Accept", "application/rdf+xml");
+
+            var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/rdf+xml", response.Content.Headers.ContentType?.MediaType);
+
+            var content = await response.Content.ReadAsStringAsync();
+            // RDF/XML starts with XML declaration and rdf:RDF element
+            Assert.StartsWith("<?xml version=\"1.0\"", content);
+            Assert.Contains("<rdf:RDF", content);
+        }
+        finally
+        {
+            await server.StopAsync();
+            server.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task QueryEndpoint_ConstructQuery_DefaultAccept_ReturnsTurtle()
+    {
+        if (!TryStartServer(out var server))
+        {
+            return;
+        }
+
+        try
+        {
+            using var client = new HttpClient();
+            // No Accept header - should default to Turtle
+
+            var query = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 1";
+            var response = await client.GetAsync($"http://localhost:{_port}/sparql?query={WebUtility.UrlEncode(query)}");
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("text/turtle", response.Content.Headers.ContentType?.MediaType);
+
+            var content = await response.Content.ReadAsStringAsync();
+            // Turtle uses prefix declarations or shortened forms
+            Assert.Contains(" .", content);
+        }
+        finally
+        {
+            await server.StopAsync();
+            server.Dispose();
+        }
+    }
+
     #endregion
 }

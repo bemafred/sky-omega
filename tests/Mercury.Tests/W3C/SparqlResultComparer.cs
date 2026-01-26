@@ -511,6 +511,7 @@ public static class SparqlResultComparer
 
     /// <summary>
     /// Compares two RDF graphs for isomorphism (for CONSTRUCT/DESCRIBE results).
+    /// Uses backtracking search for proper blank node isomorphism.
     /// </summary>
     public static string? CompareGraphs(SparqlGraphResult expected, SparqlGraphResult actual)
     {
@@ -522,42 +523,173 @@ public static class SparqlResultComparer
         if (expected.Count == 0)
             return null;
 
-        // Try to find isomorphic mapping
-        var bnodeMapping = new Dictionary<string, string>();
+        // Group actual triples by structural hash for faster matching
+        var actualByHash = actual.Triples
+            .Select((triple, index) => (triple, index))
+            .GroupBy(x => GetTripleStructuralHash(x.triple))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        // Track which actual triples have been matched
         var matchedActual = new bool[actual.Count];
+        var bnodeMapping = new Dictionary<string, string>();
 
-        foreach (var expTriple in expected.Triples)
+        // Use backtracking search to find valid isomorphism
+        if (TryMatchTriples(expected.Triples, 0, actualByHash, matchedActual, bnodeMapping))
         {
-            bool found = false;
-            for (int i = 0; i < actual.Count; i++)
-            {
-                if (matchedActual[i])
-                    continue;
+            return null; // All triples matched
+        }
 
-                var actTriple = actual.Triples[i];
+        // Failed to find complete matching - generate helpful error message
+        return GenerateGraphMismatchMessage(expected, actual);
+    }
+
+    /// <summary>
+    /// Gets a structural hash for a triple that treats blank nodes as equivalent.
+    /// </summary>
+    private static int GetTripleStructuralHash((SparqlBinding Subject, SparqlBinding Predicate, SparqlBinding Object) triple)
+    {
+        var hash = new HashCode();
+
+        // Subject
+        hash.Add(triple.Subject.Type);
+        if (triple.Subject.Type != RdfTermType.BNode)
+            hash.Add(triple.Subject.Value);
+
+        // Predicate
+        hash.Add(triple.Predicate.Type);
+        if (triple.Predicate.Type != RdfTermType.BNode)
+            hash.Add(triple.Predicate.Value);
+
+        // Object
+        hash.Add(triple.Object.Type);
+        if (triple.Object.Type != RdfTermType.BNode)
+        {
+            hash.Add(triple.Object.Value);
+            hash.Add(triple.Object.Datatype);
+            hash.Add(triple.Object.Language);
+        }
+
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Recursive backtracking search for triple matching with blank node isomorphism.
+    /// </summary>
+    private static bool TryMatchTriples(
+        IReadOnlyList<(SparqlBinding Subject, SparqlBinding Predicate, SparqlBinding Object)> expectedTriples,
+        int expectedIndex,
+        Dictionary<int, List<((SparqlBinding Subject, SparqlBinding Predicate, SparqlBinding Object) triple, int index)>> actualByHash,
+        bool[] matchedActual,
+        Dictionary<string, string> bnodeMapping)
+    {
+        if (expectedIndex >= expectedTriples.Count)
+            return true; // All expected triples matched
+
+        var expTriple = expectedTriples[expectedIndex];
+        var hash = GetTripleStructuralHash(expTriple);
+
+        // Try triples with matching structural hash first
+        if (actualByHash.TryGetValue(hash, out var candidates))
+        {
+            foreach (var (actTriple, actIndex) in candidates)
+            {
+                if (matchedActual[actIndex])
+                    continue; // Already matched
+
+                // Save current mapping state for backtracking
                 var mappingSnapshot = new Dictionary<string, string>(bnodeMapping);
 
-                if (BindingsMatch(expTriple.Subject, actTriple.Subject, bnodeMapping) &&
-                    BindingsMatch(expTriple.Predicate, actTriple.Predicate, bnodeMapping) &&
-                    BindingsMatch(expTriple.Object, actTriple.Object, bnodeMapping))
+                if (TriplesMatch(expTriple, actTriple, bnodeMapping))
                 {
-                    matchedActual[i] = true;
-                    found = true;
-                    break;
+                    matchedActual[actIndex] = true;
+
+                    if (TryMatchTriples(expectedTriples, expectedIndex + 1, actualByHash, matchedActual, bnodeMapping))
+                    {
+                        return true; // Found complete matching
+                    }
+
+                    // Backtrack
+                    matchedActual[actIndex] = false;
+                    bnodeMapping.Clear();
+                    foreach (var kv in mappingSnapshot)
+                        bnodeMapping[kv.Key] = kv.Value;
                 }
-
-                // Restore mapping on mismatch
-                bnodeMapping.Clear();
-                foreach (var kv in mappingSnapshot)
-                    bnodeMapping[kv.Key] = kv.Value;
-            }
-
-            if (!found)
-            {
-                return $"No matching triple found for: {expTriple.Subject} {expTriple.Predicate} {expTriple.Object}";
             }
         }
 
-        return null;
+        // Try all unmatched triples (hash collision or different structure)
+        foreach (var group in actualByHash.Values)
+        {
+            foreach (var (actTriple, actIndex) in group)
+            {
+                if (matchedActual[actIndex])
+                    continue;
+
+                // Skip if we already tried this triple via hash match
+                if (actualByHash.TryGetValue(hash, out var hashCandidates) &&
+                    hashCandidates.Any(c => c.index == actIndex))
+                    continue;
+
+                var mappingSnapshot = new Dictionary<string, string>(bnodeMapping);
+
+                if (TriplesMatch(expTriple, actTriple, bnodeMapping))
+                {
+                    matchedActual[actIndex] = true;
+
+                    if (TryMatchTriples(expectedTriples, expectedIndex + 1, actualByHash, matchedActual, bnodeMapping))
+                    {
+                        return true;
+                    }
+
+                    matchedActual[actIndex] = false;
+                    bnodeMapping.Clear();
+                    foreach (var kv in mappingSnapshot)
+                        bnodeMapping[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if two triples match, potentially updating blank node mapping.
+    /// </summary>
+    private static bool TriplesMatch(
+        (SparqlBinding Subject, SparqlBinding Predicate, SparqlBinding Object) expected,
+        (SparqlBinding Subject, SparqlBinding Predicate, SparqlBinding Object) actual,
+        Dictionary<string, string> bnodeMapping)
+    {
+        return BindingsMatch(expected.Subject, actual.Subject, bnodeMapping) &&
+               BindingsMatch(expected.Predicate, actual.Predicate, bnodeMapping) &&
+               BindingsMatch(expected.Object, actual.Object, bnodeMapping);
+    }
+
+    /// <summary>
+    /// Generates a helpful mismatch message for graph comparison.
+    /// </summary>
+    private static string GenerateGraphMismatchMessage(SparqlGraphResult expected, SparqlGraphResult actual)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("RDF graphs do not match (no valid blank node mapping found).");
+        sb.AppendLine();
+        sb.AppendLine("Expected triples:");
+        foreach (var triple in expected.Triples.Take(5))
+        {
+            sb.AppendLine($"  {triple.Subject} {triple.Predicate} {triple.Object} .");
+        }
+        if (expected.Count > 5)
+            sb.AppendLine($"  ... ({expected.Count - 5} more)");
+
+        sb.AppendLine();
+        sb.AppendLine("Actual triples:");
+        foreach (var triple in actual.Triples.Take(5))
+        {
+            sb.AppendLine($"  {triple.Subject} {triple.Predicate} {triple.Object} .");
+        }
+        if (actual.Count > 5)
+            sb.AppendLine($"  ... ({actual.Count - 5} more)");
+
+        return sb.ToString();
     }
 }
