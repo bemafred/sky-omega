@@ -5,6 +5,70 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## What's Next
+
+**Sky Omega 1.0.0** will focus on making Mercury and its CLI/MCP interfaces production-ready (see [ADR-002](docs/adrs/ADR-002-sky-omega-1.0-operational-scope.md)):
+
+- [ ] SPARQL LOAD wiring across CLI, MCP, and HTTP surfaces
+- [ ] SPARQL Update sequences (semicolon-separated statements)
+- [ ] USING / USING NAMED clause propagation in updates
+- [ ] W3C Update tests validating resulting graph state
+- [ ] Accurate SPARQL service description
+
+**Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
+
+---
+
+## [0.6.0-beta.1] - 2026-01-26
+
+Major W3C conformance milestone and CONSTRUCT/DESCRIBE content negotiation.
+
+### Added
+
+#### Content Negotiation for CONSTRUCT/DESCRIBE
+- **RDF format negotiation** - Accept header parsing with quality values
+- **Turtle output** (default) - Human-readable with prefix support
+- **N-Triples output** - Canonical format for interoperability
+- **RDF/XML output** - XML-based serialization
+
+#### W3C Test Infrastructure
+- **Graph isomorphism** - Backtracking search for blank node mapping
+- **RDF result parsing** - Support for .ttl, .nt, .rdf expected results
+- **CONSTRUCT test validation** - Previously skipped tests now enabled
+
+### Changed
+
+#### W3C Conformance (99% coverage)
+- **Total tests**: 1,872 → 3,464 (W3C + internal)
+- **SPARQL 1.1 Query**: 96% (215/224) - 9 skipped for SERVICE/entailment
+- **SPARQL 1.1 Update**: 100% (94/94)
+- **All RDF formats**: 100% conformance maintained
+
+### Fixed
+
+#### SPARQL Conformance Fixes
+- **Unicode handling** - Supplementary characters (non-BMP) via System.Text.Rune
+- **Aggregate expressions** - COUNT, AVG error propagation, HAVING multiple conditions
+- **BIND scoping** - Correct variable visibility in nested groups
+- **EXISTS/NOT EXISTS** - Evaluation in ExecuteToMaterialized path
+- **CONCAT/STRBEFORE/STRAFTER** - Language tag and datatype handling
+- **GRAPH parsing** - Nested group pattern handling
+- **IN/NOT IN** - Empty patterns and expressions
+- **GROUP BY** - Expression type inference
+
+#### Parser Fixes
+- **Turtle Unicode escapes** - \U escape sequences beyond BMP
+- **Named blank node matching** - Consistent across parsers
+- **Empty string literals** - Correct handling in result comparison
+
+### Documentation
+
+- **ADR-002** - Sky Omega 1.0.0 Operational Scope defined
+- **ADR-010** - W3C conformance status updated
+- **ADR-012** - Conformance fixes documented
+
+---
+
 ## [0.5.0-beta.1] - 2026-01-01
 
 First versioned release of Sky Omega Mercury - a semantic-aware storage and query engine with zero-GC performance design.
@@ -126,4 +190,5 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
-[0.5.0-beta.1]: https://github.com/anthropics/sky-omega/releases/tag/v0.5.0-beta.1
+[0.6.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.0-beta.1
+[0.5.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.5.0-beta.1
