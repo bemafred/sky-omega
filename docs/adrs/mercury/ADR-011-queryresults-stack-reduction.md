@@ -2,9 +2,33 @@
 
 ## Status
 
-**Ready for Implementation** (Plan approved)
+**Blocked** - StructLayout.Explicit approach not feasible
 
-See [ADR-011-implementation-plan.md](ADR-011-implementation-plan.md) for detailed implementation steps.
+### Investigation Findings (2026-01-26)
+
+**Actual measured sizes** (3-4x larger than estimates):
+- `QueryResults`: **89,640 bytes (~90KB)** - not 22KB
+- `MultiPatternScan`: **18,080 bytes (~18KB)** - not 7.2KB
+- `DefaultGraphUnionScan`: **33,456 bytes (~33KB)** - not 8KB
+- `CrossGraphMultiPatternScan`: **15,800 bytes (~16KB)** - not 1.5KB
+
+**Why StructLayout.Explicit fails**:
+1. QueryResults contains `ReadOnlySpan<char>` fields which cannot have `[FieldOffset]` attributes
+2. All scan types are `ref struct` because they contain Span fields
+3. ref structs cannot be boxed or stored in heap-allocated classes
+4. C# has no mechanism to conditionally include fields in a struct
+
+**Alternative approaches blocked by C# constraints**:
+- Boxing scan types: ref structs cannot be boxed
+- Interface-based polymorphism: ref structs cannot implement interfaces in heap-polymorphic way
+- InlineArray union: Still reserves same stack space
+
+**Practical workarounds available**:
+1. Configure test runners with larger stack (short-term)
+2. More aggressive early materialization in QueryExecutor (medium-term)
+3. Major architectural refactor to remove Span from scan types (long-term, breaks zero-GC)
+
+See [ADR-011-implementation-plan.md](ADR-011-implementation-plan.md) for detailed investigation notes.
 
 ## Context
 

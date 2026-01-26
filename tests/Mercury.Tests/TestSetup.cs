@@ -1,5 +1,12 @@
 using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Runtime;
+using Xunit;
+
+// Limit test parallelization to reduce stack accumulation.
+// QueryResults is ~90KB on stack, and parallel tests can exhaust the 1MB Windows stack.
+// MaxParallelThreads = 1 runs tests sequentially, eliminating stack accumulation from parallelism.
+// See ADR-011 for details on the stack overflow issue.
+[assembly: CollectionBehavior(MaxParallelThreads = 1)]
 
 namespace SkyOmega.Mercury.Tests;
 
