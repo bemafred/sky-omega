@@ -53,11 +53,12 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 
 | Claim                            | Evidence              | Command to Verify                            |
 |----------------------------------|-----------------------|----------------------------------------------|
-| 100% W3C SPARQL 1.1 conformance  | 512 passing tests     | `dotnet test --filter "SparqlConformance"`   |
-| 100% W3C RDF format conformance  | 984 passing tests     | `dotnet test --filter "W3C"`                 |
+| 100% W3C SPARQL 1.1 conformance  | 512 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
+| 100% W3C RDF format conformance  | 1,896 passing tests   | `dotnet test --filter "W3C"`                 |
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
+| 3,830 tests passing              | Test suite            | `dotnet test tests/Mercury.Tests`            |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | 72K lines in weeks    | `git log --since="2025-12-01"`               |
+| Development velocity             | 146K lines in weeks   | `git log --since="2025-12-01"`               |
 
 ---
 
