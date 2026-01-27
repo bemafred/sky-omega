@@ -1,8 +1,46 @@
-# ADR-011: QueryResults Stack Reduction via Discriminated Union
+# ADR-011: QueryResults Stack Reduction via Pooled Enumerators
 
 ## Status
 
-Proposed
+**Accepted** - Implementation complete (2026-01-26)
+
+### Results Summary
+
+Stack overflow issue resolved. All W3C conformance tests now pass (1896/1896).
+
+**Final measurements** (compared to baseline):
+
+| Struct | Baseline | Final | Reduction |
+|--------|----------|-------|-----------|
+| QueryResults | 89,640 bytes | **6,128 bytes** | **93%** |
+| MultiPatternScan | 18,080 bytes | **384 bytes** | **98%** |
+| DefaultGraphUnionScan | 33,456 bytes | **1,040 bytes** | **97%** |
+| CrossGraphMultiPatternScan | 15,800 bytes | **96 bytes** | **99%** |
+| SubQueryScan | 1,976 bytes | 1,976 bytes | unchanged |
+| TriplePatternScan | 608 bytes | 608 bytes | unchanged |
+
+### Implementation Details (2026-01-26)
+
+**Phase 1: Enumerator Struct Change + Pooling**
+- Changed `TemporalQuadEnumerator` and `TemporalResultEnumerator` from `ref struct` to `struct`
+- Replaced 12 inline enumerator fields in `MultiPatternScan` with `ArrayPool<TemporalResultEnumerator>.Shared.Rent(12)`
+- Replaced 4 inline enumerator fields in `CrossGraphMultiPatternScan` with pooled array
+
+**Phase 2: GraphPattern Boxing**
+- Modified `MultiPatternScan` to always use `BoxedPattern` (heap reference) instead of inline storage
+- Applied same pattern to `DefaultGraphUnionScan` and `CrossGraphMultiPatternScan`
+- Each scan now allocates ~4KB on heap instead of stack
+
+**Key insight**: The original enumerators were `ref struct` only for lifetime enforcement, not because they contained `Span<T>` fields. Changing to `struct` enabled pooled array storage without functional changes.
+
+### Original Investigation Findings
+
+**Why StructLayout.Explicit approach was abandoned**:
+1. QueryResults contains `ReadOnlySpan<char>` fields which cannot have `[FieldOffset]` attributes
+2. However, `TemporalQuadEnumerator` and `TemporalResultEnumerator` do NOT contain Span fields
+3. These could be changed from `ref struct` to `struct`, enabling pooled array storage
+
+See [ADR-011-implementation-plan.md](ADR-011-implementation-plan.md) for detailed investigation notes.
 
 ## Context
 

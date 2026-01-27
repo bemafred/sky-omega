@@ -501,9 +501,10 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     /// <summary>
-    /// Zero-allocation enumerator for temporal triples
+    /// Zero-allocation enumerator for temporal triples.
+    /// Changed from ref struct to struct to enable pooled array storage (ADR-011).
     /// </summary>
-    public ref struct TemporalQuadEnumerator
+    public struct TemporalQuadEnumerator
     {
         private readonly QuadIndex _store;
         private long _currentPageId;

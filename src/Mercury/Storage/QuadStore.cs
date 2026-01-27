@@ -988,8 +988,9 @@ public sealed class QuadStore : IDisposable
 /// across iterations.
 ///
 /// Call Dispose() when done to return the pooled buffer.
+/// Changed from ref struct to struct to enable pooled array storage (ADR-011).
 /// </summary>
-public ref struct TemporalResultEnumerator
+public struct TemporalResultEnumerator
 {
     private QuadIndex.TemporalQuadEnumerator _baseEnumerator;
     private readonly TemporalIndexType _indexType;

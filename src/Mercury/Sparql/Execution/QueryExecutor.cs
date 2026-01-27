@@ -855,6 +855,45 @@ public partial class QueryExecutor : IDisposable
     }
 
     /// <summary>
+    /// Execute query and materialize all results to a heap-allocated list.
+    /// Returns a small QueryResults wrapper (~200 bytes) instead of the full struct (~90KB).
+    /// This prevents stack overflow when results are passed through many call frames.
+    /// </summary>
+    /// <remarks>
+    /// Use this method instead of Execute() when:
+    /// - Running many queries in sequence (e.g., test suites)
+    /// - Results need to be passed through multiple call frames
+    /// - Stack space is limited (e.g., Windows default 1MB stack)
+    ///
+    /// Trade-off: Allocates all results upfront (no streaming). For very large result
+    /// sets, consider using Execute() with streaming consumption instead.
+    /// </remarks>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public QueryResults ExecuteMaterialized()
+    {
+        // Create the large QueryResults on THIS stack frame only
+        var results = Execute();
+        try
+        {
+            // Materialize all results to heap
+            var rows = new List<MaterializedRow>();
+            while (results.MoveNext())
+            {
+                rows.Add(new MaterializedRow(results.Current));
+            }
+
+            // Return tiny wrapper backed by heap list
+            var bindings = new Binding[16];
+            return QueryResults.FromMaterializedList(rows, bindings, _stringBuffer,
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+        }
+        finally
+        {
+            results.Dispose();
+        }
+    }
+
+    /// <summary>
     /// Execute query against specified default graphs (FROM clauses).
     /// For single FROM: query that graph directly.
     /// For multiple FROM: use DefaultGraphUnionScan for streaming results.
