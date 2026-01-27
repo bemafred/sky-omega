@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-26
+**Last updated:** 2026-01-27
 
 ## Line Counts
 
@@ -10,10 +10,10 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **71,567** | Knowledge substrate |
-| ├─ Sparql | 42,921 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **71,832** | Knowledge substrate |
+| ├─ Sparql | 43,342 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
-| ├─ Storage | 5,420 | B+Tree indexes, AtomStore, WAL |
+| ├─ Storage | 5,422 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 4,009 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
 | ├─ TriG | 2,836 | TriG parser and writer |
@@ -29,7 +29,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 46,202 | 3,460 |
+| Mercury.Tests | 46,412 | 3,830 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -50,19 +50,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md) | 15,877 |
+| All docs (*.md) | 21,695 |
 | CLAUDE.md | 782 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~73,220 |
-| Tests | ~46,202 |
+| Source code | ~73,485 |
+| Tests | ~46,412 |
 | Benchmarks | ~3,406 |
 | Examples | ~851 |
-| Documentation | ~16,659 |
-| **Grand total** | **~140,338** |
+| Documentation | ~21,695 |
+| **Grand total** | **~145,849** |
 
 ## W3C Conformance
 
@@ -117,6 +117,22 @@ High-complexity features not yet implemented:
 | **SPARQL 1.1 Update** | 100% (94/94) |
 | **With optional extensions** | 99% (2,060/2,066) |
 | **Remaining gaps** | 3 tests (high complexity) |
+
+## Stack Size (ADR-011)
+
+Query execution structs optimized for stack safety:
+
+| Struct | Before | After | Reduction |
+|--------|-------:|------:|----------:|
+| QueryResults | 89,640 bytes | 6,128 bytes | **93%** |
+| MultiPatternScan | 18,080 bytes | 384 bytes | **98%** |
+| DefaultGraphUnionScan | 33,456 bytes | 1,040 bytes | **97%** |
+| CrossGraphMultiPatternScan | 15,800 bytes | 96 bytes | **99%** |
+
+Key optimizations:
+- Pooled enumerator arrays via `ArrayPool<T>.Shared`
+- Boxed `GraphPattern` (~4KB) moved from stack to heap
+- Changed `TemporalResultEnumerator` from `ref struct` to `struct`
 
 ## Benchmark Summary
 
