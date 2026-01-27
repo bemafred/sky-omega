@@ -19,6 +19,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.2] - 2026-01-27
+
+Critical stack overflow fix for parallel test execution.
+
+### Fixed
+
+#### Stack Overflow Resolution (ADR-011)
+- **QueryResults reduced from 90KB to 6KB** (93% reduction)
+  - Changed `TemporalResultEnumerator` from `ref struct` to `struct`
+  - Pooled enumerator arrays in `MultiPatternScan` and `CrossGraphMultiPatternScan`
+  - Boxed `GraphPattern` (~4KB) to move from stack to heap
+- **All scan types dramatically reduced**:
+  - `MultiPatternScan`: 18,080 → 384 bytes (98% reduction)
+  - `DefaultGraphUnionScan`: 33,456 → 1,040 bytes (97% reduction)
+  - `CrossGraphMultiPatternScan`: 15,800 → 96 bytes (99% reduction)
+- **Parallel test execution restored** - Previously limited to single thread as workaround
+
+### Changed
+
+- Re-enabled parallel test execution in xunit.runner.json
+- All 3,824 tests pass with parallel execution
+
+### Documentation
+
+- **ADR-011** completed - QueryResults Stack Reduction via Pooled Enumerators
+- **StackSizeTests** added - Enforces size constraints to prevent regression
+
+---
+
 ## [0.6.1] - 2026-01-26
 
 Full W3C SPARQL 1.1 Query conformance achieved.
@@ -219,6 +248,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[0.6.2]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.2
 [0.6.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.1
 [0.6.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.0-beta.1
 [0.5.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.5.0-beta.1

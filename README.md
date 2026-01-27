@@ -1,6 +1,6 @@
 # 🌌 Sky Omega
 
-> **v0.6.1 Released** — Full W3C SPARQL 1.1 conformance achieved (418/418 query tests, 94/94 update tests).
+> **v0.6.2 Released** — Stack overflow fix: QueryResults reduced from 90KB to 6KB, enabling parallel test execution.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
