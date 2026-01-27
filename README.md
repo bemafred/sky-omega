@@ -33,7 +33,7 @@ built *using* AI-assisted development. The methodology is the product.
 - **[sky-omega-public](https://github.com/bemafred/sky-omega-public)** — Conceptual documentation, EEE methodology, architectural narratives
 - **[grammar-meta-standard](https://github.com/canyala/grammar-meta-standard)** — EBNF grammars enabling grammar-aware reasoning
 
-——-
+---
 
 ## 📖 Documentation Guide
 
