@@ -2789,7 +2789,7 @@ internal ref struct MultiPatternScan
         {
             // Format as: "2"^^<http://www.w3.org/2001/XMLSchema#integer>
             var intVal = bindings.GetInteger(index);
-            var formatted = $"\"{intVal}\"^^<http://www.w3.org/2001/XMLSchema#integer>";
+            var formatted = $"\"{intVal.ToString(CultureInfo.InvariantCulture)}\"^^<http://www.w3.org/2001/XMLSchema#integer>";
             switch (position)
             {
                 case TermPosition.Subject:
@@ -2807,7 +2807,7 @@ internal ref struct MultiPatternScan
         {
             // Format as: "3.14"^^<http://www.w3.org/2001/XMLSchema#double>
             var doubleVal = bindings.GetDouble(index);
-            var formatted = $"\"{doubleVal}\"^^<http://www.w3.org/2001/XMLSchema#double>";
+            var formatted = $"\"{doubleVal.ToString(CultureInfo.InvariantCulture)}\"^^<http://www.w3.org/2001/XMLSchema#double>";
             switch (position)
             {
                 case TermPosition.Subject:

@@ -24,6 +24,7 @@ The codebase already uses `CultureInfo.InvariantCulture` in most numeric formatt
 - HAVING clause COUNT evaluation
 - DateTime formatting in NOW() function
 - Blank node counter generation
+- **String interpolation** with numeric values (e.g., `$"{doubleVal}"` uses current culture)
 
 ## Decision
 
@@ -37,6 +38,20 @@ All numeric and DateTime formatting in RDF/SPARQL code paths MUST explicitly spe
 | Double/Float | `value.ToString("G", CultureInfo.InvariantCulture)` |
 | Decimal | `value.ToString(CultureInfo.InvariantCulture)` |
 | DateTime | `dt.ToString("format", CultureInfo.InvariantCulture)` |
+
+### String Interpolation Warning
+
+**String interpolation uses the current culture by default.** This is a common source of bugs:
+
+```csharp
+// WRONG - uses current culture (Swedish: "3,14")
+var formatted = $"\"{doubleVal}\"^^<xsd:double>";
+
+// CORRECT - explicit culture
+var formatted = $"\"{doubleVal.ToString(CultureInfo.InvariantCulture)}\"^^<xsd:double>";
+```
+
+When interpolating numeric values into RDF literals, always call `.ToString(CultureInfo.InvariantCulture)` explicitly within the interpolation.
 
 ### Does NOT apply to:
 
@@ -58,6 +73,7 @@ Files updated to use `CultureInfo.InvariantCulture`:
 | `DiagnosticFormatter.cs` | Line numbers | Integer |
 | `TurtleStreamParser.*.cs` | Blank node counters | Integer |
 | `RdfXmlStreamParser.cs` | Blank node counters | Integer |
+| `Operators.cs` | `GetBoundValue()` typed literal formatting | Integer, Double |
 
 ## Consequences
 
@@ -77,4 +93,6 @@ Files updated to use `CultureInfo.InvariantCulture`:
 
 - Code review checklist item
 - Documented in CLAUDE.md Code Conventions section
-- Grep pattern for CI: `\.ToString\(\)` on numeric types without `CultureInfo`
+- Grep patterns for CI:
+  - `\.ToString\(\)` on numeric types without `CultureInfo`
+  - `\$".*\{[a-z]*[Vv]al\}` - interpolated numeric variables without `.ToString(...)`
