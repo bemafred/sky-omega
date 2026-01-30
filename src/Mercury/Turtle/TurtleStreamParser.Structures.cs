@@ -15,7 +15,15 @@ public sealed partial class TurtleStreamParser
     /// Async because FillBufferAsync may be needed if directive spans buffer boundary
     private async ValueTask<bool> TryParseDirectiveAsync(CancellationToken cancellationToken)
     {
+        // Ensure the buffer has data before checking directives
+        if (_bufferPosition >= _bufferLength && !_endOfStream)
+            await FillBufferAsync(cancellationToken);
+        
         SkipWhitespaceAndComments();
+        
+        // Refill if needed after skipping whitespace/comments
+        if (_bufferPosition >= _bufferLength && !_endOfStream)
+            await FillBufferAsync(cancellationToken);
         
         // @prefix directive
         if (PeekString("@prefix"))
