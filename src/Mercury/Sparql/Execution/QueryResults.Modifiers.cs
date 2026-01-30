@@ -556,7 +556,7 @@ public ref partial struct QueryResults
                     if (funcName.Equals("COUNT", StringComparison.OrdinalIgnoreCase) &&
                         aggExpr.Contains("*"))
                     {
-                        computedValue = group.RowCount.ToString();
+                        computedValue = group.RowCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
                     }
                 }
 

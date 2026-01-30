@@ -168,7 +168,7 @@ public sealed class ConsoleLogger : ILogger
 
     private void WriteLog(LogLevel level, string formattedMessage)
     {
-        var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
+        var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture);
         var levelStr = level switch
         {
             LogLevel.Trace => "TRC",

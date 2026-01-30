@@ -219,11 +219,11 @@ public sealed partial class TurtleStreamParser
         // Check for anonymous blank node: []
         if (TryConsume(']'))
         {
-            return string.Concat("_:b", _blankNodeCounter++.ToString());
+            return string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         // Generate blank node ID
-        var blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString());
+        var blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         // Parse predicate-object list with blank node as subject
         ParsePredicateObjectList(blankNodeId);
@@ -315,7 +315,7 @@ public sealed partial class TurtleStreamParser
         }
 
         // Generate first blank node for collection
-        var firstNode = string.Concat("_:b", _blankNodeCounter++.ToString());
+        var firstNode = string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
         var currentNode = firstNode;
 
         // Parse collection items
@@ -343,7 +343,7 @@ public sealed partial class TurtleStreamParser
             else
             {
                 // Create next node and link
-                var nextNode = string.Concat("_:b", _blankNodeCounter++.ToString());
+                var nextNode = string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 _pendingTriples.Add(new RdfTriple(currentNode, RdfRest, nextNode));
                 currentNode = nextNode;
             }
@@ -406,7 +406,7 @@ public sealed partial class TurtleStreamParser
         // If no reifier provided, allocate blank node
         if (string.IsNullOrEmpty(reifier))
         {
-            reifier = string.Concat("_:b", _blankNodeCounter++.ToString());
+            reifier = string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
         // Emit standard RDF reification triples
@@ -605,13 +605,13 @@ public sealed partial class TurtleStreamParser
         if (TryConsume(']'))
         {
             AppendToOutput("_:b".AsSpan());
-            AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+            AppendToOutput(_blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture).AsSpan());
             return GetOutputSpan(start);
         }
 
         // Generate blank node ID
         AppendToOutput("_:b".AsSpan());
-        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+        AppendToOutput(_blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture).AsSpan());
         var blankNodeIdSpan = GetOutputSpan(start);
         // Convert to string for use as subject (triples need string subject)
         var blankNodeId = blankNodeIdSpan.ToString();
@@ -822,7 +822,7 @@ public sealed partial class TurtleStreamParser
         {
             reifierStart = _outputOffset;
             AppendToOutput("_:b".AsSpan());
-            AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+            AppendToOutput(_blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture).AsSpan());
             reifier = GetOutputSpan(reifierStart);
         }
 

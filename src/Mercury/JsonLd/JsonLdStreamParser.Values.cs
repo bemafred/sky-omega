@@ -1131,7 +1131,7 @@ public sealed partial class JsonLdStreamParser
         // E.g., "+000" -> "0", "-002" -> "-2"
         if (int.TryParse(exponent, out var expValue))
         {
-            exponent = expValue.ToString();
+            exponent = expValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         return mantissa + "E" + exponent;

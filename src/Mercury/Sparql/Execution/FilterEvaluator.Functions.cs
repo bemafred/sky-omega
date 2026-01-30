@@ -891,7 +891,7 @@ public ref partial struct FilterEvaluator
             }
             else if (arg.Type == ValueType.Integer)
             {
-                partStr = arg.IntegerValue.ToString();
+                partStr = arg.IntegerValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             else if (arg.Type == ValueType.Double)
             {

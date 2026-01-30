@@ -863,7 +863,7 @@ public ref partial struct FilterEvaluator
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _datetimeResult = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+            _datetimeResult = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture);
             return new Value
             {
                 Type = ValueType.String,

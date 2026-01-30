@@ -1105,7 +1105,7 @@ public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
     {
         int start = _outputOffset;
         AppendToOutput("_:b".AsSpan());
-        AppendToOutput(_blankNodeCounter++.ToString().AsSpan());
+        AppendToOutput(_blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture).AsSpan());
         return GetOutputSpan(start);
     }
 

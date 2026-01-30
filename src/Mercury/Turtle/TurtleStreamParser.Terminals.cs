@@ -606,7 +606,7 @@ public sealed partial class TurtleStreamParser
         // Allocate or reuse blank node identifier
         if (!_blankNodes.TryGetValue(label, out var blankNodeId))
         {
-            blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString());
+            blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
             _blankNodes[label] = blankNodeId;
         }
 
@@ -1404,7 +1404,7 @@ public sealed partial class TurtleStreamParser
         // Get or create blank node ID
         if (!_blankNodes.TryGetValue(label, out var blankNodeId))
         {
-            blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString());
+            blankNodeId = string.Concat("_:b", _blankNodeCounter++.ToString(System.Globalization.CultureInfo.InvariantCulture));
             _blankNodes[label] = blankNodeId;
         }
 

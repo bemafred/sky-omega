@@ -179,7 +179,7 @@ public sealed class DiagnosticFormatter
 
         var lineInfo = lines[lineIndex];
         var lineText = source.Slice(lineInfo.Start, lineInfo.Length);
-        var lineNumWidth = diagnostic.Span.Line.ToString().Length;
+        var lineNumWidth = diagnostic.Span.Line.ToString(System.Globalization.CultureInfo.InvariantCulture).Length;
 
         // Empty gutter line
         WriteGutter(lineNumWidth, null);
@@ -200,7 +200,7 @@ public sealed class DiagnosticFormatter
     {
         if (lineNum.HasValue)
         {
-            var numStr = lineNum.Value.ToString().PadLeft(width);
+            var numStr = lineNum.Value.ToString(System.Globalization.CultureInfo.InvariantCulture).PadLeft(width);
             WriteColored(BrightBlue, numStr);
             WriteColored(BrightBlue, " | ");
         }
@@ -251,7 +251,7 @@ public sealed class DiagnosticFormatter
         if (relSpan.Line <= 0 || relSpan.Line > lines.Length)
             return;
 
-        var lineNumWidth = Math.Max(diagnostic.Span.Line, relSpan.Line).ToString().Length;
+        var lineNumWidth = Math.Max(diagnostic.Span.Line, relSpan.Line).ToString(System.Globalization.CultureInfo.InvariantCulture).Length;
 
         // Empty line
         WriteGutter(lineNumWidth, null);

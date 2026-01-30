@@ -773,6 +773,23 @@ Total: 10 stores × 320MB = 3.2GB ✓ Safe (within 33% budget)
 - Use `unsafe fixed` buffers for small inline storage when needed
 - Temporal semantics are implicit - all triples have valid-time bounds
 
+### Culture Invariance
+
+All numeric and date formatting in RDF/SPARQL code paths MUST use `CultureInfo.InvariantCulture` to ensure consistent output across all locales:
+
+```csharp
+// Integers
+value.ToString(CultureInfo.InvariantCulture)
+
+// Doubles/Floats
+value.ToString("G", CultureInfo.InvariantCulture)
+
+// DateTimes
+dt.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
+```
+
+**Rationale:** Swedish locale uses `,` as decimal separator, but W3C RDF/SPARQL specifications require `.` for numeric literals. See [ADR-014](docs/adrs/mercury/ADR-014-culture-invariance.md) for details.
+
 ## Design Philosophy
 
 Sky Omega values:
