@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace SkyOmega.Mercury.Sparql;
 
@@ -2145,9 +2146,9 @@ public ref struct BindingTable
     {
         if (_count >= _bindings.Length) return;
 
-        // Format the value as string and store in buffer
+        // Format the value as string and store in buffer (must use InvariantCulture for RDF compliance)
         Span<char> temp = stackalloc char[24];
-        if (!value.TryFormat(temp, out int written))
+        if (!value.TryFormat(temp, out int written, default, CultureInfo.InvariantCulture))
             return;
 
         if (_stringOffset + written > _stringBuffer.Length) return;
@@ -2171,9 +2172,9 @@ public ref struct BindingTable
     {
         if (_count >= _bindings.Length) return;
 
-        // Format the value as string and store in buffer
+        // Format the value as string and store in buffer (must use InvariantCulture for RDF compliance)
         Span<char> temp = stackalloc char[32];
-        if (!value.TryFormat(temp, out int written))
+        if (!value.TryFormat(temp, out int written, default, CultureInfo.InvariantCulture))
             return;
 
         if (_stringOffset + written > _stringBuffer.Length) return;

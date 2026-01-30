@@ -25,6 +25,7 @@ The codebase already uses `CultureInfo.InvariantCulture` in most numeric formatt
 - DateTime formatting in NOW() function
 - Blank node counter generation
 - **String interpolation** with numeric values (e.g., `$"{doubleVal}"` uses current culture)
+- **TryFormat** without IFormatProvider (e.g., `value.TryFormat(span, out len)` uses current culture)
 
 ## Decision
 
@@ -53,6 +54,18 @@ var formatted = $"\"{doubleVal.ToString(CultureInfo.InvariantCulture)}\"^^<xsd:d
 
 When interpolating numeric values into RDF literals, always call `.ToString(CultureInfo.InvariantCulture)` explicitly within the interpolation.
 
+### TryFormat Warning
+
+**`TryFormat` without an `IFormatProvider` uses the current culture.** This is another common source of bugs:
+
+```csharp
+// WRONG - uses current culture (Swedish: "3,14")
+value.TryFormat(span, out int written);
+
+// CORRECT - explicit culture
+value.TryFormat(span, out int written, default, CultureInfo.InvariantCulture);
+```
+
 ### Does NOT apply to:
 
 - `ReadOnlySpan<char>.ToString()` - culture-invariant by design
@@ -74,6 +87,7 @@ Files updated to use `CultureInfo.InvariantCulture`:
 | `TurtleStreamParser.*.cs` | Blank node counters | Integer |
 | `RdfXmlStreamParser.cs` | Blank node counters | Integer |
 | `Operators.cs` | `GetBoundValue()` typed literal formatting | Integer, Double |
+| `SparqlTypes.cs` | `BindingTable.Bind()` TryFormat calls | Integer, Double |
 
 ## Consequences
 
@@ -96,3 +110,4 @@ Files updated to use `CultureInfo.InvariantCulture`:
 - Grep patterns for CI:
   - `\.ToString\(\)` on numeric types without `CultureInfo`
   - `\$".*\{[a-z]*[Vv]al\}` - interpolated numeric variables without `.ToString(...)`
+  - `\.TryFormat\([^,]+,[^,]+\)` - TryFormat with only 2 arguments (missing IFormatProvider)
