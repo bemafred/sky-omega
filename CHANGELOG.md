@@ -36,17 +36,17 @@ Mercury reaches production-ready status with complete W3C SPARQL 1.1 conformance
 
 ### Changed
 
-#### W3C Conformance
+#### W3C Conformance (100% Core Coverage)
 - **SPARQL 1.1 Query**: 418/418 passing (100%)
-- **SPARQL 1.1 Update**: 84/94 passing (89%) with graph state validation
+- **SPARQL 1.1 Update**: 94/94 passing (100%)
 - **All tests** now validate actual graph contents, not just success status
 
-### Known Limitations (SPARQL Update)
+### Fixed
 
-10 W3C Update edge cases are not yet supported:
-- **USING clause dataset restriction** - USING without USING NAMED should restrict available named graphs (4 tests)
-- **Blank node identity** - Same bnode label in sequence operations requires scoping (4 tests)
-- **DELETE/INSERT sequence semantics** - Order of operations in combined statements (2 tests)
+#### SPARQL 1.1 Update Edge Cases (10 tests)
+- **USING clause dataset restriction** (4 tests) - USING without USING NAMED now correctly restricts named graph access
+- **Blank node identity** (4 tests) - Same bnode label across statements now creates unique nodes per W3C scoping rules
+- **DELETE/INSERT with mixed UNION branches** (2 tests) - UNION containing both GRAPH and default patterns now executes correctly via `_graphPatternFlags` tracking
 
 ### Documentation
 
