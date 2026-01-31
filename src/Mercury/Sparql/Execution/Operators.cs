@@ -49,6 +49,11 @@ internal static class SyntheticTermHelper
     public const string RdfPredicate = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate>";
     public const string RdfObject = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#object>";
 
+    // RDF namespace IRIs for RDF collections (lists)
+    public const string RdfFirst = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#first>";
+    public const string RdfRest = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#rest>";
+    public const string RdfNil = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>";
+
     // Pre-allocated synthetic variable names for reifier bindings (up to 32 per query)
     private static readonly string[] SyntheticVarNames = new string[32];
 
@@ -58,6 +63,9 @@ internal static class SyntheticTermHelper
     // Pre-allocated synthetic variable names for blank node property lists (up to 32 per query)
     private static readonly string[] SyntheticBnVarNames = new string[32];
 
+    // Pre-allocated synthetic blank node names for RDF list nodes in CONSTRUCT templates (up to 32)
+    private static readonly string[] SyntheticListNodeNames = new string[32];
+
     static SyntheticTermHelper()
     {
         for (int i = 0; i < SyntheticVarNames.Length; i++)
@@ -66,6 +74,8 @@ internal static class SyntheticTermHelper
             SyntheticSeqVarNames[i] = $"?_seq{i}";
         for (int i = 0; i < SyntheticBnVarNames.Length; i++)
             SyntheticBnVarNames[i] = $"?_bn{i}";
+        for (int i = 0; i < SyntheticListNodeNames.Length; i++)
+            SyntheticListNodeNames[i] = $"_:list{i}";
     }
 
     /// <summary>
@@ -77,6 +87,7 @@ internal static class SyntheticTermHelper
     /// <summary>
     /// Get the synthetic IRI for a negative offset.
     /// Offsets: -1 = rdf:type, -2 = rdf:Statement, -3 = rdf:subject, -4 = rdf:predicate, -5 = rdf:object
+    ///          -6 = rdf:first, -7 = rdf:rest, -8 = rdf:nil
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ReadOnlySpan<char> GetSyntheticIri(int start)
@@ -88,6 +99,9 @@ internal static class SyntheticTermHelper
             -3 => RdfSubject.AsSpan(),
             -4 => RdfPredicate.AsSpan(),
             -5 => RdfObject.AsSpan(),
+            -6 => RdfFirst.AsSpan(),
+            -7 => RdfRest.AsSpan(),
+            -8 => RdfNil.AsSpan(),
             _ => ReadOnlySpan<char>.Empty
         };
     }
@@ -97,10 +111,19 @@ internal static class SyntheticTermHelper
     /// Reifier variables: -100 to -131 = ?_qt0 to ?_qt31
     /// Sequence variables: -200 to -231 = ?_seq0 to ?_seq31
     /// Blank node property list variables: -300 to -331 = ?_bn0 to ?_bn31
+    /// List node blank nodes: -400 to -431 = _:list0 to _:list31
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ReadOnlySpan<char> GetSyntheticVarName(int start)
     {
+        // Check for list node blank nodes (-400 to -431)
+        if (start <= -400 && start > -432)
+        {
+            var index = -start - 400;
+            if (index < SyntheticListNodeNames.Length)
+                return SyntheticListNodeNames[index].AsSpan();
+        }
+
         // Check for blank node property list variables first (-300 to -331)
         if (start <= -300 && start > -332)
         {
@@ -123,6 +146,19 @@ internal static class SyntheticTermHelper
             return SyntheticVarNames[qtIndex].AsSpan();
         return ReadOnlySpan<char>.Empty;
     }
+
+    /// <summary>
+    /// Get the synthetic offset for a list node blank node.
+    /// Index 0 = offset -400, index 1 = offset -401, etc.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int GetListNodeOffset(int index) => -(400 + index);
+
+    /// <summary>
+    /// Check if offset is a list node blank node (-400 to -431).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsListNodeOffset(int start) => start <= -400 && start > -432;
 
     /// <summary>
     /// Get the synthetic offset for a sequence intermediate variable.
@@ -3201,14 +3237,21 @@ internal sealed class BoxedSubQueryExecutor
     private readonly bool _distinct;
     private readonly PrefixMapping[]? _prefixes;
     private readonly string? _graphContext;  // Graph context for subqueries inside GRAPH clauses
+    private readonly string[]? _namedGraphs;  // FROM NAMED restriction from outer query
 
     public BoxedSubQueryExecutor(QuadStore store, string source, SubSelect subSelect, PrefixMapping[]? prefixes = null)
+        : this(store, source, subSelect, prefixes, null)
+    {
+    }
+
+    public BoxedSubQueryExecutor(QuadStore store, string source, SubSelect subSelect, PrefixMapping[]? prefixes, string[]? namedGraphs)
     {
         _store = store;
         _source = source;
         _subSelect = subSelect;
         _distinct = subSelect.Distinct;
         _prefixes = prefixes;
+        _namedGraphs = namedGraphs;
 
         // Extract graph context if the subquery is inside a GRAPH clause
         // Expand prefixed names (e.g., :g2 -> <http://example.org/g2>)
@@ -3337,6 +3380,13 @@ internal sealed class BoxedSubQueryExecutor
     [MethodImpl(MethodImplOptions.NoInlining)]
     private List<MaterializedRow> ExecuteWithVariableGraphContext()
     {
+        // If subquery has real aggregates (COUNT, SUM, etc.), use per-graph aggregation path
+        // This handles cases like: GRAPH ?g { SELECT (count(*) AS ?c) WHERE { ?s :p ?x } }
+        if (_subSelect.HasRealAggregates)
+        {
+            return ExecuteWithAggregationPerGraph();
+        }
+
         var results = new List<MaterializedRow>();
         var innerBindings = new Binding[16];
         var innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
@@ -3353,28 +3403,54 @@ internal sealed class BoxedSubQueryExecutor
             int skipped = 0;
             int returned = 0;
 
-            // Iterate over all named graphs
-            var graphEnum = _store.GetNamedGraphs();
-            while (graphEnum.MoveNext())
+            // Iterate over named graphs - use FROM NAMED restriction if provided, otherwise all store graphs
+            if (_namedGraphs != null && _namedGraphs.Length > 0)
             {
-                var graphIri = graphEnum.Current;
-                var graphIriStr = graphIri.ToString();
-
-                // Execute patterns against this graph
-                if (_subSelect.PatternCount == 1)
+                // FROM NAMED specified - iterate those graphs (may include empty graphs)
+                foreach (var graphIriStr in _namedGraphs)
                 {
-                    MaterializeSinglePatternWithGraph(ref bindingTable, results, seenHashes,
-                        ref skipped, ref returned, graphIriStr, graphVarNameStr);
-                }
-                else
-                {
-                    MaterializeMultiPatternWithGraph(ref bindingTable, results, seenHashes,
-                        ref skipped, ref returned, graphIriStr, graphVarNameStr);
-                }
+                    // Execute patterns against this graph
+                    if (_subSelect.PatternCount == 1)
+                    {
+                        MaterializeSinglePatternWithGraph(ref bindingTable, results, seenHashes,
+                            ref skipped, ref returned, graphIriStr, graphVarNameStr);
+                    }
+                    else
+                    {
+                        MaterializeMultiPatternWithGraph(ref bindingTable, results, seenHashes,
+                            ref skipped, ref returned, graphIriStr, graphVarNameStr);
+                    }
 
-                // Check limit
-                if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
-                    break;
+                    // Check limit
+                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                        break;
+                }
+            }
+            else
+            {
+                // No FROM NAMED restriction - iterate all named graphs from store
+                var graphEnum = _store.GetNamedGraphs();
+                while (graphEnum.MoveNext())
+                {
+                    var graphIri = graphEnum.Current;
+                    var graphIriStr = graphIri.ToString();
+
+                    // Execute patterns against this graph
+                    if (_subSelect.PatternCount == 1)
+                    {
+                        MaterializeSinglePatternWithGraph(ref bindingTable, results, seenHashes,
+                            ref skipped, ref returned, graphIriStr, graphVarNameStr);
+                    }
+                    else
+                    {
+                        MaterializeMultiPatternWithGraph(ref bindingTable, results, seenHashes,
+                            ref skipped, ref returned, graphIriStr, graphVarNameStr);
+                    }
+
+                    // Check limit
+                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                        break;
+                }
             }
         }
         finally
@@ -3383,6 +3459,231 @@ internal sealed class BoxedSubQueryExecutor
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Execute subquery with aggregation for each named graph (GRAPH ?g { SELECT (count(*) AS ?c) ... }).
+    /// For each named graph, compute aggregates separately, including empty-group handling.
+    /// This ensures that even graphs with 0 matches return a result with count=0.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteWithAggregationPerGraph()
+    {
+        var results = new List<MaterializedRow>();
+        var innerBindings = new Binding[16];
+        var innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
+        var bindingTable = new BindingTable(innerBindings, innerStringBuffer);
+        var source = _source;
+
+        // Get the graph variable name from source
+        var graphTerm = _subSelect.GraphContext;
+        var graphVarName = source.AsSpan(graphTerm.Start, graphTerm.Length);
+        var graphVarNameStr = graphVarName.ToString();
+
+        try
+        {
+            // Iterate over named graphs - use FROM NAMED restriction if provided, otherwise all store graphs
+            IEnumerable<string> graphIris = _namedGraphs != null && _namedGraphs.Length > 0
+                ? _namedGraphs
+                : CollectNamedGraphs();
+
+            foreach (var graphIriStr in graphIris)
+            {
+                // Collect raw rows for this graph only
+                var groups = new Dictionary<string, SubQueryGroupedRow>();
+
+                if (_subSelect.PatternCount == 1)
+                {
+                    CollectRawResultsSingleWithGraph(ref bindingTable, groups, source, graphIriStr);
+                }
+                else
+                {
+                    CollectRawResultsMultiWithGraph(ref bindingTable, groups, source, graphIriStr);
+                }
+
+                // Handle implicit aggregation with empty result set for this graph:
+                // When there are aggregates but no GROUP BY and no matching rows,
+                // SPARQL requires returning one row with default aggregate values (e.g., COUNT=0)
+                if (groups.Count == 0 && _subSelect.HasAggregates && !_subSelect.HasGroupBy)
+                {
+                    bindingTable.Clear();
+                    var emptyGroup = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+                    groups[""] = emptyGroup;
+                }
+
+                // Finalize aggregates and add to results with graph binding
+                foreach (var group in groups.Values)
+                {
+                    group.FinalizeAggregates();
+                    var row = group.ToMaterializedRowWithGraphBinding(graphVarNameStr, graphIriStr);
+                    results.Add(row);
+                }
+            }
+        }
+        finally
+        {
+            PooledBufferManager.Shared.Return(innerStringBuffer);
+        }
+
+        // Apply LIMIT/OFFSET if specified
+        if (_subSelect.Offset > 0 || _subSelect.Limit > 0)
+        {
+            int skip = _subSelect.Offset;
+            int take = _subSelect.Limit > 0 ? _subSelect.Limit : results.Count;
+            if (skip >= results.Count)
+            {
+                results.Clear();
+            }
+            else
+            {
+                int available = results.Count - skip;
+                int actualTake = Math.Min(take, available);
+                results = results.GetRange(skip, actualTake);
+            }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Helper to collect named graphs from the store as a list of IRI strings.
+    /// Cannot use yield return with ref struct NamedGraphEnumerator.
+    /// </summary>
+    private List<string> CollectNamedGraphs()
+    {
+        var result = new List<string>();
+        var graphEnum = _store.GetNamedGraphs();
+        while (graphEnum.MoveNext())
+        {
+            result.Add(graphEnum.Current.ToString());
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Collect raw results from single pattern for aggregation, against a specific graph.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CollectRawResultsSingleWithGraph(ref BindingTable bindingTable,
+        Dictionary<string, SubQueryGroupedRow> groups, string source, string graphIri)
+    {
+        var tp = _subSelect.GetPattern(0);
+        var sourceSpan = source.AsSpan();
+        var graphSpan = graphIri.AsSpan();
+        var scan = new TriplePatternScan(_store, sourceSpan, tp, bindingTable, graphSpan,
+            TemporalQueryMode.Current, default, default, default, _prefixes);
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                // Apply filters if any
+                if (_subSelect.FilterCount > 0)
+                {
+                    bool passedFilters = true;
+                    for (int i = 0; i < _subSelect.FilterCount; i++)
+                    {
+                        var filter = _subSelect.GetFilter(i);
+                        var filterExpr = sourceSpan.Slice(filter.Start, filter.Length);
+                        var evaluator = new FilterEvaluator(filterExpr);
+                        if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                        {
+                            passedFilters = false;
+                            break;
+                        }
+                    }
+                    if (!passedFilters)
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                }
+
+                // Build group key from GROUP BY variables
+                var groupKey = BuildGroupKey(ref bindingTable, source);
+
+                // Get or create group
+                if (!groups.TryGetValue(groupKey, out var group))
+                {
+                    group = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+                    groups[groupKey] = group;
+                }
+
+                // Accumulate aggregate values
+                group.UpdateAggregates(bindingTable, source);
+
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Collect raw results from multiple patterns for aggregation, against a specific graph.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CollectRawResultsMultiWithGraph(ref BindingTable bindingTable,
+        Dictionary<string, SubQueryGroupedRow> groups, string source, string graphIri)
+    {
+        var graphSpan = graphIri.AsSpan();
+        var sourceSpan = source.AsSpan();
+
+        // Build pattern for multi-pattern scan
+        var graphPattern = new GraphPattern();
+        for (int i = 0; i < _subSelect.PatternCount; i++)
+        {
+            graphPattern.AddPattern(_subSelect.GetPattern(i));
+        }
+
+        var scan = new MultiPatternScan(_store, source, graphPattern, false, graphSpan, prefixes: _prefixes);
+        try
+        {
+            while (scan.MoveNext(ref bindingTable))
+            {
+                // Apply filters if any
+                if (_subSelect.FilterCount > 0)
+                {
+                    bool passedFilters = true;
+                    for (int i = 0; i < _subSelect.FilterCount; i++)
+                    {
+                        var filter = _subSelect.GetFilter(i);
+                        var filterExpr = sourceSpan.Slice(filter.Start, filter.Length);
+                        var evaluator = new FilterEvaluator(filterExpr);
+                        if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer()))
+                        {
+                            passedFilters = false;
+                            break;
+                        }
+                    }
+                    if (!passedFilters)
+                    {
+                        bindingTable.Clear();
+                        continue;
+                    }
+                }
+
+                // Build group key from GROUP BY variables
+                var groupKey = BuildGroupKey(ref bindingTable, source);
+
+                // Get or create group
+                if (!groups.TryGetValue(groupKey, out var group))
+                {
+                    group = new SubQueryGroupedRow(_subSelect, bindingTable, source);
+                    groups[groupKey] = group;
+                }
+
+                // Accumulate aggregate values
+                group.UpdateAggregates(bindingTable, source);
+
+                bindingTable.Clear();
+            }
+        }
+        finally
+        {
+            scan.Dispose();
+        }
     }
 
     /// <summary>
@@ -4929,6 +5230,35 @@ internal sealed class SubQueryGroupedRow
         return new MaterializedRow(table);
     }
 
+    /// <summary>
+    /// Convert to MaterializedRow with an additional graph binding.
+    /// Used for GRAPH ?g { SELECT (count(*) AS ?c) ... } queries where
+    /// the graph variable needs to be bound alongside aggregate results.
+    /// </summary>
+    public MaterializedRow ToMaterializedRowWithGraphBinding(string graphVarName, string graphIri)
+    {
+        var bindings = new Binding[16];
+        var buffer = new char[512];
+        var table = new BindingTable(bindings, buffer);
+
+        // Add graph variable binding first
+        table.Bind(graphVarName.AsSpan(), graphIri.AsSpan());
+
+        // Add group key bindings
+        for (int i = 0; i < _keyCount; i++)
+        {
+            table.BindWithHash(_keyHashes[i], _keyValues[i]);
+        }
+
+        // Add aggregate bindings
+        for (int i = 0; i < _aggCount; i++)
+        {
+            table.BindWithHash(_aggHashes[i], _aggValues[i]);
+        }
+
+        return new MaterializedRow(table);
+    }
+
     private static int ComputeHash(ReadOnlySpan<char> s)
     {
         uint hash = 2166136261;
@@ -5030,6 +5360,7 @@ internal ref struct SubQueryScan
     private readonly ReadOnlySpan<char> _source;
     private readonly SubSelect _subSelect;
     private readonly PrefixMapping[]? _prefixes;
+    private readonly string[]? _namedGraphs;  // FROM NAMED restriction from outer query
     // Materialized results - populated during Initialize() via BoxedSubQueryExecutor
     private List<MaterializedRow>? _materializedResults;
     private int _currentIndex;
@@ -5037,16 +5368,22 @@ internal ref struct SubQueryScan
     private bool _exhausted;
 
     public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect)
-        : this(store, source, subSelect, null)
+        : this(store, source, subSelect, null, null)
     {
     }
 
     public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect, PrefixMapping[]? prefixes)
+        : this(store, source, subSelect, prefixes, null)
+    {
+    }
+
+    public SubQueryScan(QuadStore store, ReadOnlySpan<char> source, SubSelect subSelect, PrefixMapping[]? prefixes, string[]? namedGraphs)
     {
         _store = store;
         _source = source;
         _subSelect = subSelect;
         _prefixes = prefixes;
+        _namedGraphs = namedGraphs;
         _materializedResults = null;
         _currentIndex = 0;
         _initialized = false;
@@ -5096,7 +5433,8 @@ internal ref struct SubQueryScan
         // Use boxed executor to isolate scan operator stack usage
         // The class methods have fresh stack frames without accumulated ref struct overhead
         // Pass prefix mappings for expanding prefixed names in subquery patterns
-        var executor = new BoxedSubQueryExecutor(_store, sourceString, _subSelect, _prefixes);
+        // Pass namedGraphs for FROM NAMED restriction (may include empty graphs)
+        var executor = new BoxedSubQueryExecutor(_store, sourceString, _subSelect, _prefixes, _namedGraphs);
         _materializedResults = executor.Execute();
     }
 

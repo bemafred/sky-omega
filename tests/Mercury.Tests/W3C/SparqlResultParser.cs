@@ -28,8 +28,209 @@ public static class SparqlResultParser
             ".srj" or ".json" => ParseJson(content),
             ".csv" => ParseCsv(content),
             ".tsv" => ParseTsv(content),
+            ".ttl" or ".turtle" => await ParseRdfResultSetAsync(path),
             _ => throw new NotSupportedException($"Unsupported result format: {extension}")
         };
+    }
+
+    /// <summary>
+    /// Parses SPARQL Results in RDF format (using rs:ResultSet vocabulary).
+    /// This is used by some W3C tests that encode SELECT results as RDF.
+    /// See: http://www.w3.org/2001/sw/DataAccess/tests/result-set#
+    /// </summary>
+    public static async Task<SparqlResultSet> ParseRdfResultSetAsync(string path)
+    {
+        var resultSet = new SparqlResultSet();
+
+        // Parse the Turtle file into triples
+        // Use urn:w3c:_base_ base URI - relative IRIs like <empty.ttl> need special handling
+        // since URN scheme doesn't support standard relative resolution
+        var triples = new List<(string s, string p, string o)>();
+        await using var stream = File.OpenRead(path);
+        using var parser = new Mercury.Rdf.Turtle.TurtleStreamParser(stream, baseUri: new Uri(path).AbsoluteUri);
+
+        await parser.ParseAsync((s, p, o) =>
+        {
+            // Convert file:// URIs to urn:w3c: scheme to match W3C test framework
+            var sStr = ConvertToW3cUrn(s.ToString());
+            var pStr = ConvertToW3cUrn(p.ToString());
+            var oStr = ConvertToW3cUrn(o.ToString());
+            triples.Add((sStr, pStr, oStr));
+        });
+
+        // Constants for rs: namespace
+        const string rsResultVariable = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#resultVariable>";
+        const string rsSolution = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#solution>";
+        const string rsBinding = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#binding>";
+        const string rsVariable = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#variable>";
+        const string rsValue = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#value>";
+        const string rsBoolean = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#boolean>";
+
+        // Find the ResultSet subject
+        string? resultSetSubject = null;
+        foreach (var (s, p, o) in triples)
+        {
+            if (p == "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>" &&
+                o == "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#ResultSet>")
+            {
+                resultSetSubject = s;
+                break;
+            }
+        }
+
+        if (resultSetSubject == null)
+        {
+            // No ResultSet found - might be an ASK result or empty
+            foreach (var (s, p, o) in triples)
+            {
+                if (p == rsBoolean)
+                {
+                    var boolValue = o.Trim('"') == "true" || o.Trim('"') == "1";
+                    return SparqlResultSet.Boolean(boolValue);
+                }
+            }
+            return resultSet;
+        }
+
+        // Get variable names
+        foreach (var (s, p, o) in triples)
+        {
+            if (s == resultSetSubject && p == rsResultVariable)
+            {
+                var varName = o.Trim('"');
+                resultSet.AddVariable(varName);
+            }
+        }
+
+        // Find all solutions
+        var solutionSubjects = new List<string>();
+        foreach (var (s, p, o) in triples)
+        {
+            if (s == resultSetSubject && p == rsSolution)
+            {
+                solutionSubjects.Add(o);
+            }
+        }
+
+        // Parse each solution
+        foreach (var solutionSubject in solutionSubjects)
+        {
+            var row = new SparqlResultRow();
+
+            // Find all bindings in this solution
+            var bindingSubjects = new List<string>();
+            foreach (var (s, p, o) in triples)
+            {
+                if (s == solutionSubject && p == rsBinding)
+                {
+                    bindingSubjects.Add(o);
+                }
+            }
+
+            // Parse each binding
+            foreach (var bindingSubject in bindingSubjects)
+            {
+                string? varName = null;
+                string? value = null;
+
+                foreach (var (s, p, o) in triples)
+                {
+                    if (s == bindingSubject)
+                    {
+                        if (p == rsVariable)
+                        {
+                            varName = o.Trim('"');
+                        }
+                        else if (p == rsValue)
+                        {
+                            value = o;
+                        }
+                    }
+                }
+
+                if (varName != null && value != null)
+                {
+                    row.Set(varName, ParseRdfValue(value));
+                }
+            }
+
+            resultSet.AddRow(row);
+        }
+
+        return resultSet;
+    }
+
+    /// <summary>
+    /// Parses an RDF term value into a SparqlBinding.
+    /// </summary>
+    /// <summary>
+    /// Converts file:// URIs with .ttl extension to urn:w3c: scheme.
+    /// This matches how the W3C test framework loads named graphs.
+    /// e.g., "file:///path/to/empty.ttl" → "urn:w3c:empty.ttl"
+    /// </summary>
+    private static string ConvertToW3cUrn(string value)
+    {
+        if (value.StartsWith("<file://") && value.EndsWith(">"))
+        {
+            // Extract the IRI without angle brackets
+            var iri = value[1..^1];
+            // Get the filename
+            var lastSlash = iri.LastIndexOf('/');
+            if (lastSlash >= 0)
+            {
+                var filename = iri[(lastSlash + 1)..];
+                // Only convert .ttl files (W3C test data files)
+                if (filename.EndsWith(".ttl"))
+                {
+                    return $"<urn:w3c:{filename}>";
+                }
+            }
+        }
+        return value;
+    }
+
+    private static SparqlBinding ParseRdfValue(string value)
+    {
+        if (value.StartsWith('<') && value.EndsWith('>'))
+        {
+            // IRI
+            return SparqlBinding.Uri(value[1..^1]);
+        }
+
+        if (value.StartsWith("_:"))
+        {
+            // Blank node
+            return SparqlBinding.BNode(value[2..]);
+        }
+
+        if (value.StartsWith('"'))
+        {
+            // Literal - find the closing quote
+            int closeQuote = FindClosingQuote(value);
+            if (closeQuote > 0)
+            {
+                var literalValue = UnescapeString(value[1..closeQuote]);
+                var suffix = value[(closeQuote + 1)..];
+
+                if (suffix.StartsWith('@'))
+                {
+                    return SparqlBinding.LangLiteral(literalValue, suffix[1..]);
+                }
+
+                if (suffix.StartsWith("^^"))
+                {
+                    var datatype = suffix[2..];
+                    if (datatype.StartsWith('<') && datatype.EndsWith('>'))
+                        datatype = datatype[1..^1];
+                    return SparqlBinding.TypedLiteral(literalValue, datatype);
+                }
+
+                return SparqlBinding.Literal(literalValue);
+            }
+        }
+
+        // Plain value
+        return SparqlBinding.Literal(value);
     }
 
     /// <summary>

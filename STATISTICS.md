@@ -95,8 +95,8 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | Format | Passing | Total | Coverage | Skipped |
 |--------|--------:|------:|---------:|---------|
 | JSON-LD 1.1 | 461 | 467 | **100%** | 6: JSON-LD 1.0 legacy (4), generalized RDF (2) |
-| SPARQL 1.1 Query | 418 | 418 | **100%** | — |
-| **Extended Total** | **879** | **885** | **99%** | |
+| SPARQL 1.1 Query | 421 | 421 | **100%** | — |
+| **Extended Total** | **882** | **888** | **99%** | |
 
 ### Skipped Test Categories
 
@@ -105,22 +105,12 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | JSON-LD 1.0 | 4 | Legacy behavior superseded by 1.1 | Intentional |
 | Generalized RDF | 2 | Non-standard (blank node predicates) | Intentional |
 
-### Remaining CONSTRUCT Gaps (3 tests)
-
-High-complexity features not yet implemented:
-
-| Test | Issue | Complexity |
-|------|-------|------------|
-| constructlist | RDF collection syntax in templates | High |
-| agg-empty-group-count-graph | GRAPH + subquery + COUNT | High |
-| bindings/graph | VALUES binding GRAPH variable | High |
-
 ### Summary
 
 | Metric | Value |
 |--------|-------|
 | **Core conformance** | 100% (1,181/1,181) |
-| **SPARQL 1.1 Query** | 100% (418/418) |
+| **SPARQL 1.1 Query** | 100% (421/421) |
 | **SPARQL 1.1 Update** | 100% (94/94) |
 | **With optional extensions** | 99% (2,060/2,066) |
 | **Remaining gaps** | 3 tests (high complexity) |

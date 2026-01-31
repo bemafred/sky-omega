@@ -79,8 +79,8 @@ public partial class QueryExecutor
         var stringBuffer = _stringBuffer;
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Create SubQueryScan operator with prefix mappings for expansion
-        var subQueryScan = new SubQueryScan(_store, _source, subSelect, _prefixMappings);
+        // Create SubQueryScan operator with prefix mappings and named graphs for expansion
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect, _prefixMappings, _namedGraphs);
         try
         {
             while (subQueryScan.MoveNext(ref bindingTable))
@@ -235,7 +235,7 @@ public partial class QueryExecutor
         var bindingTable = new BindingTable(bindings, stringBuffer);
 
         var results = new List<MaterializedRow>();
-        var subQueryScan = new SubQueryScan(_store, _source, subSelect, _prefixMappings);
+        var subQueryScan = new SubQueryScan(_store, _source, subSelect, _prefixMappings, _namedGraphs);
         try
         {
             while (subQueryScan.MoveNext(ref bindingTable))

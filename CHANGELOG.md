@@ -37,11 +37,16 @@ Mercury reaches production-ready status with complete W3C SPARQL 1.1 conformance
 ### Changed
 
 #### W3C Conformance (100% Core Coverage)
-- **SPARQL 1.1 Query**: 418/418 passing (100%)
+- **SPARQL 1.1 Query**: 421/421 passing (100%)
 - **SPARQL 1.1 Update**: 94/94 passing (100%)
 - **All tests** now validate actual graph contents, not just success status
 
 ### Fixed
+
+#### SPARQL 1.1 CONSTRUCT/Aggregate Gaps (3 tests)
+- **`constructlist`** - RDF collection `(...)` syntax in CONSTRUCT templates now generates proper `rdf:first/rdf:rest` chains
+- **`agg-empty-group-count-graph`** - COUNT without GROUP BY inside GRAPH ?g now correctly returns count per graph (including 0 for empty graphs)
+- **`bindings/manifest#graph`** - VALUES inside GRAPH binding same variable as graph name now correctly filters/expands based on UNDEF vs specific values
 
 #### SPARQL 1.1 Update Edge Cases (10 tests)
 - **USING clause dataset restriction** (4 tests) - USING without USING NAMED now correctly restricts named graph access

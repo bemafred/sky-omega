@@ -42,9 +42,9 @@ public static class W3CTestContext
         ["nfc"] = "NFC normalization not enforced on IRIs",
 
         // CONSTRUCT/DESCRIBE features not yet fully implemented
-        ["agg-empty-group-count-graph"] = "COUNT without GROUP BY inside GRAPH not implemented",
-        ["bindings/manifest#graph"] = "VALUES inside GRAPH binding same variable as graph name not implemented",
-        ["constructlist"] = "RDF collection construction in CONSTRUCT not implemented",
+        // ["agg-empty-group-count-graph"] = "COUNT without GROUP BY inside GRAPH not implemented",  // FIXED: Now supported
+        // ["bindings/manifest#graph"] = "VALUES inside GRAPH binding same variable as graph name not implemented",  // Testing...
+        // ["constructlist"] = "RDF collection construction in CONSTRUCT not implemented",  // FIXED: Now supported
     };
 
     /// <summary>

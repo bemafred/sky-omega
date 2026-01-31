@@ -492,6 +492,7 @@ public ref partial struct SparqlParser
     private ConstructTemplate ParseConstructTemplate()
     {
         var template = new ConstructTemplate();
+        _constructListNodeCounter = 0;  // Reset counter for each template
 
         // Expect '{'
         if (Peek() != '{')
@@ -507,8 +508,16 @@ public ref partial struct SparqlParser
             if (Peek() == '}')
                 break;
 
-            // Parse subject
-            var subject = ParseTerm();
+            // Parse subject - check for collection first
+            Term subject;
+            if (Peek() == '(')
+            {
+                subject = ParseConstructCollection(ref template);
+            }
+            else
+            {
+                subject = ParseTerm();
+            }
             if (subject.Type == TermType.Variable && subject.Length == 0)
                 break;
 
@@ -519,8 +528,16 @@ public ref partial struct SparqlParser
 
             SkipWhitespace();
 
-            // Parse object
-            var obj = ParseTerm();
+            // Parse object - check for collection first
+            Term obj;
+            if (Peek() == '(')
+            {
+                obj = ParseConstructCollection(ref template);
+            }
+            else
+            {
+                obj = ParseTerm();
+            }
 
             template.AddPattern(new TriplePattern
             {
@@ -545,7 +562,16 @@ public ref partial struct SparqlParser
                 // Parse next predicate-object pair with same subject
                 predicate = ParseTerm();
                 SkipWhitespace();
-                obj = ParseTerm();
+
+                // Parse object - check for collection first
+                if (Peek() == '(')
+                {
+                    obj = ParseConstructCollection(ref template);
+                }
+                else
+                {
+                    obj = ParseTerm();
+                }
 
                 template.AddPattern(new TriplePattern
                 {
@@ -570,6 +596,101 @@ public ref partial struct SparqlParser
 
         Advance();
         return template;
+    }
+
+    /// <summary>
+    /// Parse an RDF collection (list) in CONSTRUCT template and expand to rdf:first/rdf:rest patterns.
+    /// Returns a blank node term representing the list head.
+    /// </summary>
+    private Term ParseConstructCollection(ref ConstructTemplate template)
+    {
+        Advance(); // Skip '('
+        SkipWhitespace();
+
+        // Handle empty collection () = rdf:nil
+        if (Peek() == ')')
+        {
+            Advance();
+            // Return synthetic rdf:nil (offset -8)
+            return new Term { Type = TermType.Iri, Start = -8, Length = 0 };
+        }
+
+        // Generate first blank node for the list head
+        int headNodeIndex = _constructListNodeCounter++;
+        if (headNodeIndex >= 32)
+            throw new SparqlParseException("Too many list nodes in CONSTRUCT template (max 32)");
+
+        // Create head node term (synthetic blank node with offset -400 - index)
+        var headNode = new Term { Type = TermType.BlankNode, Start = -(400 + headNodeIndex), Length = 0 };
+        var currentNode = headNode;
+        int currentNodeIndex = headNodeIndex;
+
+        // Parse list items
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            SkipWhitespace();
+            if (Peek() == ')')
+                break;
+
+            // Parse item (could be a nested collection)
+            Term item;
+            if (Peek() == '(')
+            {
+                item = ParseConstructCollection(ref template);
+            }
+            else
+            {
+                item = ParseTerm();
+            }
+
+            // Add rdf:first triple: currentNode rdf:first item
+            // Predicate is synthetic rdf:first (offset -6)
+            template.AddPattern(new TriplePattern
+            {
+                Subject = currentNode,
+                Predicate = new Term { Type = TermType.Iri, Start = -6, Length = 0 },
+                Object = item
+            });
+
+            SkipWhitespace();
+
+            // Check if this is the last item
+            if (Peek() == ')')
+            {
+                // Add rdf:rest rdf:nil triple
+                // Predicate is synthetic rdf:rest (offset -7), Object is synthetic rdf:nil (offset -8)
+                template.AddPattern(new TriplePattern
+                {
+                    Subject = currentNode,
+                    Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
+                    Object = new Term { Type = TermType.Iri, Start = -8, Length = 0 }
+                });
+            }
+            else
+            {
+                // Create next node and add rdf:rest triple to it
+                int nextNodeIndex = _constructListNodeCounter++;
+                if (nextNodeIndex >= 32)
+                    throw new SparqlParseException("Too many list nodes in CONSTRUCT template (max 32)");
+
+                var nextNode = new Term { Type = TermType.BlankNode, Start = -(400 + nextNodeIndex), Length = 0 };
+
+                template.AddPattern(new TriplePattern
+                {
+                    Subject = currentNode,
+                    Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
+                    Object = nextNode
+                });
+
+                currentNode = nextNode;
+                currentNodeIndex = nextNodeIndex;
+            }
+        }
+
+        if (Peek() == ')')
+            Advance();
+
+        return headNode;
     }
 
     private Query ParseDescribeQuery(Prologue prologue)

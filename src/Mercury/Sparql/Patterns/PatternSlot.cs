@@ -822,6 +822,11 @@ internal sealed class QueryBuffer : IDisposable
     public ValuesClause PostQueryValues { get; set; }
     public bool HasPostQueryValues => PostQueryValues.HasValues;
 
+    // WHERE-level VALUES clause (inline VALUES inside WHERE clause)
+    // Used for VALUES-only GRAPH clauses: GRAPH ?g { VALUES (?g ?t) { ... } }
+    public ValuesClause WhereValues { get; set; }
+    public bool HasWhereValues => WhereValues.HasValues;
+
     // Computed properties
     public bool HasFilters => FilterCount > 0;
     public bool HasBinds => BindCount > 0;
@@ -1384,12 +1389,15 @@ internal static class QueryBufferAdapter
     /// </summary>
     public static QueryBuffer FromQuery(in Query query, ReadOnlySpan<char> source)
     {
-        // Estimate capacity: patterns + filters + binds + graph patterns
-        int estimatedSlots = query.WhereClause.Pattern.PatternCount
-            + query.WhereClause.Pattern.FilterCount
-            + query.WhereClause.Pattern.BindCount
-            + query.WhereClause.Pattern.GraphClauseCount * 10
-            + query.WhereClause.Pattern.ExistsFilterCount * 5
+        // Estimate capacity: patterns + filters + binds + graph patterns + values
+        var gp = query.WhereClause.Pattern;
+        int valuesSlots = gp.HasValues ? (1 + gp.Values.ValueCount) : 0;  // 1 header + N entries
+        int estimatedSlots = gp.PatternCount
+            + gp.FilterCount
+            + gp.BindCount
+            + gp.GraphClauseCount * 10
+            + gp.ExistsFilterCount * 5
+            + valuesSlots
             + 16; // Buffer room
 
         var buffer = new QueryBuffer(Math.Max(estimatedSlots, 32));
@@ -1620,6 +1628,8 @@ internal static class QueryBufferAdapter
             : 0;
         buffer.HasUnionFlag = gp.HasUnion;
         buffer.HasValues = gp.HasValues;
+        if (gp.HasValues)
+            buffer.WhereValues = gp.Values;
         // Copy OptionalFlags - build bitmask from GraphPattern's IsOptional checks
         uint optFlags = 0;
         for (int i = 0; i < gp.PatternCount && i < 32; i++)
@@ -1726,6 +1736,8 @@ internal static class QueryBufferAdapter
         }
 
         // Add GRAPH clauses
+        // Track if we added VALUES inside a GRAPH clause (to avoid adding it again at top level)
+        bool valuesAddedInsideGraph = false;
         for (int i = 0; i < gp.GraphClauseCount; i++)
         {
             var gc = gp.GetGraphClause(i);
@@ -1741,6 +1753,20 @@ internal static class QueryBufferAdapter
                     tp.Object.Type, tp.Object.Start, tp.Object.Length,
                     tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length
                 );
+            }
+
+            // If GRAPH has variable and 0 patterns, add VALUES as child (VALUES-only GRAPH clause)
+            // W3C test: GRAPH ?g { VALUES (?g ?t) { ... } }
+            if (gc.PatternCount == 0 && gc.Graph.Type == TermType.Variable && gp.HasValues)
+            {
+                var values = gp.Values;
+                int valuesHeaderIdx = patterns.AddValuesHeader(values.VarStart, values.VarLength);
+                for (int v = 0; v < values.ValueCount; v++)
+                {
+                    var (start, len) = values.GetValue(v);
+                    patterns.AddValuesEntry(start, len, valuesHeaderIdx);
+                }
+                valuesAddedInsideGraph = true;
             }
 
             patterns.EndGraph(headerIndex);
@@ -1791,8 +1817,8 @@ internal static class QueryBufferAdapter
             );
         }
 
-        // Add VALUES clause if present
-        if (gp.HasValues)
+        // Add VALUES clause if present and not already added inside a GRAPH clause
+        if (gp.HasValues && !valuesAddedInsideGraph)
         {
             var values = gp.Values;
             int headerIdx = patterns.AddValuesHeader(values.VarStart, values.VarLength);

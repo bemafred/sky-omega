@@ -25,6 +25,7 @@ public ref partial struct SparqlParser
     private int _quotedTripleCounter; // Counter for generating synthetic reifier variables
     private int _seqVarCounter; // Counter for generating synthetic sequence intermediate variables
     private int _blankNodePropListCounter; // Counter for generating synthetic blank nodes for [ ] property lists
+    private int _constructListNodeCounter; // Counter for synthetic list node blank nodes within CONSTRUCT template
     private int _currentDepth; // Current recursion depth for subqueries, paths, quoted triples
     private readonly int _maxDepth; // Maximum allowed recursion depth
     private int _scopeDepth; // Current nested group scope depth for BIND/FILTER scoping

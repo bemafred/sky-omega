@@ -1176,4 +1176,168 @@ SELECT ?book ?title ?price
             Store.ReleaseReadLock();
         }
     }
+
+    // ========== CONSTRUCT with RDF Collections Tests ==========
+
+    [Fact]
+    public void ExecuteConstruct_WithRdfCollection()
+    {
+        // Test W3C constructlist - CONSTRUCT { (?s ?o) :prop ?p } WHERE { ?s ?p ?o }
+        // Use a unique predicate that won't collide with fixture data
+        var uniquePred = "<http://example.org/constructlist-test-pred>";
+        Store.AddCurrent(
+            "<http://example.org/s1>",
+            uniquePred,
+            "<http://example.org/o1>");
+        Store.AddCurrent(
+            "<http://example.org/s2>",
+            uniquePred,
+            "<http://example.org/o1>");
+        Store.AddCurrent(
+            "<http://example.org/s2>",
+            uniquePred,
+            "<http://example.org/o2>");
+
+        var query = @"
+PREFIX : <http://example.org/>
+CONSTRUCT { (?s ?o) :prop ?p } WHERE { ?s ?p ?o . FILTER(?p = <http://example.org/constructlist-test-pred>) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Construct, parsedQuery.Type);
+        Assert.True(parsedQuery.ConstructTemplate.HasPatterns);
+        // Template should have 4 patterns per list: _:l0 rdf:first ?s, _:l0 rdf:rest _:l1, _:l1 rdf:first ?o, _:l1 rdf:rest rdf:nil
+        // Plus 1 pattern: _:l0 :prop ?p
+        Assert.Equal(5, parsedQuery.ConstructTemplate.PatternCount);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteConstruct();
+
+            var triples = new List<(string s, string p, string o)>();
+            while (results.MoveNext())
+            {
+                var t = results.Current;
+                triples.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+            }
+            results.Dispose();
+
+            // Should have at least some triples
+            Assert.True(triples.Count > 0, $"Expected some triples, got 0");
+
+            // Verify we have rdf:first triples
+            var firstTriples = triples.Where(t =>
+                t.p == "<http://www.w3.org/1999/02/22-rdf-syntax-ns#first>").ToList();
+            Assert.True(firstTriples.Count >= 6, $"Expected at least 6 rdf:first triples, got {firstTriples.Count}");
+
+            // Verify we have rdf:rest triples
+            var restTriples = triples.Where(t =>
+                t.p == "<http://www.w3.org/1999/02/22-rdf-syntax-ns#rest>").ToList();
+            Assert.True(restTriples.Count >= 6, $"Expected at least 6 rdf:rest triples, got {restTriples.Count}");
+
+            // Verify we have :prop triples (3 input rows = 3 :prop triples)
+            var propTriples = triples.Where(t =>
+                t.p == "<http://example.org/prop>").ToList();
+            Assert.Equal(3, propTriples.Count);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ExecuteConstruct_WithEmptyCollection()
+    {
+        // Test CONSTRUCT with empty collection () which should be rdf:nil
+        var uniquePred = "<http://example.org/empty-collection-test-pred>";
+        Store.AddCurrent(
+            "<http://example.org/s1>",
+            uniquePred,
+            "<http://example.org/o1>");
+
+        // Use FILTER to only match our test data
+        var query = @"
+PREFIX : <http://example.org/>
+CONSTRUCT { () :prop ?p } WHERE { ?s ?p ?o . FILTER(?p = <http://example.org/empty-collection-test-pred>) }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Construct, parsedQuery.Type);
+        // Template should have 1 pattern: rdf:nil :prop ?p
+        Assert.Equal(1, parsedQuery.ConstructTemplate.PatternCount);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteConstruct();
+
+            var triples = new List<(string s, string p, string o)>();
+            while (results.MoveNext())
+            {
+                var t = results.Current;
+                triples.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+            }
+            results.Dispose();
+
+            // 1 input row * 1 pattern = 1 triple
+            Assert.Single(triples);
+            Assert.Equal("<http://www.w3.org/1999/02/22-rdf-syntax-ns#nil>", triples[0].s);
+            Assert.Equal("<http://example.org/prop>", triples[0].p);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void ParseConstruct_SingleItemCollection()
+    {
+        // Test that single-item collections parse correctly
+        var query = @"
+PREFIX : <http://example.org/>
+CONSTRUCT { (?s) :prop ?p } WHERE { ?s :p ?o }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Construct, parsedQuery.Type);
+        // Template should have 3 patterns:
+        // _:l0 rdf:first ?s
+        // _:l0 rdf:rest rdf:nil
+        // _:l0 :prop ?p
+        Assert.Equal(3, parsedQuery.ConstructTemplate.PatternCount);
+    }
+
+    [Fact]
+    public void ParseConstruct_CollectionParsesCorrectly()
+    {
+        // Debug test to verify collection parsing creates correct patterns
+        var query = @"
+PREFIX : <http://example.org/>
+CONSTRUCT { (?x ?y) :p ?z } WHERE { ?x :q ?y . ?x :r ?z }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Construct, parsedQuery.Type);
+
+        // Expected 5 patterns for (?x ?y):
+        // 1. _:list0 rdf:first ?x
+        // 2. _:list0 rdf:rest _:list1
+        // 3. _:list1 rdf:first ?y
+        // 4. _:list1 rdf:rest rdf:nil
+        // 5. _:list0 :p ?z
+        Assert.Equal(5, parsedQuery.ConstructTemplate.PatternCount);
+
+        // Verify pattern types
+        var p0 = parsedQuery.ConstructTemplate.GetPattern(0);
+        Assert.Equal(TermType.BlankNode, p0.Subject.Type); // _:list0
+        Assert.True(p0.Subject.Start < 0); // Synthetic
+        Assert.Equal(TermType.Iri, p0.Predicate.Type); // rdf:first
+        Assert.Equal(-6, p0.Predicate.Start); // Synthetic rdf:first
+        Assert.Equal(TermType.Variable, p0.Object.Type); // ?x
+    }
 }

@@ -115,6 +115,7 @@ public class SparqlConformanceTests
         // Use urn:w3c: scheme to create valid absolute URI for base resolution
         // e.g., "urn:w3c:exists02.ttl" so <> resolves to <urn:w3c:exists02.ttl>
         _output.WriteLine($"GraphDataPaths: {(test.GraphDataPaths == null ? "null" : $"[{string.Join(", ", test.GraphDataPaths)}]")}");
+        var namedGraphIris = new List<string>();
         if (test.GraphDataPaths != null)
         {
             foreach (var graphPath in test.GraphDataPaths)
@@ -127,8 +128,13 @@ public class SparqlConformanceTests
                     // This creates a valid absolute URI that the Turtle parser can use for <> resolution
                     var graphBaseUri = $"urn:w3c:{filename}";
                     var graphIri = $"<{graphBaseUri}>";
-                    await LoadDataToNamedGraphAsync(store, graphPath, graphIri, baseUri: graphBaseUri);
-                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIri}");
+                    var tripleCount = await LoadDataToNamedGraphAsync(store, graphPath, graphIri, baseUri: graphBaseUri);
+
+                    // Track the graph IRI for FROM NAMED injection
+                    // This ensures GRAPH ?g will iterate over declared graphs even if empty
+                    namedGraphIris.Add(graphBaseUri);
+
+                    _output.WriteLine($"Loaded graph data from {graphPath} into {graphIri} ({tripleCount} triples)");
                 }
             }
         }
@@ -144,9 +150,18 @@ public class SparqlConformanceTests
             _output.WriteLine($"Loaded data from {test.DataPath}");
         }
 
+        // Inject FROM NAMED clauses for declared named graphs
+        // This ensures GRAPH ?g iteration includes empty graphs (W3C semantics)
+        if (namedGraphIris.Count > 0)
+        {
+            query = InjectFromNamedClauses(query, namedGraphIris);
+            _output.WriteLine($"Injected FROM NAMED for: {string.Join(", ", namedGraphIris)}");
+        }
+
         // Preprocess query to resolve relative GRAPH IRIs
         // W3C tests use relative IRIs like GRAPH <exists02.ttl> which need to match our file: scheme
         query = ResolveRelativeGraphIris(query);
+        _output.WriteLine($"Transformed query:\n{query}");
 
         // Parse the query
         var parser = new SparqlParser(query.AsSpan());
@@ -171,6 +186,27 @@ public class SparqlConformanceTests
         var resultExt = Path.GetExtension(test.ResultPath!).ToLowerInvariant();
         if (resultExt == ".ttl" || resultExt == ".nt" || resultExt == ".rdf")
         {
+            // Check if this is a RDF-encoded SPARQL result set (rs:ResultSet)
+            // This is used by some W3C tests to encode SELECT results as RDF
+            if (resultExt == ".ttl" && await IsRdfResultSetAsync(test.ResultPath!))
+            {
+                // SELECT query with RDF-encoded result set - parse and compare as result set
+                var expectedRdf = await SparqlResultParser.ParseRdfResultSetAsync(test.ResultPath!);
+                _output.WriteLine($"Expected {expectedRdf.Count} results (from RDF result set)");
+
+                var actualRdf = await RunSelectQueryAsync(store, query, parsed, expectedRdf);
+                _output.WriteLine($"Got {actualRdf.Count} results");
+
+                var rdfError = SparqlResultComparer.Compare(expectedRdf, actualRdf);
+                if (rdfError != null)
+                {
+                    _output.WriteLine($"Result comparison failed:");
+                    _output.WriteLine(rdfError);
+                }
+                Assert.Null(rdfError);
+                return;
+            }
+
             // CONSTRUCT/DESCRIBE query - use graph comparison
             var expectedGraph = await ParseExpectedGraphAsync(test.ResultPath!);
             _output.WriteLine($"Expected {expectedGraph.Count} triples");
@@ -594,6 +630,71 @@ public class SparqlConformanceTests
     }
 
     /// <summary>
+    /// Inject FROM NAMED clauses into a query for declared named graphs.
+    /// This ensures GRAPH ?g iteration includes all declared graphs, even empty ones.
+    /// W3C tests declare named graphs via qt:graphData entries in the manifest.
+    ///
+    /// SPARQL grammar: SelectQuery ::= SelectClause DatasetClause* WhereClause
+    /// So FROM NAMED must come AFTER SELECT clause but BEFORE WHERE.
+    /// </summary>
+    private static string InjectFromNamedClauses(string query, List<string> namedGraphIris)
+    {
+        if (namedGraphIris.Count == 0)
+            return query;
+
+        // Build FROM NAMED clauses (with leading newline for formatting)
+        var fromNamedClauses = new System.Text.StringBuilder();
+        fromNamedClauses.AppendLine();
+        foreach (var graphIri in namedGraphIris)
+        {
+            fromNamedClauses.Append("FROM NAMED <");
+            fromNamedClauses.Append(graphIri);
+            fromNamedClauses.AppendLine(">");
+        }
+
+        // Find insertion point: after SELECT clause (including variable list and DISTINCT/REDUCED)
+        // but before WHERE/FROM keywords.
+        //
+        // Pattern for SELECT clause:
+        //   SELECT (DISTINCT|REDUCED)? (variables | * | expressions)+
+        //
+        // The safest approach: find WHERE and insert just before it
+        var whereMatch = System.Text.RegularExpressions.Regex.Match(
+            query,
+            @"\bWHERE\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        if (whereMatch.Success)
+        {
+            var insertPos = whereMatch.Index;
+
+            // Check if FROM clauses already exist before WHERE
+            var beforeWhere = query.Substring(0, insertPos);
+            var fromMatch = System.Text.RegularExpressions.Regex.Match(
+                beforeWhere,
+                @"(FROM\s+(NAMED\s+)?<[^>]+>\s*)+",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            if (fromMatch.Success)
+            {
+                // Already has FROM clauses - insert after them
+                insertPos = fromMatch.Index + fromMatch.Length;
+            }
+
+            return query.Substring(0, insertPos) + fromNamedClauses.ToString() + query.Substring(insertPos);
+        }
+
+        // ASK/CONSTRUCT/DESCRIBE without WHERE - insert before opening brace
+        var braceMatch = System.Text.RegularExpressions.Regex.Match(query, @"\{");
+        if (braceMatch.Success)
+        {
+            return query.Substring(0, braceMatch.Index) + fromNamedClauses.ToString() + query.Substring(braceMatch.Index);
+        }
+
+        return query; // Can't find insertion point - return unchanged
+    }
+
+    /// <summary>
     /// Resolve relative GRAPH IRIs in SPARQL queries to use urn:w3c: scheme.
     /// W3C tests use relative IRIs like GRAPH &lt;exists02.ttl&gt; or in FILTER clauses
     /// which need to match our named graph loading (urn:w3c:exists02.ttl).
@@ -607,6 +708,66 @@ public class SparqlConformanceTests
             query,
             @"<([^<>:]+\.[a-zA-Z]+)>",
             "<urn:w3c:$1>");
+    }
+
+    /// <summary>
+    /// Checks if a Turtle file contains an rs:ResultSet (RDF-encoded SPARQL result set).
+    /// </summary>
+    private static async Task<bool> IsRdfResultSetAsync(string path)
+    {
+        var content = await File.ReadAllTextAsync(path);
+        // Quick check for rs:ResultSet pattern
+        return content.Contains("rs:ResultSet") ||
+               content.Contains("<http://www.w3.org/2001/sw/DataAccess/tests/result-set#ResultSet>");
+    }
+
+    /// <summary>
+    /// Runs a SELECT query and returns the results as a SparqlResultSet.
+    /// </summary>
+    private async Task<SparqlResultSet> RunSelectQueryAsync(QuadStore store, string query, Query parsed, SparqlResultSet expectedForVariables)
+    {
+        return await Task.Run(() => RunOnLargeStack(() =>
+        {
+            var resultSet = new SparqlResultSet();
+
+            // Copy variable names from expected result set
+            foreach (var variable in expectedForVariables.Variables)
+                resultSet.AddVariable(variable);
+
+            store.AcquireReadLock();
+            try
+            {
+                using var executor = new QueryExecutor(store, query.AsSpan(), parsed);
+                var results = executor.Execute();
+
+                try
+                {
+                    while (results.MoveNext())
+                    {
+                        var current = results.Current;
+                        var resultRow = new SparqlResultRow();
+
+                        foreach (var varName in expectedForVariables.Variables)
+                        {
+                            var binding = ExtractBinding(current, varName);
+                            resultRow.Set(varName, binding);
+                        }
+
+                        resultSet.AddRow(resultRow);
+                    }
+                }
+                finally
+                {
+                    results.Dispose();
+                }
+
+                return resultSet;
+            }
+            finally
+            {
+                store.ReleaseReadLock();
+            }
+        }));
     }
 
     private async Task LoadDataAsync(QuadStore store, string path, string? baseUri = null)
@@ -647,11 +808,12 @@ public class SparqlConformanceTests
         // Add more formats as needed
     }
 
-    private async Task LoadDataToNamedGraphAsync(QuadStore store, string path, string graphIri, string? baseUri = null)
+    private async Task<int> LoadDataToNamedGraphAsync(QuadStore store, string path, string graphIri, string? baseUri = null)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
         // Use provided base URI, or default to full file path
         var effectiveBaseUri = baseUri ?? new Uri(path).AbsoluteUri;
+        int tripleCount = 0;
 
         if (extension == ".ttl" || extension == ".turtle")
         {
@@ -661,6 +823,7 @@ public class SparqlConformanceTests
             await parser.ParseAsync((s, p, o) =>
             {
                 store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
+                tripleCount++;
             });
         }
         else if (extension == ".nt" || extension == ".ntriples")
@@ -671,6 +834,7 @@ public class SparqlConformanceTests
             await parser.ParseAsync((s, p, o) =>
             {
                 store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
+                tripleCount++;
             });
         }
         else if (extension == ".rdf" || extension == ".xml" || extension == ".rdfxml")
@@ -681,8 +845,11 @@ public class SparqlConformanceTests
             await parser.ParseAsync((s, p, o) =>
             {
                 store.AddCurrent(s.ToString(), p.ToString(), o.ToString(), graphIri);
+                tripleCount++;
             });
         }
+
+        return tripleCount;
     }
 
     public static IEnumerable<object[]> GetPositiveSyntaxTests()

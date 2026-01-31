@@ -41,7 +41,9 @@ public partial class QueryExecutor
         }
         else if (_buffer.FirstGraphIsVariable)
         {
-            if (_buffer.FirstGraphPatternCount == 0)
+            // Don't return empty if there are VALUES entries - VALUES-only GRAPH clauses are valid
+            // (e.g., GRAPH ?g { VALUES (?g ?t) { ... } })
+            if (_buffer.FirstGraphPatternCount == 0 && !_buffer.HasValues)
                 return MaterializedQueryResults.Empty();
             results = ExecuteVariableGraphSlotBased(patterns);
         }
@@ -83,7 +85,8 @@ public partial class QueryExecutor
         }
         else if (_buffer.FirstGraphIsVariable)
         {
-            if (_buffer.FirstGraphPatternCount == 0)
+            // Don't return empty if there are VALUES entries - VALUES-only GRAPH clauses are valid
+            if (_buffer.FirstGraphPatternCount == 0 && !_buffer.HasValues)
                 return MaterializedQueryResults.Empty();
             graphResults = ExecuteVariableGraphSlotBased(patterns);
         }
@@ -626,7 +629,8 @@ public partial class QueryExecutor
         // Single GRAPH clause - check if variable or fixed
         if (_buffer.FirstGraphIsVariable)
         {
-            if (_buffer.FirstGraphPatternCount == 0)
+            // Don't return null if there are VALUES entries - VALUES-only GRAPH clauses are valid
+            if (_buffer.FirstGraphPatternCount == 0 && !_buffer.HasValues)
                 return null;
 
             // Variable graph execution
@@ -745,6 +749,16 @@ public partial class QueryExecutor
                     {
                         ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, tempResults);
                     }
+                    else if (childSlot.IsValuesHeader)
+                    {
+                        // VALUES-only GRAPH clause - expand VALUES rows with graph binding
+                        ExecuteValuesInGraph(childSlot, children, ref bindingTable, varName, graphIri, tempResults);
+                    }
+                }
+                else if (children.Count > 1 && children[0].IsValuesHeader)
+                {
+                    // VALUES-only GRAPH clause with multiple value entries
+                    ExecuteValuesInGraph(children[0], children, ref bindingTable, varName, graphIri, tempResults);
                 }
                 else
                 {
@@ -788,6 +802,16 @@ public partial class QueryExecutor
                 {
                     ExecuteSinglePatternSlotBased(childSlot, ref bindingTable, graphStr, tempResults);
                 }
+                else if (childSlot.IsValuesHeader)
+                {
+                    // VALUES-only GRAPH clause - expand VALUES rows with graph binding
+                    ExecuteValuesInGraph(childSlot, children, ref bindingTable, varName, graphIri, tempResults);
+                }
+            }
+            else if (children.Count > 1 && children[0].IsValuesHeader)
+            {
+                // VALUES-only GRAPH clause with multiple value entries
+                ExecuteValuesInGraph(children[0], children, ref bindingTable, varName, graphIri, tempResults);
             }
             else
             {
@@ -811,6 +835,109 @@ public partial class QueryExecutor
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Execute VALUES clause inside a GRAPH context.
+    /// Handles the special case where VALUES binds the same variable as the GRAPH clause.
+    /// For UNDEF values, the graph variable comes from the outer GRAPH iteration.
+    /// For specific values, only emit if they match the current graph IRI.
+    /// Uses the stored WhereValues directly instead of parsing from PatternSlot entries.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private void ExecuteValuesInGraph(
+        PatternSlot valuesHeader,
+        PatternArraySlice children,
+        ref BindingTable bindingTable,
+        ReadOnlySpan<char> graphVarName,
+        ReadOnlySpan<char> graphIri,
+        List<MaterializedRow> results)
+    {
+        // Use the stored WhereValues directly (much cleaner than parsing from PatternSlot entries)
+        if (!_buffer.HasWhereValues)
+            return;
+
+        var values = _buffer.WhereValues;
+        int varCount = values.VariableCount;
+        int rowCount = values.RowCount;
+
+        if (varCount == 0 || rowCount == 0)
+            return;
+
+        // Find which variable index corresponds to the graph variable
+        int graphVarIndex = -1;
+        for (int i = 0; i < varCount; i++)
+        {
+            var (varStart, varLen) = values.GetVariable(i);
+            var varName = _source.AsSpan().Slice(varStart, varLen);
+            if (varName.SequenceEqual(graphVarName))
+            {
+                graphVarIndex = i;
+                break;
+            }
+        }
+
+        // Format graph IRI for comparison
+        var formattedGraphIri = graphIri.Length > 0 && graphIri[0] == '<'
+            ? graphIri
+            : $"<{graphIri.ToString()}>".AsSpan();
+
+        // Process each row in the VALUES clause
+        for (int row = 0; row < rowCount; row++)
+        {
+            // Check if this row should be emitted for the current graph
+            bool shouldEmit = true;
+            if (graphVarIndex >= 0)
+            {
+                var (gvStart, gvLen) = values.GetValueAt(row, graphVarIndex);
+                if (gvLen != -1) // Not UNDEF
+                {
+                    // Specific graph value - must match current graph IRI
+                    var graphValue = _source.AsSpan().Slice(gvStart, gvLen);
+                    var expandedGraphValue = ExpandPrefixedNameForValues(graphValue);
+                    if (!expandedGraphValue.SequenceEqual(formattedGraphIri))
+                        shouldEmit = false;
+                }
+                // If UNDEF (gvLen == -1), the outer ?g binding is used, always emit
+            }
+
+            if (shouldEmit)
+            {
+                // Create result row with bindings
+                bindingTable.Clear();
+
+                // Bind graph variable from outer context
+                bindingTable.Bind(graphVarName, formattedGraphIri);
+
+                // Bind other variables from VALUES row
+                for (int vi = 0; vi < varCount; vi++)
+                {
+                    if (vi == graphVarIndex) continue; // Already bound from outer context
+
+                    var (varStart, varLen) = values.GetVariable(vi);
+                    var (valStart, valLen) = values.GetValueAt(row, vi);
+
+                    if (valLen != -1) // Not UNDEF
+                    {
+                        var varName = _source.AsSpan().Slice(varStart, varLen);
+                        var value = _source.AsSpan().Slice(valStart, valLen);
+                        bindingTable.Bind(varName, value);
+                    }
+                }
+
+                results.Add(new MaterializedRow(bindingTable));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Expand prefixed names to full IRIs for VALUES comparison.
+    /// Delegates to ExpandPrefixedName which uses _prologue prefix mappings.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPrefixedNameForValues(ReadOnlySpan<char> value)
+    {
+        // Delegate to the standard prefix expansion method in the partial class
+        return ExpandPrefixedName(value);
     }
 
     /// <summary>

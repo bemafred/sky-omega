@@ -1487,5 +1487,73 @@ public partial class QueryExecutorTests
         }
     }
 
+    [Fact]
+    public void Execute_AggregateSubqueryInsideVariableGraph_ReturnsCountPerGraph()
+    {
+        // W3C test: agg-empty-group-count-graph
+        // GRAPH ?g { SELECT (count(*) AS ?c) WHERE { ?s :p ?x } }
+        // Should return one row per named graph, even if the graph has 0 matches
+
+        // Create named graphs
+        Store.BeginBatch();
+        // Empty graph - no matching triples with predicate :p
+        Store.AddCurrentBatched("<http://example/placeholder>", "<http://example/other>", "\"placeholder\"", "<http://example/empty>");
+        // Singleton graph - one matching triple with predicate :p
+        Store.AddCurrentBatched("<http://example/s>", "<http://example/p>", "<http://example/o>", "<http://example/singleton>");
+        Store.CommitBatch();
+
+        var query = @"PREFIX : <http://example/>
+SELECT ?g ?c WHERE {
+   GRAPH ?g {SELECT (count(*) AS ?c) WHERE { ?s :p ?x }}
+}";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        // Verify parsing - subquery inside GRAPH should be detected
+        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries || parsedQuery.WhereClause.Pattern.HasGraph,
+            "Query should have subqueries or GRAPH patterns");
+
+        Store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteToMaterialized();
+
+            var rows = new List<(string g, string c)>();
+            while (results.MoveNext())
+            {
+                var row = results.Current;
+                var gIdx = row.FindBinding("?g".AsSpan());
+                var cIdx = row.FindBinding("?c".AsSpan());
+
+                string g = gIdx >= 0 ? row.GetString(gIdx).ToString() : "(unbound)";
+                string c = cIdx >= 0 ? row.GetString(cIdx).ToString() : "(unbound)";
+                rows.Add((g, c));
+            }
+            results.Dispose();
+
+            // Should have 2 rows: one for empty graph (count=0), one for singleton (count=1)
+            Assert.Equal(2, rows.Count);
+
+            // Find results by graph
+            var emptyResult = rows.FirstOrDefault(r => r.g.Contains("empty"));
+            var singletonResult = rows.FirstOrDefault(r => r.g.Contains("singleton"));
+
+            // Verify both graphs returned results
+            Assert.True(emptyResult != default, "Should have result for empty graph");
+            Assert.True(singletonResult != default, "Should have result for singleton graph");
+
+            // Empty graph should have count=0
+            Assert.Contains("0", emptyResult.c);
+
+            // Singleton graph should have count=1
+            Assert.Contains("1", singletonResult.c);
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
     #endregion
 }

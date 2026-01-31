@@ -41,6 +41,12 @@ internal ref struct ConstructResults
     private int _predicateStart, _predicateLen;
     private int _objectStart, _objectLen;
 
+    // Row counter for generating unique blank node IDs per result row
+    private int _rowCounter;
+
+    // Storage for generated blank node IDs (one per list node in template, regenerated per row)
+    private string? _generatedBnode;
+
     public static ConstructResults Empty()
     {
         var result = new ConstructResults();
@@ -59,6 +65,7 @@ internal ref struct ConstructResults
         _stringBuffer = stringBuffer;
         _prefixes = prefixes;
         _expandedTerm = null;
+        _generatedBnode = null;
         _seenTriples = new HashSet<string>();
         _isEmpty = false;
         _templateIndex = 0;
@@ -68,6 +75,7 @@ internal ref struct ConstructResults
         _subjectStart = _subjectLen = 0;
         _predicateStart = _predicateLen = 0;
         _objectStart = _objectLen = 0;
+        _rowCounter = 0;
     }
 
     public readonly ConstructedTriple Current => _current;
@@ -86,6 +94,7 @@ internal ref struct ConstructResults
                     return false;
                 _templateIndex = 0;
                 _needNewRow = false;
+                _rowCounter++;  // Increment row counter for unique blank node IDs
             }
 
             // Process current template pattern
@@ -150,6 +159,30 @@ internal ref struct ConstructResults
             var value = bindings.GetString(idx);
             value.CopyTo(_outputBuffer.AsSpan(writePos));
             return writePos + value.Length;
+        }
+        // Check for synthetic terms (negative offset)
+        else if (SyntheticTermHelper.IsSynthetic(term.Start))
+        {
+            // Check for synthetic list node blank node (-400 to -431)
+            if (SyntheticTermHelper.IsListNodeOffset(term.Start))
+            {
+                // Generate unique blank node ID for this row + list node index
+                // Format: _:genid{rowCounter}_{listNodeIndex}
+                int listNodeIndex = -term.Start - 400;
+                _generatedBnode = $"_:genid{_rowCounter}_{listNodeIndex}";
+                _generatedBnode.AsSpan().CopyTo(_outputBuffer.AsSpan(writePos));
+                return writePos + _generatedBnode.Length;
+            }
+
+            // Synthetic IRI (rdf:type, rdf:first, rdf:rest, rdf:nil, etc.)
+            var syntheticIri = SyntheticTermHelper.GetSyntheticIri(term.Start);
+            if (syntheticIri.Length > 0)
+            {
+                syntheticIri.CopyTo(_outputBuffer.AsSpan(writePos));
+                return writePos + syntheticIri.Length;
+            }
+
+            return writePos; // Unknown synthetic - treat as empty
         }
         else
         {
