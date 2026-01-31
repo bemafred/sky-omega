@@ -1,6 +1,7 @@
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.1.11312.151 d18.0
+VisualStudioVersion = 18.1.11312.151
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "2 Substrates", "2 Substrates", "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}"
 EndProject
@@ -141,6 +142,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Ontologies", "Ontologies", 
 		..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl
 		..\..\..\..\..\Volumes\Mercury SSD\ontologies\prov-o.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\prov-o.ttl
 	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Solid", "src\Mercury.Solid\Mercury.Solid.csproj", "{62700C5C-5830-439B-93C6-45BB17413E42}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Solid.Tests", "tests\Mercury.Solid.Tests\Mercury.Solid.Tests.csproj", "{9F0111E6-9966-44EB-828E-F189DA657C6F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -308,6 +317,30 @@ Global
 		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x64.Build.0 = Release|Any CPU
 		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x86.ActiveCfg = Release|Any CPU
 		{D0532747-C200-4434-B247-B4AF9314DC9C}.Release|x86.Build.0 = Release|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Debug|x64.Build.0 = Debug|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Debug|x86.Build.0 = Debug|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Release|Any CPU.Build.0 = Release|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Release|x64.ActiveCfg = Release|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Release|x64.Build.0 = Release|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Release|x86.ActiveCfg = Release|Any CPU
+		{62700C5C-5830-439B-93C6-45BB17413E42}.Release|x86.Build.0 = Release|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Debug|x64.Build.0 = Debug|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Debug|x86.Build.0 = Debug|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Release|x64.ActiveCfg = Release|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Release|x64.Build.0 = Release|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Release|x86.ActiveCfg = Release|Any CPU
+		{9F0111E6-9966-44EB-828E-F189DA657C6F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -340,5 +373,7 @@ Global
 		{D0532747-C200-4434-B247-B4AF9314DC9C} = {34F2C870-6653-488D-9AD4-7968BED44481}
 		{4ADC967D-705C-4C4D-9C5F-01DF634F3154} = {107FC243-C9C8-41E4-8B10-806DFB2CE0F0}
 		{AA7ED9E6-F41F-4B10-A667-EEAE0D9103F7} = {107FC243-C9C8-41E4-8B10-806DFB2CE0F0}
+		{62700C5C-5830-439B-93C6-45BB17413E42} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
+		{9F0111E6-9966-44EB-828E-F189DA657C6F} = {ADF68131-EC39-4648-B640-E4F2C09EE3D2}
 	EndGlobalSection
 EndGlobal

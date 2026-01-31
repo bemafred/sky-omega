@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <AssemblyName>SkyOmega.Mercury.Solid</AssemblyName>
+        <RootNamespace>SkyOmega.Mercury.Solid</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="Mercury.Solid.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\Mercury\Mercury.csproj" />
+        <ProjectReference Include="..\Mercury.Runtime\Mercury.Runtime.csproj" />
+    </ItemGroup>
+
+</Project>
