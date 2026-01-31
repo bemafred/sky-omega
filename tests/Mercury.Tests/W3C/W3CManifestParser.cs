@@ -37,6 +37,8 @@ public sealed class W3CManifestParser
     private static readonly string UtData = $"<{UT}data>";
     private static readonly string UtGraphData = $"<{UT}graphData>";
     private static readonly string UtGraph = $"<{UT}graph>";
+    private static readonly string UtResult = $"<{UT}result>";
+    private static readonly string UtSuccess = $"<{UT}success>";
 
     // Test type IRIs mapped to enum values
     private static readonly Dictionary<string, W3CTestType> TestTypes = new()
@@ -273,6 +275,7 @@ public sealed class W3CManifestParser
         string? actionPath = null;
         string? dataPath = null;
         string[]? graphDataPaths = null;
+        (string Path, string GraphIri)[]? actionGraphData = null;
 
         if (props.TryGetValue(MfAction, out var actions) && actions.Count > 0)
         {
@@ -307,6 +310,12 @@ public sealed class W3CManifestParser
                             .Where(p => p != null)
                             .ToArray()!;
                     }
+
+                    // Extract ut:graphData for Update tests (have nested blank nodes with ut:graph and rdfs:label)
+                    if (actionProps.TryGetValue(UtGraphData, out var utGraphDataNodes) && utGraphDataNodes.Count > 0)
+                    {
+                        actionGraphData = ExtractGraphDataNodes(graph, utGraphDataNodes, manifestDir);
+                    }
                 }
             }
             else
@@ -316,10 +325,39 @@ public sealed class W3CManifestParser
             }
         }
 
-        // Get result (expected output file)
+        // Get result (expected output file or blank node for Update tests)
         string? resultPath = null;
+        string? expectedDefaultGraphPath = null;
+        (string Path, string GraphIri)[]? expectedNamedGraphs = null;
+
         if (props.TryGetValue(MfResult, out var results) && results.Count > 0)
-            resultPath = ResolveIriToPath(results[0], manifestDir);
+        {
+            var result = results[0];
+
+            if (result.StartsWith("_:") && testType == W3CTestType.UpdateEval)
+            {
+                // Update test: result is a blank node with ut:data and/or ut:graphData
+                if (graph.Subjects.TryGetValue(result, out var resultProps))
+                {
+                    // Extract ut:data (expected default graph)
+                    if (resultProps.TryGetValue(UtData, out var utDataFiles) && utDataFiles.Count > 0)
+                    {
+                        expectedDefaultGraphPath = ResolveIriToPath(utDataFiles[0], manifestDir);
+                    }
+
+                    // Extract ut:graphData (expected named graphs)
+                    if (resultProps.TryGetValue(UtGraphData, out var utGraphDataNodes) && utGraphDataNodes.Count > 0)
+                    {
+                        expectedNamedGraphs = ExtractGraphDataNodes(graph, utGraphDataNodes, manifestDir);
+                    }
+                }
+            }
+            else
+            {
+                // Query test: result is a direct file reference
+                resultPath = ResolveIriToPath(result, manifestDir);
+            }
+        }
 
         if (actionPath == null)
             return null; // No valid action, skip this test
@@ -333,7 +371,49 @@ public sealed class W3CManifestParser
             ResultPath: resultPath,
             DataPath: dataPath,
             GraphDataPaths: graphDataPaths?.Length > 0 ? graphDataPaths : null,
-            ManifestPath: manifestPath);
+            ManifestPath: manifestPath,
+            ActionGraphData: actionGraphData,
+            ExpectedDefaultGraphPath: expectedDefaultGraphPath,
+            ExpectedNamedGraphs: expectedNamedGraphs);
+    }
+
+    /// <summary>
+    /// Extracts ut:graphData nodes which have nested blank nodes with ut:graph and rdfs:label.
+    /// Format: ut:graphData [ ut:graph &lt;file.ttl&gt; ; rdfs:label "http://example.org/g1" ]
+    /// </summary>
+    private (string Path, string GraphIri)[]? ExtractGraphDataNodes(
+        ManifestGraph graph,
+        List<string> graphDataNodes,
+        string manifestDir)
+    {
+        var results = new List<(string Path, string GraphIri)>();
+
+        foreach (var node in graphDataNodes)
+        {
+            if (!node.StartsWith("_:") || !graph.Subjects.TryGetValue(node, out var nodeProps))
+                continue;
+
+            // Get ut:graph (the file path)
+            string? filePath = null;
+            if (nodeProps.TryGetValue(UtGraph, out var graphFiles) && graphFiles.Count > 0)
+            {
+                filePath = ResolveIriToPath(graphFiles[0], manifestDir);
+            }
+
+            // Get rdfs:label (the graph IRI)
+            string? graphIri = null;
+            if (nodeProps.TryGetValue(RdfsLabel, out var labels) && labels.Count > 0)
+            {
+                graphIri = UnquoteLiteral(labels[0]);
+            }
+
+            if (filePath != null && graphIri != null)
+            {
+                results.Add((filePath, graphIri));
+            }
+        }
+
+        return results.Count > 0 ? results.ToArray() : null;
     }
 
     private IEnumerable<string> TraverseRdfList(ManifestGraph graph, string listHead)

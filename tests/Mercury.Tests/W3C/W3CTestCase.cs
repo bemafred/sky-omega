@@ -14,6 +14,9 @@ namespace SkyOmega.Mercury.Tests.W3C;
 /// <param name="DataPath">Path to the data file (for SPARQL query tests).</param>
 /// <param name="GraphDataPaths">Paths to named graph data files (qt:graphData).</param>
 /// <param name="ManifestPath">Path to the manifest file this test came from.</param>
+/// <param name="ActionGraphData">Named graph data for action (path, graphIri) for Update tests.</param>
+/// <param name="ExpectedDefaultGraphPath">Path to expected default graph after Update.</param>
+/// <param name="ExpectedNamedGraphs">Expected named graphs after Update (path, graphIri).</param>
 public sealed record W3CTestCase(
     string Id,
     string Name,
@@ -23,7 +26,10 @@ public sealed record W3CTestCase(
     string? ResultPath,
     string? DataPath,
     string[]? GraphDataPaths,
-    string ManifestPath)
+    string ManifestPath,
+    (string Path, string GraphIri)[]? ActionGraphData = null,
+    string? ExpectedDefaultGraphPath = null,
+    (string Path, string GraphIri)[]? ExpectedNamedGraphs = null)
 {
     /// <summary>
     /// Gets a display name suitable for xUnit test output.

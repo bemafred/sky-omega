@@ -32,6 +32,7 @@ public class UpdateExecutor
     private readonly string _source;
     private readonly UpdateOperation _update;
     private readonly LoadExecutor? _loadExecutor;
+    private string? _expandedTerm; // Buffer for expanded prefixed names
 
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
         : this(store, source, update, null)
@@ -69,6 +70,48 @@ public class UpdateExecutor
         };
     }
 
+    /// <summary>
+    /// Execute a sequence of update operations.
+    /// Operations are executed in order; if any fails (and is not SILENT), execution stops.
+    /// </summary>
+    /// <param name="store">The quad store.</param>
+    /// <param name="source">The original source string containing all operations.</param>
+    /// <param name="operations">The parsed update operations.</param>
+    /// <param name="loadExecutor">Optional LoadExecutor for LOAD operations.</param>
+    /// <returns>Combined result with total affected count.</returns>
+    public static UpdateResult ExecuteSequence(
+        QuadStore store,
+        ReadOnlySpan<char> source,
+        UpdateOperation[] operations,
+        LoadExecutor? loadExecutor = null)
+    {
+        if (operations == null || operations.Length == 0)
+            return new UpdateResult { Success = true, AffectedCount = 0 };
+
+        var totalAffected = 0;
+
+        foreach (var op in operations)
+        {
+            var executor = new UpdateExecutor(store, source, op, loadExecutor);
+            var result = executor.Execute();
+
+            if (!result.Success)
+            {
+                // Return error immediately unless SILENT
+                return new UpdateResult
+                {
+                    Success = false,
+                    AffectedCount = totalAffected,
+                    ErrorMessage = result.ErrorMessage
+                };
+            }
+
+            totalAffected += result.AffectedCount;
+        }
+
+        return new UpdateResult { Success = true, AffectedCount = totalAffected };
+    }
+
     private UpdateResult ExecuteInsertData()
     {
         if (_update.InsertData == null || _update.InsertData.Length == 0)
@@ -83,7 +126,7 @@ public class UpdateExecutor
                 var predicate = GetTermValue(quad.PredicateStart, quad.PredicateLength);
                 var obj = GetTermValue(quad.ObjectStart, quad.ObjectLength);
                 var graph = quad.GraphLength > 0
-                    ? _source.AsSpan(quad.GraphStart, quad.GraphLength)
+                    ? ExpandPrefixedName(_source.AsSpan(quad.GraphStart, quad.GraphLength))
                     : ReadOnlySpan<char>.Empty;
 
                 _store.AddCurrentBatched(subject, predicate, obj, graph);
@@ -114,7 +157,7 @@ public class UpdateExecutor
                 var predicate = GetTermValue(quad.PredicateStart, quad.PredicateLength);
                 var obj = GetTermValue(quad.ObjectStart, quad.ObjectLength);
                 var graph = quad.GraphLength > 0
-                    ? _source.AsSpan(quad.GraphStart, quad.GraphLength)
+                    ? ExpandPrefixedName(_source.AsSpan(quad.GraphStart, quad.GraphLength))
                     : ReadOnlySpan<char>.Empty;
 
                 if (_store.DeleteCurrentBatched(subject, predicate, obj, graph))
@@ -142,9 +185,9 @@ public class UpdateExecutor
         if (_update.WhereClause.Pattern.PatternCount == 1 && _update.WhereClause.Pattern.GraphClauseCount == 0 && !HasVariables(_update.WhereClause.Pattern.GetPattern(0)))
         {
             var tp = _update.WhereClause.Pattern.GetPattern(0);
-            var subject = _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
-            var predicate = _source.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
-            var obj = _source.AsSpan(tp.Object.Start, tp.Object.Length);
+            var subject = ExpandPrefixedName(_source.AsSpan(tp.Subject.Start, tp.Subject.Length));
+            var predicate = ExpandPrefixedName(_source.AsSpan(tp.Predicate.Start, tp.Predicate.Length));
+            var obj = ExpandPrefixedName(_source.AsSpan(tp.Object.Start, tp.Object.Length));
 
             var deleted = _store.DeleteCurrent(subject, predicate, obj);
             return new UpdateResult { Success = true, AffectedCount = deleted ? 1 : 0 };
@@ -215,8 +258,8 @@ public class UpdateExecutor
                 }
                 else
                 {
-                    // Fixed IRI graph
-                    var graphIri = _source.AsSpan(gc.Graph.Start, gc.Graph.Length).ToString();
+                    // Fixed IRI graph - expand prefixed names
+                    var graphIri = ExpandPrefixedName(_source.AsSpan(gc.Graph.Start, gc.Graph.Length)).ToString();
                     ExecuteGraphClausePatternsForDelete(gc, graphIri, toDelete);
                 }
             }
@@ -284,12 +327,13 @@ public class UpdateExecutor
 
     /// <summary>
     /// Resolve a term for querying - returns the literal value or null for wildcards.
+    /// Expands prefixed names to full IRIs.
     /// </summary>
     private ReadOnlySpan<char> ResolveTermForQuery(Term term)
     {
         if (term.Type == TermType.Variable)
             return ReadOnlySpan<char>.Empty; // Wildcard
-        return _source.AsSpan(term.Start, term.Length);
+        return ExpandPrefixedName(_source.AsSpan(term.Start, term.Length));
     }
 
     /// <summary>
@@ -375,6 +419,7 @@ public class UpdateExecutor
     /// <summary>
     /// Instantiate a term using variable bindings.
     /// Returns null if the term is a variable that is not bound.
+    /// Expands prefixed names to full IRIs.
     /// </summary>
     private string? InstantiateTerm(Term term, BindingTable bindings)
     {
@@ -389,8 +434,8 @@ public class UpdateExecutor
             return null;
         }
 
-        // Not a variable - return the literal value
-        return termSpan.ToString();
+        // Not a variable - return the literal value with prefix expansion
+        return ExpandPrefixedName(termSpan).ToString();
     }
 
     private UpdateResult ExecuteModify()
@@ -398,11 +443,11 @@ public class UpdateExecutor
         // DELETE/INSERT ... WHERE: Execute WHERE pattern, then apply DELETE and INSERT templates
         var wherePattern = _update.WhereClause.Pattern;
 
-        // Extract WITH graph if present
+        // Extract WITH graph if present - expand prefixed names
         string? withGraph = null;
         if (_update.WithGraphLength > 0)
         {
-            withGraph = _source.Substring(_update.WithGraphStart, _update.WithGraphLength);
+            withGraph = ExpandPrefixedName(_source.AsSpan(_update.WithGraphStart, _update.WithGraphLength)).ToString();
         }
 
         // Collect all delete and insert operations (now with graph context)
@@ -415,7 +460,9 @@ public class UpdateExecutor
             Type = QueryType.Select,
             SelectClause = new SelectClause { SelectAll = true },
             WhereClause = _update.WhereClause,
-            Prologue = _update.Prologue
+            Prologue = _update.Prologue,
+            // Apply USING clauses as dataset specification for WHERE matching
+            Datasets = _update.UsingClauses
         };
 
         _store.AcquireReadLock();
@@ -500,13 +547,13 @@ public class UpdateExecutor
         var tp = pattern.GetPattern(0);
         var subjectSpan = tp.Subject.Type == TermType.Variable
             ? ReadOnlySpan<char>.Empty
-            : _source.AsSpan(tp.Subject.Start, tp.Subject.Length);
+            : ExpandPrefixedName(_source.AsSpan(tp.Subject.Start, tp.Subject.Length));
         var predicateSpan = tp.Predicate.Type == TermType.Variable
             ? ReadOnlySpan<char>.Empty
-            : _source.AsSpan(tp.Predicate.Start, tp.Predicate.Length);
+            : ExpandPrefixedName(_source.AsSpan(tp.Predicate.Start, tp.Predicate.Length));
         var objectSpan = tp.Object.Type == TermType.Variable
             ? ReadOnlySpan<char>.Empty
-            : _source.AsSpan(tp.Object.Start, tp.Object.Length);
+            : ExpandPrefixedName(_source.AsSpan(tp.Object.Start, tp.Object.Length));
 
         var results = _store.QueryCurrent(subjectSpan, predicateSpan, objectSpan, withGraph.AsSpan());
 
@@ -584,9 +631,9 @@ public class UpdateExecutor
                 for (int i = 0; i < deleteTemplate.PatternCount; i++)
                 {
                     var tp = deleteTemplate.GetPattern(i);
-                    var s = InstantiateTermFromSpan(tp.Subject, b, _source);
-                    var p = InstantiateTermFromSpan(tp.Predicate, b, _source);
-                    var o = InstantiateTermFromSpan(tp.Object, b, _source);
+                    var s = InstantiateTermFromSpan(tp.Subject, b);
+                    var p = InstantiateTermFromSpan(tp.Predicate, b);
+                    var o = InstantiateTermFromSpan(tp.Object, b);
 
                     if (s != null && p != null && o != null)
                     {
@@ -598,9 +645,9 @@ public class UpdateExecutor
                 for (int i = 0; i < insertTemplate.PatternCount; i++)
                 {
                     var tp = insertTemplate.GetPattern(i);
-                    var s = InstantiateTermFromSpan(tp.Subject, b, _source);
-                    var p = InstantiateTermFromSpan(tp.Predicate, b, _source);
-                    var o = InstantiateTermFromSpan(tp.Object, b, _source);
+                    var s = InstantiateTermFromSpan(tp.Subject, b);
+                    var p = InstantiateTermFromSpan(tp.Predicate, b);
+                    var o = InstantiateTermFromSpan(tp.Object, b);
 
                     if (s != null && p != null && o != null)
                     {
@@ -617,10 +664,11 @@ public class UpdateExecutor
 
     /// <summary>
     /// Instantiate a term from a span-based source.
+    /// Expands prefixed names to full IRIs.
     /// </summary>
-    private static string? InstantiateTermFromSpan(Term term, BindingTable bindings, string source)
+    private string? InstantiateTermFromSpan(Term term, BindingTable bindings)
     {
-        var termSpan = source.AsSpan(term.Start, term.Length);
+        var termSpan = _source.AsSpan(term.Start, term.Length);
 
         if (term.Type == TermType.Variable)
         {
@@ -630,7 +678,7 @@ public class UpdateExecutor
             return null;
         }
 
-        return termSpan.ToString();
+        return ExpandPrefixedName(termSpan).ToString();
     }
 
     private void ProcessModifyTemplates(
@@ -717,6 +765,7 @@ public class UpdateExecutor
     /// <summary>
     /// Resolve a graph term to its IRI string.
     /// Returns null if the term is a variable that is not bound.
+    /// Expands prefixed names to full IRIs.
     /// </summary>
     private string? ResolveGraphTerm(Term term, BindingTable bindings)
     {
@@ -730,7 +779,7 @@ public class UpdateExecutor
             return null;
         }
 
-        return termSpan.ToString();
+        return ExpandPrefixedName(termSpan).ToString();
     }
 
     private bool HasVariables(TriplePattern tp)
@@ -774,7 +823,7 @@ public class UpdateExecutor
                     };
 
                 case GraphTargetType.Graph:
-                    var graphIri = _source.Substring(target.IriStart, target.IriLength);
+                    var graphIri = ExpandPrefixedName(_source.AsSpan(target.IriStart, target.IriLength)).ToString();
                     return ClearSpecificGraph(graphIri);
 
                 default:
@@ -940,6 +989,12 @@ public class UpdateExecutor
         var srcGraph = ResolveGraphTarget(_update.SourceGraph);
         var dstGraph = ResolveGraphTarget(_update.DestinationGraph);
 
+        // COPY to self is a no-op
+        if (srcGraph == dstGraph || (srcGraph != null && dstGraph != null && srcGraph.Equals(dstGraph, StringComparison.Ordinal)))
+        {
+            return new UpdateResult { Success = true, AffectedCount = 0 };
+        }
+
         try
         {
             // First clear destination
@@ -964,6 +1019,12 @@ public class UpdateExecutor
         // MOVE src TO dst: Copy src to dst, then clear src
         var srcGraph = ResolveGraphTarget(_update.SourceGraph);
         var dstGraph = ResolveGraphTarget(_update.DestinationGraph);
+
+        // MOVE to self is a no-op
+        if (srcGraph == dstGraph || (srcGraph != null && dstGraph != null && srcGraph.Equals(dstGraph, StringComparison.Ordinal)))
+        {
+            return new UpdateResult { Success = true, AffectedCount = 0 };
+        }
 
         try
         {
@@ -1051,7 +1112,7 @@ public class UpdateExecutor
         return target.Type switch
         {
             GraphTargetType.Default => null,
-            GraphTargetType.Graph => _source.Substring(target.IriStart, target.IriLength),
+            GraphTargetType.Graph => ExpandPrefixedName(_source.AsSpan(target.IriStart, target.IriLength)).ToString(),
             _ => null
         };
     }
@@ -1121,6 +1182,60 @@ public class UpdateExecutor
         if (length == 0)
             return ReadOnlySpan<char>.Empty;
 
-        return _source.AsSpan(start, length);
+        var term = _source.AsSpan(start, length);
+        return ExpandPrefixedName(term);
+    }
+
+    /// <summary>
+    /// Expands a prefixed name to its full IRI using the prologue prefix mappings.
+    /// Also handles 'a' shorthand for rdf:type.
+    /// Returns the original span if not a prefixed name or no matching prefix found.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
+    {
+        // Skip if already a full IRI, literal, or blank node
+        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
+            return term;
+
+        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+        if (term.Length == 1 && term[0] == 'a')
+            return SyntheticTermHelper.RdfType.AsSpan();
+
+        // Look for colon indicating prefixed name
+        var colonIdx = term.IndexOf(':');
+        if (colonIdx < 0)
+            return term;
+
+        var prefixCount = _update.Prologue.PrefixCount;
+        if (prefixCount == 0)
+            return term;
+
+        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
+        var prefixWithColon = term.Slice(0, colonIdx + 1);
+        var localPart = term.Slice(colonIdx + 1);
+
+        // Find matching prefix in mappings
+        for (int i = 0; i < prefixCount; i++)
+        {
+            var (prefixStart, prefixLength, iriStart, iriLength) = _update.Prologue.GetPrefix(i);
+            var mappingPrefix = _source.AsSpan(prefixStart, prefixLength);
+            if (prefixWithColon.SequenceEqual(mappingPrefix))
+            {
+                // Found matching prefix, expand to full IRI
+                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
+                var iriBase = _source.AsSpan(iriStart, iriLength);
+
+                // Strip angle brackets from IRI base if present, then build full IRI
+                var iriContent = iriBase;
+                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
+                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
+
+                // Build full IRI: <base + localPart>
+                _expandedTerm = $"<{iriContent.ToString()}{localPart.ToString()}>";
+                return _expandedTerm.AsSpan();
+            }
+        }
+
+        return term;
     }
 }

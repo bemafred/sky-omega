@@ -781,10 +781,34 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             sb.AppendLine("    sd:supportedLanguage sd:SPARQL11Update ;");
         }
 
+        // Supported SPARQL 1.1 features
+        // See: https://www.w3.org/TR/sparql11-service-description/#sd-Feature
+        sb.AppendLine("    sd:feature sd:DeresolvableURIs ;");
+        sb.AppendLine("    sd:feature sd:UnionDefaultGraph ;");
+        sb.AppendLine("    sd:feature sd:BasicFederatedQuery ;");
+
+        // Extended features (custom extensions)
+        // Property paths: ^, *, +, ?, /, |, !
+        sb.AppendLine("    sd:extensionFunction <http://www.w3.org/ns/sparql-features#PropertyPaths> ;");
+        // Subqueries: nested SELECT
+        sb.AppendLine("    sd:extensionFunction <http://www.w3.org/ns/sparql-features#SubQueries> ;");
+        // Aggregates: COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT, SAMPLE
+        sb.AppendLine("    sd:extensionFunction <http://www.w3.org/ns/sparql-features#Aggregates> ;");
+        // Negation: NOT EXISTS, MINUS
+        sb.AppendLine("    sd:extensionFunction <http://www.w3.org/ns/sparql-features#Negation> ;");
+        // Full-text search: text:match
+        sb.AppendLine("    sd:extensionFunction <http://jena.apache.org/text#match> ;");
+
+        // Result formats
         sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/SPARQL_Results_JSON> ;");
         sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/SPARQL_Results_XML> ;");
         sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/SPARQL_Results_CSV> ;");
-        sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/SPARQL_Results_TSV> .");
+        sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/SPARQL_Results_TSV> ;");
+
+        // RDF output formats for CONSTRUCT/DESCRIBE
+        sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/Turtle> ;");
+        sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/N-Triples> ;");
+        sb.AppendLine("    sd:resultFormat <http://www.w3.org/ns/formats/RDF_XML> .");
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
         await response.OutputStream.WriteAsync(bytes, ct).ConfigureAwait(false);

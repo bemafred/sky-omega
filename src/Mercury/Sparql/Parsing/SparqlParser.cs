@@ -232,6 +232,7 @@ public ref partial struct SparqlParser
     /// <summary>
     /// Parse a SPARQL Update operation.
     /// [29] Update ::= Prologue ( Update1 ( ';' Update )? )?
+    /// Note: For sequences, use ParseUpdateSequence() instead.
     /// </summary>
     public UpdateOperation ParseUpdate()
     {
@@ -255,6 +256,67 @@ public ref partial struct SparqlParser
             QueryType.Add => ParseAdd(prologue),
             _ => throw new SparqlParseException("Expected INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, or ADD")
         };
+    }
+
+    /// <summary>
+    /// Parse a SPARQL Update sequence (semicolon-separated operations).
+    /// [29] Update ::= Prologue ( Update1 ( ';' Update )? )?
+    /// Returns an array of operations that share the same prologue until a new prologue is encountered.
+    /// </summary>
+    public UpdateOperation[] ParseUpdateSequence()
+    {
+        var operations = new System.Collections.Generic.List<UpdateOperation>();
+
+        while (true)
+        {
+            SkipWhitespace();
+
+            // Check for end of input
+            if (IsAtEnd())
+                break;
+
+            // Parse prologue (may be empty for subsequent operations)
+            var prologue = ParsePrologue();
+            SkipWhitespace();
+
+            // Check if there's actually an update operation
+            if (IsAtEnd())
+                break;
+
+            // Determine and parse the update type
+            var updateType = DetermineUpdateType();
+            var operation = updateType switch
+            {
+                QueryType.InsertData => ParseInsertData(prologue),
+                QueryType.DeleteData => ParseDeleteData(prologue),
+                QueryType.DeleteWhere => ParseDeleteWhere(prologue),
+                QueryType.Modify => ParseModify(prologue),
+                QueryType.Load => ParseLoad(prologue),
+                QueryType.Clear => ParseClear(prologue),
+                QueryType.Create => ParseCreate(prologue),
+                QueryType.Drop => ParseDrop(prologue),
+                QueryType.Copy => ParseCopy(prologue),
+                QueryType.Move => ParseMove(prologue),
+                QueryType.Add => ParseAdd(prologue),
+                _ => throw new SparqlParseException("Expected INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, or ADD")
+            };
+
+            operations.Add(operation);
+
+            SkipWhitespace();
+
+            // Check for semicolon separator
+            if (Peek() == ';')
+            {
+                Advance(); // consume ';'
+                continue;  // Parse next operation
+            }
+
+            // No semicolon - end of sequence
+            break;
+        }
+
+        return operations.ToArray();
     }
 
     private QueryType DetermineUpdateType()

@@ -746,6 +746,8 @@ public class SparqlConformanceTests
         _output.WriteLine($"Test: {test.Name}");
         _output.WriteLine($"Update: {test.ActionPath}");
         _output.WriteLine($"Data: {test.DataPath}");
+        _output.WriteLine($"ExpectedDefaultGraph: {test.ExpectedDefaultGraphPath}");
+        _output.WriteLine($"ExpectedNamedGraphs: {test.ExpectedNamedGraphs?.Length ?? 0}");
 
         Skip.IfNot(File.Exists(test.ActionPath), $"Update file not found: {test.ActionPath}");
 
@@ -757,10 +759,24 @@ public class SparqlConformanceTests
         using var lease = _fixture.Pool.RentScoped();
         var store = lease.Store;
 
+        // Load default graph data
         if (test.DataPath != null && File.Exists(test.DataPath))
         {
             await LoadDataAsync(store, test.DataPath);
-            _output.WriteLine($"Loaded initial data from {test.DataPath}");
+            _output.WriteLine($"Loaded initial default graph from {test.DataPath}");
+        }
+
+        // Load named graph data (from ActionGraphData for Update tests)
+        if (test.ActionGraphData != null)
+        {
+            foreach (var (path, graphIri) in test.ActionGraphData)
+            {
+                if (File.Exists(path))
+                {
+                    await LoadDataToNamedGraphAsync(store, path, $"<{graphIri}>");
+                    _output.WriteLine($"Loaded initial named graph <{graphIri}> from {path}");
+                }
+            }
         }
 
         // Parse and execute the update
@@ -782,9 +798,114 @@ public class SparqlConformanceTests
             _output.WriteLine($"Error: {result.ErrorMessage}");
         }
 
-        // Verify result - for now just check success
-        // Full conformance would compare actual graph state against expected
+        // Verify execution succeeded
         Assert.True(result.Success, result.ErrorMessage ?? "Update failed");
+
+        // Skip graph state comparison if no expected graphs specified
+        // (some tests only verify execution success)
+        if (test.ExpectedDefaultGraphPath == null && test.ExpectedNamedGraphs == null)
+        {
+            _output.WriteLine("No expected graph state specified - verifying execution success only");
+            return;
+        }
+
+        // Compare default graph state
+        if (test.ExpectedDefaultGraphPath != null)
+        {
+            Skip.IfNot(File.Exists(test.ExpectedDefaultGraphPath),
+                $"Expected default graph file not found: {test.ExpectedDefaultGraphPath}");
+
+            var expectedDefault = await ParseExpectedGraphAsync(test.ExpectedDefaultGraphPath);
+            var actualDefault = ExtractGraphFromStore(store, null);
+
+            _output.WriteLine($"Default graph: expected {expectedDefault.Count}, actual {actualDefault.Count}");
+
+            var defaultError = SparqlResultComparer.CompareGraphs(expectedDefault, actualDefault);
+            if (defaultError != null)
+            {
+                _output.WriteLine("Default graph comparison failed:");
+                _output.WriteLine(defaultError);
+                LogGraphContents("Expected default", expectedDefault);
+                LogGraphContents("Actual default", actualDefault);
+            }
+            Assert.Null(defaultError);
+        }
+
+        // Compare named graph states
+        if (test.ExpectedNamedGraphs != null)
+        {
+            foreach (var (path, graphIri) in test.ExpectedNamedGraphs)
+            {
+                Skip.IfNot(File.Exists(path),
+                    $"Expected named graph file not found: {path}");
+
+                var expectedNamed = await ParseExpectedGraphAsync(path);
+                var actualNamed = ExtractGraphFromStore(store, $"<{graphIri}>");
+
+                _output.WriteLine($"Named graph <{graphIri}>: expected {expectedNamed.Count}, actual {actualNamed.Count}");
+
+                var namedError = SparqlResultComparer.CompareGraphs(expectedNamed, actualNamed);
+                if (namedError != null)
+                {
+                    _output.WriteLine($"Named graph <{graphIri}> comparison failed:");
+                    _output.WriteLine(namedError);
+                    LogGraphContents($"Expected <{graphIri}>", expectedNamed);
+                    LogGraphContents($"Actual <{graphIri}>", actualNamed);
+                }
+                Assert.Null(namedError);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extracts all triples from a specific graph in the store.
+    /// </summary>
+    /// <param name="store">The quad store.</param>
+    /// <param name="graphIri">The graph IRI (null for default graph, or &lt;iri&gt; for named graph).</param>
+    private SparqlGraphResult ExtractGraphFromStore(SkyOmega.Mercury.Storage.QuadStore store, string? graphIri)
+    {
+        var graph = new SparqlGraphResult();
+
+        store.AcquireReadLock();
+        try
+        {
+            var results = store.QueryCurrent(null, null, null, graphIri);
+            try
+            {
+                while (results.MoveNext())
+                {
+                    var quad = results.Current;
+                    graph.AddTriple(
+                        ParseTermToBinding(quad.Subject.ToString()),
+                        ParseTermToBinding(quad.Predicate.ToString()),
+                        ParseTermToBinding(quad.Object.ToString()));
+                }
+            }
+            finally
+            {
+                results.Dispose();
+            }
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+
+        return graph;
+    }
+
+    /// <summary>
+    /// Logs the contents of a graph for debugging.
+    /// </summary>
+    private void LogGraphContents(string label, SparqlGraphResult graph)
+    {
+        _output.WriteLine($"{label} ({graph.Count} triples):");
+        foreach (var triple in graph.Triples.Take(10))
+        {
+            _output.WriteLine($"  {triple.Subject} {triple.Predicate} {triple.Object}");
+        }
+        if (graph.Count > 10)
+            _output.WriteLine($"  ... ({graph.Count - 10} more)");
     }
 
     public static IEnumerable<object[]> GetUpdateEvalTests()

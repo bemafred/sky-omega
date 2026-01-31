@@ -351,6 +351,27 @@ public class UpdateExecutorTests : PooledStoreTestBase
         Assert.Equal(2, CountTriples("<http://ex.org/dst>")); // Destination has copies
     }
 
+    [Fact]
+    public void Copy_SameGraph_IsNoOp()
+    {
+        // Add triples to graph
+        Store.BeginBatch();
+        Store.AddCurrentBatched("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>", "<http://ex.org/g1>");
+        Store.AddCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o2>", "<http://ex.org/g1>");
+        Store.CommitBatch();
+
+        var update = "PREFIX : <http://ex.org/>\nCOPY :g1 TO :g1";
+        var parser = new SparqlParser(update.AsSpan());
+        var operation = parser.ParseUpdate();
+
+        var executor = new UpdateExecutor(Store, update.AsSpan(), operation);
+        var result = executor.Execute();
+
+        Assert.True(result.Success);
+        Assert.Equal(0, result.AffectedCount); // No-op
+        Assert.Equal(2, CountTriples("<http://ex.org/g1>")); // Graph unchanged
+    }
+
     #endregion
 
     #region MOVE Tests
@@ -854,6 +875,122 @@ public class UpdateExecutorTests : PooledStoreTestBase
         Assert.Equal(0, CountTriples("<http://ex.org/g1>"));
         // Default graph should be unchanged
         Assert.Equal(1, CountTriples());
+    }
+
+    #endregion
+
+    #region Update Sequence Tests
+
+    [Fact]
+    public void ParseUpdateSequence_SingleOperation_ReturnsOneOperation()
+    {
+        var update = "INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        Assert.Single(operations);
+        Assert.Equal(QueryType.InsertData, operations[0].Type);
+    }
+
+    [Fact]
+    public void ParseUpdateSequence_TwoOperations_ReturnsBothOperations()
+    {
+        var update = @"INSERT DATA { <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o1> } ;
+                       INSERT DATA { <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o2> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        Assert.Equal(2, operations.Length);
+        Assert.All(operations, op => Assert.Equal(QueryType.InsertData, op.Type));
+    }
+
+    [Fact]
+    public void ParseUpdateSequence_MixedOperations_ParsesAll()
+    {
+        var update = @"INSERT DATA { <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o1> } ;
+                       DELETE DATA { <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o2> } ;
+                       CLEAR DEFAULT";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        Assert.Equal(3, operations.Length);
+        Assert.Equal(QueryType.InsertData, operations[0].Type);
+        Assert.Equal(QueryType.DeleteData, operations[1].Type);
+        Assert.Equal(QueryType.Clear, operations[2].Type);
+    }
+
+    [Fact]
+    public void ExecuteSequence_MultipleInserts_InsertsAll()
+    {
+        var update = @"INSERT DATA { <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o1> } ;
+                       INSERT DATA { <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o2> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        var result = UpdateExecutor.ExecuteSequence(Store, update.AsSpan(), operations);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.Equal(2, CountTriples());
+    }
+
+    [Fact]
+    public void ExecuteSequence_InsertThenDelete_LeavesCorrectState()
+    {
+        // First insert two triples
+        Store.AddCurrent("<http://ex.org/s1>", "<http://ex.org/p>", "<http://ex.org/o1>");
+        Assert.Equal(1, CountTriples());
+
+        // Now execute sequence: insert one more, then delete the original
+        var update = @"INSERT DATA { <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o2> } ;
+                       DELETE DATA { <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o1> }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        var result = UpdateExecutor.ExecuteSequence(Store, update.AsSpan(), operations);
+
+        Assert.True(result.Success);
+        // 1 insert + 1 delete = 2 affected
+        Assert.Equal(2, result.AffectedCount);
+        // Should have only the new triple
+        Assert.Equal(1, CountTriples());
+    }
+
+    [Fact]
+    public void ExecuteSequence_WithPrologueSharing_ResolvesCorrectly()
+    {
+        // Prologue applies to first operation, subsequent operations may have their own
+        var update = @"PREFIX ex: <http://ex.org/>
+                       INSERT DATA { ex:s1 ex:p ex:o1 } ;
+                       INSERT DATA { ex:s2 ex:p ex:o2 }";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        var result = UpdateExecutor.ExecuteSequence(Store, update.AsSpan(), operations);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.AffectedCount);
+        Assert.Equal(2, CountTriples());
+    }
+
+    [Fact]
+    public void ParseUpdateSequence_EmptyInput_ReturnsEmptyArray()
+    {
+        var update = "   ";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        Assert.Empty(operations);
+    }
+
+    [Fact]
+    public void ParseUpdateSequence_TrailingSemicolon_IgnoresTrailingSeparator()
+    {
+        var update = "INSERT DATA { <http://ex.org/s> <http://ex.org/p> <http://ex.org/o> } ;";
+        var parser = new SparqlParser(update.AsSpan());
+        var operations = parser.ParseUpdateSequence();
+
+        Assert.Single(operations);
     }
 
     #endregion

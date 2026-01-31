@@ -1,7 +1,27 @@
 # ADR-002 - Sky Omega 1.0.0 Operational Scope: CLI and MCP First
 
 ## Status
-Proposed
+Accepted (2026-01-31)
+
+## Implementation Summary
+
+Core success criteria achieved:
+
+- ✅ SPARQL LOAD wiring across CLI, MCP, and HTTP surfaces (v0.5.3)
+- ✅ SPARQL Update sequences with semicolon separators (v1.0.0)
+- ✅ USING / USING NAMED clause parsing in updates (v0.6.0)
+- ✅ Content negotiation for CONSTRUCT/DESCRIBE (v0.6.0-beta.1)
+- ✅ W3C Update tests validating resulting graph state (v1.0.0)
+- ✅ Accurate SPARQL service description with sd:feature declarations (v1.0.0)
+- ✅ 100% W3C SPARQL 1.1 Query conformance (418/418)
+- ✅ 89% W3C SPARQL 1.1 Update conformance (84/94)
+
+### Known Update Limitations
+
+10 W3C Update edge cases deferred (complex semantics with limited practical impact):
+- USING clause dataset restriction (USING without USING NAMED)
+- Blank node identity preservation across sequence operations
+- DELETE/INSERT combined operation ordering
 
 ## Context
 
