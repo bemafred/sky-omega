@@ -1996,6 +1996,46 @@ internal ref struct MultiPatternScan
         _cachedPatternCount = boxedPattern.Pattern.RequiredPatternCount;
     }
 
+    public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, BoxedPattern boxedPattern,
+        ReadOnlySpan<char> graph, PrefixMapping[]? prefixes = null)
+    {
+        _store = store;
+        _source = source;
+        _boxedPattern = boxedPattern;
+        _unionMode = false;
+        _graph = graph;
+        _patternOrder = null;
+        _temporalMode = TemporalQueryMode.Current;
+        _asOfTime = default;
+        _rangeStart = default;
+        _rangeEnd = default;
+        _prefixes = prefixes;
+        _expandedSubject = null;
+        _expandedPredicate = null;
+        _expandedObject = null;
+        _currentLevel = 0;
+        _init0 = _init1 = _init2 = _init3 = false;
+        _init4 = _init5 = _init6 = _init7 = false;
+        _init8 = _init9 = _init10 = _init11 = false;
+        _exhausted = false;
+        _enumerators = System.Buffers.ArrayPool<TemporalResultEnumerator>.Shared.Rent(MaxPatternLevels);
+        _bindingCount0 = _bindingCount1 = _bindingCount2 = _bindingCount3 = 0;
+        _bindingCount4 = _bindingCount5 = _bindingCount6 = _bindingCount7 = 0;
+        _bindingCount8 = _bindingCount9 = _bindingCount10 = _bindingCount11 = 0;
+        _levelFilterCount0 = _levelFilterCount1 = _levelFilterCount2 = _levelFilterCount3 = 0;
+        _levelFilterCount4 = _levelFilterCount5 = _levelFilterCount6 = _levelFilterCount7 = 0;
+        _f0_0 = _f0_1 = _f0_2 = _f0_3 = 0;
+        _f1_0 = _f1_1 = _f1_2 = _f1_3 = 0;
+        _f2_0 = _f2_1 = _f2_2 = _f2_3 = 0;
+        _f3_0 = _f3_1 = _f3_2 = _f3_3 = 0;
+        _f4_0 = _f4_1 = _f4_2 = _f4_3 = 0;
+        _f5_0 = _f5_1 = _f5_2 = _f5_3 = 0;
+        _f6_0 = _f6_1 = _f6_2 = _f6_3 = 0;
+        _f7_0 = _f7_1 = _f7_2 = _f7_3 = 0;
+        _hasPushedFilters = false;
+        _cachedPatternCount = boxedPattern.Pattern.RequiredPatternCount;
+    }
+
     public MultiPatternScan(QuadStore store, ReadOnlySpan<char> source, GraphPattern pattern,
         bool unionMode, ReadOnlySpan<char> graph,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
@@ -3171,11 +3211,60 @@ internal sealed class BoxedSubQueryExecutor
         _prefixes = prefixes;
 
         // Extract graph context if the subquery is inside a GRAPH clause
-        if (subSelect.HasGraphContext)
+        // Expand prefixed names (e.g., :g2 -> <http://example.org/g2>)
+        if (subSelect.HasGraphContext && !subSelect.GraphContext.IsVariable)
         {
             var graphTerm = subSelect.GraphContext;
-            _graphContext = source.AsSpan(graphTerm.Start, graphTerm.Length).ToString();
+            var rawGraphIri = source.AsSpan(graphTerm.Start, graphTerm.Length);
+            _graphContext = ExpandPrefixedName(rawGraphIri, source, prefixes);
         }
+    }
+
+    /// <summary>
+    /// Expand a prefixed name to its full IRI using prefix mappings.
+    /// Returns the original term as a string if not a prefixed name or no matching prefix.
+    /// </summary>
+    private static string ExpandPrefixedName(ReadOnlySpan<char> term, string source, PrefixMapping[]? prefixes)
+    {
+        // Skip if already a full IRI, literal, or blank node
+        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
+            return term.ToString();
+
+        // Handle 'a' shorthand for rdf:type
+        if (term.Length == 1 && term[0] == 'a')
+            return SyntheticTermHelper.RdfType;
+
+        // Look for colon indicating prefixed name
+        var colonIdx = term.IndexOf(':');
+        if (colonIdx < 0 || prefixes == null || prefixes.Length == 0)
+            return term.ToString();
+
+        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
+        var prefixWithColon = term.Slice(0, colonIdx + 1);
+        var localPart = term.Slice(colonIdx + 1);
+
+        // Find matching prefix in mappings
+        var sourceSpan = source.AsSpan();
+        for (int i = 0; i < prefixes.Length; i++)
+        {
+            var mapping = prefixes[i];
+            var mappingPrefix = sourceSpan.Slice(mapping.PrefixStart, mapping.PrefixLength);
+            if (prefixWithColon.SequenceEqual(mappingPrefix))
+            {
+                // Found matching prefix, expand to full IRI
+                var iriBase = sourceSpan.Slice(mapping.IriStart, mapping.IriLength);
+
+                // Strip angle brackets from IRI base if present
+                var iriContent = iriBase;
+                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
+                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
+
+                // Build full IRI: <base + localPart>
+                return $"<{iriContent.ToString()}{localPart.ToString()}>";
+            }
+        }
+
+        return term.ToString();
     }
 
     /// <summary>
@@ -3185,6 +3274,14 @@ internal sealed class BoxedSubQueryExecutor
     [MethodImpl(MethodImplOptions.NoInlining)]
     public List<MaterializedRow> Execute()
     {
+        // Handle UNION with mixed GRAPH/default patterns
+        // Some UNION branches have GRAPH ?var { }, others don't
+        // Need to execute non-GRAPH branches against default graph, GRAPH branches against named graphs
+        if (_subSelect.HasMixedGraphUnion)
+        {
+            return ExecuteWithMixedGraphUnion();
+        }
+
         // Handle variable graph context (GRAPH ?g { subquery })
         // When graph context is a variable, we need to iterate over all named graphs
         if (_subSelect.HasGraphContext && _subSelect.GraphContext.IsVariable)
@@ -3278,6 +3375,135 @@ internal sealed class BoxedSubQueryExecutor
                 // Check limit
                 if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
                     break;
+            }
+        }
+        finally
+        {
+            PooledBufferManager.Shared.Return(innerStringBuffer);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Execute subquery with mixed GRAPH/default patterns in UNION.
+    /// Some UNION branches are inside GRAPH ?var { }, others query the default graph.
+    /// Example: { ?s ?p ?o } UNION { GRAPH ?g { ?s ?p ?o } }
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private List<MaterializedRow> ExecuteWithMixedGraphUnion()
+    {
+        var results = new List<MaterializedRow>();
+        var innerBindings = new Binding[16];
+        var innerStringBuffer = PooledBufferManager.Shared.Rent<char>(512).Array!;
+        var bindingTable = new BindingTable(innerBindings, innerStringBuffer);
+        HashSet<int>? seenHashes = _distinct ? new HashSet<int>() : null;
+
+        // Get the graph variable name for GRAPH patterns
+        var graphTerm = _subSelect.GraphContext;
+        var graphVarName = _source.AsSpan(graphTerm.Start, graphTerm.Length);
+        var graphVarNameStr = graphVarName.ToString();
+
+        try
+        {
+            int skipped = 0;
+            int returned = 0;
+            var source = _source.AsSpan();
+
+            // Execute first branch (patterns before UNION) against default graph
+            // These patterns are NOT inside GRAPH blocks
+            if (_subSelect.FirstBranchPatternCount > 0)
+            {
+                for (int i = 0; i < _subSelect.FirstBranchPatternCount; i++)
+                {
+                    if (_subSelect.IsPatternInGraphBlock(i))
+                        continue; // Skip GRAPH patterns in first branch (handled below)
+
+                    var tp = _subSelect.GetPattern(i);
+                    var scan = new TriplePatternScan(_store, source, tp, bindingTable, default,
+                        TemporalQueryMode.Current, default, default, default, _prefixes);
+                    try
+                    {
+                        while (scan.MoveNext(ref bindingTable))
+                        {
+                            if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                            {
+                                if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                    return results;
+                            }
+                            bindingTable.Clear();
+                        }
+                    }
+                    finally
+                    {
+                        scan.Dispose();
+                    }
+                }
+            }
+
+            // Execute UNION branches - split by GRAPH vs default graph
+            for (int i = _subSelect.UnionStartIndex; i < _subSelect.PatternCount; i++)
+            {
+                var tp = _subSelect.GetPattern(i);
+
+                if (_subSelect.IsPatternInGraphBlock(i))
+                {
+                    // GRAPH pattern - execute against each named graph
+                    var graphEnum = _store.GetNamedGraphs();
+                    while (graphEnum.MoveNext())
+                    {
+                        var graphIri = graphEnum.Current;
+                        var graphIriStr = graphIri.ToString();
+                        var graphSpan = graphIriStr.AsSpan();
+
+                        var scan = new TriplePatternScan(_store, source, tp, bindingTable, graphSpan,
+                            TemporalQueryMode.Current, default, default, default, _prefixes);
+                        try
+                        {
+                            while (scan.MoveNext(ref bindingTable))
+                            {
+                                // Bind the graph variable if projected
+                                if (IsVariableProjected(graphVarNameStr))
+                                {
+                                    bindingTable.Bind(graphVarName, graphIriStr.AsSpan());
+                                }
+
+                                if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                                {
+                                    if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                        return results;
+                                }
+                                bindingTable.Clear();
+                            }
+                        }
+                        finally
+                        {
+                            scan.Dispose();
+                        }
+                    }
+                }
+                else
+                {
+                    // Default graph pattern
+                    var scan = new TriplePatternScan(_store, source, tp, bindingTable, default,
+                        TemporalQueryMode.Current, default, default, default, _prefixes);
+                    try
+                    {
+                        while (scan.MoveNext(ref bindingTable))
+                        {
+                            if (ProcessAndAddResult(ref bindingTable, results, seenHashes, ref skipped, ref returned))
+                            {
+                                if (_subSelect.Limit > 0 && returned >= _subSelect.Limit)
+                                    return results;
+                            }
+                            bindingTable.Clear();
+                        }
+                    }
+                    finally
+                    {
+                        scan.Dispose();
+                    }
+                }
             }
         }
         finally
@@ -3734,7 +3960,9 @@ internal sealed class BoxedSubQueryExecutor
     {
         var tp = _subSelect.GetPattern(0);
         var sourceSpan = source.AsSpan();
-        var scan = new TriplePatternScan(_store, sourceSpan, tp, bindingTable, default,
+        // Use graph context if subquery is inside a GRAPH clause
+        var graphSpan = _graphContext != null ? _graphContext.AsSpan() : ReadOnlySpan<char>.Empty;
+        var scan = new TriplePatternScan(_store, sourceSpan, tp, bindingTable, graphSpan,
             TemporalQueryMode.Current, default, default, default, _prefixes);
         try
         {
@@ -3803,7 +4031,9 @@ internal sealed class BoxedSubQueryExecutor
             }
 
             var sourceSpan = source.AsSpan();
-            var scan = new MultiPatternScan(_store, sourceSpan, boxedPattern, _prefixes);
+            // Use graph context if subquery is inside a GRAPH clause
+            var graphSpan = _graphContext != null ? _graphContext.AsSpan() : ReadOnlySpan<char>.Empty;
+            var scan = new MultiPatternScan(_store, sourceSpan, boxedPattern, graphSpan, _prefixes);
             try
             {
                 while (scan.MoveNext(ref bindingTable))
@@ -3983,8 +4213,10 @@ internal sealed class BoxedSubQueryExecutor
     {
         var tp = _subSelect.GetPattern(0);
         var source = _source.AsSpan();
+        // Use graph context if subquery is inside a GRAPH clause (e.g., GRAPH :g2 { ?s ?p ?o })
+        var graphSpan = _graphContext != null ? _graphContext.AsSpan() : ReadOnlySpan<char>.Empty;
         // Pass prefixes for prefix expansion in nested subqueries (e.g., ex:q -> <http://...#q>)
-        var scan = new TriplePatternScan(_store, source, tp, bindingTable, default,
+        var scan = new TriplePatternScan(_store, source, tp, bindingTable, graphSpan,
             TemporalQueryMode.Current, default, default, default, _prefixes);
         try
         {
@@ -4023,8 +4255,10 @@ internal sealed class BoxedSubQueryExecutor
             }
 
             var source = _source.AsSpan();
+            // Use graph context if subquery is inside a GRAPH clause
+            var graphSpan = _graphContext != null ? _graphContext.AsSpan() : ReadOnlySpan<char>.Empty;
             // Pass prefixes for prefix expansion in nested subqueries (e.g., ex:q -> <http://...#q>)
-            var scan = new MultiPatternScan(_store, source, boxedPattern, _prefixes);
+            var scan = new MultiPatternScan(_store, source, boxedPattern, graphSpan, _prefixes);
             try
             {
                 while (scan.MoveNext(ref bindingTable))

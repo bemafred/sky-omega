@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Patterns;
@@ -34,6 +35,16 @@ public class UpdateExecutor
     private readonly LoadExecutor? _loadExecutor;
     private string? _expandedTerm; // Buffer for expanded prefixed names
 
+    // Blank node scope tracking - per-statement bnode identity (W3C spec)
+    // Same bnode label within one statement = same node
+    // Same bnode label across statements = different nodes
+    private Dictionary<string, string>? _bnodeScope;
+
+    // Static counter to ensure globally unique blank node IDs across all operations
+    // Each operation creates a new UpdateExecutor, but they all share this counter
+    private static long s_globalBnodeCounter;
+    private long _bnodeBase;
+
     public UpdateExecutor(QuadStore store, ReadOnlySpan<char> source, UpdateOperation update)
         : this(store, source, update, null)
     {
@@ -45,6 +56,10 @@ public class UpdateExecutor
         _source = source.ToString();
         _update = update;
         _loadExecutor = loadExecutor;
+
+        // Reserve a unique bnode ID range for this operation
+        // Each operation gets 10 million IDs, ensuring no collisions between operations
+        _bnodeBase = Interlocked.Add(ref s_globalBnodeCounter, 10_000_000);
     }
 
     /// <summary>
@@ -434,7 +449,15 @@ public class UpdateExecutor
             return null;
         }
 
-        // Not a variable - return the literal value with prefix expansion
+        // Handle blank nodes with scoped identity
+        // Same label within one statement = same node
+        // Different statements = different nodes (via unique _bnodeBase)
+        if (term.Type == TermType.BlankNode || (termSpan.Length > 2 && termSpan[0] == '_' && termSpan[1] == ':'))
+        {
+            return GetScopedBlankNode(termSpan).ToString();
+        }
+
+        // Not a variable or blank node - return the literal value with prefix expansion
         return ExpandPrefixedName(termSpan).ToString();
     }
 
@@ -468,8 +491,8 @@ public class UpdateExecutor
         _store.AcquireReadLock();
         try
         {
-            // If there's no WHERE pattern, execute once with empty bindings
-            if (wherePattern.PatternCount == 0 && wherePattern.GraphClauseCount == 0)
+            // If there's no WHERE pattern (and no subqueries), execute once with empty bindings
+            if (wherePattern.PatternCount == 0 && wherePattern.GraphClauseCount == 0 && wherePattern.SubQueryCount == 0)
             {
                 ProcessModifyTemplates(default, toDelete, toInsert, withGraph);
             }
@@ -488,10 +511,12 @@ public class UpdateExecutor
                 // Standard path - no WITH clause or has GRAPH clauses
                 var executor = new QueryExecutor(_store, _source.AsSpan(), query);
                 var results = executor.Execute();
+                int resultCount = 0;
                 try
                 {
                     while (results.MoveNext())
                     {
+                        resultCount++;
                         ProcessModifyTemplates(results.Current, toDelete, toInsert, withGraph);
                     }
                 }
@@ -676,6 +701,12 @@ public class UpdateExecutor
             if (idx >= 0)
                 return bindings.GetString(idx).ToString();
             return null;
+        }
+
+        // Handle blank nodes with scoped identity
+        if (term.Type == TermType.BlankNode || (termSpan.Length > 2 && termSpan[0] == '_' && termSpan[1] == ':'))
+        {
+            return GetScopedBlankNode(termSpan).ToString();
         }
 
         return ExpandPrefixedName(termSpan).ToString();
@@ -1183,7 +1214,44 @@ public class UpdateExecutor
             return ReadOnlySpan<char>.Empty;
 
         var term = _source.AsSpan(start, length);
+
+        // Handle blank nodes with scoped identity
+        if (term.Length > 2 && term[0] == '_' && term[1] == ':')
+        {
+            return GetScopedBlankNode(term);
+        }
+
         return ExpandPrefixedName(term);
+    }
+
+    /// <summary>
+    /// Get or create a scoped blank node identifier.
+    /// Same label within one statement = same node.
+    /// Different operations get different IDs via unique _bnodeBase.
+    /// </summary>
+    private ReadOnlySpan<char> GetScopedBlankNode(ReadOnlySpan<char> label)
+    {
+        _bnodeScope ??= new Dictionary<string, string>();
+
+        var labelStr = label.ToString();
+        if (_bnodeScope.TryGetValue(labelStr, out var existing))
+            return existing.AsSpan();
+
+        // Use _bnodeBase + scope count to generate globally unique IDs
+        // _bnodeBase is unique per UpdateExecutor instance
+        var newBnode = $"_:b{_bnodeBase + _bnodeScope.Count}";
+        _bnodeScope[labelStr] = newBnode;
+        _expandedTerm = newBnode; // Use existing buffer field for span lifetime
+        return _expandedTerm.AsSpan();
+    }
+
+    /// <summary>
+    /// Begin a new blank node scope. Call at the start of each UPDATE statement.
+    /// This ensures bnode labels in different statements create different nodes.
+    /// </summary>
+    private void BeginBnodeScope()
+    {
+        _bnodeScope?.Clear();
     }
 
     /// <summary>

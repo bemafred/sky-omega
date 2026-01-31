@@ -95,7 +95,7 @@ public partial class QueryExecutor
         if (graphResults == null || graphResults.Count == 0)
             return MaterializedQueryResults.Empty();
 
-        // Get graph context for EXISTS evaluation
+        // Get graph context for EXISTS evaluation - expand prefixed names
         string? graphContext = null;
         if (graphCount == 1 && !_buffer.FirstGraphIsVariable)
         {
@@ -103,7 +103,8 @@ public partial class QueryExecutor
             if (graphHeaders.MoveNext())
             {
                 var header = graphHeaders.Current;
-                graphContext = _source.Substring(header.GraphTermStart, header.GraphTermLength);
+                var rawGraphIri = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength);
+                graphContext = ExpandPrefixedName(rawGraphIri).ToString();
             }
         }
 
@@ -574,8 +575,9 @@ public partial class QueryExecutor
             return null; // Unbound variable
         }
 
-        // IRI - return as-is
-        return _source.Substring(graphSlot.GraphTermStart, graphSlot.GraphTermLength);
+        // IRI - expand prefixed names
+        var rawIri = _source.AsSpan().Slice(graphSlot.GraphTermStart, graphSlot.GraphTermLength);
+        return ExpandPrefixedName(rawIri).ToString();
     }
 
     /// <summary>
@@ -713,8 +715,16 @@ public partial class QueryExecutor
         bool hasMinus = _buffer.HasMinus;
 
         // Iterate all named graphs (or FROM NAMED restricted graphs)
-        if (_namedGraphs != null && _namedGraphs.Length > 0)
+        // _namedGraphs semantics:
+        //   - null: no dataset clause, all named graphs accessible
+        //   - empty array: USING without USING NAMED, named graphs inaccessible (return empty)
+        //   - non-empty: only iterate those specific graphs
+        if (_namedGraphs != null)
         {
+            // Dataset clause present - if empty, no named graphs accessible
+            if (_namedGraphs.Length == 0)
+                return results; // Return empty results
+
             // FROM NAMED specified - only iterate those graphs
             foreach (var graphStr in _namedGraphs)
             {
@@ -948,8 +958,35 @@ public partial class QueryExecutor
         var header = graphHeaders.Current;
         var headerIndex = graphHeaders.CurrentIndex;
 
-        // Get graph IRI from source
-        var graphIri = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength).ToString();
+        // Get graph IRI from source - expand prefixed names (e.g., :g1 -> <http://example.org/g1>)
+        var rawGraphIri = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength);
+        var graphIri = ExpandPrefixedName(rawGraphIri).ToString();
+
+        // Check if this specific named graph is accessible under the USING clause
+        // _namedGraphs semantics:
+        //   - null: no dataset clause, all named graphs accessible
+        //   - empty array: USING without USING NAMED, named graphs inaccessible
+        //   - non-empty: only the listed graphs are accessible
+        if (_namedGraphs != null)
+        {
+            // If empty, no named graphs are accessible
+            if (_namedGraphs.Length == 0)
+                return null;
+
+            // If non-empty, check if this graph is in the allowed list
+            bool isAccessible = false;
+            foreach (var allowed in _namedGraphs)
+            {
+                if (allowed == graphIri)
+                {
+                    isAccessible = true;
+                    break;
+                }
+            }
+            if (!isAccessible)
+                return null;  // Graph not in allowed list
+        }
+
         var children = patterns.GetChildren(headerIndex);
 
         if (children.Count == 0)
@@ -984,7 +1021,35 @@ public partial class QueryExecutor
     private List<MaterializedRow>? ExecuteFixedGraphSlotBasedSingle(
         PatternArray patterns, int headerIndex, PatternSlot header)
     {
-        var graphIri = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength).ToString();
+        // Expand prefixed names (e.g., :g1 -> <http://example.org/g1>)
+        var rawGraphIri = _source.AsSpan().Slice(header.GraphTermStart, header.GraphTermLength);
+        var graphIri = ExpandPrefixedName(rawGraphIri).ToString();
+
+        // Check if this specific named graph is accessible under the USING clause
+        // _namedGraphs semantics:
+        //   - null: no dataset clause, all named graphs accessible
+        //   - empty array: USING without USING NAMED, named graphs inaccessible
+        //   - non-empty: only the listed graphs are accessible
+        if (_namedGraphs != null)
+        {
+            // If empty, no named graphs are accessible
+            if (_namedGraphs.Length == 0)
+                return null;
+
+            // If non-empty, check if this graph is in the allowed list
+            bool isAccessible = false;
+            foreach (var allowed in _namedGraphs)
+            {
+                if (allowed == graphIri)
+                {
+                    isAccessible = true;
+                    break;
+                }
+            }
+            if (!isAccessible)
+                return null;  // Graph not in allowed list
+        }
+
         var children = patterns.GetChildren(headerIndex);
 
         if (children.Count == 0)

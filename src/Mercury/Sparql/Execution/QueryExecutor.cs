@@ -56,6 +56,7 @@ public partial class QueryExecutor : IDisposable
     // Prefix mappings for expanding prefixed names
     private readonly Prologue _prologue;
     private readonly PrefixMapping[]? _prefixMappings;
+    private string? _expandedTerm; // Buffer for expanded prefixed names (prevents span-over-temporary)
 
     // Dataset context: default graph IRIs (FROM) and named graph IRIs (FROM NAMED)
     private readonly string[]? _defaultGraphs;
@@ -133,6 +134,10 @@ public partial class QueryExecutor : IDisposable
         _namedGraphs = null;
 
         // Extract dataset clauses into arrays (using buffer instead of query)
+        // Semantics:
+        //   - _namedGraphs = null: no dataset clause, all named graphs accessible
+        //   - _namedGraphs = empty array: USING specified without USING NAMED, named graphs inaccessible
+        //   - _namedGraphs = [g1, g2, ...]: USING NAMED specified, only those graphs accessible
         if (_buffer.Datasets != null && _buffer.Datasets.Length > 0)
         {
             var defaultList = new List<string>();
@@ -140,7 +145,9 @@ public partial class QueryExecutor : IDisposable
 
             foreach (var ds in _buffer.Datasets)
             {
-                var iri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length).ToString();
+                // Expand prefixed names like :g1 to full IRIs like <http://example.org/g1>
+                var rawIri = source.Slice(ds.GraphIri.Start, ds.GraphIri.Length);
+                var iri = ExpandPrefixedName(rawIri).ToString();
                 if (ds.IsNamed)
                     namedList.Add(iri);
                 else
@@ -148,7 +155,9 @@ public partial class QueryExecutor : IDisposable
             }
 
             if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
-            if (namedList.Count > 0) _namedGraphs = namedList.ToArray();
+            // W3C SPARQL spec: When USING is present without USING NAMED, named graphs become inaccessible
+            // This is signaled by setting _namedGraphs to empty array (vs null = no restriction)
+            _namedGraphs = namedList.Count > 0 ? namedList.ToArray() : Array.Empty<string>();
         }
 
         _serviceExecutor = serviceExecutor;
@@ -294,6 +303,10 @@ public partial class QueryExecutor : IDisposable
         }
 
         // Extract datasets from buffer
+        // Semantics:
+        //   - _namedGraphs = null: no dataset clause, all named graphs accessible
+        //   - _namedGraphs = empty array: USING specified without USING NAMED, named graphs inaccessible
+        //   - _namedGraphs = [g1, g2, ...]: USING NAMED specified, only those graphs accessible
         if (buffer.Datasets != null && buffer.Datasets.Length > 0)
         {
             var defaultList = new List<string>();
@@ -309,7 +322,8 @@ public partial class QueryExecutor : IDisposable
             }
 
             if (defaultList.Count > 0) _defaultGraphs = defaultList.ToArray();
-            if (namedList.Count > 0) _namedGraphs = namedList.ToArray();
+            // W3C SPARQL spec: When USING is present without USING NAMED, named graphs become inaccessible
+            _namedGraphs = namedList.Count > 0 ? namedList.ToArray() : Array.Empty<string>();
         }
     }
 
@@ -1424,5 +1438,58 @@ public partial class QueryExecutor : IDisposable
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// Expands a prefixed name to its full IRI using the prologue prefix mappings.
+    /// Also handles 'a' shorthand for rdf:type.
+    /// Returns the original span if not a prefixed name or no matching prefix found.
+    /// </summary>
+    private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
+    {
+        // Skip if already a full IRI, literal, or blank node
+        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
+            return term;
+
+        // Handle 'a' shorthand for rdf:type (SPARQL keyword)
+        if (term.Length == 1 && term[0] == 'a')
+            return SyntheticTermHelper.RdfType.AsSpan();
+
+        // Look for colon indicating prefixed name
+        var colonIdx = term.IndexOf(':');
+        if (colonIdx < 0)
+            return term;
+
+        var prefixCount = _prologue.PrefixCount;
+        if (prefixCount == 0)
+            return term;
+
+        // Include the colon in the prefix (stored prefixes include trailing colon, e.g., "ex:")
+        var prefixWithColon = term.Slice(0, colonIdx + 1);
+        var localPart = term.Slice(colonIdx + 1);
+
+        // Find matching prefix in mappings
+        for (int i = 0; i < prefixCount; i++)
+        {
+            var (prefixStart, prefixLength, iriStart, iriLength) = _prologue.GetPrefix(i);
+            var mappingPrefix = _source.AsSpan(prefixStart, prefixLength);
+            if (prefixWithColon.SequenceEqual(mappingPrefix))
+            {
+                // Found matching prefix, expand to full IRI
+                // The IRI is stored with angle brackets, e.g., "<http://example.org/>"
+                var iriBase = _source.AsSpan(iriStart, iriLength);
+
+                // Strip angle brackets from IRI base if present, then build full IRI
+                var iriContent = iriBase;
+                if (iriContent.Length >= 2 && iriContent[0] == '<' && iriContent[^1] == '>')
+                    iriContent = iriContent.Slice(1, iriContent.Length - 2);
+
+                // Build full IRI: <base + localPart>
+                _expandedTerm = $"<{iriContent.ToString()}{localPart.ToString()}>";
+                return _expandedTerm.AsSpan();
+            }
+        }
+
+        return term;
     }
 }

@@ -1642,13 +1642,17 @@ public struct SubSelect
     public bool HasUnion;
     public int UnionStartIndex;  // Index of first pattern in union branch
 
+    // Bitmask tracking which patterns are inside GRAPH blocks (vs default graph)
+    // Bit N = 1 means pattern N is inside a GRAPH { } block in UNION
+    private ushort _graphPatternFlags;
+
     // VALUES clause (inline bindings at end of subquery)
     public ValuesClause Values;
 
     // Graph context (for subqueries inside GRAPH clauses)
     // When this is set, the subquery patterns should be evaluated against this graph
     public Term GraphContext;
-    public bool HasGraphContext => GraphContext.Type != TermType.Variable || GraphContext.Length > 0;
+    public readonly bool HasGraphContext => GraphContext.Type != TermType.Variable || GraphContext.Length > 0;
 
     // GROUP BY and HAVING support
     public GroupByClause GroupBy;
@@ -1697,6 +1701,23 @@ public struct SubSelect
     public readonly int UnionBranchPatternCount => HasUnion ? PatternCount - UnionStartIndex : 0;
     public readonly int SubQueryCount => _nestedSubQueryCount;
     public readonly bool HasSubQueries => _nestedSubQueryCount > 0;
+
+    /// <summary>
+    /// Check if a pattern at the given index is inside a GRAPH block.
+    /// Used for UNION branches where some are GRAPH patterns and some are default graph.
+    /// </summary>
+    public readonly bool IsPatternInGraphBlock(int index) => (_graphPatternFlags & (1 << index)) != 0;
+
+    /// <summary>
+    /// Mark a pattern as being inside a GRAPH block.
+    /// Called by parser when adding patterns inside GRAPH { } in UNION branches.
+    /// </summary>
+    public void SetPatternInGraphBlock(int index) => _graphPatternFlags |= (ushort)(1 << index);
+
+    /// <summary>
+    /// Returns true if any patterns in UNION are inside GRAPH blocks (some may be default graph).
+    /// </summary>
+    public readonly bool HasMixedGraphUnion => HasUnion && _graphPatternFlags != 0 && HasGraphContext;
 
     public void AddProjectedVariable(int start, int length)
     {

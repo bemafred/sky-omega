@@ -267,6 +267,12 @@ public ref partial struct SparqlParser
     {
         var operations = new System.Collections.Generic.List<UpdateOperation>();
 
+        // Parse the initial prologue ONCE at the start of the update request.
+        // Per W3C SPARQL 1.1 Update spec, the prologue applies to the ENTIRE update request,
+        // not just the first operation. Subsequent operations may add more PREFIX declarations.
+        SkipWhitespace();
+        var sharedPrologue = ParsePrologue();
+
         while (true)
         {
             SkipWhitespace();
@@ -275,8 +281,13 @@ public ref partial struct SparqlParser
             if (IsAtEnd())
                 break;
 
-            // Parse prologue (may be empty for subsequent operations)
-            var prologue = ParsePrologue();
+            // Check for additional PREFIX/BASE declarations between operations
+            // These get merged with the shared prologue
+            var additionalPrologue = ParsePrologue();
+            if (additionalPrologue.PrefixCount > 0 || additionalPrologue.BaseUriLength > 0)
+            {
+                sharedPrologue = MergePrologues(sharedPrologue, additionalPrologue);
+            }
             SkipWhitespace();
 
             // Check if there's actually an update operation
@@ -287,17 +298,17 @@ public ref partial struct SparqlParser
             var updateType = DetermineUpdateType();
             var operation = updateType switch
             {
-                QueryType.InsertData => ParseInsertData(prologue),
-                QueryType.DeleteData => ParseDeleteData(prologue),
-                QueryType.DeleteWhere => ParseDeleteWhere(prologue),
-                QueryType.Modify => ParseModify(prologue),
-                QueryType.Load => ParseLoad(prologue),
-                QueryType.Clear => ParseClear(prologue),
-                QueryType.Create => ParseCreate(prologue),
-                QueryType.Drop => ParseDrop(prologue),
-                QueryType.Copy => ParseCopy(prologue),
-                QueryType.Move => ParseMove(prologue),
-                QueryType.Add => ParseAdd(prologue),
+                QueryType.InsertData => ParseInsertData(sharedPrologue),
+                QueryType.DeleteData => ParseDeleteData(sharedPrologue),
+                QueryType.DeleteWhere => ParseDeleteWhere(sharedPrologue),
+                QueryType.Modify => ParseModify(sharedPrologue),
+                QueryType.Load => ParseLoad(sharedPrologue),
+                QueryType.Clear => ParseClear(sharedPrologue),
+                QueryType.Create => ParseCreate(sharedPrologue),
+                QueryType.Drop => ParseDrop(sharedPrologue),
+                QueryType.Copy => ParseCopy(sharedPrologue),
+                QueryType.Move => ParseMove(sharedPrologue),
+                QueryType.Add => ParseAdd(sharedPrologue),
                 _ => throw new SparqlParseException("Expected INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, or ADD")
             };
 
@@ -317,6 +328,33 @@ public ref partial struct SparqlParser
         }
 
         return operations.ToArray();
+    }
+
+    /// <summary>
+    /// Merge two prologues, with the second one potentially adding more PREFIX declarations.
+    /// </summary>
+    private static Prologue MergePrologues(Prologue first, Prologue second)
+    {
+        // If second has a BASE, use it (it overrides)
+        var baseStart = second.BaseUriLength > 0 ? second.BaseUriStart : first.BaseUriStart;
+        var baseLen = second.BaseUriLength > 0 ? second.BaseUriLength : first.BaseUriLength;
+
+        // Merge prefixes (keep first's prefixes, add second's)
+        var merged = first;
+        if (baseLen > 0)
+        {
+            merged.BaseUriStart = baseStart;
+            merged.BaseUriLength = baseLen;
+        }
+
+        // Add additional prefixes from second
+        for (int i = 0; i < second.PrefixCount; i++)
+        {
+            var (ps, pl, irs, irl) = second.GetPrefix(i);
+            merged.AddPrefixRange(ps, pl, irs, irl);
+        }
+
+        return merged;
     }
 
     private QueryType DetermineUpdateType()

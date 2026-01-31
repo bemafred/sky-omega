@@ -779,16 +779,23 @@ public class SparqlConformanceTests
             }
         }
 
-        // Parse and execute the update
+        // Parse and execute the update sequence (may contain multiple operations separated by ;)
         // Run on dedicated thread with 8MB stack to avoid stack overflow from large ref structs
         var parser = new SparqlParser(update.AsSpan());
-        var parsed = parser.ParseUpdate();
-        _output.WriteLine($"Update type: {parsed.Type}");
+        var operations = parser.ParseUpdateSequence();
+        _output.WriteLine($"Update operations: {operations.Length}");
+        foreach (var op in operations)
+        {
+            _output.WriteLine($"  - {op.Type}");
+            if (op.Type == SkyOmega.Mercury.Sparql.QueryType.Modify && op.WhereClause.Pattern.SubQueryCount > 0)
+            {
+                _output.WriteLine($"    WHERE has {op.WhereClause.Pattern.SubQueryCount} subquery(ies)");
+            }
+        }
 
         var result = RunOnLargeStack(() =>
         {
-            var executor = new UpdateExecutor(store, update.AsSpan(), parsed);
-            return executor.Execute();
+            return UpdateExecutor.ExecuteSequence(store, update.AsSpan(), operations);
         });
 
         _output.WriteLine($"Update result: Success={result.Success}, Affected={result.AffectedCount}");

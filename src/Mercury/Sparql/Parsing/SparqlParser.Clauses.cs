@@ -1650,9 +1650,19 @@ public ref partial struct SparqlParser
                 continue;
             }
 
+            // Record pattern count before parsing
+            int patternIndexBefore = subSelect.PatternCount;
+
             // Parse triple pattern
             if (!TryParseSubSelectTriplePattern(ref subSelect))
                 break;
+
+            // Mark any newly added patterns as being inside a GRAPH block
+            // This enables proper handling of UNION branches with mixed GRAPH/default patterns
+            for (int i = patternIndexBefore; i < subSelect.PatternCount; i++)
+            {
+                subSelect.SetPatternInGraphBlock(i);
+            }
 
             SkipWhitespace();
 

@@ -149,15 +149,11 @@ public ref partial struct SparqlParser
         if (usingClauses.Count > 0)
             op.UsingClauses = usingClauses.ToArray();
 
-        // WHERE clause
+        // WHERE clause - use ParseGroupGraphPattern() to handle SubSelect properly
+        // [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
         ConsumeKeyword("WHERE");
         SkipWhitespace();
-        var wherePattern = new GraphPattern();
-        ExpectChar('{');
-        SkipWhitespace();
-        ParseGroupGraphPatternSub(ref wherePattern);
-        SkipWhitespace();
-        ExpectChar('}');
+        var wherePattern = ParseGroupGraphPattern();
         op.WhereClause = new WhereClause { Pattern = wherePattern };
 
         return op;
