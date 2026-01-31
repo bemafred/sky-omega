@@ -10,8 +10,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **72,541** | Knowledge substrate |
-| ├─ Sparql | 46,615 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **73,187** | Knowledge substrate |
+| ├─ Sparql | 47,261 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 5,422 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 4,009 | Turtle parser and writer |
@@ -35,7 +35,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 47,047 | 3,844 |
+| Mercury.Tests | 47,647 | 3,852 |
 | Mercury.Solid.Tests | 443 | 25 |
 | Minerva.Tests | — | — |
 
@@ -64,12 +64,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~78,671 |
-| Tests | ~47,490 |
+| Source code | ~79,317 |
+| Tests | ~48,090 |
 | Benchmarks | ~3,406 |
 | Examples | ~851 |
 | Documentation | ~22,143 |
-| **Grand total** | **~152,561** |
+| **Grand total** | **~153,807** |
 
 ## W3C Conformance
 
@@ -112,8 +112,8 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | **Core conformance** | 100% (1,181/1,181) |
 | **SPARQL 1.1 Query** | 100% (421/421) |
 | **SPARQL 1.1 Update** | 100% (94/94) |
-| **With optional extensions** | 99% (2,060/2,066) |
-| **Remaining gaps** | 3 tests (high complexity) |
+| **With optional extensions** | 99% (2,063/2,069) |
+| **Remaining gaps** | 0 (all high-complexity gaps resolved) |
 
 ## Stack Size (ADR-011)
 

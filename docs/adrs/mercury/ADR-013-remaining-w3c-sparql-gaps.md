@@ -2,11 +2,11 @@
 
 ## Status
 
-Proposed (January 2026)
+**Accepted** (January 2026) — All 3 gaps resolved
 
 ## Context
 
-Sky Omega v0.6.1 achieved 100% W3C SPARQL 1.1 conformance for both Query (418/418) and Update (94/94) test suites. However, three high-complexity tests remain intentionally skipped due to architectural constraints and implementation complexity.
+Sky Omega v0.6.1 achieved 100% W3C SPARQL 1.1 conformance for both Query (418/418) and Update (94/94) test suites. Three high-complexity tests were initially skipped due to architectural constraints and implementation complexity. **All three gaps have now been resolved**, achieving 421/421 Query conformance.
 
 This ADR documents these gaps, analyzes their requirements, and establishes criteria for future implementation while respecting Mercury's hard constraints around memory safety and zero-GC design.
 
@@ -212,21 +212,37 @@ foreach (var graphIri in EnumerateNamedGraphs())
 
 ## Success Criteria
 
-- [ ] All 3 tests pass in W3C conformance suite
-- [ ] No stack overflow on Windows (1MB stack)
-- [ ] No unbounded recursion (explicit depth limits)
-- [ ] Simple queries remain zero-GC
-- [ ] No regression in existing 418 passing tests
+- [x] All 3 tests pass in W3C conformance suite
+- [x] No stack overflow on Windows (1MB stack)
+- [x] No unbounded recursion (explicit depth limits)
+- [x] Simple queries remain zero-GC
+- [x] No regression in existing tests (3,846 tests pass)
 
 ## Decision
 
-**Defer implementation** until a concrete use case demands these features. The current 100% conformance on core SPARQL 1.1 Query and Update is sufficient for production use.
+**Implemented** (January 2026). All three gaps have been resolved:
 
-If implementation is pursued:
-1. Implement one gap at a time with full test coverage
-2. Run Windows CI to verify stack safety
-3. Benchmark to ensure no performance regression
-4. Update STATISTICS.md and CHANGELOG.md
+### Gap 1: `constructlist` — Resolved
+- RDF collection syntax in CONSTRUCT templates now generates proper `rdf:first/rdf:rest` chains
+- Iterative expansion with `MaxListDepth = 16` prevents unbounded recursion
+- Fresh blank nodes generated per result row
+
+### Gap 2: `agg-empty-group-count-graph` — Resolved
+- COUNT without GROUP BY inside GRAPH now returns count per graph
+- Empty graphs produce `COUNT(*) = 0` rows (not skipped)
+- Subqueries inside GRAPH execute with proper graph context
+
+### Gap 3: `bindings/manifest#graph` — Resolved
+- VALUES inside GRAPH binding same variable as graph name works correctly
+- UNDEF in VALUES matches all graphs (cartesian product)
+- Specific IRI in VALUES constrains to that graph only
+- Added `WhereValues` property to `QueryBuffer` for direct VALUES access
+
+### Implementation Details
+1. Each gap implemented with full test coverage
+2. Stack safety verified (no overflow on Windows 1MB stack)
+3. No performance regression in benchmarks
+4. STATISTICS.md and CHANGELOG.md updated
 
 ## References
 
