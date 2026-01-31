@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-27
+**Last updated:** 2026-01-31
 
 ## Line Counts
 
@@ -10,7 +10,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **71,832** | Knowledge substrate |
+| **Mercury (total)** | **71,841** | Knowledge substrate |
 | ├─ Sparql | 43,342 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 5,422 | B+Tree indexes, AtomStore, WAL |
@@ -21,6 +21,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 | ├─ NTriples | 1,244 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
 | └─ Rdf | 442 | Core RDF types |
+| **Mercury.Solid (total)** | **4,477** | W3C Solid Protocol |
+| ├─ Http | 1,420 | Resource, Container, Patch handlers |
+| ├─ N3 | 1,348 | N3 Patch parser and executor |
+| ├─ AccessControl | 894 | WAC and ACP implementations |
+| ├─ Models | 297 | SolidResource, SolidContainer |
+| └─ SolidServer | 481 | HTTP server |
 | **Mercury.Pruning** | **1,188** | Copy-and-switch pruning |
 | **Mercury CLIs** | **465** | Turtle and SPARQL CLI demos |
 | **Minerva** | **—** | Thought substrate (planned) |
@@ -29,7 +35,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 46,412 | 3,830 |
+| Mercury.Tests | 46,696 | 3,829 |
+| Mercury.Solid.Tests | 443 | 25 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -50,19 +57,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md) | 21,695 |
-| CLAUDE.md | 782 |
+| All docs (*.md) | 22,143 |
+| CLAUDE.md | 799 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~73,485 |
-| Tests | ~46,412 |
+| Source code | ~77,971 |
+| Tests | ~47,139 |
 | Benchmarks | ~3,406 |
 | Examples | ~851 |
-| Documentation | ~21,695 |
-| **Grand total** | **~145,849** |
+| Documentation | ~22,143 |
+| **Grand total** | **~151,510** |
 
 ## W3C Conformance
 
