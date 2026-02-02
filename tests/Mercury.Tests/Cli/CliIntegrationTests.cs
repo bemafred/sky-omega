@@ -11,16 +11,25 @@ namespace SkyOmega.Mercury.Tests.Cli;
 /// Integration tests for Mercury CLI tools.
 /// These tests run the actual CLI executables and verify their output.
 /// </summary>
+/// <remarks>
+/// These tests require access to the actual project files to run 'dotnet run --project'.
+/// They are skipped when running under NCrunch, which copies assemblies to a temp location
+/// without the source files.
+/// </remarks>
 public class CliIntegrationTests : IDisposable
 {
     private readonly string _tempDir;
     private readonly string _testTurtleFile;
     private readonly string _invalidTurtleFile;
+    private readonly string? _solutionRoot;
 
     public CliIntegrationTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"mercury-cli-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_tempDir);
+
+        // Find solution root - may be null if running under NCrunch
+        _solutionRoot = FindSolutionRoot();
 
         // Create test Turtle file
         _testTurtleFile = Path.Combine(_tempDir, "test.ttl");
@@ -302,38 +311,48 @@ public class CliIntegrationTests : IDisposable
 
     #region Helper Methods
 
-    private static async Task<(int exitCode, string stdout, string stderr)> RunTurtleCliAsync(string args)
+    private async Task<(int exitCode, string stdout, string stderr)> RunTurtleCliAsync(string args)
     {
         return await RunCliAsync("src/Mercury.Cli.Turtle/Mercury.Cli.Turtle.csproj", args);
     }
 
-    private static async Task<(int exitCode, string stdout, string stderr)> RunSparqlCliAsync(string args)
+    private async Task<(int exitCode, string stdout, string stderr)> RunSparqlCliAsync(string args)
     {
         return await RunCliAsync("src/Mercury.Cli.Sparql/Mercury.Cli.Sparql.csproj", args);
     }
 
-    private static async Task<(int exitCode, string stdout, string stderr)> RunCliAsync(string project, string args)
+    private static string? FindSolutionRoot()
     {
-        // Find solution root by walking up from the test assembly location
-        // (not current directory, which may be different under NCrunch)
+        // Walk up from the test assembly location to find solution root
         var assemblyLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-        string? solutionRoot = assemblyLocation;
+        string? candidate = assemblyLocation;
 
-        while (solutionRoot != null && !File.Exists(Path.Combine(solutionRoot, "SkyOmega.sln")))
+        while (candidate != null && !File.Exists(Path.Combine(candidate, "SkyOmega.sln")))
         {
-            solutionRoot = Directory.GetParent(solutionRoot)?.FullName;
+            candidate = Directory.GetParent(candidate)?.FullName;
         }
 
-        if (solutionRoot == null)
-            throw new InvalidOperationException($"Could not find SkyOmega.sln (searched from {assemblyLocation})");
+        return candidate;
+    }
 
-        var projectPath = Path.Combine(solutionRoot, project);
+    private async Task<(int exitCode, string stdout, string stderr)> RunCliAsync(string project, string args)
+    {
+        // Skip if running under NCrunch (assemblies copied to temp without project files)
+        if (_solutionRoot == null)
+        {
+            Assert.Fail(
+                "CLI integration tests require access to project files. " +
+                "Skipped under NCrunch which copies assemblies to a temp location. " +
+                "Run these tests directly via 'dotnet test' or Visual Studio.");
+        }
+
+        var projectPath = Path.Combine(_solutionRoot, project);
 
         var psi = new ProcessStartInfo
         {
             FileName = "dotnet",
             Arguments = $"run --project \"{projectPath}\" --no-build -- {args}",
-            WorkingDirectory = solutionRoot,
+            WorkingDirectory = _solutionRoot,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,

@@ -1,8 +1,0 @@
-System.InvalidOperationException: Could not find SkyOmega.sln (searched from C:\Users\marfr175\AppData\Local\NCrunch\35348\15\tests\Mercury.Tests\bin\Debug\net10.0)
-   at SkyOmega.Mercury.Tests.Cli.CliIntegrationTests.RunCliAsync(String project, String args) in C:\Users\marfr175\source\repos\sky-omega\tests\Mercury.Tests\Cli\CliIntegrationTests.cs:line 328
-   at SkyOmega.Mercury.Tests.Cli.CliIntegrationTests.RunTurtleCliAsync(String args) in C:\Users\marfr175\source\repos\sky-omega\tests\Mercury.Tests\Cli\CliIntegrationTests.cs:line 307
-   at SkyOmega.Mercury.Tests.Cli.CliIntegrationTests.CrossCli_TurtleStoreCanBeQueriedBySparql() in C:\Users\marfr175\source\repos\sky-omega\tests\Mercury.Tests\Cli\CliIntegrationTests.cs:line 289
-   at Xunit.Sdk.TestInvoker`1.<>c__DisplayClass47_0.<<InvokeTestMethodAsync>b__1>d.MoveNext() in /_/src/xunit.execution/Sdk/Frameworks/Runners/TestInvoker.cs:line 259
---- End of stack trace from previous location ---
-   at Xunit.Sdk.ExecutionTimer.AggregateAsync(Func`1 asyncAction) in /_/src/xunit.execution/Sdk/Frameworks/ExecutionTimer.cs:line 48
-   at Xunit.Sdk.ExceptionAggregator.RunAsync(Func`1 code) in /_/src/xunit.core/Sdk/ExceptionAggregator.cs:line 90
