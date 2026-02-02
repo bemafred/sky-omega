@@ -26,7 +26,7 @@ public class SubqueryAggregateTests
     }
 
     [Fact]
-    public async Task SubSelect_WithGroupConcat_ParsesAggregate()
+    public void SubSelect_WithGroupConcat_ParsesAggregate()
     {
         // Test that parsing correctly extracts aggregate info
         var query = @"PREFIX : <http://www.example.org/>

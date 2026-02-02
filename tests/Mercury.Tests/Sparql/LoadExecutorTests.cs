@@ -379,7 +379,7 @@ public class LoadExecutorTests : IDisposable
         // Handler that cancels during the request
         var handler = new MockHttpMessageHandler(async req =>
         {
-            cts.Cancel();
+            await cts.CancelAsync();
             cts.Token.ThrowIfCancellationRequested();
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
