@@ -50,6 +50,9 @@ This document provides detailed code examples for all Mercury APIs. For architec
   - [Logging](#logging)
   - [Buffer Management](#buffer-management)
   - [Query Optimization](#query-optimization)
+- [CLI Tools](#cli-tools)
+  - [Mercury.Cli.Sparql](#mercuryclisparql)
+  - [Mercury.Cli.Turtle](#mercurycliturtle)
 
 ---
 
@@ -1287,3 +1290,223 @@ var explainer = new SparqlExplainer(query.AsSpan(), parsedQuery, planner);
 var plan = explainer.Explain();
 // plan.Root.EstimatedRows now populated
 ```
+
+---
+
+## CLI Tools
+
+Mercury provides two command-line tools for working with RDF data and SPARQL queries.
+
+### Mercury.Cli.Sparql
+
+Full-featured SPARQL CLI for loading RDF data and executing queries.
+
+**Basic usage:**
+```bash
+# Build the CLI
+dotnet build src/Mercury.Cli.Sparql
+
+# Show help
+dotnet run --project src/Mercury.Cli.Sparql -- --help
+```
+
+**Load and query (temp store):**
+```bash
+# Load Turtle file and run query (temp store, auto-deleted on exit)
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl \
+    --query "SELECT * WHERE { ?s ?p ?o } LIMIT 10"
+```
+
+**Persistent named stores:**
+```bash
+# Create/open named store and load data
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --store ./mydb \
+    --load data.ttl
+
+# Query existing store (no reload needed)
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --store ./mydb \
+    --query "SELECT ?name WHERE { ?s <http://xmlns.com/foaf/0.1/name> ?name }"
+
+# Add more data incrementally
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --store ./mydb \
+    --load more-data.nt
+```
+
+**Output formats:**
+```bash
+# JSON (default)
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "SELECT * WHERE { ?s ?p ?o }" --format json
+
+# CSV
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "SELECT * WHERE { ?s ?p ?o }" --format csv
+
+# TSV
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "SELECT * WHERE { ?s ?p ?o }" --format tsv
+
+# XML
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "SELECT * WHERE { ?s ?p ?o }" --format xml
+```
+
+**Query execution plan:**
+```bash
+# Show EXPLAIN plan
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --explain "SELECT * WHERE { ?s <http://ex.org/knows> ?o . ?o <http://ex.org/age> ?age }"
+```
+
+**Read query from file:**
+```bash
+# Execute query from .rq file
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --store ./mydb \
+    --query-file query.rq
+```
+
+**Interactive REPL mode:**
+```bash
+# Start REPL with persistent store
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --store ./mydb \
+    --repl
+
+# REPL commands:
+#   .help              Show available commands
+#   .quit              Exit REPL
+#   .load <file>       Load RDF file
+#   .format [fmt]      Get/set output format
+#   .count             Count triples in store
+#   .store             Show store path
+#   .explain <query>   Show query execution plan
+#
+# Multi-line queries: type across multiple lines, end with ; to execute
+```
+
+**Supported RDF formats:**
+| Extension | Format |
+|-----------|--------|
+| `.ttl`, `.turtle` | Turtle |
+| `.nt`, `.ntriples` | N-Triples |
+| `.rdf`, `.xml` | RDF/XML |
+| `.nq`, `.nquads` | N-Quads |
+| `.trig` | TriG |
+| `.jsonld` | JSON-LD |
+
+---
+
+### Mercury.Cli.Turtle
+
+Turtle parser CLI for validation, format conversion, and performance benchmarking.
+
+**Basic usage:**
+```bash
+# Build the CLI
+dotnet build src/Mercury.Cli.Turtle
+
+# Show help
+dotnet run --project src/Mercury.Cli.Turtle -- --help
+
+# Run demo (no arguments)
+dotnet run --project src/Mercury.Cli.Turtle
+```
+
+**Validate Turtle syntax:**
+```bash
+# Validate file (reports errors with line/column)
+dotnet run --project src/Mercury.Cli.Turtle -- --validate input.ttl
+
+# Example output for valid file:
+# Valid Turtle: 1,234 triples
+
+# Example output for invalid file:
+# Syntax error: Line 42, Column 15: Unexpected character '@'
+```
+
+**Show statistics:**
+```bash
+# Triple count, predicate distribution
+dotnet run --project src/Mercury.Cli.Turtle -- --stats data.ttl
+
+# Example output:
+# Total triples:    1,234
+# Unique subjects:  456
+# Unique objects:   789
+# Unique predicates: 12
+#
+# Predicate distribution:
+#     500 ( 40.5%) <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>
+#     300 ( 24.3%) <http://xmlns.com/foaf/0.1/name>
+#     ...
+```
+
+**Format conversion:**
+```bash
+# Convert Turtle to N-Triples (output file)
+dotnet run --project src/Mercury.Cli.Turtle -- \
+    --input data.ttl \
+    --output data.nt
+
+# Convert to N-Quads
+dotnet run --project src/Mercury.Cli.Turtle -- \
+    --input data.ttl \
+    --output data.nq
+
+# Convert to stdout with explicit format
+dotnet run --project src/Mercury.Cli.Turtle -- \
+    --input data.ttl \
+    --output-format nt > data.nt
+```
+
+**Load into QuadStore:**
+```bash
+# Load Turtle into persistent store
+dotnet run --project src/Mercury.Cli.Turtle -- \
+    --input data.ttl \
+    --store ./mydb
+
+# The store can then be queried with Mercury.Cli.Sparql
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --store ./mydb \
+    --query "SELECT * WHERE { ?s ?p ?o } LIMIT 10"
+```
+
+**Performance benchmark:**
+```bash
+# Run benchmark with generated data
+dotnet run --project src/Mercury.Cli.Turtle -- \
+    --benchmark \
+    --count 100000
+
+# Example output:
+# === Mercury Turtle Parser Benchmark ===
+#
+# Source: generated (100,000 triples)
+# Size: 3,982 KB
+#
+# Results:
+#   Triples:     100,000
+#   Time:        200 ms
+#   Throughput:  500,000 triples/sec
+#
+# GC Collections:
+#   Gen 0:       0
+#   Gen 1:       0
+#   Gen 2:       0
+#
+# Zero GC collections during parse!
+```
+
+**Output formats for conversion:**
+| Format | Options |
+|--------|---------|
+| N-Triples | `nt`, `ntriples` |
+| N-Quads | `nq`, `nquads` |
+| TriG | `trig` |
+| Turtle | `ttl`, `turtle` |
