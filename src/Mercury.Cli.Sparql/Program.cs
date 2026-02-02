@@ -60,12 +60,12 @@ internal static class Program
             // Execute based on mode
             if (options.Query != null)
             {
-                return ExecuteQuery(store, options.Query, options.Format);
+                return ExecuteQuery(store, options.Query, options.Format, options.RdfOutputFormat);
             }
             else if (options.QueryFile != null)
             {
                 var query = await File.ReadAllTextAsync(options.QueryFile);
-                return ExecuteQuery(store, query, options.Format);
+                return ExecuteQuery(store, query, options.Format, options.RdfOutputFormat);
             }
             else if (options.Explain != null)
             {
@@ -73,7 +73,7 @@ internal static class Program
             }
             else if (options.Repl)
             {
-                return await RunReplAsync(store, options.Format, storePath);
+                return await RunReplAsync(store, options.Format, options.RdfOutputFormat, storePath);
             }
             else if (!isTemp && options.LoadFile != null)
             {
@@ -183,6 +183,29 @@ internal static class Program
                     }
                     break;
 
+                case "--rdf-format":
+                    if (i + 1 >= args.Length)
+                    {
+                        options.Error = "--rdf-format requires a format (nt, ttl, rdf, nq, trig)";
+                        return options;
+                    }
+                    var rdfFormat = args[++i].ToLowerInvariant();
+                    options.RdfOutputFormat = rdfFormat switch
+                    {
+                        "nt" or "ntriples" => RdfFormat.NTriples,
+                        "ttl" or "turtle" => RdfFormat.Turtle,
+                        "rdf" or "rdfxml" or "xml" => RdfFormat.RdfXml,
+                        "nq" or "nquads" => RdfFormat.NQuads,
+                        "trig" => RdfFormat.TriG,
+                        _ => RdfFormat.Unknown
+                    };
+                    if (options.RdfOutputFormat == RdfFormat.Unknown)
+                    {
+                        options.Error = $"Unknown RDF format: {rdfFormat}. Use nt, ttl, rdf, nq, or trig.";
+                        return options;
+                    }
+                    break;
+
                 case "-e":
                 case "--explain":
                     if (i + 1 >= args.Length)
@@ -232,7 +255,8 @@ internal static class Program
                 -s, --store <PATH>      Use persistent store at path (created if doesn't exist)
                 -e, --explain <SPARQL>  Show query execution plan
                 -r, --repl              Start interactive REPL mode
-                --format <FORMAT>       Output format: json (default), csv, tsv, xml
+                --format <FORMAT>       Output format for SELECT: json (default), csv, tsv, xml
+                --rdf-format <FORMAT>   Output format for CONSTRUCT: nt (default), ttl, rdf, nq, trig
 
             EXAMPLES:
                 # Load data and run query (temp store, auto-deleted)
@@ -246,6 +270,9 @@ internal static class Program
 
                 # Output in CSV format
                 mercury-sparql --load data.ttl -q "SELECT * WHERE { ?s ?p ?o }" --format csv
+
+                # CONSTRUCT query with Turtle output
+                mercury-sparql --load data.ttl -q "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }" --rdf-format ttl
 
                 # Show execution plan
                 mercury-sparql --explain "SELECT * WHERE { ?s <http://ex.org/knows> ?o }"
@@ -365,7 +392,7 @@ internal static class Program
         return count;
     }
 
-    static int ExecuteQuery(QuadStore store, string queryString, OutputFormat format)
+    static int ExecuteQuery(QuadStore store, string queryString, OutputFormat format, RdfFormat rdfFormat = RdfFormat.NTriples)
     {
         // Parse the query
         var parser = new SparqlParser(queryString.AsSpan());
@@ -391,7 +418,7 @@ internal static class Program
                 return ExecuteAskQuery(store, queryString, query);
 
             case QueryType.Construct:
-                return ExecuteConstructQuery(store, queryString, query);
+                return ExecuteConstructQuery(store, queryString, query, rdfFormat);
 
             case QueryType.Describe:
                 Console.Error.WriteLine("DESCRIBE queries not yet supported in CLI");
@@ -643,37 +670,58 @@ internal static class Program
         }
     }
 
-    static int ExecuteConstructQuery(QuadStore store, string queryString, Query query)
+    static int ExecuteConstructQuery(QuadStore store, string queryString, Query query, RdfFormat rdfFormat)
     {
         store.AcquireReadLock();
         try
         {
             using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-            var results = executor.Execute();
+            var results = executor.ExecuteConstruct();
 
-            // Output constructed triples as N-Triples
+            // Handle RDF/XML specially (needs document start/end)
+            if (rdfFormat == RdfFormat.RdfXml)
+            {
+                using var rdfWriter = new RdfXmlStreamWriter(Console.Out);
+                rdfWriter.WriteStartDocument();
+                while (results.MoveNext())
+                {
+                    var triple = results.Current;
+                    rdfWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
+                }
+                rdfWriter.WriteEndDocument();
+                results.Dispose();
+                return 0;
+            }
+
+            // Create appropriate RDF writer for other formats
+            using var writer = rdfFormat switch
+            {
+                RdfFormat.Turtle => (IDisposable)new TurtleStreamWriter(Console.Out),
+                RdfFormat.NQuads => new NQuadsStreamWriter(Console.Out),
+                RdfFormat.TriG => new TriGStreamWriter(Console.Out),
+                _ => new NTriplesStreamWriter(Console.Out) // Default to N-Triples
+            };
+
+            // Output constructed triples
             while (results.MoveNext())
             {
-                var bindings = results.Current;
+                var triple = results.Current;
 
-                // For CONSTRUCT, bindings contain s, p, o
-                string? s = null, p = null, o = null;
-
-                var sIdx = bindings.FindBinding("subject".AsSpan());
-                if (sIdx < 0) sIdx = bindings.FindBinding("s".AsSpan());
-                if (sIdx >= 0) s = bindings.GetString(sIdx).ToString();
-
-                var pIdx = bindings.FindBinding("predicate".AsSpan());
-                if (pIdx < 0) pIdx = bindings.FindBinding("p".AsSpan());
-                if (pIdx >= 0) p = bindings.GetString(pIdx).ToString();
-
-                var oIdx = bindings.FindBinding("object".AsSpan());
-                if (oIdx < 0) oIdx = bindings.FindBinding("o".AsSpan());
-                if (oIdx >= 0) o = bindings.GetString(oIdx).ToString();
-
-                if (s != null && p != null && o != null)
+                // Write triple using the appropriate writer
+                switch (writer)
                 {
-                    Console.WriteLine($"{s} {p} {o} .");
+                    case NTriplesStreamWriter ntWriter:
+                        ntWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
+                        break;
+                    case TurtleStreamWriter ttlWriter:
+                        ttlWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
+                        break;
+                    case NQuadsStreamWriter nqWriter:
+                        nqWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
+                        break;
+                    case TriGStreamWriter trigWriter:
+                        trigWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
+                        break;
                 }
             }
 
@@ -708,7 +756,7 @@ internal static class Program
         }
     }
 
-    static async Task<int> RunReplAsync(QuadStore store, OutputFormat format, string storePath)
+    static async Task<int> RunReplAsync(QuadStore store, OutputFormat format, RdfFormat rdfFormat, string storePath)
     {
         Console.WriteLine("Mercury SPARQL REPL");
         Console.WriteLine("Type SPARQL queries (end with ';' to execute), or use dot commands.");
@@ -716,7 +764,7 @@ internal static class Program
         Console.WriteLine();
 
         var queryBuffer = new StringBuilder();
-        var state = new ReplState { Format = format };
+        var state = new ReplState { Format = format, RdfFormat = rdfFormat };
 
         while (true)
         {
@@ -758,7 +806,7 @@ internal static class Program
                 {
                     try
                     {
-                        ExecuteQuery(store, queryString, state.Format);
+                        ExecuteQuery(store, queryString, state.Format, state.RdfFormat);
                     }
                     catch (Exception ex)
                     {
@@ -837,6 +885,31 @@ internal static class Program
                 }
                 break;
 
+            case ".rdf-format":
+            case ".rf":
+                if (string.IsNullOrEmpty(arg))
+                {
+                    Console.WriteLine($"Current RDF format: {state.RdfFormat.ToString().ToLowerInvariant()}");
+                    Console.WriteLine("Available: nt, ttl, rdf, nq, trig");
+                }
+                else
+                {
+                    state.RdfFormat = arg.ToLowerInvariant() switch
+                    {
+                        "nt" or "ntriples" => RdfFormat.NTriples,
+                        "ttl" or "turtle" => RdfFormat.Turtle,
+                        "rdf" or "rdfxml" => RdfFormat.RdfXml,
+                        "nq" or "nquads" => RdfFormat.NQuads,
+                        "trig" => RdfFormat.TriG,
+                        _ => state.RdfFormat
+                    };
+                    if (arg.ToLowerInvariant() is not ("nt" or "ntriples" or "ttl" or "turtle" or "rdf" or "rdfxml" or "nq" or "nquads" or "trig"))
+                        Console.Error.WriteLine($"Unknown RDF format: {arg}. Use nt, ttl, rdf, nq, or trig.");
+                    else
+                        Console.WriteLine($"RDF output format set to: {state.RdfFormat.ToString().ToLowerInvariant()}");
+                }
+                break;
+
             case ".count":
             case ".c":
                 {
@@ -893,7 +966,8 @@ internal static class Program
               .help, .h              Show this help
               .quit, .exit, .q       Exit REPL
               .load <file>, .l       Load RDF file into store
-              .format [fmt], .f      Get/set output format (json, csv, tsv, xml)
+              .format [fmt], .f      Get/set SELECT output format (json, csv, tsv, xml)
+              .rdf-format [fmt], .rf Get/set CONSTRUCT output format (nt, ttl, rdf, nq, trig)
               .count, .c             Count triples in store
               .store, .s             Show store path
               .explain <query>, .e   Show query execution plan
@@ -904,6 +978,8 @@ internal static class Program
 
             Examples:
               SELECT * WHERE { ?s ?p ?o } LIMIT 10;
+
+              CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 10;
 
               SELECT ?name
               WHERE {
@@ -948,6 +1024,7 @@ internal class CliOptions
     public string? StorePath { get; set; }
     public string? Explain { get; set; }
     public OutputFormat Format { get; set; } = OutputFormat.Json;
+    public RdfFormat RdfOutputFormat { get; set; } = RdfFormat.NTriples;
     public bool ShowHelp { get; set; }
     public bool Repl { get; set; }
     public string? Error { get; set; }
@@ -965,4 +1042,5 @@ internal enum OutputFormat
 internal class ReplState
 {
     public OutputFormat Format { get; set; } = OutputFormat.Json;
+    public RdfFormat RdfFormat { get; set; } = RdfFormat.NTriples;
 }

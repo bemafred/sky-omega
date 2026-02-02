@@ -6,11 +6,11 @@ using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
-/// <remarks>
-/// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an
-/// implementation detail of CONSTRUCT query execution.</para>
-/// </remarks>
-internal ref struct ConstructResults
+/// <summary>
+/// Results from CONSTRUCT query execution. Yields constructed triples from template substitution.
+/// Must be disposed to return pooled resources.
+/// </summary>
+public ref struct ConstructResults
 {
     private QueryResults _queryResults;
     private ConstructTemplate _template;

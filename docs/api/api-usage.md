@@ -1355,6 +1355,21 @@ dotnet run --project src/Mercury.Cli.Sparql -- \
     --load data.ttl -q "SELECT * WHERE { ?s ?p ?o }" --format xml
 ```
 
+**CONSTRUCT queries with RDF output:**
+```bash
+# CONSTRUCT with N-Triples output (default)
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }" --rdf-format nt
+
+# CONSTRUCT with Turtle output (grouped by subject)
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }" --rdf-format ttl
+
+# CONSTRUCT with RDF/XML output
+dotnet run --project src/Mercury.Cli.Sparql -- \
+    --load data.ttl -q "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }" --rdf-format rdf
+```
+
 **Query execution plan:**
 ```bash
 # Show EXPLAIN plan
@@ -1381,7 +1396,8 @@ dotnet run --project src/Mercury.Cli.Sparql -- \
 #   .help              Show available commands
 #   .quit              Exit REPL
 #   .load <file>       Load RDF file
-#   .format [fmt]      Get/set output format
+#   .format [fmt]      Get/set SELECT output format (json, csv, tsv, xml)
+#   .rdf-format [fmt]  Get/set CONSTRUCT output format (nt, ttl, rdf, nq, trig)
 #   .count             Count triples in store
 #   .store             Show store path
 #   .explain <query>   Show query execution plan

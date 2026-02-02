@@ -1118,7 +1118,7 @@ public partial class QueryExecutor : IDisposable
     /// Execute a CONSTRUCT query and return constructed triples.
     /// Caller must hold read lock on store and call Dispose on results.
     /// </summary>
-    internal ConstructResults ExecuteConstruct()
+    public ConstructResults ExecuteConstruct()
     {
         ref readonly var pattern = ref _cachedPattern;
         var template = _buffer.GetConstructTemplate();
