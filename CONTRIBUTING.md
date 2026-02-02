@@ -123,7 +123,7 @@ This is the primary development workflow for Sky Omega, and the one most likely 
 ## What We Don’t Need
 
 - **Style guides.** The code speaks for itself. Read it. Match it.
-- **Issue templates.** If you found a bug, describe it. If you have a proposal, describe it. Templates are training wheels for organizations that can’t hire people who can write.
+- **Issue templates.** If you found a bug, describe it. If you have a proposal, describe it. Templates are pre-packaged Engineering. Start with what you found, not with a form to fill.
 - **CI/CD configuration PRs.** The build and test infrastructure is intentionally simple. `dotnet build`. `dotnet test`. If you need more, you are overcomplicating it.
 - **Dependency update PRs.** There are no dependencies to update. That’s the point.
 
