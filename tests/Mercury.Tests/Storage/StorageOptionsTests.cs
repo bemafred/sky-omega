@@ -1,11 +1,9 @@
 using System;
 using System.IO;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
-
-// Use the Storage version of these types (not the Runtime version)
-using InsufficientDiskSpaceException = SkyOmega.Mercury.Storage.InsufficientDiskSpaceException;
 
 namespace SkyOmega.Mercury.Tests.Storage;
 

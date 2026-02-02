@@ -353,16 +353,6 @@ public sealed class LoadExecutor : IDisposable
 }
 
 /// <summary>
-/// Supported RDF serialization formats.
-/// </summary>
-public enum RdfFormat
-{
-    Turtle,
-    NTriples,
-    RdfXml
-}
-
-/// <summary>
 /// Exception thrown when the triple count limit is exceeded during loading.
 /// </summary>
 public sealed class TripleLimitExceededException : Exception

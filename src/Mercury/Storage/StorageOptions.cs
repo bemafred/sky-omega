@@ -107,58 +107,6 @@ public sealed class StorageOptions
 }
 
 /// <summary>
-/// Exception thrown when a storage operation would reduce free disk space
-/// below the configured minimum threshold.
-/// </summary>
-public sealed class InsufficientDiskSpaceException : IOException
-{
-    /// <summary>
-    /// Path of the file/directory where the operation was attempted.
-    /// </summary>
-    public string Path { get; }
-
-    /// <summary>
-    /// Bytes the operation attempted to allocate.
-    /// </summary>
-    public long RequestedBytes { get; }
-
-    /// <summary>
-    /// Current available disk space in bytes.
-    /// </summary>
-    public long AvailableBytes { get; }
-
-    /// <summary>
-    /// Configured minimum free space that must be maintained.
-    /// </summary>
-    public long MinimumFreeSpace { get; }
-
-    public InsufficientDiskSpaceException(
-        string path,
-        long requestedBytes,
-        long availableBytes,
-        long minimumFreeSpace)
-        : base(FormatMessage(path, requestedBytes, availableBytes, minimumFreeSpace))
-    {
-        Path = path;
-        RequestedBytes = requestedBytes;
-        AvailableBytes = availableBytes;
-        MinimumFreeSpace = minimumFreeSpace;
-    }
-
-    private static string FormatMessage(
-        string path,
-        long requestedBytes,
-        long availableBytes,
-        long minimumFreeSpace)
-    {
-        var afterGrowth = availableBytes - requestedBytes;
-        return $"Storage operation refused: growing '{System.IO.Path.GetFileName(path)}' by {ByteFormatter.Format(requestedBytes)} " +
-               $"would leave only {ByteFormatter.Format(afterGrowth)} free (minimum required: {ByteFormatter.Format(minimumFreeSpace)}). " +
-               $"Current available: {ByteFormatter.Format(availableBytes)}.";
-    }
-}
-
-/// <summary>
 /// Helper for disk space checking used by storage components.
 /// </summary>
 public static class DiskSpaceChecker

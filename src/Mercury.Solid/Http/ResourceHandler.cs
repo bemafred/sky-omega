@@ -9,13 +9,13 @@ using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.NTriples;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.Solid.AccessControl;
 using SkyOmega.Mercury.Solid.Models;
 using SkyOmega.Mercury.Storage;
-using RdfFormat = SkyOmega.Mercury.Rdf.RdfFormat;
 
 namespace SkyOmega.Mercury.Solid.Http;
 

@@ -130,33 +130,6 @@ public static class DiskSpaceGuard
 }
 
 /// <summary>
-/// Exception thrown when disk space is insufficient for an operation.
-/// </summary>
-public sealed class InsufficientDiskSpaceException : IOException
-{
-    public string Path { get; }
-    public long RequiredBytes { get; }
-    public long AvailableBytes { get; }
-    public string OperationName { get; }
-
-    public InsufficientDiskSpaceException(string path, long requiredBytes, long availableBytes, string operationName)
-        : base(FormatMessage(path, requiredBytes, availableBytes, operationName))
-    {
-        Path = path;
-        RequiredBytes = requiredBytes;
-        AvailableBytes = availableBytes;
-        OperationName = operationName;
-    }
-
-    private static string FormatMessage(string path, long required, long available, string operation)
-    {
-        return $"Insufficient disk space for {operation}. " +
-               $"Required: {ByteFormatter.Format(required)}, Available: {ByteFormatter.Format(available)}. " +
-               $"Path: {path}";
-    }
-}
-
-/// <summary>
 /// A scope that tracks disk usage and can enforce limits during an operation.
 /// </summary>
 public sealed class SpaceLimitedScope : IDisposable

@@ -12,10 +12,10 @@ using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.TriG;
+using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Runtime;
 using Xunit;
-using RdfFormat = SkyOmega.Mercury.Rdf.RdfFormat;
-using RdfFormatNegotiator = SkyOmega.Mercury.Rdf.RdfFormatNegotiator;
 
 namespace SkyOmega.Mercury.Tests.Infrastructure;
 

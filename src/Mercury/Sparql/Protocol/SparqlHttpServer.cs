@@ -18,9 +18,9 @@ using SkyOmega.Mercury.RdfXml;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Results;
+using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Storage;
-using RdfFormat = SkyOmega.Mercury.Rdf.RdfFormat;
-using RdfFormatNegotiator = SkyOmega.Mercury.Rdf.RdfFormatNegotiator;
 
 namespace SkyOmega.Mercury.Sparql.Protocol;
 
