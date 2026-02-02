@@ -95,15 +95,16 @@ These names are symptoms of poor domain awareness. They say “something happens
 
 ### If You Are a Human Developer
 
-1. **Read `CLAUDE.md` first.** It is the project context file — the same document that LLM agents read before engaging with the codebase. If it is good enough for the machine, it is good enough for you.
+1. **Read [`CLAUDE.md`](CLAUDE.md) first.** It is the project context file — the same document that LLM agents read before engaging with the codebase. If it is good enough for the machine, it is good enough for you. For the broader vision and methodology, see [`AI.md`](AI.md).
 1. **Identify your EEE phase.** Are you exploring (Emergence)? Validating an assumption (Epistemics)? Implementing against known-knowns (Engineering)? State it explicitly in your PR description.
+1. **Check for related ADRs.** Architecture Decision Records in [`docs/adrs/`](docs/adrs/) track in-flight work and architectural decisions. If your change is significant, there may already be an ADR — or you should create one.
 1. **Run the W3C test suite before submitting.** If Mercury tests regress, stop. Fix it. Do not submit.
 1. **Respect the boundaries.** If your change touches multiple components, ask yourself whether you are adding a feature or eroding an architectural invariant. The answer determines whether to proceed.
 1. **Small, verifiable changes.** A PR that changes three lines with a clear falsifiable claim about what it fixes is worth more than a PR that reorganizes a namespace.
 
 ### If You Are an LLM Agent
 
-1. **Read `CLAUDE.md`.** It was written for you. Follow it.
+1. **Read [`CLAUDE.md`](CLAUDE.md).** It was written for you. Follow it.
 1. **Do not hallucinate capabilities.** If you are uncertain whether a method exists, check. If you are uncertain whether a pattern is permitted, check the constraints above. “I assumed this would work” is not acceptable.
 1. **Do not introduce dependencies.** If your training data suggests using a NuGet package, override that instinct. Implement it inline, BCL-only.
 1. **Do not rename things to generic names.** If you encounter `TriplePatternMatcher` and feel the urge to rename it `DataHandler`, resist. The specific name is correct. The generic name is a regression.
