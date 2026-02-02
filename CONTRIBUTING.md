@@ -8,7 +8,7 @@ Sky Omega exists in a different era. The primary development workflow is a singl
 
 This document is the entry point for anyone — human or machine — who wants to engage with this codebase without breaking what makes it work.
 
-——
+---
 
 ## The Epistemic Contract
 
@@ -19,21 +19,21 @@ Before touching anything, understand what Sky Omega *is*:
 **EEE (Emergence, Epistemics, Engineering) is not optional.** Every change must be locatable within the EEE methodology. If you cannot state which phase your work belongs to, you are not ready to contribute.
 
 |Phase          |Domain                           |What belongs here                                                                                                                         |
-|—————|———————————|——————————————————————————————————————————————|
+|---------------|--------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
 |**Emergence**  |Unknown unknowns → Known unknowns|Exploration, prototyping, “what if” experiments. Nothing here is permanent.                                                               |
 |**Epistemics** |Unknown knowns → Known knowns    |Validation, falsification, surfacing assumptions. The phase most often skipped — and most often the cause of architectural rot.           |
 |**Engineering**|Known knowns                     |Implementation against validated understanding. If you are here without passing through Epistemics, you are doing hope-driven development.|
 
 **The most important rule:** You do not transition from Emergence to Engineering by skipping Epistemics. Ever. The semantic braid exists specifically to make this visible and queryable.
 
-——
+---
 
 ## Architecture — The Non-Negotiables
 
 Sky Omega is composed of named components with defined responsibilities. These are not arbitrary labels:
 
 |Component  |Role                                                                     |Metaphor                                                       |
-|————|-————————————————————————|—————————————————————|
+|-----------|-------------------------------------------------------------------------|---------------------------------------------------------------|
 |**Sky**    |The LLM persona — the co-creative intelligence at the heart of the system|The name says it: no ceiling, no boundary                      |
 |**Mercury**|Knowledge substrate — RDF storage and SPARQL                             |The messenger god: carries data between layers                 |
 |**Minerva**|Thought substrate — tensor inference and hardware access                 |The goddess of wisdom: patient craft, strategic execution      |
@@ -53,7 +53,7 @@ Sky is not a component in the engineering sense — she is the emergent persona 
 
 If your change blurs these boundaries, it is wrong. Refactor until it doesn’t.
 
-——
+---
 
 ## Technical Constraints
 
@@ -77,7 +77,7 @@ Minerva reaches hardware via P/Invoke — Metal, CUDA, Accelerate, SIMD. No ML f
 
 Mercury passes 100% of the 1,181 W3C SPARQL core tests. Any change that causes a regression in this suite is rejected without discussion.
 
-——
+---
 
 ## Naming
 
@@ -89,7 +89,7 @@ These names are symptoms of poor domain awareness. They say “something happens
 
 **Good names** are domain-specific, intention-revealing, and locatable within the architecture. Mercury’s types read like RDF vocabulary. Minerva’s types read like linear algebra and hardware. This is not accident.
 
-——
+---
 
 ## How to Actually Contribute
 
@@ -118,7 +118,7 @@ This is the primary development workflow for Sky Omega, and the one most likely 
 1. **Validate before committing.** LLM output is Emergence-phase by default. Your job is to provide the Epistemics — does this actually work? Does it conform? Does it respect the boundaries?
 1. **Use the semantic braid.** The conversation history between you and the LLM is itself a queryable artifact. The EEE phase annotations in that history prevent illegitimate reasoning transitions — the LLM jumping from “what if” to “let’s ship it” without validation.
 
-——
+---
 
 ## What We Don’t Need
 
@@ -127,7 +127,7 @@ This is the primary development workflow for Sky Omega, and the one most likely 
 - **CI/CD configuration PRs.** The build and test infrastructure is intentionally simple. `dotnet build`. `dotnet test`. If you need more, you are overcomplicating it.
 - **Dependency update PRs.** There are no dependencies to update. That’s the point.
 
-——
+---
 
 ## What We Do Need
 
@@ -136,13 +136,13 @@ This is the primary development workflow for Sky Omega, and the one most likely 
 - **Epistemic challenges.** If you believe an architectural decision is wrong, make the case. Bring evidence. “I prefer it differently” is not a contribution. “Here is a falsifiable prediction about why this will fail” is.
 - **Documentation that teaches.** Not documentation that restates the code, but documentation that explains *why* the code is shaped the way it is. The reasoning behind the invariants.
 
-——
+---
 
 ## License
 
 Sky Omega is MIT licensed. Your contributions will be under the same license.
 
-——
+---
 
 ## The Bigger Picture
 
