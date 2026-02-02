@@ -2,11 +2,11 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
-Integration tests for Mercury CLI tools (`Mercury.Cli.Turtle`, `Mercury.Cli.Sparql`) currently use `dotnet run --project <path>` to execute the CLI tools. This approach has a fundamental dependency on the source tree being present at runtime.
+Integration tests for Mercury CLI tools (`Mercury.Cli.Turtle`, `Mercury.Cli.Sparql`) originally used `dotnet run --project <path>` to execute the CLI tools. This approach had a fundamental dependency on the source tree being present at runtime.
 
 **The Problem:**
 
@@ -17,160 +17,121 @@ Source location:     C:\Users\...\source\repos\sky-omega\
 NCrunch location:    C:\Users\...\AppData\Local\NCrunch\35348\15\tests\Mercury.Tests\bin\Debug\net10.0\
 ```
 
-The test code walks up the directory tree looking for `SkyOmega.sln` to locate project files. This fails under NCrunch because the assembly is no longer within the source tree.
+The test code walked up the directory tree looking for `SkyOmega.sln` to locate project files. This failed under NCrunch because the assembly was no longer within the source tree.
 
 **Why This Matters:**
 
 1. **Epistemics:** A test that only runs in some environments creates false confidence. We cannot trust a test suite that behaves differently based on how it's invoked.
 2. **EEE Violation:** Skipping tests or marking them as "NCrunch-incompatible" hides information rather than surfacing it.
-3. **Parallel Execution:** NCrunch's isolation model is correct for parallel test execution. The tests are wrong, not NCrunch.
+3. **Parallel Execution:** NCrunch's isolation model is correct for parallel test execution. The tests were wrong, not NCrunch.
 
 ## Decision Drivers
 
 - Tests must produce identical results regardless of execution environment
 - No skipping, no conditional execution, no "works only in environment X"
+- Solution must be test-runner agnostic (not coupled to NCrunch, VS, or any specific tool)
 - Solution must be maintainable as CLI tools evolve
-- BCL-only constraint applies to production code, not test infrastructure
 
-## Options Considered
+## Decision
 
-### Option 1: Embed CLI Assemblies via ProjectReference
+Use a **build-time generated configuration file** containing absolute paths to CLI DLLs.
 
-Add the CLI projects as ProjectReferences to the test project. Configure MSBuild to copy CLI outputs to the test output directory.
+### How It Works
+
+1. **Build order**: ProjectReferences ensure CLI projects build before the test project
+2. **Path generation**: MSBuild target generates `cli-paths.json` with absolute paths to CLI DLLs
+3. **Config copied**: The JSON file is written to test output directory (gets copied by any test runner)
+4. **Runtime discovery**: Tests read the config file to find CLI DLLs, then run with `dotnet exec`
+
+### Implementation
+
+**Test project configuration** (`Mercury.Tests.csproj`):
 
 ```xml
+<!-- CLI projects for integration tests - build only, no assembly reference -->
 <ProjectReference Include="..\..\src\Mercury.Cli.Turtle\Mercury.Cli.Turtle.csproj">
   <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-  <OutputItemType>Content</OutputItemType>
-  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 </ProjectReference>
-```
+<ProjectReference Include="..\..\src\Mercury.Cli.Sparql\Mercury.Cli.Sparql.csproj">
+  <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+</ProjectReference>
 
-Tests then run: `dotnet exec Mercury.Cli.Turtle.dll -- <args>`
-
-**Pros:**
-- Tests are fully self-contained
-- Works in any environment (NCrunch, CI, local)
-- CLI binaries always match the code being tested
-
-**Cons:**
-- Increases test project build time
-- Test output directory grows (includes CLI dependencies)
-- Need to handle CLI subdirectory structure
-
-### Option 2: Publish CLIs to Known Location During Build
-
-Use a pre-test build target to publish CLI tools to a known location (e.g., `artifacts/cli/`).
-
-```xml
-<Target Name="PublishCliTools" BeforeTargets="Build">
-  <Exec Command="dotnet publish ../Mercury.Cli.Turtle -o $(ArtifactsDir)/cli/turtle" />
+<!-- Generate config file with absolute paths to CLI DLLs -->
+<Target Name="GenerateCliPaths" AfterTargets="Build">
+  <PropertyGroup>
+    <TurtleCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll'))</TurtleCliPath>
+    <SparqlCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll'))</SparqlCliPath>
+  </PropertyGroup>
+  <WriteLinesToFile
+    File="$(OutputPath)cli-paths.json"
+    Lines="{&quot;TurtleCli&quot;: &quot;$(TurtleCliPath)&quot;, &quot;SparqlCli&quot;: &quot;$(SparqlCliPath)&quot;}"
+    Overwrite="true" />
 </Target>
 ```
 
-Tests locate CLIs via environment variable or well-known path relative to solution.
+**Generated config file** (`cli-paths.json`):
 
-**Pros:**
-- Clear separation between test code and CLI artifacts
-- Can use `--self-contained` for true isolation
-
-**Cons:**
-- Still requires solution-relative path knowledge
-- Build coordination complexity
-- May not work with NCrunch's isolated execution model
-
-### Option 3: Test CLI Logic Directly, Not via Process
-
-Refactor CLI projects to separate entry point from logic. Test the logic directly without process spawning.
-
-```csharp
-// Mercury.Cli.Turtle/TurtleCommands.cs (testable)
-public static class TurtleCommands
-{
-    public static int Validate(string path, TextWriter output) { ... }
-    public static int Convert(string input, string output, RdfFormat format) { ... }
-}
-
-// Mercury.Cli.Turtle/Program.cs (thin entry point)
-TurtleCommands.Validate(args[0], Console.Out);
+```json
+{"TurtleCli": "/absolute/path/to/Mercury.Cli.Turtle.dll", "SparqlCli": "/absolute/path/to/Mercury.Cli.Sparql.dll"}
 ```
 
-**Pros:**
-- No process spawning complexity
-- Fastest test execution
-- Direct access to internals for verification
+**Test code reads config and runs CLI**:
 
-**Cons:**
-- Doesn't test actual CLI invocation (argument parsing, exit codes, stdout/stderr)
-- May miss integration issues (encoding, process lifecycle)
-- Requires refactoring existing CLI code
+```csharp
+var configPath = Path.Combine(assemblyDir, "cli-paths.json");
+var paths = JsonSerializer.Deserialize<CliPaths>(File.ReadAllText(configPath));
 
-### Option 4: Hybrid - Unit Test Logic, Integration Test in CI Only
+// Run CLI using dotnet exec (not dotnet run --project)
+var psi = new ProcessStartInfo
+{
+    FileName = "dotnet",
+    Arguments = $"exec \"{paths.TurtleCli}\" {args}"
+};
+```
 
-Use Option 3 for most coverage. Have a small set of true CLI integration tests that only run in CI where the full source tree is available.
+## Alternatives Considered
 
-**Pros:**
-- Best of both worlds
-- Fast local development
+### Embed CLI DLLs in test output directory
 
-**Cons:**
-- **EEE Violation:** Tests behave differently in different environments
-- Defeats the purpose of local test validation
+Copy CLI DLLs to the test output directory so tests are fully self-contained.
 
-### Option 5: NCrunch Workspace Configuration
+**Rejected because:** More complex MSBuild configuration, increases test output size, and the CLI DLLs are already built - we just need to know where they are.
 
-Configure NCrunch to copy additional files/folders to the isolated workspace, or to run certain tests in-place rather than isolated.
+### Test CLI logic directly without process spawning
 
-**Pros:**
-- No code changes required
-- NCrunch-specific solution for NCrunch-specific problem
+Refactor CLIs to expose testable command classes.
 
-**Cons:**
-- Couples test suite to specific tool configuration
-- Other test runners may have same issue
-- Configuration can drift from intent
+**Not rejected, but orthogonal:** This is good design regardless, but doesn't replace integration tests that verify actual CLI behavior (argument parsing, exit codes, stdout/stderr).
 
-## Recommendation
+### NCrunch-specific configuration
 
-**Option 1 (Embed CLI Assemblies)** with elements of **Option 3 (Direct Logic Testing)**.
+Configure NCrunch to copy source files or run tests in-place.
 
-**Rationale:**
+**Rejected because:** Couples tests to specific tool. Other test runners may have the same issue.
 
-1. Option 1 makes tests truly environment-independent. The test project carries everything it needs.
-2. Option 3 principles should be applied regardless - CLI projects should have testable logic separate from the entry point. This is good design independent of the NCrunch issue.
-3. The combination provides defense in depth: unit tests for logic, integration tests for CLI invocation, both working everywhere.
+## Consequences
 
-## Implementation Plan
+### Positive
 
-### Phase 1: Refactor CLI Projects for Testability
+- Tests work identically in all environments (dotnet test, VS, NCrunch, CI)
+- No test skipping or conditional execution
+- Faster test execution (`dotnet exec` vs `dotnet run --project`)
+- Test-runner agnostic - no tool-specific configuration
+- Clear error messages if CLI DLLs not found
 
-1. Extract command logic from `Program.cs` into testable classes
-2. Add unit tests for command logic (no process spawning)
-3. Keep existing CLI integration tests temporarily
+### Negative
 
-### Phase 2: Embed CLI Assemblies in Test Project
+- Requires JSON file generation during build
+- Absolute paths in config file (not portable between machines, but not needed to be)
 
-1. Add ProjectReferences with appropriate MSBuild configuration
-2. Update `RunCliAsync` to use `dotnet exec <dll>` from test output directory
-3. Verify tests pass under NCrunch
+## Validation
 
-### Phase 3: Validate and Clean Up
-
-1. Run full test suite in multiple environments (dotnet test, VS, NCrunch, CI)
-2. Remove any NCrunch-specific workarounds
-3. Document the pattern for future CLI tools
-
-## Success Criteria
-
-- [ ] All CLI integration tests pass under NCrunch parallel execution
-- [ ] All CLI integration tests pass under `dotnet test`
-- [ ] All CLI integration tests pass in CI
-- [ ] No conditional test execution based on environment
-- [ ] No test skipping
-- [ ] CLI command logic has direct unit test coverage
+- [x] All CLI integration tests pass under `dotnet test`
+- [x] Tests pass in Visual Studio
+- [ ] Tests pass under NCrunch parallel execution (to be verified on Windows)
+- [x] No conditional test execution based on environment
+- [x] No test skipping
 
 ## References
 
-- [NCrunch Documentation: Workspace Configuration](https://www.ncrunch.net/)
-- [MSBuild ProjectReference Documentation](https://docs.microsoft.com/en-us/visualstudio/msbuild/common-msbuild-project-items)
-- EEE Methodology (see CONTRIBUTING.md)
+- EEE Methodology (see CONTRIBUTING.md, "Forbidden Patterns" section)

@@ -21,7 +21,26 @@
     <ProjectReference Include="..\..\src\Mercury\Mercury.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Runtime\Mercury.Runtime.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Pruning\Mercury.Pruning.csproj" />
+    <!-- CLI projects for integration tests - build only, no assembly reference -->
+    <ProjectReference Include="..\..\src\Mercury.Cli.Turtle\Mercury.Cli.Turtle.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\Mercury.Cli.Sparql\Mercury.Cli.Sparql.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
+
+  <!-- Generate config file with absolute paths to CLI DLLs for integration tests -->
+  <Target Name="GenerateCliPaths" AfterTargets="Build">
+    <PropertyGroup>
+      <TurtleCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll'))</TurtleCliPath>
+      <SparqlCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll'))</SparqlCliPath>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(OutputPath)cli-paths.json"
+      Lines="{&quot;TurtleCli&quot;: &quot;$(TurtleCliPath)&quot;, &quot;SparqlCli&quot;: &quot;$(SparqlCliPath)&quot;}"
+      Overwrite="true" />
+  </Target>
 
   <ItemGroup>
     <None Update="xunit.runner.json">
