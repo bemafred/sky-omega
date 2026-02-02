@@ -2,11 +2,25 @@
 
 ## Status
 
-Proposed (2026-01-03)
+**Accepted (2026-02-02)**
 
-## Notes regarding test
+## Implementation Notes
 
-This ADR does not yet address the current use of [Fixture] used by many tests. This must be analyzed before any implementation is initiated. This ADR must be updated according to what is found when analyzing the current tests.
+The unified QuadStorePool has been implemented with full backward compatibility. The existing `Rent()`/`Return()` API continues to work unchanged, and the new named store functionality is additive.
+
+**Key implementation details:**
+- Legacy constructors (`QuadStorePool(maxConcurrent, ...)`) create temporary pools with automatic cleanup
+- New constructor (`QuadStorePool(string basePath, ...)`) creates persistent pools with named stores
+- `CreateTemp()` factory provides isolated temporary pools for testing
+- Existing test fixture (`QuadStorePoolFixture`) continues to use `Rent()`/`Return()` API unchanged
+- Named store tests use `CreateTemp()` directly in test methods for full isolation
+
+**Files:**
+- `src/Mercury/Storage/QuadStorePool.cs` - Extended with named store support
+- `src/Mercury/Storage/PoolMetadata.cs` - JSON serialization for pool.json
+- `src/Mercury/Storage/QuadStorePoolOptions.cs` - Configuration options
+- `tests/Mercury.Tests/Storage/QuadStorePoolNamedTests.cs` - Named store tests (28 tests)
+- `tests/Mercury.Tests/Fixtures/QuadStorePoolFixture.cs` - Updated documentation
 
 ## Related ADRs
 
@@ -452,16 +466,16 @@ pool.Switch("primary", "secondary");
 
 ## Success Criteria
 
-- [ ] `QuadStorePool` class with named store access
-- [ ] `CreateTemp()` factory with TempPath integration
-- [ ] `Switch()` with atomic metadata update
-- [ ] `Rent()`/`Return()` for pooled anonymous stores
-- [ ] GUID v7 directory naming throughout
-- [ ] `pool.json` metadata with write-rename persistence
-- [ ] Tests for all switch scenarios
-- [ ] Tests using `CreateTemp()` for isolation
+- [x] `QuadStorePool` class with named store access
+- [x] `CreateTemp()` factory with TempPath integration
+- [x] `Switch()` with atomic metadata update
+- [x] `Rent()`/`Return()` for pooled anonymous stores (unchanged, backward compatible)
+- [x] GUID v7 directory naming throughout
+- [x] `pool.json` metadata with write-rename persistence
+- [x] Tests for all switch scenarios
+- [x] Tests using `CreateTemp()` for isolation
 - [ ] Mercury.Cli integration example
-- [ ] Documentation updated
+- [x] Documentation updated
 
 ## Risks and Mitigations
 

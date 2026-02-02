@@ -1,49 +1,62 @@
+// QuadStorePool.cs
+// Bounded pool of reusable QuadStore instances with named store support.
+// No external dependencies, only BCL.
+// .NET 10 / C# 14
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// Bounded pool of reusable QuadStore instances.
-/// Limits concurrent stores to prevent disk exhaustion.
-/// Thread-safe.
+/// Bounded pool of reusable QuadStore instances with named store support.
+/// Limits concurrent stores to prevent disk exhaustion. Thread-safe.
 /// </summary>
 /// <remarks>
-/// <para>Use this pool in testing, SERVICE materialization, or any scenario
-/// where many temporary stores are created and destroyed.</para>
+/// <para>Use this pool in testing, SERVICE materialization, pruning workflows,
+/// or any scenario where stores are created, switched, and destroyed.</para>
 ///
-/// <para><strong>Why pooling:</strong></para>
-/// <list type="bullet">
-/// <item><description>Creating/deleting store files is expensive</description></item>
-/// <item><description>Parallel test execution can exhaust disk space</description></item>
-/// <item><description>Clear() is cheap (reset counters) vs Dispose+Create (file I/O)</description></item>
+/// <para><strong>Two usage modes:</strong></para>
+/// <list type="number">
+/// <item><description><b>Anonymous pooling</b> via <see cref="Rent"/>/<see cref="Return"/>:
+/// Temporary stores for transient operations (e.g., SERVICE clause materialization).</description></item>
+/// <item><description><b>Named stores</b> via <see cref="this[string]"/> indexer:
+/// Persistent stores with logical names (e.g., "primary", "secondary" for pruning).</description></item>
 /// </list>
+///
+/// <para><strong>Directory structure:</strong></para>
+/// <code>
+/// {basePath}/
+///   pool.json                 # Metadata: name->GUID mappings, active store, settings
+///   stores/
+///     0194a3f8c2e1.../        # "primary" maps here (GUID v7 prefix)
+///     0194a3f9b7d4.../        # "secondary" maps here
+///   pooled/
+///     0194c3d4e5f6.../        # Anonymous pooled stores
+/// </code>
+///
+/// <para><strong>Pruning workflow example:</strong></para>
+/// <code>
+/// using var pool = new QuadStorePool("/data/my-kb");
+/// LoadRdf(pool["primary"], sourceFile);  // Load data
+/// // ... soft deletes accumulate ...
+/// new PruningTransfer(pool["primary"], pool["secondary"]).Execute();
+/// pool.Switch("primary", "secondary");   // Atomic swap
+/// pool.Clear("secondary");               // Ready for next cycle
+/// </code>
 ///
 /// <para><strong>Cross-process coordination:</strong></para>
 /// <para>
-/// When <c>useCrossProcessGate</c> is enabled (default for testing), the pool coordinates
-/// with other processes via <see cref="CrossProcessStoreGate"/>. This prevents disk exhaustion
-/// when multiple test runner processes (e.g., NCrunch) create pools simultaneously.
+/// When <c>UseCrossProcessGate</c> is enabled, the pool coordinates with other processes
+/// via <see cref="CrossProcessStoreGate"/>. This prevents disk exhaustion when multiple
+/// test runner processes (e.g., NCrunch) create pools simultaneously.
 /// </para>
-///
-/// <para><strong>Usage:</strong></para>
-/// <code>
-/// using var pool = new QuadStorePool(maxConcurrent: 4);
-///
-/// // Option 1: Manual rent/return
-/// var store = pool.Rent();
-/// try { /* use store */ }
-/// finally { pool.Return(store); }
-///
-/// // Option 2: Scoped (RAII)
-/// using var lease = pool.RentScoped();
-/// var store = lease.Store;
-/// // Automatically returned when lease is disposed
-/// </code>
 /// </remarks>
 public sealed class QuadStorePool : IDisposable
 {
@@ -57,43 +70,53 @@ public sealed class QuadStorePool : IDisposable
     /// </summary>
     private const long HashTableSizeBytes = 512L << 20;
 
+    private const string PoolJsonFileName = "pool.json";
+    private const string StoresDirectoryName = "stores";
+    private const string PooledDirectoryName = "pooled";
+
+    // === Anonymous pool state (Rent/Return) ===
     private readonly ConcurrentBag<QuadStore> _available = new();
-    private readonly List<(TempPath path, QuadStore store)> _all = new();
-    private readonly SemaphoreSlim _gate;
-    private readonly object _createLock = new();
-    private readonly string _purpose;
+    private readonly List<(string path, QuadStore store)> _pooledStores = new();
+    private readonly SemaphoreSlim _poolGate;
+    private readonly object _poolLock = new();
+
+    // === Named store state ===
+    private readonly Dictionary<string, QuadStore> _namedStores = new();
+    private readonly object _namedLock = new();
+    private PoolMetadata _metadata;
+    private string? _activeName;
+
+    // === Common state ===
+    private readonly string? _basePath;
+    private bool _isTemporary;
     private readonly StorageOptions _storageOptions;
     private readonly bool _useCrossProcessGate;
+    private readonly long _maxDiskBytes;
     private int _globalSlotsHeld;
     private bool _disposed;
 
+    #region Constructors
+
     /// <summary>
-    /// Creates a pool with bounded concurrency.
+    /// Creates a temporary pool with bounded concurrency (legacy API).
+    /// Stores are created in system temp directory and cleaned up on dispose.
     /// </summary>
     /// <param name="maxConcurrent">Maximum concurrent stores. Defaults to ProcessorCount.</param>
     /// <param name="purpose">Category for TempPath naming (e.g., "test", "service").</param>
-    /// <param name="useCrossProcessGate">Enable cross-process coordination via <see cref="CrossProcessStoreGate"/>. Default: false.</param>
+    /// <param name="useCrossProcessGate">Enable cross-process coordination. Default: false.</param>
     public QuadStorePool(int maxConcurrent = 0, string purpose = "pooled", bool useCrossProcessGate = false)
         : this(null, DefaultDiskBudgetFraction, maxConcurrent, purpose, useCrossProcessGate)
     {
     }
 
     /// <summary>
-    /// Creates a pool with disk-budget-aware concurrency limiting.
-    /// The pool size is calculated as the minimum of:
-    /// - CPU count (or explicit maxConcurrent)
-    /// - Available disk space × diskBudgetFraction ÷ estimated per-store size
+    /// Creates a temporary pool with disk-budget-aware concurrency limiting (legacy API).
     /// </summary>
-    /// <param name="storageOptions">Storage options including initial sizes. Use StorageOptions.ForTesting for minimal footprint.</param>
-    /// <param name="diskBudgetFraction">Fraction of available disk space to use as budget (0.0-1.0). Default: 0.33 (33%).</param>
-    /// <param name="maxConcurrent">Maximum concurrent stores (0 = ProcessorCount). Disk budget may reduce this further.</param>
-    /// <param name="purpose">Category for TempPath naming (e.g., "test", "service").</param>
-    /// <param name="useCrossProcessGate">
-    /// Enable cross-process coordination via <see cref="CrossProcessStoreGate"/>.
-    /// When enabled, store creation blocks until a global slot is available across ALL processes
-    /// on the machine. This prevents disk exhaustion when multiple test runners (e.g., NCrunch)
-    /// create pools simultaneously. Default: false.
-    /// </param>
+    /// <param name="storageOptions">Storage options including initial sizes.</param>
+    /// <param name="diskBudgetFraction">Fraction of available disk space to use (0.0-1.0).</param>
+    /// <param name="maxConcurrent">Maximum concurrent stores (0 = ProcessorCount).</param>
+    /// <param name="purpose">Category for TempPath naming.</param>
+    /// <param name="useCrossProcessGate">Enable cross-process coordination.</param>
     public QuadStorePool(StorageOptions? storageOptions,
                          double diskBudgetFraction = DefaultDiskBudgetFraction,
                          int maxConcurrent = 0,
@@ -105,52 +128,284 @@ public sealed class QuadStorePool : IDisposable
                 "Disk budget fraction must be between 0 (exclusive) and 1.0 (inclusive)");
 
         _storageOptions = storageOptions ?? StorageOptions.Default;
-        _purpose = purpose;
         _useCrossProcessGate = useCrossProcessGate;
+        _isTemporary = true;
+        _basePath = null;
+        _metadata = new PoolMetadata();
+
+        // Create temp base path for this pool instance
+        var tempPath = TempPath.Create(purpose, Guid.CreateVersion7().ToString("N")[..12], unique: false);
+        tempPath.EnsureClean();
+        tempPath.MarkOwnership();
+        _basePath = tempPath.FullPath;
 
         var cpuLimit = maxConcurrent > 0 ? maxConcurrent : Environment.ProcessorCount;
-        var diskLimit = CalculateDiskLimit(_storageOptions, diskBudgetFraction);
-
+        var diskLimit = CalculateDiskLimit(_storageOptions, diskBudgetFraction, _basePath);
         var max = Math.Max(1, Math.Min(cpuLimit, diskLimit));
-        _gate = new SemaphoreSlim(max, max);
+        _poolGate = new SemaphoreSlim(max, max);
+        _maxDiskBytes = (long)(DiskSpaceChecker.GetAvailableSpace(_basePath) * diskBudgetFraction);
     }
 
     /// <summary>
-    /// Maximum number of concurrent stores this pool allows.
+    /// Creates a persistent pool at the specified base path with named store support.
     /// </summary>
-    public int MaxConcurrent => _gate.CurrentCount + (TotalCreated - AvailableCount);
-
-    /// <summary>
-    /// Calculates the maximum number of stores based on available disk space.
-    /// </summary>
-    private static int CalculateDiskLimit(StorageOptions options, double fraction)
+    /// <param name="basePath">Base directory for the pool. Created if it doesn't exist.</param>
+    /// <param name="options">Pool configuration options. Default: <see cref="QuadStorePoolOptions.Default"/>.</param>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="basePath"/> is null.</exception>
+    public QuadStorePool(string basePath, QuadStorePoolOptions? options = null)
     {
-        var tempPath = Path.GetTempPath();
-        var available = DiskSpaceChecker.GetAvailableSpace(tempPath);
+        ArgumentNullException.ThrowIfNull(basePath);
 
-        if (available < 0)
-            return int.MaxValue; // Can't determine disk space, don't limit
+        var opts = options ?? QuadStorePoolOptions.Default;
+        _basePath = Path.GetFullPath(basePath);
+        _isTemporary = false;
+        _storageOptions = opts.StorageOptions;
+        _useCrossProcessGate = opts.UseCrossProcessGate;
 
-        var budget = (long)(available * fraction);
-        var perStoreEstimate = EstimateStoreSize(options);
+        // Ensure directories exist
+        Directory.CreateDirectory(_basePath);
+        Directory.CreateDirectory(StoresPath);
+        Directory.CreateDirectory(PooledPath);
 
-        if (perStoreEstimate <= 0)
-            return int.MaxValue;
+        // Load or create metadata
+        _metadata = PoolMetadata.Load(PoolJsonPath);
+        _activeName = _metadata.Active;
 
-        return (int)(budget / perStoreEstimate);
+        // Calculate disk budget
+        if (opts.MaxDiskBytes > 0)
+        {
+            _maxDiskBytes = opts.MaxDiskBytes;
+        }
+        else
+        {
+            var available = DiskSpaceChecker.GetAvailableSpace(_basePath);
+            _maxDiskBytes = available > 0 ? (long)(available * opts.DiskBudgetFraction) : long.MaxValue;
+        }
+
+        // Initialize pool gate
+        var poolLimit = opts.MaxPooledStores > 0 ? opts.MaxPooledStores : 8;
+        _poolGate = new SemaphoreSlim(poolLimit, poolLimit);
+
+        // Rehydrate named stores from metadata
+        RehydrateNamedStores();
     }
 
     /// <summary>
-    /// Estimates the disk footprint of a single QuadStore based on options.
+    /// Creates a temporary pool for isolated testing or transient operations.
+    /// The pool is created in the system temp directory with a unique path
+    /// and automatically cleaned up on dispose.
     /// </summary>
-    private static long EstimateStoreSize(StorageOptions options)
+    /// <param name="purpose">Descriptive name for the temp path (e.g., "unit-test", "prune").</param>
+    /// <param name="options">Pool configuration options.</param>
+    /// <returns>A new temporary pool.</returns>
+    public static QuadStorePool CreateTemp(string? purpose = null, QuadStorePoolOptions? options = null)
     {
-        // 4 indexes + atom data + hash table (fixed 512MB) + atom offsets
-        return (options.IndexInitialSizeBytes * 4)
-             + options.AtomDataInitialSizeBytes
-             + HashTableSizeBytes
-             + (options.AtomOffsetInitialCapacity * sizeof(long));
+        var opts = options ?? QuadStorePoolOptions.Default;
+        var category = purpose ?? "pool";
+        var tempPath = TempPath.Create(category, Guid.CreateVersion7().ToString("N")[..12], unique: false);
+        tempPath.EnsureClean();
+        tempPath.MarkOwnership();
+
+        var pool = new QuadStorePool(tempPath.FullPath, opts);
+        pool._isTemporary = true;
+        return pool;
     }
+
+    #endregion
+
+    #region Named Store API
+
+    /// <summary>
+    /// Gets a named store by name. Creates the store on first access.
+    /// </summary>
+    /// <param name="name">Logical name for the store (e.g., "primary", "secondary").</param>
+    /// <returns>The QuadStore instance.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown if pool is disposed.</exception>
+    /// <exception cref="InsufficientDiskSpaceException">Thrown if disk budget would be exceeded.</exception>
+    public QuadStore this[string name]
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+            lock (_namedLock)
+            {
+                if (_namedStores.TryGetValue(name, out var existing))
+                    return existing;
+
+                // Create new named store
+                var guid = Guid.CreateVersion7().ToString("N")[..12];
+                var storePath = Path.Combine(StoresPath, guid);
+
+                // Check disk budget before creation
+                EnsureDiskBudget(storePath, "CreateNamedStore");
+
+                Directory.CreateDirectory(storePath);
+                var store = new QuadStore(storePath, null, null, _storageOptions);
+
+                _namedStores[name] = store;
+                _metadata.Stores[name] = guid;
+
+                // Set as active if this is the first store
+                if (_activeName == null)
+                {
+                    _activeName = name;
+                    _metadata.Active = name;
+                }
+
+                SaveMetadata();
+                return store;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the currently active store.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown if no active store is set.</exception>
+    public QuadStore Active
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var name = _activeName ?? throw new InvalidOperationException("No active store is set.");
+            return this[name];
+        }
+    }
+
+    /// <summary>
+    /// Gets the name of the currently active store, or null if not set.
+    /// </summary>
+    public string? ActiveName => _activeName;
+
+    /// <summary>
+    /// Gets the names of all named stores.
+    /// </summary>
+    public IReadOnlyList<string> StoreNames
+    {
+        get
+        {
+            lock (_namedLock)
+            {
+                return _metadata.Stores.Keys.ToList();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sets the active store by name.
+    /// </summary>
+    /// <param name="name">Name of the store to make active.</param>
+    /// <exception cref="KeyNotFoundException">Thrown if the store doesn't exist.</exception>
+    public void SetActive(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        lock (_namedLock)
+        {
+            if (!_metadata.Stores.ContainsKey(name))
+                throw new KeyNotFoundException($"Store '{name}' does not exist.");
+
+            _activeName = name;
+            _metadata.Active = name;
+            SaveMetadata();
+        }
+    }
+
+    /// <summary>
+    /// Atomically swaps the physical stores for two logical names.
+    /// After this operation, accessing store "a" returns what was "b" and vice versa.
+    /// </summary>
+    /// <param name="a">First store name.</param>
+    /// <param name="b">Second store name.</param>
+    /// <remarks>
+    /// <para>This is a metadata-only operation. The physical directories remain unchanged;
+    /// only the name→GUID mappings are swapped in pool.json.</para>
+    /// <para>Existing QuadStore references remain valid but will now be accessed via the
+    /// swapped name. This is intentional for pruning workflows where you want
+    /// <c>pool["primary"]</c> to return the freshly-pruned data.</para>
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">Thrown if either store doesn't exist.</exception>
+    public void Switch(string a, string b)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(a);
+        ArgumentException.ThrowIfNullOrWhiteSpace(b);
+
+        if (a == b)
+            return; // No-op
+
+        lock (_namedLock)
+        {
+            // Ensure both stores exist (creates if needed)
+            _ = this[a];
+            _ = this[b];
+
+            // Swap GUID mappings
+            (_metadata.Stores[a], _metadata.Stores[b]) = (_metadata.Stores[b], _metadata.Stores[a]);
+
+            // Swap in-memory references
+            (_namedStores[a], _namedStores[b]) = (_namedStores[b], _namedStores[a]);
+
+            SaveMetadata();
+        }
+    }
+
+    /// <summary>
+    /// Deletes a named store and its physical directory.
+    /// </summary>
+    /// <param name="name">Name of the store to delete.</param>
+    /// <exception cref="InvalidOperationException">Thrown if attempting to delete the active store.</exception>
+    /// <exception cref="KeyNotFoundException">Thrown if the store doesn't exist.</exception>
+    public void Delete(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        lock (_namedLock)
+        {
+            if (!_metadata.Stores.TryGetValue(name, out var guid))
+                throw new KeyNotFoundException($"Store '{name}' does not exist.");
+
+            if (_activeName == name)
+                throw new InvalidOperationException($"Cannot delete the active store '{name}'. Set a different store as active first.");
+
+            // Dispose and remove from memory
+            if (_namedStores.TryGetValue(name, out var store))
+            {
+                store.Dispose();
+                _namedStores.Remove(name);
+            }
+
+            // Remove from metadata
+            _metadata.Stores.Remove(name);
+            SaveMetadata();
+
+            // Delete physical directory
+            var storePath = Path.Combine(StoresPath, guid);
+            TempPath.SafeCleanup(storePath);
+        }
+    }
+
+    /// <summary>
+    /// Clears all data from a named store without deleting it.
+    /// </summary>
+    /// <param name="name">Name of the store to clear.</param>
+    /// <exception cref="KeyNotFoundException">Thrown if the store doesn't exist.</exception>
+    public void Clear(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var store = this[name]; // Creates if doesn't exist
+        store.Clear();
+    }
+
+    #endregion
+
+    #region Anonymous Pool API (Rent/Return)
 
     /// <summary>
     /// Rent a store from the pool. Blocks if pool is exhausted.
@@ -162,7 +417,7 @@ public sealed class QuadStorePool : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        _gate.Wait();
+        _poolGate.Wait();
 
         if (_available.TryTake(out var store))
         {
@@ -170,12 +425,12 @@ public sealed class QuadStorePool : IDisposable
             return store;
         }
 
-        // Create new store - need global slot if cross-process gate is enabled
+        // Create new pooled store
         if (_useCrossProcessGate)
         {
             if (!CrossProcessStoreGate.Instance.Acquire(TimeSpan.FromSeconds(60)))
             {
-                _gate.Release(); // Release local slot since we failed
+                _poolGate.Release();
                 throw new TimeoutException(
                     $"Timed out waiting for cross-process store slot. " +
                     $"Max global stores: {CrossProcessStoreGate.Instance.MaxGlobalStores}. " +
@@ -187,19 +442,21 @@ public sealed class QuadStorePool : IDisposable
 
         try
         {
-            lock (_createLock)
+            lock (_poolLock)
             {
-                var path = TempPath.Create(_purpose, Guid.NewGuid().ToString("N")[..8], unique: false);
-                path.EnsureClean();
-                path.MarkOwnership();
-                var newStore = new QuadStore(path, null, null, _storageOptions);
-                _all.Add((path, newStore));
+                var guid = Guid.CreateVersion7().ToString("N")[..12];
+                var storePath = Path.Combine(PooledPath, guid);
+
+                EnsureDiskBudget(storePath, "RentStore");
+
+                Directory.CreateDirectory(storePath);
+                var newStore = new QuadStore(storePath, null, null, _storageOptions);
+                _pooledStores.Add((storePath, newStore));
                 return newStore;
             }
         }
         catch
         {
-            // Store creation failed - release global slot
             if (_useCrossProcessGate)
             {
                 CrossProcessStoreGate.Instance.Release();
@@ -215,20 +472,15 @@ public sealed class QuadStorePool : IDisposable
     /// <param name="store">The store to return.</param>
     /// <remarks>
     /// The store is NOT cleared on return - clearing happens on next Rent().
-    /// This amortizes the clear cost and allows inspection of returned store contents
-    /// during debugging.
+    /// This amortizes the clear cost and allows inspection during debugging.
     /// </remarks>
     public void Return(QuadStore store)
     {
         if (_disposed)
-        {
-            // Pool is disposed - semaphore is also disposed, nothing to do
-            // The store was already disposed by pool's Dispose() method
             return;
-        }
 
         _available.Add(store);
-        _gate.Release();
+        _poolGate.Release();
     }
 
     /// <summary>
@@ -243,42 +495,116 @@ public sealed class QuadStorePool : IDisposable
     public int AvailableCount => _available.Count;
 
     /// <summary>
-    /// Total number of stores created by this pool.
+    /// Total number of pooled stores created (not including named stores).
     /// </summary>
     public int TotalCreated
     {
         get
         {
-            lock (_createLock)
+            lock (_poolLock)
             {
-                return _all.Count;
+                return _pooledStores.Count;
             }
         }
     }
 
     /// <summary>
+    /// Maximum number of concurrent pooled stores this pool allows.
+    /// </summary>
+    public int MaxConcurrent => _poolGate.CurrentCount + (TotalCreated - AvailableCount);
+
+    /// <summary>
     /// Number of cross-process slots currently held by this pool.
-    /// Only non-zero when <c>useCrossProcessGate</c> was enabled.
     /// </summary>
     public int GlobalSlotsHeld => _globalSlotsHeld;
+
+    #endregion
+
+    #region Disk Management
+
+    /// <summary>
+    /// Gets the total disk usage of all stores (named + pooled) in bytes.
+    /// </summary>
+    public long TotalDiskUsage
+    {
+        get
+        {
+            if (_basePath == null)
+                return 0;
+
+            var total = 0L;
+
+            // Named stores
+            if (Directory.Exists(StoresPath))
+            {
+                foreach (var dir in Directory.GetDirectories(StoresPath))
+                {
+                    total += GetDirectorySize(dir);
+                }
+            }
+
+            // Pooled stores
+            if (Directory.Exists(PooledPath))
+            {
+                foreach (var dir in Directory.GetDirectories(PooledPath))
+                {
+                    total += GetDirectorySize(dir);
+                }
+            }
+
+            return total;
+        }
+    }
+
+    /// <summary>
+    /// Gets the maximum disk space budget for this pool in bytes.
+    /// </summary>
+    public long MaxDiskBytes => _maxDiskBytes;
+
+    /// <summary>
+    /// Gets the base path for this pool, or null if temporary mode without persistence.
+    /// </summary>
+    public string? BasePath => _basePath;
+
+    /// <summary>
+    /// Gets whether this pool is temporary (will be cleaned up on dispose).
+    /// </summary>
+    public bool IsTemporary => _isTemporary;
+
+    #endregion
+
+    #region Dispose
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
-        // Drain available stores (just for bookkeeping)
+        // Drain available stores
         while (_available.TryTake(out _)) { }
 
-        // Dispose all stores and cleanup paths
-        lock (_createLock)
+        // Dispose named stores
+        lock (_namedLock)
         {
-            foreach (var (path, store) in _all)
+            foreach (var store in _namedStores.Values)
             {
                 store.Dispose();
-                TempPath.SafeCleanup(path);
             }
-            _all.Clear();
+            _namedStores.Clear();
+        }
+
+        // Dispose pooled stores and cleanup paths
+        lock (_poolLock)
+        {
+            foreach (var (path, store) in _pooledStores)
+            {
+                store.Dispose();
+                if (_isTemporary)
+                {
+                    TempPath.SafeCleanup(path);
+                }
+            }
+            _pooledStores.Clear();
         }
 
         // Release global slots
@@ -291,8 +617,108 @@ public sealed class QuadStorePool : IDisposable
             }
         }
 
-        _gate.Dispose();
+        // Cleanup temporary base path
+        if (_isTemporary && _basePath != null)
+        {
+            TempPath.SafeCleanup(_basePath);
+        }
+
+        _poolGate.Dispose();
     }
+
+    #endregion
+
+    #region Private Helpers
+
+    private string StoresPath => Path.Combine(_basePath!, StoresDirectoryName);
+    private string PooledPath => Path.Combine(_basePath!, PooledDirectoryName);
+    private string PoolJsonPath => Path.Combine(_basePath!, PoolJsonFileName);
+
+    private void SaveMetadata()
+    {
+        if (_basePath != null)
+        {
+            _metadata.Save(PoolJsonPath);
+        }
+    }
+
+    private void RehydrateNamedStores()
+    {
+        // Open existing stores from metadata
+        foreach (var (name, guid) in _metadata.Stores)
+        {
+            var storePath = Path.Combine(StoresPath, guid);
+            if (Directory.Exists(storePath))
+            {
+                var store = new QuadStore(storePath, null, null, _storageOptions);
+                _namedStores[name] = store;
+            }
+        }
+    }
+
+    private void EnsureDiskBudget(string path, string operation)
+    {
+        if (_maxDiskBytes <= 0 || _maxDiskBytes == long.MaxValue)
+            return;
+
+        var estimatedSize = EstimateStoreSize(_storageOptions);
+        var currentUsage = TotalDiskUsage;
+        var projectedUsage = currentUsage + estimatedSize;
+
+        if (projectedUsage > _maxDiskBytes)
+        {
+            throw new InsufficientDiskSpaceException(
+                path,
+                estimatedSize,
+                _maxDiskBytes - currentUsage,
+                operation);
+        }
+    }
+
+    private static int CalculateDiskLimit(StorageOptions options, double fraction, string? basePath)
+    {
+        var checkPath = basePath ?? Path.GetTempPath();
+        var available = DiskSpaceChecker.GetAvailableSpace(checkPath);
+
+        if (available < 0)
+            return int.MaxValue;
+
+        var budget = (long)(available * fraction);
+        var perStoreEstimate = EstimateStoreSize(options);
+
+        if (perStoreEstimate <= 0)
+            return int.MaxValue;
+
+        return (int)(budget / perStoreEstimate);
+    }
+
+    private static long EstimateStoreSize(StorageOptions options)
+    {
+        return (options.IndexInitialSizeBytes * 4)
+             + options.AtomDataInitialSizeBytes
+             + HashTableSizeBytes
+             + (options.AtomOffsetInitialCapacity * sizeof(long));
+    }
+
+    private static long GetDirectorySize(string path)
+    {
+        if (!Directory.Exists(path))
+            return 0;
+
+        var total = 0L;
+        foreach (var file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+        {
+            try
+            {
+                total += new FileInfo(file).Length;
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        return total;
+    }
+
+    #endregion
 }
 
 /// <summary>

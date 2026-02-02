@@ -4,11 +4,15 @@ using SkyOmega.Mercury.Storage;
 namespace SkyOmega.Mercury.Tests.Fixtures;
 
 /// <summary>
-/// xUnit collection fixture providing a shared QuadStorePool.
+/// xUnit collection fixture providing a shared QuadStorePool for anonymous pooling.
 /// Pool is created once per test collection and disposed after all tests complete.
 /// </summary>
 /// <remarks>
-/// Usage with IClassFixture (per-class pool):
+/// <para>This fixture provides the <see cref="QuadStorePool.Rent"/>/<see cref="QuadStorePool.Return"/>
+/// API for temporary stores. For named store tests, use <see cref="QuadStorePool.CreateTemp"/>
+/// directly in the test method.</para>
+///
+/// <para><strong>Usage with IClassFixture (per-class pool):</strong></para>
 /// <code>
 /// public class MyTests : IClassFixture&lt;QuadStorePoolFixture&gt;
 /// {
@@ -17,7 +21,7 @@ namespace SkyOmega.Mercury.Tests.Fixtures;
 /// }
 /// </code>
 ///
-/// Usage with ICollectionFixture (shared across collection):
+/// <para><strong>Usage with ICollectionFixture (shared across collection):</strong></para>
 /// <code>
 /// [CollectionDefinition("QuadStore")]
 /// public class QuadStoreCollection : ICollectionFixture&lt;QuadStorePoolFixture&gt; { }
@@ -27,6 +31,18 @@ namespace SkyOmega.Mercury.Tests.Fixtures;
 /// {
 ///     private readonly QuadStorePoolFixture _fixture;
 ///     public MyTests(QuadStorePoolFixture fixture) => _fixture = fixture;
+/// }
+/// </code>
+///
+/// <para><strong>For named store testing:</strong></para>
+/// <code>
+/// [Fact]
+/// public void TestNamedStores()
+/// {
+///     using var pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
+///     pool["primary"].AddCurrent("&lt;http://ex/s&gt;", "&lt;http://ex/p&gt;", "&lt;http://ex/o&gt;");
+///     pool.Switch("primary", "secondary");
+///     // ...
 /// }
 /// </code>
 /// </remarks>
