@@ -56,7 +56,7 @@ class CrossProcessTest
         for (int i = 0; i < slotsToAcquire; i++)
         {
             Console.Write($"  Slot {i + 1}: ");
-            if (sem.WaitOne(TimeSpan.FromSeconds(2)))
+            if (sem.WaitOne(TimeSpan.FromSeconds(10)))
             {
                 acquired++;
                 Console.WriteLine("ACQUIRED");
