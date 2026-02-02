@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -313,9 +314,10 @@ public class CliIntegrationTests : IDisposable
 
     private static async Task<(int exitCode, string stdout, string stderr)> RunCliAsync(string project, string args)
     {
-        // Find solution root (go up from test directory)
-        var currentDir = Directory.GetCurrentDirectory();
-        string? solutionRoot = currentDir;
+        // Find solution root by walking up from the test assembly location
+        // (not current directory, which may be different under NCrunch)
+        var assemblyLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+        string? solutionRoot = assemblyLocation;
 
         while (solutionRoot != null && !File.Exists(Path.Combine(solutionRoot, "SkyOmega.sln")))
         {
@@ -323,7 +325,7 @@ public class CliIntegrationTests : IDisposable
         }
 
         if (solutionRoot == null)
-            throw new InvalidOperationException("Could not find SkyOmega.sln");
+            throw new InvalidOperationException($"Could not find SkyOmega.sln (searched from {assemblyLocation})");
 
         var projectPath = Path.Combine(solutionRoot, project);
 
