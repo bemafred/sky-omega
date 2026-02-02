@@ -1185,9 +1185,9 @@ public partial class QueryExecutor : IDisposable
     /// <summary>
     /// Execute a DESCRIBE query and return triples describing the matched resources.
     /// Returns all triples where described resources appear as subject or object.
-    /// Caller must hold read lock on store.
+    /// Caller must hold read lock on store and call Dispose on results.
     /// </summary>
-    internal DescribeResults ExecuteDescribe()
+    public DescribeResults ExecuteDescribe()
     {
         ref readonly var pattern = ref _cachedPattern;
         var describeAll = _buffer.DescribeAll;

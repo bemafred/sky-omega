@@ -274,6 +274,9 @@ internal static class Program
                 # CONSTRUCT query with Turtle output
                 mercury-sparql --load data.ttl -q "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }" --rdf-format ttl
 
+                # DESCRIBE query with Turtle output
+                mercury-sparql --load data.ttl -q "DESCRIBE ?s WHERE { ?s <http://ex.org/name> \"Alice\" }" --rdf-format ttl
+
                 # Show execution plan
                 mercury-sparql --explain "SELECT * WHERE { ?s <http://ex.org/knows> ?o }"
 
@@ -421,8 +424,7 @@ internal static class Program
                 return ExecuteConstructQuery(store, queryString, query, rdfFormat);
 
             case QueryType.Describe:
-                Console.Error.WriteLine("DESCRIBE queries not yet supported in CLI");
-                return 1;
+                return ExecuteDescribeQuery(store, queryString, query, rdfFormat);
 
             default:
                 Console.Error.WriteLine($"Unsupported query type: {query.Type}");
@@ -734,6 +736,70 @@ internal static class Program
         }
     }
 
+    static int ExecuteDescribeQuery(QuadStore store, string queryString, Query query, RdfFormat rdfFormat)
+    {
+        store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
+            var results = executor.ExecuteDescribe();
+
+            // Handle RDF/XML specially (needs document start/end)
+            if (rdfFormat == RdfFormat.RdfXml)
+            {
+                using var rdfWriter = new RdfXmlStreamWriter(Console.Out);
+                rdfWriter.WriteStartDocument();
+                while (results.MoveNext())
+                {
+                    var triple = results.Current;
+                    rdfWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
+                }
+                rdfWriter.WriteEndDocument();
+                results.Dispose();
+                return 0;
+            }
+
+            // Create appropriate RDF writer for other formats
+            using var writer = rdfFormat switch
+            {
+                RdfFormat.Turtle => (IDisposable)new TurtleStreamWriter(Console.Out),
+                RdfFormat.NQuads => new NQuadsStreamWriter(Console.Out),
+                RdfFormat.TriG => new TriGStreamWriter(Console.Out),
+                _ => new NTriplesStreamWriter(Console.Out) // Default to N-Triples
+            };
+
+            // Output describe triples
+            while (results.MoveNext())
+            {
+                var triple = results.Current;
+
+                // Write triple using the appropriate writer
+                switch (writer)
+                {
+                    case NTriplesStreamWriter ntWriter:
+                        ntWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
+                        break;
+                    case TurtleStreamWriter ttlWriter:
+                        ttlWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
+                        break;
+                    case NQuadsStreamWriter nqWriter:
+                        nqWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
+                        break;
+                    case TriGStreamWriter trigWriter:
+                        trigWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
+                        break;
+                }
+            }
+
+            results.Dispose();
+            return 0;
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
     static int ShowExplainPlan(string queryString)
     {
         try
@@ -980,6 +1046,8 @@ internal static class Program
               SELECT * WHERE { ?s ?p ?o } LIMIT 10;
 
               CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 10;
+
+              DESCRIBE ?person WHERE { ?person a <http://xmlns.com/foaf/0.1/Person> };
 
               SELECT ?name
               WHERE {

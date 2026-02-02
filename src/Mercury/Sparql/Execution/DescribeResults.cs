@@ -5,11 +5,12 @@ using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
-/// <remarks>
-/// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an
-/// implementation detail of DESCRIBE query execution.</para>
-/// </remarks>
-internal ref struct DescribeResults
+/// <summary>
+/// Results from DESCRIBE query execution. Yields triples describing matched resources.
+/// For each resource, returns triples where the resource appears as subject or object.
+/// Must be disposed to return pooled resources.
+/// </summary>
+public ref struct DescribeResults
 {
     private readonly QuadStore _store;
     private QueryResults _queryResults;
