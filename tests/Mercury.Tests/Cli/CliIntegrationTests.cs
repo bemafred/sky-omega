@@ -12,9 +12,9 @@ namespace SkyOmega.Mercury.Tests.Cli;
 /// These tests run the actual CLI executables and verify their output.
 /// </summary>
 /// <remarks>
-/// These tests require access to the actual project files to run 'dotnet run --project'.
-/// They are skipped when running under NCrunch, which copies assemblies to a temp location
-/// without the source files.
+/// KNOWN ISSUE: These tests currently fail under NCrunch because they depend on
+/// 'dotnet run --project' which requires source files. NCrunch copies assemblies
+/// to isolated directories without source. See ADR-017 for the architectural fix.
 /// </remarks>
 public class CliIntegrationTests : IDisposable
 {
@@ -337,13 +337,15 @@ public class CliIntegrationTests : IDisposable
 
     private async Task<(int exitCode, string stdout, string stderr)> RunCliAsync(string project, string args)
     {
-        // Skip if running under NCrunch (assemblies copied to temp without project files)
+        // These tests currently depend on source tree access for 'dotnet run --project'.
+        // This fails under NCrunch which copies assemblies to isolated directories.
+        // See ADR-017 for the proper solution (embed CLI assemblies in test output).
         if (_solutionRoot == null)
         {
-            Assert.Fail(
-                "CLI integration tests require access to project files. " +
-                "Skipped under NCrunch which copies assemblies to a temp location. " +
-                "Run these tests directly via 'dotnet test' or Visual Studio.");
+            var assemblyLocation = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            throw new InvalidOperationException(
+                $"Cannot locate SkyOmega.sln from test assembly location: {assemblyLocation}. " +
+                "This test requires source tree access. See ADR-017 for the architectural fix.");
         }
 
         var projectPath = Path.Combine(_solutionRoot, project);

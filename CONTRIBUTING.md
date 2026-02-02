@@ -87,7 +87,19 @@ Names matter. They reveal whether the author understands the domain or is just m
 
 These names are symptoms of poor domain awareness. They say “something happens here” without saying *what*. If you cannot find a precise name, you do not yet understand what the code does. Return to Epistemics.
 
-**Good names** are domain-specific, intention-revealing, and locatable within the architecture. Mercury’s types read like RDF vocabulary. Minerva’s types read like linear algebra and hardware. This is not accident.
+**Good names** are domain-specific, intention-revealing, and locatable within the architecture. Mercury's types read like RDF vocabulary. Minerva's types read like linear algebra and hardware. This is not accident.
+
+---
+
+## Forbidden Patterns
+
+These are EEE violations — behaviors that hide information rather than surface it.
+
+**Skipping tests.** Tests exist to falsify assumptions. Skipping a test — whether via `[Skip]`, conditional execution, or "runs only in environment X" — removes a falsification opportunity. If a test cannot run in some environment, fix the root cause. Deleting a test is equally wrong — it removes the falsification opportunity permanently. A test that sometimes runs is epistemically worse than no test at all because it creates false confidence.
+
+**Swallowing exceptions.** Empty `catch` blocks, `catch { /* ignore */ }`, or logging without re-throwing hides failure modes. If an exception can occur, either handle it meaningfully or let it propagate. Silent failure is an Epistemics violation.
+
+**Conditional compilation that changes behavior.** `#if DEBUG` that changes logic (not just adds logging) creates two different programs masquerading as one. Test what you ship.
 
 ---
 
