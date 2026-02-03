@@ -1,0 +1,5 @@
+System.InvalidOperationException: Turtle CLI not found at C:\Users\marfr175\AppData\Local\NCrunch\25056\15\tests\src\Mercury.Cli.Turtle\bin\Debug\net10.0\Mercury.Cli.Turtle.dll. Ensure Mercury.Cli.Turtle builds before tests run.
+   at SkyOmega.Mercury.Tests.Cli.CliIntegrationTests.LoadCliPaths() in C:\Users\marfr175\source\repos\sky-omega\tests\Mercury.Tests\Cli\CliIntegrationTests.cs:line 347
+   at SkyOmega.Mercury.Tests.Cli.CliIntegrationTests..ctor() in C:\Users\marfr175\source\repos\sky-omega\tests\Mercury.Tests\Cli\CliIntegrationTests.cs:line 33
+   at System.RuntimeType.CreateInstanceDefaultCtor(Boolean publicOnly, Boolean wrapExceptions)
+
