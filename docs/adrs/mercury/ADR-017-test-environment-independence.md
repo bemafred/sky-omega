@@ -14,7 +14,7 @@ NCrunch (and potentially other test runners) copies compiled test assemblies to 
 
 ```
 Source location:     C:\Users\...\source\repos\sky-omega\
-NCrunch location:    C:\Users\...\AppData\Local\NCrunch\35348\15\tests\Mercury.Tests\bin\Debug\net10.0\
+NCrunch workspace:   C:\Users\...\AppData\Local\NCrunch\25056\15\tests\
 ```
 
 The test code walked up the directory tree looking for `SkyOmega.sln` to locate project files. This failed under NCrunch because the assembly was no longer within the source tree.
@@ -34,14 +34,9 @@ The test code walked up the directory tree looking for `SkyOmega.sln` to locate 
 
 ## Decision
 
-Use a **build-time generated configuration file** containing absolute paths to CLI DLLs.
+**Copy CLI DLLs to the test output directory at build time.**
 
-### How It Works
-
-1. **Build order**: ProjectReferences ensure CLI projects build before the test project
-2. **Path generation**: MSBuild target generates `cli-paths.json` with absolute paths to CLI DLLs
-3. **Config copied**: The JSON file is written to test output directory (gets copied by any test runner)
-4. **Runtime discovery**: Tests read the config file to find CLI DLLs, then run with `dotnet exec`
+When the test assembly is copied anywhere (NCrunch workspace, CI agent, etc.), the CLI DLLs travel with it.
 
 ### Implementation
 
@@ -56,58 +51,51 @@ Use a **build-time generated configuration file** containing absolute paths to C
   <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
 </ProjectReference>
 
-<!-- Generate config file with absolute paths to CLI DLLs -->
-<Target Name="GenerateCliPaths" AfterTargets="Build">
+<!-- Copy CLI DLLs to test output directory -->
+<Target Name="CopyCliTools" AfterTargets="Build">
   <PropertyGroup>
-    <TurtleCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll'))</TurtleCliPath>
-    <SparqlCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll'))</SparqlCliPath>
+    <TurtleCliSource>$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll</TurtleCliSource>
+    <SparqlCliSource>$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll</SparqlCliSource>
   </PropertyGroup>
-  <WriteLinesToFile
-    File="$(OutputPath)cli-paths.json"
-    Lines="{&quot;TurtleCli&quot;: &quot;$(TurtleCliPath)&quot;, &quot;SparqlCli&quot;: &quot;$(SparqlCliPath)&quot;}"
-    Overwrite="true" />
+  <Copy SourceFiles="$(TurtleCliSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  <Copy SourceFiles="$(SparqlCliSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
 </Target>
 ```
 
-**Generated config file** (`cli-paths.json`):
-
-```json
-{"TurtleCli": "/absolute/path/to/Mercury.Cli.Turtle.dll", "SparqlCli": "/absolute/path/to/Mercury.Cli.Sparql.dll"}
-```
-
-**Test code reads config and runs CLI**:
+**Test code finds CLI DLLs adjacent to itself:**
 
 ```csharp
-var configPath = Path.Combine(assemblyDir, "cli-paths.json");
-var paths = JsonSerializer.Deserialize<CliPaths>(File.ReadAllText(configPath));
+var assemblyDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+var turtleCliPath = Path.Combine(assemblyDir, "Mercury.Cli.Turtle.dll");
+var sparqlCliPath = Path.Combine(assemblyDir, "Mercury.Cli.Sparql.dll");
 
-// Run CLI using dotnet exec (not dotnet run --project)
+// Run CLI using dotnet exec
 var psi = new ProcessStartInfo
 {
     FileName = "dotnet",
-    Arguments = $"exec \"{paths.TurtleCli}\" {args}"
+    Arguments = $"exec \"{turtleCliPath}\" {args}"
 };
 ```
 
 ## Alternatives Considered
 
-### Embed CLI DLLs in test output directory
+### Build-time JSON config with absolute paths
 
-Copy CLI DLLs to the test output directory so tests are fully self-contained.
+Generate a JSON file at build time containing absolute paths to CLI DLLs.
 
-**Rejected because:** More complex MSBuild configuration, increases test output size, and the CLI DLLs are already built - we just need to know where they are.
-
-### Test CLI logic directly without process spawning
-
-Refactor CLIs to expose testable command classes.
-
-**Not rejected, but orthogonal:** This is good design regardless, but doesn't replace integration tests that verify actual CLI behavior (argument parsing, exit codes, stdout/stderr).
+**Rejected because:** NCrunch builds in an isolated workspace, so MSBuild path resolution (`$(MSBuildThisFileDirectory)`) points to the workspace, not the original source tree. The generated paths would be invalid.
 
 ### NCrunch-specific configuration
 
 Configure NCrunch to copy source files or run tests in-place.
 
 **Rejected because:** Couples tests to specific tool. Other test runners may have the same issue.
+
+### Test CLI logic directly without process spawning
+
+Refactor CLIs to expose testable command classes.
+
+**Not rejected, but orthogonal:** This is good design regardless, but doesn't replace integration tests that verify actual CLI behavior (argument parsing, exit codes, stdout/stderr).
 
 ## Consequences
 
@@ -117,18 +105,18 @@ Configure NCrunch to copy source files or run tests in-place.
 - No test skipping or conditional execution
 - Faster test execution (`dotnet exec` vs `dotnet run --project`)
 - Test-runner agnostic - no tool-specific configuration
-- Clear error messages if CLI DLLs not found
+- Simple implementation - just copy files at build time
 
 ### Negative
 
-- Requires JSON file generation during build
-- Absolute paths in config file (not portable between machines, but not needed to be)
+- Test output directory grows slightly (adds ~90KB for CLI DLLs)
+- CLI DLLs are duplicated (original location + test output)
 
 ## Validation
 
 - [x] All CLI integration tests pass under `dotnet test`
 - [x] Tests pass in Visual Studio
-- [ ] Tests pass under NCrunch parallel execution (to be verified on Windows)
+- [ ] Tests pass under NCrunch parallel execution (pending verification)
 - [x] No conditional test execution based on environment
 - [x] No test skipping
 
