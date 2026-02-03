@@ -30,20 +30,14 @@
     </ProjectReference>
   </ItemGroup>
 
-  <!-- Generate config file with absolute paths to CLI DLLs for integration tests -->
-  <Target Name="GenerateCliPaths" AfterTargets="Build">
+  <!-- Copy CLI DLLs to test output directory so they travel with the test assembly -->
+  <Target Name="CopyCliTools" AfterTargets="Build">
     <PropertyGroup>
-      <!-- Get absolute paths -->
-      <TurtleCliPathRaw>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll'))</TurtleCliPathRaw>
-      <SparqlCliPathRaw>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll'))</SparqlCliPathRaw>
-      <!-- Escape backslashes for JSON (Windows paths have \ which must be \\ in JSON) -->
-      <TurtleCliPath>$(TurtleCliPathRaw.Replace('\', '\\'))</TurtleCliPath>
-      <SparqlCliPath>$(SparqlCliPathRaw.Replace('\', '\\'))</SparqlCliPath>
+      <TurtleCliSource>$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll</TurtleCliSource>
+      <SparqlCliSource>$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll</SparqlCliSource>
     </PropertyGroup>
-    <WriteLinesToFile
-      File="$(OutputPath)cli-paths.json"
-      Lines="{&quot;TurtleCli&quot;: &quot;$(TurtleCliPath)&quot;, &quot;SparqlCli&quot;: &quot;$(SparqlCliPath)&quot;}"
-      Overwrite="true" />
+    <Copy SourceFiles="$(TurtleCliSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(SparqlCliSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
 
   <ItemGroup>
