@@ -33,8 +33,12 @@
   <!-- Generate config file with absolute paths to CLI DLLs for integration tests -->
   <Target Name="GenerateCliPaths" AfterTargets="Build">
     <PropertyGroup>
-      <TurtleCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll'))</TurtleCliPath>
-      <SparqlCliPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll'))</SparqlCliPath>
+      <!-- Get absolute paths -->
+      <TurtleCliPathRaw>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll'))</TurtleCliPathRaw>
+      <SparqlCliPathRaw>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll'))</SparqlCliPathRaw>
+      <!-- Escape backslashes for JSON (Windows paths have \ which must be \\ in JSON) -->
+      <TurtleCliPath>$(TurtleCliPathRaw.Replace('\', '\\'))</TurtleCliPath>
+      <SparqlCliPath>$(SparqlCliPathRaw.Replace('\', '\\'))</SparqlCliPath>
     </PropertyGroup>
     <WriteLinesToFile
       File="$(OutputPath)cli-paths.json"
