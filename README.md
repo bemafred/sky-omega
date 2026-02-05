@@ -1,6 +1,6 @@
 # 🌌 Sky Omega
 
-> **v0.6.2 Released** — Stack overflow fix: QueryResults reduced from 90KB to 6KB, enabling parallel test execution.
+> **v1.0.0 Released** — Mercury reaches production-ready status with 100% W3C SPARQL 1.1 conformance.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---

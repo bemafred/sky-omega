@@ -289,6 +289,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.0.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.0.0
 [0.6.2]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.2
 [0.6.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.1
 [0.6.0-beta.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.0-beta.1
