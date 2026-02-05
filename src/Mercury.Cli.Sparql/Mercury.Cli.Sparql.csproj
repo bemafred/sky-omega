@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Mercury\Mercury.csproj" />
+    <ProjectReference Include="..\Mercury.Sparql.Tool\Mercury.Sparql.Tool.csproj" />
   </ItemGroup>
 
 </Project>

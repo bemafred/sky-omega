@@ -21,24 +21,9 @@
     <ProjectReference Include="..\..\src\Mercury\Mercury.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Runtime\Mercury.Runtime.csproj" />
     <ProjectReference Include="..\..\src\Mercury.Pruning\Mercury.Pruning.csproj" />
-    <!-- CLI projects for integration tests - build only, no assembly reference -->
-    <ProjectReference Include="..\..\src\Mercury.Cli.Turtle\Mercury.Cli.Turtle.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-    <ProjectReference Include="..\..\src\Mercury.Cli.Sparql\Mercury.Cli.Sparql.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
+    <ProjectReference Include="..\..\src\Mercury.Sparql.Tool\Mercury.Sparql.Tool.csproj" />
+    <ProjectReference Include="..\..\src\Mercury.Turtle.Tool\Mercury.Turtle.Tool.csproj" />
   </ItemGroup>
-
-  <!-- Copy CLI DLLs to test output directory so they travel with the test assembly -->
-  <Target Name="CopyCliTools" AfterTargets="Build">
-    <PropertyGroup>
-      <TurtleCliSource>$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Turtle\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Turtle.dll</TurtleCliSource>
-      <SparqlCliSource>$(MSBuildThisFileDirectory)..\..\src\Mercury.Cli.Sparql\bin\$(Configuration)\$(TargetFramework)\Mercury.Cli.Sparql.dll</SparqlCliSource>
-    </PropertyGroup>
-    <Copy SourceFiles="$(TurtleCliSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="$(SparqlCliSource)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-  </Target>
 
   <ItemGroup>
     <None Update="xunit.runner.json">

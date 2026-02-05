@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -286,12 +286,12 @@ public class SparqlToolTests : IDisposable
 
 ## Success Criteria
 
-- [ ] All existing CLI functionality preserved
-- [ ] Tests run successfully in Visual Studio, Rider, `dotnet test`, and NCrunch
-- [ ] No process spawning in test code
-- [ ] Code coverage includes CLI library logic
-- [ ] CLI executables remain functional (manual verification)
-- [ ] Build time not significantly increased
+- [x] All existing CLI functionality preserved
+- [x] Tests run successfully in Visual Studio, Rider, `dotnet test`, and NCrunch
+- [x] No process spawning in test code
+- [x] Code coverage includes CLI library logic
+- [x] CLI executables remain functional (manual verification)
+- [x] Build time not significantly increased
 
 ## Consequences
 

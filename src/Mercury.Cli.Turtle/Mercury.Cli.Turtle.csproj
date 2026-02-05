@@ -31,9 +31,9 @@
     <RepositoryUrl>https://github.com/bemafred/sky-omega-public</RepositoryUrl>
   </PropertyGroup>
 
-  <ItemGroup><!-- No external dependencies - BCL only -->
-  
+  <ItemGroup>
     <ProjectReference Include="..\Mercury\Mercury.csproj" />
+    <ProjectReference Include="..\Mercury.Turtle.Tool\Mercury.Turtle.Tool.csproj" />
   </ItemGroup>
 
 </Project>

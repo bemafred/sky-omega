@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>SkyOmega.Mercury.Sparql.Tool</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Mercury\Mercury.csproj" />
+    <ProjectReference Include="..\Mercury.Abstractions\Mercury.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
