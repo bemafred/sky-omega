@@ -43,7 +43,7 @@ dotnet run --project examples/Mercury.Examples -- demo
 For throwaway scripts, one-off debugging, test data generation, or quick repro cases, use file-based apps instead of creating a full project. Write a single `.cs` file and run it directly:
 
 ```csharp
-#!/usr/bin/env dotnet
+#!/usr/bin/env -S dotnet
 #:project ../src/Mercury/Mercury.csproj
 
 // your code here
@@ -51,7 +51,7 @@ For throwaway scripts, one-off debugging, test data generation, or quick repro c
 
 ```bash
 chmod +x script.cs
-./script.cs          # or: dotnet run script.cs
+./script.cs          # or: dotnet script.cs
 ```
 
 Use `#:package Name@version` for NuGet references, `#:project path` for project references, `#:sdk Microsoft.NET.Sdk.Web` for web apps. Do not add file-based scripts to the solution — they are standalone by design.
