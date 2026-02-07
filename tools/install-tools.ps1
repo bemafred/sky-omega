@@ -7,7 +7,7 @@ $ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path
 $NupkgDir = Join-Path $ScriptDir "nupkg"
 
 Write-Host "Building and packing Sky Omega tools..."
-dotnet pack (Join-Path $ScriptDir "SkyOmega.sln") -c Release -o $NupkgDir
+dotnet pack (Join-Path $ScriptDir "SkyOmega.sln") -c Release -o $NupkgDir -p:PackageReadmeFile=""
 
 Write-Host ""
 Write-Host "Installing tools..."
@@ -22,9 +22,9 @@ $packages = @(
 foreach ($pkg in $packages) {
     Write-Host "  $pkg"
     try {
-        dotnet tool install -g $pkg --add-source $NupkgDir 2>$null
+        dotnet tool install -g $pkg --prerelease --add-source $NupkgDir 2>$null
     } catch {
-        dotnet tool update -g $pkg --add-source $NupkgDir
+        dotnet tool update -g $pkg --prerelease --add-source $NupkgDir
     }
 }
 

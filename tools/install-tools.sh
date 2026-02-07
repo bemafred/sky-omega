@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 NUPKG_DIR="$SCRIPT_DIR/nupkg"
 
 echo "Building and packing Sky Omega tools..."
-dotnet pack "$SCRIPT_DIR/SkyOmega.sln" -c Release -o "$NUPKG_DIR"
+dotnet pack "$SCRIPT_DIR/SkyOmega.sln" -c Release -o "$NUPKG_DIR" -p:PackageReadmeFile=""
 
 echo ""
 echo "Installing tools..."
@@ -16,8 +16,8 @@ echo "Installing tools..."
 for pkg in SkyOmega.Mercury.Cli SkyOmega.Mercury.Cli.Sparql \
            SkyOmega.Mercury.Cli.Turtle SkyOmega.Mercury.Mcp; do
     echo "  $pkg"
-    dotnet tool install -g "$pkg" --add-source "$NUPKG_DIR" 2>/dev/null \
-        || dotnet tool update -g "$pkg" --add-source "$NUPKG_DIR"
+    dotnet tool install -g "$pkg" --prerelease --add-source "$NUPKG_DIR" 2>/dev/null \
+        || dotnet tool update -g "$pkg" --prerelease --add-source "$NUPKG_DIR"
 done
 
 echo ""
