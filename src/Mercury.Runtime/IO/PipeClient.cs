@@ -208,7 +208,8 @@ public sealed class PipeClient : IDisposable
                 var promptStart = current.LastIndexOf('\n');
                 if (promptStart >= 0)
                 {
-                    return (current[..promptStart], current[(promptStart + 1)..]);
+                    // Include the newline in output so Write() ends on a new line
+                    return (current[..(promptStart + 1)], current[(promptStart + 1)..]);
                 }
                 else
                 {
