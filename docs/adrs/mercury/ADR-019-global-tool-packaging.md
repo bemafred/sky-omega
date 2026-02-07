@@ -5,7 +5,7 @@
 
 ## Context
 
-Sky Omega reached v1.0 with four CLI/MCP executables runnable only via `dotnet run --project` from within the repo. For v2.0, these tools need to be globally accessible from any terminal, any repo, on all platforms. Mercury.Mcp must also be connectable from Claude Code as an MCP server with persistent semantic memory.
+Sky Omega reached v1.0 with four CLI/MCP executables runnable only via `dotnet run --project` from within the repo. For v1.1, these tools need to be globally accessible from any terminal, any repo, on all platforms. Mercury.Mcp must also be connectable from Claude Code as an MCP server with persistent semantic memory.
 
 **Problems addressed:**
 1. Tools only runnable from repo root via `dotnet run`
@@ -22,10 +22,10 @@ All four executables are packaged as .NET global tools via `PackAsTool`:
 
 | Project | PackageId | ToolCommandName | Version |
 |---------|-----------|-----------------|---------|
-| Mercury.Cli | SkyOmega.Mercury.Cli | `mercury` | 2.0.0-preview.1 |
-| Mercury.Cli.Sparql | SkyOmega.Mercury.Cli.Sparql | `mercury-sparql` | 2.0.0-preview.1 |
-| Mercury.Cli.Turtle | SkyOmega.Mercury.Cli.Turtle | `mercury-turtle` | 2.0.0-preview.1 |
-| Mercury.Mcp | SkyOmega.Mercury.Mcp | `mercury-mcp` | 2.0.0-preview.1 |
+| Mercury.Cli | SkyOmega.Mercury.Cli | `mercury` | 1.1.0 |
+| Mercury.Cli.Sparql | SkyOmega.Mercury.Cli.Sparql | `mercury-sparql` | 1.1.0 |
+| Mercury.Cli.Turtle | SkyOmega.Mercury.Cli.Turtle | `mercury-turtle` | 1.1.0 |
+| Mercury.Mcp | SkyOmega.Mercury.Mcp | `mercury-mcp` | 1.1.0 |
 
 ### 2. Persistent store paths via `MercuryPaths`
 
