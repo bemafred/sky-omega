@@ -28,7 +28,6 @@
 
   <PropertyGroup>
     <PackageId>SkyOmega.Mercury.Cli.Turtle</PackageId>
-    <Version>1.1.0</Version>
     <Authors>Sky Omega Team</Authors>
     <Description>Mercury Turtle CLI - zero-GC streaming Turtle (RDF 1.2) parser demo.</Description>
     <PackageTags>RDF;Turtle;Parser;Streaming;Zero-GC;Lucy;SkyOmega</PackageTags>

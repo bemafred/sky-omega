@@ -10,7 +10,6 @@
         <PackAsTool>true</PackAsTool>
         <ToolCommandName>mercury</ToolCommandName>
         <PackageId>SkyOmega.Mercury.Cli</PackageId>
-        <Version>1.1.0</Version>
         <Authors>Sky Omega Team</Authors>
         <Description>Mercury SPARQL CLI - interactive REPL for RDF triple store with zero-GC performance.</Description>
     </PropertyGroup>

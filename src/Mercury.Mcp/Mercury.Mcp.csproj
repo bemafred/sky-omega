@@ -10,7 +10,6 @@
         <PackAsTool>true</PackAsTool>
         <ToolCommandName>mercury-mcp</ToolCommandName>
         <PackageId>SkyOmega.Mercury.Mcp</PackageId>
-        <Version>1.1.0</Version>
         <Authors>Sky Omega Team</Authors>
         <Description>Mercury MCP Server - semantic memory for Claude via Model Context Protocol.</Description>
     </PropertyGroup>

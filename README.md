@@ -1,6 +1,6 @@
 # 🌌 Sky Omega
 
-> **v1.1.0 Released** — Global tool packaging, persistent stores, and Microsoft MCP SDK integration.
+> **v1.1.1 Released** — Version consolidation and `-v`/`--version` support for all CLI tools.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---

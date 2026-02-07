@@ -16,7 +16,6 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>mercury-sparql</ToolCommandName>
     <PackageId>SkyOmega.Mercury.Cli.Sparql</PackageId>
-    <Version>1.1.0</Version>
     <Authors>Sky Omega Team</Authors>
     <Description>Mercury SPARQL CLI - zero-GC SPARQL query engine demo.</Description>
   </PropertyGroup>

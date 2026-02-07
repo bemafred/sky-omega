@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.1] - 2026-02-07
+
+Version consolidation and CLI improvements.
+
+### Added
+
+- **`-v`/`--version` flag** for all CLI tools (`mercury`, `mercury-mcp`, `mercury-sparql`, `mercury-turtle`)
+
+### Changed
+
+- **Centralized versioning** - `Directory.Build.props` is now the single source of truth for all project versions
+- **Mercury.Mcp reset** from `2.0.0-preview.1` to `1.1.1` to align with unified versioning
+
+---
+
 ## [1.1.0] - 2026-02-07
 
 Global tool packaging, persistent stores, and Microsoft MCP SDK integration.
@@ -333,6 +348,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.1.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.1
 [1.1.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.0
 [1.0.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.0.0
 [0.6.2]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.2
