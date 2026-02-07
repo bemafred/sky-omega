@@ -11,6 +11,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-02-07
+
+Global tool packaging, persistent stores, and Microsoft MCP SDK integration.
+
+### Added
+
+#### Global Tool Packaging (ADR-019)
+- **`mercury`** - SPARQL CLI installable as .NET global tool
+- **`mercury-mcp`** - MCP server installable as .NET global tool
+- **`mercury-sparql`** - SPARQL query engine demo as global tool
+- **`mercury-turtle`** - Turtle parser demo as global tool
+- **Install scripts** - `tools/install-tools.sh` (bash) and `tools/install-tools.ps1` (PowerShell)
+
+#### Persistent Store Defaults
+- **`MercuryPaths`** - Well-known persistent store paths per platform
+  - macOS: `~/Library/SkyOmega/stores/{name}/`
+  - Linux/WSL: `~/.local/share/SkyOmega/stores/{name}/`
+  - Windows: `%LOCALAPPDATA%\SkyOmega\stores\{name}\`
+- **`mercury`** defaults to persistent store at `MercuryPaths.Store("cli")`
+- **`mercury-mcp`** defaults to persistent store at `MercuryPaths.Store("mcp")`
+
+#### Claude Code Integration
+- **`.mcp.json`** - Dev-time MCP config for Claude Code at repo root
+- **User-scope install** - `claude mcp add --scope user mercury -- mercury-mcp`
+
+### Changed
+
+#### Microsoft MCP SDK Migration
+- **Replaced hand-rolled `McpProtocol.cs`** (~494 lines) with official `ModelContextProtocol` NuGet package (0.8.0-preview.1)
+- **`[McpServerToolType]`** attribute-based tool registration via `MercuryTools.cs`
+- **Hosted service model** - PipeServer and SparqlHttpServer as `IHostedService` implementations
+- **`Microsoft.Extensions.Hosting`** - Proper application lifecycle management
+
+#### CLI Library Extraction (ADR-018)
+- Extracted CLI logic into testable libraries (`Mercury.Sparql.Tool`, `Mercury.Turtle.Tool`)
+
+### Documentation
+
+- **ADR-019** - Global Tool Packaging and Persistent Stores
+- **ADR-018** - CLI Library Extraction
+- **Mercury ADR index** updated with all 20 ADRs and correct statuses
+
+---
+
 ## [1.0.0] - 2026-01-31
 
 Mercury reaches production-ready status with complete W3C SPARQL 1.1 conformance.
@@ -289,6 +333,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.1.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.0
 [1.0.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.0.0
 [0.6.2]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.2
 [0.6.1]: https://github.com/bemafred/sky-omega/releases/tag/v0.6.1

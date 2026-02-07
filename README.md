@@ -1,6 +1,6 @@
 # 🌌 Sky Omega
 
-> **v1.0.0 Released** — Mercury reaches production-ready status with 100% W3C SPARQL 1.1 conformance.
+> **v1.1.0 Released** — Global tool packaging, persistent stores, and Microsoft MCP SDK integration.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
