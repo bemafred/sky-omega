@@ -2,6 +2,7 @@
 // Mercury SPARQL CLI - Thin shim that delegates to SparqlTool library
 
 using System;
+using System.Reflection;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Sparql.Tool;
@@ -13,6 +14,15 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         var options = ParseArgs(args);
+
+        if (options.ShowVersion)
+        {
+            var version = typeof(Program).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? "unknown";
+            Console.WriteLine($"mercury-sparql {version}");
+            return 0;
+        }
 
         if (options.ShowHelp)
         {
@@ -41,6 +51,11 @@ internal static class Program
 
             switch (arg)
             {
+                case "-v":
+                case "--version":
+                    options.ShowVersion = true;
+                    return options;
+
                 case "-h":
                 case "--help":
                     options.ShowHelp = true;
@@ -129,6 +144,7 @@ internal static class Program
                 mercury-sparql [OPTIONS] [QUERY]
 
             OPTIONS:
+                -v, --version           Show version information
                 -h, --help              Show this help message
                 -l, --load <FILE>       Load RDF file (Turtle, N-Triples, RDF/XML, N-Quads, TriG, JSON-LD)
                 -q, --query <SPARQL>    Execute SPARQL query
@@ -184,6 +200,7 @@ internal class CliOptions
     public string? Explain { get; set; }
     public OutputFormat Format { get; set; } = OutputFormat.Json;
     public RdfFormat RdfOutputFormat { get; set; } = RdfFormat.NTriples;
+    public bool ShowVersion { get; set; }
     public bool ShowHelp { get; set; }
     public bool Repl { get; set; }
     public string? Error { get; set; }

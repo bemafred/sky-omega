@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ string? storePath = null;
 int httpPort = MercuryPorts.Mcp;
 bool enableHttpUpdates = false;
 bool showHelp = false;
+bool showVersion = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -28,6 +30,10 @@ for (int i = 0; i < args.Length; i++)
         case "-h":
         case "--help":
             showHelp = true;
+            break;
+        case "-v":
+        case "--version":
+            showVersion = true;
             break;
         case "-d":
         case "--data":
@@ -49,6 +55,15 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
+if (showVersion)
+{
+    var version = Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+        ?.InformationalVersion ?? "unknown";
+    Console.WriteLine($"mercury-mcp {version}");
+    return 0;
+}
+
 if (showHelp)
 {
     Console.Error.WriteLine("""
@@ -57,6 +72,7 @@ if (showHelp)
         Usage: mercury-mcp [options] [store-path]
 
         Options:
+          -v, --version           Show version information
           -h, --help              Show this help message
           -d, --data <path>       Path to data directory
           -p, --port <port>       HTTP port (default: 3030)

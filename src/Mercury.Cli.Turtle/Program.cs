@@ -2,6 +2,7 @@
 // Mercury Turtle CLI - Thin shim that delegates to TurtleTool library
 
 using System;
+using System.Reflection;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Turtle.Tool;
@@ -13,6 +14,15 @@ internal static class Program
     public static async Task<int> Main(string[] args)
     {
         var options = ParseArgs(args);
+
+        if (options.ShowVersion)
+        {
+            var version = typeof(Program).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? "unknown";
+            Console.WriteLine($"mercury-turtle {version}");
+            return 0;
+        }
 
         if (options.ShowHelp)
         {
@@ -41,6 +51,11 @@ internal static class Program
 
             switch (arg)
             {
+                case "-v":
+                case "--version":
+                    options.ShowVersion = true;
+                    return options;
+
                 case "-h":
                 case "--help":
                     options.ShowHelp = true;
@@ -72,7 +87,6 @@ internal static class Program
                     if (options.OutputFormat == RdfFormat.Unknown) { options.Error = $"Unknown format: {fmt}. Use nt, nq, trig, or ttl."; return options; }
                     break;
 
-                case "-v":
                 case "--validate":
                     options.Validate = true;
                     break;
@@ -118,11 +132,12 @@ internal static class Program
                 mercury-turtle [OPTIONS] [INPUT_FILE]
 
             OPTIONS:
+                -v, --version           Show version information
                 -h, --help              Show this help message
                 -i, --input <FILE>      Input Turtle file
                 -o, --output <FILE>     Output file (format detected from extension)
                 --output-format <FMT>   Output format: nt, nq, trig, ttl
-                -v, --validate          Validate syntax only (report errors)
+                --validate              Validate syntax only (report errors)
                 --stats                 Show statistics (triple count, predicates)
                 -b, --benchmark         Run performance benchmark
                 -n, --count <N>         Number of triples for benchmark (default: 10000)
@@ -169,6 +184,7 @@ internal class CliOptions
     public bool Stats { get; set; }
     public bool Benchmark { get; set; }
     public int TripleCount { get; set; } = 10_000;
+    public bool ShowVersion { get; set; }
     public bool ShowHelp { get; set; }
     public string? Error { get; set; }
 

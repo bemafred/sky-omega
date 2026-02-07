@@ -58,6 +58,8 @@ dotnet tool install -g SkyOmega.Mercury.Mcp --add-source ./nupkg
 | `mercury-sparql` | SPARQL query engine demo |
 | `mercury-turtle` | Turtle parser demo |
 
+All tools support `-v`/`--version`.
+
 ### MCP Integration
 
 **Dev-time** (this repo): `.mcp.json` at repo root auto-configures Claude Code.

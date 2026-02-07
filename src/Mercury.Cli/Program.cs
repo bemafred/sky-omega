@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using System.Reflection;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql;
@@ -14,6 +15,7 @@ using SkyOmega.Mercury.Storage;
 string? storePath = null;
 bool inMemory = false;
 bool showHelp = false;
+bool showVersion = false;
 int httpPort = MercuryPorts.Cli;
 bool enableHttp = true;
 string? attachTarget = null;
@@ -25,6 +27,10 @@ for (int i = 0; i < args.Length; i++)
         case "-h":
         case "--help":
             showHelp = true;
+            break;
+        case "-v":
+        case "--version":
+            showVersion = true;
             break;
         case "-m":
         case "--memory":
@@ -56,6 +62,15 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
+if (showVersion)
+{
+    var version = Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+        ?.InformationalVersion ?? "unknown";
+    Console.WriteLine($"mercury {version}");
+    return 0;
+}
+
 if (showHelp)
 {
     Console.WriteLine("""
@@ -64,6 +79,7 @@ if (showHelp)
         Usage: mercury [options] [store-path]
 
         Options:
+          -v, --version      Show version information
           -h, --help         Show this help message
           -m, --memory       Use temporary in-memory store (deleted on exit)
           -d, --data <path>  Path to data directory
