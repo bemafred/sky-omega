@@ -3,7 +3,6 @@
 
 using System.Diagnostics;
 using SkyOmega.Mercury.Abstractions;
-using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
@@ -66,16 +65,16 @@ if (showHelp)
 
         Options:
           -h, --help         Show this help message
-          -m, --memory       Use in-memory store (no persistence)
+          -m, --memory       Use temporary in-memory store (deleted on exit)
           -d, --data <path>  Path to data directory
           -p, --port <port>  HTTP port (default: 3031)
           --no-http          Disable HTTP endpoint
           -a, --attach [target]  Attach to running instance (default: mcp)
 
         Examples:
-          mercury                     # In-memory store with HTTP on :3031
-          mercury ./mydata            # Persistent store at ./mydata
-          mercury -m                  # Explicit in-memory mode
+          mercury                     # Persistent store at ~/Library/SkyOmega/stores/cli/
+          mercury ./mydata            # Custom store path
+          mercury -m                  # Temporary store (deleted on exit)
           mercury -a mcp              # Attach to MCP instance via pipe
           mercury -a                  # Same as above
 
@@ -100,21 +99,20 @@ if (attachTarget != null)
 string actualPath;
 bool usingTempStore = false;
 
-if (inMemory || storePath == null)
+if (inMemory)
 {
-    // Use temp directory for in-memory mode
-    actualPath = TempPath.Cli("session");
+    // Explicit in-memory mode: use temp directory, cleaned up on exit
+    actualPath = SkyOmega.Mercury.Runtime.TempPath.Cli("session");
     usingTempStore = true;
-
-    if (!inMemory && storePath == null)
-    {
-        Console.WriteLine("(Using temporary store. Use -d <path> for persistence.)");
-        Console.WriteLine();
-    }
+}
+else if (storePath != null)
+{
+    actualPath = storePath;
 }
 else
 {
-    actualPath = storePath;
+    // Default: persistent per-user store
+    actualPath = MercuryPaths.Store("cli");
 }
 
 var store = new QuadStore(actualPath);

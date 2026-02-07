@@ -2,16 +2,20 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Mcp;
+using SkyOmega.Mercury.Mcp.Services;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
-using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
 
-// Parse command line arguments
+// Parse command line arguments before building host
 string? storePath = null;
 int httpPort = MercuryPorts.Mcp;
 bool enableHttpUpdates = false;
@@ -59,7 +63,7 @@ if (showHelp)
           --enable-http-updates   Allow SPARQL UPDATE via HTTP
 
         Examples:
-          mercury-mcp                          # Default store at ./mcp-store
+          mercury-mcp                          # Persistent store at ~/Library/SkyOmega/stores/mcp/
           mercury-mcp ./mydata                 # Custom store path
           mercury-mcp -p 3031 --enable-http-updates
 
@@ -71,57 +75,67 @@ if (showHelp)
     return 0;
 }
 
-// Default store path
-storePath ??= "./mcp-store";
+// Default store path - persistent per-user location
+storePath ??= MercuryPaths.Store("mcp");
 
 Console.Error.WriteLine("Mercury MCP Server starting...");
 Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
 
-// Create store
-using var store = new QuadStore(storePath);
+// Create store (singleton for the lifetime of the host)
+var store = new QuadStore(storePath);
 
-// Create session factory for pipe connections
-ReplSession CreateSession() => new ReplSession(
-    executeQuery: sparql => ExecuteQuery(store, sparql),
-    executeUpdate: sparql => ExecuteUpdate(store, sparql),
-    getStatistics: () => GetStatistics(store),
-    getNamedGraphs: () => GetNamedGraphs(store));
-
-// Start HTTP server
-using var httpServer = new SparqlHttpServer(
-    store,
-    $"http://localhost:{httpPort}/",
-    new SparqlHttpServerOptions { EnableUpdates = enableHttpUpdates });
-
-httpServer.Start();
-Console.Error.WriteLine($"  HTTP: http://localhost:{httpPort}/sparql");
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
 
-// Start pipe server for CLI attachment
-using var pipeServer = new PipeServer(
-    MercuryPorts.McpPipeName,
-    CreateSession,
-    welcomeMessage: $"Connected to Mercury MCP (store: {storePath})",
-    prompt: "mcp> ");
+// Build host with MCP SDK
+var builder = Host.CreateApplicationBuilder();
+builder.Logging.AddConsole(options =>
+{
+    options.LogToStandardErrorThreshold = LogLevel.Trace;
+});
 
-pipeServer.Start();
-Console.Error.WriteLine($"  Pipe: {MercuryPorts.McpPipeName}");
+// Register QuadStore as singleton
+builder.Services.AddSingleton(store);
+
+// Register MCP server with stdio transport and tools
+builder.Services
+    .AddMcpServer(options =>
+    {
+        options.ServerInfo = new()
+        {
+            Name = "mercury-mcp",
+            Version = "2.0.0-preview.1"
+        };
+    })
+    .WithStdioServerTransport()
+    .WithTools<MercuryTools>();
+
+// Register hosted services for HTTP and pipe servers
+builder.Services.AddSingleton<HttpServerHostedService>(
+    _ => new HttpServerHostedService(store, httpPort, enableHttpUpdates));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HttpServerHostedService>());
+
+builder.Services.AddSingleton<PipeServerHostedService>(
+    _ => new PipeServerHostedService(store, CreateSession, storePath));
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PipeServerHostedService>());
 
 Console.Error.WriteLine();
 Console.Error.WriteLine("Ready. Waiting for MCP messages on stdin...");
 Console.Error.WriteLine();
 
-// Run MCP protocol on stdin/stdout
-await McpProtocol.RunAsync(
-    store,
-    Console.OpenStandardInput(),
-    Console.OpenStandardOutput());
+await builder.Build().RunAsync();
 
 Console.Error.WriteLine("MCP Server shutting down...");
-await pipeServer.StopAsync();
-await httpServer.StopAsync();
+store.Dispose();
 
 return 0;
+
+// --- Session factory for pipe connections ---
+
+static ReplSession CreateSession(QuadStore store) => new ReplSession(
+    executeQuery: sparql => ExecuteQuery(store, sparql),
+    executeUpdate: sparql => ExecuteUpdate(store, sparql),
+    getStatistics: () => GetStatistics(store),
+    getNamedGraphs: () => GetNamedGraphs(store));
 
 // --- Execution helpers for ReplSession ---
 

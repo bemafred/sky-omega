@@ -38,6 +38,35 @@ dotnet run --project examples/Mercury.Examples -- temporal
 dotnet run --project examples/Mercury.Examples -- demo
 ```
 
+## Global Tools
+
+Mercury tools are packaged as .NET global tools for use from any directory.
+
+```bash
+# Install all tools from local source
+./tools/install-tools.sh
+
+# Or install individually from local nupkg
+dotnet pack SkyOmega.sln -c Release -o ./nupkg
+dotnet tool install -g SkyOmega.Mercury.Mcp --add-source ./nupkg
+```
+
+| Command | Description |
+|---------|-------------|
+| `mercury` | SPARQL CLI with persistent store at `~/Library/SkyOmega/stores/cli/` |
+| `mercury-mcp` | MCP server for Claude with persistent store at `~/Library/SkyOmega/stores/mcp/` |
+| `mercury-sparql` | SPARQL query engine demo |
+| `mercury-turtle` | Turtle parser demo |
+
+### MCP Integration
+
+**Dev-time** (this repo): `.mcp.json` at repo root auto-configures Claude Code.
+
+**Production** (any repo):
+```bash
+claude mcp add --transport stdio --scope user mercury -- mercury-mcp
+```
+
 ## In-Flight Work: ADRs
 
 Architecture Decision Records track planning and progress for complex features:

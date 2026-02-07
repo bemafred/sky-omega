@@ -7,7 +7,18 @@
         <Nullable>enable</Nullable>
         <AssemblyName>mercury-mcp</AssemblyName>
         <RootNamespace>SkyOmega.Mercury.Mcp</RootNamespace>
+        <PackAsTool>true</PackAsTool>
+        <ToolCommandName>mercury-mcp</ToolCommandName>
+        <PackageId>SkyOmega.Mercury.Mcp</PackageId>
+        <Version>2.0.0-preview.1</Version>
+        <Authors>Sky Omega Team</Authors>
+        <Description>Mercury MCP Server - semantic memory for Claude via Model Context Protocol.</Description>
     </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="ModelContextProtocol" Version="0.8.0-preview.1" />
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\Mercury\Mercury.csproj" />

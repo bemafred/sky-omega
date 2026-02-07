@@ -7,26 +7,30 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <RootNamespace>SkyOmega.Mercury.Cli.Turtle</RootNamespace>
-    
+
     <!-- Zero-GC optimizations -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <RetainVMGarbageCollection>true</RetainVMGarbageCollection>
-    
+
     <!-- Performance -->
     <TieredCompilation>true</TieredCompilation>
     <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
-    
+
     <!-- Warnings -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningLevel>5</WarningLevel>
+
+    <!-- Global tool packaging -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>mercury-turtle</ToolCommandName>
   </PropertyGroup>
 
   <PropertyGroup>
-    <PackageId>SkyOmega.Rdf.TurtleParser</PackageId>
-    <Version>1.0.0</Version>
+    <PackageId>SkyOmega.Mercury.Cli.Turtle</PackageId>
+    <Version>2.0.0-preview.1</Version>
     <Authors>Sky Omega Team</Authors>
-    <Description>Zero-GC streaming Turtle (RDF 1.2) parser with EBNF grammar. No external dependencies.</Description>
+    <Description>Mercury Turtle CLI - zero-GC streaming Turtle (RDF 1.2) parser demo.</Description>
     <PackageTags>RDF;Turtle;Parser;Streaming;Zero-GC;Lucy;SkyOmega</PackageTags>
     <RepositoryUrl>https://github.com/bemafred/sky-omega-public</RepositoryUrl>
   </PropertyGroup>
