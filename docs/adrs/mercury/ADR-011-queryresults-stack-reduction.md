@@ -40,7 +40,7 @@ Stack overflow issue resolved. All W3C conformance tests now pass (1896/1896).
 2. However, `TemporalQuadEnumerator` and `TemporalResultEnumerator` do NOT contain Span fields
 3. These could be changed from `ref struct` to `struct`, enabling pooled array storage
 
-See [ADR-011-implementation-plan.md](ADR-011-implementation-plan.md) for detailed investigation notes.
+See [ADR-011b-implementation-plan.md](ADR-011b-implementation-plan.md) for detailed investigation notes.
 
 ## Context
 

@@ -2,7 +2,15 @@
 
 ## Status
 
-Proposed
+**Accepted** — Core attach mode implemented (2026-02)
+
+### Implementation Note
+
+The CLI-to-MCP attach capability (`mercury -a mcp`) is implemented and working. The implementation was simplified from the original design:
+
+- **Implemented:** CLI attaches to running MCP server via named pipe, executes SPARQL queries against MCP's store using dependency injection + `ReplSession` callbacks
+- **Simplified:** No `IStoreContext` abstraction needed — the `ReplSession` receives a `QuadStore` directly from the MCP connection, avoiding the local/remote context class hierarchy
+- **Deferred:** Dual simultaneous contexts, `SERVICE mcp://` routing, `:local`/`:remote` REPL commands, `SparqlHttpServer` integration
 
 ## Context
 

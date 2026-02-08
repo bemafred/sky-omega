@@ -1,4 +1,4 @@
-# ADR-011 Implementation Plan: QueryResults Stack Reduction
+# ADR-011b Implementation Plan: QueryResults Stack Reduction
 
 ## Executive Summary
 
