@@ -44,12 +44,12 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ## 📖 Documentation Guide
 
-| Document                       | Purpose                                          |
-|--------------------------------|--------------------------------------------------|
-| [AI.md](AI.md)                 | **Start here if you're an AI assistant**         |
-| [CLAUDE.md](CLAUDE.md)         | Operational guidance for AI-assisted development |
-| [MERCURY.md](MERCURY.md)       | Semantic memory discipline — when, why, how      |
-| [STATISTICS.md](STATISTICS.md) | Codebase metrics and conformance tracking        |
+| Document                              | Purpose                                          |
+|---------------------------------------|--------------------------------------------------|
+| [AI.md](AI.md)                        | **Start here if you're an AI assistant**         |
+| [CLAUDE.md](CLAUDE.md)                | Operational guidance for AI-assisted development |
+| [MERCURY.md](MERCURY.md)              | Semantic memory discipline — when, why, how      |
+| [STATISTICS.md](STATISTICS.md)        | Codebase metrics and conformance tracking        |
 
 ---
 
