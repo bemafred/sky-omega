@@ -140,17 +140,24 @@ SkyOmega.sln
 │   │   │   └── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
-│   ├── Mercury.Cli.Turtle/  # Turtle parser CLI demo
-│   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI demo
+│   ├── Mercury.Abstractions/ # Shared interfaces and types (RdfFormat, Results)
+│   ├── Mercury.Runtime/     # Runtime utilities (CrossProcessStoreGate, TempPath, buffers)
+│   ├── Mercury.Cli/         # Mercury CLI tool (persistent store)
+│   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI (thin shim over Mercury.Sparql.Tool)
+│   ├── Mercury.Cli.Turtle/  # Turtle parser CLI (thin shim over Mercury.Turtle.Tool)
+│   ├── Mercury.Sparql.Tool/ # SPARQL CLI logic as testable library
+│   ├── Mercury.Turtle.Tool/ # Turtle CLI logic as testable library
+│   ├── Mercury.Mcp/         # MCP server for Claude
 │   ├── Mercury.Pruning/     # Dual-instance pruning with copy-and-switch
+│   ├── Mercury.Solid/       # Solid protocol server (authentication, access control, N3)
 │   │
-│   ├── Minerva/             # Thought substrate - tensor inference (BCL only)
+│   ├── Minerva.Core/        # Thought substrate - tensor inference (BCL only)
 │   │   ├── Weights/         # GGUF and SafeTensors readers
 │   │   ├── Tokenizers/      # BPE, SentencePiece tokenizers
 │   │   ├── Tensors/         # Tensor operations
 │   │   └── Inference/       # Model inference
-│   ├── Minerva.Cli/         # Minerva CLI (future)
-│   └── Minerva.Mcp/         # Minerva MCP server (future)
+│   ├── Minerva.Cli/         # Minerva CLI
+│   └── Minerva.Mcp/         # Minerva MCP server
 ├── tests/
 │   ├── Mercury.Tests/       # Mercury xUnit tests
 │   │   ├── Diagnostics/     # Diagnostic system tests
@@ -162,7 +169,10 @@ SkyOmega.sln
 │   │   ├── Sparql/          # SPARQL parser, executor, protocol tests
 │   │   ├── Storage/         # Storage layer tests (QuadStore, AtomStore, WAL)
 │   │   └── W3C/             # W3C conformance test suites
-│   └── Minerva.Tests/       # Minerva xUnit tests (future)
+│   ├── Mercury.Solid.Tests/ # Mercury Solid protocol tests
+│   ├── Minerva.Tests/       # Minerva xUnit tests
+│   ├── w3c-json-ld-api/     # W3C JSON-LD conformance test suite data
+│   └── w3c-rdf-tests/       # W3C RDF conformance test suite data
 ├── benchmarks/
 │   ├── Mercury.Benchmarks/  # Mercury BenchmarkDotNet tests
 │   └── Minerva.Benchmarks/  # Minerva benchmarks (future)
