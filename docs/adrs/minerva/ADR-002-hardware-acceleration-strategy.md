@@ -27,7 +27,7 @@ Not: `Minerva → Package → Package’s dependencies → Hardware API → Hard
 ### Hardware Landscape
 
 |Platform     |Accelerator |Access Path                    |.NET Status       |
-|-————|————|-——————————|——————|
+|-------------|------------|-------------------------------|------------------|
 |x64          |AVX2/AVX-512|`System.Runtime.Intrinsics.X86`|✓ Full BCL        |
 |ARM64        |NEON        |`System.Runtime.Intrinsics.Arm`|✓ Full BCL        |
 |ARM64        |SVE/SVE2    |`System.Runtime.Intrinsics.Arm`|Partial, expanding|
@@ -382,7 +382,7 @@ minerva-native/
 Quantized inference is critical for practical model sizes. Each backend implements:
 
 |Format|Description     |CPU|Apple|CUDA|
-|——|-—————|—|——|-—|
+|------|----------------|---|-----|------|
 |Q8_0  |8-bit symmetric |✓  |✓    |✓   |
 |Q4_0  |4-bit symmetric |✓  |✓    |✓   |
 |Q4_1  |4-bit asymmetric|✓  |✓    |✓   |
@@ -413,7 +413,7 @@ Dequantization happens in the kernel — no intermediate float expansion.
 ### Risks and Mitigations
 
 |Risk                  |Mitigation                                             |
-|-———————|-——————————————————|
+|----------------------|-------------------------------------------------------|
 |Vendor API instability|Pin to stable versions; abstract behind IComputeBackend|
 |Platform-specific bugs|Comprehensive test suite per backend; CPU as reference |
 |Build complexity      |Containerized builds; pre-built binaries for releases  |

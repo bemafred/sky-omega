@@ -9,7 +9,7 @@ Accepted
 Mercury includes two CLI utilities that have grown substantially after ADR-016’s upgrades:
 
 |CLI                 |Lines|Functionality                                                   |
-|———————|——|-—————————————————————|
+|---------------------|-----|----------------------------------------------------------------|
 |`Mercury.Cli.Sparql`|~1100|SPARQL query execution, RDF loading, REPL, result formatting    |
 |`Mercury.Cli.Turtle`|~660 |Turtle parsing, validation, conversion, statistics, benchmarking|
 
@@ -229,7 +229,7 @@ public class SparqlToolTests : IDisposable
 ### Benefits Over Current Approach
 
 |Aspect               |Current (Process Spawn)         |Proposed (Library)            |
-|———————|———————————|——————————|
+|----------------------|--------------------------------|------------------------------|
 |Test speed           |~200ms overhead per test        |Direct method call (~1ms)     |
 |NCrunch compatibility|Fragile build order             |Standard ProjectReference     |
 |Debugging            |Separate process, no breakpoints|Single process, full debugging|
@@ -242,7 +242,7 @@ public class SparqlToolTests : IDisposable
 ### Phase 1: Create Library Projects
 
 |Task|Description                                                        |
-|-—|-——————————————————————|
+|----|-------------------------------------------------------------------|
 |1.1 |Create `Mercury.Sparql.Tool` project                               |
 |1.2 |Create `Mercury.Turtle.Tool` project                               |
 |1.3 |Define `SparqlToolOptions`, `TurtleToolOptions`, `ToolResult` types|
@@ -251,7 +251,7 @@ public class SparqlToolTests : IDisposable
 ### Phase 2: Extract Logic
 
 |Task|Description                                                                               |
-|-—|——————————————————————————————|
+|----|-----------------------------------------------------------------------------------------------|
 |2.1 |Move SPARQL execution logic from `Mercury.Cli.Sparql/Program.cs` to `Mercury.Sparql.Tool` |
 |2.2 |Move Turtle processing logic from `Mercury.Cli.Turtle/Program.cs` to `Mercury.Turtle.Tool`|
 |2.3 |Parameterize `TextWriter` for output (replace `Console.Out`/`Console.Error`)              |
@@ -260,7 +260,7 @@ public class SparqlToolTests : IDisposable
 ### Phase 3: Simplify CLIs
 
 |Task|Description                                                            |
-|-—|————————————————————————|
+|----|-----------------------------------------------------------------------|
 |3.1 |Reduce `Mercury.Cli.Sparql/Program.cs` to argument parsing + delegation|
 |3.2 |Reduce `Mercury.Cli.Turtle/Program.cs` to argument parsing + delegation|
 |3.3 |Add ProjectReference from CLI to corresponding Tool library            |
@@ -268,7 +268,7 @@ public class SparqlToolTests : IDisposable
 ### Phase 4: Refactor Tests
 
 |Task|Description                                                      |
-|-—|——————————————————————|
+|----|---------------------------------------------------------------------|
 |4.1 |Create new test files: `SparqlToolTests.cs`, `TurtleToolTests.cs`|
 |4.2 |Port existing integration tests to library-based tests           |
 |4.3 |Remove process-spawning test infrastructure                      |
@@ -278,7 +278,7 @@ public class SparqlToolTests : IDisposable
 ### Phase 5: Cleanup
 
 |Task|Description                                      |
-|-—|-————————————————|
+|----|--------------------------------------------------|
 |5.1 |Delete `Mercury.Tests/Cli/CliIntegrationTests.cs`|
 |5.2 |Update ADR-017 status to “Superseded by ADR-018” |
 |5.3 |Verify NCrunch runs all tests successfully       |
