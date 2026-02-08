@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-01-31
+**Last updated:** 2026-02-08
 
 ## Line Counts
 
@@ -10,41 +10,43 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **73,187** | Knowledge substrate |
-| ├─ Sparql | 47,261 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **73,696** | Knowledge substrate |
+| ├─ Sparql | 44,680 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
-| ├─ Storage | 5,422 | B+Tree indexes, AtomStore, WAL |
-| ├─ Turtle | 4,009 | Turtle parser and writer |
+| ├─ Storage | 5,966 | B+Tree indexes, AtomStore, WAL |
+| ├─ Turtle | 4,017 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
 | ├─ TriG | 2,836 | TriG parser and writer |
 | ├─ NQuads | 1,476 | N-Quads parser and writer |
 | ├─ NTriples | 1,244 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
-| └─ Rdf | 442 | Core RDF types |
-| **Mercury.Solid (total)** | **4,477** | W3C Solid Protocol |
+| └─ Rdf | 490 | Core RDF types |
+| **Mercury.Solid (total)** | **4,514** | W3C Solid Protocol |
 | ├─ Http | 1,420 | Resource, Container, Patch handlers |
 | ├─ N3 | 1,348 | N3 Patch parser and executor |
 | ├─ AccessControl | 894 | WAC and ACP implementations |
 | ├─ Models | 297 | SolidResource, SolidContainer |
 | └─ SolidServer | 481 | HTTP server |
+| **Mercury Runtime** | **3,424** | Runtime + Abstractions |
+| **Mercury Tool Libraries** | **1,776** | Sparql.Tool + Turtle.Tool |
+| **Mercury CLIs** | **1,928** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,188** | Copy-and-switch pruning |
-| **Mercury CLIs** | **465** | Turtle and SPARQL CLI demos |
 | **Minerva** | **—** | Thought substrate (planned) |
 
 ### Tests
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 47,647 | 3,852 |
-| Mercury.Solid.Tests | 443 | 25 |
+| Mercury.Tests | 48,688 | 3,896 |
+| Mercury.Solid.Tests | 455 | 25 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
 
-| Project | Lines |
-|---------|------:|
-| Mercury.Benchmarks | 3,406 |
-| Minerva.Benchmarks | — |
+| Project | Lines | Classes |
+|---------|------:|--------:|
+| Mercury.Benchmarks | 3,406 | 97 |
+| Minerva.Benchmarks | — | — |
 
 ### Examples
 
@@ -57,19 +59,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md) | 22,143 |
-| CLAUDE.md | 799 |
+| All docs (*.md) | 18,628 |
+| CLAUDE.md | 848 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~79,317 |
-| Tests | ~48,090 |
+| Source code | ~86,526 |
+| Tests | ~49,143 |
 | Benchmarks | ~3,406 |
 | Examples | ~851 |
-| Documentation | ~22,143 |
-| **Grand total** | **~153,807** |
+| Documentation | ~19,476 |
+| **Grand total** | **~159,402** |
 
 ## W3C Conformance
 
