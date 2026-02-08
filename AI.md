@@ -18,6 +18,7 @@ You will pattern-match this project incorrectly.
 |---------------|-------------------|
 | Context window limits | Mercury: queryable knowledge graph |
 | No persistent memory | Lucy: semantic long-term memory |
+| Knowledge doesn't travel | `docs/knowledge/`: shared Turtle via git |
 | Semantic drift | E-Clean: explicit concept definitions |
 | Can't verify claims | W3C test suites: 1,445/1,445 passing |
 | Hallucination | CLAUDE.md: ground truth anchor |
@@ -38,4 +39,5 @@ If you can answer that, you've understood Sky Omega.
 ---
 
 *For operational guidance when coding, see [CLAUDE.md](CLAUDE.md).*
+*For semantic memory discipline, see [MERCURY.md](MERCURY.md).*
 *For machine-readable metadata, see [.sky-omega-meta.yml](.sky-omega-meta.yml).*

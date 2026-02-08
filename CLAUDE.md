@@ -87,6 +87,14 @@ All tools support `-v`/`--version`.
 claude mcp add --transport stdio --scope user mercury -- mercury-mcp
 ```
 
+### Semantic Memory
+
+Mercury MCP provides persistent semantic memory across sessions. The store at `~/Library/SkyOmega/stores/mcp/` survives between sessions — what you write, future sessions can query.
+
+**At session start:** check what's in memory. **At session end:** consider what's worth remembering.
+
+See **[MERCURY.md](MERCURY.md)** for when, why, and how to use semantic memory — including EEE discipline, provenance conventions, and consolidation patterns.
+
 ## In-Flight Work: ADRs
 
 Architecture Decision Records track planning and progress for complex features:
@@ -128,6 +136,7 @@ SkyOmega.sln
 │   │   ├── rdf/             # RDF specs (future: SPARQL, Turtle, etc.)
 │   │   └── llm/             # LLM specs (GGUF, SafeTensors, Tokenizers)
 │   ├── architecture/        # Conceptual documentation
+│   ├── knowledge/           # Shared semantic knowledge (Turtle files, see MERCURY.md)
 │   └── api/                 # API documentation
 ├── src/
 │   ├── Mercury/             # Knowledge substrate - RDF storage and SPARQL (BCL only)

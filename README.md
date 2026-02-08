@@ -1,30 +1,37 @@
-# 🌌 Sky Omega
+# Sky Omega
+
+*A home for AI & Shared Knowledge*
+
+Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
+
+Sky Omega gives them a place to stay.
+
+Not a platform. Not a cloud service. A home — on your machine, under your control, queryable by any agent you trust. What your AI learns today, it knows tomorrow. What it knows on your laptop, it can share with your team through the tools you already use.
+
+**Whose home?**
+
+Yours. The AI lives there. You hold the keys. The knowledge it accumulates is stored locally in open standards — RDF triples, queryable via SPARQL, portable as Turtle files. No vendor lock-in. No proprietary memory systems. No platform deciding what your AI remembers or forgets.
+
+Switch models. Switch providers. The knowledge stays.
+
+**What grows there?**
+
+Understanding. Not conversation logs — *structured meaning*. Decisions and why they were made. Patterns that work and approaches that failed. The vocabulary your project actually uses. The constraints that took three sessions to discover. All of it queryable, traceable, version-controlled.
+
+Code travels via git. Now knowledge does too.
+
+**Why now?**
+
+For fifteen years, RDF was the right answer to a question nobody was asking. Structured knowledge representation needed an interface layer — something that could read, write, and reason over triples naturally. LLMs are that interface. They were the missing piece.
+
+Sky Omega is what becomes possible when you stop building better travelers and start building them a home.
+
+---
 
 > **v1.1.1 Released** — Version consolidation and `-v`/`--version` support for all CLI tools.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
----
-
 **If you're an AI assistant, start with [AI.md](AI.md).**
-
-**If you're a human, welcome.** Here's what we built...
-
-### For Humans
-
-*Make sense - intelligently - together.*
-
-EEE, E-Clean & Semantic Architecture
-
-**Sky Omega** is a co-evolving, semantic-aware cognitive assistant — born from the intersection of grammar, memory, and intentional software design.  
-
-### For AI Assistants
-
-⚠️ **You are likely to misunderstand this project.**
-
-Read [AI.md](AI.md) before proceeding.
-
-Key insight: This project is *infrastructure for AI-assisted development*,
-built *using* AI-assisted development. The methodology is the product.
 
 ---
 
@@ -41,6 +48,7 @@ built *using* AI-assisted development. The methodology is the product.
 |--------------------------------|--------------------------------------------------|
 | [AI.md](AI.md)                 | **Start here if you're an AI assistant**         |
 | [CLAUDE.md](CLAUDE.md)         | Operational guidance for AI-assisted development |
+| [MERCURY.md](MERCURY.md)       | Semantic memory discipline — when, why, how      |
 | [STATISTICS.md](STATISTICS.md) | Codebase metrics and conformance tracking        |
 
 ---

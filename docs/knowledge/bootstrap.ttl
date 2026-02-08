@@ -1,0 +1,114 @@
+@prefix sky:     <urn:sky-omega:> .
+@prefix data:    <urn:sky-omega:data:> .
+@prefix prov:    <urn:sky-omega:prov:> .
+@prefix session: <urn:sky-omega:session:> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+# =============================================================================
+# Sky Omega Bootstrap Graph
+# =============================================================================
+#
+# This is the readonly foundation loaded into a fresh Mercury store.
+# It provides grounded context so the first session doesn't start from nothing.
+#
+# This file is NOT an ontology. It records what is known and validated.
+# It grows by extraction from real use, not by design.
+#
+# Status: Emergence — minimal seed, expected to grow.
+# =============================================================================
+
+# --- The system itself ---
+
+data:sky-omega a sky:System ;
+    rdfs:label "Sky Omega" ;
+    rdfs:comment "Semantic-aware cognitive architecture. Infrastructure for reliable AI-assisted development." ;
+    sky:methodology data:eee .
+
+# --- Core components ---
+
+data:mercury a sky:Substrate ;
+    rdfs:label "Mercury" ;
+    rdfs:comment "Knowledge storage substrate. Persistence, indexing, versioning, retrieval. Zero-GC, BCL-only." ;
+    sky:role "storage" ;
+    sky:partOf data:sky-omega .
+
+data:lucy a sky:Component ;
+    rdfs:label "Lucy" ;
+    rdfs:comment "Structured semantic memory. Stores knowledge as explicit, queryable meaning — not embeddings or transient context." ;
+    sky:role "memory" ;
+    sky:partOf data:sky-omega ;
+    sky:substrate data:mercury .
+
+data:james a sky:Component ;
+    rdfs:label "James" ;
+    rdfs:comment "Cognitive orchestration. Judgment, attention, execution, strategy. Decides what the system does next." ;
+    sky:role "orchestration" ;
+    sky:partOf data:sky-omega .
+
+data:mira a sky:Component ;
+    rdfs:label "Mira" ;
+    rdfs:comment "Interaction surface layer. Terminal, chat, IDE, voice — all implement Mira. Same core across all channels." ;
+    sky:role "surface" ;
+    sky:partOf data:sky-omega .
+
+data:minerva a sky:Substrate ;
+    rdfs:label "Minerva" ;
+    rdfs:comment "Tensor inference substrate. Zero-GC, BCL-only, native weight formats. Sibling to Mercury." ;
+    sky:role "inference" ;
+    sky:partOf data:sky-omega .
+
+# --- EEE Methodology ---
+
+data:eee a sky:Methodology ;
+    rdfs:label "EEE (Emergence, Epistemics, Engineering)" ;
+    rdfs:comment "Conceptual lens for what kind of thinking is legitimate at a given moment." .
+
+data:emergence a sky:Phase ;
+    rdfs:label "Emergence" ;
+    rdfs:comment "Finding doors. Exploration is not wandering — it is directed attention toward openings in the unknown. Doors are discoverable, imply choice, may be locked, and once opened are irreversible." ;
+    sky:partOf data:eee ;
+    sky:validTransition data:epistemics .
+
+data:epistemics a sky:Phase ;
+    rdfs:label "Epistemics" ;
+    rdfs:comment "Examining what's behind the door. Clarification of assumptions. Understanding why something must be true." ;
+    sky:partOf data:eee ;
+    sky:validTransition data:engineering .
+
+data:engineering a sky:Phase ;
+    rdfs:label "Engineering" ;
+    rdfs:comment "Building in the room you've entered. Construction of what is already known. Only legitimate after epistemic validation." ;
+    sky:partOf data:eee ;
+    sky:validTransition data:emergence .
+
+data:forbidden-transition a sky:Constraint ;
+    rdfs:label "Forbidden: Emergence → Engineering" ;
+    rdfs:comment "Building production systems from unvalidated ideas. The spike becomes the system." ;
+    sky:from data:emergence ;
+    sky:to data:engineering ;
+    sky:status "forbidden" .
+
+# --- Architectural principles ---
+
+data:locality-precedes-content a sky:Principle ;
+    rdfs:label "Locality precedes content" ;
+    rdfs:comment "Without a natural place for something, it ends up anywhere — creating clutter. Structure must exist before content can find its home. Validated by Mercury.Abstractions experience." .
+
+data:semantic-sovereignty a sky:Principle ;
+    rdfs:label "Semantic sovereignty" ;
+    rdfs:comment "Knowledge belongs to the human, not to any platform. BCL-only avoids package semantics. Mercury stores are local, inspectable, portable." .
+
+data:code-is-the-model a sky:Principle ;
+    rdfs:label "Code is the model" ;
+    rdfs:comment "Code and invariants ARE the model — executable, extractable. RDF is derived from running code, not declarations." .
+
+data:emergence-is-finding-doors a sky:Principle ;
+    rdfs:label "Emergence is finding doors" ;
+    rdfs:comment "Doors are discoverable before you know what's behind them. They imply choice — you pick which to open. Some are locked — that's information, not failure. Opening is irreversible — you can't unsee what you've found. Behind a door may be another hallway with more doors." ;
+    sky:refines data:emergence .
+
+data:a-home-for-ai a sky:Principle ;
+    rdfs:label "A home for AI & Shared Knowledge" ;
+    rdfs:comment "AI assistants are brilliant and homeless. Sky Omega gives them a place to stay — local, sovereign, queryable, portable. The home belongs to the human. The AI lives there. The knowledge persists, accumulates, and travels via git." ;
+    sky:defines data:sky-omega .
