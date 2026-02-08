@@ -144,7 +144,7 @@ SkyOmega.sln
 │   │   ├── Rdf/             # Triple data structures
 │   │   ├── RdfXml/          # Streaming RDF/XML parser
 │   │   ├── Sparql/          # SPARQL parser and query execution
-│   │   │   ├── Execution/   # Query operators, executor, LoadExecutor
+│   │   │   ├── Execution/   # One file per operator/type, plus executor, LoadExecutor
 │   │   │   ├── Parsing/     # SparqlParser, RdfParser (zero-GC parsing)
 │   │   │   └── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
@@ -446,13 +446,20 @@ Key components:
 2. Build execution plan → Stack of operators (TriplePatternScan, MultiPatternScan)
 3. Execute → Pull-based iteration through operator pipeline
 
-**Operator pipeline:**
+**Operator pipeline** (one file per type in `Sparql/Execution/`):
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 12 patterns with backtracking (supports SPARQL-star expansion)
+- `VariableGraphScan` - Scans patterns across all named graphs, binding a graph variable
+- `DefaultGraphUnionScan` - Unions pattern results across multiple default graphs (FROM clauses)
+- `CrossGraphMultiPatternScan` - Cross-graph joins where patterns match in different graphs
+- `SubQueryScan` - Executes nested SELECT subquery, projects selected variables
+- `BoxedSubQueryExecutor` - Isolates subquery scan stack usage in a class (breaks ref struct chain)
+- `SubQueryGroupedRow` - GROUP BY / aggregate computation for subqueries
+- `SubQueryJoinScan` - Joins subquery results with outer patterns via nested loop
+- `QueryCancellation` - Thread-static cancellation token for query operators
+- `SyntheticTermHelper` - Resolves synthetic terms from SPARQL-star expansion
 - `SlotTriplePatternScan` - Slot-based variant reading from 64-byte PatternSlot
 - `SlotMultiPatternScan` - Slot-based multi-pattern join reading from byte[] buffer
-- `SubQueryScan` - Executes nested SELECT subquery, projects selected variables
-- `SubQueryJoinScan` - Joins subquery results with outer patterns via nested loop
 - `ServiceScan` - Executes SERVICE clause against remote SPARQL endpoint via ISparqlServiceExecutor
 - Filter/BIND/MINUS/VALUES evaluation integrated into result iteration
 
