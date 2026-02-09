@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-02-09
+
+Namespace restructuring for improved code navigation and IDE experience.
+
+### Changed
+
+#### SPARQL Types Namespace (`SkyOmega.Mercury.Sparql.Types`)
+- **Split `SparqlTypes.cs`** (2,572 lines, 37 types) into individual files under `Sparql/Types/`
+- **New namespace** `SkyOmega.Mercury.Sparql.Types` — one file per type (Query, GraphPattern, SubSelect, etc.)
+- Follows folder-correlates-to-namespace convention for better code navigation
+
+#### Operator Namespace (`SkyOmega.Mercury.Sparql.Execution.Operators`)
+- **Moved 14 operator files** from `Execution/` to `Execution/Operators/`
+- **New namespace** `SkyOmega.Mercury.Sparql.Execution.Operators` — scan operators, IScan interface, ScanType enum
+- Files: TriplePatternScan, MultiPatternScan, DefaultGraphUnionScan, CrossGraphMultiPatternScan, VariableGraphScan, SubQueryScan, SubQueryJoinScan, SubQueryGroupedRow, BoxedSubQueryExecutor, QueryCancellation, SyntheticTermHelper, SlotBasedOperators, IScan, ScanType
+
+### Documentation
+
+- **CLAUDE.md** updated with Operators/ and Types/ folder structure
+- **STATISTICS.md** line counts updated
+
+---
+
 ## [1.1.1] - 2026-02-07
 
 Version consolidation and CLI improvements.
@@ -348,6 +371,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.2.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.0
 [1.1.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.1
 [1.1.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.0
 [1.0.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.0.0
