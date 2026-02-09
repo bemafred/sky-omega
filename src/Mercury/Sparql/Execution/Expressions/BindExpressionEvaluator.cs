@@ -856,7 +856,7 @@ internal ref struct BindExpressionEvaluator
             if (name.Equals("STRLEN", StringComparison.OrdinalIgnoreCase))
             {
                 if (arg.Type == ValueType.String)
-                    return new Value { Type = ValueType.Integer, IntegerValue = UnicodeHelper.GetCodePointCount(arg.GetLexicalForm()) };
+                    return new Value { Type = ValueType.Integer, IntegerValue = CodePointOps.GetCodePointCount(arg.GetLexicalForm()) };
                 return new Value { Type = ValueType.Unbound };
             }
 
@@ -1725,7 +1725,7 @@ internal ref struct BindExpressionEvaluator
         var startCodePoint = (int)startVal; // SPARQL is 1-based, keep as-is for helper
 
         // Get code point count for bounds checking
-        var codePointCount = UnicodeHelper.GetCodePointCount(str);
+        var codePointCount = CodePointOps.GetCodePointCount(str);
 
         if (startCodePoint < 1) startCodePoint = 1;
         if (startCodePoint > codePointCount)
@@ -1748,7 +1748,7 @@ internal ref struct BindExpressionEvaluator
         }
 
         // Use code point-based substring
-        var result = UnicodeHelper.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
+        var result = CodePointOps.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
 
         // Preserve language tag/datatype from the first argument
         var suffix = stringArg.GetLangTagOrDatatype();

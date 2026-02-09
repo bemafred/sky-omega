@@ -9,7 +9,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 /// not UTF-16 code units. This matters for characters outside the BMP
 /// (code points > U+FFFF) which are encoded as surrogate pairs in UTF-16.
 /// </summary>
-internal static class UnicodeHelper
+internal static class CodePointOps
 {
     /// <summary>
     /// Counts the number of Unicode code points in a span.

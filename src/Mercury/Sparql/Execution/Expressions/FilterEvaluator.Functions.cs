@@ -827,7 +827,7 @@ public ref partial struct FilterEvaluator
         var startCodePoint = (int)startArg.IntegerValue; // SPARQL is 1-based, keep as-is for helper
 
         // Get code point count for bounds checking
-        var codePointCount = UnicodeHelper.GetCodePointCount(str);
+        var codePointCount = CodePointOps.GetCodePointCount(str);
 
         if (startCodePoint < 1) startCodePoint = 1;
         if (startCodePoint > codePointCount)
@@ -845,7 +845,7 @@ public ref partial struct FilterEvaluator
         }
 
         // Use code point-based substring
-        var result = UnicodeHelper.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
+        var result = CodePointOps.SubstringByCodePoints(str, startCodePoint, lengthCodePoints);
 
         // Preserve language tag/datatype from the first argument
         var suffix = stringArg.GetLangTagOrDatatype();

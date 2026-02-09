@@ -1055,7 +1055,7 @@ public ref partial struct FilterEvaluator
                 return new Value
                 {
                     Type = ValueType.Integer,
-                    IntegerValue = UnicodeHelper.GetCodePointCount(arg1.GetLexicalForm())
+                    IntegerValue = CodePointOps.GetCodePointCount(arg1.GetLexicalForm())
                 };
             }
             return new Value { Type = ValueType.Unbound };
