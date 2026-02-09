@@ -21,6 +21,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Mercury\Mercury.csproj" />
+        <ProjectReference Include="..\Mercury.Pruning\Mercury.Pruning.csproj" />
         <ProjectReference Include="..\Mercury.Runtime\Mercury.Runtime.csproj" />
     </ItemGroup>
 

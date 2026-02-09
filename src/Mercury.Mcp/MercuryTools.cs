@@ -2,9 +2,12 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text;
 using ModelContextProtocol.Server;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Pruning;
+using SkyOmega.Mercury.Pruning.Filters;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
@@ -15,11 +18,11 @@ namespace SkyOmega.Mercury.Mcp;
 [McpServerToolType]
 public sealed class MercuryTools
 {
-    private readonly QuadStore _store;
+    private readonly QuadStorePool _pool;
 
-    public MercuryTools(QuadStore store)
+    public MercuryTools(QuadStorePool pool)
     {
-        _store = store;
+        _pool = pool;
     }
 
     [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store")]
@@ -42,10 +45,11 @@ public sealed class MercuryTools
                 return $"Error: {ex.Message}";
             }
 
-            _store.AcquireReadLock();
+            var store = _pool.Active;
+            store.AcquireReadLock();
             try
             {
-                var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+                var executor = new QueryExecutor(store, query.AsSpan(), parsed);
                 var sb = new StringBuilder();
 
                 switch (parsed.Type)
@@ -120,7 +124,7 @@ public sealed class MercuryTools
             }
             finally
             {
-                _store.ReleaseReadLock();
+                store.ReleaseReadLock();
             }
         }
         catch (Exception ex)
@@ -149,7 +153,8 @@ public sealed class MercuryTools
                 return $"Error: {ex.Message}";
             }
 
-            var executor = new UpdateExecutor(_store, update.AsSpan(), parsed);
+            var store = _pool.Active;
+            var executor = new UpdateExecutor(store, update.AsSpan(), parsed);
             var result = executor.Execute();
 
             if (!result.Success)
@@ -166,8 +171,9 @@ public sealed class MercuryTools
     [McpServerTool(Name = "mercury_stats"), Description("Get Mercury store statistics (quad count, atoms, storage size, WAL status)")]
     public string Stats()
     {
-        var (quadCount, atomCount, totalBytes) = _store.GetStatistics();
-        var (walTxId, walCheckpoint, walSize) = _store.GetWalStatistics();
+        var store = _pool.Active;
+        var (quadCount, atomCount, totalBytes) = store.GetStatistics();
+        var (walTxId, walCheckpoint, walSize) = store.GetWalStatistics();
 
         var sb = new StringBuilder();
         sb.AppendLine("Mercury Store Statistics:");
@@ -186,16 +192,17 @@ public sealed class MercuryTools
     {
         var graphs = new List<string>();
 
-        _store.AcquireReadLock();
+        var store = _pool.Active;
+        store.AcquireReadLock();
         try
         {
-            var enumerator = _store.GetNamedGraphs();
+            var enumerator = store.GetNamedGraphs();
             while (enumerator.MoveNext())
                 graphs.Add(enumerator.Current.ToString());
         }
         finally
         {
-            _store.ReleaseReadLock();
+            store.ReleaseReadLock();
         }
 
         if (graphs.Count == 0)
@@ -209,6 +216,81 @@ public sealed class MercuryTools
         }
 
         return sb.ToString().Trim();
+    }
+
+    [McpServerTool(Name = "mercury_prune"), Description("Compact the Mercury store by removing soft-deleted data and optionally filtering graphs or predicates")]
+    public string Prune(
+        [Description("Preview without writing (default: false)")] bool dryRun = false,
+        [Description("History mode: 'flatten' (default), 'preserve', or 'all'")] string historyMode = "flatten",
+        [Description("Comma-separated graph IRIs to exclude")] string? excludeGraphs = null,
+        [Description("Comma-separated predicate IRIs to exclude")] string? excludePredicates = null)
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+
+            var mode = historyMode.ToLowerInvariant() switch
+            {
+                "preserve" => HistoryMode.PreserveVersions,
+                "all" => HistoryMode.PreserveAll,
+                _ => HistoryMode.FlattenToCurrent
+            };
+
+            // Build filters
+            var filters = new List<IPruningFilter>();
+            if (!string.IsNullOrWhiteSpace(excludeGraphs))
+            {
+                var iris = excludeGraphs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (iris.Length > 0)
+                    filters.Add(GraphFilter.Exclude(iris));
+            }
+            if (!string.IsNullOrWhiteSpace(excludePredicates))
+            {
+                var iris = excludePredicates.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (iris.Length > 0)
+                    filters.Add(PredicateFilter.Exclude(iris));
+            }
+
+            var options = new TransferOptions
+            {
+                HistoryMode = mode,
+                DryRun = dryRun
+            };
+            if (filters.Count > 0)
+                options = new TransferOptions
+                {
+                    HistoryMode = mode,
+                    DryRun = dryRun,
+                    Filter = CompositeFilter.All(filters.ToArray())
+                };
+
+            // Execute pruning workflow
+            _pool.Clear("secondary");
+            var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"], options);
+            var result = transfer.Execute();
+
+            if (!result.Success)
+                return $"Prune failed: {result.ErrorMessage}";
+
+            if (!dryRun)
+            {
+                _pool.Switch("primary", "secondary");
+                _pool.Clear("secondary");
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine(dryRun ? "Prune dry-run complete:" : "Prune complete:");
+            sb.AppendLine($"  Quads scanned: {result.TotalScanned:N0}");
+            sb.AppendLine($"  Quads written: {result.TotalWritten:N0}");
+            if (!dryRun)
+                sb.AppendLine($"  Space saved: {ByteFormatter.FormatCompact(result.BytesSaved)}");
+            sb.AppendLine($"  Duration: {sw.Elapsed.TotalMilliseconds:N0}ms");
+            return sb.ToString().Trim();
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
     }
 
     private static string[] ExtractVariableNames(BindingTable bindings, string source)

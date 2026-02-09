@@ -162,6 +162,9 @@ public sealed class QuadStorePool : IDisposable
         _storageOptions = opts.StorageOptions;
         _useCrossProcessGate = opts.UseCrossProcessGate;
 
+        // Auto-migrate flat QuadStore format to pool structure
+        MigrateFlatStore(_basePath);
+
         // Ensure directories exist
         Directory.CreateDirectory(_basePath);
         Directory.CreateDirectory(StoresPath);
@@ -698,6 +701,54 @@ public sealed class QuadStorePool : IDisposable
              + options.AtomDataInitialSizeBytes
              + HashTableSizeBytes
              + (options.AtomOffsetInitialCapacity * sizeof(long));
+    }
+
+    /// <summary>
+    /// Detects a flat QuadStore directory (gspo.tdb directly in basePath) and migrates
+    /// to pool directory structure by moving files into stores/{guid}/.
+    /// </summary>
+    private static void MigrateFlatStore(string basePath)
+    {
+        var gspoFile = Path.Combine(basePath, "gspo.tdb");
+        if (!File.Exists(gspoFile))
+            return; // Not a flat store — nothing to migrate
+
+        // Generate a store slot GUID
+        var guid = Guid.CreateVersion7().ToString("N")[..12];
+        var storesDir = Path.Combine(basePath, StoresDirectoryName);
+        var storePath = Path.Combine(storesDir, guid);
+        var pooledDir = Path.Combine(basePath, PooledDirectoryName);
+
+        // Create pool directory structure
+        Directory.CreateDirectory(storesDir);
+        Directory.CreateDirectory(storePath);
+        Directory.CreateDirectory(pooledDir);
+
+        // Move known QuadStore files into the store slot
+        string[] knownFiles = ["gspo.tdb", "gpos.tdb", "gosp.tdb", "tgsp.tdb", "wal.log"];
+        foreach (var fileName in knownFiles)
+        {
+            var src = Path.Combine(basePath, fileName);
+            if (File.Exists(src))
+                File.Move(src, Path.Combine(storePath, fileName));
+        }
+
+        // Move known subdirectories
+        string[] knownDirs = ["atoms", "trigram"];
+        foreach (var dirName in knownDirs)
+        {
+            var src = Path.Combine(basePath, dirName);
+            if (Directory.Exists(src))
+                Directory.Move(src, Path.Combine(storePath, dirName));
+        }
+
+        // Create pool.json with "primary" → guid mapping
+        var metadata = new PoolMetadata
+        {
+            Active = "primary",
+            Stores = { ["primary"] = guid }
+        };
+        metadata.Save(Path.Combine(basePath, PoolJsonFileName));
     }
 
     private static long GetDirectorySize(string path)

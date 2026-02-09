@@ -42,7 +42,7 @@ namespace SkyOmega.Mercury.Sparql.Protocol;
 public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
 {
     private readonly HttpListener _listener;
-    private readonly QuadStore _store;
+    private readonly Func<QuadStore> _storeFactory;
     private readonly string _baseUri;
     private readonly SparqlHttpServerOptions _options;
     private CancellationTokenSource? _cts;
@@ -50,14 +50,36 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     private bool _disposed;
 
     /// <summary>
-    /// Creates a new SPARQL HTTP server.
+    /// Creates a new SPARQL HTTP server with a store factory.
+    /// Each request resolves the store via the factory, enabling seamless store switching
+    /// (e.g., after pruning) without restarting the server.
+    /// </summary>
+    /// <param name="storeFactory">Factory function that returns the current QuadStore.</param>
+    /// <param name="baseUri">Base URI to listen on (e.g., "http://localhost:8080/").</param>
+    /// <param name="options">Server configuration options.</param>
+    public SparqlHttpServer(Func<QuadStore> storeFactory, string baseUri, SparqlHttpServerOptions? options = null)
+    {
+        _storeFactory = storeFactory ?? throw new ArgumentNullException(nameof(storeFactory));
+        _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
+        _options = options ?? new SparqlHttpServerOptions();
+
+        if (!_baseUri.EndsWith("/"))
+            _baseUri += "/";
+
+        _listener = new HttpListener();
+        _listener.Prefixes.Add(_baseUri);
+    }
+
+    /// <summary>
+    /// Creates a new SPARQL HTTP server with a fixed store.
     /// </summary>
     /// <param name="store">The QuadStore to query and update.</param>
     /// <param name="baseUri">Base URI to listen on (e.g., "http://localhost:8080/").</param>
     /// <param name="options">Server configuration options.</param>
     public SparqlHttpServer(QuadStore store, string baseUri, SparqlHttpServerOptions? options = null)
     {
-        _store = store ?? throw new ArgumentNullException(nameof(store));
+        ArgumentNullException.ThrowIfNull(store);
+        _storeFactory = () => store;
         _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         _options = options ?? new SparqlHttpServerOptions();
 
@@ -279,10 +301,11 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         using var memStream = new MemoryStream();
         using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
 
-        _store.AcquireReadLock();
+        var store = _storeFactory();
+        store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, queryString.AsSpan(), query);
+            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
 
             switch (query.Type)
             {
@@ -300,7 +323,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            store.ReleaseReadLock();
         }
 
         writer.Flush();
@@ -312,10 +335,11 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         using var memStream = new MemoryStream();
         using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
 
-        _store.AcquireReadLock();
+        var store = _storeFactory();
+        store.AcquireReadLock();
         try
         {
-            using var executor = new QueryExecutor(_store, queryString.AsSpan(), query);
+            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
 
             switch (query.Type)
             {
@@ -333,7 +357,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         }
         finally
         {
-            _store.ReleaseReadLock();
+            store.ReleaseReadLock();
         }
 
         writer.Flush();
@@ -740,7 +764,8 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             var parser = new SparqlParser(updateString.AsSpan());
             var operation = parser.ParseUpdate();
 
-            var executor = new UpdateExecutor(_store, updateString.AsSpan(), operation);
+            var store = _storeFactory();
+            var executor = new UpdateExecutor(store, updateString.AsSpan(), operation);
             var result = executor.Execute();
 
             if (result.Success)

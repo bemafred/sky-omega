@@ -119,6 +119,7 @@ public sealed class ReplSession : IDisposable
     private readonly Func<string, UpdateResult> _executeUpdate;
     private readonly Func<StoreStatistics> _getStatistics;
     private readonly Func<IEnumerable<string>> _getNamedGraphs;
+    private readonly Func<string, PruneResult>? _executePrune;
 
     private readonly Dictionary<string, string> _prefixes = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _history = new();
@@ -149,12 +150,14 @@ public sealed class ReplSession : IDisposable
         Func<string, QueryResult> executeQuery,
         Func<string, UpdateResult> executeUpdate,
         Func<StoreStatistics> getStatistics,
-        Func<IEnumerable<string>> getNamedGraphs)
+        Func<IEnumerable<string>> getNamedGraphs,
+        Func<string, PruneResult>? executePrune = null)
     {
         _executeQuery = executeQuery ?? throw new ArgumentNullException(nameof(executeQuery));
         _executeUpdate = executeUpdate ?? throw new ArgumentNullException(nameof(executeUpdate));
         _getStatistics = getStatistics ?? throw new ArgumentNullException(nameof(getStatistics));
         _getNamedGraphs = getNamedGraphs ?? throw new ArgumentNullException(nameof(getNamedGraphs));
+        _executePrune = executePrune;
 
         // Pre-register common prefixes
         foreach (var (prefix, iri) in WellKnownPrefixes)
@@ -428,6 +431,7 @@ public sealed class ReplSession : IDisposable
             ":graphs" => ExecuteListGraphs(),
             ":count" => ExecuteCount(args),
             ":stats" or ":s" => ExecuteStats(),
+            ":prune" => ExecutePrune(args),
             ":quit" or ":q" or ":exit" => ExecutionResult.Command("EXIT"),
             _ => ExecutionResult.Error($"Unknown command: {command}. Type :help for available commands.")
         };
@@ -555,6 +559,36 @@ public sealed class ReplSession : IDisposable
                upper.StartsWith("WITH");
     }
 
+    private ExecutionResult ExecutePrune(string args)
+    {
+        if (_executePrune == null)
+            return ExecutionResult.Error("Prune is not available in this session.");
+
+        try
+        {
+            var result = _executePrune(args);
+
+            if (!result.Success)
+                return ExecutionResult.Error($"Prune failed: {result.ErrorMessage}");
+
+            var sb = new System.Text.StringBuilder();
+            if (result.DryRun)
+                sb.AppendLine("Prune dry-run complete:");
+            else
+                sb.AppendLine("Prune complete:");
+            sb.AppendLine($"  Quads scanned: {result.QuadsScanned:N0}");
+            sb.AppendLine($"  Quads written: {result.QuadsWritten:N0}");
+            if (!result.DryRun)
+                sb.AppendLine($"  Space saved:   {ByteFormatter.FormatCompact(result.BytesSaved)}");
+            sb.AppendLine($"  Duration:      {result.Duration.TotalMilliseconds:N0}ms");
+            return ExecutionResult.Command(sb.ToString().TrimEnd());
+        }
+        catch (Exception ex)
+        {
+            return ExecutionResult.Error($"Prune failed: {ex.Message}");
+        }
+    }
+
     private ExecutionResult ExecuteClear()
     {
         _history.Clear();
@@ -640,7 +674,14 @@ public sealed class ReplSession : IDisposable
           :history          Show query history
           :graphs           List named graphs
           :count [pattern]  Count triples (optionally matching pattern)
+          :prune [options]  Compact the store (remove soft-deleted data)
           :quit, :q, :exit  Exit the REPL
+
+        Prune options:
+          --dry-run                    Preview without writing
+          --history preserve|all       History mode (default: flatten)
+          --exclude-graph <iri>        Exclude graph from pruned store
+          --exclude-predicate <iri>    Exclude predicate from pruned store
 
         SPARQL:
           PREFIX ex: <...>  Register a prefix

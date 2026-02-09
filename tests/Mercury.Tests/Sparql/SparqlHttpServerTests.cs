@@ -82,7 +82,7 @@ public class SparqlHttpServerTests : IDisposable
     [Fact]
     public void Server_ThrowsOnNullStore()
     {
-        Assert.Throws<ArgumentNullException>(() => new SparqlHttpServer(null!, "http://localhost:19997/"));
+        Assert.Throws<ArgumentNullException>(() => new SparqlHttpServer((QuadStore)null!, "http://localhost:19997/"));
     }
 
     [Fact]

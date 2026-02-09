@@ -68,6 +68,20 @@ public sealed class UpdateResult
 }
 
 /// <summary>
+/// Result of a store pruning operation.
+/// </summary>
+public sealed class PruneResult
+{
+    public bool Success { get; init; }
+    public string? ErrorMessage { get; init; }
+    public long QuadsScanned { get; init; }
+    public long QuadsWritten { get; init; }
+    public long BytesSaved { get; init; }
+    public TimeSpan Duration { get; init; }
+    public bool DryRun { get; init; }
+}
+
+/// <summary>
 /// Store statistics for the :stats command.
 /// </summary>
 public sealed class StoreStatistics

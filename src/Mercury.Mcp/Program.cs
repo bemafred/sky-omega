@@ -97,8 +97,8 @@ storePath ??= MercuryPaths.Store("mcp");
 Console.Error.WriteLine("Mercury MCP Server starting...");
 Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
 
-// Create store (singleton for the lifetime of the host)
-var store = new QuadStore(storePath);
+// Create pool (auto-migrates flat stores on first run)
+var pool = new QuadStorePool(storePath);
 
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
 
@@ -109,8 +109,8 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Register QuadStore as singleton
-builder.Services.AddSingleton(store);
+// Register QuadStorePool as singleton
+builder.Services.AddSingleton(pool);
 
 // Register MCP server with stdio transport and tools
 builder.Services
@@ -127,11 +127,11 @@ builder.Services
 
 // Register hosted services for HTTP and pipe servers
 builder.Services.AddSingleton<HttpServerHostedService>(
-    _ => new HttpServerHostedService(store, httpPort, enableHttpUpdates));
+    _ => new HttpServerHostedService(pool, httpPort, enableHttpUpdates));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<HttpServerHostedService>());
 
 builder.Services.AddSingleton<PipeServerHostedService>(
-    _ => new PipeServerHostedService(store, CreateSession, storePath));
+    _ => new PipeServerHostedService(pool, CreateSession, storePath));
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PipeServerHostedService>());
 
 Console.Error.WriteLine();
@@ -141,17 +141,17 @@ Console.Error.WriteLine();
 await builder.Build().RunAsync();
 
 Console.Error.WriteLine("MCP Server shutting down...");
-store.Dispose();
+pool.Dispose();
 
 return 0;
 
 // --- Session factory for pipe connections ---
 
-static ReplSession CreateSession(QuadStore store) => new ReplSession(
-    executeQuery: sparql => ExecuteQuery(store, sparql),
-    executeUpdate: sparql => ExecuteUpdate(store, sparql),
-    getStatistics: () => GetStatistics(store),
-    getNamedGraphs: () => GetNamedGraphs(store));
+static ReplSession CreateSession(QuadStorePool pool) => new ReplSession(
+    executeQuery: sparql => ExecuteQuery(pool.Active, sparql),
+    executeUpdate: sparql => ExecuteUpdate(pool.Active, sparql),
+    getStatistics: () => GetStatistics(pool.Active),
+    getNamedGraphs: () => GetNamedGraphs(pool.Active));
 
 // --- Execution helpers for ReplSession ---
 

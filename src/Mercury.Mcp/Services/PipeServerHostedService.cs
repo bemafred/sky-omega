@@ -15,11 +15,11 @@ public sealed class PipeServerHostedService : IHostedService, IDisposable
 {
     private readonly PipeServer _pipeServer;
 
-    public PipeServerHostedService(QuadStore store, Func<QuadStore, ReplSession> sessionFactory, string storePath)
+    public PipeServerHostedService(QuadStorePool pool, Func<QuadStorePool, ReplSession> sessionFactory, string storePath)
     {
         _pipeServer = new PipeServer(
             MercuryPorts.McpPipeName,
-            () => sessionFactory(store),
+            () => sessionFactory(pool),
             welcomeMessage: $"Connected to Mercury MCP (store: {storePath})",
             prompt: "mcp> ");
     }

@@ -4,6 +4,8 @@
 using System.Diagnostics;
 using System.Reflection;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Pruning;
+using SkyOmega.Mercury.Pruning.Filters;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
@@ -111,27 +113,18 @@ if (attachTarget != null)
     return await RunAttachMode(attachTarget);
 }
 
-// Create or open store
-string actualPath;
-bool usingTempStore = false;
+// Create or open pool
+QuadStorePool pool;
 
 if (inMemory)
 {
-    // Explicit in-memory mode: use temp directory, cleaned up on exit
-    actualPath = SkyOmega.Mercury.Runtime.TempPath.Cli("session");
-    usingTempStore = true;
-}
-else if (storePath != null)
-{
-    actualPath = storePath;
+    pool = QuadStorePool.CreateTemp("cli-session");
 }
 else
 {
-    // Default: persistent per-user store
-    actualPath = MercuryPaths.Store("cli");
+    var actualPath = storePath ?? MercuryPaths.Store("cli");
+    pool = new QuadStorePool(actualPath);
 }
-
-var store = new QuadStore(actualPath);
 
 // Start HTTP server if enabled
 SparqlHttpServer? httpServer = null;
@@ -140,7 +133,7 @@ if (enableHttp)
     try
     {
         httpServer = new SparqlHttpServer(
-            store,
+            () => pool.Active,
             $"http://localhost:{httpPort}/",
             new SparqlHttpServerOptions { EnableUpdates = true });
 
@@ -164,33 +157,16 @@ if (enableHttp)
 }
 
 // Create ReplSession with inline lambdas and run REPL
-try
+using (pool)
+using (httpServer)
+using (var session = new ReplSession(
+    executeQuery: sparql => ExecuteQuery(pool.Active, sparql),
+    executeUpdate: sparql => ExecuteUpdate(pool.Active, sparql),
+    getStatistics: () => GetStatistics(pool.Active),
+    getNamedGraphs: () => GetNamedGraphs(pool.Active),
+    executePrune: pruneArgs => ExecutePrune(pool, pruneArgs)))
 {
-    using (store)
-    using (httpServer)
-    using (var session = new ReplSession(
-        executeQuery: sparql => ExecuteQuery(store, sparql),
-        executeUpdate: sparql => ExecuteUpdate(store, sparql),
-        getStatistics: () => GetStatistics(store),
-        getNamedGraphs: () => GetNamedGraphs(store)))
-    {
-        session.RunInteractive();
-    }
-}
-finally
-{
-    // Clean up temp store
-    if (usingTempStore && Directory.Exists(actualPath))
-    {
-        try
-        {
-            Directory.Delete(actualPath, recursive: true);
-        }
-        catch
-        {
-            // Ignore cleanup errors
-        }
-    }
+    session.RunInteractive();
 }
 
 return 0;
@@ -479,4 +455,87 @@ static IEnumerable<string> GetNamedGraphs(QuadStore store)
         store.ReleaseReadLock();
     }
     return graphs;
+}
+
+static PruneResult ExecutePrune(QuadStorePool pool, string args)
+{
+    var sw = Stopwatch.StartNew();
+
+    // Parse prune args
+    bool dryRun = false;
+    var historyMode = HistoryMode.FlattenToCurrent;
+    var excludeGraphs = new List<string>();
+    var excludePredicates = new List<string>();
+
+    var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    for (int i = 0; i < parts.Length; i++)
+    {
+        switch (parts[i])
+        {
+            case "--dry-run":
+                dryRun = true;
+                break;
+            case "--history" when i + 1 < parts.Length:
+                historyMode = parts[++i].ToLowerInvariant() switch
+                {
+                    "preserve" => HistoryMode.PreserveVersions,
+                    "all" => HistoryMode.PreserveAll,
+                    _ => HistoryMode.FlattenToCurrent
+                };
+                break;
+            case "--exclude-graph" when i + 1 < parts.Length:
+                excludeGraphs.Add(parts[++i]);
+                break;
+            case "--exclude-predicate" when i + 1 < parts.Length:
+                excludePredicates.Add(parts[++i]);
+                break;
+        }
+    }
+
+    // Build transfer options
+    IPruningFilter? filter = null;
+    var filters = new List<IPruningFilter>();
+
+    if (excludeGraphs.Count > 0)
+        filters.Add(GraphFilter.Exclude(excludeGraphs.ToArray()));
+    if (excludePredicates.Count > 0)
+        filters.Add(PredicateFilter.Exclude(excludePredicates.ToArray()));
+
+    if (filters.Count > 0)
+        filter = CompositeFilter.All(filters.ToArray());
+
+    var options = new TransferOptions
+    {
+        HistoryMode = historyMode,
+        DryRun = dryRun
+    };
+    if (filter != null)
+        options = new TransferOptions
+        {
+            HistoryMode = historyMode,
+            DryRun = dryRun,
+            Filter = filter
+        };
+
+    // Clear secondary, run transfer, switch
+    pool.Clear("secondary");
+    var transfer = new PruningTransfer(pool["primary"], pool["secondary"], options);
+    var result = transfer.Execute();
+
+    if (result.Success && !dryRun)
+    {
+        pool.Switch("primary", "secondary");
+        pool.Clear("secondary");
+    }
+
+    return new PruneResult
+    {
+        Success = result.Success,
+        ErrorMessage = result.ErrorMessage,
+        QuadsScanned = result.TotalScanned,
+        QuadsWritten = result.TotalWritten,
+        BytesSaved = result.BytesSaved,
+        Duration = sw.Elapsed,
+        DryRun = dryRun
+    };
 }

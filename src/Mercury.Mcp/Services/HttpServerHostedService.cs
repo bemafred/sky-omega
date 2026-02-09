@@ -15,11 +15,11 @@ public sealed class HttpServerHostedService : IHostedService, IDisposable
     private readonly SparqlHttpServer _httpServer;
     private readonly int _port;
 
-    public HttpServerHostedService(QuadStore store, int port, bool enableUpdates)
+    public HttpServerHostedService(QuadStorePool pool, int port, bool enableUpdates)
     {
         _port = port;
         _httpServer = new SparqlHttpServer(
-            store,
+            () => pool.Active,
             $"http://localhost:{port}/",
             new SparqlHttpServerOptions { EnableUpdates = enableUpdates });
     }
