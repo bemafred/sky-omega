@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Sparql.Execution.Operators;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 

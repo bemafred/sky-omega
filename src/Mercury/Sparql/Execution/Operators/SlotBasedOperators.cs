@@ -6,7 +6,7 @@ using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 
 /// <summary>
 /// Triple pattern scan that reads from PatternSlot instead of TriplePattern struct.

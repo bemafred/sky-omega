@@ -1,7 +1,7 @@
 using System;
 using SkyOmega.Mercury.Sparql.Types;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 
 /// <summary>
 /// Documentation contract for scan operators.

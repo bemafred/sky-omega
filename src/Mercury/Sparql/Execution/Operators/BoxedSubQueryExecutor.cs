@@ -6,7 +6,7 @@ using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Types;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 
 /// <summary>
 /// Boxed executor for subqueries that isolates large scan operator stack usage.

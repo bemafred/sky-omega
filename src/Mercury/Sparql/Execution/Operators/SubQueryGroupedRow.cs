@@ -3,7 +3,7 @@ using System.Globalization;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 
 /// <summary>
 /// Groups results and computes aggregates for subqueries with GROUP BY and/or aggregates.

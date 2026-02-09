@@ -1,4 +1,4 @@
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 
 /// <summary>
 /// Discriminator for active scan type in QueryResults.

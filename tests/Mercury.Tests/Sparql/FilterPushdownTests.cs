@@ -8,6 +8,7 @@ using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Tests.Fixtures;
 using Xunit;
+using SkyOmega.Mercury.Sparql.Execution.Operators;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 
