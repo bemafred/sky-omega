@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Storage;
 using Xunit;
 

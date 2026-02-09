@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using SkyOmega.Mercury.Sparql.Types;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 /// <remarks>
 /// <para><strong>INTERNAL USE ONLY:</strong> This struct is internal because it is an

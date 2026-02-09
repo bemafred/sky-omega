@@ -7,7 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Sparql.Types;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 
 /// <summary>
 /// Default implementation of ISparqlServiceExecutor using BCL HttpClient.

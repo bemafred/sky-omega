@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Execution.Expressions;
+using ValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 

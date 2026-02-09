@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 /// <summary>
 /// Zero-allocation FILTER expression evaluator using stack-based evaluation

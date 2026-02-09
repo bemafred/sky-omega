@@ -4,7 +4,7 @@ using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 
 /// <summary>
 /// Shared pool for SERVICE clause materialization.

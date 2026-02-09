@@ -144,8 +144,10 @@ SkyOmega.sln
 │   │   ├── Rdf/             # Triple data structures
 │   │   ├── RdfXml/          # Streaming RDF/XML parser
 │   │   ├── Sparql/          # SPARQL parser and query execution
-│   │   │   ├── Execution/   # Query executor, results, filter evaluation
-│   │   │   │   └── Operators/ # One file per scan operator (ref structs)
+│   │   │   ├── Execution/   # Query executor, results, query planning
+│   │   │   │   ├── Expressions/ # Filter/BIND evaluation, filter analysis
+│   │   │   │   ├── Federated/   # SERVICE clause, LOAD, remote execution
+│   │   │   │   └── Operators/   # One file per scan operator (ref structs)
 │   │   │   ├── Parsing/     # SparqlParser, RdfParser (zero-GC parsing)
 │   │   │   ├── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
 │   │   │   └── Types/       # One file per SPARQL type (Query, GraphPattern, etc.)

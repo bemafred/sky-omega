@@ -15,7 +15,7 @@ using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.RdfXml;
 using SkyOmega.Mercury.Storage;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 
 /// <summary>
 /// Options for configuring LoadExecutor behavior and limits.

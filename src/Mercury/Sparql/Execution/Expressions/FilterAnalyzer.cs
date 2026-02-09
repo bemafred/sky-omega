@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 /// <summary>
 /// Analyzes FILTER expressions to determine which variables they reference.

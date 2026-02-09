@@ -4,7 +4,9 @@ using System.Runtime.CompilerServices;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
+using ValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 

@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Tests.Fixtures;

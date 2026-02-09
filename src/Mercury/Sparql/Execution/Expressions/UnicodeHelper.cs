@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace SkyOmega.Mercury.Sparql.Execution;
+namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 /// <summary>
 /// Helper methods for Unicode code point operations using System.Text.Rune.

@@ -2,6 +2,7 @@ using System;
 using Xunit;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 
