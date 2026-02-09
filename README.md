@@ -28,7 +28,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.1.1 Released** — Version consolidation and `-v`/`--version` support for all CLI tools.
+> **v1.2.1 Released** — Pruning support in CLI and MCP with QuadStorePool migration.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**

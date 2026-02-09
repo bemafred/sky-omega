@@ -10,7 +10,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **73,847** | Knowledge substrate |
+| **Mercury (total)** | **73,923** | Knowledge substrate |
 | ├─ Sparql | 44,831 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 5,966 | B+Tree indexes, AtomStore, WAL |
@@ -27,9 +27,9 @@ Codebase metrics are tracked over time. Update after significant changes.
 | ├─ AccessControl | 894 | WAC and ACP implementations |
 | ├─ Models | 297 | SolidResource, SolidContainer |
 | └─ SolidServer | 481 | HTTP server |
-| **Mercury Runtime** | **3,424** | Runtime + Abstractions |
+| **Mercury Runtime** | **3,479** | Runtime + Abstractions |
 | **Mercury Tool Libraries** | **1,776** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,928** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury CLIs** | **2,069** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,188** | Copy-and-switch pruning |
 | **Minerva** | **—** | Thought substrate (planned) |
 
@@ -37,7 +37,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 48,701 | 3,896 |
+| Mercury.Tests | 49,121 | 3,913 |
 | Mercury.Solid.Tests | 455 | 25 |
 | Minerva.Tests | — | — |
 
@@ -66,12 +66,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,677 |
-| Tests | ~49,156 |
+| Source code | ~86,949 |
+| Tests | ~49,576 |
 | Benchmarks | ~3,408 |
 | Examples | ~851 |
 | Documentation | ~22,015 |
-| **Grand total** | **~162,107** |
+| **Grand total** | **~162,799** |
 
 ## W3C Conformance
 

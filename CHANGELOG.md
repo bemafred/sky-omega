@@ -11,6 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.1] - 2026-02-09
+
+Pruning support in Mercury CLI and MCP, with QuadStorePool migration.
+
+### Added
+
+#### Pruning in Mercury CLI
+- **`:prune` REPL command** with options: `--dry-run`, `--history preserve|all`, `--exclude-graph <iri>`, `--exclude-predicate <iri>`
+- **QuadStorePool migration** — CLI now uses `QuadStorePool` instead of raw `QuadStore`, enabling dual-instance pruning via copy-and-switch
+- **Flat-store auto-migration** — existing CLI stores at `~/Library/SkyOmega/stores/cli/` are transparently restructured into pool format on first run
+
+#### Pruning in Mercury MCP
+- **`mercury_prune` MCP tool** with parameters: `dryRun`, `historyMode`, `excludeGraphs`, `excludePredicates`
+- **QuadStorePool migration** — MCP server now uses `QuadStorePool`, pruning switches stores seamlessly without restart
+
+#### Infrastructure
+- **`PruneResult`** class in Mercury.Abstractions for standardized pruning results
+- **`Func<QuadStore>` factory constructor** for `SparqlHttpServer` — each request resolves store via factory, enabling seamless store switching after prune without HTTP server restart
+- **Flat-store auto-migration** in `QuadStorePool` constructor — detects `gspo.tdb` in base path and restructures into `stores/{guid}/` + `pool.json`
+
+### Changed
+
+- **Mercury.Cli** — migrated from `QuadStore` to `QuadStorePool` (in-memory mode uses `QuadStorePool.CreateTemp`)
+- **Mercury.Mcp** — migrated from `QuadStore` to `QuadStorePool` (`MercuryTools`, `HttpServerHostedService`, `PipeServerHostedService`)
+- **SparqlHttpServer** — field changed from `QuadStore` to `Func<QuadStore>` factory; existing constructor preserved for backward compatibility
+
+### Tests
+
+- **17 new tests** (3,913 total): `ReplPruneTests` (7), `QuadStorePoolPruneTests` (6), `QuadStorePoolMigrationTests` (4)
+
+---
+
 ## [1.2.0] - 2026-02-09
 
 Namespace restructuring for improved code navigation and IDE experience.
@@ -371,6 +403,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.2.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.1
 [1.2.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.0
 [1.1.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.1
 [1.1.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.0
