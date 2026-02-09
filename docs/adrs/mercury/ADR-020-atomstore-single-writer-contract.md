@@ -1,10 +1,8 @@
 # ADR-020: AtomStore Single-Writer Contract and Safe Publication
 
-[Download this ADR](sandbox:/mnt/data/ADR-020-atomstore-single-writer-contract.md)
-
 ## Status
 
-**Accepted** — clarifies the intended single-owner/single-writer model and removes ambiguous concurrency semantics (2026-02-09)
+**Proposed** — clarifies the intended single-owner/single-writer model and removes ambiguous concurrency semantics (2026-02-09)
 
 ## Context
 
