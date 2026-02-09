@@ -1,7 +1,7 @@
 using System;
 using System.Buffers;
 using System.Runtime.CompilerServices;
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 

@@ -1,6 +1,6 @@
 // Licensed under the MIT License.
 
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
@@ -954,7 +954,7 @@ public class SparqlConformanceTests
         foreach (var op in operations)
         {
             _output.WriteLine($"  - {op.Type}");
-            if (op.Type == SkyOmega.Mercury.Sparql.QueryType.Modify && op.WhereClause.Pattern.SubQueryCount > 0)
+            if (op.Type == SkyOmega.Mercury.Sparql.Types.QueryType.Modify && op.WhereClause.Pattern.SubQueryCount > 0)
             {
                 _output.WriteLine($"    WHERE has {op.WhereClause.Pattern.SubQueryCount} subquery(ies)");
             }

@@ -5,7 +5,7 @@ using System.ComponentModel;
 using System.Text;
 using ModelContextProtocol.Server;
 using SkyOmega.Mercury.Abstractions;
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;

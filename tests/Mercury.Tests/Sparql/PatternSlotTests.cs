@@ -3,7 +3,7 @@
 // Validates zero-GC discriminated union pattern implementation
 
 using System.Buffers;
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Patterns;
 using Xunit;
 

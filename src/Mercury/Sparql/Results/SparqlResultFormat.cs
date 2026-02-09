@@ -7,6 +7,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using SkyOmega.Mercury.Runtime.Buffers;
+using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Results;
 

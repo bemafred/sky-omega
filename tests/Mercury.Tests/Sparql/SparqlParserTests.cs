@@ -1,4 +1,4 @@
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Parsing;
 using Xunit;
 

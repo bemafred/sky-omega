@@ -1,6 +1,6 @@
 using System;
 using Xunit;
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 
 namespace SkyOmega.Mercury.Tests.Sparql;

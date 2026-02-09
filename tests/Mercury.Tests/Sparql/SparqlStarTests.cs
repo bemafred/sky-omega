@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Xunit;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Rdf.Turtle;
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;

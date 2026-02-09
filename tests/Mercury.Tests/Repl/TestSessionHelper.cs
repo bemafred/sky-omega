@@ -4,7 +4,7 @@
 using System.Diagnostics;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.IO;
-using SkyOmega.Mercury.Sparql;
+using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;

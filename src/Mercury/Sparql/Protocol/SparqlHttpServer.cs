@@ -21,6 +21,7 @@ using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Protocol;
 
