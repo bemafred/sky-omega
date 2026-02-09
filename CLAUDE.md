@@ -144,9 +144,11 @@ SkyOmega.sln
 │   │   ├── Rdf/             # Triple data structures
 │   │   ├── RdfXml/          # Streaming RDF/XML parser
 │   │   ├── Sparql/          # SPARQL parser and query execution
-│   │   │   ├── Execution/   # One file per operator/type, plus executor, LoadExecutor
+│   │   │   ├── Execution/   # Query executor, results, filter evaluation
+│   │   │   │   └── Operators/ # One file per scan operator (ref structs)
 │   │   │   ├── Parsing/     # SparqlParser, RdfParser (zero-GC parsing)
-│   │   │   └── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
+│   │   │   ├── Patterns/    # PatternSlot, QueryBuffer (Buffer+View pattern)
+│   │   │   └── Types/       # One file per SPARQL type (Query, GraphPattern, etc.)
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Abstractions/ # Shared interfaces and types (RdfFormat, Results)
@@ -446,7 +448,7 @@ Key components:
 2. Build execution plan → Stack of operators (TriplePatternScan, MultiPatternScan)
 3. Execute → Pull-based iteration through operator pipeline
 
-**Operator pipeline** (one file per type in `Sparql/Execution/`):
+**Operator pipeline** (one file per type in `Sparql/Execution/Operators/`):
 - `TriplePatternScan` - Scans single pattern, binds variables from matching triples
 - `MultiPatternScan` - Nested loop join for up to 12 patterns with backtracking (supports SPARQL-star expansion)
 - `VariableGraphScan` - Scans patterns across all named graphs, binding a graph variable
