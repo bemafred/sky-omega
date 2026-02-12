@@ -1,9 +1,5 @@
 # Sky Omega
 
-<p align=”center”>
-  <img src=”docs/assets/korpen.svg” alt=”Korpen” width=”200”>
-</p>
-
 *A home for AI & Shared Knowledge*
 
 Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
