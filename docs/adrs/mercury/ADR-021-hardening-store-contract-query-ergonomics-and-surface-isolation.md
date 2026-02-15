@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (2026-02-09)
+**Proposed** (2026-02-09) — §6 comment fixes applied 2026-02-15, remaining sections open
 
 ## Context
 
@@ -139,9 +139,9 @@ Update `QuadStore` docs to clearly distinguish:
 - Introduce a small internal abstraction for “tool operations” if needed.
 - Keep MCP package types entirely in `Mercury.Mcp`.
 
-### F) Documentation fixes
+### F) Documentation fixes ✓
 
-- Correct `CrossProcessStoreGate` comments and any other discovered mismatches.
+- ~~Correct `CrossProcessStoreGate` comments and any other discovered mismatches.~~ Done (2026-02-15).
 
 ## Consequences
 
