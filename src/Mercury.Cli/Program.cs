@@ -120,13 +120,17 @@ QuadStorePool pool;
 if (inMemory)
 {
     pool = QuadStorePool.CreateTemp("cli-session");
-    _ = pool["primary"]; // Eagerly create the primary store so pool.Active works immediately
 }
 else
 {
     var actualPath = storePath ?? MercuryPaths.Store("cli");
     pool = new QuadStorePool(actualPath);
 }
+
+// Ensure a primary store exists so pool.Active works immediately
+// (new pools and temp pools start with no stores; persistent pools
+// may have been created by an older version without pool metadata)
+_ = pool["primary"];
 
 // Start HTTP server if enabled
 SparqlHttpServer? httpServer = null;
