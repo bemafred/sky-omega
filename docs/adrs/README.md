@@ -10,6 +10,7 @@ Foundational decisions affecting the entire repository:
 |-----|-------|--------|
 | [ADR-000](ADR-000-repository-restructure.md) | Repository Restructure for Multi-Substrate Architecture | Implemented |
 | [ADR-001](ADR-001-sky-omega-1.0-operational-scope.md) | Sky Omega 1.0.0 Operational Scope | Accepted |
+| [ADR-002](ADR-002-documentation-and-tutorial-strategy.md) | Documentation and Tutorial Strategy | Phase 1 Accepted |
 
 ## Substrate-Specific ADRs
 

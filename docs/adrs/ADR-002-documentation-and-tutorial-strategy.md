@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (2026-02-09)
+**Phase 1 Accepted** (2026-02-15) — Phase 1 implemented and merged. Phases 2-5 remain Proposed.
 
 ## Context
 
@@ -196,14 +196,16 @@ Brief README for the examples project:
 
 ### Phase 1 acceptance criteria
 
-- [ ] A user with .NET 10 installed can follow getting-started.md from clone to running queries without consulting any other document
-- [ ] A user can configure Claude Code with Mercury MCP by following mercury-mcp.md
-- [ ] mercury-mcp.md documents all three bootstrap paths (Claude auto-load, manual via CLI attachment, standalone without Claude)
-- [ ] CLAUDE.md contains an explicit directive to follow MERCURY.md bootstrap procedure on empty MCP store
-- [ ] MERCURY.md bootstrap section uses a resolvable path (not a placeholder) and resolves the permission/recommendation ambiguity
-- [ ] All code examples in tutorials are verified runnable (manually, by the author executing each command/query during authoring)
-- [ ] All cross-references resolve to existing files
-- [ ] README.md quick-start section exists and links work
+- [x] A user with .NET 10 installed can follow getting-started.md from clone to running queries without consulting any other document
+- [x] A user can configure Claude Code with Mercury MCP by following mercury-mcp.md
+- [x] mercury-mcp.md documents all three bootstrap paths (Claude auto-load, manual via CLI attachment, standalone without Claude)
+- [x] CLAUDE.md contains an explicit directive to follow MERCURY.md bootstrap procedure on empty MCP store
+- [x] MERCURY.md bootstrap section uses a resolvable path (not a placeholder) and resolves the permission/recommendation ambiguity
+- [x] All code examples in tutorials are verified runnable (manually, by the author executing each command/query during authoring)
+- [x] All cross-references resolve to existing files
+- [x] README.md quick-start section exists and links work
+
+**Implementation note:** Phase 1 also included a code fix not originally in the ADR: `LoadExecutor` gained `file://` URI support and was wired into all update paths (CLI, MCP tools, MCP pipe sessions, HTTP server). Without this fix, `LOAD <file:///...>` — the bootstrap mechanism documented in the tutorials — would have failed silently everywhere.
 
 -----
 
