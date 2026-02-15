@@ -10,8 +10,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **73,807** | Knowledge substrate |
-| ├─ Sparql | 44,831 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **73,882** | Knowledge substrate |
+| ├─ Sparql | 44,932 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 6,014 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 4,017 | Turtle parser and writer |
@@ -29,7 +29,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 | └─ SolidServer | 481 | HTTP server |
 | **Mercury Runtime** | **3,276** | Runtime + Abstractions |
 | **Mercury Tool Libraries** | **1,632** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,777** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury CLIs** | **1,786** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,116** | Copy-and-switch pruning |
 | **Minerva** | **—** | Thought substrate (planned) |
 
@@ -59,19 +59,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md) | 20,203 |
+| All docs (*.md) | 24,274 |
 | CLAUDE.md | 878 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,057 |
+| Source code | ~86,141 |
 | Tests | ~49,480 |
 | Benchmarks | ~2,968 |
 | Examples | ~779 |
-| Documentation | ~20,203 |
-| **Grand total** | **~159,487** |
+| Documentation | ~24,274 |
+| **Grand total** | **~163,642** |
 
 ## W3C Conformance
 
