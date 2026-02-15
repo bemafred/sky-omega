@@ -224,3 +224,5 @@ mercury> PREFIX proj: <http://example.org/project/>
 - [Mercury Turtle CLI](mercury-turtle-cli.md) -- validation, conversion, benchmarking
 - [Your First Knowledge Graph](your-first-knowledge-graph.md) -- RDF for newcomers
 - [Installation and Tools](installation-and-tools.md) -- full tool lifecycle
+- [Solid Protocol](solid-protocol.md) -- W3C Solid pods backed by Mercury
+- [EEE for Teams](eee-for-teams.md) -- applying EEE methodology in team settings

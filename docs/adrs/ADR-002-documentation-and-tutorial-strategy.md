@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase 4 Accepted** (2026-02-15) — Phases 1-4 implemented and merged. Phase 5 remains Proposed.
+**Phase 5 Partially Accepted** (2026-02-15) — Phases 1-4 implemented and merged. Phase 5: Solid and EEE tutorials implemented; Minerva deferred (skeleton stage, nothing executable to demonstrate).
 
 ## Context
 
@@ -397,21 +397,27 @@ Each file must follow the knowledge directory’s own README: curated, general, 
 
 -----
 
-## Phase 5 — Future (Deferred)
-
-These tutorials are recognized as valuable but depend on components still maturing:
+## Phase 5 — Future (Partially Accepted)
 
 ### 5.1 `docs/tutorials/solid-protocol.md`
 
-Mercury.Solid is implemented ([ADR-015](mercury/ADR-015-solid-architecture.md)) but not yet production-validated. Tutorial deferred until Solid integration is exercised in real workflows. Would cover: Pod concepts, resource CRUD, N3 Patch, access control, and Mercury’s graph-to-pod mapping.
+Mercury.Solid tutorial covering: Solid concepts, `SolidServer` creation and options, resource CRUD via HTTP (PUT/GET/DELETE/HEAD), conditional requests (ETags), LDP container semantics (POST, Slug, ldp:contains), N3 Patch (WHERE/DELETE/INSERT with variable binding), access control (WAC and ACP), graph-to-pod mapping, .NET embedding, and current limitations.
 
 ### 5.2 `docs/tutorials/minerva-local-inference.md`
 
-Minerva is at skeleton stage ([ADR-001](minerva/ADR-001-weight-formats.md) approved). Tutorial deferred until weight loading and tokenization are functional. Would cover: GGUF/SafeTensors weight loading, native tokenizers, Metal/CUDA acceleration via P/Invoke.
+**Deferred.** Minerva is at skeleton stage (33 lines of stubs). Tutorial deferred until weight loading and tokenization are functional.
 
 ### 5.3 `docs/tutorials/eee-for-teams.md`
 
-The existing EEE tutorial (`learning-to-navigate-eee.md`) is individual-focused. A team-oriented tutorial covering EEE in collaborative workflows, VGR workshop patterns, and organizational instance usage is valuable but depends on workshop experience. Deferred until post-workshop lessons are available.
+Team-oriented EEE tutorial covering: why teams amplify EEE risks (assumption propagation, mode disagreement, invisible transitions), the three modes at team scale (sailing metaphor), the forbidden transition's team consequences, phase detection questions adapted for groups, four mode-mixing failure patterns, epistemic governance models (architect authority, team consensus, evidence-based thresholds), code review and testing as epistemic tools, shared semantic memory via Mercury, integration with Agile/DDD/ADRs/code review, and honest boundaries about the lack of validated workshop experience.
+
+### Phase 5 acceptance criteria
+
+- [x] Solid tutorial covers server creation, resource CRUD, containers, N3 Patch, access control, and limitations
+- [x] Solid tutorial curl examples are accurate against actual HTTP handler implementation
+- [x] EEE for Teams tutorial extends the navigation metaphor to team scale
+- [x] EEE for Teams tutorial includes honest boundaries about evidence base
+- [ ] Minerva tutorial — deferred (skeleton stage, nothing executable)
 
 -----
 
@@ -484,6 +490,14 @@ The existing EEE tutorial (`learning-to-navigate-eee.md`) is individual-focused.
 |`docs/knowledge/patterns/convergence.ttl`                 |Created|
 |`docs/knowledge/patterns/curiosity-driven-exploration.ttl`|Created|
 |`docs/knowledge/decisions/adr-summary.ttl`                |Created|
+
+### Phase 5
+
+|File                                 |Action                                          |
+|-------------------------------------|-------------------------------------------------|
+|`docs/tutorials/solid-protocol.md`   |Created                                          |
+|`docs/tutorials/eee-for-teams.md`    |Created                                          |
+|`docs/tutorials/getting-started.md`  |Modified (Phase 5 tutorials in Where to Go Next) |
 
 ## ADR Index Update
 
