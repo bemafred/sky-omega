@@ -252,8 +252,11 @@ public sealed class LoadExecutor : IDisposable
 
     /// <summary>
     /// Load RDF data from a file:// URI.
+    /// Runs on a dedicated thread to maintain lock affinity — BeginBatch/CommitBatch
+    /// use ReaderWriterLockSlim which is thread-affined, so the entire batch must
+    /// execute on one thread without async continuations switching threads.
     /// </summary>
-    private async ValueTask<UpdateResult> LoadFromFileAsync(
+    private ValueTask<UpdateResult> LoadFromFileAsync(
         string sourceUri,
         string? graphStr,
         QuadStore store,
@@ -263,11 +266,11 @@ public sealed class LoadExecutor : IDisposable
 
         if (!File.Exists(filePath))
         {
-            return new UpdateResult
+            return new ValueTask<UpdateResult>(new UpdateResult
             {
                 Success = false,
                 ErrorMessage = $"File not found: {filePath}"
-            };
+            });
         }
 
         // Check file size against limit
@@ -276,41 +279,50 @@ public sealed class LoadExecutor : IDisposable
             var fileInfo = new FileInfo(filePath);
             if (fileInfo.Length > _options.MaxDownloadSize)
             {
-                return new UpdateResult
+                return new ValueTask<UpdateResult>(new UpdateResult
                 {
                     Success = false,
                     ErrorMessage = $"File size ({fileInfo.Length:N0} bytes) exceeds maximum allowed ({_options.MaxDownloadSize:N0} bytes)"
-                };
+                });
             }
         }
 
         var format = DetermineFormat(null, sourceUri);
+        var maxTripleCount = _options.MaxTripleCount;
 
-        using var stream = File.OpenRead(filePath);
-
-        store.BeginBatch();
-        try
+        // Run on a dedicated thread to maintain ReaderWriterLockSlim thread affinity.
+        // BeginBatch acquires the write lock; CommitBatch releases it.
+        // These must happen on the same thread — async continuations can switch threads.
+        var task = Task.Run(() =>
         {
-            var count = await ParseAndLoadAsync(stream, format, graphStr, store, _options.MaxTripleCount, ct)
-                .ConfigureAwait(false);
-            store.CommitBatch();
+            using var stream = File.OpenRead(filePath);
 
-            return new UpdateResult { Success = true, AffectedCount = count };
-        }
-        catch (TripleLimitExceededException ex)
-        {
-            store.RollbackBatch();
-            return new UpdateResult
+            store.BeginBatch();
+            try
             {
-                Success = false,
-                ErrorMessage = ex.Message
-            };
-        }
-        catch
-        {
-            store.RollbackBatch();
-            throw;
-        }
+                var count = ParseAndLoadAsync(stream, format, graphStr, store, maxTripleCount, ct)
+                    .GetAwaiter().GetResult();
+                store.CommitBatch();
+
+                return new UpdateResult { Success = true, AffectedCount = count };
+            }
+            catch (TripleLimitExceededException ex)
+            {
+                store.RollbackBatch();
+                return new UpdateResult
+                {
+                    Success = false,
+                    ErrorMessage = ex.Message
+                };
+            }
+            catch
+            {
+                store.RollbackBatch();
+                throw;
+            }
+        }, ct);
+
+        return new ValueTask<UpdateResult>(task);
     }
 
     /// <summary>

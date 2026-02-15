@@ -120,6 +120,7 @@ QuadStorePool pool;
 if (inMemory)
 {
     pool = QuadStorePool.CreateTemp("cli-session");
+    _ = pool["primary"]; // Eagerly create the primary store so pool.Active works immediately
 }
 else
 {
