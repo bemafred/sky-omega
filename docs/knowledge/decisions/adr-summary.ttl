@@ -1,0 +1,174 @@
+@prefix sky:   <urn:sky-omega:> .
+@prefix adr:   <urn:sky-omega:adr:mercury:> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# =============================================================================
+# ADR Summary — Key Architectural Decisions
+# =============================================================================
+#
+# A queryable index of Mercury's Architecture Decision Records. Not a
+# replacement for the Markdown ADRs — a structured summary enabling SPARQL
+# queries like "what decisions affect storage?" or "which ADRs are accepted?"
+#
+# Only decisions with broad architectural impact are included. Implementation
+# plans (ADR-011b, ADR-012) and superseded records (ADR-017) are omitted.
+#
+# Status: Curated from docs/adrs/mercury/*.md titles and statuses.
+# =============================================================================
+
+# --- Decision type ---
+
+sky:Decision a rdfs:Class ;
+    rdfs:label "Decision" ;
+    rdfs:comment "An architecture decision record capturing a significant design choice with rationale and consequences." .
+
+sky:decidedBy a rdfs:Property ;
+    rdfs:label "decidedBy" ;
+    rdfs:comment "Links a decision to the component or concern it governs." ;
+    rdfs:domain sky:Decision ;
+    rdfs:range rdfs:Resource .
+
+sky:rationale a rdfs:Property ;
+    rdfs:label "rationale" ;
+    rdfs:comment "Why this decision was made — the core reasoning." ;
+    rdfs:domain sky:Decision ;
+    rdfs:range xsd:string .
+
+# --- Storage decisions ---
+
+adr:001 a sky:Decision ;
+    rdfs:label "Compaction strategy" ;
+    rdfs:comment "ADR-001: Copy-and-switch compaction for append-only storage. Dual-instance pruning avoids in-place mutation, preserving crash safety." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Append-only storage grows without bound. Copy-and-switch preserves the crash-safety invariant while enabling physical removal of soft-deleted data." .
+
+adr:005 a sky:Decision ;
+    rdfs:label "QuadStore pooling and Clear()" ;
+    rdfs:comment "ADR-005: Pool-based QuadStore lifecycle with Clear() for test isolation. Avoids repeated store creation overhead." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Creating a QuadStore (memory-mapped files, B+Tree initialization) is expensive. Pooling amortizes creation cost; Clear() enables test isolation without re-creation." .
+
+adr:008 a sky:Decision ;
+    rdfs:label "Unified QuadStorePool" ;
+    rdfs:comment "ADR-008: Single pool abstraction managing temp, persistent, and test stores with cross-process coordination." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Multiple pool implementations (temp, persistent, test) with different lifecycles caused inconsistency. A unified pool with CrossProcessStoreGate coordinates disk budget across NCrunch processes." .
+
+adr:020 a sky:Decision ;
+    rdfs:label "AtomStore single-writer contract" ;
+    rdfs:comment "ADR-020: AtomStore has a single-owner, single-writer contract. Concurrent reads are safe; writes require external synchronization." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "AtomStore's append-only design with memory-mapped files and hash index requires single-writer semantics. Making this contract explicit prevents misuse." .
+
+# --- SPARQL engine decisions ---
+
+adr:004 a sky:Decision ;
+    rdfs:label "SERVICE via IScan and temp stores" ;
+    rdfs:comment "ADR-004: SERVICE clause execution materializes remote results into a temporary QuadStore, then scans locally." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:sparql> ;
+    sky:rationale "SERVICE is a materialization boundary. Remote SPARQL results cannot be streamed as ref struct iterators. Temp store provides local index access with crash-safe lifecycle." .
+
+adr:007 a sky:Decision ;
+    rdfs:label "UNION branch SERVICE execution" ;
+    rdfs:comment "ADR-007: SERVICE clauses within UNION branches execute independently with isolated temp stores." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:sparql> ;
+    sky:rationale "UNION branches are logically independent. Each SERVICE clause needs its own materialization context to prevent cross-branch interference." .
+
+adr:009 a sky:Decision ;
+    rdfs:label "Stack overflow mitigation" ;
+    rdfs:comment "ADR-009: Strategy for preventing stack overflow from large ref struct query operators. Materialization boundaries and boxed subquery execution." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:sparql> ;
+    sky:rationale "Zero-GC ref structs live on the stack. Deep query nesting (subqueries, UNION, SERVICE) can exceed stack limits. BoxedSubQueryExecutor breaks the ref struct chain at materialization boundaries." .
+
+adr:011 a sky:Decision ;
+    rdfs:label "QueryResults stack reduction" ;
+    rdfs:comment "ADR-011: Reduce QueryResults from ~22KB to ~2KB via pooled enumerators and heap-allocated graph patterns." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:sparql> ;
+    sky:rationale "QueryResults at 22KB per instance caused stack overflow in complex queries. Pooled arrays and boxed GraphPattern reduce stack footprint by 93% while maintaining zero-GC on hot paths." .
+
+# --- Conformance decisions ---
+
+adr:010 a sky:Decision ;
+    rdfs:label "W3C test suite integration" ;
+    rdfs:comment "ADR-010: Integrate W3C conformance test suites for all RDF formats and SPARQL. Target 100% on core features." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Conformance claims require evidence. W3C test suites are the authoritative standard. 100% conformance (1,181/1,181 core tests) provides that evidence." .
+
+adr:014 a sky:Decision ;
+    rdfs:label "Culture invariance" ;
+    rdfs:comment "ADR-014: All numeric and date formatting in RDF/SPARQL paths uses CultureInfo.InvariantCulture." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Swedish locale uses comma as decimal separator. W3C specs require period. Culture-dependent formatting produces invalid RDF." .
+
+# --- Architecture decisions ---
+
+adr:002 a sky:Decision ;
+    rdfs:label "IBufferManager adoption" ;
+    rdfs:comment "ADR-002: Unified buffer allocation via IBufferManager abstraction over ArrayPool." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Multiple components independently used ArrayPool with inconsistent patterns. A unified interface enables consistent allocation strategy and RAII-style cleanup via BufferLease." .
+
+adr:003 a sky:Decision ;
+    rdfs:label "Buffer pattern for stack safety" ;
+    rdfs:comment "ADR-003: The Buffer + View pattern for large data — tiny handle struct with caller-owned storage." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Zero-GC does not mean everything on the stack. Pooled heap memory is equally zero-GC. The Buffer + View pattern separates the handle (stack) from storage (caller-chosen: stack, pool, or mmap)." .
+
+adr:006 a sky:Decision ;
+    rdfs:label "Dual-mode store access" ;
+    rdfs:comment "ADR-006: CLI supports both local pool and remote connection (attach mode) to running Mercury instances." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Users need to inspect MCP store contents. Attach mode (mercury -a mcp) connects via named pipe to a running instance, enabling REPL access without copying the store." .
+
+# --- Tooling decisions ---
+
+adr:018 a sky:Decision ;
+    rdfs:label "CLI library extraction" ;
+    rdfs:comment "ADR-018: Extract CLI logic into testable libraries (Mercury.Sparql.Tool, Mercury.Turtle.Tool) with thin CLI shims." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "CLI programs are hard to test. Extracting logic into libraries enables unit testing of REPL commands, format conversion, and validation without process spawning." .
+
+adr:019 a sky:Decision ;
+    rdfs:label "Global tool packaging" ;
+    rdfs:comment "ADR-019: Package Mercury tools as .NET global tools with persistent stores at platform-specific paths." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "dotnet global tools provide a standard installation mechanism. Platform-specific paths (MercuryPaths) ensure stores survive tool updates." .
+
+# --- Extended architecture ---
+
+adr:015 a sky:Decision ;
+    rdfs:label "Solid protocol architecture" ;
+    rdfs:comment "ADR-015: Mercury.Solid implements W3C Solid Protocol for linked data pods backed by QuadStore." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Solid provides a standard for personal data pods. Mercury's quad storage naturally maps to Solid's resource/container model." .
+
+adr:016 a sky:Decision ;
+    rdfs:label "CLI tool upgrade" ;
+    rdfs:comment "ADR-016: Redesign mercury CLI with persistent store, REPL, HTTP endpoint, and pipe-based attachment." ;
+    sky:status "accepted" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "The original CLI was a demo. A production CLI needs persistent state, interactive exploration, and inter-process communication." .
+
+adr:021 a sky:Decision ;
+    rdfs:label "Hardening store contract and surface isolation" ;
+    rdfs:comment "ADR-021: Proposed hardening of QuadStore API contract, query ergonomics, and surface isolation. Partially applied." ;
+    sky:status "deferred" ;
+    sky:decidedBy <urn:sky-omega:data:mercury> ;
+    sky:rationale "Multiple improvement areas identified. Section 6 (AtomStore contract) applied immediately; remaining sections deferred for future iteration." .

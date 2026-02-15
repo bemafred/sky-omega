@@ -1,0 +1,113 @@
+@prefix sky:   <urn:sky-omega:> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# =============================================================================
+# Core Predicate Vocabulary
+# =============================================================================
+#
+# Predicates that emerged from actual use across sessions and stabilized
+# through convergence. This is not a designed ontology — it records what
+# predicates exist, what they mean, and where they are used.
+#
+# Load into Mercury for reference:
+#   LOAD <file:///path/to/docs/knowledge/vocabulary/core-predicates.ttl>
+#
+# Status: Curated from bootstrap.ttl and observed usage.
+# =============================================================================
+
+# --- Structural predicates ---
+
+sky:partOf a rdfs:Property ;
+    rdfs:label "partOf" ;
+    rdfs:comment "Indicates membership in a larger system or methodology. Used for components within Sky Omega and phases within EEE." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+sky:role a rdfs:Property ;
+    rdfs:label "role" ;
+    rdfs:comment "The functional role of a component within Sky Omega. Values: storage, memory, orchestration, surface, inference." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range xsd:string .
+
+sky:substrate a rdfs:Property ;
+    rdfs:label "substrate" ;
+    rdfs:comment "Links a component to the storage substrate it depends on. Lucy's substrate is Mercury." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+sky:methodology a rdfs:Property ;
+    rdfs:label "methodology" ;
+    rdfs:comment "Links a system to its governing methodology. Sky Omega's methodology is EEE." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+# --- EEE predicates ---
+
+sky:validTransition a rdfs:Property ;
+    rdfs:label "validTransition" ;
+    rdfs:comment "Defines a legitimate phase transition in EEE. Emergence -> Epistemics -> Engineering -> Emergence. The transition Emergence -> Engineering is forbidden." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+sky:from a rdfs:Property ;
+    rdfs:label "from" ;
+    rdfs:comment "Source phase of a transition constraint." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+sky:to a rdfs:Property ;
+    rdfs:label "to" ;
+    rdfs:comment "Target phase of a transition constraint." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+sky:status a rdfs:Property ;
+    rdfs:label "status" ;
+    rdfs:comment "Status of a constraint or decision. Values include 'forbidden', 'accepted', 'proposed'." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range xsd:string .
+
+# --- Knowledge predicates ---
+
+sky:refines a rdfs:Property ;
+    rdfs:label "refines" ;
+    rdfs:comment "Indicates that one concept is a refinement or elaboration of another. Used when a principle adds detail to a phase or methodology." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+sky:defines a rdfs:Property ;
+    rdfs:label "defines" ;
+    rdfs:comment "Indicates that a principle or concept defines or characterizes a system." ;
+    rdfs:domain rdfs:Resource ;
+    rdfs:range rdfs:Resource .
+
+# --- Type vocabulary ---
+
+sky:System a rdfs:Class ;
+    rdfs:label "System" ;
+    rdfs:comment "A complete architecture or platform. Sky Omega is the primary instance." .
+
+sky:Substrate a rdfs:Class ;
+    rdfs:label "Substrate" ;
+    rdfs:comment "A foundational layer providing storage or computation. Mercury and Minerva are substrates." .
+
+sky:Component a rdfs:Class ;
+    rdfs:label "Component" ;
+    rdfs:comment "A functional component of the system. Lucy, James, and Mira are components." .
+
+sky:Methodology a rdfs:Class ;
+    rdfs:label "Methodology" ;
+    rdfs:comment "A governing approach to work. EEE is the methodology." .
+
+sky:Phase a rdfs:Class ;
+    rdfs:label "Phase" ;
+    rdfs:comment "A phase within a methodology. Emergence, Epistemics, and Engineering are phases." .
+
+sky:Principle a rdfs:Class ;
+    rdfs:label "Principle" ;
+    rdfs:comment "An architectural or epistemic principle that guides decisions." .
+
+sky:Constraint a rdfs:Class ;
+    rdfs:label "Constraint" ;
+    rdfs:comment "A rule that restricts valid behavior. The forbidden Emergence-to-Engineering transition is a constraint." .

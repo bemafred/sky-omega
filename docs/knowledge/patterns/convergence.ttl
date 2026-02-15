@@ -1,0 +1,70 @@
+@prefix sky:   <urn:sky-omega:> .
+@prefix pat:   <urn:sky-omega:pattern:> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+
+# =============================================================================
+# Convergence Pattern
+# =============================================================================
+#
+# Curated from docs/scratches/reasoning/patterns/convergence.ttl.
+# Describes the epistemic unification that Sky Omega achieves by bridging
+# formal (hard) and interpretive (soft) reasoning through structured
+# semantic memory and LLM-mediated interaction.
+#
+# This pattern is broadly applicable: it describes how structured knowledge
+# and natural language reasoning can reinforce each other rather than
+# compete.
+#
+# Status: Validated through Mercury implementation and multi-session use.
+# =============================================================================
+
+pat:convergence a sky:Pattern ;
+    rdfs:label "Convergence" ;
+    rdfs:comment "The epistemic unification of formal and interpretive reasoning. Structured knowledge (RDF, SPARQL, type systems) provides rigor. Natural language reasoning (LLM interaction) provides flexibility. The convergence is that each makes the other more effective — formal structures ground LLM reasoning, and LLM reasoning makes formal structures accessible." ;
+    sky:enabledBy pat:convergence-enablers ;
+    sky:produces pat:convergence-outcomes .
+
+pat:convergence-enablers a sky:PatternElement ;
+    rdfs:label "Convergence enablers" ;
+    rdfs:comment "Four capabilities that together make convergence possible." ;
+    sky:includes
+        pat:semantic-structures ,
+        pat:reflective-dialogue ,
+        pat:language-centered-co-creation ,
+        pat:temporal-grounding .
+
+pat:semantic-structures a sky:PatternElement ;
+    rdfs:label "Semantic structures" ;
+    rdfs:comment "Knowledge represented as triples with explicit relationships. Not embeddings, not flat text — queryable, versionable, composable meaning." .
+
+pat:reflective-dialogue a sky:PatternElement ;
+    rdfs:label "Reflective dialogue" ;
+    rdfs:comment "Conversation that surfaces assumptions and validates understanding before committing to implementation. The Epistemics phase of EEE." .
+
+pat:language-centered-co-creation a sky:PatternElement ;
+    rdfs:label "Language-centered co-creation" ;
+    rdfs:comment "Human and LLM building knowledge together through natural language, with the LLM translating between human intent and structured form." .
+
+pat:temporal-grounding a sky:PatternElement ;
+    rdfs:label "Temporal grounding" ;
+    rdfs:comment "Knowledge is time-bound. Facts have validity periods. What was true changes. The temporal dimension prevents the illusion of permanent truth." .
+
+pat:convergence-outcomes a sky:PatternElement ;
+    rdfs:label "Convergence outcomes" ;
+    rdfs:comment "What becomes possible when convergence is achieved." ;
+    sky:includes
+        pat:multi-domain-reasoning ,
+        pat:structured-meaning-making ,
+        pat:epistemic-accountability .
+
+pat:multi-domain-reasoning a sky:PatternElement ;
+    rdfs:label "Multi-domain reasoning" ;
+    rdfs:comment "Reasoning that crosses domain boundaries because the knowledge is in a uniform format (triples) regardless of origin." .
+
+pat:structured-meaning-making a sky:PatternElement ;
+    rdfs:label "Structured meaning-making" ;
+    rdfs:comment "The process of converting vague understanding into explicit, queryable, falsifiable claims. EEE's Epistemics phase in practice." .
+
+pat:epistemic-accountability a sky:PatternElement ;
+    rdfs:label "Epistemic accountability" ;
+    rdfs:comment "The ability to trace what was known, when it was known, and what it was based on. Bitemporal storage makes this queryable." .

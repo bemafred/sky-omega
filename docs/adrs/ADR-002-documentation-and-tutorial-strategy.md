@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase 3 Accepted** (2026-02-15) — Phases 1-3 implemented and merged. Phases 4-5 remain Proposed.
+**Phase 4 Accepted** (2026-02-15) — Phases 1-4 implemented and merged. Phase 5 remains Proposed.
 
 ## Context
 
@@ -390,10 +390,10 @@ Each file must follow the knowledge directory’s own README: curated, general, 
 
 ### Phase 4 acceptance criteria
 
-- [ ] A developer can add Mercury to a new .NET 10 project by following the embedding tutorial
-- [ ] Benchmark tutorial includes expected output and interpretation guidance
-- [ ] At least one file exists in each knowledge subdirectory (vocabulary, patterns, decisions)
-- [ ] Knowledge files are valid Turtle, loadable into Mercury
+- [x] A developer can add Mercury to a new .NET 10 project by following the embedding tutorial
+- [x] Benchmark tutorial includes expected output and interpretation guidance
+- [x] At least one file exists in each knowledge subdirectory (vocabulary, patterns, decisions)
+- [x] Knowledge files are valid Turtle, loadable into Mercury
 
 -----
 

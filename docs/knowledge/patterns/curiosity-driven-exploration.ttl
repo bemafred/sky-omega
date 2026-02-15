@@ -1,0 +1,59 @@
+@prefix sky:   <urn:sky-omega:> .
+@prefix pat:   <urn:sky-omega:pattern:> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+
+# =============================================================================
+# Curiosity-Driven Exploration Pattern
+# =============================================================================
+#
+# Curated from docs/scratches/reasoning/patterns/curiosity-pattern.ttl.
+# Describes the systematic investigation of knowledge gaps — a meta-pattern
+# for how an agent (human or AI) identifies what it doesn't know and
+# directs attention toward reducing uncertainty.
+#
+# This pattern maps directly to EEE's Emergence phase: the systematic
+# search for doors (knowledge gaps) before deciding which to open.
+#
+# Status: Validated through session use. Broadly applicable.
+# =============================================================================
+
+pat:curiosity-driven-exploration a sky:Pattern ;
+    rdfs:label "Curiosity-driven exploration" ;
+    rdfs:comment "A meta-pattern for investigating areas where knowledge is incomplete, uncertain, or evolving. The agent identifies known unknowns and directs attention toward reducing them — not randomly, but with purpose. This is Emergence as a discipline, not as wandering." ;
+    sky:phase <urn:sky-omega:data:emergence> ;
+    sky:produces pat:exploration-outcomes .
+
+pat:knowledge-gap a sky:PatternElement ;
+    rdfs:label "Knowledge gap" ;
+    rdfs:comment "A recognized area of incomplete understanding. Classification matters: unknown unknowns become known unknowns through attention, then known knowns through investigation. The pattern applies to the transition from unknown to known." .
+
+pat:curious-observation a sky:PatternElement ;
+    rdfs:label "Curious observation" ;
+    rdfs:comment "The initial noticing that something is unknown or uncertain. This is the trigger for the pattern — it converts an unknown unknown into a known unknown by the act of noticing." ;
+    sky:triggers pat:investigation .
+
+pat:investigation a sky:PatternElement ;
+    rdfs:label "Investigation" ;
+    rdfs:comment "Directed attention toward a knowledge gap. Not exhaustive search — focused inquiry that aims to reduce uncertainty enough to make a decision. The result may be understanding, or it may be a better-defined question." ;
+    sky:requires pat:knowledge-gap ;
+    sky:produces pat:exploration-outcomes .
+
+pat:exploration-outcomes a sky:PatternElement ;
+    rdfs:label "Exploration outcomes" ;
+    rdfs:comment "What curiosity-driven exploration produces." ;
+    sky:includes
+        pat:reduced-uncertainty ,
+        pat:refined-questions ,
+        pat:discovered-connections .
+
+pat:reduced-uncertainty a sky:PatternElement ;
+    rdfs:label "Reduced uncertainty" ;
+    rdfs:comment "The primary outcome: something that was unknown is now understood well enough to act on or to ask better questions about." .
+
+pat:refined-questions a sky:PatternElement ;
+    rdfs:label "Refined questions" ;
+    rdfs:comment "Sometimes exploration doesn't answer the original question but produces a more precise question. This is progress — a better-defined unknown is more tractable than a vague one." .
+
+pat:discovered-connections a sky:PatternElement ;
+    rdfs:label "Discovered connections" ;
+    rdfs:comment "Exploration often reveals unexpected relationships between concepts. These connections are valuable even when they don't directly answer the motivating question." .
