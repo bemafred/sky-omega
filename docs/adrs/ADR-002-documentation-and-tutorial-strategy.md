@@ -205,7 +205,11 @@ Brief README for the examples project:
 - [x] All cross-references resolve to existing files
 - [x] README.md quick-start section exists and links work
 
-**Implementation note:** Phase 1 also included a code fix not originally in the ADR: `LoadExecutor` gained `file://` URI support and was wired into all update paths (CLI, MCP tools, MCP pipe sessions, HTTP server). Without this fix, `LOAD <file:///...>` — the bootstrap mechanism documented in the tutorials — would have failed silently everywhere.
+**Implementation notes:** Phase 1 also included code fixes not originally in the ADR:
+
+1. **LoadExecutor file:// support and wiring:** `LoadExecutor` gained `file://` URI support and was wired into all update paths (CLI, MCP tools, MCP pipe sessions, HTTP server). Without this fix, `LOAD <file:///...>` — the bootstrap mechanism documented in the tutorials — would have failed silently everywhere.
+2. **LoadExecutor thread affinity:** `LoadFromFileAsync` runs on a dedicated thread via `Task.Run` to maintain `ReaderWriterLockSlim` thread affinity. `BeginBatch`/`CommitBatch` must execute on the same thread, but async parser continuations can switch threads.
+3. **CLI pool.Active initialization:** The CLI now eagerly creates the primary store via `pool["primary"]` after pool construction. Without this, `pool.Active` threw `InvalidOperationException` for both temp pools (`mercury -m`) and persistent pools opened at paths without existing pool metadata (e.g., `mercury -d ~/Library/SkyOmega/stores/mcp/`).
 
 -----
 
