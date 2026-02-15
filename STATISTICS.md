@@ -29,7 +29,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 | └─ SolidServer | 481 | HTTP server |
 | **Mercury Runtime** | **3,276** | Runtime + Abstractions |
 | **Mercury Tool Libraries** | **1,632** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,787** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury CLIs** | **1,791** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,116** | Copy-and-switch pruning |
 | **Minerva** | **—** | Thought substrate (planned) |
 
@@ -66,12 +66,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,154 |
+| Source code | ~86,158 |
 | Tests | ~49,480 |
 | Benchmarks | ~2,968 |
 | Examples | ~779 |
 | Documentation | ~24,274 |
-| **Grand total** | **~163,655** |
+| **Grand total** | **~163,659** |
 
 ## W3C Conformance
 
