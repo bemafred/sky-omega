@@ -59,7 +59,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md) | 24,281 |
+| All docs (*.md) | 25,111 |
 | CLAUDE.md | 878 |
 
 ## Totals
@@ -70,8 +70,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 | Tests | ~49,480 |
 | Benchmarks | ~2,968 |
 | Examples | ~779 |
-| Documentation | ~24,281 |
-| **Grand total** | **~163,666** |
+| Documentation | ~25,111 |
+| **Grand total** | **~164,496** |
 
 ## W3C Conformance
 

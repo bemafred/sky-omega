@@ -220,3 +220,7 @@ mercury> PREFIX proj: <http://example.org/project/>
   and advanced usage
 - [Mercury MCP server](mercury-mcp.md) -- setting up Mercury as an MCP
   server for Claude
+- [Mercury SPARQL CLI](mercury-sparql-cli.md) -- batch queries and format conversion
+- [Mercury Turtle CLI](mercury-turtle-cli.md) -- validation, conversion, benchmarking
+- [Your First Knowledge Graph](your-first-knowledge-graph.md) -- RDF for newcomers
+- [Installation and Tools](installation-and-tools.md) -- full tool lifecycle

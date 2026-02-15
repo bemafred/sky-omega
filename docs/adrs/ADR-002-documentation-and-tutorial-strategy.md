@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase 1 Accepted** (2026-02-15) — Phase 1 implemented and merged. Phases 2-5 remain Proposed.
+**Phase 2 Accepted** (2026-02-15) — Phases 1-2 implemented and merged. Phases 3-5 remain Proposed.
 
 ## Context
 
@@ -272,10 +272,10 @@ Comprehensive tool lifecycle management. Where getting-started.md (§1.1) covers
 
 ### Phase 2 acceptance criteria
 
-- [ ] All four CLI tools have dedicated tutorials with runnable examples
-- [ ] A user unfamiliar with RDF can build and query a knowledge graph by following the tutorial
-- [ ] Scripting/CI patterns are documented with copy-pasteable examples
-- [ ] All cross-references resolve
+- [x] All four CLI tools have dedicated tutorials with runnable examples
+- [x] A user unfamiliar with RDF can build and query a knowledge graph by following the tutorial
+- [x] Scripting/CI patterns are documented with copy-pasteable examples
+- [x] All cross-references resolve
 
 -----
 
