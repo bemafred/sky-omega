@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (2026-02-09) — §6 comment fixes applied 2026-02-15, remaining sections open
+**Deferred** (proposed 2026-02-09) — §6 applied 2026-02-15; remaining sections deferred, see Disposition below
 
 ## Context
 
@@ -142,6 +142,36 @@ Update `QuadStore` docs to clearly distinguish:
 ### F) Documentation fixes ✓
 
 - ~~Correct `CrossProcessStoreGate` comments and any other discovered mismatches.~~ Done (2026-02-15).
+
+## Disposition (2026-02-15)
+
+A code audit was performed against all sections of this ADR. §6 was applied (real comment mismatches). The remaining sections are deferred because they address speculative risks or propose abstractions with no current consumer. This section records the reasoning for each.
+
+### §1 ReadSession — Deferred (no design flaw, one bug fixed directly)
+
+A code audit of all QuadStore query callsites (CLI, HTTP, MCP, Solid, UpdateExecutor — 20+ sites) found that **all but one** correctly manage `AcquireReadLock`/`ReleaseReadLock`. The single violation (`ResourceHandler.DeleteGraphTriples`) was a missing lock around `QueryCurrent` — fixed directly by adding the lock pair, not by introducing a new API.
+
+The ergonomic problem ReadSession solves is real in principle, but premature in practice: 19 out of 20 callsites already follow the pattern correctly. Adding `ReadSession`/`QueryLocked` introduces API surface, a new concept for callers to learn, and risk of double-locking for callers that already hold locks. Revisit when a new entrypoint is added or a second locking bug appears.
+
+### §2 SPARQL lock invariant — Deferred (comment fix applied, no executor change needed)
+
+The misleading QueryPlanner comment (the actionable part) was fixed under §6. The full Option A (executor acquires locks internally) would require refactoring all entrypoints and risks double-locking for callers that need to group multiple operations under one lock (e.g., HTTP handler doing existence check + query). Option B's DEBUG assertions could be added independently but have no current bug to detect — all callers correctly hold locks.
+
+### §3 Lock ordering — Deferred (deadlock cannot currently occur)
+
+`PruningTransfer` — the only multi-store operation — never holds locks on two stores simultaneously. The source read lock is released before the target verification lock is acquired. Write-side batching (`BeginBatch`/`CommitBatch`) does not acquire read locks. There is no code path today where two store locks are held concurrently, so codifying an ordering rule prevents a deadlock that cannot happen yet.
+
+### §4 QueryPlanCache — Deferred (benign, no measurable impact)
+
+The `LastAccessed = DateTime.UtcNow` mutation is on a class-level field of `CachedPlan`, not on a shared dictionary slot. The dictionary itself is copy-on-write and correct. The worst case of the race is evicting a recently-used plan instead of the oldest — a minor efficiency impact, not a correctness issue. `DateTime.UtcNow` costs ~15ns, negligible versus microsecond-scale query planning.
+
+### §5 MCP isolation — Deferred (isolation already exists)
+
+MCP types are already fully contained in `Mercury.Mcp`. No types leak into `Mercury` or `Mercury.Abstractions` — the dependency graph is strictly unidirectional (`Mercury.Mcp → Mercury → Mercury.Abstractions`). The suggested "tool facade" abstraction would add an indirection layer with exactly one consumer. The boundary this section asks for already exists in practice.
+
+### §7 WAL durability modes — Deferred (optional, no operational need)
+
+The ADR itself marks this as optional and contingent on operational needs. Batch writes already achieve 100K+ triples/sec via `BeginBatch`/`CommitBatch`. No workload has required relaxed fsync semantics.
 
 ## Consequences
 

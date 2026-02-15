@@ -371,16 +371,25 @@ public sealed class ResourceHandler
 
     private void DeleteGraphTriples(string graphUri)
     {
-        // Query all triples in the graph and delete them
-        var results = _store.QueryCurrent(null, null, null, graphUri);
+        // Query all triples in the graph and delete them.
+        // Read lock required around QueryCurrent enumeration (ADR-020 single-writer contract).
         var toDelete = new List<(string Subject, string Predicate, string Object)>();
 
-        while (results.MoveNext())
+        _store.AcquireReadLock();
+        try
         {
-            var current = results.Current;
-            toDelete.Add((current.Subject.ToString(), current.Predicate.ToString(), current.Object.ToString()));
+            var results = _store.QueryCurrent(null, null, null, graphUri);
+            while (results.MoveNext())
+            {
+                var current = results.Current;
+                toDelete.Add((current.Subject.ToString(), current.Predicate.ToString(), current.Object.ToString()));
+            }
+            results.Dispose();
         }
-        results.Dispose();
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
 
         foreach (var (s, p, o) in toDelete)
         {
