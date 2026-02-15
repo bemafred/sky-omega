@@ -11,6 +11,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.2] - 2026-02-15
+
+Complete tutorial suite and infrastructure fixes.
+
+### Added
+
+#### ADR-002 Tutorial Suite (Phases 1-5)
+- **Phase 1 — The Front Door:** `getting-started.md` (clone to first query in 30 minutes), `mercury-cli.md`, `mercury-mcp.md`, examples README, CLAUDE.md and MERCURY.md bootstrap improvements
+- **Phase 2 — Tool Mastery:** `mercury-sparql-cli.md`, `mercury-turtle-cli.md`, `your-first-knowledge-graph.md` (RDF onboarding), `installation-and-tools.md`
+- **Phase 3 — Depth and Patterns:** `temporal-rdf.md`, `semantic-braid.md`, `pruning-and-maintenance.md`, `federation-and-service.md`
+- **Phase 4 — Developer Integration:** `embedding-mercury.md`, `running-benchmarks.md`, knowledge directory seeding (`core-predicates.ttl`, `convergence.ttl`, `curiosity-driven-exploration.ttl`, `adr-summary.ttl`)
+- **Phase 5 — Future:** `solid-protocol.md` (server setup, resource CRUD, containers, N3 Patch, WAC/ACP access control), `eee-for-teams.md` (team-scale EEE methodology with honest boundaries); Minerva tutorial deferred
+
+### Fixed
+
+#### AtomStore Safety (ADR-020)
+- **Publication order fix** — store atom bytes before publishing pointer, preventing readers from seeing uninitialized memory
+- **CAS removal** — removed unnecessary compare-and-swap on append-only offset
+- **Growth ordering** — correct file growth sequencing
+
+#### ResourceHandler Read Lock
+- **Missing read lock** in `ResourceHandler` — added `AcquireReadLock`/`ReleaseReadLock` around query enumeration (ADR-021)
+
+#### LOAD File Support
+- **`LOAD <file://...>` wired into all update paths** — CLI, MCP tools, MCP pipe sessions, HTTP server
+- **Thread affinity fix** — `LoadFromFileAsync` runs on dedicated thread via `Task.Run` to maintain `ReaderWriterLockSlim` thread affinity across `BeginBatch`/`CommitBatch`
+- **CLI pool.Active initialization** — eagerly creates primary store to prevent `InvalidOperationException` on first access
+
+### Documentation
+
+- **ADR-002** status updated to "Phase 5 Partially Accepted"
+- **STATISTICS.md** documentation lines updated to 26,292 (grand total 165,677)
+
+---
+
 ## [1.2.1] - 2026-02-09
 
 Pruning support in Mercury CLI and MCP, with QuadStorePool migration.
@@ -403,6 +438,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.2.2]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.2
 [1.2.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.1
 [1.2.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.0
 [1.1.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.1.1
