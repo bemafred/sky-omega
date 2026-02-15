@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase 2 Accepted** (2026-02-15) — Phases 1-2 implemented and merged. Phases 3-5 remain Proposed.
+**Phase 3 Accepted** (2026-02-15) — Phases 1-3 implemented and merged. Phases 4-5 remain Proposed.
 
 ## Context
 
@@ -339,10 +339,10 @@ Querying across Mercury instances.
 
 ### Phase 3 acceptance criteria
 
-- [ ] Temporal RDF tutorial includes runnable examples referencing the examples project
-- [ ] Semantic braid is explained with concrete SPARQL, not just conceptual description
-- [ ] Pruning tutorial covers both CLI and MCP surfaces
-- [ ] Federation tutorial demonstrates cross-instance queries
+- [x] Temporal RDF tutorial includes runnable examples referencing the examples project
+- [x] Semantic braid is explained with concrete SPARQL, not just conceptual description
+- [x] Pruning tutorial covers both CLI and MCP surfaces
+- [x] Federation tutorial demonstrates cross-instance queries
 
 -----
 
