@@ -16,6 +16,7 @@ using SkyOmega.Mercury.NTriples;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.RdfXml;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Abstractions;
@@ -45,6 +46,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     private readonly Func<QuadStore> _storeFactory;
     private readonly string _baseUri;
     private readonly SparqlHttpServerOptions _options;
+    private readonly LoadExecutor _loadExecutor;
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
     private bool _disposed;
@@ -62,6 +64,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         _storeFactory = storeFactory ?? throw new ArgumentNullException(nameof(storeFactory));
         _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         _options = options ?? new SparqlHttpServerOptions();
+        _loadExecutor = new LoadExecutor();
 
         if (!_baseUri.EndsWith("/"))
             _baseUri += "/";
@@ -82,6 +85,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         _storeFactory = () => store;
         _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         _options = options ?? new SparqlHttpServerOptions();
+        _loadExecutor = new LoadExecutor();
 
         if (!_baseUri.EndsWith("/"))
             _baseUri += "/";
@@ -765,7 +769,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             var operation = parser.ParseUpdate();
 
             var store = _storeFactory();
-            var executor = new UpdateExecutor(store, updateString.AsSpan(), operation);
+            var executor = new UpdateExecutor(store, updateString.AsSpan(), operation, _loadExecutor);
             var result = executor.Execute();
 
             if (result.Success)
@@ -880,6 +884,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         _cts?.Cancel();
         _listener.Close();
         _cts?.Dispose();
+        _loadExecutor.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -890,6 +895,7 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
         _listener.Close();
         _cts?.Dispose();
+        _loadExecutor.Dispose();
     }
 }
 

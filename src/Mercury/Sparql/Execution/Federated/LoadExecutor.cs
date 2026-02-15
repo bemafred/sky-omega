@@ -134,9 +134,9 @@ public sealed class LoadExecutor : IDisposable
     }
 
     /// <summary>
-    /// Execute LOAD operation - fetch RDF data from URL and add to store.
+    /// Execute LOAD operation - fetch RDF data from URL or local file and add to store.
     /// </summary>
-    /// <param name="sourceUri">URL of RDF document to load.</param>
+    /// <param name="sourceUri">URL or file:// URI of RDF document to load.</param>
     /// <param name="destinationGraph">Target named graph (null or empty for default graph).</param>
     /// <param name="silent">If true, suppress errors and return success with 0 affected.</param>
     /// <param name="store">QuadStore to load data into.</param>
@@ -155,6 +155,12 @@ public sealed class LoadExecutor : IDisposable
 
         try
         {
+            // Handle file:// URIs locally
+            if (sourceUri.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            {
+                return await LoadFromFileAsync(sourceUri, graphStr, store, ct).ConfigureAwait(false);
+            }
+
             using var response = await _httpClient.GetAsync(sourceUri, HttpCompletionOption.ResponseHeadersRead, ct)
                 .ConfigureAwait(false);
 
@@ -241,6 +247,69 @@ public sealed class LoadExecutor : IDisposable
                 Success = false,
                 ErrorMessage = $"Error loading {sourceUri}: {ex.Message}"
             };
+        }
+    }
+
+    /// <summary>
+    /// Load RDF data from a file:// URI.
+    /// </summary>
+    private async ValueTask<UpdateResult> LoadFromFileAsync(
+        string sourceUri,
+        string? graphStr,
+        QuadStore store,
+        CancellationToken ct)
+    {
+        var filePath = new Uri(sourceUri).LocalPath;
+
+        if (!File.Exists(filePath))
+        {
+            return new UpdateResult
+            {
+                Success = false,
+                ErrorMessage = $"File not found: {filePath}"
+            };
+        }
+
+        // Check file size against limit
+        if (_options.MaxDownloadSize > 0)
+        {
+            var fileInfo = new FileInfo(filePath);
+            if (fileInfo.Length > _options.MaxDownloadSize)
+            {
+                return new UpdateResult
+                {
+                    Success = false,
+                    ErrorMessage = $"File size ({fileInfo.Length:N0} bytes) exceeds maximum allowed ({_options.MaxDownloadSize:N0} bytes)"
+                };
+            }
+        }
+
+        var format = DetermineFormat(null, sourceUri);
+
+        using var stream = File.OpenRead(filePath);
+
+        store.BeginBatch();
+        try
+        {
+            var count = await ParseAndLoadAsync(stream, format, graphStr, store, _options.MaxTripleCount, ct)
+                .ConfigureAwait(false);
+            store.CommitBatch();
+
+            return new UpdateResult { Success = true, AffectedCount = count };
+        }
+        catch (TripleLimitExceededException ex)
+        {
+            store.RollbackBatch();
+            return new UpdateResult
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+        catch
+        {
+            store.RollbackBatch();
+            throw;
         }
     }
 

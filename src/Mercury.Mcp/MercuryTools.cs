@@ -10,6 +10,7 @@ using SkyOmega.Mercury.Pruning;
 using SkyOmega.Mercury.Pruning.Filters;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 
@@ -19,10 +20,12 @@ namespace SkyOmega.Mercury.Mcp;
 public sealed class MercuryTools
 {
     private readonly QuadStorePool _pool;
+    private readonly LoadExecutor _loadExecutor;
 
-    public MercuryTools(QuadStorePool pool)
+    public MercuryTools(QuadStorePool pool, LoadExecutor loadExecutor)
     {
         _pool = pool;
+        _loadExecutor = loadExecutor;
     }
 
     [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store")]
@@ -154,7 +157,7 @@ public sealed class MercuryTools
             }
 
             var store = _pool.Active;
-            var executor = new UpdateExecutor(store, update.AsSpan(), parsed);
+            var executor = new UpdateExecutor(store, update.AsSpan(), parsed, _loadExecutor);
             var result = executor.Execute();
 
             if (!result.Success)

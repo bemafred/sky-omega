@@ -52,7 +52,7 @@ SELECT ?s ?label ?comment WHERE {
 }
 ```
 
-If the store is empty, that's fine — you're bootstrapping. If it has content, orient yourself before acting.
+If the store is empty, that's fine — you're starting fresh. Load `docs/knowledge/bootstrap.ttl` (see Bootstrap section below) for grounded context, or begin with your own assertions. An empty store is a valid starting point; the bootstrap provides a productive seed, not a requirement.
 
 ### End Every Session by Considering What to Remember
 
@@ -192,10 +192,22 @@ docs/knowledge/
 
 ### Bootstrap — First Session with an Empty Store
 
-If `mercury_stats` shows zero quads, load the bootstrap:
+If `mercury_stats` shows zero quads, load the bootstrap knowledge. From the repository root:
 
 ```sparql
-LOAD <file:///absolute/path/to/docs/knowledge/bootstrap.ttl>
+LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
+```
+
+Replace the path with your actual repository root. To find it: the directory containing `CLAUDE.md` and `SkyOmega.sln`.
+
+Alternatively, use the CLI tool for direct file loading:
+
+```bash
+mercury -a mcp
+```
+Then in the attached session:
+```sparql
+LOAD <file:///Users/you/src/sky-omega/docs/knowledge/bootstrap.ttl>
 ```
 
 This provides grounded context: component definitions, EEE methodology as queryable structure, core architectural principles. It is a seed, not a schema.

@@ -39,6 +39,22 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
+## Quick Start
+
+```bash
+git clone <repo-url> && cd sky-omega
+dotnet build SkyOmega.sln
+dotnet test
+./tools/install-tools.sh      # macOS/Linux
+mercury -m                     # Start an in-memory session
+```
+
+New here? Follow the **[Getting Started tutorial](docs/tutorials/getting-started.md)**.
+
+Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutorials/mercury-mcp.md)**.
+
+---
+
 ## Related Repositories
 
 - **[sky-omega-public](https://github.com/bemafred/sky-omega-public)** — Conceptual documentation, EEE methodology, architectural narratives
@@ -54,6 +70,10 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 | [CLAUDE.md](CLAUDE.md)                | Operational guidance for AI-assisted development |
 | [MERCURY.md](MERCURY.md)              | Semantic memory discipline — when, why, how      |
 | [STATISTICS.md](STATISTICS.md)        | Codebase metrics and conformance tracking        |
+| [Getting Started](docs/tutorials/getting-started.md) | 30-minute onboarding tutorial           |
+| [Mercury CLI](docs/tutorials/mercury-cli.md) | CLI REPL deep dive                        |
+| [Mercury MCP](docs/tutorials/mercury-mcp.md) | Claude integration and persistent memory  |
+| [API Reference](docs/api/api-usage.md) | Detailed code examples for all APIs             |
 
 ---
 

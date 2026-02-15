@@ -13,6 +13,7 @@ using SkyOmega.Mercury.Mcp.Services;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
 
@@ -99,6 +100,7 @@ Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
 
 // Create pool (auto-migrates flat stores on first run)
 var pool = new QuadStorePool(storePath);
+var loadExecutor = new LoadExecutor();
 
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
 
@@ -109,8 +111,9 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Register QuadStorePool as singleton
+// Register QuadStorePool and LoadExecutor as singletons
 builder.Services.AddSingleton(pool);
+builder.Services.AddSingleton(loadExecutor);
 
 // Register MCP server with stdio transport and tools
 builder.Services
@@ -141,15 +144,16 @@ Console.Error.WriteLine();
 await builder.Build().RunAsync();
 
 Console.Error.WriteLine("MCP Server shutting down...");
+loadExecutor.Dispose();
 pool.Dispose();
 
 return 0;
 
 // --- Session factory for pipe connections ---
 
-static ReplSession CreateSession(QuadStorePool pool) => new ReplSession(
+ReplSession CreateSession(QuadStorePool pool) => new ReplSession(
     executeQuery: sparql => ExecuteQuery(pool.Active, sparql),
-    executeUpdate: sparql => ExecuteUpdate(pool.Active, sparql),
+    executeUpdate: sparql => ExecuteUpdate(pool.Active, sparql, loadExecutor),
     getStatistics: () => GetStatistics(pool.Active),
     getNamedGraphs: () => GetNamedGraphs(pool.Active));
 
@@ -322,7 +326,7 @@ static QueryResult ExecuteTriples(QueryExecutor executor, QueryType type, TimeSp
     };
 }
 
-static UpdateResult ExecuteUpdate(QuadStore store, string sparql)
+static UpdateResult ExecuteUpdate(QuadStore store, string sparql, LoadExecutor loadExecutor)
 {
     var sw = Stopwatch.StartNew();
 
@@ -343,7 +347,7 @@ static UpdateResult ExecuteUpdate(QuadStore store, string sparql)
         var parseTime = sw.Elapsed;
         sw.Restart();
 
-        var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed);
+        var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed, loadExecutor);
         var result = executor.Execute();
 
         return new UpdateResult

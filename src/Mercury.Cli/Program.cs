@@ -9,6 +9,7 @@ using SkyOmega.Mercury.Pruning.Filters;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
@@ -157,11 +158,12 @@ if (enableHttp)
 }
 
 // Create ReplSession with inline lambdas and run REPL
+using var loadExecutor = new LoadExecutor();
 using (pool)
 using (httpServer)
 using (var session = new ReplSession(
     executeQuery: sparql => ExecuteQuery(pool.Active, sparql),
-    executeUpdate: sparql => ExecuteUpdate(pool.Active, sparql),
+    executeUpdate: sparql => ExecuteUpdate(pool.Active, sparql, loadExecutor),
     getStatistics: () => GetStatistics(pool.Active),
     getNamedGraphs: () => GetNamedGraphs(pool.Active),
     executePrune: pruneArgs => ExecutePrune(pool, pruneArgs)))
@@ -386,7 +388,7 @@ static QueryResult ExecuteTriples(QueryExecutor executor, QueryType type, TimeSp
     };
 }
 
-static UpdateResult ExecuteUpdate(QuadStore store, string sparql)
+static UpdateResult ExecuteUpdate(QuadStore store, string sparql, LoadExecutor loadExecutor)
 {
     var sw = Stopwatch.StartNew();
 
@@ -407,7 +409,7 @@ static UpdateResult ExecuteUpdate(QuadStore store, string sparql)
         var parseTime = sw.Elapsed;
         sw.Restart();
 
-        var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed);
+        var executor = new UpdateExecutor(store, sparql.AsSpan(), parsed, loadExecutor);
         var result = executor.Execute();
 
         return new UpdateResult
