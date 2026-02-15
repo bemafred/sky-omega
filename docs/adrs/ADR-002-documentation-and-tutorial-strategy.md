@@ -6,7 +6,7 @@
 
 ## Context
 
-Sky Omega v1.2 ships four globally-installable CLI/MCP tools (ADR-019), a comprehensive API reference (`docs/api/api-usage.md`), deep architectural documentation (18 Mercury ADRs, canonical concept definitions, EEE methodology), and a working examples project. The repository is preparing for public release under MIT license.
+Sky Omega v1.2 ships four globally-installable CLI/MCP tools ([ADR-019](mercury/ADR-019-global-tool-packaging.md)), a comprehensive API reference (`docs/api/api-usage.md`), deep architectural documentation (18 Mercury ADRs, canonical concept definitions, EEE methodology), and a working examples project. The repository is preparing for public release under MIT license.
 
 **The problem:** there is no path from “I just cloned this” to “I’m productively using it.”
 
@@ -14,7 +14,7 @@ A developer or AI agent arriving at the repository today encounters:
 
 1. **No getting-started tutorial.** README points to AI.md, CLAUDE.md, MERCURY.md — all internal operational documents. The `tools/` directory with install scripts is not referenced from README.
 1. **No tool documentation.** Four CLI tools (`mercury`, `mercury-sparql`, `mercury-turtle`, `mercury-mcp`) have `--help` text in source but no tutorial explaining workflows, use cases, or examples beyond the inline help.
-1. **No MCP onboarding.** The main integration story — “give your AI persistent memory” — has no walkthrough. Claude Code configuration is documented only in ADR-019.
+1. **No MCP onboarding.** The main integration story — “give your AI persistent memory” — has no walkthrough. Claude Code configuration is documented only in [ADR-019](mercury/ADR-019-global-tool-packaging.md).
 1. **Empty knowledge directories.** `docs/knowledge/patterns/`, `docs/knowledge/decisions/`, `docs/knowledge/vocabulary/` have `.gitkeep` files and an excellent README describing their purpose, but no content.
 1. **Undocumented examples.** The `examples/Mercury.Examples` project has storage and temporal examples but no README explaining how to run them or what they demonstrate.
 1. **No RDF onboarding.** The project assumes RDF/SPARQL familiarity. For the audience that needs Sky Omega most — developers who haven’t used RDF because the tooling was hostile — there’s no bridge.
@@ -96,15 +96,15 @@ This chain currently depends on *probable* LLM behavior, not a *reliable* mechan
 
 **Phase 1 addresses this through three actions:**
 
-1. **CLAUDE.md modification:** Promote the MERCURY.md reference from “see also” to an explicit directive in session startup context — *“On first MCP interaction with an empty store, follow the bootstrap procedure in MERCURY.md”*
-1. **MERCURY.md modification:** Replace the placeholder path with a resolvable pattern or explicit instruction for the agent to construct the absolute path from the repository root
+1. **CLAUDE.md modification:** Promote the MERCURY.md reference from "see also" to an explicit directive in session startup context — *"On first MCP interaction with an empty store, follow the bootstrap procedure in MERCURY.md"*
+1. **MERCURY.md modification:** Replace the placeholder path `<file:///absolute/path/to/docs/knowledge/bootstrap.ttl>` with a concrete instruction. The agent should use `pwd` or equivalent to determine the repository root and construct the absolute `file:///` URI, e.g.: *"Determine the repository root (the directory containing CLAUDE.md), then run: `LOAD <file:///{repo_root}/docs/knowledge/bootstrap.ttl>`"*. Alternatively, if Mercury's `LOAD` supports relative paths from the working directory, document that and use `LOAD <docs/knowledge/bootstrap.ttl>`.
 1. **Tutorial coverage (mercury-mcp.md):** Document all three bootstrap scenarios — Claude auto-loading, manual loading via CLI attachment, and standalone `mercury-mcp` without Claude Code — so the human always has a path regardless of tooling configuration
 
 -----
 
 ## Phase 1 — The Front Door
 
-**Goal:** A new user can go from `git clone` to running queries and using Claude with persistent memory in under 30 minutes.
+**Goal:** A new user can go from `git clone` to running their first SPARQL query in under 30 minutes (§1.1). The remaining Phase 1 deliverables extend that path to persistent stores, CLI workflows, and Claude integration — valuable independently but not part of the "30 minutes" promise.
 
 **Deliverables:**
 
@@ -175,7 +175,7 @@ Must be supplemented with an explicit instruction in the session startup context
 
 Two targeted improvements to the Bootstrap section:
 
-1. **Replace the placeholder path** (`<file:///absolute/path/to/...>`) with an instruction for the agent to resolve the repository root and construct the absolute path, or provide the path pattern using `MercuryPaths` conventions.
+1. **Replace the placeholder path** (`<file:///absolute/path/to/...>`) with a concrete resolution strategy: instruct the agent to determine the repo root via `pwd` (or by locating `CLAUDE.md`) and construct the absolute `file:///` URI. See the bootstrap chain fix in the Decision section above for the exact formulation.
 1. **Resolve the mixed signal** between “Session Discipline” (*“If the store is empty, that’s fine”*) and “Bootstrap” (*“load the bootstrap”*). Make the relationship explicit: an empty store is a valid starting point, *and* loading bootstrap.ttl provides grounded context that makes the first session more productive. These are not contradictory — the first is permission, the second is recommendation.
 
 ### 1.6 `examples/Mercury.Examples/README.md`
@@ -201,7 +201,7 @@ Brief README for the examples project:
 - [ ] mercury-mcp.md documents all three bootstrap paths (Claude auto-load, manual via CLI attachment, standalone without Claude)
 - [ ] CLAUDE.md contains an explicit directive to follow MERCURY.md bootstrap procedure on empty MCP store
 - [ ] MERCURY.md bootstrap section uses a resolvable path (not a placeholder) and resolves the permission/recommendation ambiguity
-- [ ] All code examples in tutorials are verified runnable
+- [ ] All code examples in tutorials are verified runnable (manually, by the author executing each command/query during authoring)
 - [ ] All cross-references resolve to existing files
 - [ ] README.md quick-start section exists and links work
 
@@ -254,7 +254,7 @@ RDF for people who haven’t used it — the bridge tutorial.
 
 ### 2.4 `docs/tutorials/installation-and-tools.md`
 
-Comprehensive tool lifecycle management.
+Comprehensive tool lifecycle management. Where getting-started.md (§1.1) covers the *happy path* — run the install script, verify versions — this tutorial covers the *full lifecycle*: manual installation, updates, uninstalls, platform differences, and port configuration.
 
 - What `install-tools.sh` / `install-tools.ps1` does under the hood (build, pack, global install)
 - Manual installation via `dotnet tool install`
@@ -378,6 +378,8 @@ Populate the empty knowledge directories with curated content:
 - **`patterns/curiosity-driven-exploration.ttl`** — Curate from `docs/scratches/reasoning/patterns/curiosity-pattern.ttl`.
 - **`decisions/adr-summary.ttl`** — Key architectural decisions as queryable triples with rationale. Not a replacement for ADR Markdown — a queryable index.
 
+**Note:** `docs/scratches/reasoning/patterns/` contains four additional pattern files (`evolving-tools.ttl`, `speculative-assertion.ttl`, `what-if.ttl`, `temperature-strategy.ttl`). Only `convergence` and `curiosity-driven-exploration` are selected for initial seeding because they represent the most stable, broadly applicable patterns. The others are candidates for future seeding once they mature through additional session usage.
+
 Each file must follow the knowledge directory’s own README: curated, general, no raw session dumps, no duplication of what code expresses.
 
 ### Phase 4 acceptance criteria
@@ -395,11 +397,11 @@ These tutorials are recognized as valuable but depend on components still maturi
 
 ### 5.1 `docs/tutorials/solid-protocol.md`
 
-Mercury.Solid is implemented (ADR-015) but not yet production-validated. Tutorial deferred until Solid integration is exercised in real workflows. Would cover: Pod concepts, resource CRUD, N3 Patch, access control, and Mercury’s graph-to-pod mapping.
+Mercury.Solid is implemented ([ADR-015](mercury/ADR-015-solid-architecture.md)) but not yet production-validated. Tutorial deferred until Solid integration is exercised in real workflows. Would cover: Pod concepts, resource CRUD, N3 Patch, access control, and Mercury’s graph-to-pod mapping.
 
 ### 5.2 `docs/tutorials/minerva-local-inference.md`
 
-Minerva is at skeleton stage (ADR-001 approved). Tutorial deferred until weight loading and tokenization are functional. Would cover: GGUF/SafeTensors weight loading, native tokenizers, Metal/CUDA acceleration via P/Invoke.
+Minerva is at skeleton stage ([ADR-001](minerva/ADR-001-weight-formats.md) approved). Tutorial deferred until weight loading and tokenization are functional. Would cover: GGUF/SafeTensors weight loading, native tokenizers, Metal/CUDA acceleration via P/Invoke.
 
 ### 5.3 `docs/tutorials/eee-for-teams.md`
 
@@ -419,7 +421,7 @@ The existing EEE tutorial (`learning-to-navigate-eee.md`) is individual-focused.
 
 ### Negative
 
-- Documentation maintenance burden: tutorials must be updated when tool behavior changes
+- Documentation maintenance burden: tutorials must be updated when tool behavior changes. Mitigated by adding tutorial review as a responsibility in CONTRIBUTING.md — changes to CLI flags, REPL commands, or MCP tool signatures should trigger a check of affected tutorials.
 - Risk of tutorials drifting from implementation: mitigated by including verifiable commands and by treating tutorials as first-class artifacts (changes to tool behavior should trigger tutorial review)
 - Phase 4 knowledge seeding requires epistemic judgment about what has stabilized enough to share — premature extraction violates the knowledge directory’s own principles
 
@@ -427,7 +429,7 @@ The existing EEE tutorial (`learning-to-navigate-eee.md`) is individual-focused.
 
 - Tutorials never duplicate API reference — they link to it
 - Tutorials use runnable examples, not pseudocode
-- All file paths in tutorials use the conventions established by `MercuryPaths` and ADR-019
+- All file paths in tutorials use the conventions established by `MercuryPaths` and [ADR-019](mercury/ADR-019-global-tool-packaging.md)
 - Prerequisites state .NET 10 (LTS) explicitly
 - `bootstrap.ttl` is primarily for MCP stores; CLI stores do not auto-load it
 - The bootstrap chain (CLAUDE.md → MERCURY.md → LOAD) must be a directive, not a suggestion — soft references between operational documents produce unreliable behavior
@@ -482,5 +484,5 @@ The existing EEE tutorial (`learning-to-navigate-eee.md`) is individual-focused.
 This ADR should be added to `docs/adrs/README.md`:
 
 ```markdown
-| [ADR-002](ADR-002-documentation-and-tutorial-strategy.md) | Documentation and Tutorial Strategy | Accepted |
+| [ADR-002](ADR-002-documentation-and-tutorial-strategy.md) | Documentation and Tutorial Strategy | Proposed |
 ```
