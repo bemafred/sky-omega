@@ -12,7 +12,8 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// </summary>
 /// <remarks>
 /// Internal constructor: AtomStore requires external synchronization via QuadStore's
-/// read/write locks. QueryPlanner is created by QueryExecutor which holds appropriate locks.
+/// read/write locks. QueryPlanner is created by QueryExecutor; the caller of
+/// QueryExecutor must hold appropriate locks (see ADR-020, ADR-021).
 /// </remarks>
 public sealed class QueryPlanner
 {

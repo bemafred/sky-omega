@@ -24,6 +24,8 @@ Mercury’s architecture is explicitly **single-owner** and **single-writer** at
 
 ### 1) Provide a safe default for query enumeration
 
+> **Note:** This section also covers the ReadSession ergonomics originally in ADR-020 §5, which was moved here as the natural home for query-ergonomics work.
+
 `QuadStore.Query(...)` currently requires the caller to hold a read lock for the entire lifetime of enumeration. This is correct, but easy to misuse, and misuse can be catastrophic if a writer triggers a remap or structural change.
 
 Add a safe default API shape so callers naturally do the right thing:
@@ -84,7 +86,11 @@ Establish an explicit boundary:
 Fix comments that imply behavior different from actual code, to avoid future confusion:
 
 - `CrossProcessStoreGate`: clarify when the gate is released (e.g., on pool dispose vs store return), matching actual behavior.
-- Any similar mismatch discovered in comments around `QuadStorePool`, pruning, or execution layers should be corrected as part of this ADR’s implementation.
+- Any similar mismatch discovered in comments around `QuadStorePool`, pruning, or execution layers should be corrected as part of this ADR's implementation.
+
+> **Applied (2026-02-15):** The two comment fixes identified in this section have been implemented:
+> - `QueryPlanner`: corrected to say the *caller* of QueryExecutor must hold locks.
+> - `CrossProcessStoreGate`: corrected to describe slot-held-for-pool-lifetime behavior.
 
 ### 7) Optional: expose durability/performance modes explicitly (WAL)
 

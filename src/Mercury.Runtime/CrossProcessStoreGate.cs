@@ -38,7 +38,8 @@ namespace SkyOmega.Mercury.Runtime;
 ///     CrossProcessStoreGate.Instance.Release();
 ///     throw;
 /// }
-/// // On successful store creation, Release() is called when store is returned to pool
+/// // On successful store creation, the slot is held for the pool's lifetime.
+/// // Slots are released in batch when QuadStorePool is disposed.
 /// </code>
 /// </para>
 /// </remarks>

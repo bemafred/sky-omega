@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — clarifies the intended single-owner/single-writer model and removes ambiguous concurrency semantics (2026-02-09)
+**Accepted** — clarifies the intended single-owner/single-writer model and removes ambiguous concurrency semantics (proposed 2026-02-09, implemented 2026-02-15)
 
 ## Context
 
@@ -63,18 +63,7 @@ When growing mapped files:
 
 This ensures the mapped region never transiently exceeds the file length.
 
-### 5) QuadStore exposes a safer read pattern (ergonomics)
-
-`QuadStore.Query(...)` currently requires the caller to hold the read lock for the **entire** enumeration lifetime.
-
-To reduce footguns while keeping the low-level API:
-
-- Introduce a scoped read session (e.g., `QuadStore.Read()` → `ReadSession : IDisposable`) that acquires/releases the read lock.
-- Optionally add `QueryLocked(...)` that holds the read lock internally and releases it when the enumerator is disposed.
-
-The existing manual-lock pattern remains available for advanced callers who want to group multiple operations under a single lock.
-
-### 6) Lock contract is enforced in DEBUG
+### 5) Lock contract is enforced in DEBUG
 
 Add internal DEBUG-only assertions to verify:
 
@@ -94,12 +83,6 @@ Add internal DEBUG-only assertions to verify:
 
 - Reorder `EnsureDataCapacity(...)` and `EnsureOffsetCapacity(...)` to extend file length before swapping the active mapping.
 
-### QuadStore safe read ergonomics
-
-- Add `ReadSession` (or `QueryLocked`) in `QuadStore`.
-- Update method docs and comments to reflect the authoritative contract:
-  - “Lock required for enumeration lifetime” becomes enforceable and easy to do correctly.
-
 ### Documentation
 
 - Update the relevant comments in:
@@ -114,12 +97,9 @@ Add internal DEBUG-only assertions to verify:
 - Removes misleading “maybe lock-free” semantics and aligns implementation with Mercury’s single-owner model.
 - Eliminates publication-order hazards in the hash index.
 - Clearer invariants reduce cognitive load and simplify future maintenance.
-- Safer default query usage reduces accidental misuse in new operational surfaces (HTTP, MCP, Solid).
-
 ### Drawbacks
 
 - AtomStore cannot be used as a multi-writer component without redesign.
-- A small amount of additional API surface (`ReadSession` / `QueryLocked`) is introduced for ergonomic safety.
 
 ### Future scaling path
 

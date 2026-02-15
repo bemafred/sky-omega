@@ -506,6 +506,9 @@ internal sealed unsafe class AtomStore : IDisposable
         }
     }
 
+    /// <remarks>
+    /// Must be called under QuadStore's write lock (single-writer contract, see ADR-020).
+    /// </remarks>
     private long InsertAtomUtf8(ReadOnlySpan<byte> utf8Value, long hash, long bucket)
     {
         // Allocate atom ID
@@ -541,24 +544,17 @@ internal sealed unsafe class AtomStore : IDisposable
 
             if (entry.AtomId == 0)
             {
-                var expected = 0L;
-                var success = System.Threading.Interlocked.CompareExchange(
-                    ref entry.AtomId,
-                    atomId,
-                    expected
-                ) == expected;
+                // Write metadata first, publish AtomId last (ADR-020 §2).
+                // Under single-writer contract, no CAS needed — plain writes suffice.
+                entry.Hash = hash;
+                entry.Length = utf8Value.Length;
+                entry.Offset = offset;
+                entry.AtomId = atomId; // Publish last — signals slot is fully populated
 
-                if (success)
-                {
-                    entry.Hash = hash;
-                    entry.Length = utf8Value.Length;
-                    entry.Offset = offset;
+                Interlocked.Increment(ref _atomCount);
+                Interlocked.Add(ref _totalBytes, utf8Value.Length);
 
-                    System.Threading.Interlocked.Increment(ref _atomCount);
-                    System.Threading.Interlocked.Add(ref _totalBytes, utf8Value.Length);
-
-                    return atomId;
-                }
+                return atomId;
             }
         }
 
@@ -588,7 +584,13 @@ internal sealed unsafe class AtomStore : IDisposable
             {
                 var newSize = Math.Max(_dataFile.Length * 2, requiredSize + InitialDataSize);
 
-                // 1. Create new map and accessor
+                // ADR-020 §4: extend file before creating mapping, so mapped
+                // region never transiently exceeds file length.
+
+                // 1. Extend the underlying file length
+                _dataFile.SetLength(newSize);
+
+                // 2. Create new map and accessor over the extended file
                 var newMap = MemoryMappedFile.CreateFromFile(
                     _dataFile,
                     mapName: null,
@@ -603,17 +605,11 @@ internal sealed unsafe class AtomStore : IDisposable
                 byte* newPtr = null;
                 newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref newPtr);
 
-                // 2. Atomic Swap - Readers now use the new pointer
-                // Pointer assignment is atomic on x64, memory barrier ensures visibility
+                // 3. Swap active pointers
                 _dataPtr = newPtr;
                 Thread.MemoryBarrier();
 
-                // 3. Extend File
-                _dataFile.SetLength(newSize);
-
-                // 4. Cleanup the OLD accessor/map
-                // Note: External locking prevents readers from using old pointers.
-                // The write lock holder (caller) blocks all readers until this completes.
+                // 4. Dispose old mapping/accessor
                 _dataAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
                 _dataAccessor.Dispose();
                 _dataMap.Dispose();
@@ -650,7 +646,13 @@ internal sealed unsafe class AtomStore : IDisposable
             {
                 var newCapacity = Math.Max(_offsetCapacity * 2, requiredCapacity + InitialOffsetCapacity);
 
-                // 1. Create new map and accessor
+                // ADR-020 §4: extend file before creating mapping, so mapped
+                // region never transiently exceeds file length.
+
+                // 1. Extend the underlying file length
+                _offsetFile.SetLength(newCapacity * sizeof(long));
+
+                // 2. Create new map and accessor over the extended file
                 var newMap = MemoryMappedFile.CreateFromFile(
                     _offsetFile,
                     mapName: null,
@@ -666,16 +668,11 @@ internal sealed unsafe class AtomStore : IDisposable
                 newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref offsetPtr);
                 var newPtr = (long*)offsetPtr;
 
-                // 2. Atomic Swap - Readers now use the new pointer
-                // Pointer assignment is atomic on x64, memory barrier ensures visibility
+                // 3. Swap active pointers
                 _offsetIndex = newPtr;
                 Thread.MemoryBarrier();
 
-                // 3. Extend File
-                _offsetFile.SetLength(newCapacity * sizeof(long));
-
-                // 4. Cleanup the OLD accessor/map
-                // Note: External locking prevents readers from using old pointers.
+                // 4. Dispose old mapping/accessor
                 _offsetAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
                 _offsetAccessor.Dispose();
                 _offsetMap.Dispose();
