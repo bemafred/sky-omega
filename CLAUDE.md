@@ -7,6 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
+# Initialize submodules (W3C test data — required for dotnet test)
+./tools/update-submodules.sh   # or .\tools\update-submodules.ps1
+
 # Build entire solution
 dotnet build SkyOmega.sln
 

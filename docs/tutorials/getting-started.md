@@ -10,11 +10,19 @@ Mercury installed, a working SPARQL REPL, and data loaded from a file.
 ## Clone and Build
 
 ```bash
-git clone https://github.com/your-org/sky-omega.git
+git clone --recurse-submodules https://github.com/your-org/sky-omega.git
 cd sky-omega
 
 dotnet build SkyOmega.sln
 dotnet test
+```
+
+The `--recurse-submodules` flag fetches W3C conformance test data stored in
+`tests/w3c-rdf-tests/` and `tests/w3c-json-ld-api/`. Without it, many tests
+will fail. If you already cloned without the flag, run:
+
+```bash
+./tools/update-submodules.sh
 ```
 
 All tests should pass. The build produces the Mercury library, CLI tools,

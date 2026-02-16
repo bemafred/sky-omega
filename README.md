@@ -42,12 +42,15 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 ## Quick Start
 
 ```bash
-git clone <repo-url> && cd sky-omega
+git clone --recurse-submodules <repo-url> && cd sky-omega
 dotnet build SkyOmega.sln
 dotnet test
 ./tools/install-tools.sh      # macOS/Linux
 mercury -m                     # Start an in-memory session
 ```
+
+> **Already cloned without submodules?** Run `./tools/update-submodules.sh` to fetch
+> the W3C conformance test data needed by `dotnet test`.
 
 New here? Follow the **[Getting Started tutorial](docs/tutorials/getting-started.md)**.
 
