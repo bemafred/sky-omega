@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-02-15
+**Last updated:** 2026-02-16
 
 ## Line Counts
 
@@ -37,7 +37,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 49,073 | 3,914 |
+| Mercury.Tests | 49,073 | 3,919 |
 | Mercury.Solid.Tests | 407 | 25 |
 | Minerva.Tests | — | — |
 
@@ -59,8 +59,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 26,292 |
-| CLAUDE.md | 878 |
+| All docs (*.md, *.ttl) | 26,300 |
+| CLAUDE.md | 881 |
 
 ## Totals
 
@@ -70,8 +70,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 | Tests | ~49,480 |
 | Benchmarks | ~2,968 |
 | Examples | ~779 |
-| Documentation | ~26,292 |
-| **Grand total** | **~165,677** |
+| Documentation | ~26,300 |
+| **Grand total** | **~165,685** |
 
 ## W3C Conformance
 
