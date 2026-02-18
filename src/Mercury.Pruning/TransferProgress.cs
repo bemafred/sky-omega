@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Pruning;
 /// <summary>
 /// Progress information for transfer operations.
 /// </summary>
-public readonly struct TransferProgress
+internal readonly struct TransferProgress
 {
     /// <summary>Total quads scanned from source.</summary>
     public long QuadsScanned { get; init; }
@@ -28,4 +28,4 @@ public readonly struct TransferProgress
 /// <summary>
 /// Callback delegate for progress reporting.
 /// </summary>
-public delegate void TransferProgressCallback(in TransferProgress progress);
+internal delegate void TransferProgressCallback(in TransferProgress progress);

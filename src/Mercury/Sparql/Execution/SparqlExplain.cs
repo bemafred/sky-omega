@@ -17,7 +17,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// <summary>
 /// Type of operator in the query plan.
 /// </summary>
-public enum ExplainOperatorType
+internal enum ExplainOperatorType
 {
     /// <summary>Root SELECT/ASK/CONSTRUCT query.</summary>
     Query,
@@ -80,7 +80,7 @@ public enum ExplainOperatorType
 /// <summary>
 /// A node in the query execution plan tree.
 /// </summary>
-public sealed class ExplainNode
+internal sealed class ExplainNode
 {
     /// <summary>Type of operator.</summary>
     public ExplainOperatorType OperatorType { get; set; }
@@ -110,7 +110,7 @@ public sealed class ExplainNode
 /// <summary>
 /// Query plan explanation with optional execution statistics.
 /// </summary>
-public sealed class ExplainPlan
+internal sealed class ExplainPlan
 {
     /// <summary>The root of the execution plan tree.</summary>
     public ExplainNode Root { get; init; } = new() { OperatorType = ExplainOperatorType.Query };
@@ -314,7 +314,7 @@ public sealed class ExplainPlan
 /// <summary>
 /// Output format for explain plans.
 /// </summary>
-public enum ExplainFormat
+internal enum ExplainFormat
 {
     /// <summary>Human-readable text format.</summary>
     Text,
@@ -326,7 +326,7 @@ public enum ExplainFormat
 /// <summary>
 /// Generates query execution plans from parsed SPARQL queries.
 /// </summary>
-public sealed class SparqlExplainer
+internal sealed class SparqlExplainer
 {
     private readonly string _source;
     private readonly Query _query;
@@ -870,7 +870,7 @@ public sealed class SparqlExplainer
 /// <summary>
 /// Extension methods for explain functionality.
 /// </summary>
-public static class SparqlExplainExtensions
+internal static class SparqlExplainExtensions
 {
     /// <summary>
     /// Generate an explain plan for a parsed query.

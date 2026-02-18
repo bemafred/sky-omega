@@ -13,7 +13,7 @@ namespace SkyOmega.Mercury.JsonLd;
 /// Interface for resolving external JSON-LD contexts.
 /// Implementations can load contexts from files, HTTP, or other sources.
 /// </summary>
-public interface IContextResolver
+internal interface IContextResolver
 {
     /// <summary>
     /// Resolve a context URI to its JSON content.
@@ -29,7 +29,7 @@ public interface IContextResolver
 /// <summary>
 /// Exception thrown when context resolution fails.
 /// </summary>
-public class JsonLdContextException : Exception
+internal class JsonLdContextException : Exception
 {
     public string ContextUri { get; }
     public string ErrorCode { get; }
@@ -54,7 +54,7 @@ public class JsonLdContextException : Exception
 /// Used primarily for testing with local context files.
 /// Tracks the current context location to properly resolve nested relative references.
 /// </summary>
-public class FileContextResolver : IContextResolver
+internal class FileContextResolver : IContextResolver
 {
     private readonly string? _basePath;
     private string? _currentContextDir;  // Track current context directory for nested resolutions
@@ -181,7 +181,7 @@ public class FileContextResolver : IContextResolver
 /// Null context resolver that doesn't support external contexts.
 /// Used when no resolver is provided.
 /// </summary>
-public class NullContextResolver : IContextResolver
+internal class NullContextResolver : IContextResolver
 {
     public static readonly NullContextResolver Instance = new();
 

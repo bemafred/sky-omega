@@ -499,20 +499,8 @@ public static class SparqlTool
             case ".count":
             case ".c":
                 {
-                    store.AcquireReadLock();
-                    try
-                    {
-                        var results = store.QueryCurrent(null, null, null);
-                        long count = 0;
-                        while (results.MoveNext())
-                            count++;
-                        results.Dispose();
-                        await output.WriteLineAsync($"Store contains {count:N0} triples");
-                    }
-                    finally
-                    {
-                        store.ReleaseReadLock();
-                    }
+                    var (quadCount, _, _) = store.GetStatistics();
+                    await output.WriteLineAsync($"Store contains {quadCount:N0} triples");
                 }
                 break;
 

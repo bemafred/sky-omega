@@ -12,7 +12,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// This is a readonly struct designed for zero-allocation storage in a <see cref="DiagnosticBag"/>.
 /// Message formatting is deferred until needed, using argument offsets into a shared buffer.
 /// </remarks>
-public readonly struct Diagnostic : IEquatable<Diagnostic>
+internal readonly struct Diagnostic : IEquatable<Diagnostic>
 {
     /// <summary>
     /// The diagnostic code (see <see cref="DiagnosticCode"/>).

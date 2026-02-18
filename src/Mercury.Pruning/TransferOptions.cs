@@ -8,7 +8,7 @@ namespace SkyOmega.Mercury.Pruning;
 /// <summary>
 /// Configuration options for quad transfer.
 /// </summary>
-public sealed class TransferOptions
+internal sealed class TransferOptions
 {
     /// <summary>
     /// How to handle temporal history. Default: FlattenToCurrent.

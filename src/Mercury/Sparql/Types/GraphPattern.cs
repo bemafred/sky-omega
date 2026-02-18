@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// A graph pattern containing triple patterns and filters.
 /// Uses inline storage for zero-allocation parsing.
 /// </summary>
-public struct GraphPattern
+internal struct GraphPattern
 {
     public const int MaxTriplePatterns = 32;
     public const int MaxFilters = 16;

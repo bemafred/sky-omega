@@ -109,7 +109,7 @@ public sealed class StorageOptions
 /// <summary>
 /// Helper for disk space checking used by storage components.
 /// </summary>
-public static class DiskSpaceChecker
+internal static class DiskSpaceChecker
 {
     /// <summary>
     /// Checks if there is sufficient disk space for a growth operation.

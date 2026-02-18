@@ -19,7 +19,7 @@ namespace SkyOmega.Mercury.JsonLd;
 /// <summary>
 /// JSON-LD output form.
 /// </summary>
-public enum JsonLdForm
+internal enum JsonLdForm
 {
     /// <summary>Expanded form - explicit IRIs, arrays for all values.</summary>
     Expanded,
@@ -40,7 +40,7 @@ public enum JsonLdForm
 /// writer.Flush();
 /// </code>
 /// </summary>
-public sealed class JsonLdStreamWriter : IDisposable, IAsyncDisposable
+internal sealed class JsonLdStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly JsonLdForm _form;

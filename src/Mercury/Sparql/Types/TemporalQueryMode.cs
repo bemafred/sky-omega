@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// <summary>
 /// Temporal query mode for bitemporal queries.
 /// </summary>
-public enum TemporalQueryMode
+internal enum TemporalQueryMode
 {
     Current,      // Default: valid at UtcNow
     AsOf,         // Point-in-time: valid at specific time

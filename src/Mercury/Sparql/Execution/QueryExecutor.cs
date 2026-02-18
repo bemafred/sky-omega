@@ -33,7 +33,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 ///
 /// Implements IDisposable to clean up the internal QueryBuffer (pooled storage).
 /// </summary>
-public partial class QueryExecutor : IDisposable
+internal partial class QueryExecutor : IDisposable
 {
     /// <summary>
     /// Default maximum join depth (number of patterns in a single nested loop join).

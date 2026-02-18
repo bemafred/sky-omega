@@ -13,7 +13,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// Handles federated queries via <see cref="ISparqlServiceExecutor"/>.
 /// Uses <see cref="ServiceMaterializer"/> for efficient result caching.
 /// </summary>
-public partial class QueryExecutor
+internal partial class QueryExecutor
 {
     /// <summary>
     /// Gets or creates the ServiceMaterializer for this executor.

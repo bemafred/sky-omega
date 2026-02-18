@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Pruning;
 /// <summary>
 /// Result of post-transfer verification.
 /// </summary>
-public readonly struct TransferVerification
+internal readonly struct TransferVerification
 {
     /// <summary>Whether verification passed successfully.</summary>
     public bool Passed { get; init; }

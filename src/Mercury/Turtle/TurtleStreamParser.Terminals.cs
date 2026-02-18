@@ -8,7 +8,7 @@ using System.Text;
 
 namespace SkyOmega.Mercury.Rdf.Turtle;
 
-public sealed partial class TurtleStreamParser
+internal sealed partial class TurtleStreamParser
 {
     /// <summary>
     /// [25] iri ::= IRIREF | PrefixedName

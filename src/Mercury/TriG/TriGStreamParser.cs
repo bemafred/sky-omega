@@ -37,7 +37,7 @@ namespace SkyOmega.Mercury.TriG;
 /// <para><b>Usage Pattern:</b> Create one instance per stream. Dispose when done
 /// to return pooled buffers.</para>
 /// </remarks>
-public sealed class TriGStreamParser : IDisposable, IAsyncDisposable
+internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;

@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// An EXISTS or NOT EXISTS filter: FILTER [NOT] EXISTS { pattern }
 /// Stores the pattern for later evaluation against the store.
 /// </summary>
-public struct ExistsFilter
+internal struct ExistsFilter
 {
     public const int MaxPatterns = 4;
 

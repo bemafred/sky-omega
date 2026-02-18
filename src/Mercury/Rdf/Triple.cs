@@ -7,7 +7,7 @@ namespace SkyOmega.Mercury.Rdf;
 /// A transient, zero-allocation reference to an RDF triple using spans.
 /// Used for streaming results and parsing.
 /// </summary>
-public readonly ref struct TripleRef(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
+internal readonly ref struct TripleRef(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
 {
     public readonly ReadOnlySpan<char> Subject = subject;
     public readonly ReadOnlySpan<char> Predicate = predicate;
@@ -19,7 +19,7 @@ public readonly ref struct TripleRef(ReadOnlySpan<char> subject, ReadOnlySpan<ch
 /// Used for high-density storage in ArrayPool or MemoryMappedFiles.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public readonly struct Triple(long subjectId, long predicateId, long objectId)
+internal readonly struct Triple(long subjectId, long predicateId, long objectId)
 {
     public readonly long SubjectId = subjectId;
     public readonly long PredicateId = predicateId;
@@ -29,7 +29,7 @@ public readonly struct Triple(long subjectId, long predicateId, long objectId)
 /// <summary>
 /// Immutable record for general-purpose use.
 /// </summary>
-public readonly record struct RdfTriple(string Subject, string Predicate, string Object)
+internal readonly record struct RdfTriple(string Subject, string Predicate, string Object)
 {
     /// <summary>
     /// Convert to N-Triples format (canonical RDF serialization)

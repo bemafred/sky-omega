@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Pruning.Filters;
 /// <summary>
 /// Filters quads by predicate IRI(s). Useful for excluding system predicates.
 /// </summary>
-public sealed class PredicateFilter : IPruningFilter
+internal sealed class PredicateFilter : IPruningFilter
 {
     private readonly HashSet<string> _predicateIris;
     private readonly bool _includeMode;

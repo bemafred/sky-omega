@@ -13,7 +13,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 /// Default implementation of ISparqlServiceExecutor using BCL HttpClient.
 /// Parses SPARQL JSON Results Format (application/sparql-results+json).
 /// </summary>
-public sealed class HttpSparqlServiceExecutor : ISparqlServiceExecutor, IDisposable
+internal sealed class HttpSparqlServiceExecutor : ISparqlServiceExecutor, IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;

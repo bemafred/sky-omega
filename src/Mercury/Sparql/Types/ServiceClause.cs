@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// A SERVICE clause: SERVICE [SILENT] &lt;uri&gt; { patterns } or SERVICE [SILENT] ?var { patterns }
 /// Stores the endpoint term and patterns to be sent to a remote SPARQL endpoint.
 /// </summary>
-public struct ServiceClause
+internal struct ServiceClause
 {
     public const int MaxPatterns = 8;
 

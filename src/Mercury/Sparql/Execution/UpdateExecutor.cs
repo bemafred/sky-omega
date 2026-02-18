@@ -30,7 +30,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// LOAD support:
 /// - LOAD: Requires LoadExecutor instance (optional parameter)
 /// </summary>
-public class UpdateExecutor
+internal class UpdateExecutor
 {
     private readonly QuadStore _store;
     private readonly string _source;

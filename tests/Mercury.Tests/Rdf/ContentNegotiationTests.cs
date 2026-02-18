@@ -281,18 +281,18 @@ public class ContentNegotiationTests
     #region SPARQL Result Format - Content Type Detection
 
     [Theory]
-    [InlineData("application/sparql-results+json", SparqlResultFormat.Json)]
-    [InlineData("application/json", SparqlResultFormat.Json)]
-    [InlineData("application/sparql-results+xml", SparqlResultFormat.Xml)]
-    [InlineData("application/xml", SparqlResultFormat.Xml)]
-    [InlineData("text/csv", SparqlResultFormat.Csv)]
-    [InlineData("text/tab-separated-values", SparqlResultFormat.Tsv)]
-    [InlineData("text/tsv", SparqlResultFormat.Tsv)]
-    [InlineData("text/html", SparqlResultFormat.Unknown)]
-    public void SparqlResultFormat_FromContentType_DetectsCorrectly(string contentType, SparqlResultFormat expected)
+    [InlineData("application/sparql-results+json", (int)SparqlResultFormat.Json)]
+    [InlineData("application/json", (int)SparqlResultFormat.Json)]
+    [InlineData("application/sparql-results+xml", (int)SparqlResultFormat.Xml)]
+    [InlineData("application/xml", (int)SparqlResultFormat.Xml)]
+    [InlineData("text/csv", (int)SparqlResultFormat.Csv)]
+    [InlineData("text/tab-separated-values", (int)SparqlResultFormat.Tsv)]
+    [InlineData("text/tsv", (int)SparqlResultFormat.Tsv)]
+    [InlineData("text/html", (int)SparqlResultFormat.Unknown)]
+    public void SparqlResultFormat_FromContentType_DetectsCorrectly(string contentType, int expected)
     {
         var result = SparqlResultFormatNegotiator.FromContentType(contentType.AsSpan());
-        Assert.Equal(expected, result);
+        Assert.Equal((SparqlResultFormat)expected, result);
     }
 
     #endregion
@@ -300,17 +300,17 @@ public class ContentNegotiationTests
     #region SPARQL Result Format - Extension Detection
 
     [Theory]
-    [InlineData(".json", SparqlResultFormat.Json)]
-    [InlineData(".srj", SparqlResultFormat.Json)]
-    [InlineData(".xml", SparqlResultFormat.Xml)]
-    [InlineData(".srx", SparqlResultFormat.Xml)]
-    [InlineData(".csv", SparqlResultFormat.Csv)]
-    [InlineData(".tsv", SparqlResultFormat.Tsv)]
-    [InlineData(".html", SparqlResultFormat.Unknown)]
-    public void SparqlResultFormat_FromExtension_DetectsCorrectly(string extension, SparqlResultFormat expected)
+    [InlineData(".json", (int)SparqlResultFormat.Json)]
+    [InlineData(".srj", (int)SparqlResultFormat.Json)]
+    [InlineData(".xml", (int)SparqlResultFormat.Xml)]
+    [InlineData(".srx", (int)SparqlResultFormat.Xml)]
+    [InlineData(".csv", (int)SparqlResultFormat.Csv)]
+    [InlineData(".tsv", (int)SparqlResultFormat.Tsv)]
+    [InlineData(".html", (int)SparqlResultFormat.Unknown)]
+    public void SparqlResultFormat_FromExtension_DetectsCorrectly(string extension, int expected)
     {
         var result = SparqlResultFormatNegotiator.FromExtension(extension.AsSpan());
-        Assert.Equal(expected, result);
+        Assert.Equal((SparqlResultFormat)expected, result);
     }
 
     #endregion
@@ -318,14 +318,14 @@ public class ContentNegotiationTests
     #region SPARQL Result Format - Accept Header Negotiation
 
     [Theory]
-    [InlineData("application/sparql-results+json", SparqlResultFormat.Json)]
-    [InlineData("application/sparql-results+xml", SparqlResultFormat.Xml)]
-    [InlineData("*/*", SparqlResultFormat.Json)] // Default
-    [InlineData("", SparqlResultFormat.Json)] // Default
-    public void SparqlResultFormat_FromAcceptHeader_Simple(string accept, SparqlResultFormat expected)
+    [InlineData("application/sparql-results+json", (int)SparqlResultFormat.Json)]
+    [InlineData("application/sparql-results+xml", (int)SparqlResultFormat.Xml)]
+    [InlineData("*/*", (int)SparqlResultFormat.Json)] // Default
+    [InlineData("", (int)SparqlResultFormat.Json)] // Default
+    public void SparqlResultFormat_FromAcceptHeader_Simple(string accept, int expected)
     {
         var result = SparqlResultFormatNegotiator.FromAcceptHeader(accept.AsSpan());
-        Assert.Equal(expected, result);
+        Assert.Equal((SparqlResultFormat)expected, result);
     }
 
     [Fact]

@@ -11,7 +11,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// Subquery execution methods.
 /// Handles queries with nested SELECT subqueries.
 /// </summary>
-public partial class QueryExecutor
+internal partial class QueryExecutor
 {
     /// <summary>
     /// Execute a query with subqueries and return lightweight materialized results.

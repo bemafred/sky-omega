@@ -9,17 +9,17 @@ namespace SkyOmega.Mercury.Tests.Diagnostics;
 public class DiagnosticCodeTests
 {
     [Theory]
-    [InlineData(DiagnosticCode.UnexpectedCharacter, DiagnosticSeverity.Error)]
-    [InlineData(DiagnosticCode.UndefinedPrefix, DiagnosticSeverity.Error)]
-    [InlineData(DiagnosticCode.QueryTimeout, DiagnosticSeverity.Error)]
-    [InlineData(DiagnosticCode.StoreNotFound, DiagnosticSeverity.Error)]
-    [InlineData(DiagnosticCode.CartesianProduct, DiagnosticSeverity.Warning)]
-    [InlineData(DiagnosticCode.RedundantDistinct, DiagnosticSeverity.Warning)]
-    [InlineData(DiagnosticCode.SuggestIndex, DiagnosticSeverity.Hint)]
-    [InlineData(DiagnosticCode.PrefixAutoRegistered, DiagnosticSeverity.Hint)]
-    public void GetSeverity_ReturnsCorrectSeverity(int code, DiagnosticSeverity expected)
+    [InlineData(DiagnosticCode.UnexpectedCharacter, (int)DiagnosticSeverity.Error)]
+    [InlineData(DiagnosticCode.UndefinedPrefix, (int)DiagnosticSeverity.Error)]
+    [InlineData(DiagnosticCode.QueryTimeout, (int)DiagnosticSeverity.Error)]
+    [InlineData(DiagnosticCode.StoreNotFound, (int)DiagnosticSeverity.Error)]
+    [InlineData(DiagnosticCode.CartesianProduct, (int)DiagnosticSeverity.Warning)]
+    [InlineData(DiagnosticCode.RedundantDistinct, (int)DiagnosticSeverity.Warning)]
+    [InlineData(DiagnosticCode.SuggestIndex, (int)DiagnosticSeverity.Hint)]
+    [InlineData(DiagnosticCode.PrefixAutoRegistered, (int)DiagnosticSeverity.Hint)]
+    public void GetSeverity_ReturnsCorrectSeverity(int code, int expected)
     {
-        Assert.Equal(expected, DiagnosticCode.GetSeverity(code));
+        Assert.Equal((DiagnosticSeverity)expected, DiagnosticCode.GetSeverity(code));
     }
 
     [Theory]

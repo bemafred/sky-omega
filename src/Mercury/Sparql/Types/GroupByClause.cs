@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct GroupByClause
+internal struct GroupByClause
 {
     public const int MaxVariables = 8;
     private int _count;

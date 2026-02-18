@@ -20,7 +20,7 @@ namespace SkyOmega.Mercury.Rdf.Turtle;
 /// Handler for zero-allocation triple parsing.
 /// Receives spans that are valid only during the callback invocation.
 /// </summary>
-public delegate void TripleHandler(
+internal delegate void TripleHandler(
     ReadOnlySpan<char> subject,
     ReadOnlySpan<char> predicate,
     ReadOnlySpan<char> obj);
@@ -40,7 +40,7 @@ public delegate void TripleHandler(
 /// designed for sequential parsing of a single Turtle document. Dispose when done
 /// to return pooled buffers.</para>
 /// </remarks>
-public sealed partial class TurtleStreamParser : IDisposable
+internal sealed partial class TurtleStreamParser : IDisposable
 {
     private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;

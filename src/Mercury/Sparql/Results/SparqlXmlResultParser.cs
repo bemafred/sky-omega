@@ -41,7 +41,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 ///   &lt;boolean&gt;true&lt;/boolean&gt;
 /// &lt;/sparql&gt;
 /// </summary>
-public sealed class SparqlXmlResultParser : IDisposable, IAsyncDisposable
+internal sealed class SparqlXmlResultParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private bool _isDisposed;

@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// SPARQL dataset clause (FROM or FROM NAMED).
 /// FROM clauses define the default graph, FROM NAMED define available named graphs.
 /// </summary>
-public struct DatasetClause
+internal struct DatasetClause
 {
     public bool IsNamed;      // false = FROM (default graph), true = FROM NAMED
     public Term GraphIri;     // The graph IRI (Start/Length into source span)

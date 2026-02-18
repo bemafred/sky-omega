@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct AggregateExpression
+internal struct AggregateExpression
 {
     public AggregateFunction Function;
     public int VariableStart;   // The variable being aggregated (e.g., ?x in COUNT(?x))

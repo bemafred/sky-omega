@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Pruning;
 /// <summary>
 /// Result of a completed transfer operation.
 /// </summary>
-public readonly struct TransferResult
+internal readonly struct TransferResult
 {
     /// <summary>Whether the transfer completed successfully.</summary>
     public bool Success { get; init; }

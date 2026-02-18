@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace SkyOmega.Mercury.Rdf.Turtle;
 
-public sealed partial class TurtleStreamParser
+internal sealed partial class TurtleStreamParser
 {
     /// <summary>
     /// [3] directive ::= prefixID | base | version | sparqlPrefix | sparqlBase | sparqlVersion

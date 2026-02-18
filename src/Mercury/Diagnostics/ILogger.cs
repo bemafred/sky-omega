@@ -120,7 +120,7 @@ public sealed class NullLogger : ILogger
 /// Output format: [HH:mm:ss.fff] [LEVEL] message
 /// This logger allocates when formatting messages - use <see cref="NullLogger"/> in production.
 /// </remarks>
-public sealed class ConsoleLogger : ILogger
+internal sealed class ConsoleLogger : ILogger
 {
     private readonly LogLevel _minLevel;
     private readonly object _lock = new();
@@ -204,7 +204,7 @@ public sealed class ConsoleLogger : ILogger
 /// <summary>
 /// Extension methods for <see cref="ILogger"/>.
 /// </summary>
-public static class LoggerExtensions
+internal static class LoggerExtensions
 {
     /// <summary>Logs a trace message.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

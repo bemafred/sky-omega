@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Pruning.Filters;
 /// <summary>
 /// Combines multiple filters with AND/OR logic.
 /// </summary>
-public sealed class CompositeFilter : IPruningFilter
+internal sealed class CompositeFilter : IPruningFilter
 {
     private readonly IPruningFilter[] _filters;
     private readonly bool _requireAll; // true = AND, false = OR

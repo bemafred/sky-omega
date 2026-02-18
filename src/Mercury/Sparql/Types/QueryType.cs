@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public enum QueryType
+internal enum QueryType
 {
     Unknown,
     Select,

@@ -8,7 +8,7 @@ namespace SkyOmega.Mercury.Rdf;
 /// <summary>
 /// Term type enumeration for RDF terms
 /// </summary>
-public enum RdfTermType
+internal enum RdfTermType
 {
     IRI,
     Literal,
@@ -19,7 +19,7 @@ public enum RdfTermType
 /// <summary>
 /// RDF literal with lexical form, datatype, and optional language tag
 /// </summary>
-public readonly record struct RdfLiteral(
+internal readonly record struct RdfLiteral(
     string LexicalForm,
     string? DatatypeIri = null,
     string? LanguageTag = null,
@@ -47,7 +47,7 @@ public readonly record struct RdfLiteral(
 /// <summary>
 /// Parser statistics for monitoring zero-GC behavior
 /// </summary>
-public readonly record struct ParserStatistics
+internal readonly record struct ParserStatistics
 {
     public long TriplesParsed { get; init; }
     public long BytesProcessed { get; init; }

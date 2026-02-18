@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public enum AggregateFunction
+internal enum AggregateFunction
 {
     None = 0,
     Count,

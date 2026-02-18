@@ -6,7 +6,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// For QuotedTriple, Start/Length point to the "&lt;&lt; s p o &gt;&gt;" text;
 /// nested terms are re-parsed on demand during pattern expansion.
 /// </summary>
-public struct Term
+internal struct Term
 {
     public TermType Type;
     public int Start;   // Offset into source

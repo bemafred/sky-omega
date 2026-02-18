@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 /// Shared pool for SERVICE clause materialization.
 /// Uses QuadStorePool to efficiently reuse temp stores across queries.
 /// </summary>
-public static class ServiceStorePool
+internal static class ServiceStorePool
 {
     /// <summary>
     /// Global pool for SERVICE temp stores.
@@ -38,7 +38,7 @@ public static class ServiceStorePool
 /// execution model - all patterns become local index scans.
 /// </para>
 /// </summary>
-public sealed class ServiceMaterializer : IDisposable
+internal sealed class ServiceMaterializer : IDisposable
 {
     private readonly ISparqlServiceExecutor _executor;
     private readonly QuadStorePool _pool;
@@ -375,7 +375,7 @@ public sealed class ServiceMaterializer : IDisposable
 /// <summary>
 /// Result of SERVICE clause fetch - either in-memory or indexed.
 /// </summary>
-public readonly struct ServiceFetchResult
+internal readonly struct ServiceFetchResult
 {
     /// <summary>
     /// Whether this result uses the indexed path.
@@ -441,7 +441,7 @@ public readonly struct ServiceFetchResult
 /// <summary>
 /// Options for SERVICE clause materialization.
 /// </summary>
-public sealed class ServiceMaterializerOptions
+internal sealed class ServiceMaterializerOptions
 {
     /// <summary>
     /// Result count threshold for in-memory vs indexed path.

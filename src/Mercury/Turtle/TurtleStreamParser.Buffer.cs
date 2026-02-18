@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace SkyOmega.Mercury.Rdf.Turtle;
 
-public sealed partial class TurtleStreamParser
+internal sealed partial class TurtleStreamParser
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int Peek()

@@ -28,7 +28,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 /// ?s	?p	?o
 /// &lt;http://example.org/s&gt;	&lt;http://example.org/p&gt;	"value"
 /// </summary>
-public sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
+internal sealed class SparqlCsvResultWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

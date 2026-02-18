@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// Reference to an EXISTS pattern embedded within a compound FILTER expression.
 /// Used to track positions of [NOT] EXISTS in expressions like: FILTER ( ?x = ?y || NOT EXISTS { ... } )
 /// </summary>
-public struct CompoundExistsRef
+internal struct CompoundExistsRef
 {
     /// <summary>
     /// Start position of the [NOT] EXISTS portion in the filter expression (relative to filter start).

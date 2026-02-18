@@ -28,7 +28,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// }
 /// </code>
 /// </remarks>
-public sealed class DiagnosticJsonFormatter
+internal sealed class DiagnosticJsonFormatter
 {
     private readonly string _source;
 

@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// A triple pattern with subject, predicate, and object terms.
 /// Supports property paths in the predicate position.
 /// </summary>
-public struct TriplePattern
+internal struct TriplePattern
 {
     public Term Subject;
     public Term Predicate;

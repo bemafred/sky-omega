@@ -16,7 +16,7 @@ namespace SkyOmega.Mercury.Owl;
 /// Inference rule types supported by the reasoner.
 /// </summary>
 [Flags]
-public enum InferenceRules
+internal enum InferenceRules
 {
     /// <summary>No inference.</summary>
     None = 0,
@@ -69,7 +69,7 @@ public enum InferenceRules
 /// - RDFS: subClassOf, subPropertyOf, domain, range
 /// - OWL: TransitiveProperty, SymmetricProperty, inverseOf, sameAs, equivalentClass, equivalentProperty
 /// </summary>
-public sealed class OwlReasoner
+internal sealed class OwlReasoner
 {
     private readonly QuadStore _store;
     private readonly InferenceRules _rules;

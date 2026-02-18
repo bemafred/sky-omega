@@ -20,7 +20,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 /// <summary>
 /// Represents a SPARQL result value with type information.
 /// </summary>
-public readonly struct SparqlResultValue
+internal readonly struct SparqlResultValue
 {
     /// <summary>The value type (uri, literal, bnode).</summary>
     public readonly SparqlValueType Type;
@@ -85,7 +85,7 @@ public readonly struct SparqlResultValue
 /// <summary>
 /// SPARQL value types.
 /// </summary>
-public enum SparqlValueType
+internal enum SparqlValueType
 {
     /// <summary>URI/IRI value.</summary>
     Uri,
@@ -100,7 +100,7 @@ public enum SparqlValueType
 /// <summary>
 /// Represents a single SPARQL result row (binding).
 /// </summary>
-public sealed class SparqlResultRow
+internal sealed class SparqlResultRow
 {
     private readonly Dictionary<string, SparqlResultValue> _bindings;
 
@@ -186,7 +186,7 @@ public sealed class SparqlResultRow
 ///   "boolean": true
 /// }
 /// </summary>
-public sealed class SparqlJsonResultParser : IDisposable, IAsyncDisposable
+internal sealed class SparqlJsonResultParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private bool _isDisposed;

@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct SolutionModifier
+internal struct SolutionModifier
 {
     public GroupByClause GroupBy;
     public HavingClause Having;

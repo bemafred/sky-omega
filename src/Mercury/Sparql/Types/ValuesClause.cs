@@ -5,7 +5,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// Supports up to 4 variables and up to 16 total values (stored in row-major order).
 /// UNDEF values are marked with length = -1.
 /// </summary>
-public struct ValuesClause
+internal struct ValuesClause
 {
     public const int MaxVariables = 4;
     public const int MaxValues = 16;

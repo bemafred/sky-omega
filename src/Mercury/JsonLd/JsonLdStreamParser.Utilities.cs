@@ -10,7 +10,7 @@ using SkyOmega.Mercury.NQuads;
 
 namespace SkyOmega.Mercury.JsonLd;
 
-public sealed partial class JsonLdStreamParser
+internal sealed partial class JsonLdStreamParser
 {
     /// <summary>
     /// Check if a string looks like a JSON-LD keyword.

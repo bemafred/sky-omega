@@ -6,7 +6,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// iri? (zero or one), path1/path2 (sequence), path1|path2 (alternative),
 /// !(iri1|iri2|...) (negated property set)
 /// </summary>
-public struct PropertyPath
+internal struct PropertyPath
 {
     public PathType Type;
     public Term Iri;           // The IRI for simple paths

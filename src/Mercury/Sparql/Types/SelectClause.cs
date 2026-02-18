@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct SelectClause
+internal struct SelectClause
 {
     public const int MaxAggregates = 8;
     public const int MaxProjectedVariables = 16;

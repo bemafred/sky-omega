@@ -13,7 +13,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 /// <summary>
 /// Zero-allocation FILTER expression evaluator using stack-based evaluation
 /// </summary>
-public ref partial struct FilterEvaluator
+internal ref partial struct FilterEvaluator
 {
     private ReadOnlySpan<char> _expression;
     private int _position;
@@ -2070,7 +2070,7 @@ public ref partial struct FilterEvaluator
 /// <summary>
 /// Stack-allocated value for FILTER evaluation
 /// </summary>
-public ref struct Value
+internal ref struct Value
 {
     public ValueType Type;
     public long IntegerValue;
@@ -2198,7 +2198,7 @@ public ref struct Value
     }
 }
 
-public enum ValueType
+internal enum ValueType
 {
     Unbound,
     Uri,
@@ -2208,7 +2208,7 @@ public enum ValueType
     Boolean
 }
 
-public enum ComparisonOperator
+internal enum ComparisonOperator
 {
     Unknown,
     Equal,

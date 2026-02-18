@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public enum GraphTargetType
+internal enum GraphTargetType
 {
     Default,      // DEFAULT
     Named,        // NAMED

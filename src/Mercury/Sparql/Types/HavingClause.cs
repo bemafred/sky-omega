@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct HavingClause
+internal struct HavingClause
 {
     public int ExpressionStart;   // Start offset of HAVING expression in source
     public int ExpressionLength;  // Length of expression

@@ -14,7 +14,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 /// <summary>
 /// Supported SPARQL query result formats.
 /// </summary>
-public enum SparqlResultFormat
+internal enum SparqlResultFormat
 {
     /// <summary>Unknown or unsupported format.</summary>
     Unknown = 0,
@@ -36,7 +36,7 @@ public enum SparqlResultFormat
 /// Content negotiation for SPARQL result formats.
 /// Maps MIME types and file extensions to result formats.
 /// </summary>
-public static class SparqlResultFormatNegotiator
+internal static class SparqlResultFormatNegotiator
 {
     /// <summary>
     /// Detect SPARQL result format from a MIME content type.

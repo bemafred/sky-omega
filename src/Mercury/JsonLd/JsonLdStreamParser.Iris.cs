@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 
 namespace SkyOmega.Mercury.JsonLd;
 
-public sealed partial class JsonLdStreamParser
+internal sealed partial class JsonLdStreamParser
 {
     private string ExpandTerm(string term)
     {

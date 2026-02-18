@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// <summary>
 /// Single variable binding (unmanaged for stackalloc)
 /// </summary>
-public struct Binding
+internal struct Binding
 {
     public int VariableNameHash;
     public BindingValueType Type;

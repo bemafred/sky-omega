@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct WhereClause
+internal struct WhereClause
 {
     public GraphPattern Pattern;
 }

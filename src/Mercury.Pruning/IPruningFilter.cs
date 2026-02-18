@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Pruning;
 /// Predicate to determine if a quad should be included in the transfer.
 /// Designed for zero-allocation hot path - no LINQ, no closures.
 /// </summary>
-public interface IPruningFilter
+internal interface IPruningFilter
 {
     /// <summary>
     /// Tests whether a quad should be included in the transfer.

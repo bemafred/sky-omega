@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Pruning.Filters;
 /// <summary>
 /// Filters quads by graph IRI(s). Supports include/exclude modes.
 /// </summary>
-public sealed class GraphFilter : IPruningFilter
+internal sealed class GraphFilter : IPruningFilter
 {
     private readonly HashSet<string> _graphIris;
     private readonly bool _includeMode; // true = include only these, false = exclude these

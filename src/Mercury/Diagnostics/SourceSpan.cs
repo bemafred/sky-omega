@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// This is a value type designed for zero-allocation error reporting.
 /// Line and column are 1-based (matching editor conventions).
 /// </remarks>
-public readonly struct SourceSpan : IEquatable<SourceSpan>
+internal readonly struct SourceSpan : IEquatable<SourceSpan>
 {
     /// <summary>
     /// Character offset from the start of the source (0-based).

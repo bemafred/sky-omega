@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Pruning;
 /// Orchestrates quad transfer between QuadStore instances with filtering.
 /// Thread-safe: acquires appropriate locks on source and target.
 /// </summary>
-public sealed class PruningTransfer
+internal sealed class PruningTransfer
 {
     private readonly QuadStore _source;
     private readonly QuadStore _target;

@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 /// <summary>
 /// Zero-allocation N-Triples parser using streaming and Span&lt;T&gt;
 /// </summary>
-public ref struct NTriplesParser
+internal ref struct NTriplesParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;
@@ -221,7 +221,7 @@ public ref struct NTriplesParser
 /// <summary>
 /// Streaming file parser that processes RDF data in chunks
 /// </summary>
-public sealed class StreamingRdfLoader : IDisposable
+internal sealed class StreamingRdfLoader : IDisposable
 {
     private const int BufferSize = 64 * 1024; // 64KB buffer
     private readonly char[] _buffer;
@@ -308,7 +308,7 @@ public sealed class StreamingRdfLoader : IDisposable
     }
 }
 
-public class ParseException : Exception
+internal class ParseException : Exception
 {
     public ParseException(string message) : base(message) { }
 }

@@ -11,7 +11,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// GRAPH clause execution methods.
 /// Handles queries with GRAPH patterns for named graph access.
 /// </summary>
-public partial class QueryExecutor
+internal partial class QueryExecutor
 {
     // Storage for expanded prefix terms in EXISTS evaluation (prevents span-over-temporary)
     private string? _existsExpandedSubject;

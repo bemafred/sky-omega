@@ -35,7 +35,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 ///   &lt;/results&gt;
 /// &lt;/sparql&gt;
 /// </summary>
-public sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
+internal sealed class SparqlXmlResultWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

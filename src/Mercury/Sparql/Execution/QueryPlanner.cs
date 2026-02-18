@@ -15,7 +15,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// read/write locks. QueryPlanner is created by QueryExecutor; the caller of
 /// QueryExecutor must hold appropriate locks (see ADR-020, ADR-021).
 /// </remarks>
-public sealed class QueryPlanner
+internal sealed class QueryPlanner
 {
     private readonly StatisticsStore _statistics;
     private readonly AtomStore _atoms;

@@ -8,7 +8,7 @@ using SkyOmega.Mercury.NQuads;
 
 namespace SkyOmega.Mercury.JsonLd;
 
-public sealed partial class JsonLdStreamParser
+internal sealed partial class JsonLdStreamParser
 {
     /// <summary>
     /// Process a language map (@container: @language).

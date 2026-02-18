@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 /// Interface for executing SPARQL queries against remote endpoints.
 /// Implementations handle HTTP communication and result parsing.
 /// </summary>
-public interface ISparqlServiceExecutor
+internal interface ISparqlServiceExecutor
 {
     /// <summary>
     /// Executes a SELECT query against a remote SPARQL endpoint.
@@ -41,7 +41,7 @@ public interface ISparqlServiceExecutor
 /// Represents a single result row from a remote SPARQL query.
 /// Maps variable names to their bound values.
 /// </summary>
-public sealed class ServiceResultRow
+internal sealed class ServiceResultRow
 {
     private readonly Dictionary<string, ServiceBinding> _bindings;
 
@@ -73,7 +73,7 @@ public sealed class ServiceResultRow
 /// <summary>
 /// Represents a bound value in a SPARQL result.
 /// </summary>
-public readonly struct ServiceBinding
+internal readonly struct ServiceBinding
 {
     public ServiceBinding(ServiceBindingType type, string value, string? datatype = null, string? language = null)
     {
@@ -108,7 +108,7 @@ public readonly struct ServiceBinding
 /// <summary>
 /// Type of a SPARQL result binding value.
 /// </summary>
-public enum ServiceBindingType
+internal enum ServiceBindingType
 {
     Uri,
     Literal,
@@ -118,7 +118,7 @@ public enum ServiceBindingType
 /// <summary>
 /// Exception thrown when a SERVICE clause execution fails.
 /// </summary>
-public class SparqlServiceException : Exception
+internal class SparqlServiceException : Exception
 {
     public SparqlServiceException(string message) : base(message) { }
     public SparqlServiceException(string message, Exception inner) : base(message, inner) { }

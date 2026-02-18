@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// For each resource, returns triples where the resource appears as subject or object.
 /// Must be disposed to return pooled resources.
 /// </summary>
-public ref struct DescribeResults
+internal ref struct DescribeResults
 {
     private readonly QuadStore _store;
     private QueryResults _queryResults;

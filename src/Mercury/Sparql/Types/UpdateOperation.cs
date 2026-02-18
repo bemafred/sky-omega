@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// <summary>
 /// Represents a parsed SPARQL Update operation.
 /// </summary>
-public struct UpdateOperation
+internal struct UpdateOperation
 {
     public QueryType Type;
     public Prologue Prologue;

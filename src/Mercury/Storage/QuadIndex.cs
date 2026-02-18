@@ -504,7 +504,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Zero-allocation enumerator for temporal triples.
     /// Changed from ref struct to struct to enable pooled array storage (ADR-011).
     /// </summary>
-    public struct TemporalQuadEnumerator
+    internal struct TemporalQuadEnumerator
     {
         private readonly QuadIndex _store;
         private long _currentPageId;
@@ -1136,7 +1136,7 @@ internal sealed unsafe class QuadIndex : IDisposable
 /// <summary>
 /// Temporal query specification
 /// </summary>
-public struct TemporalQuery
+internal struct TemporalQuery
 {
     public TemporalQueryType Type;
     public long AsOfTime;
@@ -1154,7 +1154,7 @@ public enum TemporalQueryType
 /// <summary>
 /// Temporal triple with time dimensions
 /// </summary>
-public struct TemporalQuad
+internal struct TemporalQuad
 {
     public long GraphAtom;      // 64-bit graph ID (0 = default graph)
     public long SubjectAtom;    // 64-bit for TB-scale

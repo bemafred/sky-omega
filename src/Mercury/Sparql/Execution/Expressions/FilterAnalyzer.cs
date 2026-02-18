@@ -351,7 +351,7 @@ internal static class FilterAnalyzer
 /// <summary>
 /// Describes where a filter should be applied in the pattern execution.
 /// </summary>
-public struct FilterAssignment
+internal struct FilterAssignment
 {
     /// <summary>Index of the filter in the graph pattern.</summary>
     public int FilterIndex;

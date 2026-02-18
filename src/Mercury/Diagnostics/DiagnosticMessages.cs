@@ -9,7 +9,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// <summary>
 /// Message templates for diagnostic codes.
 /// </summary>
-public static class DiagnosticMessages
+internal static class DiagnosticMessages
 {
     /// <summary>
     /// Gets the message template for a diagnostic code.

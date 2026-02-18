@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// <summary>
 /// Type of property path expression.
 /// </summary>
-public enum PathType : byte
+internal enum PathType : byte
 {
     None = 0,        // Simple IRI predicate (not a property path)
     Inverse,         // ^iri - traverse in reverse direction

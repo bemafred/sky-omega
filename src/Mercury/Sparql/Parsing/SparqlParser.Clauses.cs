@@ -3,7 +3,7 @@ using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Parsing;
 
-public ref partial struct SparqlParser
+internal ref partial struct SparqlParser
 {
     /// <summary>
     /// [7] SelectQuery ::= SelectClause DatasetClause* WhereClause SolutionModifier

@@ -34,7 +34,7 @@ namespace SkyOmega.Mercury.RdfXml;
 ///   writer.WriteTriple(subject, predicate, obj);
 ///   writer.WriteEndDocument();
 /// </summary>
-public sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
+internal sealed class RdfXmlStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

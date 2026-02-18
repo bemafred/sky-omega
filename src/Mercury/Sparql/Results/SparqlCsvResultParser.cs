@@ -36,7 +36,7 @@ namespace SkyOmega.Mercury.Sparql.Results;
 /// - Typed literals: "value"^^&lt;datatype&gt;
 /// - Language literals: "value"@lang
 /// </summary>
-public sealed class SparqlCsvResultParser : IDisposable, IAsyncDisposable
+internal sealed class SparqlCsvResultParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly bool _isTsv;

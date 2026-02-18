@@ -18,7 +18,7 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 /// <para><b>Usage Pattern:</b> Create a new instance for each query to parse.
 /// The parser is designed for single-use: parse one query, then discard.</para>
 /// </remarks>
-public ref partial struct SparqlParser
+internal ref partial struct SparqlParser
 {
     private ReadOnlySpan<char> _source;
     private int _position;

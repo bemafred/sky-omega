@@ -20,7 +20,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Federated;
 /// <summary>
 /// Options for configuring LoadExecutor behavior and limits.
 /// </summary>
-public sealed class LoadExecutorOptions
+internal sealed class LoadExecutorOptions
 {
     /// <summary>
     /// Default maximum download size: 100MB.
@@ -82,7 +82,7 @@ public sealed class LoadExecutorOptions
 /// - N-Triples (application/n-triples, text/plain with .nt extension)
 /// - RDF/XML (application/rdf+xml, text/xml, application/xml)
 /// </summary>
-public sealed class LoadExecutor : IDisposable
+internal sealed class LoadExecutor : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
@@ -436,7 +436,7 @@ public sealed class LoadExecutor : IDisposable
 /// <summary>
 /// Exception thrown when the triple count limit is exceeded during loading.
 /// </summary>
-public sealed class TripleLimitExceededException : Exception
+internal sealed class TripleLimitExceededException : Exception
 {
     public int Limit { get; }
 
@@ -450,7 +450,7 @@ public sealed class TripleLimitExceededException : Exception
 /// <summary>
 /// Exception thrown when download size limit is exceeded.
 /// </summary>
-public sealed class SizeLimitExceededException : IOException
+internal sealed class SizeLimitExceededException : IOException
 {
     public long Limit { get; }
     public long BytesRead { get; }

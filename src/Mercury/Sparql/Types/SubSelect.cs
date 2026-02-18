@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// A subquery: { SELECT ... WHERE { ... } } inside an outer WHERE clause.
 /// Only projected variables from the subquery are visible to the outer query.
 /// </summary>
-public struct SubSelect
+internal struct SubSelect
 {
     public const int MaxProjectedVars = 8;
     public const int MaxPatterns = 16;

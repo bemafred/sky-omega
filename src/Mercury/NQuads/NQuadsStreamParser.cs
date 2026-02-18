@@ -20,7 +20,7 @@ namespace SkyOmega.Mercury.NQuads;
 /// Receives spans that are valid only during the callback invocation.
 /// Graph is empty for the default graph.
 /// </summary>
-public delegate void QuadHandler(
+internal delegate void QuadHandler(
     ReadOnlySpan<char> subject,
     ReadOnlySpan<char> predicate,
     ReadOnlySpan<char> obj,
@@ -30,7 +30,7 @@ public delegate void QuadHandler(
 /// Immutable record for N-Quads (allocating version).
 /// Graph is null or empty for the default graph.
 /// </summary>
-public readonly record struct RdfQuad(string Subject, string Predicate, string Object, string? Graph)
+internal readonly record struct RdfQuad(string Subject, string Predicate, string Object, string? Graph)
 {
     /// <summary>
     /// Convert to N-Quads format (canonical RDF serialization)
@@ -79,7 +79,7 @@ public readonly record struct RdfQuad(string Subject, string Predicate, string O
 /// <para><b>Usage Pattern:</b> Create one instance per stream. Dispose when done
 /// to return pooled buffers.</para>
 /// </remarks>
-public sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
+internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;

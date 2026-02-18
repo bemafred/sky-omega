@@ -5,7 +5,7 @@ namespace SkyOmega.Mercury.Pruning.Filters;
 /// <summary>
 /// Filter that accepts all quads. Singleton pattern for zero allocation.
 /// </summary>
-public sealed class AllPassFilter : IPruningFilter
+internal sealed class AllPassFilter : IPruningFilter
 {
     /// <summary>
     /// Singleton instance.

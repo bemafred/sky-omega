@@ -11,7 +11,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// Results from CONSTRUCT query execution. Yields constructed triples from template substitution.
 /// Must be disposed to return pooled resources.
 /// </summary>
-public ref struct ConstructResults
+internal ref struct ConstructResults
 {
     private QueryResults _queryResults;
     private ConstructTemplate _template;
@@ -258,7 +258,7 @@ public ref struct ConstructResults
 /// A constructed triple from CONSTRUCT query execution.
 /// Values are valid only until next MoveNext() call.
 /// </summary>
-public readonly ref struct ConstructedTriple
+internal readonly ref struct ConstructedTriple
 {
     public readonly ReadOnlySpan<char> Subject;
     public readonly ReadOnlySpan<char> Predicate;

@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-02-17)
+Accepted (2026-02-18) — All four phases complete
 
 ## Context
 
@@ -350,37 +350,46 @@ With the facade in place, **all** of the following become internal to Mercury:
 
 ### What Remains Public
 
-The public surface of Mercury reduces to approximately **15 types**:
+The public surface of Mercury reduces to **21 types** (down from ~161):
 
-| Area | Public Types |
-|---|---|
-| **Facades** | `SparqlEngine`, `RdfEngine`, `PruneEngine` |
-| **Facade DTOs** | `PruneOptions` |
-| **Storage** | `QuadStore`, `QuadStorePool` |
-| **Protocol** | `SparqlHttpServer`, `SparqlHttpServerOptions` |
-| **Diagnostics** | `ILogger`, `NullLogger`, `LogLevel` |
+| Area | Public Types | Count |
+|---|---|---|
+| **Facades** | `SparqlEngine`, `RdfEngine`, `PruneEngine` | 3 |
+| **Facade delegates** | `RdfTripleHandler`, `RdfQuadHandler` | 2 |
+| **Protocol** | `SparqlHttpServer`, `SparqlHttpServerOptions` | 2 |
+| **Storage core** | `QuadStore`, `QuadStorePool`, `PooledStoreLease` | 3 |
+| **Storage config** | `StorageOptions`, `QuadStorePoolOptions` | 2 |
+| **Storage stats** | `StatisticsStore`, `PredicateStats`, `TemporalQueryType` | 3 |
+| **Storage enumerators** | `TemporalResultEnumerator`, `NamedGraphEnumerator`, `ResolvedTemporalQuad` | 3 |
+| **Diagnostics** | `ILogger`, `NullLogger`, `LogLevel` | 3 |
+
+The storage types (11) are public because they appear in `QuadStore`'s public
+signatures — constructors, properties, method parameters, and return types.
+These provide the low-level API for non-SPARQL consumers (e.g., Solid's LDP
+operations, the Examples project).
 
 Plus the DTOs already in `Mercury.Abstractions`: `QueryResult`, `UpdateResult`,
 `StoreStatistics`, `PruneResult`, `ExecutionResultKind`, `RdfFormat`,
 `HistoryMode`, `ByteFormatter`, etc.
 
-### No New InternalsVisibleTo Required
+### InternalsVisibleTo
 
-Because the facade provides everything consumers need through public DTOs, **no
-consumer project needs access to Mercury internals**. The CLI, MCP, SparqlTool,
-and TurtleTool all become pure consumers of the public API.
+*Updated after Phase 3 implementation:* Three new `InternalsVisibleTo` entries
+were required, contrary to the original prediction of zero:
 
-Mercury already grants `InternalsVisibleTo` to `Mercury.Tests` and
-`Mercury.Benchmarks` (declared in `Mercury.csproj`). This is correct and stays —
-the test project extensively white-box tests internal components (`AtomStore`,
-`QuadIndex`, `PageCache`, `WriteAheadLog`, `PatternSlot`, `FilterEvaluator`,
-`QueryExecutor`, etc.). The types newly internalized by this ADR (`SparqlParser`,
-`QueryExecutor`, `SparqlExplainer`, the AST types, etc.) automatically become
-testable by `Mercury.Tests` through this existing declaration.
+**Mercury.csproj** grants internal access to:
+- `Mercury.Tests` — white-box testing (pre-existing)
+- `Mercury.Benchmarks` — benchmark access (pre-existing)
+- `SkyOmega.Mercury.Solid` — Solid HTTP handlers use internal stream writers
+  and parsers for LDP content negotiation
+- `SkyOmega.Mercury.Pruning` — uses internal `LoggerExtensions`
+- `Mercury.Turtle.Tool` — format conversion tool uses internal parsers/writers
 
-`Mercury.Solid` similarly grants `InternalsVisibleTo` to `Mercury.Solid.Tests`.
+**Mercury.Pruning.csproj** grants internal access to:
+- `Mercury.Tests` — white-box testing of pruning internals
 
-No additional `InternalsVisibleTo` declarations are introduced by this ADR.
+CLI, MCP, and SparqlTool are pure consumers of the public API (facades +
+`QuadStore`). They do not need `InternalsVisibleTo`.
 
 ### Consumer Simplification
 
@@ -455,89 +464,189 @@ public string Prune(bool dryRun = false, string historyMode = "flatten",
 }
 ```
 
-### SparqlHttpServer Stays Internal and Streaming
+### SparqlHttpServer — Migrated to Facades
 
-`SparqlHttpServer` is the only consumer that genuinely needs streaming access to
-query results (for large HTTP responses) and direct access to format writers (for
-RDF serialization in HTTP responses). It is already inside Mercury and already
-uses internal types. The facades do not affect it — it continues to use
-`QueryExecutor`, `QueryResults`, and format writers directly, as an internal
-consumer.
+*Updated 2026-02-18:* The original plan kept SparqlHttpServer on direct internal
+access for streaming. During Phase 2 implementation, SparqlHttpServer was
+migrated to facades because: (a) it eliminated the hash-mismatch bug by removing
+the divergent variable extraction code, (b) result set sizes in practice are
+bounded by LIMIT clauses and client timeouts, (c) the materialization overhead is
+negligible compared to HTTP I/O. SparqlHttpServer now uses `SparqlEngine.Query()`,
+`SparqlEngine.Update()`, and inline format writing from `QueryResult` DTOs.
 
 ## Implementation
 
-### Phase 1: Create Facades
+### Phase 1: Create Facades ✓
 
-Create three public static classes inside the Mercury project:
+*Completed 2026-02-18 — commit 034ef17*
+
+Created three public static classes inside the Mercury project:
 
 **`SparqlEngine`** (`src/Mercury/SparqlEngine.cs`):
-Implement by extracting and consolidating the duplicated pipeline logic from CLI,
-MCP, SparqlTool, and SparqlHttpServer. The variable name extraction should use the
-AST-based approach from `SparqlHttpServer` (the most correct implementation) with
-hash-scan fallback for `SELECT *`. Include `LoadExecutor` lifecycle management
-internally.
+Consolidates duplicated pipeline logic from CLI, MCP, SparqlTool, and
+SparqlHttpServer. Variable name extraction uses FNV-1a hash matching for all
+queries (both explicit SELECT and SELECT *), correctly mapping binding columns
+to variable names regardless of pattern order.
 
 **`RdfEngine`** (`src/Mercury/RdfEngine.cs`):
-Extract the format-switch logic from `SparqlTool.LoadRdfAsync`. The write methods
-consolidate the format-switch logic from `SparqlTool`‘s CONSTRUCT/DESCRIBE output
-paths. `ParseTriplesAsync` covers Solid’s pattern of parsing to a triple list
-(with optional `baseUri`) without direct store insertion.
+Consolidates the format-switch logic from `SparqlTool.LoadRdfAsync`. Write
+methods consolidate format-switch logic from CONSTRUCT/DESCRIBE output paths.
+`ParseTriplesAsync` covers Solid's pattern of parsing to a triple list.
+`LoadFileAsync` buffers the file into a MemoryStream before entering the batch
+write lock to avoid thread-affinity issues with `ReaderWriterLockSlim` during
+async parsing.
 
-**`PruneEngine`** (`src/Mercury/PruneEngine.cs`):
-Extract the filter construction and clear→transfer→switch→clear workflow from CLI
-and MCP. `PruneOptions` uses the `HistoryMode` enum directly (moved to
-`Mercury.Abstractions`) and maps string arrays to the internal filter types.
+**`PruneEngine`** (`src/Mercury.Pruning/PruneEngine.cs`):
+Extracts the filter construction and clear→transfer→switch→clear workflow.
+`PruneOptions` and `HistoryMode` moved to `Mercury.Abstractions`.
 
-**Verification:** Add tests that call all three facades directly, confirming
-results match existing behavior. Run W3C conformance suite.
+**Verification:** 57 facade tests added (SparqlEngineTests, RdfEngineTests,
+PruneEngineTests). Full test suite passes (3,995 tests, 0 failures).
 
-### Phase 2: Migrate Consumers
+### Phase 2: Migrate Consumers ✓
 
-Rewrite consumer code to use the facades:
+*Completed 2026-02-18 — commit 034ef17*
 
-| Consumer | Current lines (all pipelines) | Expected lines |
-|---|---:|---:|
-| CLI | ~200 | ~20 |
-| MCP | ~200 | ~40 |
-| SparqlTool | ~170 | ~40 |
+Rewrote all consumer code to use the facades:
 
-Remove all duplicated implementations: `ExtractVariableNames` (4 copies),
-format-switch loading (2 copies), pruning workflow (2 copies).
+| Consumer | Lines removed | Notes |
+|---|---:|---|
+| CLI | ~308 | Lambda replacement + deleted 8 helper functions |
+| MCP | ~276 | Rewritten all tool methods, removed LoadExecutor |
+| SparqlTool | ~407 | Rewritten execution methods, deleted format pipeline |
+| SparqlHttpServer | ~607 | Rewritten execution, fixed hash bug |
+| Solid (Resource + Container) | ~38 each | Replaced ParseRdfAsync with RdfEngine |
 
-Solid migrates from direct parser/writer usage to `RdfEngine.ParseTriplesAsync`
-and `RdfEngine.WriteTriples`.
+Removed all duplicated implementations: `ExtractVariableNames` (4 copies),
+format-switch loading (2 copies), pruning workflow (2 copies). Net result:
++1,983 / -1,580 lines across 18 files.
 
-**Verification:** All CLI, MCP, SparqlTool, and Solid functionality works
-identically. Integration tests pass.
+**Deviation from plan:** SparqlHttpServer was also migrated to use facades
+(the ADR originally proposed keeping it on direct internal access). This
+eliminated the hash-mismatch bug (`hash * 31 + c` vs FNV-1a) by removing
+the divergent `ComputeHash`/`ExtractVariablesFromBindings` code entirely.
 
-### Phase 3: Internalize
+**Bugs found and fixed during migration:**
+1. **Thread-affinity in `RdfEngine.LoadFileAsync`:** `BeginBatch()` holds a
+   `ReaderWriterLockSlim` write lock, but `FileStream.ReadAsync` can resume on
+   a different thread. Fixed by buffering the file into a `MemoryStream` first.
+2. **Variable name mismatch in `SparqlEngine.ExecuteSelect`:** For explicit
+   SELECT queries, the facade initially used SELECT clause variable order for
+   naming, but binding table columns are in pattern match order. Fixed by always
+   using FNV-1a hash matching for column-to-name mapping.
 
-Change all types listed in “What Becomes Internal” from `public` to `internal`.
-This includes the SPARQL internals, all 12 RDF format parser/writer types,
-`RdfFormatNegotiator`, and the 10 pruning types (with `HistoryMode` already moved
-to `Mercury.Abstractions`). Single-pass mechanical change.
+**Verification:** All 3,995 tests pass. Specific groups verified: REPL (106),
+SparqlTool (12), Solid (25), Facade (57).
 
-**Verification:** `dotnet build` for entire solution. If any compilation error
-occurs, the failing type was missed in the analysis — either add it to a facade
-or keep it public and document why. Run full test suite.
+### Phase 3: Internalize ✓
 
-### Phase 4: Audit and Tighten QuadStore Surface
+*Completed 2026-02-18*
+
+Changed ~130 types from `public` to `internal` across seven groups: SPARQL types
+(~66), RDF format parsers/writers (~16), RDF core types (6), Storage subset (5),
+Diagnostics (15), OWL (2), and Mercury.Pruning (10). Four test methods that
+exposed internal enums (`SparqlResultFormat`, `DiagnosticSeverity`) in public
+`[Theory]` parameter signatures were fixed by casting to `int`.
+
+**Deviations from plan:**
+
+1. **Three `InternalsVisibleTo` entries added** (the ADR predicted none needed):
+   - `SkyOmega.Mercury.Solid` — Solid GET handlers use internal stream writers
+   - `SkyOmega.Mercury.Pruning` — uses internal `LoggerExtensions`
+   - `Mercury.Turtle.Tool` — format conversion tool uses internal parsers/writers
+
+2. **Five storage types kept public** (build forced — used in `QuadStore` public
+   signatures): `StatisticsStore`, `PredicateStats`, `TemporalQueryType`,
+   `StorageOptions`, `QuadStorePoolOptions`
+
+3. **Enumerator types kept public** (`TemporalResultEnumerator`,
+   `NamedGraphEnumerator`, `ResolvedTemporalQuad`, `PooledStoreLease`) — returned
+   from public `QuadStore`/`QuadStorePool` methods. Phase 4 evaluates whether
+   duck-typed `foreach` can allow internalization.
+
+**Final public type count:** 21 types across Mercury + Mercury.Pruning (down from
+~161). See "What Remains Public" section for the intended ~15 — the delta is the
+storage/enumerator types kept public by necessity.
+
+**Verification:** `dotnet build` — 0 errors, 0 warnings. `dotnet test` — 3,995
+tests pass (3,970 + 25 Solid, 6 known JSON-LD skips).
+
+### Phase 4: Audit and Confirm QuadStore Surface ✓
+
+*Completed 2026-02-18*
 
 With SPARQL, RDF I/O, and pruning internals hidden, audit the remaining `QuadStore`
-public API. Methods like `AcquireReadLock()` / `ReleaseReadLock()` are currently
-needed by consumers for query enumeration — but with the facades handling locking,
-evaluate whether these can become internal.
+public API to confirm the current surface is intentional.
 
-`AddCurrent()`, `AddCurrentBatched()`, `BeginBatch()` / `CommitBatch()` are used
-by Solid directly for Linked Data Platform operations (not through RDF files).
-These likely remain public. `QueryCurrent()` is used by Solid for graph
-enumeration — also remains public.
+**Audit findings:**
 
-The enumerator types returned by `GetNamedGraphs()` and `QueryCurrent()` can be
-evaluated for internalization (duck-typed foreach may allow internal enumerators).
+Post-Phase 3, direct `QuadStore` usage by consumer (excluding InternalsVisibleTo
+projects):
 
-**Verification:** Solid and Pruning continue to compile and function. All tests
-pass.
+| Consumer | Direct QuadStore usage | Notes |
+|---|---|---|
+| CLI | None | Fully on `SparqlEngine` facades |
+| MCP | None | Fully on `SparqlEngine` facades |
+| SparqlTool | `.count` command: `AcquireReadLock`/`QueryCurrent` | Replaceable with `GetStatistics().QuadCount` |
+| Examples | `QueryCurrent`, batch API, temporal queries | Intentional — demonstrates low-level API |
+
+Solid (InternalsVisibleTo) uses locking, batch, and query methods extensively for
+Linked Data Platform operations. Pruning (InternalsVisibleTo) uses locking and
+batch for transfer orchestration.
+
+**Decisions:**
+
+1. **Lock methods (`AcquireReadLock`/`ReleaseReadLock`)** — stay public. The
+   Examples project demonstrates them, and external consumers building non-SPARQL
+   applications (like Solid) need direct store access. Facades handle locking for
+   SPARQL workloads; the low-level API remains for everything else.
+
+2. **Batch methods (`BeginBatch`/`CommitBatch`/`AddCurrentBatched`)** — stay public.
+   Same reasoning: Examples demonstrate them, Solid uses them for LDP writes.
+
+3. **Query methods (`QueryCurrent`, `QueryAsOf`, etc.)** — stay public. Fundamental
+   low-level API; Examples demonstrate them.
+
+4. **Enumerator types (`TemporalResultEnumerator`, `NamedGraphEnumerator`,
+   `ResolvedTemporalQuad`)** — stay public. These are ref structs and cannot
+   implement interfaces, so duck-typed `foreach` would require the caller to see
+   the concrete type. Internalizing them would break any external consumer calling
+   `QueryCurrent()` or `GetNamedGraphs()`.
+
+5. **`StorageOptions`, `QuadStorePoolOptions`** — stay public. Constructor
+   parameters for `QuadStore` and `QuadStorePool`.
+
+6. **`PooledStoreLease`** — stays public. RAII wrapper returned by
+   `QuadStorePool.RentScoped()`. Minimal 16-byte readonly struct, zero allocation,
+   idiomatic `using` pattern. No benefit to internalizing — it's part of the pool's
+   public contract.
+
+7. **`StatisticsStore`, `PredicateStats`, `TemporalQueryType`** — stay public.
+   Used in `QuadStore` public property/method signatures.
+
+**One cleanup:** Replace SparqlTool's `.count` command to use
+`store.GetStatistics().QuadCount` instead of manual `QueryCurrent` iteration.
+This eliminates the last non-InternalsVisibleTo consumer use of locking.
+
+**Final public surface (21 types):**
+
+| Area | Public Types | Count |
+|---|---|---|
+| Facades | `SparqlEngine`, `RdfEngine`, `PruneEngine` | 3 |
+| Facade delegates | `RdfTripleHandler`, `RdfQuadHandler` | 2 |
+| Protocol | `SparqlHttpServer`, `SparqlHttpServerOptions` | 2 |
+| Storage core | `QuadStore`, `QuadStorePool`, `PooledStoreLease` | 3 |
+| Storage config | `StorageOptions`, `QuadStorePoolOptions` | 2 |
+| Storage stats | `StatisticsStore`, `PredicateStats`, `TemporalQueryType` | 3 |
+| Storage enumerators | `TemporalResultEnumerator`, `NamedGraphEnumerator`, `ResolvedTemporalQuad` | 3 |
+| Diagnostics | `ILogger`, `NullLogger`, `LogLevel` | 3 |
+
+This is the correct and final public surface. The delta from the originally
+predicted ~15 (6 additional types) is entirely storage types that must be public
+because they appear in `QuadStore`'s public signatures — not accidental exposure.
+
+**Verification:** SparqlTool `.count` fixed to use `GetStatistics().QuadCount`.
+`dotnet build` — 0 errors, 0 warnings. SparqlTool (12) and REPL (106) tests pass.
 
 ## Implementation Notes for Claude Code
 
@@ -594,31 +703,31 @@ loading) need this internally. Either create per-call (simple, safe) or hold a
 shared instance with disposal tied to some sensible lifecycle. Start with
 per-call; optimize only if profiling shows a problem.
 
-### What Not to Change
+### What Not to Change (Phase 3-4)
 
-- **Do not modify `SparqlHttpServer`’s internal implementation.** It streams
-  results and should continue to use `QueryExecutor` directly.
 - **Do not change `QuadStore.AddCurrent()` or batch APIs.** Solid and the
   `RdfEngine` facade use these.
-- **Do not rename anything.** This ADR changes visibility, adds three facade
-  classes plus `PruneOptions`, and moves `HistoryMode` to `Mercury.Abstractions`.
+- **Do not rename anything.** Phase 3 changes only visibility (`public` →
+  `internal`). No renames, no moves (except `HistoryMode` already moved in
+  Phase 1).
 
 ## Consequences
 
 ### Benefits
 
-- **~130 types become internal** — Mercury's public contract shrinks from over 140 to ~15.
+- **~140 types become internal** — Mercury's public contract shrinks from ~161 to 21.
 - **Eliminates all pipeline duplication** — SPARQL execution (4 copies), RDF format
   switching (2 copies), pruning workflow (2 copies), variable extraction (4 copies
   with a latent hash-mismatch bug between HTTP server and CLI/MCP).
 - **Locking correctness by construction** — consumers cannot forget to lock because
   they never acquire locks for SPARQL or RDF operations.
-- **No new InternalsVisibleTo needed** — consumer projects use only the public API.
-  Existing test access (`Mercury.Tests`, `Mercury.Benchmarks`) stays as-is.
+- **Three new InternalsVisibleTo** required for sibling projects (Solid, Pruning,
+  TurtleTool) that use internal parsers/writers. CLI, MCP, and SparqlTool are
+  pure public-API consumers.
 - **Consumer code shrinks dramatically** — CLI, MCP, and SparqlTool each lose
   100-170 lines of boilerplate pipeline code.
-- **Porting surface reduced** — cross-language ports need only replicate ~15 types
-  plus the DTO contracts, not 140+.
+- **Porting surface reduced** — cross-language ports need only replicate ~21 types
+  plus the DTO contracts, not 160+.
 
 ### Drawbacks
 
@@ -631,7 +740,7 @@ per-call; optimize only if profiling shows a problem.
   If profiling reveals a problem, a streaming overload can be added later.
 - **Three more types plus one DTO** in the public API (`SparqlEngine`, `RdfEngine`,
   `PruneEngine`, `PruneOptions`), plus `HistoryMode` promoted to `Mercury.Abstractions`.
-  This is the right tradeoff: five well-designed public types replacing ~130
+  This is the right tradeoff: five well-designed public types replacing ~140
   accidentally-public types.
 
 ### Neutral

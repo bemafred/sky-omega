@@ -30,7 +30,7 @@ namespace SkyOmega.Mercury.NTriples;
 ///   // or async:
 ///   await writer.WriteTripleAsync(subject, predicate, obj);
 /// </summary>
-public sealed class NTriplesStreamWriter : IDisposable, IAsyncDisposable
+internal sealed class NTriplesStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

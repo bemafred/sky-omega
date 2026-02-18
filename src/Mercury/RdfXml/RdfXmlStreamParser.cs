@@ -21,7 +21,7 @@ namespace SkyOmega.Mercury.RdfXml;
 /// <summary>
 /// Element kind in RDF/XML structure.
 /// </summary>
-public enum ElementKind
+internal enum ElementKind
 {
     Root,           // rdf:RDF container
     Description,    // rdf:Description or typed node element
@@ -55,7 +55,7 @@ public enum ElementKind
 /// <para><b>Usage Pattern:</b> Create one instance per stream. Dispose when done
 /// to return pooled buffers.</para>
 /// </remarks>
-public sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
+internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;

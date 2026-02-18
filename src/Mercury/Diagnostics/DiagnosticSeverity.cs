@@ -6,7 +6,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// <summary>
 /// Severity level for diagnostics, ordered from most to least severe.
 /// </summary>
-public enum DiagnosticSeverity : byte
+internal enum DiagnosticSeverity : byte
 {
     /// <summary>
     /// A fatal error that prevents further processing.

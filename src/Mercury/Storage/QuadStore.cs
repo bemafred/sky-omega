@@ -1125,7 +1125,7 @@ public struct TemporalResultEnumerator
     public TemporalResultEnumerator GetEnumerator() => this;
 }
 
-public enum TemporalIndexType
+internal enum TemporalIndexType
 {
     SPOT, // Subject-Predicate-Object-Time
     POST, // Predicate-Object-Subject-Time

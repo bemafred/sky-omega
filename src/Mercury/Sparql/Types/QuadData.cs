@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// Represents a quad (triple + optional graph) for INSERT DATA / DELETE DATA.
 /// Uses offsets into source span for zero-allocation parsing.
 /// </summary>
-public struct QuadData
+internal struct QuadData
 {
     public int SubjectStart;
     public int SubjectLength;

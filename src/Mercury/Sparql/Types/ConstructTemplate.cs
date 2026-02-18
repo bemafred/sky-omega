@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct ConstructTemplate
+internal struct ConstructTemplate
 {
     public const int MaxPatterns = 16;
     private int _patternCount;

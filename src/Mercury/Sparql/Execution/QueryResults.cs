@@ -12,7 +12,7 @@ using ValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
-public ref partial struct QueryResults
+internal ref partial struct QueryResults
 {
     private TriplePatternScan _singleScan;
     private MultiPatternScan _multiScan;

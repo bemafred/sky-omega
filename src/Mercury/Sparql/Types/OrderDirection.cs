@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public enum OrderDirection
+internal enum OrderDirection
 {
     Ascending,
     Descending

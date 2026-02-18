@@ -9,7 +9,7 @@ using SkyOmega.Mercury.NQuads;
 
 namespace SkyOmega.Mercury.JsonLd;
 
-public sealed partial class JsonLdStreamParser
+internal sealed partial class JsonLdStreamParser
 {
     private void ProcessProperty(string subject, string predicate, string term, JsonElement value,
         QuadHandler handler, string? graphIri)

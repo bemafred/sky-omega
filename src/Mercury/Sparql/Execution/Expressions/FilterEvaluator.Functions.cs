@@ -6,7 +6,7 @@ using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
-public ref partial struct FilterEvaluator
+internal ref partial struct FilterEvaluator
 {
     /// <summary>
     /// Parse IF(condition, thenExpr, elseExpr)

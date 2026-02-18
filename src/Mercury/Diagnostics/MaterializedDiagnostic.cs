@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// Unlike <see cref="Diagnostic"/> which references pooled buffers,
 /// this class owns its string data and can be stored freely.
 /// </remarks>
-public sealed class MaterializedDiagnostic
+internal sealed class MaterializedDiagnostic
 {
     /// <summary>
     /// The diagnostic code.

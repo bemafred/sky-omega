@@ -31,7 +31,7 @@ namespace SkyOmega.Mercury.NQuads;
 ///   // or for default graph:
 ///   writer.WriteQuad(subject, predicate, obj);
 /// </summary>
-public sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
+internal sealed class NQuadsStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct Query
+internal struct Query
 {
     public QueryType Type;
     public Prologue Prologue;

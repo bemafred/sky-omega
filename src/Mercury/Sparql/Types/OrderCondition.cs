@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public readonly struct OrderCondition
+internal readonly struct OrderCondition
 {
     public readonly int VariableStart;
     public readonly int VariableLength;

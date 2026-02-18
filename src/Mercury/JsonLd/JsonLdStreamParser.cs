@@ -42,7 +42,7 @@ namespace SkyOmega.Mercury.JsonLd;
 /// <para><b>Usage Pattern:</b> Create one instance per JSON-LD document. Dispose
 /// when done to return pooled buffers.</para>
 /// </remarks>
-public sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
+internal sealed partial class JsonLdStreamParser : IDisposable, IAsyncDisposable
 {
     private readonly Stream _stream;
     private readonly IBufferManager _bufferManager;

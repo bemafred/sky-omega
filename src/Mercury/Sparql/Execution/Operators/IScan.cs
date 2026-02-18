@@ -70,7 +70,7 @@ namespace SkyOmega.Mercury.Sparql.Execution.Operators;
 ///
 /// See: docs/mercury-adr-service-scan-interface.md for architectural context.
 /// </remarks>
-public interface IScan : IDisposable
+internal interface IScan : IDisposable
 {
     /// <summary>
     /// Advances the scan to the next result, updating bindings with new variable values.

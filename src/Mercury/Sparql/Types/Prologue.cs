@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct Prologue
+internal struct Prologue
 {
     public const int MaxPrefixes = 32;
     private int _prefixCount;

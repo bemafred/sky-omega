@@ -32,7 +32,7 @@ namespace SkyOmega.Mercury.Rdf.Turtle;
 ///   writer.WriteTriple(subject, predicate, obj);
 ///   writer.Flush(); // Writes any pending grouped triples
 /// </summary>
-public sealed class TurtleStreamWriter : IDisposable, IAsyncDisposable
+internal sealed class TurtleStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

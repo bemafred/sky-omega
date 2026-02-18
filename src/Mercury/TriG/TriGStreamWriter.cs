@@ -54,7 +54,7 @@ namespace SkyOmega.Mercury.TriG;
 ///
 ///   writer.Flush();
 /// </summary>
-public sealed class TriGStreamWriter : IDisposable, IAsyncDisposable
+internal sealed class TriGStreamWriter : IDisposable, IAsyncDisposable
 {
     private readonly TextWriter _writer;
     private readonly IBufferManager _bufferManager;

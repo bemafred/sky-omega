@@ -1,6 +1,6 @@
 namespace SkyOmega.Mercury.Sparql.Types;
 
-public struct OrderByClause
+internal struct OrderByClause
 {
     // Store up to 4 order conditions inline
     private OrderCondition _cond0, _cond1, _cond2, _cond3;

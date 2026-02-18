@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace SkyOmega.Mercury.RdfXml;
 
-public sealed partial class RdfXmlStreamParser
+internal sealed partial class RdfXmlStreamParser
 {
     #region Buffer Peek/Consume
 

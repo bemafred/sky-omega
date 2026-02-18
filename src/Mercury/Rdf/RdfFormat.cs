@@ -18,7 +18,7 @@ namespace SkyOmega.Mercury.Rdf;
 /// Content negotiation for RDF formats.
 /// Maps MIME types and file extensions to RDF formats.
 /// </summary>
-public static class RdfFormatNegotiator
+internal static class RdfFormatNegotiator
 {
     /// <summary>
     /// Detect RDF format from a MIME content type.

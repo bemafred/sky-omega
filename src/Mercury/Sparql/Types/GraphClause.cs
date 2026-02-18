@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// A GRAPH clause: GRAPH &lt;iri&gt; { patterns } or GRAPH ?var { patterns }
 /// Stores the graph term and patterns to be evaluated within that graph context.
 /// </summary>
-public struct GraphClause
+internal struct GraphClause
 {
     public const int MaxPatterns = 8;
 

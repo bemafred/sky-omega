@@ -24,7 +24,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 ///   | PREFIX foaf: &lt;http://xmlns.com/foaf/0.1/&gt;
 /// </code>
 /// </remarks>
-public sealed class DiagnosticFormatter
+internal sealed class DiagnosticFormatter
 {
     private readonly TextWriter _writer;
     private readonly bool _useColor;
@@ -426,7 +426,7 @@ public sealed class DiagnosticFormatter
     /// <summary>
     /// Information about a line in the source text.
     /// </summary>
-    public readonly struct LineInfo
+    internal readonly struct LineInfo
     {
         public readonly int Start;
         public readonly int Length;

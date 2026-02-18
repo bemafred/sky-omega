@@ -7,7 +7,7 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 /// <summary>
 /// SPARQL Update parsing methods.
 /// </summary>
-public ref partial struct SparqlParser
+internal ref partial struct SparqlParser
 {
     /// <summary>
     /// Parse INSERT DATA { QuadData }

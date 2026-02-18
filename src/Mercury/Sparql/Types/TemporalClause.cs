@@ -4,7 +4,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// Temporal clause parsed from SPARQL query.
 /// Supports: AS OF, DURING, ALL VERSIONS
 /// </summary>
-public struct TemporalClause
+internal struct TemporalClause
 {
     public TemporalQueryMode Mode;
 

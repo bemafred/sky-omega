@@ -12,6 +12,9 @@
     <ItemGroup>
         <InternalsVisibleTo Include="Mercury.Tests" />
         <InternalsVisibleTo Include="Mercury.Benchmarks" />
+        <InternalsVisibleTo Include="SkyOmega.Mercury.Solid" />
+        <InternalsVisibleTo Include="SkyOmega.Mercury.Pruning" />
+        <InternalsVisibleTo Include="Mercury.Turtle.Tool" />
     </ItemGroup>
 
     <ItemGroup>

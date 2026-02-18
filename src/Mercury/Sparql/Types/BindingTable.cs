@@ -6,7 +6,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// Binding table for variable bindings during query execution.
 /// Zero-allocation design using stackalloc buffers.
 /// </summary>
-public ref struct BindingTable
+internal ref struct BindingTable
 {
     private Span<Binding> _bindings;
     private int _count;

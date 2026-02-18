@@ -15,7 +15,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// - W1xxx: Warnings (add 10000 to code)
 /// - I1xxx: Info/hints (add 20000 to code)
 /// </remarks>
-public static class DiagnosticCode
+internal static class DiagnosticCode
 {
     // ========================================================================
     // E1xxx - Lexical/Parse Errors

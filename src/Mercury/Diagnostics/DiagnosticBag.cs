@@ -13,7 +13,7 @@ namespace SkyOmega.Mercury.Diagnostics;
 /// This is a ref struct that must be disposed to return pooled arrays.
 /// Arguments for diagnostic messages are stored in a shared char buffer.
 /// </remarks>
-public ref struct DiagnosticBag
+internal ref struct DiagnosticBag
 {
     private const int InitialDiagnosticCapacity = 8;
     private const int InitialArgBufferSize = 256;
@@ -252,7 +252,7 @@ public ref struct DiagnosticBag
     /// <summary>
     /// Enumerator for iterating over diagnostics.
     /// </summary>
-    public ref struct Enumerator
+    internal ref struct Enumerator
     {
         private readonly DiagnosticBag _bag;
         private int _index;

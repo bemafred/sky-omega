@@ -3,7 +3,7 @@ namespace SkyOmega.Mercury.Sparql.Types;
 /// <summary>
 /// Type of value in a binding.
 /// </summary>
-public enum BindingValueType : byte
+internal enum BindingValueType : byte
 {
     Unbound = 0,
     Uri = 1,
