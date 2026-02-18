@@ -11,6 +11,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-02-18
+
+Breaking API surface changes: public facade layer and type internalization.
+
+### Added
+
+#### Public Facades (ADR-003)
+- **`SparqlEngine`** — static facade for SPARQL query/update with `QueryResult`/`UpdateResult` DTOs, `Explain()`, `GetNamedGraphs()`, `GetStatistics()`
+- **`RdfEngine`** — static facade for RDF parsing, writing, loading, and content negotiation across all six formats
+- **`PruneEngine`** — static facade for dual-instance pruning with `PruneOptions`/`PruneResult` DTOs
+- **`RdfTripleHandler`/`RdfQuadHandler`** — public delegates for zero-GC callback parsing
+
+#### Public DTOs
+- **`QueryResult`** — Success, Kind, Variables, Rows, AskResult, Triples, ErrorMessage, ParseTime, ExecutionTime
+- **`UpdateResult`** — Success, AffectedCount, ErrorMessage, ParseTime, ExecutionTime
+- **`StoreStatistics`** — QuadCount, AtomCount, TotalBytes, WalTxId, WalCheckpoint, WalSize
+- **`PruneResult`** — Success, ErrorMessage, QuadsScanned, QuadsWritten, BytesSaved, Duration, DryRun
+- **`PruneOptions`** — DryRun, HistoryMode, ExcludeGraphs, ExcludePredicates
+- **`ExecutionResultKind`** enum — Empty, Select, Ask, Construct, Describe, Update, Error, ...
+
+### Changed
+
+#### Breaking: ~140 Types Internalized (ADR-003 Phases 3-4)
+- All RDF parsers now internal: `TurtleStreamParser`, `NTriplesStreamParser`, `NQuadsStreamParser`, `TriGStreamParser`, `JsonLdStreamParser`, `RdfXmlStreamParser` — use `RdfEngine` instead
+- All RDF writers now internal: `TurtleStreamWriter`, `NTriplesStreamWriter`, `NQuadsStreamWriter`, `TriGStreamWriter`, `RdfXmlStreamWriter`, `JsonLdStreamWriter` — use `RdfEngine` instead
+- SPARQL internals now internal: `SparqlParser`, `QueryExecutor`, `UpdateExecutor`, `SparqlExplainer`, `FilterEvaluator`, `QueryPlanner`, `QueryPlanCache`, `LoadExecutor` — use `SparqlEngine` instead
+- Content negotiation now internal: `RdfFormatNegotiator`, `SparqlResultFormatNegotiator` — use `RdfEngine.DetermineFormat()`/`NegotiateFromAccept()` instead
+- Result writers/parsers now internal: `SparqlJsonResultWriter`, `SparqlXmlResultWriter`, `SparqlCsvResultWriter` and corresponding parsers
+- OWL/RDFS reasoning now internal: `OwlReasoner`, `InferenceRules`
+- **Mercury public surface reduced to 21 types** (3 facades, 2 protocol, 11 storage, 3 diagnostics, 2 delegates)
+
+### Documentation
+
+- **`docs/api/api-usage.md`** restructured around public facades (1,529 → 900 lines); all internal type examples removed
+- **`docs/tutorials/embedding-mercury.md`** updated to use `SparqlEngine`, `RdfEngine` facades
+- **CLAUDE.md** updated with Mercury public type count (21 types)
+- **ADR-003** completed — Buffer Pattern for Stack Safety, extended to cover facade design and type internalization
+
+---
+
 ## [1.2.2] - 2026-02-15
 
 Complete tutorial suite and infrastructure fixes.
@@ -438,6 +478,7 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.3.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.3.0
 [1.2.2]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.2
 [1.2.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.1
 [1.2.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.0
