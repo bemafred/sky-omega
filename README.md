@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.2.1 Released** — Pruning support in CLI and MCP with QuadStorePool migration.
+> **v1.3.0 Released** — Public facade layer, type internalization, 100% W3C SPARQL 1.1 conformance.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
@@ -82,12 +82,14 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 
 ## 💠 Project Purpose
 
-Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
+**Mercury** is a complete SPARQL 1.1 engine with zero external dependencies, zero-GC performance, and 100% W3C conformance across all core specifications. It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
 
-- **Structured memory** via a temporal RDF triple store (`Lucy`)
+The broader Sky Omega vision is a **stand-alone cognitive agent** built on this foundation, combining:
+
+- **Structured memory** via a temporal RDF knowledge substrate (Mercury — built)
 - **Grammar-driven reasoning** (syntax, behavior, and intent grammars)
-- **Zero-GC performance and SSD-optimized data structures** (e.g., B+ trees, append-only stores)
-- **Explainable, traceable logic**—a foundation for hybrid AGI
+- **Local LLM inference** (Minerva — planned)
+- **Explainable, traceable logic** — a foundation for hybrid AGI
 
 ---
 
@@ -95,12 +97,12 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 
 | Claim                            | Evidence              | Command to Verify                            |
 |----------------------------------|-----------------------|----------------------------------------------|
-| 100% W3C SPARQL 1.1 conformance  | 512 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
-| 100% W3C RDF format conformance  | 1,896 passing tests   | `dotnet test --filter "W3C"`                 |
+| 100% W3C SPARQL 1.1 conformance  | 618 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
+| 100% W3C conformance (all formats)| 2,063 passing tests  | `dotnet test --filter "W3C"`                 |
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
 | 3,995 tests passing              | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | 146K lines in weeks   | `git log --since="2025-12-01"`               |
+| Development velocity             | ~167K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
 ---
 
@@ -110,17 +112,30 @@ Sky Omega is designed as a **stand-alone cognitive agent**, powered by:
 
 ---
 
-## 🧠 Core Components
+## 🧠 What's Built
 
-| Component                      | Description                                                                                       |
-|--------------------------------|---------------------------------------------------------------------------------------------------|
-| **Sky**                        | The language layer. Provides pruned reasoning, reflection, and short-term memory.                 |
-| **James**                      | The cognitive orchestration layer. A tail recursive orchestration loop.                           |
-| **Lucy**                       | The long-term memory layer. Epistemic and semantic in nature, fast, huge, queryable, and precise. |
-| **Mira**                       | The integration layer. The expression and sensory capablities, UX/UI.                             |
-| **Mercury**                    | The temporal RDF-substrate. Fast, huge, low-level, persistent and deterministic.                  |
-| **Minerva**                    | The LLM inference substrate. BCL-only, zero-GC, local-first. *[planned]*                          |
-| **Behavior & Intent Grammars** | Define what Sky *knows*, *intends*, and *verifies*.                                               |
+Everything below has code in `src/`, tests, and benchmarks.
+
+| Component              | Description                                                                                |
+|------------------------|--------------------------------------------------------------------------------------------|
+| **Mercury**            | Temporal RDF substrate — 74,600 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC     |
+| **Mercury.Solid**      | W3C Solid Protocol server with WAC/ACP access control                                      |
+| **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
+| **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
+| **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
+
+## 🔭 Architectural Vision
+
+The agent architecture that Mercury is being built to support. These components are planned for Sky Omega 2.0.
+
+| Component                      | Role                                                                                        |
+|--------------------------------|---------------------------------------------------------------------------------------------|
+| **Sky**                        | Language layer — pruned reasoning, reflection, and short-term memory                        |
+| **James**                      | Cognitive orchestration — tail recursive orchestration loop                                 |
+| **Lucy**                       | Long-term memory — epistemic and semantic, queryable, precise (powered by Mercury)          |
+| **Mira**                       | Integration layer — expression and sensory capabilities, UX/UI                              |
+| **Minerva**                    | LLM inference substrate — BCL-only, zero-GC, local-first                                   |
+| **Behavior & Intent Grammars** | Define what Sky *knows*, *intends*, and *verifies*                                          |
 
 
 ---
