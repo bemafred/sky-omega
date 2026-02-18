@@ -202,160 +202,163 @@ while (graphs.MoveNext())
 
 ## SPARQL from Code
 
-### Parse and execute a SELECT query
+The `SparqlEngine` facade handles parsing, execution, read locking, and result
+materialization in a single call.
+
+### SELECT queries
 
 ```csharp
-using SkyOmega.Mercury.Sparql.Parsing;
-using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury;
 
-var queryString = "SELECT ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name }";
+var result = SparqlEngine.Query(store,
+    "SELECT ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name }");
 
-// Parse the query (zero-GC ref struct parser)
-var parser = new SparqlParser(queryString.AsSpan());
-var query = parser.ParseQuery();
-
-// Execute against the store
-store.AcquireReadLock();
-try
+if (result.Success)
 {
-    using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-    var results = executor.Execute();
-
-    while (results.MoveNext())
+    // result.Variables: ["name"]
+    foreach (var row in result.Rows!)
     {
-        var row = results.Current;
-        var nameIdx = row.FindBinding("name".AsSpan());
-        if (nameIdx >= 0)
-        {
-            Console.WriteLine(row.GetString(nameIdx).ToString());
-        }
+        Console.WriteLine(row["name"]);
     }
-    results.Dispose();
-}
-finally
-{
-    store.ReleaseReadLock();
 }
 ```
 
 ### ASK queries
 
 ```csharp
-using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-bool exists = executor.ExecuteAsk();
+var result = SparqlEngine.Query(store,
+    "ASK WHERE { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> ?name }");
+
+if (result.Success && result.AskResult == true)
+{
+    // Pattern exists
+}
 ```
 
 ### CONSTRUCT queries
 
 ```csharp
-using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-var results = executor.ExecuteConstruct();
+var result = SparqlEngine.Query(store, @"
+    CONSTRUCT { ?person <http://example.org/hasName> ?name }
+    WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name }");
 
-while (results.MoveNext())
+if (result.Success)
 {
-    var triple = results.Current;
-    Console.WriteLine($"{triple.Subject} {triple.Predicate} {triple.Object}");
+    foreach (var (subject, predicate, obj) in result.Triples!)
+    {
+        Console.WriteLine($"{subject} {predicate} {obj}");
+    }
 }
-results.Dispose();
+```
+
+### SPARQL Update
+
+```csharp
+var result = SparqlEngine.Update(store,
+    "INSERT DATA { <http://example.org/alice> <http://xmlns.com/foaf/0.1/name> \"Alice\" }");
+// result.Success, result.AffectedCount
 ```
 
 ---
 
 ## Parsing RDF Files
 
-All parsers follow the same pattern: create from a stream, parse with a
-callback.
+The `RdfEngine` facade handles all six RDF formats (Turtle, N-Triples,
+RDF/XML, N-Quads, TriG, JSON-LD) through a single API.
 
-### Turtle (recommended for human-readable data)
+### Load a file into a store
 
 ```csharp
-using SkyOmega.Mercury.Rdf.Turtle;
+using SkyOmega.Mercury;
 
+// Format detected from file extension (.ttl, .nt, .rdf, .nq, .trig, .jsonld)
+long count = await RdfEngine.LoadFileAsync(store, "data.ttl");
+Console.WriteLine($"Loaded {count} triples");
+```
+
+### Load from a stream
+
+```csharp
+await using var stream = File.OpenRead("data.nt");
+long count = await RdfEngine.LoadAsync(store, stream, RdfFormat.NTriples);
+```
+
+### Zero-GC callback parsing
+
+For processing without loading into a store:
+
+```csharp
 await using var stream = File.OpenRead("data.ttl");
-using var parser = new TurtleStreamParser(stream);
-
-await parser.ParseAsync((subject, predicate, obj) =>
+await RdfEngine.ParseAsync(stream, RdfFormat.Turtle, (subject, predicate, obj) =>
 {
     // subject, predicate, obj are ReadOnlySpan<char>
     // Valid only during this callback
-    store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
+    Console.WriteLine($"{subject} {predicate} {obj}");
 });
 ```
 
-### N-Triples (fastest, simplest format)
+### Materialize to a list
 
 ```csharp
-using SkyOmega.Mercury.NTriples;
+await using var stream = File.OpenRead("data.ttl");
+var triples = await RdfEngine.ParseTriplesAsync(stream, RdfFormat.Turtle);
 
-await using var stream = File.OpenRead("data.nt");
-using var parser = new NTriplesStreamParser(stream);
-
-await parser.ParseAsync((subject, predicate, obj) =>
+foreach (var (subject, predicate, obj) in triples)
 {
-    store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-});
+    Console.WriteLine($"{subject} {predicate} {obj}");
+}
 ```
-
-### N-Quads (triples with named graphs)
-
-```csharp
-using SkyOmega.Mercury.NQuads;
-
-await using var stream = File.OpenRead("data.nq");
-using var parser = new NQuadsStreamParser(stream);
-
-await parser.ParseAsync((subject, predicate, obj, graph) =>
-{
-    if (graph.IsEmpty)
-        store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-    else
-        store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString(), graph.ToString());
-});
-```
-
-### Other formats
-
-The same pattern applies to `TriGStreamParser`, `JsonLdStreamParser`, and
-`RdfXmlStreamParser`.
 
 ---
 
 ## Writing RDF Output
 
-### N-Triples
+### Writing triples
 
 ```csharp
-using SkyOmega.Mercury.NTriples;
+using SkyOmega.Mercury;
 
-using var writer = new NTriplesStreamWriter(Console.Out);
-writer.WriteTriple(
-    "<http://example.org/alice>".AsSpan(),
-    "<http://xmlns.com/foaf/0.1/name>".AsSpan(),
-    "\"Alice\"".AsSpan());
+var triples = new List<(string Subject, string Predicate, string Object)>
+{
+    ("<http://example.org/alice>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\""),
+    ("<http://example.org/alice>", "<http://xmlns.com/foaf/0.1/knows>", "<http://example.org/bob>"),
+};
+
+// Write as N-Triples
+using var sw = new StringWriter();
+RdfEngine.WriteTriples(sw, RdfFormat.NTriples, triples);
+Console.Write(sw.ToString());
+
+// Also supports: RdfFormat.Turtle, RdfFormat.RdfXml
 ```
 
-### Turtle
+### Writing quads
 
 ```csharp
-using SkyOmega.Mercury.Rdf.Turtle;
+var quads = new List<(string Subject, string Predicate, string Object, string Graph)>
+{
+    ("<http://example.org/alice>", "<http://xmlns.com/foaf/0.1/name>", "\"Alice\"", "<http://example.org/graph1>"),
+};
 
-using var writer = new TurtleStreamWriter(Console.Out);
-writer.WriteTriple(subject, predicate, obj);
+using var sw = new StringWriter();
+RdfEngine.WriteQuads(sw, RdfFormat.NQuads, quads);
+// Also supports: RdfFormat.TriG, RdfFormat.JsonLd
 ```
 
-### Format negotiation
-
-Use `RdfFormatNegotiator` to select a format from content types or file
-extensions:
+### Format detection
 
 ```csharp
-using SkyOmega.Mercury.Abstractions;
-
-var format = RdfFormatNegotiator.FromExtension(".ttl".AsSpan());
+// From MIME content type
+var format = RdfEngine.DetermineFormat("text/turtle; charset=utf-8");
 // Returns RdfFormat.Turtle
 
-var format2 = RdfFormatNegotiator.FromContentType("application/n-triples".AsSpan());
-// Returns RdfFormat.NTriples
+// From Accept header
+var format2 = RdfEngine.NegotiateFromAccept("text/turtle;q=1.0, application/n-triples;q=0.8");
+// Returns RdfFormat.Turtle
+
+// Get MIME type for a format
+var contentType = RdfEngine.GetContentType(RdfFormat.NTriples);
+// Returns "application/n-triples"
 ```
 
 ---
