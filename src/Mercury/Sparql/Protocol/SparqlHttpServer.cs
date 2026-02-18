@@ -12,17 +12,10 @@ using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using SkyOmega.Mercury.NTriples;
-using SkyOmega.Mercury.Rdf.Turtle;
-using SkyOmega.Mercury.RdfXml;
-using SkyOmega.Mercury.Sparql.Execution;
-using SkyOmega.Mercury.Sparql.Execution.Federated;
-using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Results;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Protocol;
 
@@ -46,7 +39,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
     private readonly Func<QuadStore> _storeFactory;
     private readonly string _baseUri;
     private readonly SparqlHttpServerOptions _options;
-    private readonly LoadExecutor _loadExecutor;
     private CancellationTokenSource? _cts;
     private Task? _listenTask;
     private bool _disposed;
@@ -64,7 +56,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         _storeFactory = storeFactory ?? throw new ArgumentNullException(nameof(storeFactory));
         _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         _options = options ?? new SparqlHttpServerOptions();
-        _loadExecutor = new LoadExecutor();
 
         if (!_baseUri.EndsWith("/"))
             _baseUri += "/";
@@ -85,7 +76,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         _storeFactory = () => store;
         _baseUri = baseUri ?? throw new ArgumentNullException(nameof(baseUri));
         _options = options ?? new SparqlHttpServerOptions();
-        _loadExecutor = new LoadExecutor();
 
         if (!_baseUri.EndsWith("/"))
             _baseUri += "/";
@@ -263,461 +253,284 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         // Determine output format from Accept header
         var acceptHeader = request.Headers["Accept"] ?? "";
 
-        // Parse and execute query
-        try
-        {
-            var parser = new SparqlParser(queryString.AsSpan());
-            var query = parser.ParseQuery();
+        // Execute query via facade
+        var store = _storeFactory();
+        var result = SparqlEngine.Query(store, queryString);
 
-            // CONSTRUCT/DESCRIBE return RDF graphs, SELECT/ASK return SPARQL results
-            if (query.Type == QueryType.Construct || query.Type == QueryType.Describe)
-            {
-                // Use RDF format negotiation for graph results
-                var rdfFormat = RdfFormatNegotiator.FromAcceptHeader(
-                    acceptHeader.AsSpan(),
-                    RdfFormat.Turtle); // Default to Turtle for readability
-                response.ContentType = RdfFormatNegotiator.GetContentType(rdfFormat);
-
-                var resultBytes = ExecuteGraphQuerySync(queryString, query, rdfFormat);
-                await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                // Use SPARQL result format negotiation for SELECT/ASK
-                var format = string.IsNullOrEmpty(acceptHeader)
-                    ? SparqlResultFormat.Json
-                    : SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
-                response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
-
-                var resultBytes = ExecuteQuerySync(queryString, query, format);
-                await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
-            }
-        }
-        catch (SparqlParseException ex)
+        if (!result.Success)
         {
             await WriteErrorResponseAsync(response, 400, "Bad Request",
-                $"SPARQL parse error: {ex.Message}").ConfigureAwait(false);
+                result.ErrorMessage ?? "Query execution failed").ConfigureAwait(false);
+            return;
+        }
+
+        // CONSTRUCT/DESCRIBE return RDF graphs, SELECT/ASK return SPARQL results
+        if (result.Kind is ExecutionResultKind.Construct or ExecutionResultKind.Describe)
+        {
+            var rdfFormat = RdfFormatNegotiator.FromAcceptHeader(
+                acceptHeader.AsSpan(),
+                RdfFormat.Turtle);
+            response.ContentType = RdfFormatNegotiator.GetContentType(rdfFormat);
+
+            var resultBytes = FormatGraphResult(result, rdfFormat);
+            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+        }
+        else if (result.Kind == ExecutionResultKind.Ask)
+        {
+            var format = string.IsNullOrEmpty(acceptHeader)
+                ? SparqlResultFormat.Json
+                : SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
+            response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
+
+            var resultBytes = FormatAskResult(result, format);
+            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var format = string.IsNullOrEmpty(acceptHeader)
+                ? SparqlResultFormat.Json
+                : SparqlResultFormatNegotiator.FromAcceptHeader(acceptHeader.AsSpan(), SparqlResultFormat.Json);
+            response.ContentType = SparqlResultFormatNegotiator.GetContentType(format);
+
+            var resultBytes = FormatSelectResult(result, format);
+            await response.OutputStream.WriteAsync(resultBytes, ct).ConfigureAwait(false);
         }
     }
 
-    private byte[] ExecuteQuerySync(string queryString, Query query, SparqlResultFormat format)
+    #region Result Formatting
+
+    private static byte[] FormatSelectResult(QueryResult result, SparqlResultFormat format)
     {
         using var memStream = new MemoryStream();
         using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
 
-        var store = _storeFactory();
-        store.AcquireReadLock();
-        try
+        var variables = result.Variables ?? [];
+        var rows = result.Rows ?? [];
+
+        switch (format)
         {
-            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-
-            switch (query.Type)
-            {
-                case QueryType.Select:
-                    WriteSelectResults(executor, query, queryString, format, writer);
-                    break;
-
-                case QueryType.Ask:
-                    WriteAskResult(executor, format, writer);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Query type {query.Type} should use ExecuteGraphQuerySync");
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
+            case SparqlResultFormat.Json:
+                WriteSelectJson(writer, variables, rows);
+                break;
+            case SparqlResultFormat.Xml:
+                WriteSelectXml(writer, variables, rows);
+                break;
+            case SparqlResultFormat.Csv:
+                WriteSelectDelimited(writer, variables, rows, ',');
+                break;
+            case SparqlResultFormat.Tsv:
+                WriteSelectDelimited(writer, variables, rows, '\t');
+                break;
+            default:
+                WriteSelectJson(writer, variables, rows);
+                break;
         }
 
         writer.Flush();
         return memStream.ToArray();
     }
 
-    private byte[] ExecuteGraphQuerySync(string queryString, Query query, RdfFormat rdfFormat)
+    private static byte[] FormatAskResult(QueryResult result, SparqlResultFormat format)
     {
         using var memStream = new MemoryStream();
         using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
 
-        var store = _storeFactory();
-        store.AcquireReadLock();
-        try
+        var boolStr = result.AskResult == true ? "true" : "false";
+
+        switch (format)
         {
-            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-
-            switch (query.Type)
-            {
-                case QueryType.Construct:
-                    WriteConstructResults(executor, rdfFormat, writer);
-                    break;
-
-                case QueryType.Describe:
-                    WriteDescribeResults(executor, rdfFormat, writer);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Query type {query.Type} should use ExecuteQuerySync");
-            }
-        }
-        finally
-        {
-            store.ReleaseReadLock();
+            case SparqlResultFormat.Json:
+                writer.Write($"{{\"boolean\":{boolStr}}}");
+                break;
+            case SparqlResultFormat.Xml:
+                writer.Write("<?xml version=\"1.0\"?>");
+                writer.Write("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">");
+                writer.Write($"<boolean>{boolStr}</boolean>");
+                writer.Write("</sparql>");
+                break;
+            default:
+                writer.Write(boolStr);
+                break;
         }
 
         writer.Flush();
         return memStream.ToArray();
     }
 
-    private void WriteSelectResults(QueryExecutor executor, Query query, string source,
-        SparqlResultFormat format, StreamWriter writer)
+    private static byte[] FormatGraphResult(QueryResult result, RdfFormat rdfFormat)
     {
-        // Extract variable names from patterns
-        var varNames = ExtractVariableNames(query, source);
+        using var memStream = new MemoryStream();
+        using var writer = new StreamWriter(memStream, Encoding.UTF8, leaveOpen: true);
 
-        var results = executor.Execute();
-
-        try
+        // Fall back to NTriples for quad-only formats
+        var format = rdfFormat switch
         {
-            using var resultWriter = SparqlResultFormatNegotiator.CreateWriter(writer, format);
+            RdfFormat.NTriples or RdfFormat.Turtle or RdfFormat.RdfXml => rdfFormat,
+            _ => RdfFormat.NTriples
+        };
+        RdfEngine.WriteTriples(writer, format, result.Triples ?? []);
 
-            if (resultWriter is SparqlJsonResultWriter jsonWriter)
-            {
-                // If SELECT * and no explicit variables, get them from first result
-                if (varNames.Length == 0 && results.MoveNext())
-                {
-                    varNames = ExtractVariablesFromBindings(results.Current, source);
-                    jsonWriter.WriteHead(varNames);
+        writer.Flush();
+        return memStream.ToArray();
+    }
 
-                    var bindings = results.Current;
-                    jsonWriter.WriteResult(ref bindings);
-
-                    while (results.MoveNext())
-                    {
-                        var b = results.Current;
-                        jsonWriter.WriteResult(ref b);
-                    }
-                }
-                else
-                {
-                    jsonWriter.WriteHead(varNames);
-
-                    while (results.MoveNext())
-                    {
-                        var bindings = results.Current;
-                        jsonWriter.WriteResult(ref bindings);
-                    }
-                }
-
-                jsonWriter.WriteEnd();
-            }
-            else if (resultWriter is SparqlXmlResultWriter xmlWriter)
-            {
-                if (varNames.Length == 0 && results.MoveNext())
-                {
-                    varNames = ExtractVariablesFromBindings(results.Current, source);
-                    xmlWriter.WriteHead(varNames);
-                    var bindings = results.Current;
-                    xmlWriter.WriteResult(ref bindings);
-
-                    while (results.MoveNext())
-                    {
-                        var b = results.Current;
-                        xmlWriter.WriteResult(ref b);
-                    }
-                }
-                else
-                {
-                    xmlWriter.WriteHead(varNames);
-                    while (results.MoveNext())
-                    {
-                        var bindings = results.Current;
-                        xmlWriter.WriteResult(ref bindings);
-                    }
-                }
-
-                xmlWriter.WriteEnd();
-            }
-            else if (resultWriter is SparqlCsvResultWriter csvWriter)
-            {
-                if (varNames.Length == 0 && results.MoveNext())
-                {
-                    varNames = ExtractVariablesFromBindings(results.Current, source);
-                    csvWriter.WriteHead(varNames);
-                    var bindings = results.Current;
-                    csvWriter.WriteResult(ref bindings);
-
-                    while (results.MoveNext())
-                    {
-                        var b = results.Current;
-                        csvWriter.WriteResult(ref b);
-                    }
-                }
-                else
-                {
-                    csvWriter.WriteHead(varNames);
-                    while (results.MoveNext())
-                    {
-                        var bindings = results.Current;
-                        csvWriter.WriteResult(ref bindings);
-                    }
-                }
-
-                csvWriter.WriteEnd();
-            }
+    private static void WriteSelectJson(StreamWriter writer, string[] variables, List<Dictionary<string, string>> rows)
+    {
+        writer.Write("{\"head\":{\"vars\":[");
+        for (int i = 0; i < variables.Length; i++)
+        {
+            if (i > 0) writer.Write(',');
+            writer.Write($"\"{EscapeJson(variables[i])}\"");
         }
-        finally
+        writer.Write("]},\"results\":{\"bindings\":[");
+
+        for (int r = 0; r < rows.Count; r++)
         {
-            results.Dispose();
+            if (r > 0) writer.Write(',');
+            writer.Write('{');
+
+            var row = rows[r];
+            bool firstVar = true;
+            foreach (var variable in variables)
+            {
+                if (row.TryGetValue(variable, out var valueStr))
+                {
+                    if (!firstVar) writer.Write(',');
+                    firstVar = false;
+
+                    var (type, val, extra) = ClassifyRdfTerm(valueStr);
+                    writer.Write($"\"{EscapeJson(variable)}\":{{\"type\":\"{type}\",\"value\":\"{EscapeJson(val)}\"");
+                    if (extra != null)
+                    {
+                        if (type == "literal" && extra.StartsWith("@"))
+                            writer.Write($",\"xml:lang\":\"{extra.Substring(1)}\"");
+                        else if (type == "literal" && extra.StartsWith("^^"))
+                            writer.Write($",\"datatype\":\"{extra.Substring(2)}\"");
+                    }
+                    writer.Write('}');
+                }
+            }
+
+            writer.Write('}');
+        }
+
+        writer.Write("]}}");
+    }
+
+    private static void WriteSelectXml(StreamWriter writer, string[] variables, List<Dictionary<string, string>> rows)
+    {
+        writer.Write("<?xml version=\"1.0\"?>");
+        writer.Write("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">");
+        writer.Write("<head>");
+        foreach (var v in variables)
+            writer.Write($"<variable name=\"{EscapeXml(v)}\"/>");
+        writer.Write("</head>");
+        writer.Write("<results>");
+
+        foreach (var row in rows)
+        {
+            writer.Write("<result>");
+            foreach (var variable in variables)
+            {
+                if (row.TryGetValue(variable, out var valueStr))
+                {
+                    var (type, val, extra) = ClassifyRdfTerm(valueStr);
+                    writer.Write($"<binding name=\"{EscapeXml(variable)}\">");
+
+                    if (type == "uri")
+                        writer.Write($"<uri>{EscapeXml(val)}</uri>");
+                    else if (type == "bnode")
+                        writer.Write($"<bnode>{EscapeXml(val)}</bnode>");
+                    else
+                    {
+                        writer.Write("<literal");
+                        if (extra != null && extra.StartsWith("@"))
+                            writer.Write($" xml:lang=\"{extra.Substring(1)}\"");
+                        else if (extra != null && extra.StartsWith("^^"))
+                            writer.Write($" datatype=\"{extra.Substring(2)}\"");
+                        writer.Write($">{EscapeXml(val)}</literal>");
+                    }
+
+                    writer.Write("</binding>");
+                }
+            }
+            writer.Write("</result>");
+        }
+
+        writer.Write("</results>");
+        writer.Write("</sparql>");
+    }
+
+    private static void WriteSelectDelimited(StreamWriter writer, string[] variables, List<Dictionary<string, string>> rows, char delimiter)
+    {
+        writer.WriteLine(string.Join(delimiter, variables));
+
+        foreach (var row in rows)
+        {
+            var values = new string[variables.Length];
+            for (int i = 0; i < variables.Length; i++)
+            {
+                values[i] = row.TryGetValue(variables[i], out var v) ? v : "";
+
+                if (delimiter == ',' && (values[i].Contains(',') || values[i].Contains('"') || values[i].Contains('\n')))
+                {
+                    values[i] = "\"" + values[i].Replace("\"", "\"\"") + "\"";
+                }
+            }
+            writer.WriteLine(string.Join(delimiter, values));
         }
     }
 
-    private static string[] ExtractVariableNames(Query query, string source)
+    private static (string type, string value, string? extra) ClassifyRdfTerm(string term)
     {
-        // Check SelectClause for explicit variables
-        if (!query.SelectClause.SelectAll)
+        if (term.StartsWith("<") && term.EndsWith(">"))
+            return ("uri", term.Substring(1, term.Length - 2), null);
+
+        if (term.StartsWith("_:"))
+            return ("bnode", term.Substring(2), null);
+
+        if (term.StartsWith("\""))
         {
-            // Check aggregates for aliases
-            var vars = new List<string>();
-            for (int i = 0; i < query.SelectClause.AggregateCount; i++)
+            int closeQuote = term.LastIndexOf('"');
+            if (closeQuote > 0)
             {
-                var agg = query.SelectClause.GetAggregate(i);
-                if (agg.AliasLength > 0)
-                {
-                    var alias = source.AsSpan().Slice(agg.AliasStart, agg.AliasLength).ToString();
-                    // Remove leading ? if present
-                    vars.Add(alias.StartsWith("?") ? alias.Substring(1) : alias);
-                }
-            }
-            if (vars.Count > 0)
-                return vars.ToArray();
-        }
-
-        // For SELECT * or when we can't determine variables, return empty
-        // The caller should extract from first result bindings
-        return [];
-    }
-
-    private static string[] ExtractVariablesFromBindings(BindingTable bindings, string source)
-    {
-        // BindingTable only stores hashes, not names
-        // We need to scan the source for variables and match by hash
-        var knownVars = new List<(string Name, int Hash)>();
-
-        // Simple regex-like scan for ?varName patterns
-        var span = source.AsSpan();
-        for (int i = 0; i < span.Length - 1; i++)
-        {
-            if (span[i] == '?')
-            {
-                int start = i;
-                int end = i + 1;
-                while (end < span.Length && (char.IsLetterOrDigit(span[end]) || span[end] == '_'))
-                    end++;
-
-                if (end > start + 1)
-                {
-                    var varName = span.Slice(start, end - start).ToString();
-                    var hash = ComputeHash(varName.AsSpan());
-                    if (!knownVars.Exists(v => v.Hash == hash))
-                        knownVars.Add((varName.Substring(1), hash)); // Strip leading ?
-                }
+                var value = term.Substring(1, closeQuote - 1);
+                var suffix = term.Substring(closeQuote + 1);
+                return ("literal", value, suffix.Length > 0 ? suffix : null);
             }
         }
 
-        // Match against bindings
-        var result = new List<string>();
-        for (int i = 0; i < bindings.Count; i++)
-        {
-            var bindingHash = bindings.GetVariableHash(i);
-            var found = knownVars.Find(v => v.Hash == bindingHash);
-            if (found.Name != null)
-                result.Add(found.Name);
-            else
-                result.Add($"var{i}"); // Fallback
-        }
-
-        return result.ToArray();
+        return ("literal", term, null);
     }
 
-    private static int ComputeHash(ReadOnlySpan<char> name)
+    private static string EscapeJson(string s)
     {
-        // Must match BindingTable.ComputeHash
-        int hash = 17;
-        foreach (var c in name)
-            hash = hash * 31 + c;
-        return hash;
-    }
-
-    private static void WriteAskResult(QueryExecutor executor, SparqlResultFormat format, StreamWriter writer)
-    {
-        bool result = executor.ExecuteAsk();
-
-        using var resultWriter = SparqlResultFormatNegotiator.CreateWriter(writer, format);
-
-        if (resultWriter is SparqlJsonResultWriter jsonWriter)
+        var sb = new StringBuilder(s.Length);
+        foreach (var c in s)
         {
-            jsonWriter.WriteBooleanResult(result);
-        }
-        else if (resultWriter is SparqlXmlResultWriter xmlWriter)
-        {
-            xmlWriter.WriteBooleanResult(result);
-        }
-        else if (resultWriter is SparqlCsvResultWriter csvWriter)
-        {
-            // CSV doesn't support boolean results well, write as simple value
-            writer.WriteLine(result ? "true" : "false");
-        }
-    }
-
-    private static void WriteConstructResults(QueryExecutor executor, RdfFormat rdfFormat, StreamWriter writer)
-    {
-        var results = executor.ExecuteConstruct();
-
-        try
-        {
-            switch (rdfFormat)
+            switch (c)
             {
-                case RdfFormat.NTriples:
-                    {
-                        using var ntWriter = new NTriplesStreamWriter(writer);
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            ntWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                    }
-                    break;
-
-                case RdfFormat.Turtle:
-                    {
-                        using var turtleWriter = new TurtleStreamWriter(writer);
-                        turtleWriter.WritePrefixes();
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            turtleWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                    }
-                    break;
-
-                case RdfFormat.RdfXml:
-                    {
-                        using var rdfXmlWriter = new RdfXmlStreamWriter(writer);
-                        rdfXmlWriter.WriteStartDocument();
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            rdfXmlWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                        rdfXmlWriter.WriteEndDocument();
-                    }
-                    break;
-
-                default:
-                    // Default to N-Triples for unknown/unsupported formats
-                    {
-                        using var defaultWriter = new NTriplesStreamWriter(writer);
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            defaultWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                    }
-                    break;
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default: sb.Append(c); break;
             }
         }
-        finally
-        {
-            results.Dispose();
-        }
+        return sb.ToString();
     }
 
-    private static void WriteDescribeResults(QueryExecutor executor, RdfFormat rdfFormat, StreamWriter writer)
+    private static string EscapeXml(string s)
     {
-        var results = executor.ExecuteDescribe();
-
-        try
-        {
-            switch (rdfFormat)
-            {
-                case RdfFormat.NTriples:
-                    {
-                        using var ntWriter = new NTriplesStreamWriter(writer);
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            ntWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                    }
-                    break;
-
-                case RdfFormat.Turtle:
-                    {
-                        using var turtleWriter = new TurtleStreamWriter(writer);
-                        turtleWriter.WritePrefixes();
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            turtleWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                    }
-                    break;
-
-                case RdfFormat.RdfXml:
-                    {
-                        using var rdfXmlWriter = new RdfXmlStreamWriter(writer);
-                        rdfXmlWriter.WriteStartDocument();
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            rdfXmlWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                        rdfXmlWriter.WriteEndDocument();
-                    }
-                    break;
-
-                default:
-                    // Default to N-Triples for unknown/unsupported formats
-                    {
-                        using var defaultWriter = new NTriplesStreamWriter(writer);
-                        while (results.MoveNext())
-                        {
-                            var triple = results.Current;
-                            defaultWriter.WriteTriple(
-                                triple.Subject.ToString().AsSpan(),
-                                triple.Predicate.ToString().AsSpan(),
-                                triple.Object.ToString().AsSpan());
-                        }
-                    }
-                    break;
-            }
-        }
-        finally
-        {
-            results.Dispose();
-        }
+        return s.Replace("&", "&amp;")
+                .Replace("<", "&lt;")
+                .Replace(">", "&gt;")
+                .Replace("\"", "&quot;")
+                .Replace("'", "&apos;");
     }
+
+    #endregion
 
     private async Task HandleUpdateRequestAsync(HttpListenerRequest request, HttpListenerResponse response, CancellationToken ct)
     {
@@ -763,33 +576,21 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
             return;
         }
 
-        try
+        var store = _storeFactory();
+        var result = SparqlEngine.Update(store, updateString);
+
+        if (result.Success)
         {
-            var parser = new SparqlParser(updateString.AsSpan());
-            var operation = parser.ParseUpdate();
+            response.StatusCode = 200;
+            response.ContentType = "application/json";
 
-            var store = _storeFactory();
-            var executor = new UpdateExecutor(store, updateString.AsSpan(), operation, _loadExecutor);
-            var result = executor.Execute();
-
-            if (result.Success)
-            {
-                response.StatusCode = 200;
-                response.ContentType = "application/json";
-
-                var responseBytes = Encoding.UTF8.GetBytes($"{{\"success\":true,\"affected\":{result.AffectedCount}}}");
-                await response.OutputStream.WriteAsync(responseBytes, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                await WriteErrorResponseAsync(response, 400, "Bad Request",
-                    result.ErrorMessage ?? "Update failed").ConfigureAwait(false);
-            }
+            var responseBytes = Encoding.UTF8.GetBytes($"{{\"success\":true,\"affected\":{result.AffectedCount}}}");
+            await response.OutputStream.WriteAsync(responseBytes, ct).ConfigureAwait(false);
         }
-        catch (SparqlParseException ex)
+        else
         {
             await WriteErrorResponseAsync(response, 400, "Bad Request",
-                $"SPARQL parse error: {ex.Message}").ConfigureAwait(false);
+                result.ErrorMessage ?? "Update failed").ConfigureAwait(false);
         }
     }
 
@@ -884,7 +685,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         _cts?.Cancel();
         _listener.Close();
         _cts?.Dispose();
-        _loadExecutor.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -895,7 +695,6 @@ public sealed class SparqlHttpServer : IDisposable, IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
         _listener.Close();
         _cts?.Dispose();
-        _loadExecutor.Dispose();
     }
 }
 

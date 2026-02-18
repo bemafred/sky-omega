@@ -8,6 +8,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.NTriples;
 using SkyOmega.Mercury.Rdf;
@@ -131,10 +132,10 @@ public sealed class ContainerHandler
             return ResourceResult.UnsupportedMediaType($"Unsupported content type: {contentType}");
         }
 
-        var triples = new List<(string Subject, string Predicate, string Object)>();
+        List<(string Subject, string Predicate, string Object)> triples;
         try
         {
-            await ParseRdfAsync(body, format, resourceUri, triples, ct);
+            triples = await RdfEngine.ParseTriplesAsync(body, format, resourceUri, ct);
         }
         catch (Exception ex)
         {
@@ -443,37 +444,4 @@ public sealed class ContainerHandler
         hasher.AppendData(oBytes);
     }
 
-    private static async Task ParseRdfAsync(
-        Stream body,
-        RdfFormat format,
-        string baseUri,
-        List<(string Subject, string Predicate, string Object)> triples,
-        CancellationToken ct)
-    {
-        switch (format)
-        {
-            case RdfFormat.Turtle:
-                {
-                    using var parser = new TurtleStreamParser(body, baseUri: baseUri);
-                    await parser.ParseAsync((s, p, o) =>
-                    {
-                        triples.Add((s.ToString(), p.ToString(), o.ToString()));
-                    }, ct);
-                }
-                break;
-
-            case RdfFormat.NTriples:
-                {
-                    using var parser = new NTriplesStreamParser(body);
-                    await parser.ParseAsync((s, p, o) =>
-                    {
-                        triples.Add((s.ToString(), p.ToString(), o.ToString()));
-                    }, ct);
-                }
-                break;
-
-            default:
-                throw new NotSupportedException($"RDF format {format} not supported for parsing");
-        }
-    }
 }

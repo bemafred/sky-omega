@@ -1,4 +1,4 @@
-namespace SkyOmega.Mercury.Pruning;
+namespace SkyOmega.Mercury.Abstractions;
 
 /// <summary>
 /// How to handle temporal history during transfer.

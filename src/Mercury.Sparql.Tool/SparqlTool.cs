@@ -2,18 +2,9 @@
 // SPARQL tool library - testable logic extracted from CLI
 
 using System.Text;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
-using SkyOmega.Mercury.JsonLd;
-using SkyOmega.Mercury.NQuads;
-using SkyOmega.Mercury.NTriples;
-using SkyOmega.Mercury.Rdf;
-using SkyOmega.Mercury.Rdf.Turtle;
-using SkyOmega.Mercury.RdfXml;
-using SkyOmega.Mercury.Sparql.Types;
-using SkyOmega.Mercury.Sparql.Execution;
-using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Storage;
-using SkyOmega.Mercury.TriG;
 
 namespace SkyOmega.Mercury.Sparql.Tool;
 
@@ -102,100 +93,7 @@ public static class SparqlTool
     /// </summary>
     public static async Task<long> LoadRdfAsync(QuadStore store, string filePath)
     {
-        if (!File.Exists(filePath))
-            throw new FileNotFoundException($"File not found: {filePath}");
-
-        var extension = Path.GetExtension(filePath);
-        var format = RdfFormatNegotiator.FromExtension(extension.AsSpan());
-
-        if (format == RdfFormat.Unknown)
-            throw new NotSupportedException($"Unknown RDF format for extension: {extension}");
-
-        await using var stream = File.OpenRead(filePath);
-        long count = 0;
-
-        switch (format)
-        {
-            case RdfFormat.Turtle:
-                using (var parser = new TurtleStreamParser(stream))
-                {
-                    await parser.ParseAsync((subject, predicate, obj) =>
-                    {
-                        store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-                        count++;
-                    });
-                }
-                break;
-
-            case RdfFormat.NTriples:
-                using (var parser = new NTriplesStreamParser(stream))
-                {
-                    await parser.ParseAsync((subject, predicate, obj) =>
-                    {
-                        store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-                        count++;
-                    });
-                }
-                break;
-
-            case RdfFormat.RdfXml:
-                using (var parser = new RdfXmlStreamParser(stream))
-                {
-                    await parser.ParseAsync((subject, predicate, obj) =>
-                    {
-                        store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-                        count++;
-                    });
-                }
-                break;
-
-            case RdfFormat.NQuads:
-                using (var parser = new NQuadsStreamParser(stream))
-                {
-                    await parser.ParseAsync((subject, predicate, obj, graph) =>
-                    {
-                        if (graph.IsEmpty)
-                            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-                        else
-                            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString(), graph.ToString());
-                        count++;
-                    });
-                }
-                break;
-
-            case RdfFormat.TriG:
-                using (var parser = new TriGStreamParser(stream))
-                {
-                    await parser.ParseAsync((subject, predicate, obj, graph) =>
-                    {
-                        if (graph.IsEmpty)
-                            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-                        else
-                            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString(), graph.ToString());
-                        count++;
-                    });
-                }
-                break;
-
-            case RdfFormat.JsonLd:
-                using (var parser = new JsonLdStreamParser(stream))
-                {
-                    await parser.ParseAsync((subject, predicate, obj, graph) =>
-                    {
-                        if (graph.IsEmpty)
-                            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString());
-                        else
-                            store.AddCurrent(subject.ToString(), predicate.ToString(), obj.ToString(), graph.ToString());
-                        count++;
-                    });
-                }
-                break;
-
-            default:
-                throw new NotSupportedException($"Unsupported RDF format: {format}");
-        }
-
-        return count;
+        return await RdfEngine.LoadFileAsync(store, filePath);
     }
 
     /// <summary>
@@ -203,39 +101,20 @@ public static class SparqlTool
     /// </summary>
     public static ToolResult ExecuteQuery(QuadStore store, string queryString, OutputFormat format, RdfFormat rdfFormat, TextWriter output, TextWriter error)
     {
-        // Parse the query
-        var parser = new SparqlParser(queryString.AsSpan());
-        Query query;
-
-        try
+        var result = SparqlEngine.Query(store, queryString);
+        if (!result.Success)
         {
-            query = parser.ParseQuery();
-        }
-        catch (Exception ex)
-        {
-            error.WriteLine($"Parse error: {ex.Message}");
-            return ToolResult.Fail($"Parse error: {ex.Message}");
+            error.WriteLine($"Parse error: {result.ErrorMessage}");
+            return ToolResult.Fail($"Parse error: {result.ErrorMessage}");
         }
 
-        // Handle different query types
-        switch (query.Type)
+        return result.Kind switch
         {
-            case QueryType.Select:
-                return ExecuteSelectQuery(store, queryString, query, format, output);
-
-            case QueryType.Ask:
-                return ExecuteAskQuery(store, queryString, query, output);
-
-            case QueryType.Construct:
-                return ExecuteConstructQuery(store, queryString, query, rdfFormat, output);
-
-            case QueryType.Describe:
-                return ExecuteDescribeQuery(store, queryString, query, rdfFormat, output);
-
-            default:
-                error.WriteLine($"Unsupported query type: {query.Type}");
-                return ToolResult.Fail($"Unsupported query type: {query.Type}");
-        }
+            ExecutionResultKind.Select => WriteSelectResult(result, format, output),
+            ExecutionResultKind.Ask => WriteAskResult(result, output),
+            ExecutionResultKind.Construct or ExecutionResultKind.Describe => WriteTripleResult(result, rdfFormat, output),
+            _ => ToolResult.Fail("Unsupported query type")
+        };
     }
 
     /// <summary>
@@ -245,15 +124,7 @@ public static class SparqlTool
     {
         try
         {
-            // Parse the query first
-            var parser = new SparqlParser(queryString.AsSpan());
-            var query = parser.ParseQuery();
-
-            // Generate explain plan
-            var explainer = new SparqlExplainer(queryString, in query);
-            var plan = explainer.Explain();
-
-            output.WriteLine(plan.Format());
+            output.WriteLine(SparqlEngine.Explain(queryString));
             return ToolResult.Ok();
         }
         catch (Exception ex)
@@ -341,70 +212,56 @@ public static class SparqlTool
 
     #region Private Query Execution Methods
 
-    private static ToolResult ExecuteSelectQuery(QuadStore store, string queryString, Query query, OutputFormat format, TextWriter output)
+    private static ToolResult WriteSelectResult(QueryResult result, OutputFormat format, TextWriter output)
     {
-        store.AcquireReadLock();
-        try
+        var variables = result.Variables ?? [];
+        var rows = result.Rows ?? [];
+
+        switch (format)
         {
-            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-            var results = executor.Execute();
+            case OutputFormat.Json:
+                WriteJsonResults(output, variables, rows);
+                break;
 
-            // Get variable names from select clause
-            var variables = GetSelectVariables(query, queryString);
+            case OutputFormat.Csv:
+                WriteCsvResults(output, variables, rows, delimiter: ',');
+                break;
 
-            // Write results in requested format
-            switch (format)
-            {
-                case OutputFormat.Json:
-                    WriteJsonResults(output, variables, ref results);
-                    break;
+            case OutputFormat.Tsv:
+                WriteCsvResults(output, variables, rows, delimiter: '\t');
+                break;
 
-                case OutputFormat.Csv:
-                    WriteCsvResults(output, variables, ref results, delimiter: ',');
-                    break;
+            case OutputFormat.Xml:
+                WriteXmlResults(output, variables, rows);
+                break;
 
-                case OutputFormat.Tsv:
-                    WriteCsvResults(output, variables, ref results, delimiter: '\t');
-                    break;
-
-                case OutputFormat.Xml:
-                    WriteXmlResults(output, variables, ref results);
-                    break;
-
-                default:
-                    WriteJsonResults(output, variables, ref results);
-                    break;
-            }
-
-            results.Dispose();
-            return ToolResult.Ok();
+            default:
+                WriteJsonResults(output, variables, rows);
+                break;
         }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
+
+        return ToolResult.Ok();
     }
 
-    private static string[] GetSelectVariables(Query query, string source)
+    private static ToolResult WriteAskResult(QueryResult result, TextWriter output)
     {
-        if (query.SelectClause.SelectAll)
-        {
-            return ["s", "p", "o"];
-        }
-
-        var variables = new string[query.SelectClause.ProjectedVariableCount];
-        for (int i = 0; i < query.SelectClause.ProjectedVariableCount; i++)
-        {
-            var (start, length) = query.SelectClause.GetProjectedVariable(i);
-            var varSpan = source.AsSpan().Slice(start, length);
-            if (varSpan.Length > 0 && (varSpan[0] == '?' || varSpan[0] == '$'))
-                varSpan = varSpan.Slice(1);
-            variables[i] = varSpan.ToString();
-        }
-        return variables;
+        output.WriteLine(result.AskResult == true ? "true" : "false");
+        return ToolResult.Ok();
     }
 
-    private static void WriteJsonResults(TextWriter writer, string[] variables, ref QueryResults results)
+    private static ToolResult WriteTripleResult(QueryResult result, RdfFormat rdfFormat, TextWriter output)
+    {
+        // CONSTRUCT/DESCRIBE produce triples; fall back to NTriples for quad-only formats
+        var format = rdfFormat switch
+        {
+            RdfFormat.NTriples or RdfFormat.Turtle or RdfFormat.RdfXml => rdfFormat,
+            _ => RdfFormat.NTriples
+        };
+        RdfEngine.WriteTriples(output, format, result.Triples ?? []);
+        return ToolResult.Ok();
+    }
+
+    private static void WriteJsonResults(TextWriter writer, string[] variables, List<Dictionary<string, string>> rows)
     {
         writer.WriteLine("{");
         writer.WriteLine("  \"head\": { \"vars\": [" + string.Join(", ", variables.Select(v => $"\"{v}\"")) + "] },");
@@ -412,7 +269,7 @@ public static class SparqlTool
         writer.WriteLine("    \"bindings\": [");
 
         bool first = true;
-        while (results.MoveNext())
+        foreach (var row in rows)
         {
             if (!first) writer.WriteLine(",");
             first = false;
@@ -420,18 +277,13 @@ public static class SparqlTool
             writer.Write("      { ");
             bool firstVar = true;
 
-            var bindings = results.Current;
             foreach (var variable in variables)
             {
-                var idx = bindings.FindBinding(variable.AsSpan());
-                if (idx < 0)
-                    idx = bindings.FindBinding(("?" + variable).AsSpan());
-                if (idx >= 0)
+                if (row.TryGetValue(variable, out var valueStr))
                 {
                     if (!firstVar) writer.Write(", ");
                     firstVar = false;
 
-                    var valueStr = bindings.GetString(idx).ToString();
                     var (type, val, extra) = ClassifyRdfTerm(valueStr);
 
                     writer.Write($"\"{variable}\": {{ \"type\": \"{type}\", \"value\": \"{EscapeJson(val)}\"");
@@ -455,21 +307,17 @@ public static class SparqlTool
         writer.WriteLine("}");
     }
 
-    private static void WriteCsvResults(TextWriter writer, string[] variables, ref QueryResults results, char delimiter)
+    private static void WriteCsvResults(TextWriter writer, string[] variables, List<Dictionary<string, string>> rows, char delimiter)
     {
         writer.WriteLine(string.Join(delimiter, variables));
 
-        while (results.MoveNext())
+        foreach (var row in rows)
         {
-            var bindings = results.Current;
             var values = new string[variables.Length];
 
             for (int i = 0; i < variables.Length; i++)
             {
-                var idx = bindings.FindBinding(variables[i].AsSpan());
-                if (idx < 0)
-                    idx = bindings.FindBinding(("?" + variables[i]).AsSpan());
-                values[i] = idx >= 0 ? bindings.GetString(idx).ToString() : "";
+                values[i] = row.TryGetValue(variables[i], out var v) ? v : "";
 
                 if (delimiter == ',' && (values[i].Contains(',') || values[i].Contains('"') || values[i].Contains('\n')))
                 {
@@ -481,7 +329,7 @@ public static class SparqlTool
         }
     }
 
-    private static void WriteXmlResults(TextWriter writer, string[] variables, ref QueryResults results)
+    private static void WriteXmlResults(TextWriter writer, string[] variables, List<Dictionary<string, string>> rows)
     {
         writer.WriteLine("<?xml version=\"1.0\"?>");
         writer.WriteLine("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">");
@@ -491,19 +339,14 @@ public static class SparqlTool
         writer.WriteLine("  </head>");
         writer.WriteLine("  <results>");
 
-        while (results.MoveNext())
+        foreach (var row in rows)
         {
             writer.WriteLine("    <result>");
-            var bindings = results.Current;
 
             foreach (var variable in variables)
             {
-                var idx = bindings.FindBinding(variable.AsSpan());
-                if (idx < 0)
-                    idx = bindings.FindBinding(("?" + variable).AsSpan());
-                if (idx >= 0)
+                if (row.TryGetValue(variable, out var valueStr))
                 {
-                    var valueStr = bindings.GetString(idx).ToString();
                     var (type, val, extra) = ClassifyRdfTerm(valueStr);
 
                     writer.Write($"      <binding name=\"{EscapeXml(variable)}\">");
@@ -553,142 +396,6 @@ public static class SparqlTool
         }
 
         return ("literal", term, null);
-    }
-
-    private static ToolResult ExecuteAskQuery(QuadStore store, string queryString, Query query, TextWriter output)
-    {
-        store.AcquireReadLock();
-        try
-        {
-            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-            var result = executor.ExecuteAsk();
-            output.WriteLine(result ? "true" : "false");
-            return ToolResult.Ok();
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    private static ToolResult ExecuteConstructQuery(QuadStore store, string queryString, Query query, RdfFormat rdfFormat, TextWriter output)
-    {
-        store.AcquireReadLock();
-        try
-        {
-            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-            var results = executor.ExecuteConstruct();
-
-            if (rdfFormat == RdfFormat.RdfXml)
-            {
-                using var rdfWriter = new RdfXmlStreamWriter(output);
-                rdfWriter.WriteStartDocument();
-                while (results.MoveNext())
-                {
-                    var triple = results.Current;
-                    rdfWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
-                }
-                rdfWriter.WriteEndDocument();
-                results.Dispose();
-                return ToolResult.Ok();
-            }
-
-            using var writer = rdfFormat switch
-            {
-                RdfFormat.Turtle => (IDisposable)new TurtleStreamWriter(output),
-                RdfFormat.NQuads => new NQuadsStreamWriter(output),
-                RdfFormat.TriG => new TriGStreamWriter(output),
-                _ => new NTriplesStreamWriter(output)
-            };
-
-            while (results.MoveNext())
-            {
-                var triple = results.Current;
-
-                switch (writer)
-                {
-                    case NTriplesStreamWriter ntWriter:
-                        ntWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
-                        break;
-                    case TurtleStreamWriter ttlWriter:
-                        ttlWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
-                        break;
-                    case NQuadsStreamWriter nqWriter:
-                        nqWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
-                        break;
-                    case TriGStreamWriter trigWriter:
-                        trigWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
-                        break;
-                }
-            }
-
-            results.Dispose();
-            return ToolResult.Ok();
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
-    }
-
-    private static ToolResult ExecuteDescribeQuery(QuadStore store, string queryString, Query query, RdfFormat rdfFormat, TextWriter output)
-    {
-        store.AcquireReadLock();
-        try
-        {
-            using var executor = new QueryExecutor(store, queryString.AsSpan(), query);
-            var results = executor.ExecuteDescribe();
-
-            if (rdfFormat == RdfFormat.RdfXml)
-            {
-                using var rdfWriter = new RdfXmlStreamWriter(output);
-                rdfWriter.WriteStartDocument();
-                while (results.MoveNext())
-                {
-                    var triple = results.Current;
-                    rdfWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
-                }
-                rdfWriter.WriteEndDocument();
-                results.Dispose();
-                return ToolResult.Ok();
-            }
-
-            using var writer = rdfFormat switch
-            {
-                RdfFormat.Turtle => (IDisposable)new TurtleStreamWriter(output),
-                RdfFormat.NQuads => new NQuadsStreamWriter(output),
-                RdfFormat.TriG => new TriGStreamWriter(output),
-                _ => new NTriplesStreamWriter(output)
-            };
-
-            while (results.MoveNext())
-            {
-                var triple = results.Current;
-
-                switch (writer)
-                {
-                    case NTriplesStreamWriter ntWriter:
-                        ntWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
-                        break;
-                    case TurtleStreamWriter ttlWriter:
-                        ttlWriter.WriteTriple(triple.Subject, triple.Predicate, triple.Object);
-                        break;
-                    case NQuadsStreamWriter nqWriter:
-                        nqWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
-                        break;
-                    case TriGStreamWriter trigWriter:
-                        trigWriter.WriteQuad(triple.Subject, triple.Predicate, triple.Object, ReadOnlySpan<char>.Empty);
-                        break;
-                }
-            }
-
-            results.Dispose();
-            return ToolResult.Ok();
-        }
-        finally
-        {
-            store.ReleaseReadLock();
-        }
     }
 
     #endregion
