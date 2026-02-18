@@ -29,9 +29,9 @@ Codebase metrics are tracked over time. Update after significant changes.
 | ├─ Models | 297 | SolidResource, SolidContainer |
 | └─ SolidServer | 481 | HTTP server |
 | **Mercury Runtime** | **3,540** | Runtime + Abstractions |
-| **Mercury Tool Libraries** | **1,483** | Sparql.Tool + Turtle.Tool |
+| **Mercury Tool Libraries** | **1,471** | Sparql.Tool + Turtle.Tool |
 | **Mercury CLIs** | **1,416** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
-| **Mercury.Pruning** | **1,274** | Copy-and-switch pruning + PruneEngine |
+| **Mercury.Pruning** | **1,275** | Copy-and-switch pruning + PruneEngine |
 | **Minerva** | **—** | Thought substrate (planned) |
 
 ### Tests
@@ -60,19 +60,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 27,103 |
+| All docs (*.md, *.ttl) | 27,212 |
 | CLAUDE.md | 881 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,772 |
+| Source code | ~86,764 |
 | Tests | ~50,265 |
 | Benchmarks | ~3,408 |
 | Examples | ~851 |
-| Documentation | ~27,103 |
-| **Grand total** | **~168,399** |
+| Documentation | ~27,212 |
+| **Grand total** | **~168,500** |
 
 ## W3C Conformance
 
