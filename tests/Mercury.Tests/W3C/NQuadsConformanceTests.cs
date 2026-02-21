@@ -68,7 +68,8 @@ public class NQuadsConformanceTests
     public static IEnumerable<object[]> GetNQuads11PositiveSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NQuads11);
@@ -84,7 +85,8 @@ public class NQuadsConformanceTests
     public static IEnumerable<object[]> GetNQuads11NegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.NQuads11);

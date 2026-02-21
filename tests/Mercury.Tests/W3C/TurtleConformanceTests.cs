@@ -223,7 +223,8 @@ public class TurtleConformanceTests
     public static IEnumerable<object[]> GetTurtle11PositiveSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
@@ -239,7 +240,8 @@ public class TurtleConformanceTests
     public static IEnumerable<object[]> GetTurtle11NegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);
@@ -255,7 +257,8 @@ public class TurtleConformanceTests
     public static IEnumerable<object[]> GetTurtle11EvalTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.Turtle11);

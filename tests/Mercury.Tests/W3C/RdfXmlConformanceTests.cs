@@ -199,7 +199,8 @@ public class RdfXmlConformanceTests
     public static IEnumerable<object[]> GetRdfXml11NegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml11);
@@ -218,7 +219,8 @@ public class RdfXmlConformanceTests
     public static IEnumerable<object[]> GetRdfXml11EvalTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.RdfXml11);

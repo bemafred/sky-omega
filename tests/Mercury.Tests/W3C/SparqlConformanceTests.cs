@@ -855,7 +855,8 @@ public class SparqlConformanceTests
     public static IEnumerable<object[]> GetPositiveSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var tests = W3CTestContext.LoadTestCasesAsync(
             W3CTestSuite.Sparql11Query,
@@ -870,7 +871,8 @@ public class SparqlConformanceTests
     public static IEnumerable<object[]> GetNegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var tests = W3CTestContext.LoadTestCasesAsync(
             W3CTestSuite.Sparql11Query,
@@ -885,7 +887,8 @@ public class SparqlConformanceTests
     public static IEnumerable<object[]> GetQueryEvalTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var tests = W3CTestContext.LoadTestCasesAsync(
             W3CTestSuite.Sparql11Query,
@@ -1085,7 +1088,8 @@ public class SparqlConformanceTests
     public static IEnumerable<object[]> GetUpdateEvalTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var tests = W3CTestContext.LoadTestCasesAsync(
             W3CTestSuite.Sparql11Update,

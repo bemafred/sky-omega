@@ -239,26 +239,22 @@ public class JsonLdConformanceTests
     }
 
     public static IEnumerable<object[]> GetToRdfPositiveTests()
-    {
-        if (!JsonLdTestContext.IsAvailable)
-            yield break;
-
-        var tests = JsonLdTestContext.LoadToRdfTests().GetAwaiter().GetResult();
-
-        foreach (var test in tests.Where(t => t.IsPositive))
-        {
-            yield return new object[] { test };
-        }
-    }
+        => GetToRdfTests(positive: true);
 
     public static IEnumerable<object[]> GetToRdfNegativeTests()
+        => GetToRdfTests(positive: false);
+
+    private static IEnumerable<object[]> GetToRdfTests(bool positive)
     {
         if (!JsonLdTestContext.IsAvailable)
-            yield break;
+        {
+            throw new InvalidOperationException(
+                "W3C JSON-LD test suite not found. Run ./tools/update-submodules.sh to initialize.");
+        }
 
         var tests = JsonLdTestContext.LoadToRdfTests().GetAwaiter().GetResult();
 
-        foreach (var test in tests.Where(t => !t.IsPositive))
+        foreach (var test in tests.Where(t => t.IsPositive == positive))
         {
             yield return new object[] { test };
         }
