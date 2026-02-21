@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Sparql;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
@@ -51,9 +52,8 @@ public static class SparqlEngine
             store.AcquireReadLock();
             try
             {
-                var planner = store.Statistics != null
-                    ? new QueryPlanner(store.Statistics, store.Atoms)
-                    : null;
+                var planner = new QueryPlanner(store.Statistics, store.Atoms);
+                    
                 using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, null, planner);
 
                 return parsed.Type switch
@@ -403,10 +403,9 @@ public static class SparqlEngine
                 if (end > i + 1)
                 {
                     var varName = span.Slice(i, end - i).ToString();
-                    uint hash = 2166136261;
-                    foreach (var ch in varName) { hash ^= ch; hash *= 16777619; }
-                    if (!knownVars.Exists(v => v.Hash == (int)hash))
-                        knownVars.Add((varName, (int)hash));
+                    var hash = Fnv1a.Hash(varName.AsSpan());
+                    if (!knownVars.Exists(v => v.Hash == hash))
+                        knownVars.Add((varName, hash));
                 }
             }
         }

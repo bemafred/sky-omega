@@ -356,23 +356,9 @@ internal sealed class QueryPlanner
         return boundVars.Contains(hash);
     }
 
-    /// <summary>
-    /// Compute FNV-1a hash for a variable name.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ComputeVariableHash(in Term term, ReadOnlySpan<char> source)
-    {
-        var name = source.Slice(term.Start, term.Length);
-        unchecked
-        {
-            int hash = (int)2166136261;
-            foreach (var c in name)
-            {
-                hash = (hash ^ c) * 16777619;
-            }
-            return hash;
-        }
-    }
+        => Fnv1a.Hash(source.Slice(term.Start, term.Length));
 
     // Default cardinality estimate for SERVICE clauses (remote endpoints)
     // Conservative estimate: SERVICE calls are expensive, assume moderate result size

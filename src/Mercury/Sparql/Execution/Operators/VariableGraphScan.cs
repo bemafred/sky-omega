@@ -55,17 +55,7 @@ internal ref struct VariableGraphScan
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ComputeHash(ReadOnlySpan<char> s)
-    {
-        unchecked
-        {
-            int hash = (int)2166136261;
-            foreach (var c in s)
-                hash = (hash ^ c) * 16777619;
-            return hash;
-        }
-    }
+    private static int ComputeHash(ReadOnlySpan<char> s) => Fnv1a.Hash(s);
 
     public bool MoveNext(ref BindingTable bindings)
     {

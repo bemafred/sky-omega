@@ -1080,17 +1080,7 @@ internal sealed class MaterializedRow
         }
     }
 
-    private static int ComputeHash(ReadOnlySpan<char> s)
-    {
-        // FNV-1a hash - must match BindingTable.ComputeHash
-        uint hash = 2166136261;
-        foreach (var ch in s)
-        {
-            hash ^= ch;
-            hash *= 16777619;
-        }
-        return (int)hash;
-    }
+    private static int ComputeHash(ReadOnlySpan<char> s) => Fnv1a.Hash(s);
 }
 
 /// <summary>
@@ -1474,16 +1464,7 @@ internal sealed class GroupedRow
     public int GetAggregateHash(int index) => _aggHashes[index];
     public ReadOnlySpan<char> GetAggregateValue(int index) => _aggValues[index];
 
-    private static int ComputeHash(ReadOnlySpan<char> s)
-    {
-        uint hash = 2166136261;
-        foreach (var ch in s)
-        {
-            hash ^= ch;
-            hash *= 16777619;
-        }
-        return (int)hash;
-    }
+    private static int ComputeHash(ReadOnlySpan<char> s) => Fnv1a.Hash(s);
 
     /// <summary>
     /// Try to parse a numeric value from an RDF literal string.

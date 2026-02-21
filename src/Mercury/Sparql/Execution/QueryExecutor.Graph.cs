@@ -547,21 +547,7 @@ internal partial class QueryExecutor
         }
     }
 
-    /// <summary>
-    /// Compute variable hash for local binding lookup.
-    /// </summary>
-    private static int ComputeVarHash(ReadOnlySpan<char> varName)
-    {
-        unchecked
-        {
-            int hash = (int)2166136261;
-            foreach (var ch in varName)
-            {
-                hash = (hash ^ ch) * 16777619;
-            }
-            return hash;
-        }
-    }
+    private static int ComputeVarHash(ReadOnlySpan<char> varName) => Fnv1a.Hash(varName);
 
     /// <summary>
     /// Resolve graph context for EXISTS evaluation.

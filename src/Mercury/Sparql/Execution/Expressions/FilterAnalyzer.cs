@@ -327,23 +327,7 @@ internal static class FilterAnalyzer
         (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
         (c >= '0' && c <= '9') || c == '_';
 
-    /// <summary>
-    /// Compute FNV-1a hash for a variable name span.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ComputeHash(ReadOnlySpan<char> value)
-    {
-        unchecked
-        {
-            uint hash = 2166136261;
-            foreach (var ch in value)
-            {
-                hash ^= ch;
-                hash *= 16777619;
-            }
-            return (int)hash;
-        }
-    }
+    private static int ComputeHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 
     #endregion
 }

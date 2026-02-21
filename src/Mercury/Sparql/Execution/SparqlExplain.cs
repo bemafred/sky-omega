@@ -762,16 +762,9 @@ internal sealed class SparqlExplainer
     private void AddVariableHash(Term term)
     {
         var name = _source.AsSpan().Slice(term.Start, term.Length);
-        unchecked
-        {
-            int hash = (int)2166136261;
-            foreach (var c in name)
-            {
-                hash = (hash ^ c) * 16777619;
-            }
-            if (!_boundVariables.Contains(hash))
-                _boundVariables.Add(hash);
-        }
+        var hash = Fnv1a.Hash(name);
+        if (!_boundVariables.Contains(hash))
+            _boundVariables.Add(hash);
     }
 
     private string GetTriplePatternDescription(TriplePattern tp)
