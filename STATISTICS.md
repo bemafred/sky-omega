@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-02-18
+**Last updated:** 2026-02-21
 
 ## Line Counts
 
@@ -10,8 +10,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **74,600** | Knowledge substrate |
-| ├─ Sparql | 44,743 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **74,404** | Knowledge substrate |
+| ├─ Sparql | 44,621 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 6,014 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 4,017 | Turtle parser and writer |
@@ -19,19 +19,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 | ├─ TriG | 2,836 | TriG parser and writer |
 | ├─ NQuads | 1,476 | N-Quads parser and writer |
 | ├─ NTriples | 1,244 | N-Triples parser and writer |
-| ├─ Facades | 793 | SparqlEngine, RdfEngine |
+| ├─ Facades | 792 | SparqlEngine, RdfEngine |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
 | └─ Rdf | 490 | Core RDF types |
-| **Mercury.Solid (total)** | **4,459** | W3C Solid Protocol |
+| **Mercury.Solid (total)** | **4,422** | W3C Solid Protocol |
 | ├─ Http | 1,365 | Resource, Container, Patch handlers |
 | ├─ N3 | 1,348 | N3 Patch parser and executor |
 | ├─ AccessControl | 894 | WAC and ACP implementations |
 | ├─ Models | 297 | SolidResource, SolidContainer |
 | └─ SolidServer | 481 | HTTP server |
-| **Mercury Runtime** | **3,540** | Runtime + Abstractions |
-| **Mercury Tool Libraries** | **1,471** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,416** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
-| **Mercury.Pruning** | **1,275** | Copy-and-switch pruning + PruneEngine |
+| **Mercury Runtime** | **3,408** | Runtime + Abstractions |
+| **Mercury Tool Libraries** | **1,399** | Sparql.Tool + Turtle.Tool |
+| **Mercury CLIs** | **1,270** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury.Pruning** | **1,239** | Copy-and-switch pruning + PruneEngine |
 | **Minerva** | **—** | Thought substrate (planned) |
 
 ### Tests
@@ -39,21 +39,21 @@ Codebase metrics are tracked over time. Update after significant changes.
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
 | Mercury.Tests | 49,810 | 3,970 |
-| Mercury.Solid.Tests | 455 | 25 |
+| Mercury.Solid.Tests | 443 | 25 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
 
 | Project | Lines | Classes |
 |---------|------:|--------:|
-| Mercury.Benchmarks | 3,408 | 97 |
+| Mercury.Benchmarks | 3,004 | 97 |
 | Minerva.Benchmarks | — | — |
 
 ### Examples
 
 | Project | Lines |
 |---------|------:|
-| Mercury.Examples | 851 |
+| Mercury.Examples | 815 |
 | Minerva.Examples | — |
 
 ### Documentation
@@ -67,12 +67,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,764 |
-| Tests | ~50,265 |
-| Benchmarks | ~3,408 |
-| Examples | ~851 |
+| Source code | ~86,247 |
+| Tests | ~50,253 |
+| Benchmarks | ~3,004 |
+| Examples | ~815 |
 | Documentation | ~26,152 |
-| **Grand total** | **~167,440** |
+| **Grand total** | **~166,471** |
 
 ## W3C Conformance
 
