@@ -757,10 +757,7 @@ The test fixture uses `StorageOptions.ForTesting` automatically.
 
 **Problem:** Multiple NCrunch test runner processes can each create stores, potentially exhausting disk space even with `StorageOptions.ForTesting`.
 
-**Solution:** `CrossProcessStoreGate` provides machine-wide coordination using a hybrid approach:
-
-1. **Primary: Named system semaphore** - Fast, kernel-level coordination across processes
-2. **Fallback: File-based slot locking** - Universal cross-platform support if semaphores fail
+**Solution:** `CrossProcessStoreGate` provides machine-wide coordination using file-based slot locking. Numbered lock files (slot-0.lock through slot-N.lock) with exclusive file locks ensure the OS releases locks automatically on process death, so slots are never permanently lost when a test runner is killed.
 
 **Components:**
 
@@ -788,15 +785,7 @@ Pool = new QuadStorePool(
 - Clamped to 2-12 slots
 - Example: 10GB available → 10GB × 0.33 ÷ 320MB ≈ 10 slots max globally
 
-**Cross-platform behavior:**
-
-| Platform | Primary Strategy | Fallback |
-|----------|------------------|----------|
-| Windows | Named Semaphore (`Global\SkyOmega-...`) | File-based |
-| Linux | POSIX semaphore via .NET | File-based |
-| macOS | POSIX semaphore via .NET | File-based |
-
-**File-based fallback details:**
+**File-based locking details:**
 - Lock directory: `/tmp/.sky-omega-pool-locks/` (or `%TEMP%` on Windows)
 - Files: `slot-0.lock` through `slot-N.lock`
 - Uses `FileShare.None` for exclusive locking
@@ -835,7 +824,6 @@ Total: 10 stores × 320MB = 3.2GB ✓ Safe (within 33% budget)
 
 1. **Timeout waiting for slot**: Check `CrossProcessStoreGate.Instance.MaxGlobalStores` - may need more disk space
 2. **Lock files accumulating**: Check `/tmp/.sky-omega-pool-locks/` for stale files from crashed processes
-3. **Semaphore issues on Linux**: Ensure `/dev/shm` is mounted and writable
 
 ### Production Hardening Checklist
 
