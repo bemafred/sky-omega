@@ -11,5 +11,4 @@ git -C "$SCRIPT_DIR" submodule update --init --recursive
 
 echo ""
 echo "Done. Submodules initialized:"
-echo "  tests/w3c-rdf-tests     - W3C RDF conformance test data"
-echo "  tests/w3c-json-ld-api   - W3C JSON-LD conformance test data"
+git -C "$SCRIPT_DIR" submodule foreach --quiet 'echo "  $sm_path"'

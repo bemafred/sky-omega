@@ -10,5 +10,4 @@ git -C $ScriptDir submodule update --init --recursive
 
 Write-Host ""
 Write-Host "Done. Submodules initialized:"
-Write-Host "  tests/w3c-rdf-tests     - W3C RDF conformance test data"
-Write-Host "  tests/w3c-json-ld-api   - W3C JSON-LD conformance test data"
+git -C $ScriptDir submodule foreach --quiet 'echo "  $sm_path"' | ForEach-Object { Write-Host $_ }
