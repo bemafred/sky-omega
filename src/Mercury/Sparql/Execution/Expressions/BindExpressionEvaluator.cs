@@ -387,16 +387,7 @@ internal ref struct BindExpressionEvaluator
         return -1;
     }
 
-    private static int ComputeVariableHash(ReadOnlySpan<char> value)
-    {
-        uint hash = 2166136261;
-        foreach (var ch in value)
-        {
-            hash ^= ch;
-            hash *= 16777619;
-        }
-        return (int)hash;
-    }
+    private static int ComputeVariableHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 
     private Value ParseStringLiteral()
     {

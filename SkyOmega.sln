@@ -19,10 +19,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentation", "Documentat
 	ProjectSection(SolutionItems) = preProject
 		CHANGELOG.md = CHANGELOG.md
 		CLAUDE.md = CLAUDE.md
+		LICENSE = LICENSE
+		MERCURY.md = MERCURY.md
 		README.md = README.md
 		STATISTICS.md = STATISTICS.md
-		MERCURY.md = MERCURY.md
-		LICENSE = LICENSE
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Infrastructure", "Infrastructure", "{6A048219-87B6-4063-9E6B-D76490244A39}"
@@ -118,9 +118,9 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D8E9-0123-DEF0-444444444444}"
 	ProjectSection(SolutionItems) = preProject
 		docs\adrs\minerva\ADR-001-weight-formats.md = docs\adrs\minerva\ADR-001-weight-formats.md
-		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
 		docs\adrs\minerva\ADR-002-hardware-acceleration-strategy.md = docs\adrs\minerva\ADR-002-hardware-acceleration-strategy.md
 		docs\adrs\minerva\ADR-003-metal-compute-architecture.md = docs\adrs\minerva\ADR-003-metal-compute-architecture.md
+		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "5 Tools", "5 Tools", "{323748F7-28B7-4B8A-A5E6-A6D1B2745CDF}"
@@ -135,16 +135,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "6 Data", "6 Data", "{107FC2
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "FHIR", "FHIR", "{4ADC967D-705C-4C4D-9C5F-01DF634F3154}"
 	ProjectSection(SolutionItems) = preProject
+		..\..\..\..\..\Volumes\Mercury SSD\fhir\fhir.ttl = ..\..\..\..\..\Volumes\Mercury SSD\fhir\fhir.ttl
 		..\..\..\..\..\Volumes\Mercury SSD\fhir\rim.ttl = ..\..\..\..\..\Volumes\Mercury SSD\fhir\rim.ttl
 		..\..\..\..\..\Volumes\Mercury SSD\fhir\w5.ttl = ..\..\..\..\..\Volumes\Mercury SSD\fhir\w5.ttl
-		..\..\..\..\..\Volumes\Mercury SSD\fhir\fhir.ttl = ..\..\..\..\..\Volumes\Mercury SSD\fhir\fhir.ttl
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Ontologies", "Ontologies", "{AA7ED9E6-F41F-4B10-A667-EEAE0D9103F7}"
 	ProjectSection(SolutionItems) = preProject
 		..\..\..\..\..\Volumes\Mercury SSD\ontologies\dcterms.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\dcterms.ttl
-		..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl
 		..\..\..\..\..\Volumes\Mercury SSD\ontologies\prov-o.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\prov-o.ttl
+		..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
@@ -164,6 +164,11 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "James", "James", "{1BC3D075-06C6-4ACC-9190-F582692C11EF}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Lucy", "Lucy", "{AB6D2997-5345-49B5-9C0D-43EAB07A5AD9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "testresults", "testresults", "{EDBA2C7E-EBA8-4B58-8BDA-9EC0DE54DD8F}"
+	ProjectSection(SolutionItems) = preProject
+		testresults\RawResults-windows-nchrunch.xml = testresults\RawResults-windows-nchrunch.xml
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -405,5 +410,8 @@ Global
 		{105FD4AB-E9FF-4681-9024-900E882868E2} = {C3D4E5F6-A7B8-9012-CDEF-345678901234}
 		{1BC3D075-06C6-4ACC-9190-F582692C11EF} = {B2C3D4E5-F6A7-8901-BCDE-F23456789012}
 		{AB6D2997-5345-49B5-9C0D-43EAB07A5AD9} = {B2C3D4E5-F6A7-8901-BCDE-F23456789012}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F44A55EF-8B8C-4287-96E0-5C14B3983CB3}
 	EndGlobalSection
 EndGlobal

@@ -313,15 +313,5 @@ internal ref struct BindingTable
         _stringBuffer.Slice(0, _stringOffset).CopyTo(destination);
     }
 
-    private static int ComputeHash(ReadOnlySpan<char> value)
-    {
-        // FNV-1a hash
-        uint hash = 2166136261;
-        foreach (var ch in value)
-        {
-            hash ^= ch;
-            hash *= 16777619;
-        }
-        return (int)hash;
-    }
+    private static int ComputeHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 }

@@ -231,7 +231,8 @@ public class TriGConformanceTests
     public static IEnumerable<object[]> GetTriG11PositiveSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
@@ -247,7 +248,8 @@ public class TriGConformanceTests
     public static IEnumerable<object[]> GetTriG11NegativeSyntaxTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
@@ -263,7 +265,8 @@ public class TriGConformanceTests
     public static IEnumerable<object[]> GetTriG11EvalTests()
     {
         if (!W3CTestContext.IsAvailable)
-            yield break;
+            throw new InvalidOperationException(
+                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);

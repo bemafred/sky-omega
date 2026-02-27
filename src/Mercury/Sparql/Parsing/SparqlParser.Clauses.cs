@@ -887,20 +887,7 @@ internal ref partial struct SparqlParser
         return clause;
     }
 
-    /// <summary>
-    /// Compute a hash for a span (for duplicate detection).
-    /// </summary>
-    private static int ComputeSpanHash(ReadOnlySpan<char> span)
-    {
-        // FNV-1a hash
-        uint hash = 2166136261;
-        foreach (var ch in span)
-        {
-            hash ^= ch;
-            hash *= 16777619;
-        }
-        return (int)hash;
-    }
+    private static int ComputeSpanHash(ReadOnlySpan<char> span) => Fnv1a.Hash(span);
 
     private AggregateExpression ParseAggregateExpression()
     {

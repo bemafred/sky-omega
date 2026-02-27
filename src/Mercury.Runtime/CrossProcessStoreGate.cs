@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -18,11 +17,9 @@ namespace SkyOmega.Mercury.Runtime;
 /// when run in parallel.
 /// </para>
 /// <para>
-/// The gate uses a hybrid approach:
-/// <list type="number">
-/// <item><description>Primary: Named system semaphore (fast, kernel-level coordination)</description></item>
-/// <item><description>Fallback: File-based slot locking (universal cross-platform)</description></item>
-/// </list>
+/// The gate uses file-based slot locking: numbered lock files (slot-0.lock through slot-N.lock)
+/// with exclusive file locks. The OS releases locks automatically on process death, so slots
+/// are never permanently lost when a test runner is killed.
 /// </para>
 /// <para>
 /// Usage:
@@ -51,14 +48,9 @@ public sealed class CrossProcessStoreGate : IDisposable
     public const int DefaultMaxGlobalStores = 6;
 
     /// <summary>
-    /// Lock directory for file-based fallback.
+    /// Lock directory for file-based slot locking.
     /// </summary>
     private static readonly string LockDirectory = Path.Combine(Path.GetTempPath(), ".sky-omega-pool-locks");
-
-    /// <summary>
-    /// Semaphore name for cross-process coordination.
-    /// </summary>
-    private const string SemaphoreName = "SkyOmega-QuadStore-Gate-v1";
 
     private readonly object _lock = new();
     private readonly IGateStrategy _strategy;
@@ -177,52 +169,9 @@ public sealed class CrossProcessStoreGate : IDisposable
         }
     }
 
-    /// <summary>
-    /// Creates the appropriate strategy based on platform capabilities.
-    /// </summary>
     private static IGateStrategy CreateStrategy(int maxStores)
     {
-        // Try named semaphore first (preferred)
-        if (TryCreateSemaphoreStrategy(maxStores, out var semaphoreStrategy))
-            return semaphoreStrategy;
-
-        // Fall back to file-based locking (universal)
         return new FileBasedGateStrategy(maxStores, LockDirectory);
-    }
-
-    private static bool TryCreateSemaphoreStrategy(int maxStores, out IGateStrategy strategy)
-    {
-        try
-        {
-            strategy = new SemaphoreGateStrategy(maxStores, GetSemaphoreName());
-            return true;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            strategy = null!;
-            return false;
-        }
-        catch (IOException)
-        {
-            // Semaphore creation failed (permissions, etc.)
-            strategy = null!;
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            strategy = null!;
-            return false;
-        }
-    }
-
-    private static string GetSemaphoreName()
-    {
-        // Windows requires "Global\" prefix for cross-session visibility
-        // On Unix, just use the name directly
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return $"Global\\{SemaphoreName}";
-
-        return SemaphoreName;
     }
 
     public void Dispose()
@@ -253,49 +202,6 @@ internal interface IGateStrategy : IDisposable
     string Name { get; }
     bool TryAcquire(TimeSpan timeout);
     void Release();
-}
-
-/// <summary>
-/// Named semaphore strategy for fast cross-process coordination.
-/// </summary>
-internal sealed class SemaphoreGateStrategy : IGateStrategy
-{
-    private readonly Semaphore _semaphore;
-
-    public SemaphoreGateStrategy(int maxCount, string name)
-    {
-        // CreateOrOpen semantics: if semaphore exists, opens it; otherwise creates with initial=max
-        _semaphore = new Semaphore(maxCount, maxCount, name, out bool createdNew);
-
-        // If we created it, it's ready to go with maxCount available
-        // If we opened existing, it has whatever count was left by previous processes
-        // This is correct - the semaphore persists across process lifetimes
-    }
-
-    public string Name => "NamedSemaphore";
-
-    public bool TryAcquire(TimeSpan timeout)
-    {
-        return _semaphore.WaitOne(timeout);
-    }
-
-    public void Release()
-    {
-        try
-        {
-            _semaphore.Release();
-        }
-        catch (SemaphoreFullException)
-        {
-            // Already at max - can happen if Release called without matching Acquire
-            // This is a bug in caller, but we handle it gracefully
-        }
-    }
-
-    public void Dispose()
-    {
-        _semaphore.Dispose();
-    }
 }
 
 /// <summary>

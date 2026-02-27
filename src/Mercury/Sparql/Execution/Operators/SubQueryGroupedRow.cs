@@ -332,16 +332,7 @@ internal sealed class SubQueryGroupedRow
         return new MaterializedRow(table);
     }
 
-    private static int ComputeHash(ReadOnlySpan<char> s)
-    {
-        uint hash = 2166136261;
-        foreach (var ch in s)
-        {
-            hash ^= ch;
-            hash *= 16777619;
-        }
-        return (int)hash;
-    }
+    private static int ComputeHash(ReadOnlySpan<char> s) => Fnv1a.Hash(s);
 
     /// <summary>
     /// Try to parse a numeric value from an RDF literal string.
