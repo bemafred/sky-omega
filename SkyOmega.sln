@@ -167,6 +167,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Lucy", "Lucy", "{AB6D2997-5
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "testresults", "testresults", "{EDBA2C7E-EBA8-4B58-8BDA-9EC0DE54DD8F}"
 	ProjectSection(SolutionItems) = preProject
+		testresults\diagnose-file-locks.cs.txt = testresults\diagnose-file-locks.cs.txt
 		testresults\RawResults-windows-nchrunch.xml = testresults\RawResults-windows-nchrunch.xml
 	EndProjectSection
 EndProject
