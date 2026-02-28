@@ -35,10 +35,10 @@ namespace SkyOmega.Mercury.Storage;
 /// {basePath}/
 ///   pool.json                 # Metadata: name->GUID mappings, active store, settings
 ///   stores/
-///     0194a3f8c2e1.../        # "primary" maps here (GUID v7 prefix)
-///     0194a3f9b7d4.../        # "secondary" maps here
+///     0194a3f8c2e1a4b5c6d7e8f9.../  # "primary" maps here (full GUID v7)
+///     0194a3f9b7d4e5f6a7b8c9d0.../  # "secondary" maps here
 ///   pooled/
-///     0194c3d4e5f6.../        # Anonymous pooled stores
+///     0194c3d4e5f6a7b8c9d0e1f2.../  # Anonymous pooled stores
 /// </code>
 ///
 /// <para><strong>Pruning workflow example:</strong></para>
@@ -134,7 +134,7 @@ public sealed class QuadStorePool : IDisposable
         _metadata = new PoolMetadata();
 
         // Create temp base path for this pool instance
-        var tempPath = TempPath.Create(purpose, Guid.CreateVersion7().ToString("N")[..12], unique: false);
+        var tempPath = TempPath.Create(purpose, Guid.CreateVersion7().ToString("N"), unique: false);
         tempPath.EnsureClean();
         tempPath.MarkOwnership();
         _basePath = tempPath.FullPath;
@@ -205,7 +205,7 @@ public sealed class QuadStorePool : IDisposable
     {
         var opts = options ?? QuadStorePoolOptions.Default;
         var category = purpose ?? "pool";
-        var tempPath = TempPath.Create(category, Guid.CreateVersion7().ToString("N")[..12], unique: false);
+        var tempPath = TempPath.Create(category, Guid.CreateVersion7().ToString("N"), unique: false);
         tempPath.EnsureClean();
         tempPath.MarkOwnership();
 
@@ -238,7 +238,7 @@ public sealed class QuadStorePool : IDisposable
                     return existing;
 
                 // Create new named store
-                var guid = Guid.CreateVersion7().ToString("N")[..12];
+                var guid = Guid.CreateVersion7().ToString("N");
                 var storePath = Path.Combine(StoresPath, guid);
 
                 // Check disk budget before creation
@@ -447,7 +447,7 @@ public sealed class QuadStorePool : IDisposable
         {
             lock (_poolLock)
             {
-                var guid = Guid.CreateVersion7().ToString("N")[..12];
+                var guid = Guid.CreateVersion7().ToString("N");
                 var storePath = Path.Combine(PooledPath, guid);
 
                 EnsureDiskBudget(storePath, "RentStore");
@@ -714,7 +714,7 @@ public sealed class QuadStorePool : IDisposable
             return; // Not a flat store — nothing to migrate
 
         // Generate a store slot GUID
-        var guid = Guid.CreateVersion7().ToString("N")[..12];
+        var guid = Guid.CreateVersion7().ToString("N");
         var storesDir = Path.Combine(basePath, StoresDirectoryName);
         var storePath = Path.Combine(storesDir, guid);
         var pooledDir = Path.Combine(basePath, PooledDirectoryName);
