@@ -112,7 +112,18 @@ internal ref partial struct SparqlParser
         {
             hasDelete = true;
             SkipWhitespace();
-            op.DeleteTemplate = ParseQuadPattern();
+            // Inlined ParseQuadPattern() to reduce call depth (NCrunch stack overflow mitigation)
+            var deletePattern = new GraphPattern();
+            if (Peek() != '{')
+                throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
+            Advance();
+            SkipWhitespace();
+            ParseGroupGraphPatternSub(ref deletePattern);
+            SkipWhitespace();
+            if (Peek() != '}')
+                throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
+            Advance();
+            op.DeleteTemplate = deletePattern;
             SkipWhitespace();
         }
 
@@ -120,7 +131,18 @@ internal ref partial struct SparqlParser
         {
             hasInsert = true;
             SkipWhitespace();
-            op.InsertTemplate = ParseQuadPattern();
+            // Inlined ParseQuadPattern() to reduce call depth (NCrunch stack overflow mitigation)
+            var insertPattern = new GraphPattern();
+            if (Peek() != '{')
+                throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
+            Advance();
+            SkipWhitespace();
+            ParseGroupGraphPatternSub(ref insertPattern);
+            SkipWhitespace();
+            if (Peek() != '}')
+                throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
+            Advance();
+            op.InsertTemplate = insertPattern;
             SkipWhitespace();
         }
 
@@ -150,11 +172,29 @@ internal ref partial struct SparqlParser
         if (usingClauses.Count > 0)
             op.UsingClauses = usingClauses.ToArray();
 
-        // WHERE clause - use ParseGroupGraphPattern() to handle SubSelect properly
+        // WHERE clause - inlined ParseGroupGraphPattern() to reduce call depth
         // [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
         ConsumeKeyword("WHERE");
         SkipWhitespace();
-        var wherePattern = ParseGroupGraphPattern();
+        var wherePattern = new GraphPattern();
+        if (Peek() == '{')
+        {
+            Advance();
+            SkipWhitespace();
+            var span = PeekSpan(6);
+            if (span.Length >= 6 && span[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
+            {
+                var subSelect = ParseSubSelect();
+                wherePattern.AddSubQuery(subSelect);
+            }
+            else
+            {
+                ParseGroupGraphPatternSub(ref wherePattern);
+            }
+            SkipWhitespace();
+            if (Peek() == '}')
+                Advance();
+        }
         op.WhereClause = new WhereClause { Pattern = wherePattern };
 
         return op;

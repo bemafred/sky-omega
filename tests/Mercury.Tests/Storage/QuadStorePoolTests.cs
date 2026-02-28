@@ -81,7 +81,12 @@ public class QuadStorePoolTests : IDisposable
     [Fact]
     public void Pool_LimitsMaxConcurrent()
     {
-        _pool = new QuadStorePool(maxConcurrent: 2, purpose: "test");
+        // Use ForTesting options to avoid slow Clear() on 5.5GB default stores,
+        // which can cause thread.Join to time out and race with Dispose()
+        _pool = new QuadStorePool(
+            storageOptions: StorageOptions.ForTesting,
+            maxConcurrent: 2,
+            purpose: "test");
 
         var store1 = _pool.Rent();
         var store2 = _pool.Rent();
@@ -100,11 +105,12 @@ public class QuadStorePoolTests : IDisposable
         Thread.Sleep(100);
         Assert.False(rentedThird); // Should still be blocked
 
-        // Return one store
+        // Return one store - unblocks the background thread
         _pool.Return(store1);
 
-        // Wait for third to complete
-        thread.Join(1000);
+        // Wait for background thread to complete before returning store2,
+        // ensuring all stores are returned before Dispose() runs
+        Assert.True(thread.Join(10_000), "Background thread did not complete in time");
         Assert.True(rentedThird);
 
         _pool.Return(store2);

@@ -4,6 +4,7 @@
     <AllowTestsInParallelWithThemselves>False</AllowTestsInParallelWithThemselves>
     <DefaultTestTimeout>120000</DefaultTestTimeout>
     <EnableRDI>False</EnableRDI>
+    <TestThreadStackSize>2097152</TestThreadStackSize>
     <NCrunchCacheStoragePath>.ncrunch\cache</NCrunchCacheStoragePath>
     <ProjectConfigStoragePathRelativeToSolutionDir>.ncrunch</ProjectConfigStoragePathRelativeToSolutionDir>
     <RdiConfigured>True</RdiConfigured>
