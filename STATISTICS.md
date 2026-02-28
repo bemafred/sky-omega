@@ -10,8 +10,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **74,637** | Knowledge substrate |
-| ├─ Sparql | 44,775 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **74,635** | Knowledge substrate |
+| ├─ Sparql | 44,773 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 6,014 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 4,017 | Turtle parser and writer |
@@ -38,7 +38,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 49,699 | 3,975 |
+| Mercury.Tests | 49,819 | 3,975 |
 | Mercury.Solid.Tests | 455 | 25 |
 | Minerva.Tests | — | — |
 
@@ -67,12 +67,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,704 |
-| Tests | ~50,154 |
+| Source code | ~86,702 |
+| Tests | ~50,274 |
 | Benchmarks | ~3,408 |
 | Examples | ~851 |
 | Documentation | ~26,434 |
-| **Grand total** | **~167,551** |
+| **Grand total** | **~167,669** |
 
 ## W3C Conformance
 
@@ -117,6 +117,21 @@ See [ADR-010](docs/adrs/mercury/ADR-010-w3c-test-suite-integration.md) for integ
 | **SPARQL 1.1 Update** | 100% (94/94) |
 | **With optional extensions** | 99% (2,063/2,069) |
 | **Remaining gaps** | 0 (all high-complexity gaps resolved) |
+
+## NCrunch (Windows) Compatibility
+
+All tests pass under NCrunch parallel test execution on Windows:
+
+| Metric | Value |
+|--------|-------|
+| **Total tests** | 2,146 |
+| **Passed** | 2,146 |
+| **Failed** | 0 |
+
+Key fixes for NCrunch compatibility:
+- MSBuild-embedded W3C submodule paths via `$(NCrunchOriginalProjectDir)` (NCrunch workspaces don't copy git submodules)
+- Stack frame reduction in SPARQL parser (eliminated intermediate `GraphPattern` locals ~5-11 KB each)
+- TOCTOU-resilient `CrossProcessStoreGate` tests (concurrent NCrunch runner processes)
 
 ## Stack Size (ADR-011)
 
