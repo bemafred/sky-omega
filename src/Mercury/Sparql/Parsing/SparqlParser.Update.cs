@@ -108,21 +108,22 @@ internal ref partial struct SparqlParser
         bool hasDelete = false;
         bool hasInsert = false;
 
+        // Parse DELETE/INSERT directly into op fields to avoid intermediate
+        // GraphPattern locals (~5-11 KB each). JIT allocates all locals in the
+        // prologue, so 3 extra GraphPatterns would add ~15-33 KB to this frame.
         if (TryConsumeKeyword("DELETE"))
         {
             hasDelete = true;
             SkipWhitespace();
-            var deletePattern = new GraphPattern();
             if (Peek() != '{')
                 throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
             Advance();
             SkipWhitespace();
-            ParseQuadTemplateBody(ref deletePattern);
+            ParseQuadTemplateBody(ref op.DeleteTemplate);
             SkipWhitespace();
             if (Peek() != '}')
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
             Advance();
-            op.DeleteTemplate = deletePattern;
             SkipWhitespace();
         }
 
@@ -130,17 +131,15 @@ internal ref partial struct SparqlParser
         {
             hasInsert = true;
             SkipWhitespace();
-            var insertPattern = new GraphPattern();
             if (Peek() != '{')
                 throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
             Advance();
             SkipWhitespace();
-            ParseQuadTemplateBody(ref insertPattern);
+            ParseQuadTemplateBody(ref op.InsertTemplate);
             SkipWhitespace();
             if (Peek() != '}')
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
             Advance();
-            op.InsertTemplate = insertPattern;
             SkipWhitespace();
         }
 
@@ -172,9 +171,9 @@ internal ref partial struct SparqlParser
 
         // WHERE clause - inlined ParseGroupGraphPattern() to reduce call depth
         // [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
+        // Parse directly into op.WhereClause.Pattern (same stack-saving strategy)
         ConsumeKeyword("WHERE");
         SkipWhitespace();
-        var wherePattern = new GraphPattern();
         if (Peek() == '{')
         {
             Advance();
@@ -183,17 +182,16 @@ internal ref partial struct SparqlParser
             if (span.Length >= 6 && span[..6].Equals("SELECT", StringComparison.OrdinalIgnoreCase))
             {
                 var subSelect = ParseSubSelect();
-                wherePattern.AddSubQuery(subSelect);
+                op.WhereClause.Pattern.AddSubQuery(subSelect);
             }
             else
             {
-                ParseGroupGraphPatternSub(ref wherePattern);
+                ParseGroupGraphPatternSub(ref op.WhereClause.Pattern);
             }
             SkipWhitespace();
             if (Peek() == '}')
                 Advance();
         }
-        op.WhereClause = new WhereClause { Pattern = wherePattern };
 
         return op;
     }
