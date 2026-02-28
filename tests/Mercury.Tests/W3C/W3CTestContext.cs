@@ -199,21 +199,9 @@ public static class W3CTestContext
 
     private static string FindTestsRoot([CallerFilePath] string? callerPath = null)
     {
-        // Strategy 1: Explicit override via environment variable.
-        // Required for test runners that shadow-copy source to a workspace (e.g. NCrunch),
-        // where MSBuild paths and CallerFilePath both resolve inside the workspace
-        // and submodule directories are not copied.
-        var envRoot = Environment.GetEnvironmentVariable("SKY_OMEGA_ROOT");
-        if (!string.IsNullOrEmpty(envRoot))
-        {
-            var envCandidate = Path.Combine(envRoot, "tests", "w3c-rdf-tests");
-            if (Directory.Exists(envCandidate))
-                return envCandidate;
-        }
-
-        // Strategy 2: MSBuild-embedded path (computed from .csproj location at build time).
-        // Works for dotnet test and VS Test Explorer. Returns even if directory doesn't exist
-        // so error messages show the expected path rather than a meaningless fallback.
+        // Strategy 1: MSBuild-embedded path (computed from .csproj location at build time).
+        // Under NCrunch, uses $(NCrunchOriginalProjectDir) to resolve back to the real
+        // source tree where git submodules live (NCrunch workspaces don't copy submodules).
         var assembly = typeof(W3CTestContext).Assembly;
         foreach (var attr in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
         {
@@ -221,7 +209,7 @@ public static class W3CTestContext
                 return attr.Value;
         }
 
-        // Strategy 3: Walk up from [CallerFilePath] (fallback if metadata not available)
+        // Strategy 2: Walk up from [CallerFilePath] (fallback if metadata not available)
         var dir = callerPath != null
             ? Path.GetDirectoryName(callerPath)
             : Directory.GetCurrentDirectory();

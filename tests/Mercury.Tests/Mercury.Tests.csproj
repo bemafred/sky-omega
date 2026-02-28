@@ -8,9 +8,16 @@
     <IsTestProject>true</IsTestProject>
     <RootNamespace>SkyOmega.Mercury.Tests</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- Absolute paths to W3C test submodules, embedded at build time for reliable test runner resolution -->
+    <!-- Absolute paths to W3C test submodules, embedded at build time via AssemblyMetadata -->
     <W3CRdfTestsRoot>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'w3c-rdf-tests'))</W3CRdfTestsRoot>
     <W3CJsonLdTestsRoot>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'w3c-json-ld-api'))</W3CJsonLdTestsRoot>
+  </PropertyGroup>
+
+  <!-- NCrunch builds in an isolated workspace where git submodules are absent.
+       Use NCrunchOriginalProjectDir to resolve back to the real source tree. -->
+  <PropertyGroup Condition="'$(NCrunch)' == '1'">
+    <W3CRdfTestsRoot>$([MSBuild]::NormalizePath('$(NCrunchOriginalProjectDir)', '..', 'w3c-rdf-tests'))</W3CRdfTestsRoot>
+    <W3CJsonLdTestsRoot>$([MSBuild]::NormalizePath('$(NCrunchOriginalProjectDir)', '..', 'w3c-json-ld-api'))</W3CJsonLdTestsRoot>
   </PropertyGroup>
 
   <ItemGroup>
