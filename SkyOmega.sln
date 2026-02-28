@@ -165,11 +165,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "James", "James", "{1BC3D075
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Lucy", "Lucy", "{AB6D2997-5345-49B5-9C0D-43EAB07A5AD9}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "testresults", "testresults", "{EDBA2C7E-EBA8-4B58-8BDA-9EC0DE54DD8F}"
-	ProjectSection(SolutionItems) = preProject
-		testresults\diagnose-file-locks.cs.txt = testresults\diagnose-file-locks.cs.txt
-	EndProjectSection
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
