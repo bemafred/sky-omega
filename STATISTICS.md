@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-02-25
+**Last updated:** 2026-02-28
 
 ## Line Counts
 
@@ -10,8 +10,8 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **74,480** | Knowledge substrate |
-| ├─ Sparql | 44,621 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **74,637** | Knowledge substrate |
+| ├─ Sparql | 44,775 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Storage | 6,014 | B+Tree indexes, AtomStore, WAL |
 | ├─ Turtle | 4,017 | Turtle parser and writer |
@@ -38,7 +38,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Project | Lines | Test Cases |
 |---------|------:|----------:|
-| Mercury.Tests | 49,693 | 3,975 |
+| Mercury.Tests | 49,699 | 3,975 |
 | Mercury.Solid.Tests | 455 | 25 |
 | Minerva.Tests | — | — |
 
@@ -60,19 +60,19 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 26,152 |
+| All docs (*.md, *.ttl) | 26,434 |
 | CLAUDE.md | 869 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,547 |
-| Tests | ~50,148 |
+| Source code | ~86,704 |
+| Tests | ~50,154 |
 | Benchmarks | ~3,408 |
 | Examples | ~851 |
-| Documentation | ~26,152 |
-| **Grand total** | **~167,106** |
+| Documentation | ~26,434 |
+| **Grand total** | **~167,551** |
 
 ## W3C Conformance
 
