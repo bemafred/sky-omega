@@ -712,9 +712,9 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Parse a GRAPH block inside a QuadPattern template.
     /// [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
-    /// Separated from ParseQuadTemplateBody so that large struct locals
-    /// (GraphPattern ~5KB, GraphClause ~900B) are only on the stack when
-    /// a GRAPH block is actually encountered.
+    /// [51] TriplesTemplate ::= TriplesSameSubject ( '.' TriplesTemplate? )?
+    /// Parses triples directly into GraphClause without a temp GraphPattern,
+    /// keeping the stack frame small (~1KB vs ~6-11KB) for NCrunch compatibility.
     /// </summary>
     private void ParseQuadTemplateGraph(ref GraphPattern pattern)
     {
@@ -729,20 +729,57 @@ internal ref partial struct SparqlParser
         Advance();
         SkipWhitespace();
 
-        // Parse triple patterns inside GRAPH block into a temp pattern,
-        // then transfer to a GraphClause
         var graphClause = new GraphClause { Graph = graphTerm };
-        var tempPattern = new GraphPattern();
+
+        // Parse TriplesTemplate directly into GraphClause (no temp GraphPattern)
         while (!IsAtEnd() && Peek() != '}')
         {
-            if (!TryParseTriplePattern(ref tempPattern))
-                break;
             SkipWhitespace();
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            var subject = ParseTerm();
+            if (subject.Type == TermType.Variable && subject.Length == 0)
+                break;
+
+            SkipWhitespace();
+            var (predicate, path) = ParsePredicateOrPath();
+            SkipWhitespace();
+            var obj = ParseTerm();
+
+            if (path.Type == PathType.Sequence)
+                ExpandSequencePathIntoGraphClause(ref graphClause, subject, obj, path);
+            else
+                graphClause.AddPattern(new TriplePattern
+                {
+                    Subject = subject, Predicate = predicate, Object = obj, Path = path
+                });
+
+            SkipWhitespace();
+
+            // Handle ';' for predicate-object lists (same subject)
+            while (Peek() == ';')
+            {
+                Advance();
+                SkipWhitespace();
+                if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                    break;
+                var (nextPred, nextPath) = ParsePredicateOrPath();
+                SkipWhitespace();
+                var nextObj = ParseTerm();
+                if (nextPath.Type == PathType.Sequence)
+                    ExpandSequencePathIntoGraphClause(ref graphClause, subject, nextObj, nextPath);
+                else
+                    graphClause.AddPattern(new TriplePattern
+                    {
+                        Subject = subject, Predicate = nextPred, Object = nextObj, Path = nextPath
+                    });
+                SkipWhitespace();
+            }
+
             if (Peek() == '.')
                 Advance();
         }
-        for (int i = 0; i < tempPattern.PatternCount; i++)
-            graphClause.AddPattern(tempPattern.GetPattern(i));
 
         SkipWhitespace();
         if (Peek() == '}')
