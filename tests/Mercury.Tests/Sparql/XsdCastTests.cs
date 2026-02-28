@@ -166,9 +166,8 @@ public class XsdCastTests : PooledStoreTestBase
 
         // Use the exact W3C query
         var queryPath = Path.Combine(
-            Directory.GetCurrentDirectory(),
-            "..", "..", "..", "..", "..",
-            "tests/w3c-rdf-tests/sparql/sparql11/cast/cast-int.rq");
+            W3CTestContext.TestsRoot,
+            "sparql", "sparql11", "cast", "cast-int.rq");
         var query = await File.ReadAllTextAsync(queryPath);
         _output.WriteLine($"Query:\n{query}\n");
 
