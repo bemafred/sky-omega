@@ -678,7 +678,8 @@ internal ref partial struct SparqlParser
     /// [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
     /// Only supports triple patterns and GRAPH blocks (per SPARQL spec).
     /// Avoids ParseGroupGraphPatternSub→ParseGraph call chain to reduce stack depth
-    /// for NCrunch compatibility.
+    /// for NCrunch compatibility. Large struct locals (GraphPattern, GraphClause) are
+    /// isolated in ParseQuadTemplateGraph to keep this method's frame small.
     /// </summary>
     private void ParseQuadTemplateBody(ref GraphPattern pattern)
     {
@@ -691,40 +692,7 @@ internal ref partial struct SparqlParser
             var span = PeekSpan(5);
             if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
             {
-                // [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
-                // Handle GRAPH inline to avoid the heavy ParseGraph stack frame.
-                ConsumeKeyword("GRAPH");
-                SkipWhitespace();
-
-                var graphTerm = ParseTerm();
-                SkipWhitespace();
-
-                if (Peek() != '{')
-                    throw new SparqlParseException($"Expected '{{' after GRAPH term");
-                Advance();
-                SkipWhitespace();
-
-                // Parse triple patterns inside GRAPH block into a temp pattern,
-                // then transfer to a GraphClause
-                var graphClause = new GraphClause { Graph = graphTerm };
-                var tempPattern = new GraphPattern();
-                while (!IsAtEnd() && Peek() != '}')
-                {
-                    if (!TryParseTriplePattern(ref tempPattern))
-                        break;
-                    SkipWhitespace();
-                    if (Peek() == '.')
-                        Advance();
-                }
-                for (int i = 0; i < tempPattern.PatternCount; i++)
-                    graphClause.AddPattern(tempPattern.GetPattern(i));
-
-                SkipWhitespace();
-                if (Peek() == '}')
-                    Advance();
-
-                pattern.AddGraphClause(graphClause);
-
+                ParseQuadTemplateGraph(ref pattern);
                 SkipWhitespace();
                 if (Peek() == '.')
                     Advance();
@@ -739,6 +707,48 @@ internal ref partial struct SparqlParser
             if (Peek() == '.')
                 Advance();
         }
+    }
+
+    /// <summary>
+    /// Parse a GRAPH block inside a QuadPattern template.
+    /// [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
+    /// Separated from ParseQuadTemplateBody so that large struct locals
+    /// (GraphPattern ~5KB, GraphClause ~900B) are only on the stack when
+    /// a GRAPH block is actually encountered.
+    /// </summary>
+    private void ParseQuadTemplateGraph(ref GraphPattern pattern)
+    {
+        ConsumeKeyword("GRAPH");
+        SkipWhitespace();
+
+        var graphTerm = ParseTerm();
+        SkipWhitespace();
+
+        if (Peek() != '{')
+            throw new SparqlParseException($"Expected '{{' after GRAPH term");
+        Advance();
+        SkipWhitespace();
+
+        // Parse triple patterns inside GRAPH block into a temp pattern,
+        // then transfer to a GraphClause
+        var graphClause = new GraphClause { Graph = graphTerm };
+        var tempPattern = new GraphPattern();
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            if (!TryParseTriplePattern(ref tempPattern))
+                break;
+            SkipWhitespace();
+            if (Peek() == '.')
+                Advance();
+        }
+        for (int i = 0; i < tempPattern.PatternCount; i++)
+            graphClause.AddPattern(tempPattern.GetPattern(i));
+
+        SkipWhitespace();
+        if (Peek() == '}')
+            Advance();
+
+        pattern.AddGraphClause(graphClause);
     }
 
     /// <summary>
