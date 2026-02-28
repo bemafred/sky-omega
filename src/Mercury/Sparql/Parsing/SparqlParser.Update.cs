@@ -112,13 +112,12 @@ internal ref partial struct SparqlParser
         {
             hasDelete = true;
             SkipWhitespace();
-            // Inlined ParseQuadPattern() to reduce call depth (NCrunch stack overflow mitigation)
             var deletePattern = new GraphPattern();
             if (Peek() != '{')
                 throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
             Advance();
             SkipWhitespace();
-            ParseGroupGraphPatternSub(ref deletePattern);
+            ParseQuadTemplateBody(ref deletePattern);
             SkipWhitespace();
             if (Peek() != '}')
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
@@ -131,13 +130,12 @@ internal ref partial struct SparqlParser
         {
             hasInsert = true;
             SkipWhitespace();
-            // Inlined ParseQuadPattern() to reduce call depth (NCrunch stack overflow mitigation)
             var insertPattern = new GraphPattern();
             if (Peek() != '{')
                 throw new SparqlParseException($"Expected '{{' but found '{Peek()}'");
             Advance();
             SkipWhitespace();
-            ParseGroupGraphPatternSub(ref insertPattern);
+            ParseQuadTemplateBody(ref insertPattern);
             SkipWhitespace();
             if (Peek() != '}')
                 throw new SparqlParseException($"Expected '}}' but found '{Peek()}'");
@@ -672,6 +670,75 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
         ExpectChar('}');
         return pattern;
+    }
+
+    /// <summary>
+    /// Parse the body of a QuadPattern template (DELETE/INSERT).
+    /// [49] Quads ::= TriplesTemplate? ( QuadsNotTriples '.'? TriplesTemplate? )*
+    /// [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
+    /// Only supports triple patterns and GRAPH blocks (per SPARQL spec).
+    /// Avoids ParseGroupGraphPatternSub→ParseGraph call chain to reduce stack depth
+    /// for NCrunch compatibility.
+    /// </summary>
+    private void ParseQuadTemplateBody(ref GraphPattern pattern)
+    {
+        while (!IsAtEnd() && Peek() != '}')
+        {
+            SkipWhitespace();
+            if (IsAtEnd() || Peek() == '}')
+                break;
+
+            var span = PeekSpan(5);
+            if (span.Length >= 5 && span[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase))
+            {
+                // [50] QuadsNotTriples ::= 'GRAPH' VarOrIri '{' TriplesTemplate? '}'
+                // Handle GRAPH inline to avoid the heavy ParseGraph stack frame.
+                ConsumeKeyword("GRAPH");
+                SkipWhitespace();
+
+                var graphTerm = ParseTerm();
+                SkipWhitespace();
+
+                if (Peek() != '{')
+                    throw new SparqlParseException($"Expected '{{' after GRAPH term");
+                Advance();
+                SkipWhitespace();
+
+                // Parse triple patterns inside GRAPH block into a temp pattern,
+                // then transfer to a GraphClause
+                var graphClause = new GraphClause { Graph = graphTerm };
+                var tempPattern = new GraphPattern();
+                while (!IsAtEnd() && Peek() != '}')
+                {
+                    if (!TryParseTriplePattern(ref tempPattern))
+                        break;
+                    SkipWhitespace();
+                    if (Peek() == '.')
+                        Advance();
+                }
+                for (int i = 0; i < tempPattern.PatternCount; i++)
+                    graphClause.AddPattern(tempPattern.GetPattern(i));
+
+                SkipWhitespace();
+                if (Peek() == '}')
+                    Advance();
+
+                pattern.AddGraphClause(graphClause);
+
+                SkipWhitespace();
+                if (Peek() == '.')
+                    Advance();
+                continue;
+            }
+
+            // Triple pattern (TriplesTemplate)
+            if (!TryParseTriplePattern(ref pattern))
+                break;
+
+            SkipWhitespace();
+            if (Peek() == '.')
+                Advance();
+        }
     }
 
     /// <summary>
