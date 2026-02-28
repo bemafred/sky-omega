@@ -1,5 +1,6 @@
 // Licensed under the MIT License.
 
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace SkyOmega.Mercury.Tests.W3C;
@@ -198,7 +199,15 @@ public static class W3CTestContext
 
     private static string FindTestsRoot([CallerFilePath] string? callerPath = null)
     {
-        // Start from the test file location and walk up to find the submodule
+        // Strategy 1: MSBuild-embedded path (reliable across all test runners)
+        var assembly = typeof(W3CTestContext).Assembly;
+        foreach (var attr in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
+        {
+            if (attr.Key == "W3CRdfTestsRoot" && !string.IsNullOrEmpty(attr.Value) && Directory.Exists(attr.Value))
+                return attr.Value;
+        }
+
+        // Strategy 2: Walk up from [CallerFilePath] (original approach)
         var dir = callerPath != null
             ? Path.GetDirectoryName(callerPath)
             : Directory.GetCurrentDirectory();

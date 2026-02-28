@@ -232,7 +232,9 @@ public class TriGConformanceTests
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
-                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
+                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
+                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
@@ -249,7 +251,9 @@ public class TriGConformanceTests
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
-                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
+                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
+                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);
@@ -266,7 +270,9 @@ public class TriGConformanceTests
     {
         if (!W3CTestContext.IsAvailable)
             throw new InvalidOperationException(
-                "W3C RDF test suite not found. Run ./tools/update-submodules.sh to initialize.");
+                $"W3C RDF test suite not found at '{W3CTestContext.TestsRoot}'. " +
+                $"Directory exists: {Directory.Exists(W3CTestContext.TestsRoot)}. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
 
         var parser = new W3CManifestParser();
         var manifestPath = W3CTestContext.GetManifestPath(W3CTestSuite.TriG11);

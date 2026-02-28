@@ -8,7 +8,21 @@
     <IsTestProject>true</IsTestProject>
     <RootNamespace>SkyOmega.Mercury.Tests</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Absolute paths to W3C test submodules, embedded at build time for reliable test runner resolution -->
+    <W3CRdfTestsRoot>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'w3c-rdf-tests'))</W3CRdfTestsRoot>
+    <W3CJsonLdTestsRoot>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'w3c-json-ld-api'))</W3CJsonLdTestsRoot>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>W3CRdfTestsRoot</_Parameter1>
+      <_Parameter2>$(W3CRdfTestsRoot)</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>W3CJsonLdTestsRoot</_Parameter1>
+      <_Parameter2>$(W3CJsonLdTestsRoot)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />

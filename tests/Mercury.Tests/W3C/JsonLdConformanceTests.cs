@@ -1,5 +1,6 @@
 // Licensed under the MIT License.
 
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using SkyOmega.Mercury.JsonLd;
@@ -249,7 +250,9 @@ public class JsonLdConformanceTests
         if (!JsonLdTestContext.IsAvailable)
         {
             throw new InvalidOperationException(
-                "W3C JSON-LD test suite not found. Run ./tools/update-submodules.sh to initialize.");
+                $"W3C JSON-LD test suite not found at '{JsonLdTestContext.TestsRoot}'. " +
+                $"Directory exists: {Directory.Exists(JsonLdTestContext.TestsRoot)}. " +
+                "Run ./tools/update-submodules.sh (or .\\tools\\update-submodules.ps1) to initialize.");
         }
 
         var tests = JsonLdTestContext.LoadToRdfTests().GetAwaiter().GetResult();
@@ -383,6 +386,15 @@ public static class JsonLdTestContext
 
     private static string FindTestsRoot([CallerFilePath] string? callerPath = null)
     {
+        // Strategy 1: MSBuild-embedded path (reliable across all test runners)
+        var assembly = typeof(JsonLdTestContext).Assembly;
+        foreach (var attr in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
+        {
+            if (attr.Key == "W3CJsonLdTestsRoot" && !string.IsNullOrEmpty(attr.Value) && Directory.Exists(attr.Value))
+                return attr.Value;
+        }
+
+        // Strategy 2: Walk up from [CallerFilePath] (original approach)
         var dir = callerPath != null
             ? Path.GetDirectoryName(callerPath)
             : Directory.GetCurrentDirectory();
