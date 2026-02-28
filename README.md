@@ -1,6 +1,6 @@
-<p align="center">
+<div align="center">
   <img src="docs/assets/edgar-badge.svg" alt="Edgar" width="200">
-</p>
+</div>
 
 # Sky Omega
 
