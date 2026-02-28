@@ -4,6 +4,7 @@ using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Tests.Fixtures;
+using SkyOmega.Mercury.Tests.W3C;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -131,9 +132,8 @@ public class XsdCastTests : PooledStoreTestBase
     {
         // Load the exact W3C test data file
         var dataPath = Path.Combine(
-            Directory.GetCurrentDirectory(),
-            "..", "..", "..", "..", "..", // Back to repo root
-            "tests/w3c-rdf-tests/sparql/sparql11/cast/data.ttl");
+            W3CTestContext.TestsRoot,
+            "sparql", "sparql11", "cast", "data.ttl");
 
         if (!File.Exists(dataPath))
         {
