@@ -386,15 +386,17 @@ public static class JsonLdTestContext
 
     private static string FindTestsRoot([CallerFilePath] string? callerPath = null)
     {
-        // Strategy 1: MSBuild-embedded path (reliable across all test runners)
+        // Strategy 1: MSBuild-embedded path (always correct — computed from .csproj location at build time).
+        // Return even if directory doesn't exist, so error messages show the real expected path
+        // instead of a meaningless CWD-based fallback (e.g. NCrunch shadow directory).
         var assembly = typeof(JsonLdTestContext).Assembly;
         foreach (var attr in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
         {
-            if (attr.Key == "W3CJsonLdTestsRoot" && !string.IsNullOrEmpty(attr.Value) && Directory.Exists(attr.Value))
+            if (attr.Key == "W3CJsonLdTestsRoot" && !string.IsNullOrEmpty(attr.Value))
                 return attr.Value;
         }
 
-        // Strategy 2: Walk up from [CallerFilePath] (original approach)
+        // Strategy 2: Walk up from [CallerFilePath] (fallback if metadata not available)
         var dir = callerPath != null
             ? Path.GetDirectoryName(callerPath)
             : Directory.GetCurrentDirectory();
