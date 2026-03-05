@@ -106,8 +106,9 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Register QuadStorePool as singleton
+// Register QuadStorePool and store path as singletons
 builder.Services.AddSingleton(pool);
+builder.Services.AddSingleton(new StorePathHolder(Path.GetFullPath(storePath)));
 
 // Register MCP server with stdio transport and tools
 builder.Services
@@ -116,7 +117,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = "1.1.0"
+            Version = "1.3.6"
         };
     })
     .WithStdioServerTransport()
@@ -148,4 +149,5 @@ ReplSession CreateSession(QuadStorePool pool) => new ReplSession(
     executeQuery: sparql => SparqlEngine.Query(pool.Active, sparql),
     executeUpdate: sparql => SparqlEngine.Update(pool.Active, sparql),
     getStatistics: () => SparqlEngine.GetStatistics(pool.Active),
-    getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active));
+    getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active),
+    getStorePath: () => Path.GetFullPath(storePath));

@@ -170,7 +170,7 @@ Verify the CLI can create and query a store:
 mercury -m
 ```
 
-At the `mercury>` prompt, type:
+At the `cli>` prompt, type:
 
 ```sparql
 INSERT DATA { <http://example.org/test> <http://example.org/status> "ok" }

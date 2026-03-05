@@ -81,41 +81,41 @@ SERVICE <local://store> { } Query local from remote context (if supported)
 ```
 $ mercury-cli
 
-mercury> :status
+cli> :status
 Context: local/default (empty)
 Mcp: not connected
 
-mercury> :local scratch
+cli> :local scratch
 Switched to local store: scratch
 
-mercury> LOAD <experiment.ttl>
+cli> LOAD <experiment.ttl>
 Loaded 1,547 triples
 
-mercury> SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }
+cli> SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }
 ┌───────┐
 │ n     │
 ├───────┤
 │ 1547  │
 └───────┘
 
-mercury> :connect
+cli> :connect
 Connected to Mcp at /tmp/mercury-mcp.sock
 
-mercury> :remote primary
+cli> :remote primary
 Switched to remote store: primary (via Mcp)
 
-mercury> SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }
+cli> SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }
 ┌───────┐
 │ n     │
 ├───────┤
 │ 84291 │
 └───────┘
 
-mercury> :local scratch
+cli> :local scratch
 Switched to local store: scratch
 
-mercury> # Query remote FROM local context
-mercury> SELECT * WHERE {
+cli> # Query remote FROM local context
+cli> SELECT * WHERE {
            ?local <http://ex/source> ?src .
            SERVICE <mcp://primary> {
              ?src <http://ex/label> ?label
@@ -289,10 +289,10 @@ $ mercury-mcp --store /data/main --http-port 9090
 
 # Terminal 2: Cli with local experimentation
 $ mercury-cli
-mercury> :local scratch
-mercury> LOAD <experiment.ttl>
-mercury> # Query Mcp's store via standard HTTP SERVICE
-mercury> SELECT * WHERE {
+cli> :local scratch
+cli> LOAD <experiment.ttl>
+cli> # Query Mcp's store via standard HTTP SERVICE
+cli> SELECT * WHERE {
            ?local <http://ex/ref> ?id .
            SERVICE <http://localhost:9090/sparql> {
              ?id <http://ex/label> ?label

@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.6] - 2026-03-05
+
+CLI and MCP connectivity improvements.
+
+### Added
+
+- **`:attach` / `:a` REPL command** — attach to running MCP (or other Mercury instance) from within the CLI REPL, not just from the command line
+- **`mercury_store` MCP tool** — exposes store path via MCP for Claude Code
+- **`StorePathHolder`** — DI-injectable store path for MCP tools
+
+### Fixed
+
+- **Pipe prompt sync** — `ReadUntilPromptAsync` no longer false-matches `<...> ` in help text as a prompt, fixing delayed/out-of-sync responses in attached mode
+- **`:detach` cleanup** — no more spurious "Cannot access a closed pipe" errors after detaching; graceful pipe disposal on all code paths
+- **macOS store paths** — `MercuryPaths.Store()` now resolves to `~/Library/SkyOmega/stores/` on macOS instead of the non-standard `~/.local/share/`
+
+### Changed
+
+- **CLI prompt renamed** — `mercury>` → `cli>` for visual balance with `mcp>` and consistency with store names
+- **Goodbye message** — now ends with double linefeed for cleaner terminal output
+
+### Documentation
+
+- All tutorials updated for `cli>` prompt
+- ADR-006 updated for `cli>` prompt
+
+---
+
 ## [1.3.0] - 2026-02-18
 
 Breaking API surface changes: public facade layer and type internalization.

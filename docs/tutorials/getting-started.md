@@ -68,7 +68,7 @@ mercury -m
 You will see the REPL prompt:
 
 ```
-mercury>
+cli>
 ```
 
 ### Insert some data
@@ -107,7 +107,7 @@ Expected output:
 ### Check store statistics
 
 ```
-mercury> :stats
+cli> :stats
 ```
 
 This shows triple count, atom count, index sizes, and other store metrics.
@@ -115,7 +115,7 @@ This shows triple count, atom count, index sizes, and other store metrics.
 ### Exit
 
 ```
-mercury> :quit
+cli> :quit
 ```
 
 Because you started with `-m`, the temporary store is now deleted.
@@ -195,14 +195,14 @@ roles.
 Check the total triple count:
 
 ```
-mercury> :count
+cli> :count
 ```
 
 ---
 
 ## REPL Command Reference
 
-These commands are available at the `mercury>` prompt:
+These commands are available at the `cli>` prompt:
 
 | Command | Alias | Description |
 |---------|-------|-------------|
@@ -217,7 +217,7 @@ These commands are available at the `mercury>` prompt:
 You can also register additional prefixes interactively:
 
 ```
-mercury> PREFIX proj: <http://example.org/project/>
+cli> PREFIX proj: <http://example.org/project/>
 ```
 
 ---

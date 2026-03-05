@@ -86,16 +86,16 @@ PREFIX declarations are sticky -- once registered, they apply to every query
 for the rest of the session:
 
 ```
-mercury> PREFIX proj: <http://example.org/project/>
+cli> PREFIX proj: <http://example.org/project/>
 Prefix 'proj:' registered as <http://example.org/project/>
 
-mercury> SELECT ?name WHERE { proj:alpha rdfs:label ?name }
+cli> SELECT ?name WHERE { proj:alpha rdfs:label ?name }
 ```
 
 BASE works the same way:
 
 ```
-mercury> BASE <http://example.org/>
+cli> BASE <http://example.org/>
 Base IRI set to <http://example.org/>
 ```
 
@@ -124,7 +124,7 @@ The REPL detects unclosed braces and switches to continuation mode
 automatically. You do not need any special syntax:
 
 ```
-mercury> INSERT DATA {
+cli> INSERT DATA {
       ->   ex:alice foaf:name "Alice" .
       ->   ex:alice foaf:knows ex:bob .
       -> }
@@ -137,21 +137,21 @@ An empty line or a line ending with `;` also terminates multi-line input.
 Without arguments, `:count` returns the total number of triples:
 
 ```
-mercury> :count
+cli> :count
 Count: 42
 ```
 
 With a pattern argument, it counts matching triples:
 
 ```
-mercury> :count ?s foaf:knows ?o
+cli> :count ?s foaf:knows ?o
 Count: 7
 ```
 
 ### The :stats command
 
 ```
-mercury> :stats
+cli> :stats
 Store Statistics:
   Quads:           1,234
   Atoms:           567
@@ -179,7 +179,7 @@ SPARQL `LOAD` command.
 File URIs must be absolute paths:
 
 ```
-mercury> LOAD <file:///Users/you/data/people.ttl>
+cli> LOAD <file:///Users/you/data/people.ttl>
 ```
 
 Mercury detects the RDF format from the file extension. Supported extensions
@@ -189,7 +189,7 @@ include `.ttl` (Turtle), `.nt` (N-Triples), `.nq` (N-Quads), `.trig` (TriG),
 ### Loading from a remote URL
 
 ```
-mercury> LOAD <http://example.org/data/vocabulary.ttl>
+cli> LOAD <http://example.org/data/vocabulary.ttl>
 ```
 
 Remote loading uses content negotiation to determine the format.
@@ -199,7 +199,7 @@ Remote loading uses content negotiation to determine the format.
 Use the `INTO GRAPH` clause to load data into a specific named graph:
 
 ```
-mercury> LOAD <file:///Users/you/data/people.ttl> INTO GRAPH <http://example.org/people>
+cli> LOAD <file:///Users/you/data/people.ttl> INTO GRAPH <http://example.org/people>
 ```
 
 ### Verifying loaded data
@@ -207,20 +207,20 @@ mercury> LOAD <file:///Users/you/data/people.ttl> INTO GRAPH <http://example.org
 After loading, check the triple count and run a quick query:
 
 ```
-mercury> :count
+cli> :count
 Count: 1,234
 
-mercury> SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 5
+cli> SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 5
 ```
 
 If you loaded into a named graph, list the graphs first:
 
 ```
-mercury> :graphs
+cli> :graphs
 Named graphs (1):
   <http://example.org/people>
 
-mercury> SELECT ?s ?p ?o WHERE {
+cli> SELECT ?s ?p ?o WHERE {
       ->   GRAPH <http://example.org/people> { ?s ?p ?o }
       -> } LIMIT 5
 ```
@@ -234,7 +234,7 @@ mercury> SELECT ?s ?p ?o WHERE {
 SELECT is the most common query type. It returns a table of variable bindings:
 
 ```
-mercury> SELECT ?person ?name WHERE {
+cli> SELECT ?person ?name WHERE {
       ->   ?person foaf:name ?name .
       -> } ORDER BY ?name LIMIT 10
 | person                     | name    |
@@ -248,7 +248,7 @@ mercury> SELECT ?person ?name WHERE {
 **Aggregation:**
 
 ```
-mercury> SELECT ?type (COUNT(?s) AS ?count) WHERE {
+cli> SELECT ?type (COUNT(?s) AS ?count) WHERE {
       ->   ?s rdf:type ?type .
       -> } GROUP BY ?type ORDER BY DESC(?count)
 ```
@@ -256,7 +256,7 @@ mercury> SELECT ?type (COUNT(?s) AS ?count) WHERE {
 **OPTIONAL and FILTER:**
 
 ```
-mercury> SELECT ?person ?name ?email WHERE {
+cli> SELECT ?person ?name ?email WHERE {
       ->   ?person foaf:name ?name .
       ->   OPTIONAL { ?person foaf:mbox ?email }
       ->   FILTER(CONTAINS(?name, "Al"))
@@ -268,7 +268,7 @@ mercury> SELECT ?person ?name ?email WHERE {
 ASK returns a boolean -- does any matching data exist?
 
 ```
-mercury> ASK { ex:alice foaf:knows ex:bob }
+cli> ASK { ex:alice foaf:knows ex:bob }
 true (parse: 0.1ms, exec: 0.3ms)
 ```
 
@@ -277,7 +277,7 @@ true (parse: 0.1ms, exec: 0.3ms)
 CONSTRUCT builds an RDF graph from query results:
 
 ```
-mercury> CONSTRUCT {
+cli> CONSTRUCT {
       ->   ?person schema:name ?name .
       -> } WHERE {
       ->   ?person foaf:name ?name .
@@ -293,7 +293,7 @@ mercury> CONSTRUCT {
 DESCRIBE returns all known triples about a resource:
 
 ```
-mercury> DESCRIBE ex:alice
+cli> DESCRIBE ex:alice
 ```
 
 ### Cross-graph queries
@@ -301,7 +301,7 @@ mercury> DESCRIBE ex:alice
 Query across multiple named graphs:
 
 ```
-mercury> SELECT ?g ?s ?p ?o WHERE {
+cli> SELECT ?g ?s ?p ?o WHERE {
       ->   GRAPH ?g { ?s ?p ?o }
       -> } LIMIT 10
 ```
@@ -311,11 +311,11 @@ mercury> SELECT ?g ?s ?p ?o WHERE {
 Mercury supports temporal SPARQL extensions for querying historical data:
 
 ```
-mercury> SELECT ?name WHERE {
+cli> SELECT ?name WHERE {
       ->   ex:alice foaf:name ?name .
       -> } AS OF "2025-06-01"^^xsd:date
 
-mercury> SELECT ?name WHERE {
+cli> SELECT ?name WHERE {
       ->   ex:alice foaf:name ?name .
       -> } ALL VERSIONS
 ```
@@ -325,7 +325,7 @@ mercury> SELECT ?name WHERE {
 If the MCP server is running, you can query it from the CLI using SERVICE:
 
 ```
-mercury> SELECT ?s ?p ?o WHERE {
+cli> SELECT ?s ?p ?o WHERE {
       ->   SERVICE <http://localhost:3030/sparql> {
       ->     ?s ?p ?o
       ->   }
@@ -564,7 +564,7 @@ are swapped.
 ### Basic prune
 
 ```
-mercury> :prune
+cli> :prune
 Prune complete:
   Quads scanned: 1,234
   Quads written: 1,100
@@ -577,7 +577,7 @@ Prune complete:
 Preview what a prune would do without writing anything:
 
 ```
-mercury> :prune --dry-run
+cli> :prune --dry-run
 Prune dry-run complete:
   Quads scanned: 1,234
   Quads written: 1,100
@@ -590,7 +590,7 @@ By default, pruning flattens history to keep only the current version of each
 triple. Use `--history` to control this:
 
 ```
-mercury> :prune --history preserve
+cli> :prune --history preserve
 ```
 
 | Mode | Flag value | Behavior |
@@ -604,13 +604,13 @@ mercury> :prune --history preserve
 Exclude specific named graphs from the pruned store:
 
 ```
-mercury> :prune --exclude-graph <http://example.org/temp>
+cli> :prune --exclude-graph <http://example.org/temp>
 ```
 
 Multiple exclusions are supported:
 
 ```
-mercury> :prune --exclude-graph <http://example.org/temp> --exclude-graph <http://example.org/scratch>
+cli> :prune --exclude-graph <http://example.org/temp> --exclude-graph <http://example.org/scratch>
 ```
 
 ### Excluding predicates
@@ -618,7 +618,7 @@ mercury> :prune --exclude-graph <http://example.org/temp> --exclude-graph <http:
 Exclude triples with specific predicates:
 
 ```
-mercury> :prune --exclude-predicate <http://example.org/debug>
+cli> :prune --exclude-predicate <http://example.org/debug>
 ```
 
 ### Combining options
@@ -626,7 +626,7 @@ mercury> :prune --exclude-predicate <http://example.org/debug>
 Options can be combined freely:
 
 ```
-mercury> :prune --dry-run --history preserve --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
+cli> :prune --dry-run --history preserve --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
 ```
 
 ---
@@ -636,10 +636,10 @@ mercury> :prune --dry-run --history preserve --exclude-graph <http://example.org
 ### Explore an unknown dataset
 
 ```
-mercury> :count
-mercury> :graphs
-mercury> SELECT DISTINCT ?type WHERE { ?s rdf:type ?type }
-mercury> SELECT ?p (COUNT(?s) AS ?count) WHERE { ?s ?p ?o } GROUP BY ?p ORDER BY DESC(?count)
+cli> :count
+cli> :graphs
+cli> SELECT DISTINCT ?type WHERE { ?s rdf:type ?type }
+cli> SELECT ?p (COUNT(?s) AS ?count) WHERE { ?s ?p ?o } GROUP BY ?p ORDER BY DESC(?count)
 ```
 
 ### Export data as Turtle
@@ -658,7 +658,7 @@ curl -G http://localhost:3031/sparql \
 Run the CLI and use SERVICE to federate across both stores:
 
 ```
-mercury> SELECT ?s ?p ?o WHERE {
+cli> SELECT ?s ?p ?o WHERE {
       ->   SERVICE <http://localhost:3030/sparql> {
       ->     ?s ?p ?o
       ->   }

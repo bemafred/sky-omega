@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-02-28
+**Last updated:** 2026-03-05
 
 ## Line Counts
 
@@ -28,9 +28,9 @@ Codebase metrics are tracked over time. Update after significant changes.
 | ├─ AccessControl | 894 | WAC and ACP implementations |
 | ├─ Models | 297 | SolidResource, SolidContainer |
 | └─ SolidServer | 481 | HTTP server |
-| **Mercury Runtime** | **3,446** | Runtime + Abstractions |
+| **Mercury Runtime** | **3,503** | Runtime + Abstractions |
 | **Mercury Tool Libraries** | **1,471** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,416** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury CLIs** | **1,456** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,275** | Copy-and-switch pruning + PruneEngine |
 | **Minerva** | **—** | Thought substrate (planned) |
 
@@ -67,12 +67,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~86,702 |
+| Source code | ~86,799 |
 | Tests | ~50,274 |
 | Benchmarks | ~3,408 |
 | Examples | ~851 |
 | Documentation | ~26,434 |
-| **Grand total** | **~167,669** |
+| **Grand total** | **~167,766** |
 
 ## W3C Conformance
 

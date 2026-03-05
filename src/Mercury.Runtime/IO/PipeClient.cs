@@ -175,10 +175,21 @@ public sealed class PipeClient : IDisposable
             // Check for detach
             if (line.Trim().Equals(":detach", StringComparison.OrdinalIgnoreCase))
             {
-                // Read final message
-                var final = await _reader!.ReadLineAsync(ct).ConfigureAwait(false);
-                if (final != null)
-                    output.WriteLine(final);
+                // Read remaining output (server sends "Detaching..." then closes)
+                try
+                {
+                    while (IsConnected)
+                    {
+                        var remaining = await _reader!.ReadLineAsync(ct).ConfigureAwait(false);
+                        if (remaining == null)
+                            break;
+                        output.WriteLine(remaining);
+                    }
+                }
+                catch (Exception) when (!ct.IsCancellationRequested)
+                {
+                    // Pipe closed by server — expected after detach
+                }
                 break;
             }
         }
@@ -206,14 +217,18 @@ public sealed class PipeClient : IDisposable
             {
                 // Find where the prompt starts (look for newline before it or start)
                 var promptStart = current.LastIndexOf('\n');
-                if (promptStart >= 0)
+                var promptCandidate = promptStart >= 0
+                    ? current[(promptStart + 1)..]
+                    : current;
+
+                // Real prompts start at column 0 (no leading whitespace)
+                // This avoids false matches on help text like "  PREFIX ex: <...> "
+                if (promptCandidate.Length > 0 && !char.IsWhiteSpace(promptCandidate[0]))
                 {
-                    // Include the newline in output so Write() ends on a new line
-                    return (current[..(promptStart + 1)], current[(promptStart + 1)..]);
-                }
-                else
-                {
-                    return (null, current);
+                    if (promptStart >= 0)
+                        return (current[..(promptStart + 1)], promptCandidate);
+                    else
+                        return (null, current);
                 }
             }
         }
@@ -252,9 +267,9 @@ public sealed class PipeClient : IDisposable
 
     private void Cleanup()
     {
-        _reader?.Dispose();
-        _writer?.Dispose();
-        _pipe?.Dispose();
+        try { _reader?.Dispose(); } catch { }
+        try { _writer?.Dispose(); } catch { }
+        try { _pipe?.Dispose(); } catch { }
 
         _reader = null;
         _writer = null;

@@ -110,15 +110,17 @@ if (attachTarget != null)
 
 // Create or open pool
 QuadStorePool pool;
+string resolvedStorePath;
 
 if (inMemory)
 {
     pool = QuadStorePool.CreateTemp("cli-session");
+    resolvedStorePath = pool.BasePath!;
 }
 else
 {
-    var actualPath = storePath ?? MercuryPaths.Store("cli");
-    pool = new QuadStorePool(actualPath);
+    resolvedStorePath = storePath ?? MercuryPaths.Store("cli");
+    pool = new QuadStorePool(resolvedStorePath);
 }
 
 // Ensure a primary store exists so pool.Active works immediately
@@ -164,7 +166,9 @@ using (var session = new ReplSession(
     executeUpdate: sparql => SparqlEngine.Update(pool.Active, sparql),
     getStatistics: () => SparqlEngine.GetStatistics(pool.Active),
     getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active),
-    executePrune: pruneArgs => ExecutePrune(pool, pruneArgs)))
+    executePrune: pruneArgs => ExecutePrune(pool, pruneArgs),
+    getStorePath: () => resolvedStorePath,
+    executeAttach: target => RunAttachSession(target)))
 {
     session.RunInteractive();
 }
@@ -185,6 +189,24 @@ static async Task<bool> IsEndpointAlive(string url)
     {
         return false;
     }
+}
+
+static async Task RunAttachSession(string target)
+{
+    var pipeName = target.ToLowerInvariant() switch
+    {
+        "mcp" => MercuryPorts.McpPipeName,
+        "cli" => MercuryPorts.CliPipeName,
+        _ => target
+    };
+
+    Console.WriteLine($"Attaching to {target} via pipe '{pipeName}'...");
+
+    using var client = new PipeClient(pipeName);
+    await client.ConnectAsync(timeoutMs: 5000);
+    await client.RunInteractiveAsync();
+
+    Console.WriteLine($"Detached from {target}.");
 }
 
 static async Task<int> RunAttachMode(string target)

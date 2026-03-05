@@ -10,14 +10,24 @@ using SkyOmega.Mercury.Storage;
 
 namespace SkyOmega.Mercury.Mcp;
 
+/// <summary>
+/// Holds the resolved store path for DI injection.
+/// </summary>
+public sealed class StorePathHolder(string path)
+{
+    public string Path { get; } = path;
+}
+
 [McpServerToolType]
 public sealed class MercuryTools
 {
     private readonly QuadStorePool _pool;
+    private readonly StorePathHolder _storePath;
 
-    public MercuryTools(QuadStorePool pool)
+    public MercuryTools(QuadStorePool pool, StorePathHolder storePath)
     {
         _pool = pool;
+        _storePath = storePath;
     }
 
     [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store")]
@@ -140,6 +150,12 @@ public sealed class MercuryTools
         }
 
         return sb.ToString().Trim();
+    }
+
+    [McpServerTool(Name = "mercury_store"), Description("Get the filesystem path of the Mercury store folder")]
+    public string Store()
+    {
+        return _storePath.Path;
     }
 
     [McpServerTool(Name = "mercury_prune"), Description("Compact the Mercury store by removing soft-deleted data and optionally filtering graphs or predicates")]

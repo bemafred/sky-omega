@@ -76,7 +76,7 @@ public sealed class ReplOptions
     };
 
     /// <summary>Primary prompt shown before input.</summary>
-    public string Prompt { get; init; } = "mercury> ";
+    public string Prompt { get; init; } = "cli> ";
 
     /// <summary>Continuation prompt for multi-line input.</summary>
     public string ContinuationPrompt { get; init; } = "      -> ";
@@ -120,6 +120,8 @@ public sealed class ReplSession : IDisposable
     private readonly Func<StoreStatistics> _getStatistics;
     private readonly Func<IEnumerable<string>> _getNamedGraphs;
     private readonly Func<string, PruneResult>? _executePrune;
+    private readonly Func<string>? _getStorePath;
+    private readonly Func<string, Task>? _executeAttach;
 
     private readonly Dictionary<string, string> _prefixes = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _history = new();
@@ -151,13 +153,17 @@ public sealed class ReplSession : IDisposable
         Func<string, UpdateResult> executeUpdate,
         Func<StoreStatistics> getStatistics,
         Func<IEnumerable<string>> getNamedGraphs,
-        Func<string, PruneResult>? executePrune = null)
+        Func<string, PruneResult>? executePrune = null,
+        Func<string>? getStorePath = null,
+        Func<string, Task>? executeAttach = null)
     {
         _executeQuery = executeQuery ?? throw new ArgumentNullException(nameof(executeQuery));
         _executeUpdate = executeUpdate ?? throw new ArgumentNullException(nameof(executeUpdate));
         _getStatistics = getStatistics ?? throw new ArgumentNullException(nameof(getStatistics));
         _getNamedGraphs = getNamedGraphs ?? throw new ArgumentNullException(nameof(getNamedGraphs));
         _executePrune = executePrune;
+        _getStorePath = getStorePath;
+        _executeAttach = executeAttach;
 
         // Pre-register common prefixes
         foreach (var (prefix, iri) in WellKnownPrefixes)
@@ -285,6 +291,7 @@ public sealed class ReplSession : IDisposable
             {
                 output.WriteLine();
                 output.WriteLine(goodbye);
+                output.WriteLine();
             }
         }
     }
@@ -431,7 +438,9 @@ public sealed class ReplSession : IDisposable
             ":graphs" => ExecuteListGraphs(),
             ":count" => ExecuteCount(args),
             ":stats" or ":s" => ExecuteStats(),
+            ":store" => ExecuteStore(),
             ":prune" => ExecutePrune(args),
+            ":attach" or ":a" => ExecuteAttach(args),
             ":quit" or ":q" or ":exit" => ExecutionResult.Command("EXIT"),
             _ => ExecutionResult.Error($"Unknown command: {command}. Type :help for available commands.")
         };
@@ -559,6 +568,35 @@ public sealed class ReplSession : IDisposable
                upper.StartsWith("WITH");
     }
 
+    private ExecutionResult ExecuteStore()
+    {
+        if (_getStorePath == null)
+            return ExecutionResult.Error("Store path is not available in this session.");
+
+        return ExecutionResult.Command(_getStorePath());
+    }
+
+    private ExecutionResult ExecuteAttach(string args)
+    {
+        if (_executeAttach == null)
+            return ExecutionResult.Error("Attach is not available in this session.");
+
+        var target = string.IsNullOrWhiteSpace(args) ? "mcp" : args.Trim();
+        try
+        {
+            _executeAttach(target).GetAwaiter().GetResult();
+            return ExecutionResult.Empty();
+        }
+        catch (TimeoutException)
+        {
+            return ExecutionResult.Error($"Could not connect to {target}. Is it running?");
+        }
+        catch (Exception ex)
+        {
+            return ExecutionResult.Error($"Attach failed: {ex.Message}");
+        }
+    }
+
     private ExecutionResult ExecutePrune(string args)
     {
         if (_executePrune == null)
@@ -673,6 +711,8 @@ public sealed class ReplSession : IDisposable
           :reset            Reset session (prefixes, history)
           :history          Show query history
           :graphs           List named graphs
+          :store            Show store folder path
+          :attach, :a [target]  Attach to running instance (default: mcp)
           :count [pattern]  Count triples (optionally matching pattern)
           :prune [options]  Compact the store (remove soft-deleted data)
           :quit, :q, :exit  Exit the REPL

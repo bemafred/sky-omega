@@ -23,9 +23,11 @@ public static class MercuryPaths
     /// <param name="name">Store name (e.g., "mcp", "cli").</param>
     public static string Store(string name)
     {
-        var path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SkyOmega", "stores", name);
+        var basePath = OperatingSystem.IsMacOS()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library")
+            : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+        var path = Path.Combine(basePath, "SkyOmega", "stores", name);
 
         Directory.CreateDirectory(path);
         return path;

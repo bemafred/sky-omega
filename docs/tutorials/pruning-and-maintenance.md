@@ -48,7 +48,7 @@ operation.
 From the Mercury REPL:
 
 ```
-mercury> :prune
+cli> :prune
 Prune complete:
   Quads scanned: 1,234
   Quads written: 1,100
@@ -61,7 +61,7 @@ Prune complete:
 Always preview first. A dry run enumerates and filters without writing:
 
 ```
-mercury> :prune --dry-run
+cli> :prune --dry-run
 Prune dry-run complete:
   Quads scanned: 1,234
   Quads written: 1,100
@@ -77,7 +77,7 @@ By default, pruning flattens history to keep only the current version of
 each triple. Use `--history` to change this:
 
 ```
-mercury> :prune --history preserve
+cli> :prune --history preserve
 ```
 
 | Mode | Flag value | What it keeps |
@@ -100,13 +100,13 @@ rebuilds the store files for compaction.
 Remove an entire named graph from the pruned store:
 
 ```
-mercury> :prune --exclude-graph <http://example.org/temp>
+cli> :prune --exclude-graph <http://example.org/temp>
 ```
 
 Multiple exclusions:
 
 ```
-mercury> :prune --exclude-graph <http://example.org/temp> --exclude-graph <http://example.org/scratch>
+cli> :prune --exclude-graph <http://example.org/temp> --exclude-graph <http://example.org/scratch>
 ```
 
 ### Excluding predicates
@@ -114,7 +114,7 @@ mercury> :prune --exclude-graph <http://example.org/temp> --exclude-graph <http:
 Remove all triples with specific predicates:
 
 ```
-mercury> :prune --exclude-predicate <http://example.org/debug>
+cli> :prune --exclude-predicate <http://example.org/debug>
 ```
 
 ### Combining options
@@ -122,7 +122,7 @@ mercury> :prune --exclude-predicate <http://example.org/debug>
 Options compose freely:
 
 ```
-mercury> :prune --dry-run --history preserve --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
+cli> :prune --dry-run --history preserve --exclude-graph <http://example.org/temp> --exclude-predicate <http://example.org/debug>
 ```
 
 ---
@@ -161,7 +161,7 @@ do a dry-run prune to see what can be removed."
 ### From the CLI
 
 ```
-mercury> :stats
+cli> :stats
 Store Statistics:
   Quads:           1,234
   Atoms:           567
@@ -274,10 +274,10 @@ The audit log is written in N-Quads format -- you can re-load it with
 A simple maintenance routine for a production store:
 
 ```
-mercury> :stats
-mercury> :prune --dry-run
-mercury> :prune
-mercury> :stats
+cli> :stats
+cli> :prune --dry-run
+cli> :prune
+cli> :stats
 ```
 
 Compare the before and after stats to confirm the prune worked as expected.
@@ -287,7 +287,7 @@ Compare the before and after stats to confirm the prune worked as expected.
 After importing data for analysis, clean up:
 
 ```
-mercury> :prune --exclude-graph <http://example.org/import-2025-09>
+cli> :prune --exclude-graph <http://example.org/import-2025-09>
 ```
 
 ### Flatten history for a fresh start
@@ -295,7 +295,7 @@ mercury> :prune --exclude-graph <http://example.org/import-2025-09>
 If you don't need temporal queries and want the smallest possible store:
 
 ```
-mercury> :prune --history flatten
+cli> :prune --history flatten
 ```
 
 This keeps only the current version of each triple, discarding all history.
