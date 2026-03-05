@@ -127,7 +127,8 @@ internal static class Program
 
                 default:
                     if (arg.StartsWith("-")) { options.Error = $"Unknown option: {arg}"; return options; }
-                    if (options.Query == null && options.QueryFile == null) { options.Query = arg; }
+                    if (options.Query != null || options.QueryFile != null) { options.Error = $"Unexpected argument '{arg}'. Query already set."; return options; }
+                    options.Query = arg;
                     break;
             }
         }

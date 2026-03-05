@@ -53,8 +53,27 @@ for (int i = 0; i < args.Length; i++)
                 : "mcp";
             break;
         default:
-            if (!args[i].StartsWith('-') && storePath == null)
-                storePath = args[i];
+            if (args[i].StartsWith('-'))
+            {
+                Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
+                Console.Error.WriteLine("Use --help for usage information.");
+                return 1;
+            }
+            if (storePath != null)
+            {
+                Console.Error.WriteLine($"Error: Unexpected argument '{args[i]}'. Store path already set to '{storePath}'.");
+                Console.Error.WriteLine("Use --help for usage information.");
+                return 1;
+            }
+            if (LooksLikeSparql(args[i]))
+            {
+                Console.Error.WriteLine($"Error: '{args[i]}' looks like a SPARQL query, not a store path.");
+                Console.Error.WriteLine("The mercury CLI does not execute queries directly from arguments.");
+                Console.Error.WriteLine("Use 'mercury-sparql --query \"...\"' for one-shot queries,");
+                Console.Error.WriteLine("or start the REPL with 'mercury' and type queries interactively.");
+                return 1;
+            }
+            storePath = args[i];
             break;
     }
 }
@@ -283,4 +302,15 @@ static PruneResult ExecutePrune(QuadStorePool pool, string args)
     };
 
     return PruneEngine.Execute(pool, options);
+}
+
+static bool LooksLikeSparql(string arg)
+{
+    // Detect SPARQL keywords and syntax that should never appear in a file path
+    var upper = arg.ToUpperInvariant();
+    return upper.Contains("SELECT ") || upper.Contains("CONSTRUCT ") ||
+           upper.Contains("DESCRIBE ") || upper.Contains("ASK ") ||
+           upper.Contains("INSERT ") || upper.Contains("DELETE ") ||
+           upper.Contains("WHERE") || arg.Contains('{') || arg.Contains('}') ||
+           arg.Contains("?s ") || arg.Contains("?p ") || arg.Contains("?o ");
 }

@@ -115,7 +115,8 @@ internal static class Program
 
                 default:
                     if (arg.StartsWith("-")) { options.Error = $"Unknown option: {arg}"; return options; }
-                    if (options.InputFile == null) { options.InputFile = arg; }
+                    if (options.InputFile != null) { options.Error = $"Unexpected argument '{arg}'. Input file already set to '{options.InputFile}'."; return options; }
+                    options.InputFile = arg;
                     break;
             }
         }

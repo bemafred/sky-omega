@@ -46,8 +46,26 @@ for (int i = 0; i < args.Length; i++)
             enableHttpUpdates = true;
             break;
         default:
-            if (!args[i].StartsWith('-') && storePath == null)
-                storePath = args[i];
+            if (args[i].StartsWith('-'))
+            {
+                Console.Error.WriteLine($"Error: Unknown option '{args[i]}'.");
+                Console.Error.WriteLine("Use --help for usage information.");
+                return 1;
+            }
+            if (storePath != null)
+            {
+                Console.Error.WriteLine($"Error: Unexpected argument '{args[i]}'. Store path already set to '{storePath}'.");
+                Console.Error.WriteLine("Use --help for usage information.");
+                return 1;
+            }
+            if (LooksLikeSparql(args[i]))
+            {
+                Console.Error.WriteLine($"Error: '{args[i]}' looks like a SPARQL query, not a store path.");
+                Console.Error.WriteLine("mercury-mcp is an MCP server, not a query CLI.");
+                Console.Error.WriteLine("Use 'mercury-sparql --query \"...\"' for one-shot queries.");
+                return 1;
+            }
+            storePath = args[i];
             break;
     }
 }
@@ -117,7 +135,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = "1.3.6"
+            Version = "1.3.7"
         };
     })
     .WithStdioServerTransport()
@@ -151,3 +169,13 @@ ReplSession CreateSession(QuadStorePool pool) => new ReplSession(
     getStatistics: () => SparqlEngine.GetStatistics(pool.Active),
     getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active),
     getStorePath: () => Path.GetFullPath(storePath));
+
+static bool LooksLikeSparql(string arg)
+{
+    var upper = arg.ToUpperInvariant();
+    return upper.Contains("SELECT ") || upper.Contains("CONSTRUCT ") ||
+           upper.Contains("DESCRIBE ") || upper.Contains("ASK ") ||
+           upper.Contains("INSERT ") || upper.Contains("DELETE ") ||
+           upper.Contains("WHERE") || arg.Contains('{') || arg.Contains('}') ||
+           arg.Contains("?s ") || arg.Contains("?p ") || arg.Contains("?o ");
+}
