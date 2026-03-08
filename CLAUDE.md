@@ -258,7 +258,7 @@ Use the batch API for high-throughput bulk loading (~100,000 triples/sec vs ~300
 QuadStore supports RDF named graphs for domain isolation. See [docs/api/api-usage.md#named-graphs-quads](docs/api/api-usage.md#named-graphs-quads).
 
 **Design notes:**
-- **Multiple index paths**: SPO, POS, OSP, TSPO for efficient query patterns from any entry point
+- **Multiple index paths**: GSPO, GPOS, GOSP, TGSP for efficient query patterns from any entry point
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
 - **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + ValidFrom + ValidTo + TransactionTime)
 - **WAL record**: 72 bytes (includes GraphId for crash recovery)
