@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-03-08
+**Proposed** — 2026-03-08 | Phase 1 (rename) complete — 2026-03-10
 
 ## Context
 

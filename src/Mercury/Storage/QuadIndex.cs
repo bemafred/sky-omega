@@ -20,7 +20,7 @@ namespace SkyOmega.Mercury.Storage;
 internal sealed unsafe class QuadIndex : IDisposable
 {
     private const int PageSize = 16384;
-    private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry (with GraphAtom)
+    private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry
 
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmapFile;
@@ -113,26 +113,26 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Add a temporal quad with explicit time bounds
     /// </summary>
     public void Add(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         long validFrom,
         long validTo,
         long? transactionTime = null,
         ReadOnlySpan<char> graph = default)
     {
         var g = graph.IsEmpty ? 0 : _atoms.Intern(graph);
-        var s = _atoms.Intern(subject);
-        var p = _atoms.Intern(predicate);
-        var o = _atoms.Intern(obj);
+        var a = _atoms.Intern(primary);
+        var b = _atoms.Intern(secondary);
+        var c = _atoms.Intern(tertiary);
         var tt = transactionTime ?? _currentTransactionTime;
 
         var temporalKey = new TemporalKey
         {
-            GraphAtom = g,
-            SubjectAtom = s,
-            PredicateAtom = p,
-            ObjectAtom = o,
+            Graph = g,
+            Primary = a,
+            Secondary = b,
+            Tertiary = c,
             ValidFrom = validFrom,
             ValidTo = validTo,
             TransactionTime = tt
@@ -145,12 +145,12 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Add a current fact (valid from now to end of time)
     /// </summary>
     public void AddCurrent(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         ReadOnlySpan<char> graph = default)
     {
-        Add(subject, predicate, obj,
+        Add(primary, secondary, tertiary,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             long.MaxValue,
             transactionTime: null,
@@ -161,14 +161,14 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Add a historical fact (valid for specific time period)
     /// </summary>
     public void AddHistorical(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
-        Add(subject, predicate, obj,
+        Add(primary, secondary, tertiary,
             validFrom.ToUnixTimeMilliseconds(),
             validTo.ToUnixTimeMilliseconds(),
             transactionTime: null,
@@ -180,30 +180,30 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Returns true if the triple was found and deleted, false otherwise.
     /// </summary>
     public bool Delete(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         long validFrom,
         long validTo,
         ReadOnlySpan<char> graph = default)
     {
         // Look up atom IDs - if any don't exist, the triple doesn't exist
         var g = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
-        var s = _atoms.GetAtomId(subject);
-        var p = _atoms.GetAtomId(predicate);
-        var o = _atoms.GetAtomId(obj);
+        var a = _atoms.GetAtomId(primary);
+        var b = _atoms.GetAtomId(secondary);
+        var c = _atoms.GetAtomId(tertiary);
 
-        if (s == 0 || p == 0 || o == 0)
+        if (a == 0 || b == 0 || c == 0)
             return false;
         if (!graph.IsEmpty && g == 0)
             return false;
 
         var key = new TemporalKey
         {
-            GraphAtom = g,
-            SubjectAtom = s,
-            PredicateAtom = p,
-            ObjectAtom = o,
+            Graph = g,
+            Primary = a,
+            Secondary = b,
+            Tertiary = c,
             ValidFrom = validFrom,
             ValidTo = validTo,
             TransactionTime = _currentTransactionTime
@@ -217,14 +217,14 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Returns true if the triple was found and deleted, false otherwise.
     /// </summary>
     public bool DeleteHistorical(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
-        return Delete(subject, predicate, obj,
+        return Delete(primary, secondary, tertiary,
             validFrom.ToUnixTimeMilliseconds(),
             validTo.ToUnixTimeMilliseconds(),
             graph);
@@ -243,8 +243,8 @@ internal sealed unsafe class QuadIndex : IDisposable
         {
             ref var entry = ref page->GetEntry(i);
 
-            // Check if this is the exact entry (same SPO and overlapping time)
-            if (IsSameGSPO(entry.Key, key) && !entry.IsDeleted)
+            // Check if this is the exact entry (same graph + dimensions and overlapping time)
+            if (IsSameDimensions(entry.Key, key) && !entry.IsDeleted)
             {
                 // Check for time overlap
                 if (entry.Key.ValidFrom <= key.ValidTo && entry.Key.ValidTo >= key.ValidFrom)
@@ -268,14 +268,14 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Query triples with temporal constraints
     /// </summary>
     public TemporalQuadEnumerator Query(
-        long graphAtom,
-        long subjectAtom,
-        long predicateAtom,
-        long objectAtom,
+        long graph,
+        long primary,
+        long secondary,
+        long tertiary,
         TemporalQuery temporalQuery)
     {
-        var minKey = CreateSearchKey(graphAtom, subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: true);
-        var maxKey = CreateSearchKey(graphAtom, subjectAtom, predicateAtom, objectAtom, temporalQuery, isMin: false);
+        var minKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: true);
+        var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: false);
 
         var leafPageId = FindLeafPage(_rootPageId, minKey);
 
@@ -291,19 +291,19 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Query current state (as of now)
     /// </summary>
     public TemporalQuadEnumerator QueryCurrent(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         ReadOnlySpan<char> graph = default)
     {
         var g = ResolveGraphAtom(graph);
-        var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
-        var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
-        var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
+        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
+        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
+        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        return Query(g, s, p, o, new TemporalQuery
+        return Query(g, a, b, c, new TemporalQuery
         {
             Type = TemporalQueryType.AsOf,
             AsOfTime = now
@@ -330,18 +330,18 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Query historical state (as of specific time)
     /// </summary>
     public TemporalQuadEnumerator QueryAsOf(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         DateTimeOffset asOfTime,
         ReadOnlySpan<char> graph = default)
     {
         var g = ResolveGraphAtom(graph);
-        var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
-        var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
-        var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
+        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
+        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
+        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
 
-        return Query(g, s, p, o, new TemporalQuery
+        return Query(g, a, b, c, new TemporalQuery
         {
             Type = TemporalQueryType.AsOf,
             AsOfTime = asOfTime.ToUnixTimeMilliseconds()
@@ -352,19 +352,19 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Query time range (all versions during period)
     /// </summary>
     public TemporalQuadEnumerator QueryRange(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         DateTimeOffset rangeStart,
         DateTimeOffset rangeEnd,
         ReadOnlySpan<char> graph = default)
     {
         var g = ResolveGraphAtom(graph);
-        var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
-        var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
-        var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
+        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
+        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
+        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
 
-        return Query(g, s, p, o, new TemporalQuery
+        return Query(g, a, b, c, new TemporalQuery
         {
             Type = TemporalQueryType.Range,
             RangeStart = rangeStart.ToUnixTimeMilliseconds(),
@@ -376,17 +376,17 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Query evolution (all versions ever)
     /// </summary>
     public TemporalQuadEnumerator QueryHistory(
-        ReadOnlySpan<char> subject,
-        ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> primary,
+        ReadOnlySpan<char> secondary,
+        ReadOnlySpan<char> tertiary,
         ReadOnlySpan<char> graph = default)
     {
         var g = ResolveGraphAtom(graph);
-        var s = subject.IsEmpty ? -1 : _atoms.GetAtomId(subject);
-        var p = predicate.IsEmpty ? -1 : _atoms.GetAtomId(predicate);
-        var o = obj.IsEmpty ? -1 : _atoms.GetAtomId(obj);
+        var a = primary.IsEmpty ? -1 : _atoms.GetAtomId(primary);
+        var b = secondary.IsEmpty ? -1 : _atoms.GetAtomId(secondary);
+        var c = tertiary.IsEmpty ? -1 : _atoms.GetAtomId(tertiary);
 
-        return Query(g, s, p, o, new TemporalQuery
+        return Query(g, a, b, c, new TemporalQuery
         {
             Type = TemporalQueryType.AllTime
         });
@@ -419,16 +419,17 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     /// <summary>
-    /// Temporal key: GSPO + ValidTime + TransactionTime (56 bytes)
-    /// Sorted by Graph first (GSPO ordering) for named graph queries
+    /// Temporal key: Graph + 3 generic dimensions + ValidTime + TransactionTime (56 bytes)
+    /// QuadIndex is a generic multi-dimensional B+Tree. The RDF-to-dimension mapping
+    /// (Subject→Primary, Predicate→Secondary, Object→Tertiary) lives in QuadStore.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     internal struct TemporalKey : IComparable<TemporalKey>
     {
-        public long GraphAtom;       // 64-bit graph ID (0 = default graph)
-        public long SubjectAtom;     // 64-bit for TB-scale
-        public long PredicateAtom;   // 64-bit for TB-scale
-        public long ObjectAtom;      // 64-bit for TB-scale
+        public long Graph;           // 64-bit graph ID (0 = default graph)
+        public long Primary;         // 64-bit, first dimension (e.g., subject in GSPO)
+        public long Secondary;       // 64-bit, second dimension (e.g., predicate in GSPO)
+        public long Tertiary;        // 64-bit, third dimension (e.g., object in GSPO)
         public long ValidFrom;       // Valid-time start (milliseconds since epoch)
         public long ValidTo;         // Valid-time end (milliseconds since epoch)
         public long TransactionTime; // Transaction-time (when recorded)
@@ -436,17 +437,17 @@ internal sealed unsafe class QuadIndex : IDisposable
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public readonly int CompareTo(TemporalKey other)
         {
-            // Primary sort: GSPO (Graph first for named graph queries)
-            var cmp = GraphAtom.CompareTo(other.GraphAtom);
+            // Primary sort: Graph → Primary → Secondary → Tertiary
+            var cmp = Graph.CompareTo(other.Graph);
             if (cmp != 0) return cmp;
 
-            cmp = SubjectAtom.CompareTo(other.SubjectAtom);
+            cmp = Primary.CompareTo(other.Primary);
             if (cmp != 0) return cmp;
 
-            cmp = PredicateAtom.CompareTo(other.PredicateAtom);
+            cmp = Secondary.CompareTo(other.Secondary);
             if (cmp != 0) return cmp;
 
-            cmp = ObjectAtom.CompareTo(other.ObjectAtom);
+            cmp = Tertiary.CompareTo(other.Tertiary);
             if (cmp != 0) return cmp;
 
             // Secondary sort: Valid time
@@ -483,7 +484,7 @@ internal sealed unsafe class QuadIndex : IDisposable
 
     /// <summary>
     /// B+Tree entry for temporal triple (88 bytes)
-    /// Key: 56 bytes (with GraphAtom) + Child/Value: 8 bytes + Metadata: 24 bytes
+    /// Key: 56 bytes + Child/Value: 8 bytes + Metadata: 24 bytes
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct TemporalBTreeEntry
@@ -597,10 +598,10 @@ internal sealed unsafe class QuadIndex : IDisposable
         {
             get => new TemporalQuad
             {
-                GraphAtom = _currentKey.GraphAtom,
-                SubjectAtom = _currentKey.SubjectAtom,
-                PredicateAtom = _currentKey.PredicateAtom,
-                ObjectAtom = _currentKey.ObjectAtom,
+                Graph = _currentKey.Graph,
+                Primary = _currentKey.Primary,
+                Secondary = _currentKey.Secondary,
+                Tertiary = _currentKey.Tertiary,
                 ValidFrom = _currentKey.ValidFrom,
                 ValidTo = _currentKey.ValidTo,
                 TransactionTime = _currentKey.TransactionTime,
@@ -714,7 +715,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         if (insertPos > 0)
         {
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
-            if (IsSameGSPO(key, prevEntry.Key))
+            if (IsSameDimensions(key, prevEntry.Key))
             {
                 // If both entries are "current" (ValidTo is far future), treat as duplicate.
                 // RDF semantics: adding a duplicate triple should be idempotent.
@@ -760,12 +761,12 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool IsSameGSPO(TemporalKey a, TemporalKey b)
+    private static bool IsSameDimensions(TemporalKey a, TemporalKey b)
     {
-        return a.GraphAtom == b.GraphAtom &&
-               a.SubjectAtom == b.SubjectAtom &&
-               a.PredicateAtom == b.PredicateAtom &&
-               a.ObjectAtom == b.ObjectAtom;
+        return a.Graph == b.Graph &&
+               a.Primary == b.Primary &&
+               a.Secondary == b.Secondary &&
+               a.Tertiary == b.Tertiary;
     }
 
     private void HandleTemporalUpdate(TemporalBTreePage* page, int existingIndex, TemporalKey newKey)
@@ -1008,7 +1009,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     private static TemporalKey CreateSearchKey(
-        long graph, long subject, long predicate, long obj,
+        long graph, long primary, long secondary, long tertiary,
         TemporalQuery query,
         bool isMin)
     {
@@ -1018,7 +1019,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         // Set to -2 for both min and max so no entries will match
         long graphValue;
         if (graph == -2)
-            graphValue = -2; // Will never match any entry (entries have non-negative GraphAtom)
+            graphValue = -2; // Will never match any entry (entries have non-negative Graph)
         else if (graph < 0)
             graphValue = unboundValue;
         else
@@ -1026,10 +1027,10 @@ internal sealed unsafe class QuadIndex : IDisposable
 
         return new TemporalKey
         {
-            GraphAtom = graphValue,
-            SubjectAtom = subject < 0 ? unboundValue : subject,
-            PredicateAtom = predicate < 0 ? unboundValue : predicate,
-            ObjectAtom = obj < 0 ? unboundValue : obj,
+            Graph = graphValue,
+            Primary = primary < 0 ? unboundValue : primary,
+            Secondary = secondary < 0 ? unboundValue : secondary,
+            Tertiary = tertiary < 0 ? unboundValue : tertiary,
             ValidFrom = isMin ? 0 : long.MaxValue,
             ValidTo = isMin ? 0 : long.MaxValue,
             TransactionTime = isMin ? 0 : long.MaxValue
@@ -1152,14 +1153,16 @@ public enum TemporalQueryType
 }
 
 /// <summary>
-/// Temporal triple with time dimensions
+/// Temporal quad with generic dimension fields and time dimensions.
+/// The RDF-to-dimension mapping (Primary=subject, Secondary=predicate, etc.)
+/// depends on the index type and is resolved in QuadStore's TemporalResultEnumerator.
 /// </summary>
 internal struct TemporalQuad
 {
-    public long GraphAtom;      // 64-bit graph ID (0 = default graph)
-    public long SubjectAtom;    // 64-bit for TB-scale
-    public long PredicateAtom;  // 64-bit for TB-scale
-    public long ObjectAtom;     // 64-bit for TB-scale
+    public long Graph;          // 64-bit graph ID (0 = default graph)
+    public long Primary;        // 64-bit, first dimension
+    public long Secondary;      // 64-bit, second dimension
+    public long Tertiary;       // 64-bit, third dimension
     public long ValidFrom;
     public long ValidTo;
     public long TransactionTime;

@@ -209,7 +209,7 @@ public class QuadIndexTests : IDisposable
         var lastSubject = "";
         while (results.MoveNext())
         {
-            var current = index.Atoms.GetAtomString(results.Current.SubjectAtom);
+            var current = index.Atoms.GetAtomString(results.Current.Primary);
             Assert.True(string.CompareOrdinal(current, lastSubject) >= 0,
                 $"Out of order: {lastSubject} should come before {current}");
             lastSubject = current;
@@ -241,9 +241,9 @@ public class QuadIndexTests : IDisposable
         Assert.True(results.MoveNext());
 
         var triple = results.Current;
-        Assert.True(triple.SubjectAtom > 0);
-        Assert.True(triple.PredicateAtom > 0);
-        Assert.True(triple.ObjectAtom > 0);
+        Assert.True(triple.Primary > 0);
+        Assert.True(triple.Secondary > 0);
+        Assert.True(triple.Tertiary > 0);
     }
 
     [Fact]
@@ -254,11 +254,11 @@ public class QuadIndexTests : IDisposable
 
         var results1 = index.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         results1.MoveNext();
-        var subjectId1 = results1.Current.SubjectAtom;
+        var subjectId1 = results1.Current.Primary;
 
         var results2 = index.QueryCurrent("<http://ex.org/s>", ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
         results2.MoveNext();
-        var subjectId2 = results2.Current.SubjectAtom;
+        var subjectId2 = results2.Current.Primary;
 
         Assert.Equal(subjectId1, subjectId2);
     }
@@ -440,7 +440,7 @@ public class QuadIndexTests : IDisposable
 
         // After MoveNext, Current has values
         var triple = results.Current;
-        Assert.True(triple.SubjectAtom > 0);
+        Assert.True(triple.Primary > 0);
     }
 
     #endregion

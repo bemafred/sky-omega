@@ -21,10 +21,10 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 public sealed class QuadStore : IDisposable
 {
-    private readonly QuadIndex _gspoIndex; // Primary index (was SPOT)
-    private readonly QuadIndex _gposIndex; // Predicate-first (was POST)
-    private readonly QuadIndex _gospIndex; // Object-first (was OSPT)
-    private readonly QuadIndex _tgspIndex; // Time-first (was TSPO)
+    private readonly QuadIndex _gspoIndex; // Primary index: S→Primary, P→Secondary, O→Tertiary
+    private readonly QuadIndex _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
+    private readonly QuadIndex _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
+    private readonly QuadIndex _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
     private readonly TrigramIndex? _trigramIndex; // Full-text search (optional)
 
     private readonly AtomStore _atoms;
@@ -186,7 +186,7 @@ public sealed class QuadStore : IDisposable
     public void Add(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
@@ -200,14 +200,14 @@ public sealed class QuadStore : IDisposable
             var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
             var subjectId = _atoms.Intern(subject);
             var predicateId = _atoms.Intern(predicate);
-            var objectId = _atoms.Intern(obj);
+            var objectId = _atoms.Intern(@object);
 
             // 2. Write to WAL (fsync ensures durability)
             var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId);
             _wal.Append(record);
 
             // 3. Apply to indexes
-            ApplyToIndexes(subject, predicate, obj, validFrom, validTo, graph);
+            ApplyToIndexes(subject, predicate, @object, validFrom, validTo, graph);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -228,10 +228,10 @@ public sealed class QuadStore : IDisposable
     public void AddCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        Add(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
+        Add(subject, predicate, @object, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
     }
 
     /// <summary>
@@ -242,7 +242,7 @@ public sealed class QuadStore : IDisposable
     public bool Delete(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
@@ -256,7 +256,7 @@ public sealed class QuadStore : IDisposable
             var graphId = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
             var subjectId = _atoms.GetAtomId(subject);
             var predicateId = _atoms.GetAtomId(predicate);
-            var objectId = _atoms.GetAtomId(obj);
+            var objectId = _atoms.GetAtomId(@object);
 
             if (subjectId == 0 || predicateId == 0 || objectId == 0)
                 return false;
@@ -268,7 +268,7 @@ public sealed class QuadStore : IDisposable
             _wal.Append(record);
 
             // 3. Apply to indexes
-            var deleted = ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, graph);
+            var deleted = ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, graph);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -292,11 +292,11 @@ public sealed class QuadStore : IDisposable
     public bool DeleteCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
         // Use a wide time range to match any current fact
-        return Delete(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
+        return Delete(subject, predicate, @object, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
     }
 
     #region Batch API
@@ -343,7 +343,7 @@ public sealed class QuadStore : IDisposable
     public void AddBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
@@ -355,14 +355,14 @@ public sealed class QuadStore : IDisposable
         var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var subjectId = _atoms.Intern(subject);
         var predicateId = _atoms.Intern(predicate);
-        var objectId = _atoms.Intern(obj);
+        var objectId = _atoms.Intern(@object);
 
         // 2. Write to WAL without fsync
         var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId);
         _wal.AppendBatch(record, _activeBatchTxId);
 
         // 3. Apply to indexes immediately (in-memory, fast)
-        ApplyToIndexes(subject, predicate, obj, validFrom, validTo, graph);
+        ApplyToIndexes(subject, predicate, @object, validFrom, validTo, graph);
     }
 
     /// <summary>
@@ -371,10 +371,10 @@ public sealed class QuadStore : IDisposable
     public void AddCurrentBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        AddBatched(subject, predicate, obj, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
+        AddBatched(subject, predicate, @object, DateTimeOffset.UtcNow, DateTimeOffset.MaxValue, graph);
     }
 
     /// <summary>
@@ -385,7 +385,7 @@ public sealed class QuadStore : IDisposable
     public bool DeleteBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
@@ -397,7 +397,7 @@ public sealed class QuadStore : IDisposable
         var graphId = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
         var subjectId = _atoms.GetAtomId(subject);
         var predicateId = _atoms.GetAtomId(predicate);
-        var objectId = _atoms.GetAtomId(obj);
+        var objectId = _atoms.GetAtomId(@object);
 
         if (subjectId == 0 || predicateId == 0 || objectId == 0)
             return false;
@@ -409,7 +409,7 @@ public sealed class QuadStore : IDisposable
         _wal.AppendBatch(record, _activeBatchTxId);
 
         // 3. Apply to indexes immediately (in-memory, fast)
-        return ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, graph);
+        return ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, graph);
     }
 
     /// <summary>
@@ -419,10 +419,10 @@ public sealed class QuadStore : IDisposable
     public bool DeleteCurrentBatched(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        return DeleteBatched(subject, predicate, obj, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
+        return DeleteBatched(subject, predicate, @object, DateTimeOffset.MinValue, DateTimeOffset.MaxValue, graph);
     }
 
     /// <summary>
@@ -476,24 +476,29 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Apply a quad to all indexes (internal, no WAL).
+    /// Each index receives its dimensions in the order that matches its sort:
+    /// GSPO: S→Primary, P→Secondary, O→Tertiary
+    /// GPOS: P→Primary, O→Secondary, S→Tertiary
+    /// GOSP: O→Primary, S→Secondary, P→Tertiary
+    /// TGSP: S→Primary, P→Secondary, O→Tertiary (same mapping as GSPO, different sort order)
     /// </summary>
     private void ApplyToIndexes(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
-        _gspoIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
-        _gposIndex.AddHistorical(predicate, obj, subject, validFrom, validTo, graph);
-        _gospIndex.AddHistorical(obj, subject, predicate, validFrom, validTo, graph);
-        _tgspIndex.AddHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        _gspoIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, graph);
+        _gposIndex.AddHistorical(predicate, @object, subject, validFrom, validTo, graph);
+        _gospIndex.AddHistorical(@object, subject, predicate, validFrom, validTo, graph);
+        _tgspIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, graph);
 
         // Index object for full-text search if enabled and it's a literal (starts with ")
-        if (_trigramIndex != null && !obj.IsEmpty && obj[0] == '"')
+        if (_trigramIndex != null && !@object.IsEmpty && @object[0] == '"')
         {
-            var objectId = _atoms.GetAtomId(obj);
+            var objectId = _atoms.GetAtomId(@object);
             if (objectId > 0)
             {
                 var utf8Span = _atoms.GetAtomSpan(objectId);
@@ -509,16 +514,16 @@ public sealed class QuadStore : IDisposable
     private bool ApplyDeleteToIndexes(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
-        // Delete from all 4 indexes - use the appropriate argument order for each
-        var d1 = _gspoIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
-        var d2 = _gposIndex.DeleteHistorical(predicate, obj, subject, validFrom, validTo, graph);
-        var d3 = _gospIndex.DeleteHistorical(obj, subject, predicate, validFrom, validTo, graph);
-        var d4 = _tgspIndex.DeleteHistorical(subject, predicate, obj, validFrom, validTo, graph);
+        // Delete from all 4 indexes - use the appropriate dimension order for each
+        var d1 = _gspoIndex.DeleteHistorical(subject, predicate, @object, validFrom, validTo, graph);
+        var d2 = _gposIndex.DeleteHistorical(predicate, @object, subject, validFrom, validTo, graph);
+        var d3 = _gospIndex.DeleteHistorical(@object, subject, predicate, validFrom, validTo, graph);
+        var d4 = _tgspIndex.DeleteHistorical(subject, predicate, @object, validFrom, validTo, graph);
 
         return d1 || d2 || d3 || d4;
     }
@@ -544,13 +549,13 @@ public sealed class QuadStore : IDisposable
                     var graph = record.GraphId == 0 ? string.Empty : _atoms.GetAtomString(record.GraphId);
                     var subject = _atoms.GetAtomString(record.SubjectId);
                     var predicate = _atoms.GetAtomString(record.PredicateId);
-                    var obj = _atoms.GetAtomString(record.ObjectId);
+                    var @object = _atoms.GetAtomString(record.ObjectId);
 
                     var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
                     var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
 
                     // Apply to indexes (no WAL write - already in log)
-                    ApplyToIndexes(subject, predicate, obj, validFrom, validTo, graph);
+                    ApplyToIndexes(subject, predicate, @object, validFrom, validTo, graph);
                     recoveredCount++;
                 }
                 else if (record.Operation == LogOperation.Delete)
@@ -559,13 +564,13 @@ public sealed class QuadStore : IDisposable
                     var graph = record.GraphId == 0 ? string.Empty : _atoms.GetAtomString(record.GraphId);
                     var subject = _atoms.GetAtomString(record.SubjectId);
                     var predicate = _atoms.GetAtomString(record.PredicateId);
-                    var obj = _atoms.GetAtomString(record.ObjectId);
+                    var @object = _atoms.GetAtomString(record.ObjectId);
 
                     var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
                     var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
 
                     // Apply delete to indexes (no WAL write - already in log)
-                    ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, graph);
+                    ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, graph);
                     recoveredCount++;
                 }
             }
@@ -654,19 +659,18 @@ public sealed class QuadStore : IDisposable
         // GPOS ordering: Predicate-Object-Subject, so grouped by predicate
         var enumerator = _gposIndex.QueryAsOf(
             ReadOnlySpan<char>.Empty,  // All predicates
-            ReadOnlySpan<char>.Empty,  // All objects (arg2 in POST ordering)
-            ReadOnlySpan<char>.Empty,  // All subjects (arg3 in POST ordering)
+            ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
+            ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
             DateTimeOffset.UtcNow);
 
         while (enumerator.MoveNext())
         {
             var quad = enumerator.Current;
 
-            // In GPOS index, Subject position is predicate, Predicate position is object, Object position is subject
-            // (based on TemporalIndexType.POST remapping)
-            var predicateAtom = quad.SubjectAtom;  // POST: predicate stored in Subject position
-            var objectAtom = quad.PredicateAtom;    // POST: object stored in Predicate position
-            var subjectAtom = quad.ObjectAtom;      // POST: subject stored in Object position
+            // In GPOS index: Primary=predicate, Secondary=object, Tertiary=subject
+            var predicateAtom = quad.Primary;
+            var objectAtom = quad.Secondary;
+            var subjectAtom = quad.Tertiary;
 
             if (!stats.TryGetValue(predicateAtom, out var entry))
             {
@@ -705,7 +709,7 @@ public sealed class QuadStore : IDisposable
     public TemporalResultEnumerator Query(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         TemporalQueryType queryType,
         DateTimeOffset? asOfTime = null,
         DateTimeOffset? rangeStart = null,
@@ -713,30 +717,30 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         // Select optimal index
-        var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, obj, queryType);
+        var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, queryType);
 
-        // Reorder parameters based on index type (indexes store data in different orders)
-        // SPOT: (subject, predicate, object) - no change
-        // POST: (predicate, object, subject)
-        // OSPT: (object, subject, predicate)
-        // TSPO: (subject, predicate, object) - no change
+        // Map RDF terms to index dimensions:
+        // GSPO: S→Primary, P→Secondary, O→Tertiary
+        // GPOS: P→Primary, O→Secondary, S→Tertiary
+        // GOSP: O→Primary, S→Secondary, P→Tertiary
+        // TGSP: S→Primary, P→Secondary, O→Tertiary
         ReadOnlySpan<char> arg1, arg2, arg3;
         switch (indexType)
         {
-            case TemporalIndexType.POST:
+            case TemporalIndexType.GPOS:
                 arg1 = predicate;
-                arg2 = obj;
+                arg2 = @object;
                 arg3 = subject;
                 break;
-            case TemporalIndexType.OSPT:
-                arg1 = obj;
+            case TemporalIndexType.GOSP:
+                arg1 = @object;
                 arg2 = subject;
                 arg3 = predicate;
                 break;
-            default: // SPOT, TSPO
+            default: // GSPO, TGSP
                 arg1 = subject;
                 arg2 = predicate;
-                arg3 = obj;
+                arg3 = @object;
                 break;
         }
 
@@ -764,10 +768,10 @@ public sealed class QuadStore : IDisposable
     public TemporalResultEnumerator QueryCurrent(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AsOf, graph: graph);
+        return Query(subject, predicate, @object, TemporalQueryType.AsOf, graph: graph);
     }
 
     /// <summary>
@@ -777,11 +781,11 @@ public sealed class QuadStore : IDisposable
     public TemporalResultEnumerator QueryAsOf(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset asOfTime,
         ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: asOfTime, graph: graph);
+        return Query(subject, predicate, @object, TemporalQueryType.AsOf, asOfTime: asOfTime, graph: graph);
     }
 
     /// <summary>
@@ -791,10 +795,10 @@ public sealed class QuadStore : IDisposable
     public TemporalResultEnumerator QueryEvolution(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AllTime, graph: graph);
+        return Query(subject, predicate, @object, TemporalQueryType.AllTime, graph: graph);
     }
 
     /// <summary>
@@ -805,10 +809,10 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset targetTime,
         ReadOnlySpan<char> subject = default,
         ReadOnlySpan<char> predicate = default,
-        ReadOnlySpan<char> obj = default,
+        ReadOnlySpan<char> @object = default,
         ReadOnlySpan<char> graph = default)
     {
-        return Query(subject, predicate, obj, TemporalQueryType.AsOf, asOfTime: targetTime, graph: graph);
+        return Query(subject, predicate, @object, TemporalQueryType.AsOf, asOfTime: targetTime, graph: graph);
     }
 
     /// <summary>
@@ -820,11 +824,11 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset periodEnd,
         ReadOnlySpan<char> subject = default,
         ReadOnlySpan<char> predicate = default,
-        ReadOnlySpan<char> obj = default,
+        ReadOnlySpan<char> @object = default,
         ReadOnlySpan<char> graph = default)
     {
         return Query(
-            subject, predicate, obj,
+            subject, predicate, @object,
             TemporalQueryType.Range,
             rangeStart: periodStart,
             rangeEnd: periodEnd,
@@ -844,35 +848,35 @@ public sealed class QuadStore : IDisposable
     private (QuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         TemporalQueryType queryType)
     {
         var subjectBound = !subject.IsEmpty && subject[0] != '?';
         var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
-        var objectBound = !obj.IsEmpty && obj[0] != '?';
+        var objectBound = !@object.IsEmpty && @object[0] != '?';
 
-        // For time-range queries, prefer TSPO index
+        // For time-range queries, prefer TGSP index
         if (queryType == TemporalQueryType.Range)
         {
-            return (_tgspIndex, TemporalIndexType.TSPO);
+            return (_tgspIndex, TemporalIndexType.TGSP);
         }
 
         // Otherwise select based on bound variables
         if (subjectBound)
         {
-            return (_gspoIndex, TemporalIndexType.SPOT);
+            return (_gspoIndex, TemporalIndexType.GSPO);
         }
         else if (predicateBound)
         {
-            return (_gposIndex, TemporalIndexType.POST);
+            return (_gposIndex, TemporalIndexType.GPOS);
         }
         else if (objectBound)
         {
-            return (_gospIndex, TemporalIndexType.OSPT);
+            return (_gospIndex, TemporalIndexType.GOSP);
         }
         else
         {
-            return (_gspoIndex, TemporalIndexType.SPOT);
+            return (_gspoIndex, TemporalIndexType.GSPO);
         }
     }
 
@@ -1025,35 +1029,35 @@ public struct TemporalResultEnumerator
     {
         get
         {
-            var triple = _baseEnumerator.Current;
+            var quad = _baseEnumerator.Current;
 
-            // Remap based on index type
+            // Remap generic dimensions back to RDF terms based on index type
             long s, p, o;
 
             switch (_indexType)
             {
-                case TemporalIndexType.SPOT:
-                    s = triple.SubjectAtom;
-                    p = triple.PredicateAtom;
-                    o = triple.ObjectAtom;
+                case TemporalIndexType.GSPO:
+                    s = quad.Primary;    // GSPO: Primary=subject
+                    p = quad.Secondary;  // GSPO: Secondary=predicate
+                    o = quad.Tertiary;   // GSPO: Tertiary=object
                     break;
 
-                case TemporalIndexType.POST:
-                    p = triple.SubjectAtom;
-                    o = triple.PredicateAtom;
-                    s = triple.ObjectAtom;
+                case TemporalIndexType.GPOS:
+                    p = quad.Primary;    // GPOS: Primary=predicate
+                    o = quad.Secondary;  // GPOS: Secondary=object
+                    s = quad.Tertiary;   // GPOS: Tertiary=subject
                     break;
 
-                case TemporalIndexType.OSPT:
-                    o = triple.SubjectAtom;
-                    s = triple.PredicateAtom;
-                    p = triple.ObjectAtom;
+                case TemporalIndexType.GOSP:
+                    o = quad.Primary;    // GOSP: Primary=object
+                    s = quad.Secondary;  // GOSP: Secondary=subject
+                    p = quad.Tertiary;   // GOSP: Tertiary=predicate
                     break;
 
-                case TemporalIndexType.TSPO:
-                    s = triple.SubjectAtom;
-                    p = triple.PredicateAtom;
-                    o = triple.ObjectAtom;
+                case TemporalIndexType.TGSP:
+                    s = quad.Primary;    // TGSP: Primary=subject
+                    p = quad.Secondary;  // TGSP: Secondary=predicate
+                    o = quad.Tertiary;   // TGSP: Tertiary=object
                     break;
 
                 default:
@@ -1065,14 +1069,14 @@ public struct TemporalResultEnumerator
             const long MaxValidMs = 253402300799999L; // Dec 31, 9999
 
             return new ResolvedTemporalQuad(
-                triple.GraphAtom == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(triple.GraphAtom),
+                quad.Graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(quad.Graph),
                 DecodeAtomToBuffer(s),
                 DecodeAtomToBuffer(p),
                 DecodeAtomToBuffer(o),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidFrom, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.ValidTo, MaxValidMs)),
-                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(triple.TransactionTime, MaxValidMs)),
-                triple.IsDeleted
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ValidFrom, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.ValidTo, MaxValidMs)),
+                DateTimeOffset.FromUnixTimeMilliseconds(Math.Min(quad.TransactionTime, MaxValidMs)),
+                quad.IsDeleted
             );
         }
     }
@@ -1127,10 +1131,10 @@ public struct TemporalResultEnumerator
 
 internal enum TemporalIndexType
 {
-    SPOT, // Subject-Predicate-Object-Time
-    POST, // Predicate-Object-Subject-Time
-    OSPT, // Object-Subject-Predicate-Time
-    TSPO  // Time-Subject-Predicate-Object
+    GSPO, // Graph-Subject-Predicate-Object (Primary=S, Secondary=P, Tertiary=O)
+    GPOS, // Graph-Predicate-Object-Subject (Primary=P, Secondary=O, Tertiary=S)
+    GOSP, // Graph-Object-Subject-Predicate (Primary=O, Secondary=S, Tertiary=P)
+    TGSP  // Time-Graph-Subject-Predicate-Object (Primary=S, Secondary=P, Tertiary=O)
 }
 
 /// <summary>
@@ -1151,7 +1155,7 @@ public readonly ref struct ResolvedTemporalQuad
         ReadOnlySpan<char> graph,
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
-        ReadOnlySpan<char> obj,
+        ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         DateTimeOffset transactionTime,
@@ -1160,7 +1164,7 @@ public readonly ref struct ResolvedTemporalQuad
         Graph = graph;
         Subject = subject;
         Predicate = predicate;
-        Object = obj;
+        Object = @object;
         ValidFrom = validFrom;
         ValidTo = validTo;
         TransactionTime = transactionTime;
@@ -1200,7 +1204,7 @@ public ref struct NamedGraphEnumerator
     {
         while (_enumerator.MoveNext())
         {
-            var graphAtom = _enumerator.Current.GraphAtom;
+            var graphAtom = _enumerator.Current.Graph;
 
             // Skip default graph (atom 0)
             if (graphAtom == 0)
