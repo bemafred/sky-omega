@@ -682,9 +682,26 @@ internal sealed unsafe class QuadIndex : IDisposable
         public TemporalQuadEnumerator GetEnumerator() => this;
     }
 
+#if DEBUG
+    private long _pageAccessCount;
+
+    /// <summary>
+    /// Number of page accesses since last reset. Debug builds only.
+    /// </summary>
+    internal long PageAccessCount => _pageAccessCount;
+
+    /// <summary>
+    /// Reset the page access counter. Debug builds only.
+    /// </summary>
+    internal void ResetPageAccessCount() => _pageAccessCount = 0;
+#endif
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private TemporalBTreePage* GetPage(long pageId)
     {
+#if DEBUG
+        System.Threading.Interlocked.Increment(ref _pageAccessCount);
+#endif
         if (_pageCache.TryGet(pageId, out var cachedPtr))
             return (TemporalBTreePage*)cachedPtr;
 

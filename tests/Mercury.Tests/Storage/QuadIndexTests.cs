@@ -514,4 +514,146 @@ public class QuadIndexTests : IDisposable
     }
 
     #endregion
+
+    #region TimeFirst Sort Order (ADR-022)
+
+    [Fact]
+    public void TimeFirst_SortOrder_EnumeratesByValidFromFirst()
+    {
+        // Create a TimeFirst index
+        var timeFirstPath = Path.Combine(_testDir, "timefirst.tdb");
+        using var index = new QuadIndex(timeFirstPath, null, sortOrder: QuadIndex.KeySortOrder.TimeFirst);
+
+        // Entry A: low entity ID, HIGH time
+        var highTime = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        // Entry B: high entity ID, LOW time
+        var lowTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Insert A first (low entity, high time)
+        index.AddHistorical("<http://ex.org/aaa>", "<http://ex.org/p>", "<http://ex.org/o>",
+            highTime, highTime.AddYears(1));
+
+        // Insert B second (high entity, low time)
+        index.AddHistorical("<http://ex.org/zzz>", "<http://ex.org/p>", "<http://ex.org/o>",
+            lowTime, lowTime.AddYears(1));
+
+        // Enumerate all entries — TimeFirst should yield B (lowTime) before A (highTime)
+        var results = index.QueryHistory(
+            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+
+        Assert.True(results.MoveNext(), "Expected first result");
+        var first = results.Current;
+
+        Assert.True(results.MoveNext(), "Expected second result");
+        var second = results.Current;
+
+        Assert.False(results.MoveNext(), "Expected only two results");
+
+        // TimeFirst: ValidFrom should be ascending across results
+        Assert.True(first.ValidFrom < second.ValidFrom,
+            $"TimeFirst sort should yield lower ValidFrom first. Got {first.ValidFrom} then {second.ValidFrom}");
+
+        // The first result should be the zzz entry (low time) and second should be aaa (high time)
+        var firstPrimary = index.Atoms.GetAtomString(first.Primary);
+        var secondPrimary = index.Atoms.GetAtomString(second.Primary);
+        Assert.Equal("<http://ex.org/zzz>", firstPrimary);
+        Assert.Equal("<http://ex.org/aaa>", secondPrimary);
+    }
+
+    [Fact]
+    public void EntityFirst_SortOrder_EnumeratesByEntityFirst()
+    {
+        // Create an EntityFirst index for comparison
+        var entityFirstPath = Path.Combine(_testDir, "entityfirst.tdb");
+        using var index = new QuadIndex(entityFirstPath, null, sortOrder: QuadIndex.KeySortOrder.EntityFirst);
+
+        // Same data as above
+        var highTime = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var lowTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        index.AddHistorical("<http://ex.org/aaa>", "<http://ex.org/p>", "<http://ex.org/o>",
+            highTime, highTime.AddYears(1));
+        index.AddHistorical("<http://ex.org/zzz>", "<http://ex.org/p>", "<http://ex.org/o>",
+            lowTime, lowTime.AddYears(1));
+
+        // Enumerate — EntityFirst should yield aaa before zzz (entity order)
+        var results = index.QueryHistory(
+            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+
+        Assert.True(results.MoveNext());
+        var firstPrimary = index.Atoms.GetAtomString(results.Current.Primary);
+
+        Assert.True(results.MoveNext());
+        var secondPrimary = index.Atoms.GetAtomString(results.Current.Primary);
+
+        Assert.Equal("<http://ex.org/aaa>", firstPrimary);
+        Assert.Equal("<http://ex.org/zzz>", secondPrimary);
+    }
+
+#if DEBUG
+    [Fact]
+    public void TimeFirst_TemporalRangeQuery_VisitsFewerPages()
+    {
+        // Create two indexes with the same data: one EntityFirst, one TimeFirst
+        var entityPath = Path.Combine(_testDir, "pages_entity.tdb");
+        var timePath = Path.Combine(_testDir, "pages_time.tdb");
+        using var entityIndex = new QuadIndex(entityPath, null, sortOrder: QuadIndex.KeySortOrder.EntityFirst);
+        using var timeIndex = new QuadIndex(timePath, null, sortOrder: QuadIndex.KeySortOrder.TimeFirst);
+
+        // Insert 5000 entries spread across 10 years (2020-2030)
+        // ~27 leaf pages (5000 / 185 entries per page)
+        var baseTime = new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        for (int i = 0; i < 5000; i++)
+        {
+            var validFrom = baseTime.AddHours(i * 18); // ~18-hour intervals over 10 years
+            var validTo = validFrom.AddDays(7);         // each valid for 7 days
+
+            entityIndex.AddHistorical(
+                $"<http://ex.org/s{i:D5}>", "<http://ex.org/p>", "<http://ex.org/o>",
+                validFrom, validTo);
+            timeIndex.AddHistorical(
+                $"<http://ex.org/s{i:D5}>", "<http://ex.org/p>", "<http://ex.org/o>",
+                validFrom, validTo);
+        }
+
+        // Query a narrow window near the START: [2020-03-01, 2020-06-01]
+        // With maxKey.ValidFrom = rangeEnd, the TimeFirst index stops scanning
+        // after ValidFrom passes 2020-06-01 (~5% of the 10-year range).
+        // EntityFirst has maxKey.ValidFrom = MAX and must scan all leaf pages.
+        var rangeStart = new DateTimeOffset(2020, 3, 1, 0, 0, 0, TimeSpan.Zero);
+        var rangeEnd = new DateTimeOffset(2020, 6, 1, 0, 0, 0, TimeSpan.Zero);
+
+        // Reset counters before querying
+        entityIndex.ResetPageAccessCount();
+        timeIndex.ResetPageAccessCount();
+
+        // Query EntityFirst index
+        var entityResults = entityIndex.QueryRange(
+            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+            rangeStart, rangeEnd);
+        var entityCount = 0;
+        while (entityResults.MoveNext()) entityCount++;
+        var entityPages = entityIndex.PageAccessCount;
+
+        // Query TimeFirst index
+        var timeResults = timeIndex.QueryRange(
+            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+            rangeStart, rangeEnd);
+        var timeCount = 0;
+        while (timeResults.MoveNext()) timeCount++;
+        var timePages = timeIndex.PageAccessCount;
+
+        // Both must return the same results
+        Assert.Equal(entityCount, timeCount);
+        Assert.True(entityCount > 0, "Query should match some entries");
+
+        // TimeFirst should visit fewer pages than EntityFirst
+        Assert.True(timePages < entityPages,
+            $"TimeFirst should visit fewer pages than EntityFirst. " +
+            $"TimeFirst: {timePages}, EntityFirst: {entityPages} " +
+            $"(matched {entityCount} entries out of 5000)");
+    }
+#endif
+
+    #endregion
 }
