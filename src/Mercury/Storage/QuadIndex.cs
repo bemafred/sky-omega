@@ -1078,7 +1078,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         return page->GetEntry(right).ChildOrValue;
     }
 
-    private static TemporalKey CreateSearchKey(
+    private TemporalKey CreateSearchKey(
         long graph, long primary, long secondary, long tertiary,
         TemporalQuery query,
         bool isMin)
@@ -1095,13 +1095,35 @@ internal sealed unsafe class QuadIndex : IDisposable
         else
             graphValue = graph;
 
+        // For TimeFirst sort order, ValidFrom is the leading dimension.
+        // Temporal overlap semantics: ValidFrom < rangeEnd AND ValidTo > rangeStart.
+        // minKey.ValidFrom stays 0 because entries starting before the query window
+        // may still overlap (their ValidTo extends into the window).
+        // maxKey.ValidFrom = rangeEnd/asOfTime to skip entries that can't overlap.
+        // This narrows the scan from O(N) to O(log N + k') where k' = entries with
+        // ValidFrom < rangeEnd. MatchesTemporalQuery post-filters ValidTo > rangeStart.
+        long validFrom;
+        if (_sortOrder == KeySortOrder.TimeFirst && !isMin)
+        {
+            validFrom = query.Type switch
+            {
+                TemporalQueryType.Range => query.RangeEnd,
+                TemporalQueryType.AsOf => query.AsOfTime,
+                _ => long.MaxValue
+            };
+        }
+        else
+        {
+            validFrom = unboundValue;
+        }
+
         return new TemporalKey
         {
             Graph = graphValue,
             Primary = primary < 0 ? unboundValue : primary,
             Secondary = secondary < 0 ? unboundValue : secondary,
             Tertiary = tertiary < 0 ? unboundValue : tertiary,
-            ValidFrom = isMin ? 0 : long.MaxValue,
+            ValidFrom = validFrom,
             ValidTo = isMin ? 0 : long.MaxValue,
             TransactionTime = isMin ? 0 : long.MaxValue
         };
