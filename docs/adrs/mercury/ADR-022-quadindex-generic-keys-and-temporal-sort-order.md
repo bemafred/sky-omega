@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** — 2026-03-08 | Phases 1–3 complete — 2026-03-10
+**Accepted** — 2026-03-08 | All phases complete — 2026-03-10
 
 ## Context
 
