@@ -10,7 +10,7 @@ Lucy is a convenience layer over Mercury that provides semantic memory operation
 
 ## Context
 
-Mercury is a complete, production-ready RDF engine (v1.3.7, 100% W3C conformance). It speaks triples, atoms, SPARQL, and bitemporal queries. This is powerful but low-level — like having direct access to the storage controller without a filesystem.
+Mercury is a complete, production-ready RDF engine (v1.3.8, 100% W3C conformance). It speaks triples, atoms, SPARQL, and bitemporal queries. This is powerful but low-level — like having direct access to the storage controller without a filesystem.
 
 James (ADR-001) establishes that cognites — situated epistemic state changes — must be persisted with full provenance (quadrant, reference frame, EEE phase, primary question, temporal coordinates). James stores through Lucy, not directly through Mercury. Sky dispatches through James and receives context enriched by Lucy's recall.
 

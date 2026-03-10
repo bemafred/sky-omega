@@ -11,6 +11,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.8] - 2026-03-10
+
+QuadIndex generic key fields and time-leading sort order (ADR-022).
+
+### Changed
+
+#### QuadIndex Generic Keys (ADR-022 Phase 1)
+- **TemporalKey fields renamed** — `SubjectAtom`/`PredicateAtom`/`ObjectAtom` → `Primary`/`Secondary`/`Tertiary`; `GraphAtom` → `Graph`
+- **QuadIndex method parameters** — `subject`/`predicate`/`obj` → `primary`/`secondary`/`tertiary`
+- **QuadStore public API** — `obj` → `@object` (idiomatic C# keyword escape)
+- **TemporalIndexType enum** — `SPOT`/`POST`/`OSPT`/`TSPO` → `GSPO`/`GPOS`/`GOSP`/`TGSP`
+
+### Fixed
+
+#### TGSP Index (ADR-022 Phases 2–3)
+- **TGSP was a byte-for-byte duplicate of GSPO** — introduced `KeySortOrder` enum and `KeyComparer` delegate so TGSP uses `TimeFirst` sort order (ValidFrom leads), while GSPO/GPOS/GOSP use `EntityFirst`
+- **Temporal range queries O(N) → O(log N + k)** — `CreateSearchKey` now produces time-leading bounds for `TimeFirst` indexes, enabling B+Tree seek instead of full scan
+
+### Added
+
+- **Page access instrumentation** (`#if DEBUG`) — `PageAccessCount`/`ResetPageAccessCount()` on `QuadIndex` for verifying index efficiency in tests
+- **3 verification tests** — sort order correctness (TimeFirst, EntityFirst) and page access efficiency comparison
+
+### Documentation
+
+- **ADR-022** completed — all 4 phases implemented
+- **Initial ADRs** for Lucy, James, Sky, and Mira cognitive components (Sky Omega 2.0)
+
+---
+
+## [1.3.7] - 2026-03-07
+
+### Fixed
+
+- **CLI argument validation** — prevent accidental store creation from unrecognized arguments
+
+---
+
 ## [1.3.6] - 2026-03-05
 
 CLI and MCP connectivity improvements.
@@ -506,6 +544,9 @@ First versioned release of Sky Omega Mercury - a semantic-aware storage and quer
 - Multiple SERVICE clauses in single query not yet supported
 - TrigramIndex uses full rebuild on delete (lazy deletion not implemented)
 
+[1.3.8]: https://github.com/bemafred/sky-omega/releases/tag/v1.3.8
+[1.3.7]: https://github.com/bemafred/sky-omega/releases/tag/v1.3.7
+[1.3.6]: https://github.com/bemafred/sky-omega/releases/tag/v1.3.6
 [1.3.0]: https://github.com/bemafred/sky-omega/releases/tag/v1.3.0
 [1.2.2]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.2
 [1.2.1]: https://github.com/bemafred/sky-omega/releases/tag/v1.2.1

@@ -14,7 +14,7 @@ From the canonical definition: Mira is the embodied integration surface of Sky O
 
 ### What Already Exists
 
-Mercury v1.3.7 already has operational Mira surfaces, though they predate the formal component naming:
+Mercury v1.3.8 already has operational Mira surfaces, though they predate the formal component naming:
 
 | Surface | Implementation | Status |
 |---------|---------------|--------|

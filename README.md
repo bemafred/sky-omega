@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.3.0 Released** — Public facade layer, type internalization, 100% W3C SPARQL 1.1 conformance.
+> **v1.3.8 Released** — QuadIndex generic key fields, time-leading sort order, O(log N + k) temporal queries.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
@@ -100,7 +100,7 @@ The broader Sky Omega vision is a **stand-alone cognitive agent** built on this 
 | 100% W3C SPARQL 1.1 conformance  | 618 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
 | 100% W3C conformance (all formats)| 2,063 passing tests  | `dotnet test --filter "W3C"`                 |
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 3,995 tests passing              | Test suite            | `dotnet test`                                |
+| 3,978 tests passing              | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~167K lines           | See [STATISTICS.md](STATISTICS.md)           |
 

@@ -135,7 +135,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = "1.3.7"
+            Version = "1.3.8"
         };
     })
     .WithStdioServerTransport()
