@@ -96,10 +96,12 @@ public sealed class QuadStore : IDisposable
             WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager);
 
         // Create indexes with shared atom store
-        _gspoIndex = new QuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes);
-        _gposIndex = new QuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes);
-        _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes);
-        _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes);
+        // Entity-first indexes sort by Graph → dimensions → time
+        // TGSP uses time-first sort for O(log N + k) temporal range queries
+        _gspoIndex = new QuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
+        _gposIndex = new QuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
+        _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
+        _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.TimeFirst);
 
         // Create trigram index for full-text search if enabled
         if (options.EnableFullTextSearch)

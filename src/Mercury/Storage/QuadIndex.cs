@@ -28,6 +28,8 @@ internal sealed unsafe class QuadIndex : IDisposable
     private readonly AtomStore _atoms;
     private readonly bool _ownsAtomStore;
     private readonly PageCache _pageCache;
+    private readonly KeyComparer _comparer;
+    private readonly KeySortOrder _sortOrder;
 
     // Cached base pointer acquired once during construction (avoids repeated AcquirePointer calls)
     private byte* _basePtr;
@@ -41,7 +43,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Create a temporal quad store with its own atom store
     /// </summary>
     public QuadIndex(string filePath, long initialSizeBytes = 1L << 30)
-        : this(filePath, null, initialSizeBytes)
+        : this(filePath, null, initialSizeBytes, KeySortOrder.EntityFirst)
     {
     }
 
@@ -52,8 +54,13 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Internal: AtomStore parameter requires external synchronization.
     /// Use this constructor only when sharing an AtomStore across indexes.
     /// </remarks>
-    internal QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30)
+    internal QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30,
+        KeySortOrder sortOrder = KeySortOrder.EntityFirst)
     {
+        _sortOrder = sortOrder;
+        _comparer = sortOrder == KeySortOrder.TimeFirst
+            ? TemporalKey.CompareTimeFirst
+            : TemporalKey.CompareEntityFirst;
         _fileStream = new FileStream(
             filePath,
             FileMode.OpenOrCreate,
@@ -108,6 +115,17 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// QuadStore's read/write locks.
     /// </remarks>
     internal AtomStore Atoms => _atoms;
+
+    /// <summary>
+    /// The sort order used by this index instance.
+    /// </summary>
+    internal KeySortOrder SortOrder => _sortOrder;
+
+    /// <summary>
+    /// Compare two keys using this index's sort order.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal int CompareKeys(in TemporalKey a, in TemporalKey b) => _comparer(in a, in b);
 
     /// <summary>
     /// Add a temporal quad with explicit time bounds
@@ -257,7 +275,7 @@ internal sealed unsafe class QuadIndex : IDisposable
             }
 
             // If we've passed the key range, stop searching
-            if (entry.Key.CompareTo(key) > 0)
+            if (CompareKeys(in entry.Key, in key) > 0)
                 break;
         }
 
@@ -419,6 +437,24 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     /// <summary>
+    /// Sort order for TemporalKey comparisons.
+    /// Selected once at QuadIndex construction; the JIT optimizes monomorphic delegate call sites.
+    /// </summary>
+    internal enum KeySortOrder
+    {
+        /// <summary>Graph → Primary → Secondary → Tertiary → ValidFrom → ValidTo → TransactionTime</summary>
+        EntityFirst,
+
+        /// <summary>ValidFrom → Graph → Primary → Secondary → Tertiary → ValidTo → TransactionTime</summary>
+        TimeFirst
+    }
+
+    /// <summary>
+    /// Delegate type for key comparison. Selected once at construction, stored as a field.
+    /// </summary>
+    internal delegate int KeyComparer(in TemporalKey a, in TemporalKey b);
+
+    /// <summary>
     /// Temporal key: Graph + 3 generic dimensions + ValidTime + TransactionTime (56 bytes)
     /// QuadIndex is a generic multi-dimensional B+Tree. The RDF-to-dimension mapping
     /// (Subject→Primary, Predicate→Secondary, Object→Tertiary) lives in QuadStore.
@@ -434,31 +470,65 @@ internal sealed unsafe class QuadIndex : IDisposable
         public long ValidTo;         // Valid-time end (milliseconds since epoch)
         public long TransactionTime; // Transaction-time (when recorded)
 
+        /// <summary>
+        /// Default comparison: EntityFirst order.
+        /// Used by IComparable for cases where no delegate is available.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public readonly int CompareTo(TemporalKey other)
+        public readonly int CompareTo(TemporalKey other) => CompareEntityFirst(in this, in other);
+
+        /// <summary>
+        /// Graph → Primary → Secondary → Tertiary → ValidFrom → ValidTo → TransactionTime
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static int CompareEntityFirst(in TemporalKey a, in TemporalKey b)
         {
-            // Primary sort: Graph → Primary → Secondary → Tertiary
-            var cmp = Graph.CompareTo(other.Graph);
+            var cmp = a.Graph.CompareTo(b.Graph);
             if (cmp != 0) return cmp;
 
-            cmp = Primary.CompareTo(other.Primary);
+            cmp = a.Primary.CompareTo(b.Primary);
             if (cmp != 0) return cmp;
 
-            cmp = Secondary.CompareTo(other.Secondary);
+            cmp = a.Secondary.CompareTo(b.Secondary);
             if (cmp != 0) return cmp;
 
-            cmp = Tertiary.CompareTo(other.Tertiary);
+            cmp = a.Tertiary.CompareTo(b.Tertiary);
             if (cmp != 0) return cmp;
 
-            // Secondary sort: Valid time
-            cmp = ValidFrom.CompareTo(other.ValidFrom);
+            cmp = a.ValidFrom.CompareTo(b.ValidFrom);
             if (cmp != 0) return cmp;
 
-            cmp = ValidTo.CompareTo(other.ValidTo);
+            cmp = a.ValidTo.CompareTo(b.ValidTo);
             if (cmp != 0) return cmp;
 
-            // Tertiary sort: Transaction time
-            return TransactionTime.CompareTo(other.TransactionTime);
+            return a.TransactionTime.CompareTo(b.TransactionTime);
+        }
+
+        /// <summary>
+        /// ValidFrom → Graph → Primary → Secondary → Tertiary → ValidTo → TransactionTime
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static int CompareTimeFirst(in TemporalKey a, in TemporalKey b)
+        {
+            var cmp = a.ValidFrom.CompareTo(b.ValidFrom);
+            if (cmp != 0) return cmp;
+
+            cmp = a.Graph.CompareTo(b.Graph);
+            if (cmp != 0) return cmp;
+
+            cmp = a.Primary.CompareTo(b.Primary);
+            if (cmp != 0) return cmp;
+
+            cmp = a.Secondary.CompareTo(b.Secondary);
+            if (cmp != 0) return cmp;
+
+            cmp = a.Tertiary.CompareTo(b.Tertiary);
+            if (cmp != 0) return cmp;
+
+            cmp = a.ValidTo.CompareTo(b.ValidTo);
+            if (cmp != 0) return cmp;
+
+            return a.TransactionTime.CompareTo(b.TransactionTime);
         }
     }
 
@@ -545,11 +615,11 @@ internal sealed unsafe class QuadIndex : IDisposable
                     _currentKey = entry.Key;
                     _currentIsDeleted = entry.IsDeleted;
 
-                    // Check spatial bounds
-                    if (_currentKey.CompareTo(_maxKey) > 0)
+                    // Check spatial bounds using the index's sort order
+                    if (_store.CompareKeys(in _currentKey, in _maxKey) > 0)
                         return false;
 
-                    if (_currentKey.CompareTo(_minKey) >= 0)
+                    if (_store.CompareKeys(in _currentKey, in _minKey) >= 0)
                     {
                         // Check temporal bounds
                         if (MatchesTemporalQuery(entry))
@@ -706,7 +776,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         while (insertPos < page->EntryCount)
         {
             ref var entry = ref page->GetEntry(insertPos);
-            if (key.CompareTo(entry.Key) < 0)
+            if (CompareKeys(in key, in entry.Key) < 0)
                 break;
             insertPos++;
         }
@@ -812,7 +882,7 @@ internal sealed unsafe class QuadIndex : IDisposable
 
         // Insert the new key into the appropriate page
         // (recursive call is safe - pages now have room after split)
-        if (key.CompareTo(promotedKey) < 0)
+        if (CompareKeys(in key, in promotedKey) < 0)
         {
             InsertIntoLeaf(page, key);
         }
@@ -840,7 +910,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         while (insertPos < page->EntryCount)
         {
             ref var entry = ref page->GetEntry(insertPos);
-            if (key.CompareTo(entry.Key) < 0)
+            if (CompareKeys(in key, in entry.Key) < 0)
                 break;
             insertPos++;
         }
@@ -923,7 +993,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         }
 
         // Insert the new key into the appropriate page
-        if (key.CompareTo(promotedKey) < 0)
+        if (CompareKeys(in key, in promotedKey) < 0)
         {
             InsertIntoInternal(page, key, rightChildPageId);
         }
@@ -993,7 +1063,7 @@ internal sealed unsafe class QuadIndex : IDisposable
             int mid = left + (right - left) / 2;
             ref var entry = ref page->GetEntry(mid);
 
-            var cmp = key.CompareTo(entry.Key);
+            var cmp = CompareKeys(in key, in entry.Key);
             if (cmp < 0)
                 right = mid - 1;
             else
