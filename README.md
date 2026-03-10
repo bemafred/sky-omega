@@ -102,7 +102,7 @@ The broader Sky Omega vision is a **stand-alone cognitive agent** built on this 
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
 | 3,978 tests passing              | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | ~167K lines           | See [STATISTICS.md](STATISTICS.md)           |
+| Development velocity             | ~170K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
 ---
 
@@ -118,7 +118,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 74,600 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC     |
+| **Mercury**            | Temporal RDF substrate — 74,750 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC     |
 | **Mercury.Solid**      | W3C Solid Protocol server with WAC/ACP access control                                      |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
