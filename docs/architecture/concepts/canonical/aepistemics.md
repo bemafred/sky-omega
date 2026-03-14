@@ -35,3 +35,4 @@ Aepistemics is the premature commitment to building what has not yet been unders
 - A system built aepistemically may function, but its correctness is accidental rather than justified.
 - The term is analogous to atheism — but where atheism names the absence of belief, aepistemics diagnoses the absence of the *process* by which belief becomes knowledge.
 - Recognizing aepistemics is itself an epistemic act: it surfaces the unknown known that "we skipped understanding."
+- Theism is a domain-specific instance of aepistemics — emergence (wonder, mystery) proceeding directly to engineering (dogma, ritual, commandments) without epistemic clarification. Atheism, historically framed as a counter-position, is more precisely understood as the recognition of aepistemics within the domain of existence. This reframing generalizes: AI hype, organizational theater, and uncritical policy-making are structurally identical — aepistemics applied to different domains.
