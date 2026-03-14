@@ -31,6 +31,7 @@ The philosophical and architectural stances that govern *how* we think about the
 
 *   [**E-Clean (Epistemically Clean)**](e-clean.md) – The architectural stance requiring strict separation of knowns, unknowns, and assumptions.
 *   [**EEE (Emergence, Epistemic, Engineering)**](eee-emergence-epistemic-engineering.md) – The lens distinguishing exploration, clarification, and construction.
+*   [**Aepistemics**](aepistemics.md) – The diagnosis of proceeding from emergence directly to engineering without epistemic clarification.
 *   [**Structured Intelligence**](structured-intelligence.md) – Intelligence grounded in explicit structure and traceable meaning, rather than statistical probability.
 *   [**Epistemic Cleanliness**](epistemic-cleanliness.md) – Detailed elaboration on maintaining epistemic hygiene.
 *   [**Epistemic Consolidation Protocol (ECP)**](epistemic-consolidation-protocol-ecp.md) – The protocol for moving knowledge from transient states to permanent structure.
