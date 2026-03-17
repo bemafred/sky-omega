@@ -19,6 +19,7 @@ public class PruneEngineTests : IDisposable
     private QuadStorePool CreatePool()
     {
         _pool = QuadStorePool.CreateTemp("prune-engine-test", QuadStorePoolOptions.ForTesting);
+        _pool.EnsureActive("primary");
         return _pool;
     }
 
@@ -26,7 +27,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_BasicPrune_TransfersAllQuads()
     {
         var pool = CreatePool();
-        var primary = pool["primary"];
+        var primary = pool.GetOrCreate("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"v1\"");
         primary.AddCurrent("<http://ex/s2>", "<http://ex/p>", "\"v2\"");
         primary.AddCurrent("<http://ex/s3>", "<http://ex/p>", "\"v3\"");
@@ -47,7 +48,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_ExcludeGraphs_FiltersQuads()
     {
         var pool = CreatePool();
-        var primary = pool["primary"];
+        var primary = pool.GetOrCreate("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"v1\"");
         primary.AddCurrent("<http://ex/s2>", "<http://ex/p>", "\"v2\"", "<http://ex/temp>");
         primary.AddCurrent("<http://ex/s3>", "<http://ex/p>", "\"v3\"", "<http://ex/temp>");
@@ -68,7 +69,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_ExcludePredicates_FiltersQuads()
     {
         var pool = CreatePool();
-        var primary = pool["primary"];
+        var primary = pool.GetOrCreate("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/keep>", "\"v1\"");
         primary.AddCurrent("<http://ex/s2>", "<http://ex/remove>", "\"v2\"");
         primary.AddCurrent("<http://ex/s3>", "<http://ex/keep>", "\"v3\"");
@@ -89,7 +90,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_DryRun_DoesNotSwitch()
     {
         var pool = CreatePool();
-        var primary = pool["primary"];
+        var primary = pool.GetOrCreate("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"v1\"");
         primary.AddCurrent("<http://ex/s2>", "<http://ex/p>", "\"v2\"");
 
@@ -111,7 +112,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_FlattenToCurrent_IsDefault()
     {
         var pool = CreatePool();
-        var primary = pool["primary"];
+        var primary = pool.GetOrCreate("primary");
         primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"v1\"");
 
         var result = PruneEngine.Execute(pool);
@@ -124,7 +125,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_PreserveVersions_TransfersHistory()
     {
         var pool = CreatePool();
-        var primary = pool["primary"];
+        var primary = pool.GetOrCreate("primary");
         primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"v1\"");
 
         var options = new PruneOptions
@@ -142,7 +143,7 @@ public class PruneEngineTests : IDisposable
     public void Execute_HasTimingInfo()
     {
         var pool = CreatePool();
-        pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "\"v\"");
+        pool.GetOrCreate("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "\"v\"");
 
         var result = PruneEngine.Execute(pool);
 

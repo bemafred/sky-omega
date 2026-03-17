@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.ComponentModel;
+using System.Reflection;
 using System.Text;
 using ModelContextProtocol.Server;
 using SkyOmega.Mercury;
@@ -156,6 +157,15 @@ public sealed class MercuryTools
     public string Store()
     {
         return _storePath.Path;
+    }
+
+    [McpServerTool(Name = "mercury_version"), Description("Get the Mercury MCP server version")]
+    public string Version()
+    {
+        var version = typeof(MercuryTools).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "unknown";
+        return $"mercury-mcp {version}";
     }
 
     [McpServerTool(Name = "mercury_prune"), Description("Compact the Mercury store by removing soft-deleted data and optionally filtering graphs or predicates")]

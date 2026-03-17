@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.3.8 Released** — QuadIndex generic key fields, time-leading sort order, O(log N + k) temporal queries.
+> **v1.3.9 Released** — QuadStorePool explicit store lifecycle: `EnsureActive`, `GetOrCreate`, indexer is pure lookup.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**

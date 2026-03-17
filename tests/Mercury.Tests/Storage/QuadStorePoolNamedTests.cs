@@ -38,7 +38,7 @@ public class QuadStorePoolNamedTests : IDisposable
         var basePath = pool.BasePath!;
 
         // Create a named store
-        var store = pool["primary"];
+        var store = pool.GetOrCreate("primary");
         store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         Assert.True(Directory.Exists(basePath));
@@ -55,11 +55,19 @@ public class QuadStorePoolNamedTests : IDisposable
     #region Named Store Indexer Tests
 
     [Fact]
-    public void Indexer_CreatesStoreOnFirstAccess()
+    public void Indexer_ThrowsForNonexistentStore()
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var store = _pool["primary"];
+        Assert.Throws<KeyNotFoundException>(() => _pool["primary"]);
+    }
+
+    [Fact]
+    public void GetOrCreate_CreatesStoreOnFirstAccess()
+    {
+        _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
+
+        var store = _pool.GetOrCreate("primary");
 
         Assert.NotNull(store);
         Assert.Contains("primary", _pool.StoreNames);
@@ -70,7 +78,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var store1 = _pool["primary"];
+        var store1 = _pool.GetOrCreate("primary");
         store1.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         var store2 = _pool["primary"];
@@ -81,13 +89,13 @@ public class QuadStorePoolNamedTests : IDisposable
     }
 
     [Fact]
-    public void Indexer_CreatesMultipleStores()
+    public void GetOrCreate_CreatesMultipleStores()
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
-        var secondary = _pool["secondary"];
-        var tertiary = _pool["tertiary"];
+        var primary = _pool.GetOrCreate("primary");
+        var secondary = _pool.GetOrCreate("secondary");
+        var tertiary = _pool.GetOrCreate("tertiary");
 
         Assert.NotSame(primary, secondary);
         Assert.NotSame(secondary, tertiary);
@@ -104,19 +112,40 @@ public class QuadStorePoolNamedTests : IDisposable
         Assert.Throws<ArgumentException>(() => _pool["   "]);
     }
 
+    [Fact]
+    public void GetOrCreate_ThrowsOnNullOrWhitespaceName()
+    {
+        _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
+
+        Assert.Throws<ArgumentNullException>(() => _pool.GetOrCreate(null!));
+        Assert.Throws<ArgumentException>(() => _pool.GetOrCreate(""));
+        Assert.Throws<ArgumentException>(() => _pool.GetOrCreate("   "));
+    }
+
     #endregion
 
     #region Active Store Tests
 
     [Fact]
-    public void Active_FirstStoreBecomesActive()
+    public void Active_EnsureActiveSetsActive()
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var store = _pool["primary"];
+        var store = _pool.EnsureActive("primary");
 
         Assert.Equal("primary", _pool.ActiveName);
         Assert.Same(store, _pool.Active);
+    }
+
+    [Fact]
+    public void Active_GetOrCreateDoesNotSetActive()
+    {
+        _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
+
+        _pool.GetOrCreate("primary");
+
+        Assert.Null(_pool.ActiveName);
+        Assert.Throws<InvalidOperationException>(() => _pool.Active);
     }
 
     [Fact]
@@ -134,8 +163,8 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
-        var secondary = _pool["secondary"];
+        var primary = _pool.EnsureActive("primary");
+        var secondary = _pool.GetOrCreate("secondary");
 
         Assert.Equal("primary", _pool.ActiveName);
 
@@ -162,8 +191,8 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
-        var secondary = _pool["secondary"];
+        var primary = _pool.GetOrCreate("primary");
+        var secondary = _pool.GetOrCreate("secondary");
 
         primary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"primary-data\"");
         secondary.AddCurrent("<http://ex/s>", "<http://ex/p>", "\"secondary-data\"");
@@ -179,15 +208,11 @@ public class QuadStorePoolNamedTests : IDisposable
     }
 
     [Fact]
-    public void Switch_CreatesStoresIfNeeded()
+    public void Switch_ThrowsForNonexistentStore()
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        // Neither store exists yet
-        _pool.Switch("a", "b");
-
-        Assert.Contains("a", _pool.StoreNames);
-        Assert.Contains("b", _pool.StoreNames);
+        Assert.Throws<KeyNotFoundException>(() => _pool.Switch("a", "b"));
     }
 
     [Fact]
@@ -195,7 +220,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var store = _pool["primary"];
+        var store = _pool.GetOrCreate("primary");
         store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         _pool.Switch("primary", "primary");
@@ -214,8 +239,8 @@ public class QuadStorePoolNamedTests : IDisposable
             // Create pool with named stores - add different amounts to each
             using (var pool = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting))
             {
-                pool["primary"].AddCurrent("<http://ex/s1>", "<http://ex/p>", "<http://ex/o>");
-                pool["secondary"].AddCurrent("<http://ex/s1>", "<http://ex/p>", "<http://ex/o>");
+                pool.GetOrCreate("primary").AddCurrent("<http://ex/s1>", "<http://ex/p>", "<http://ex/o>");
+                pool.GetOrCreate("secondary").AddCurrent("<http://ex/s1>", "<http://ex/p>", "<http://ex/o>");
                 pool["secondary"].AddCurrent("<http://ex/s2>", "<http://ex/p>", "<http://ex/o>");
                 pool.Switch("primary", "secondary");
             }
@@ -247,8 +272,8 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        _pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
-        var _ = _pool["secondary"]; // Create secondary so we can delete primary
+        _pool.GetOrCreate("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        var _ = _pool.GetOrCreate("secondary"); // Create secondary so we can delete primary
 
         _pool.SetActive("secondary");
         _pool.Delete("primary");
@@ -261,7 +286,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var _ = _pool["primary"];
+        _pool.EnsureActive("primary");
 
         Assert.Throws<InvalidOperationException>(() => _pool.Delete("primary"));
     }
@@ -283,7 +308,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var store = _pool["primary"];
+        var store = _pool.GetOrCreate("primary");
         store.AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         var (countBefore, _, _) = store.GetStatistics();
@@ -296,13 +321,11 @@ public class QuadStorePoolNamedTests : IDisposable
     }
 
     [Fact]
-    public void Clear_CreatesStoreIfNotExists()
+    public void Clear_ThrowsForNonexistentStore()
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        _pool.Clear("newstore");
-
-        Assert.Contains("newstore", _pool.StoreNames);
+        Assert.Throws<KeyNotFoundException>(() => _pool.Clear("newstore"));
     }
 
     #endregion
@@ -318,7 +341,7 @@ public class QuadStorePoolNamedTests : IDisposable
             // Create pool with data
             using (var pool = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting))
             {
-                pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+                pool.GetOrCreate("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
             }
 
             // Reopen and verify
@@ -343,8 +366,8 @@ public class QuadStorePoolNamedTests : IDisposable
         {
             using (var pool = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting))
             {
-                var _ = pool["primary"];
-                var __ = pool["secondary"];
+                var _ = pool.GetOrCreate("primary");
+                var __ = pool.GetOrCreate("secondary");
                 pool.SetActive("secondary");
             }
 
@@ -368,8 +391,8 @@ public class QuadStorePoolNamedTests : IDisposable
         {
             using (var pool = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting))
             {
-                var _ = pool["primary"];
-                var __ = pool["secondary"];
+                var _ = pool.GetOrCreate("primary");
+                var __ = pool.GetOrCreate("secondary");
                 pool.SetActive("secondary");
             }
 
@@ -401,7 +424,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        _pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        _pool.GetOrCreate("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         // Should have some disk usage (at least the index files)
         Assert.True(_pool.TotalDiskUsage > 0);
@@ -426,7 +449,7 @@ public class QuadStorePoolNamedTests : IDisposable
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
         // Create a named store
-        _pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        _pool.GetOrCreate("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
 
         // Rent should still work
         var rented = _pool.Rent();
@@ -447,7 +470,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var _ = _pool["primary"];
+        var _ = _pool.GetOrCreate("primary");
 
         using (var lease = _pool.RentScoped())
         {
@@ -466,7 +489,7 @@ public class QuadStorePoolNamedTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("test", QuadStorePoolOptions.ForTesting);
 
-        var _ = _pool["primary"];
+        var _ = _pool.GetOrCreate("primary");
         var rented = _pool.Rent();
         _pool.Return(rented);
 

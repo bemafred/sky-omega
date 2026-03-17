@@ -219,12 +219,12 @@ public sealed class QuadStorePool : IDisposable
     #region Named Store API
 
     /// <summary>
-    /// Gets a named store by name. Creates the store on first access.
+    /// Gets a named store by name.
     /// </summary>
     /// <param name="name">Logical name for the store (e.g., "primary", "secondary").</param>
     /// <returns>The QuadStore instance.</returns>
     /// <exception cref="ObjectDisposedException">Thrown if pool is disposed.</exception>
-    /// <exception cref="InsufficientDiskSpaceException">Thrown if disk budget would be exceeded.</exception>
+    /// <exception cref="KeyNotFoundException">Thrown if the store doesn't exist.</exception>
     public QuadStore this[string name]
     {
         get
@@ -237,28 +237,7 @@ public sealed class QuadStorePool : IDisposable
                 if (_namedStores.TryGetValue(name, out var existing))
                     return existing;
 
-                // Create new named store
-                var guid = Guid.CreateVersion7().ToString("N");
-                var storePath = Path.Combine(StoresPath, guid);
-
-                // Check disk budget before creation
-                EnsureDiskBudget(storePath, "CreateNamedStore");
-
-                Directory.CreateDirectory(storePath);
-                var store = new QuadStore(storePath, null, null, _storageOptions);
-
-                _namedStores[name] = store;
-                _metadata.Stores[name] = guid;
-
-                // Set as active if this is the first store
-                if (_activeName == null)
-                {
-                    _activeName = name;
-                    _metadata.Active = name;
-                }
-
-                SaveMetadata();
-                return store;
+                throw new KeyNotFoundException($"Store '{name}' does not exist. Use EnsureActive(\"{name}\") to create it.");
             }
         }
     }
@@ -293,6 +272,66 @@ public sealed class QuadStorePool : IDisposable
             {
                 return _metadata.Stores.Keys.ToList();
             }
+        }
+    }
+
+    /// <summary>
+    /// Gets a named store, creating it if it doesn't exist.
+    /// </summary>
+    /// <param name="name">Logical name for the store (e.g., "primary", "secondary").</param>
+    /// <returns>The QuadStore instance.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown if pool is disposed.</exception>
+    /// <exception cref="InsufficientDiskSpaceException">Thrown if disk budget would be exceeded.</exception>
+    public QuadStore GetOrCreate(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        lock (_namedLock)
+        {
+            if (_namedStores.TryGetValue(name, out var existing))
+                return existing;
+
+            var guid = Guid.CreateVersion7().ToString("N");
+            var storePath = Path.Combine(StoresPath, guid);
+
+            EnsureDiskBudget(storePath, "CreateNamedStore");
+
+            Directory.CreateDirectory(storePath);
+            var store = new QuadStore(storePath, null, null, _storageOptions);
+
+            _namedStores[name] = store;
+            _metadata.Stores[name] = guid;
+            SaveMetadata();
+
+            return store;
+        }
+    }
+
+    /// <summary>
+    /// Ensures a named store exists and is active. Creates the store if it doesn't exist.
+    /// </summary>
+    /// <param name="name">Logical name for the store (e.g., "primary").</param>
+    /// <returns>The QuadStore instance.</returns>
+    /// <exception cref="ObjectDisposedException">Thrown if pool is disposed.</exception>
+    /// <exception cref="InsufficientDiskSpaceException">Thrown if disk budget would be exceeded.</exception>
+    public QuadStore EnsureActive(string name)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        lock (_namedLock)
+        {
+            var store = GetOrCreate(name);
+
+            if (_activeName != name)
+            {
+                _activeName = name;
+                _metadata.Active = name;
+                SaveMetadata();
+            }
+
+            return store;
         }
     }
 
@@ -342,7 +381,7 @@ public sealed class QuadStorePool : IDisposable
 
         lock (_namedLock)
         {
-            // Ensure both stores exist (creates if needed)
+            // Verify both stores exist
             _ = this[a];
             _ = this[b];
 
@@ -402,7 +441,7 @@ public sealed class QuadStorePool : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        var store = this[name]; // Creates if doesn't exist
+        var store = this[name];
         store.Clear();
     }
 

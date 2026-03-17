@@ -63,9 +63,11 @@ public static class PruneEngine
                 };
             }
 
-            // Execute pruning workflow
-            pool.Clear("secondary");
-            var transfer = new PruningTransfer(pool["primary"], pool["secondary"], transferOptions);
+            // Execute pruning workflow: create secondary as target, clear it
+            var primary = pool["primary"];
+            var secondary = pool.GetOrCreate("secondary");
+            secondary.Clear();
+            var transfer = new PruningTransfer(primary, secondary, transferOptions);
             var result = transfer.Execute();
 
             if (!result.Success)

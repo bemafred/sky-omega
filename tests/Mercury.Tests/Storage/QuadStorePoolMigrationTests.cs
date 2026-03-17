@@ -66,10 +66,10 @@ public class QuadStorePoolMigrationTests : IDisposable
     {
         // Create pool format directly
         _pool = new QuadStorePool(_tempDir, QuadStorePoolOptions.ForTesting);
-        _pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "\"test\"");
+        _pool.EnsureActive("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "\"test\"");
         _pool.Dispose();
 
-        // Re-open — should not error
+        // Re-open — should not error (migration rehydrates from pool.json)
         _pool = new QuadStorePool(_tempDir, QuadStorePoolOptions.ForTesting);
         var (count, _, _) = _pool.Active.GetStatistics();
         Assert.Equal(1, count);
@@ -84,7 +84,7 @@ public class QuadStorePoolMigrationTests : IDisposable
         _pool = new QuadStorePool(_tempDir, QuadStorePoolOptions.ForTesting);
 
         // Should create "primary" on first access
-        _pool["primary"].AddCurrent("<http://ex/s>", "<http://ex/p>", "\"test\"");
+        _pool.EnsureActive("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "\"test\"");
         var (count, _, _) = _pool.Active.GetStatistics();
         Assert.Equal(1, count);
     }

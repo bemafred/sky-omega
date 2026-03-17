@@ -23,13 +23,13 @@ public class QuadStorePoolPruneTests : IDisposable
         _pool = QuadStorePool.CreateTemp("prune-test", QuadStorePoolOptions.ForTesting);
 
         // Add data to primary
-        var primary = _pool["primary"];
+        var primary = _pool.EnsureActive("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"one\"");
         primary.AddCurrent("<http://ex/s2>", "<http://ex/p>", "\"two\"");
 
         // Execute pruning workflow
-        _pool.Clear("secondary");
-        var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"]);
+        var secondary = _pool.GetOrCreate("secondary");
+        var transfer = new PruningTransfer(primary, secondary);
         var result = transfer.Execute();
 
         Assert.True(result.Success);
@@ -49,7 +49,7 @@ public class QuadStorePoolPruneTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("prune-test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
+        var primary = _pool.EnsureActive("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"keep\"");
         primary.AddCurrent("<http://ex/s2>", "<http://ex/p>", "\"exclude\"", "<http://temp>");
 
@@ -58,8 +58,8 @@ public class QuadStorePoolPruneTests : IDisposable
             Filter = GraphFilter.Exclude("<http://temp>")
         };
 
-        _pool.Clear("secondary");
-        var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"], options);
+        var secondary = _pool.GetOrCreate("secondary");
+        var transfer = new PruningTransfer(primary, secondary, options);
         var result = transfer.Execute();
 
         Assert.True(result.Success);
@@ -77,13 +77,13 @@ public class QuadStorePoolPruneTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("prune-test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
+        var primary = _pool.EnsureActive("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"data\"");
 
         var options = new TransferOptions { DryRun = true };
 
-        _pool.Clear("secondary");
-        var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"], options);
+        var secondary = _pool.GetOrCreate("secondary");
+        var transfer = new PruningTransfer(primary, secondary, options);
         var result = transfer.Execute();
 
         Assert.True(result.Success);
@@ -104,7 +104,7 @@ public class QuadStorePoolPruneTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("prune-test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
+        var primary = _pool.EnsureActive("primary");
         primary.AddCurrent("<http://ex/s1>", "<http://ex/p>", "\"original\"");
 
         // Verify Active points to primary initially
@@ -112,8 +112,8 @@ public class QuadStorePoolPruneTests : IDisposable
         Assert.Same(primary, activeBefore);
 
         // Prune + switch
-        _pool.Clear("secondary");
-        var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"]);
+        var secondary = _pool.GetOrCreate("secondary");
+        var transfer = new PruningTransfer(primary, secondary);
         transfer.Execute();
         _pool.Switch("primary", "secondary");
 
@@ -131,7 +131,7 @@ public class QuadStorePoolPruneTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("prune-test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
+        var primary = _pool.EnsureActive("primary");
         primary.AddCurrent("<http://ex/s>", "<http://ex/name>", "\"keep\"");
         primary.AddCurrent("<http://ex/s>", "<http://ex/debug>", "\"exclude\"");
 
@@ -140,8 +140,8 @@ public class QuadStorePoolPruneTests : IDisposable
             Filter = PredicateFilter.Exclude("<http://ex/debug>")
         };
 
-        _pool.Clear("secondary");
-        var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"], options);
+        var secondary = _pool.GetOrCreate("secondary");
+        var transfer = new PruningTransfer(primary, secondary, options);
         var result = transfer.Execute();
 
         Assert.True(result.Success);
@@ -159,7 +159,7 @@ public class QuadStorePoolPruneTests : IDisposable
     {
         _pool = QuadStorePool.CreateTemp("prune-test", QuadStorePoolOptions.ForTesting);
 
-        var primary = _pool["primary"];
+        var primary = _pool.EnsureActive("primary");
         primary.AddCurrent("<http://ex/s>", "<http://ex/name>", "\"keep\"");
         primary.AddCurrent("<http://ex/s>", "<http://ex/debug>", "\"exclude-pred\"");
         primary.AddCurrent("<http://ex/s>", "<http://ex/name>", "\"exclude-graph\"", "<http://temp>");
@@ -171,8 +171,8 @@ public class QuadStorePoolPruneTests : IDisposable
                 PredicateFilter.Exclude("<http://ex/debug>"))
         };
 
-        _pool.Clear("secondary");
-        var transfer = new PruningTransfer(_pool["primary"], _pool["secondary"], options);
+        var secondary = _pool.GetOrCreate("secondary");
+        var transfer = new PruningTransfer(primary, secondary, options);
         var result = transfer.Execute();
 
         Assert.True(result.Success);

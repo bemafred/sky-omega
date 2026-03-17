@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.9] - 2026-03-17
+
+QuadStorePool explicit store lifecycle — remove implicit creation side effects.
+
+### Changed
+
+- **`QuadStorePool` indexer (`pool["name"]`)** — now pure lookup; throws `KeyNotFoundException` if store doesn't exist (was: silently created store as side effect)
+- **`Clear(name)` and `Switch(a, b)`** — now throw if stores don't exist (no implicit creation)
+- **`PruneEngine`** — uses explicit `GetOrCreate("secondary")` for prune target
+
+### Added
+
+- **`QuadStorePool.EnsureActive(name)`** — creates store if needed, sets it as active; the proper API for initialization
+- **`QuadStorePool.GetOrCreate(name)`** — creates store if needed, returns it; explicit about creation intent
+
+### Fixed
+
+- **Mercury MCP server fresh install** — `mercury-mcp` now calls `EnsureActive("primary")` on startup, fixing "No active store is set" error when `~/Library/SkyOmega/stores/mcp/` has no existing `pool.json`
+
+---
+
 ## [1.3.8] - 2026-03-10
 
 QuadIndex generic key fields and time-leading sort order (ADR-022).

@@ -114,6 +114,7 @@ Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
 
 // Create pool (auto-migrates flat stores on first run)
 var pool = new QuadStorePool(storePath);
+pool.EnsureActive("primary");
 
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
 
@@ -135,7 +136,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = "1.3.8"
+            Version = "1.3.9"
         };
     })
     .WithStdioServerTransport()

@@ -145,7 +145,7 @@ else
 // Ensure a primary store exists so pool.Active works immediately
 // (new pools and temp pools start with no stores; persistent pools
 // may have been created by an older version without pool metadata)
-_ = pool["primary"];
+pool.EnsureActive("primary");
 
 // Start HTTP server if enabled
 SparqlHttpServer? httpServer = null;
