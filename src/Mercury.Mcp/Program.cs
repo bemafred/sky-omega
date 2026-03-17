@@ -113,7 +113,18 @@ Console.Error.WriteLine("Mercury MCP Server starting...");
 Console.Error.WriteLine($"  Store: {Path.GetFullPath(storePath)}");
 
 // Create pool (auto-migrates flat stores on first run)
-var pool = new QuadStorePool(storePath);
+QuadStorePool pool;
+try
+{
+    pool = new QuadStorePool(storePath);
+}
+catch (StoreInUseException ex)
+{
+    Console.Error.WriteLine($"Error: {ex.Message}");
+    Console.Error.WriteLine("Another mercury-mcp or mercury process is using this store.");
+    Console.Error.WriteLine("Close the other process first, or use -d to specify a different store path.");
+    return 1;
+}
 pool.EnsureActive("primary");
 
 Console.Error.WriteLine($"  Updates: {(enableHttpUpdates ? "enabled" : "disabled")}");
@@ -136,7 +147,7 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = "1.3.9"
+            Version = "1.3.10"
         };
     })
     .WithStdioServerTransport()

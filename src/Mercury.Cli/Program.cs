@@ -139,7 +139,16 @@ if (inMemory)
 else
 {
     resolvedStorePath = storePath ?? MercuryPaths.Store("cli");
-    pool = new QuadStorePool(resolvedStorePath);
+    try
+    {
+        pool = new QuadStorePool(resolvedStorePath);
+    }
+    catch (StoreInUseException ex)
+    {
+        Console.Error.WriteLine($"Error: {ex.Message}");
+        Console.Error.WriteLine("Use -m for a temporary in-memory session, or -d to specify a different store path.");
+        return 1;
+    }
 }
 
 // Ensure a primary store exists so pool.Active works immediately

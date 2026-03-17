@@ -507,4 +507,51 @@ public class QuadStorePoolNamedTests : IDisposable
     }
 
     #endregion
+
+    #region Store Lock Tests
+
+    [Fact]
+    public void StoreLock_PreventsSecondPoolOnSamePath()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"pool-test-{Guid.NewGuid():N}");
+        try
+        {
+            using var first = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting);
+
+            var ex = Assert.Throws<StoreInUseException>(
+                () => new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting));
+
+            Assert.Equal(Path.GetFullPath(tempPath), ex.StorePath);
+        }
+        finally
+        {
+            if (Directory.Exists(tempPath))
+                Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StoreLock_ReleasedOnDispose()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"pool-test-{Guid.NewGuid():N}");
+        try
+        {
+            using (var first = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting))
+            {
+                first.EnsureActive("primary").AddCurrent("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+            }
+
+            // After dispose, another pool should be able to open the same path
+            using var second = new QuadStorePool(tempPath, QuadStorePoolOptions.ForTesting);
+            var (count, _, _) = second["primary"].GetStatistics();
+            Assert.Equal(1, count);
+        }
+        finally
+        {
+            if (Directory.Exists(tempPath))
+                Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    #endregion
 }

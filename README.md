@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.3.9 Released** — QuadStorePool explicit store lifecycle: `EnsureActive`, `GetOrCreate`, indexer is pure lookup.
+> **v1.3.10 Released** — Exclusive store lock prevents multi-process corruption; `mercury_version` MCP tool.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**

@@ -93,6 +93,7 @@ public sealed class QuadStorePool : IDisposable
     private readonly bool _useCrossProcessGate;
     private readonly long _maxDiskBytes;
     private int _globalSlotsHeld;
+    private FileStream? _storeLock;
     private bool _disposed;
 
     #region Constructors
@@ -169,6 +170,9 @@ public sealed class QuadStorePool : IDisposable
         Directory.CreateDirectory(_basePath);
         Directory.CreateDirectory(StoresPath);
         Directory.CreateDirectory(PooledPath);
+
+        // Acquire exclusive store lock (prevents concurrent access from other processes)
+        _storeLock = AcquireStoreLock(_basePath);
 
         // Load or create metadata
         _metadata = PoolMetadata.Load(PoolJsonPath);
@@ -659,6 +663,15 @@ public sealed class QuadStorePool : IDisposable
             }
         }
 
+        // Release store lock
+        if (_storeLock != null)
+        {
+            _storeLock.Dispose();
+            _storeLock = null;
+            // Clean up lock file
+            try { File.Delete(StoreLockPath); } catch { }
+        }
+
         // Cleanup temporary base path
         if (_isTemporary && _basePath != null)
         {
@@ -672,9 +685,12 @@ public sealed class QuadStorePool : IDisposable
 
     #region Private Helpers
 
+    private const string StoreLockFileName = "store.lock";
+
     private string StoresPath => Path.Combine(_basePath!, StoresDirectoryName);
     private string PooledPath => Path.Combine(_basePath!, PooledDirectoryName);
     private string PoolJsonPath => Path.Combine(_basePath!, PoolJsonFileName);
+    private string StoreLockPath => Path.Combine(_basePath!, StoreLockFileName);
 
     private void SaveMetadata()
     {
@@ -695,6 +711,52 @@ public sealed class QuadStorePool : IDisposable
                 var store = new QuadStore(storePath, null, null, _storageOptions);
                 _namedStores[name] = store;
             }
+        }
+    }
+
+    /// <summary>
+    /// Acquires an exclusive file lock on the store directory.
+    /// Writes the current PID to the lock file so other processes can identify the owner.
+    /// </summary>
+    /// <exception cref="StoreInUseException">Thrown if another process holds the lock.</exception>
+    private static FileStream AcquireStoreLock(string basePath)
+    {
+        var lockPath = Path.Combine(basePath, StoreLockFileName);
+
+        // Read owner PID from existing lock file (best effort, for error message)
+        int? ownerPid = null;
+        try
+        {
+            if (File.Exists(lockPath))
+            {
+                var content = File.ReadAllText(lockPath).Trim();
+                if (int.TryParse(content, out var pid))
+                    ownerPid = pid;
+            }
+        }
+        catch { }
+
+        try
+        {
+            var stream = new FileStream(
+                lockPath,
+                FileMode.Create,
+                FileAccess.ReadWrite,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.DeleteOnClose);
+
+            // Write our PID so other processes can report it
+            var pidBytes = System.Text.Encoding.UTF8.GetBytes(
+                Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            stream.Write(pidBytes);
+            stream.Flush();
+
+            return stream;
+        }
+        catch (IOException)
+        {
+            throw new StoreInUseException(basePath, ownerPid);
         }
     }
 

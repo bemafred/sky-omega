@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.10] - 2026-03-17
+
+Exclusive store lock and `mercury_version` MCP tool.
+
+### Added
+
+- **Exclusive store lock** — persistent pools acquire a file lock (`store.lock`) preventing concurrent access from multiple processes; throws `StoreInUseException` with owner PID if store is already in use; OS releases lock automatically on crash
+- **`mercury_version` MCP tool** — exposes server version at runtime via assembly `InformationalVersion`
+
+### Fixed
+
+- **Multi-process store corruption** — two `mercury-mcp` or `mercury` processes opening the same store would corrupt data; now the second process gets a clear error with actionable guidance
+
+---
+
 ## [1.3.9] - 2026-03-17
 
 QuadStorePool explicit store lifecycle — remove implicit creation side effects.
