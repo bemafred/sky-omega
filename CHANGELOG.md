@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.11] - 2026-03-20
+
+Full-text search enabled by default — LLMs can now discover and use `text:match` out of the box.
+
+### Changed
+
+- **`EnableFullTextSearch` defaults to `true`** — trigram index is now built automatically for all new stores; previously required explicit opt-in via `StorageOptions`
+- **`mercury_query` MCP tool description** — now advertises `text:match(?var, "term")` for case-insensitive full-text search, making it discoverable by LLMs
+
+---
+
 ## [1.3.10] - 2026-03-17
 
 Exclusive store lock and `mercury_version` MCP tool.

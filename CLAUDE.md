@@ -631,7 +631,7 @@ SERVICE clauses (federated queries) require special handling due to fundamentall
 
 ### Full-Text Search
 
-BCL-only trigram index for SPARQL text search. Opt-in via `StorageOptions.EnableFullTextSearch`.
+BCL-only trigram index for SPARQL text search. Enabled by default. Disable via `StorageOptions { EnableFullTextSearch = false }` if write throughput is critical and text search isn't needed.
 
 **Components:**
 
@@ -641,11 +641,6 @@ BCL-only trigram index for SPARQL text search. Opt-in via `StorageOptions.Enable
 | `text:match` | `Sparql/Execution/FilterEvaluator.Functions.cs` | SPARQL FILTER function |
 
 **Usage:**
-```csharp
-var options = new StorageOptions { EnableFullTextSearch = true };
-var store = new QuadStore(path, null, null, options);
-```
-
 ```sparql
 SELECT ?city ?name WHERE {
     ?city <http://ex.org/name> ?name .

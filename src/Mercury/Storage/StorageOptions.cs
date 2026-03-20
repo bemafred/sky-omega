@@ -38,13 +38,9 @@ public sealed class StorageOptions
     /// <summary>
     /// Enable full-text search via trigram indexing.
     /// When enabled, object literals are indexed for use with <c>text:match</c> SPARQL function.
-    /// Default: false (opt-in for backward compatibility).
+    /// Default: true. Disable if write throughput is critical and text search isn't needed.
     /// </summary>
-    /// <remarks>
-    /// Full-text search adds overhead to write operations (trigram extraction and indexing).
-    /// Only enable if you need the <c>text:match</c> functionality.
-    /// </remarks>
-    public bool EnableFullTextSearch { get; init; } = false;
+    public bool EnableFullTextSearch { get; init; } = true;
 
     /// <summary>
     /// Initial size for each QuadIndex file (4 indexes: GSPO, GPOS, GOSP, TGSP). Default: 1GB.

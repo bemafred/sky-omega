@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.3.10 Released** — Exclusive store lock prevents multi-process corruption; `mercury_version` MCP tool.
+> **v1.3.11 Released** — Full-text search enabled by default; `mercury_query` MCP tool now advertises `text:match`.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**

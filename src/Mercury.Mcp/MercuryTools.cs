@@ -31,7 +31,7 @@ public sealed class MercuryTools
         _storePath = storePath;
     }
 
-    [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store")]
+    [McpServerTool(Name = "mercury_query"), Description("Execute a SPARQL SELECT, ASK, CONSTRUCT, or DESCRIBE query against the Mercury triple store. Supports text:match(?var, \"term\") in FILTER clauses for case-insensitive full-text search.")]
     public string Query([Description("The SPARQL query to execute")] string query)
     {
         if (string.IsNullOrWhiteSpace(query))
