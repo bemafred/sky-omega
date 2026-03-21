@@ -25,15 +25,13 @@ public class QuadStoreFullTextTests : IDisposable
         TempPath.SafeCleanup(_testDir);
     }
 
-    private StorageOptions FullTextOptions => new() { EnableFullTextSearch = true };
-
     #region Integration Tests
 
     [Fact]
-    public void QuadStore_FullTextEnabled_CreatesTrigramFiles()
+    public void QuadStore_CreatesTrigramFiles()
     {
         // Arrange & Act
-        using (var store = new QuadStore(_testDir, null, null, FullTextOptions))
+        using (var store = new QuadStore(_testDir))
         {
             store.AddCurrent("<s>", "<p>", "\"hello world\"");
         }
@@ -44,24 +42,10 @@ public class QuadStoreFullTextTests : IDisposable
     }
 
     [Fact]
-    public void QuadStore_FullTextDisabled_NoTrigramFiles()
-    {
-        // Arrange & Act
-        using (var store = new QuadStore(_testDir))
-        {
-            store.AddCurrent("<s>", "<p>", "\"hello world\"");
-        }
-
-        // Assert
-        Assert.False(File.Exists(Path.Combine(_testDir, "trigram.hash")));
-        Assert.False(File.Exists(Path.Combine(_testDir, "trigram.posts")));
-    }
-
-    [Fact]
-    public void QuadStore_FullTextEnabled_IndexesLiterals()
+    public void QuadStore_IndexesLiterals()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act
         store.AddCurrent("<s1>", "<name>", "\"Stockholm\"");
@@ -77,7 +61,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_SkipsIRIs()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - add IRI objects (not literals)
         store.AddCurrent("<s1>", "<type>", "<http://example.org/City>");
@@ -91,7 +75,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_HandlesSwedishCharacters()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - add Swedish text with åäö
         store.AddCurrent("<s1>", "<name>", "\"Räksmörgås\""); // Shrimp sandwich
@@ -106,7 +90,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_HandlesEmptyLiterals()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - add empty literal
         store.AddCurrent("<s1>", "<name>", "\"\"");
@@ -119,7 +103,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_HandlesShortLiterals()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - add short literals (< 3 chars, no trigrams possible)
         store.AddCurrent("<s1>", "<name>", "\"a\"");
@@ -133,7 +117,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_HandlesLanguageTaggedLiterals()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - add literals with language tags
         store.AddCurrent("<s1>", "<name>", "\"Stockholm\"@sv");
@@ -147,7 +131,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_HandlesTypedLiterals()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - add typed literals
         store.AddCurrent("<s1>", "<population>", "\"1000000\"^^<http://www.w3.org/2001/XMLSchema#integer>");
@@ -165,7 +149,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_PersistsAcrossReopen()
     {
         // Arrange - create store and add data
-        using (var store = new QuadStore(_testDir, null, null, FullTextOptions))
+        using (var store = new QuadStore(_testDir))
         {
             store.AddCurrent("<s1>", "<name>", "\"Stockholm\"");
             store.AddCurrent("<s2>", "<name>", "\"Göteborg\"");
@@ -173,7 +157,7 @@ public class QuadStoreFullTextTests : IDisposable
         }
 
         // Act - reopen and verify files exist
-        using (var store = new QuadStore(_testDir, null, null, FullTextOptions))
+        using (var store = new QuadStore(_testDir))
         {
             // Just verify we can reopen without issues
             Assert.True(true);
@@ -188,7 +172,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_CheckpointFlushesIndex()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         store.AddCurrent("<s1>", "<name>", "\"Stockholm\"");
         store.AddCurrent("<s2>", "<name>", "\"Göteborg\"");
@@ -212,7 +196,7 @@ public class QuadStoreFullTextTests : IDisposable
     public void QuadStore_FullTextEnabled_BatchAPIWorks()
     {
         // Arrange
-        using var store = new QuadStore(_testDir, null, null, FullTextOptions);
+        using var store = new QuadStore(_testDir);
 
         // Act - use batch API
         store.BeginBatch();

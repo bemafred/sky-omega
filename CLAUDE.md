@@ -631,7 +631,7 @@ SERVICE clauses (federated queries) require special handling due to fundamentall
 
 ### Full-Text Search
 
-BCL-only trigram index for SPARQL text search. Enabled by default. Disable via `StorageOptions { EnableFullTextSearch = false }` if write throughput is critical and text search isn't needed.
+BCL-only trigram index for SPARQL text search. Always enabled — every QuadStore instance creates a trigram index.
 
 **Components:**
 

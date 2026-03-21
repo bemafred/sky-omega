@@ -25,7 +25,7 @@ public sealed class QuadStore : IDisposable
     private readonly QuadIndex _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
     private readonly QuadIndex _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
     private readonly QuadIndex _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
-    private readonly TrigramIndex? _trigramIndex; // Full-text search (optional)
+    private readonly TrigramIndex _trigramIndex;
 
     private readonly AtomStore _atoms;
     private readonly WriteAheadLog _wal;
@@ -103,13 +103,9 @@ public sealed class QuadStore : IDisposable
         _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
         _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.TimeFirst);
 
-        // Create trigram index for full-text search if enabled
-        if (options.EnableFullTextSearch)
-        {
-            var trigramPath = Path.Combine(baseDirectory, "trigram");
-            _trigramIndex = new TrigramIndex(trigramPath, _bufferManager);
-            _logger.Info("Full-text search enabled".AsSpan());
-        }
+        // Create trigram index for full-text search
+        var trigramPath = Path.Combine(baseDirectory, "trigram");
+        _trigramIndex = new TrigramIndex(trigramPath, _bufferManager);
 
         _logger.Info("Opening store at {0}".AsSpan(), baseDirectory);
 
@@ -497,8 +493,8 @@ public sealed class QuadStore : IDisposable
         _gospIndex.AddHistorical(@object, subject, predicate, validFrom, validTo, graph);
         _tgspIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, graph);
 
-        // Index object for full-text search if enabled and it's a literal (starts with ")
-        if (_trigramIndex != null && !@object.IsEmpty && @object[0] == '"')
+        // Index object for full-text search if it's a literal (starts with ")
+        if (!@object.IsEmpty && @object[0] == '"')
         {
             var objectId = _atoms.GetAtomId(@object);
             if (objectId > 0)
@@ -627,7 +623,7 @@ public sealed class QuadStore : IDisposable
         CollectPredicateStatistics();
 
         // Flush trigram index if enabled
-        _trigramIndex?.Flush();
+        _trigramIndex.Flush();
 
         // Write checkpoint marker to WAL
         _wal.Checkpoint();
@@ -914,7 +910,7 @@ public sealed class QuadStore : IDisposable
         _gposIndex?.Dispose();
         _gospIndex?.Dispose();
         _tgspIndex?.Dispose();
-        _trigramIndex?.Dispose();
+        _trigramIndex.Dispose();
         _atoms?.Dispose();
         _lock?.Dispose();
     }
@@ -949,8 +945,8 @@ public sealed class QuadStore : IDisposable
             // Clear atom store
             _atoms.Clear();
 
-            // Clear trigram index if enabled
-            _trigramIndex?.Clear();
+            // Clear trigram index
+            _trigramIndex.Clear();
 
             // Clear cached statistics
             _statistics.Clear();

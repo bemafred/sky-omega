@@ -23,9 +23,7 @@ public class SparqlTextSearchTests : IDisposable
         tempPath.MarkOwnership();
         _tempDir = tempPath;
 
-        // Create store with full-text search enabled
-        var options = new StorageOptions { EnableFullTextSearch = true };
-        _store = new QuadStore(_tempDir, null, null, options);
+        _store = new QuadStore(_tempDir);
 
         // Add test data with Swedish city names
         AddTriple("<http://ex.org/stockholm>", "<http://ex.org/name>", "\"Stockholm\"");

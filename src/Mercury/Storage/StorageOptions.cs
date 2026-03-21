@@ -36,13 +36,6 @@ public sealed class StorageOptions
     public long MaxAtomSize { get; init; } = AtomStore.DefaultMaxAtomSize;
 
     /// <summary>
-    /// Enable full-text search via trigram indexing.
-    /// When enabled, object literals are indexed for use with <c>text:match</c> SPARQL function.
-    /// Default: true. Disable if write throughput is critical and text search isn't needed.
-    /// </summary>
-    public bool EnableFullTextSearch { get; init; } = true;
-
-    /// <summary>
     /// Initial size for each QuadIndex file (4 indexes: GSPO, GPOS, GOSP, TGSP). Default: 1GB.
     /// For testing, use smaller values (e.g., 64MB) to reduce disk footprint.
     /// Files grow automatically when capacity is exceeded.
