@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.12] - 2026-03-21
+
+Full-text search is now unconditional — the trigram index is always created.
+
+### Removed
+
+- **`EnableFullTextSearch` option** — `StorageOptions.EnableFullTextSearch` property removed; every `QuadStore` now unconditionally creates a `TrigramIndex`
+
+---
+
 ## [1.3.11] - 2026-03-20
 
 Full-text search enabled by default — LLMs can now discover and use `text:match` out of the box.

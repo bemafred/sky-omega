@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.3.11 Released** — Full-text search enabled by default; `mercury_query` MCP tool now advertises `text:match`.
+> **v1.3.12 Released** — Full-text search is now unconditional; `EnableFullTextSearch` option removed.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
