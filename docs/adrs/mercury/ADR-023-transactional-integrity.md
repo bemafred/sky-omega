@@ -134,7 +134,7 @@ The reserved bytes `[9-15]` (7 bytes) in the current layout are unused. Use byte
 
 Alternatively, expand the record to 80 bytes and add a full 8-byte `TransactionTimeTicks` field. This is cleaner but breaks the existing record size.
 
-**Recommendation:** Use the reserved bytes (no record size change). Mark the WAL version byte to indicate the field is present.
+**Decision:** Expand to 80 bytes with a full 8-byte `TransactionTimeTicks` field. No production stores exist, so there is no migration cost — and the cleaner layout avoids version-byte complexity and bit-packing fragility.
 
 **Modify `QuadIndex`:**
 
@@ -169,14 +169,13 @@ Each phase must include tests that verify the **invariant**, not just the mechan
 
 ### Negative
 
-- **WAL format migration** — existing stores need a one-time recovery pass on first open with the new code. Old-format records (no `BeginTx`/`CommitTx`) are treated as committed, preserving existing data.
+- **WAL format is a breaking change** — record size increases from 72 to 80 bytes. No production stores exist, so no migration is needed.
 - **Deferred application changes batch semantics** — batched writes are invisible until commit. Any code that queries mid-batch (none known) would break.
-- **Record layout change** — transaction time in reserved bytes requires careful validation of struct alignment
 
 ### Risks
 
 - **Performance regression in batch path** — buffering atom strings until commit adds memory pressure for large batches. Mitigate by streaming from WAL on commit rather than buffering in memory.
-- **Migration correctness** — the version-byte approach must be tested against WAL files from the current format to ensure backward-compatible recovery.
+- **Record alignment** — 80-byte records must be validated for correct struct layout and memory-mapped access.
 
 ## Implementation Order
 
@@ -191,5 +190,4 @@ Suggested order: **1 → 2 → 3**, with tests written alongside each phase.
 - [ ] Transaction time varies per-write in a long-lived store — verified by temporal query
 - [ ] Transaction time survives recovery — verified by comparing pre/post-crash query results
 - [ ] Existing 329 storage tests continue to pass
-- [ ] Old WAL files (no tx markers) are recovered correctly with new code
 - [ ] Batch write throughput regression < 10% (benchmark)
