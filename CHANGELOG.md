@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] - 2026-03-22
+
+Transactional integrity and trigram read path — two major architectural advances.
+
+### Added
+
+#### WAL v2 — Transactional Integrity (ADR-023)
+- **Transaction boundaries** — `BeginTx`/`CommitTx` markers in WAL enable crash-safe batch semantics; recovery replays only committed transactions
+- **Deferred materialization** — batched writes buffer in memory, apply to indexes only at `CommitBatch()`; `RollbackBatch()` discards buffer without touching indexes
+- **Per-write transaction time** — each write generates `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()` stored in WAL and indexes; preserved through crash recovery
+- **80-byte WAL v2 record** — includes `GraphId`, `TransactionTimeTicks`, and transaction markers
+- **Replay idempotence** — WAL recovery is safe to re-run; already-applied records are skipped
+
+#### Trigram Read Path (ADR-024)
+- **Scan-level pre-filtering for `text:match`** — `MultiPatternScan` restricts enumerator to candidate object atoms from the trigram index, reducing full-text search from O(N) to O(k × log N)
+- **Selectivity-based fallback** — candidate sets exceeding 10,000 atoms revert to brute-force scan to avoid index overhead on low-selectivity queries
+
+### Fixed
+
+- **`text:match` culture dependency** — switched to `OrdinalIgnoreCase` per ADR-014, fixing locale-sensitive matching on Swedish characters (å, ä, ö)
+
+---
+
 ## [1.3.12] - 2026-03-21
 
 Full-text search is now unconditional — the trigram index is always created.
