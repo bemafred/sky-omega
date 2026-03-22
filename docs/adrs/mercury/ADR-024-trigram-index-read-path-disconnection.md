@@ -42,7 +42,7 @@ When a SPARQL query contains `FILTER(text:match(?label, "stockholm"))`:
 1. `FilterAnalyzer` performs predicate pushdown — pushes the filter to the earliest pattern level where `?label` is bound
 2. `MultiPatternScan` iterates bindings from the B+Tree index scan
 3. `FilterEvaluator.ParseTextMatchFunction()` evaluates the filter
-4. The implementation (line ~315): `textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.CurrentCultureIgnoreCase)`
+4. The implementation (line ~315): `textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.OrdinalIgnoreCase)`
 
 Pure O(n) substring scan on every binding that reaches the filter. The trigram index is never consulted.
 
@@ -69,7 +69,7 @@ This is the second instance of a specific failure mode in Mercury:
 
 Both share the signature: tests pass, results are correct, the performance contract is violated, and the violation is invisible to any test that checks correctness rather than complexity class.
 
-The comment in `ParseTextMatchFunction` is an epistemic lubricant in the ADR-002 sense — it describes the architecture-as-intended in language that reads as architecture-as-implemented, suppressing the question "but does it actually do this?"
+The comment in `ParseTextMatchFunction` is architecture-as-intended phrased as architecture-as-implemented. That suppresses the obvious follow-up question: "but does it actually do this?"
 
 ### Cost being paid for no benefit
 
@@ -80,11 +80,11 @@ The write-side cost is non-trivial:
 
 ## Decision
 
-### Phase 1: Query-planner integration — set-based pre-filtering
+### Phase 1: Planning and scan integration — set-based pre-filtering
 
 Mercury is a cognitive substrate. Full-text search over RDF literals is not a convenience feature — it is a primary query pattern for any system that stores natural language (chat memory, document content, labels, descriptions). The correct fix changes the complexity class, not the constant factor.
 
-When the query planner detects a `text:match` filter on a variable bound by a triple pattern's object position, it calls `QueryCandidates` to obtain candidate atom IDs and restricts the B+Tree scan to those candidates.
+When planning/pushing a `text:match` filter on a variable bound by a triple pattern's object position, Mercury must carry that information into scan construction. The execution path that opens the underlying `QuadStore` enumerator then calls `QueryCandidates` to obtain candidate object atom IDs and restricts the scan to those candidates.
 
 This transforms the query from:
 
@@ -92,21 +92,24 @@ This transforms the query from:
 
 To:
 
-- `QueryCandidates(searchTerm)` → intersect posting lists → get k candidate atom IDs → probe B+Tree for each → verify with `Contains` → O(k × log N) where k << N
+- `QueryCandidates(searchTerm)` → intersect posting lists → get k candidate object atom IDs → probe the most appropriate object-bearing access path for each candidate → verify with `Contains` → O(k × log N) where k << N
 
-The trigram intersection is a necessary condition — no false negatives. The `Contains` verification on the candidate set eliminates false positives. Correctness is preserved; complexity class changes.
+The trigram intersection is a necessary condition — no false negatives. The `Contains` verification on the candidate bindings eliminates false positives. Correctness is preserved; complexity class changes.
 
 **This is the same fix pattern as ADR-022.** ADR-022 didn't optimise the full scan — it fixed the TGSP sort order so the B+Tree seek operates on the right leading dimension. Here, the trigram index *is* the leading dimension for text search. Wiring it at the filter-evaluator level (checking `IsCandidateMatch` per binding but still iterating all bindings) would be the equivalent of ADR-022 keeping the wrong sort order but adding a faster comparator. Wrong level of intervention.
 
 **Required changes:**
 
-1. **Filter recognition in query planning.** Detect `text:match(?var, "constant")` where the search term is a constant string and the variable is bound to a triple pattern's object position. This is a static property of the parsed query — no runtime cost. The `FilterAnalyzer` already extracts variable references; extending it to recognise `text:match` with a constant second argument is a natural extension.
+1. **Filter recognition in planning.** Detect `text:match(?var, "constant")` where the search term is a constant string and the variable is bound to a triple pattern's object position. The planner/filter-analysis layer must produce structured metadata for this filter, not just a generic "evaluate filter at level X" assignment.
 
-2. **Candidate-driven scan on QuadStore.** A new method or scan mode that accepts a set of candidate object atom IDs from `QueryCandidates` and produces bindings by probing the GOSP index (object-leading) for each candidate. The GOSP index already exists and sorts by object — this is a series of point lookups, not a new index.
+2. **Candidate-driven scan on QuadStore.** Add a new method or scan mode that accepts a set of candidate object atom IDs and combines them with any already-bound graph/subject/predicate terms. This is **not** hardwired to GOSP. The correct access path depends on the rest of the pattern:
+   - If predicate is bound, probing `GPOS` per candidate object may be cheaper
+   - If only object is bound, `GOSP` is the natural path
+   - The implementation should preserve existing index-selection heuristics wherever possible and only add the candidate constraint as an extra bound dimension
 
-3. **Selectivity-based fallback.** When the candidate set is large relative to the store (low selectivity — common trigrams, short search terms), the overhead of k individual B+Tree probes may exceed a single scan. The planner should fall back to brute-force scan + filter when `|candidates| > threshold`. The threshold can be a simple heuristic initially (e.g., candidates > 10% of indexed atom count) and refined empirically.
+3. **Selectivity-based fallback.** When the candidate set is large relative to the store (low selectivity — common trigrams, short search terms), the overhead of many point probes may exceed a single scan. The planner/executor should fall back to brute-force scan + filter when the estimated candidate fan-out is too high. A simple starting heuristic is acceptable, but it should be based on candidate atoms plus expected binding fan-out, not candidate count alone.
 
-4. **Verification.** The `Contains` check remains as ground truth on the candidate set. The trigram index is a pre-filter, not a replacement. This is non-negotiable — trigram intersection can produce false positives (e.g., "abc" and "bca" share all trigrams of a 3-character query).
+4. **Verification.** The `Contains` check remains as ground truth on the candidate bindings. The trigram index is a pre-filter, not a replacement. This is non-negotiable — trigram intersection can produce false positives (e.g., "abc" and "bca" share all trigrams of a 3-character query).
 
 ### Phase 2: Short queries and edge cases
 
@@ -146,13 +149,13 @@ The analogous instrumentation for full-text search:
 
 3. **Before integration (current state):** The counter equals the total number of bindings reaching the filter — approximately N for a single triple pattern with N objects. Every binding is evaluated.
 
-4. **After integration:** The counter equals k (the candidate set size from `QueryCandidates`). Only candidates reach the `Contains` verification.
+4. **After integration:** The counter tracks only candidate bindings that survive the trigram pre-filter and still need `Contains` verification.
 
-5. **The assertion:** `TextMatchEvaluationCount` must be significantly less than N. The ADR-022 test uses a relative assertion (`timePages < entityPages`). Here the assertion can be tighter: `TextMatchEvaluationCount <= candidateSetSize`, where `candidateSetSize` is obtained by calling `QueryCandidates` directly in the test for comparison.
+5. **The assertion:** `TextMatchEvaluationCount` must be significantly less than N. For a controlled test dataset with **one triple per literal atom**, the assertion can be tighter: `TextMatchEvaluationCount <= candidateSetSize`, where `candidateSetSize` is obtained by calling `QueryCandidates` directly. In the general case, multiple triples may share the same literal atom, so the reliable invariant is relative: the counter must drop sharply versus the pre-integration baseline.
 
 ### What this proves
 
-The counter is not measuring wall-clock time or throughput — it is measuring **which code path executed**. If the query planner correctly routes `text:match` through the trigram index, the filter evaluator only sees candidates. If the integration is absent or broken, the filter evaluator sees every binding. The counter distinguishes these two cases with zero ambiguity.
+The counter is not measuring wall-clock time or throughput — it is measuring **which code path executed**. If the planner/scan integration correctly routes `text:match` through the trigram index, the filter evaluator only sees candidate bindings. If the integration is absent or broken, the filter evaluator sees every binding. The counter distinguishes these two cases with zero ambiguity when the test data shape is controlled.
 
 This is the same epistemics as ADR-022: the test doesn't measure "is it faster" (a performance question susceptible to noise), it measures "did it visit fewer things" (a structural question with a deterministic answer).
 
@@ -160,7 +163,7 @@ This is the same epistemics as ADR-022: the test doesn't measure "is it faster" 
 
 1. Full-text search becomes O(k × log N) for selective queries — the complexity class appropriate for a substrate that will store millions of triples with natural-language objects
 2. The write-side cost (trigram extraction and posting list maintenance on every literal assertion) becomes justified — it is the cost of maintaining an index that is actually used
-3. The GOSP index gains a new consumer — candidate-driven point lookups. This validates the four-index architecture: GSPO for subject-leading, GPOS for predicate-leading, GOSP for object-leading, TGSP for time-leading. Full-text search is an object-leading query pattern; the index already exists
+3. The existing object-bearing indexes gain a new consumer — candidate-driven point lookups. This validates the four-index architecture: GSPO for subject-leading, GPOS for predicate-leading, GOSP for object-leading, TGSP for time-leading. Full-text search is object-constrained, but the best probe path still depends on which other terms are bound
 4. **DrHook relevance:** This is the second bug in the "correct results, wrong complexity class" category. Both ADR-022 and ADR-024 are invisible to correctness tests. DrHook's runtime inspection capability — observing actual execution paths, measuring scan ranges, counting filter evaluations — is the detection method that would catch this class of bug systematically. These two ADRs are the empirical case for DrHook's third discipline: compile, test, **inspect**
 
 ## Related

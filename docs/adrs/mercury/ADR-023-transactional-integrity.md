@@ -16,10 +16,10 @@ All 329 storage tests pass. The test suite documents and accepts the current beh
 
 After rollback:
 - **In-memory state is dirty** — indexes contain mutations from the abandoned batch
-- **Queries return rolled-back data** until the process restarts
-- **If a checkpoint occurs before restart**, the dirty index state is persisted to disk, making the rollback permanent despite the caller's intent
+- **Queries return rolled-back data immediately** — the caller has no isolation from its own aborted writes
+- **The corruption may already be durable** — `QuadIndex` flushes the mapped accessor during page mutation, so a restart or checkpoint is not required for the abandoned batch to persist on disk
 
-The doc comment on line 453-454 says *"Recovery will not replay these records"* — this is only true if a checkpoint happened after `CommitBatch()` advanced `_currentTxId` but before the crash, which is not what the comment implies.
+The doc comment on line 453-454 says *"Recovery will not replay these records"* — that is misleading on both visibility and durability. The damage is already done before recovery runs because the indexes were mutated directly.
 
 The existing rollback test (`QuadStoreTests.cs:908`) only verifies lock release, not state visibility.
 
@@ -70,7 +70,7 @@ The test coverage (`QuadIndexTests.cs:427`) only asserts that transaction time i
 
 Fix all three violations. These are not documentation issues — they require structural changes to the WAL format, batch protocol, and transaction time propagation.
 
-### Phase 1: WAL transaction boundaries
+### Phase 1: WAL v2 with explicit transaction boundaries
 
 **Add `BeginTx` and `CommitTx` record types to `LogOperation`:**
 
@@ -100,12 +100,15 @@ internal enum LogOperation : byte
 2. On second pass (or single-pass with buffering), only yield records whose TxId appears in the committed set
 3. Records with TxId that has `BeginTx` but no `CommitTx` are discarded — this is a crashed/rolled-back transaction
 
-**WAL format compatibility:**
-- The record size (72 bytes) does not change — `BeginTx`/`CommitTx` use the existing layout with zeroed atom fields
-- Old WAL files without `BeginTx`/`CommitTx` markers: treat all records as committed (backward-compatible recovery)
-- Add a WAL version byte in the reserved field `[9]` to distinguish old vs new format
+**WAL format decision:**
+- Make a single WAL format change to **v2, 80-byte records**
+- Add `TransactionTimeTicks` to the record layout from the start; `BeginTx`/`CommitTx` set it to `0`
+- Do **not** carry dual-format recovery logic or a version-byte shim in the reserved bytes
+- Mercury has no production stores; existing development/test WAL files are disposable and must be recreated
 
-### Phase 2: Batch rollback with index undo
+This keeps the design coherent: transaction markers and transaction time ship in one WAL revision rather than in two partially overlapping formats.
+
+### Phase 2: Batch rollback with deferred materialization
 
 **Two options, choose one:**
 
@@ -114,27 +117,43 @@ internal enum LogOperation : byte
 Do not call `ApplyToIndexes` during `AddBatched`/`DeleteBatched`. Instead, buffer the WAL records and apply to indexes only in `CommitBatch()`. This means batched data is invisible to queries until commit — true transaction isolation.
 
 Implementation:
-- `AddBatched`/`DeleteBatched`: write to WAL only, accumulate atom strings in a batch buffer
-- `CommitBatch()`: write `CommitTx`, fsync, then apply all buffered mutations to indexes
+- `AddBatched`/`DeleteBatched`: write to WAL only, accumulate the batch's records and any required atom/string materialization state
+- `CommitBatch()`: append `CommitTx`, fsync, then materialize the committed records into the indexes
 - `RollbackBatch()`: discard the buffer, release lock — indexes are untouched
 
 Trade-off: Batched writes are not queryable mid-transaction. This is the correct semantic for a transactional system.
+
+**Critical requirement: committed replay must be idempotent.**
+
+With deferred materialization, a crash can occur **after** `CommitTx` is durable but **before** every index mutation has been applied. Recovery must therefore be allowed to re-apply the batch safely. That requires exact-record idempotence:
+
+- Re-applying the same committed `Add` record must be a no-op if the exact temporal row already exists
+- Re-applying the same committed `Delete` record must be a no-op if the exact row is already deleted/absent
+- Historical replays must not create duplicate versions or re-truncate `ValidTo` a second time
+
+This is the part the current `QuadIndex` does **not** guarantee. `InsertIntoLeaf` (line ~802) only deduplicates when both entries have matching GSPO dimensions **and** `ValidTo >= year 9000` (the "current fact" sentinel). For historical triples and temporal updates, the current control flow is worse than simple duplication: it can truncate the existing row via `HandleTemporalUpdate` and then return **without inserting the new committed row at all**. A crash in that window leaves history incomplete, and replay safety depends on changing that control flow, not just adding one more equality check.
+
+**Fix:** Split the insertion logic into three explicit cases:
+
+1. **Exact full-key duplicate** (`Graph`, `Primary`, `Secondary`, `Tertiary`, `ValidFrom`, `ValidTo`, `TransactionTime` all equal) → skip as a replayed no-op
+2. **Same dimensions, different temporal key** → perform any required truncation of the predecessor, then continue to insert the new row
+3. **Distinct dimensions** → insert normally
+
+The existing GSPO-only check for current facts may remain as a fast-path optimization, but it must preserve the semantics above. The key point is that "truncate predecessor" and "insert committed row" must be part of one replay-safe algorithm; the former cannot return early and suppress the latter.
+
+Option A is only sound with this index-layer upgrade.
 
 **Option B — Undo log (complex):**
 
 Maintain a per-batch undo log of index mutations. `RollbackBatch()` replays the undo log in reverse. This preserves the current behavior of mid-transaction visibility but adds complexity and memory pressure.
 
-**Recommendation: Option A.** Mid-transaction visibility is not a feature anyone relies on — it's an accident of the current implementation. Deferred application is simpler, correct, and aligns with how every real database works.
+**Recommendation: Option A, but only with replay-idempotent materialization.** Mid-transaction visibility is not a feature anyone relies on — it's an accident of the current implementation. Deferred application remains the simplest correct approach once replay safety is made explicit.
 
 ### Phase 3: Transaction time per-write with WAL persistence
 
-**Extend WAL record to include transaction time:**
+**Use the WAL v2 `TransactionTimeTicks` field for all add/delete records.**
 
-The reserved bytes `[9-15]` (7 bytes) in the current layout are unused. Use bytes `[9-14]` (6 bytes) for a 48-bit millisecond timestamp, leaving `[15]` reserved. 48 bits of milliseconds covers ~8,900 years — sufficient.
-
-Alternatively, expand the record to 80 bytes and add a full 8-byte `TransactionTimeTicks` field. This is cleaner but breaks the existing record size.
-
-**Decision:** Expand to 80 bytes with a full 8-byte `TransactionTimeTicks` field. No production stores exist, so there is no migration cost — and the cleaner layout avoids version-byte complexity and bit-packing fragility.
+The WAL format decision is already made in Phase 1: the new record size is 80 bytes, and transaction time is a first-class field rather than a packed value in reserved bytes.
 
 **Modify `QuadIndex`:**
 
@@ -156,6 +175,7 @@ Each phase must include tests that verify the **invariant**, not just the mechan
 |-----------|---------------|
 | Rollback | After `RollbackBatch()`, queries must not return any data from the abandoned batch |
 | WAL boundaries | After crash mid-batch, recovery must not replay uncommitted records |
+| Replay idempotence | After crash after durable `CommitTx` but before full materialization, recovery must not duplicate or re-truncate history |
 | Transaction time | After recovery, transaction times must equal the original write times, not recovery time |
 
 ## Consequences
@@ -165,21 +185,22 @@ Each phase must include tests that verify the **invariant**, not just the mechan
 - **Rollback means rollback** — callers can trust the API contract
 - **Crash recovery is correct** — partial batches are discarded, not silently committed
 - **Transaction time is meaningful** — bitemporal queries return accurate system-time provenance
-- **WAL format is forward-compatible** — version byte enables future extensions
+- **The WAL design is internally coherent** — one record format carries both commit markers and transaction time
 
 ### Negative
 
-- **WAL format is a breaking change** — record size increases from 72 to 80 bytes. No production stores exist, so no migration is needed.
+- **WAL format is a breaking change** — record size increases from 72 to 80 bytes. Existing development/test stores must be recreated.
 - **Deferred application changes batch semantics** — batched writes are invisible until commit. Any code that queries mid-batch (none known) would break.
 
 ### Risks
 
-- **Performance regression in batch path** — buffering atom strings until commit adds memory pressure for large batches. Mitigate by streaming from WAL on commit rather than buffering in memory.
+- **Replay-idempotence bugs are the main correctness risk** — if historical `Add`/`Delete` replay is not exact-record idempotent, a crash after `CommitTx` but before full materialization can still distort history
+- **Performance regression in batch path** — buffering batch state until commit adds memory pressure for large transactions. Mitigate by buffering compact record state and/or streaming the committed transaction back from WAL during materialization.
 - **Record alignment** — 80-byte records must be validated for correct struct layout and memory-mapped access.
 
 ## Implementation Order
 
-Phase 1 (WAL boundaries) is the foundation — phases 2 and 3 depend on it. Phase 4 is concurrent with each phase.
+Phase 1 (WAL v2) is the foundation — phases 2 and 3 depend on it. Phase 4 is concurrent with each phase.
 
 Suggested order: **1 → 2 → 3**, with tests written alongside each phase.
 
@@ -187,6 +208,7 @@ Suggested order: **1 → 2 → 3**, with tests written alongside each phase.
 
 - [ ] `RollbackBatch()` leaves indexes unchanged — verified by query after rollback
 - [ ] WAL recovery discards uncommitted batch records — verified by crash simulation
+- [ ] Crash after durable `CommitTx` but before full index materialization does not duplicate or truncate history on recovery
 - [ ] Transaction time varies per-write in a long-lived store — verified by temporal query
 - [ ] Transaction time survives recovery — verified by comparing pre/post-crash query results
 - [ ] Existing 329 storage tests continue to pass
