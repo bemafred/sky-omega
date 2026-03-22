@@ -36,6 +36,7 @@ public sealed class QuadStore : IDisposable
     private readonly long _minimumFreeDiskSpace;
     private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
+    private List<(LogRecord Record, string Graph, string Subject, string Predicate, string Object)>? _batchBuffer;
     private bool _disposed;
     private bool _diskSpaceLow; // Set when disk space drops below threshold
 
@@ -199,13 +200,15 @@ public sealed class QuadStore : IDisposable
             var subjectId = _atoms.Intern(subject);
             var predicateId = _atoms.Intern(predicate);
             var objectId = _atoms.Intern(@object);
+            var transactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             // 2. Write to WAL (fsync ensures durability)
-            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId);
+            var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+                transactionTimeTicks: transactionTime);
             _wal.Append(record);
 
             // 3. Apply to indexes
-            ApplyToIndexes(subject, predicate, @object, validFrom, validTo, graph);
+            ApplyToIndexes(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -261,12 +264,15 @@ public sealed class QuadStore : IDisposable
             if (!graph.IsEmpty && graphId == 0)
                 return false;
 
+            var transactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
             // 2. Write to WAL (fsync ensures durability)
-            var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo, graphId);
+            var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+                transactionTimeTicks: transactionTime);
             _wal.Append(record);
 
             // 3. Apply to indexes
-            var deleted = ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, graph);
+            var deleted = ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
 
             // 4. Check if checkpoint needed
             CheckpointIfNeeded();
@@ -325,6 +331,8 @@ public sealed class QuadStore : IDisposable
                 throw new InvalidOperationException("A batch is already active.");
 
             _activeBatchTxId = _wal.BeginBatch();
+            _batchBuffer ??= new();
+            _batchBuffer.Clear();
         }
         catch
         {
@@ -349,18 +357,23 @@ public sealed class QuadStore : IDisposable
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
-        // 1. Intern atoms (AtomStore is append-only)
+        // 1. Intern atoms (AtomStore is append-only — orphans from rollback are harmless)
         var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var subjectId = _atoms.Intern(subject);
         var predicateId = _atoms.Intern(predicate);
         var objectId = _atoms.Intern(@object);
 
+        var transactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         // 2. Write to WAL without fsync
-        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId);
+        var record = LogRecord.CreateAdd(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+            transactionTimeTicks: transactionTime);
         _wal.AppendBatch(record, _activeBatchTxId);
 
-        // 3. Apply to indexes immediately (in-memory, fast)
-        ApplyToIndexes(subject, predicate, @object, validFrom, validTo, graph);
+        // 3. Buffer for deferred materialization at CommitBatch (indexes untouched until commit)
+        var graphStr = graph.IsEmpty ? string.Empty : _atoms.GetAtomString(graphId);
+        _batchBuffer!.Add((record, graphStr, _atoms.GetAtomString(subjectId),
+            _atoms.GetAtomString(predicateId), _atoms.GetAtomString(objectId)));
     }
 
     /// <summary>
@@ -378,7 +391,8 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Soft-delete a temporal quad in the current batch (no fsync until CommitBatch).
     /// Must be called between BeginBatch() and CommitBatch()/RollbackBatch().
-    /// Returns true if the quad was found and deleted, false otherwise.
+    /// Returns true if the atoms exist and the delete was buffered, false if atoms are unknown.
+    /// With deferred materialization, the actual index mutation is applied at CommitBatch time.
     /// </summary>
     public bool DeleteBatched(
         ReadOnlySpan<char> subject,
@@ -391,7 +405,7 @@ public sealed class QuadStore : IDisposable
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
-        // 1. Look up atoms (don't intern)
+        // 1. Look up atoms (don't intern for deletes)
         var graphId = graph.IsEmpty ? 0 : _atoms.GetAtomId(graph);
         var subjectId = _atoms.GetAtomId(subject);
         var predicateId = _atoms.GetAtomId(predicate);
@@ -402,17 +416,23 @@ public sealed class QuadStore : IDisposable
         if (!graph.IsEmpty && graphId == 0)
             return false;
 
+        var transactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         // 2. Write to WAL without fsync
-        var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo, graphId);
+        var record = LogRecord.CreateDelete(subjectId, predicateId, objectId, validFrom, validTo, graphId,
+            transactionTimeTicks: transactionTime);
         _wal.AppendBatch(record, _activeBatchTxId);
 
-        // 3. Apply to indexes immediately (in-memory, fast)
-        return ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, graph);
+        // 3. Buffer for deferred materialization at CommitBatch (indexes untouched until commit)
+        var graphStr = graph.IsEmpty ? string.Empty : _atoms.GetAtomString(graphId);
+        _batchBuffer!.Add((record, graphStr, _atoms.GetAtomString(subjectId),
+            _atoms.GetAtomString(predicateId), _atoms.GetAtomString(objectId)));
+        return true;
     }
 
     /// <summary>
     /// Soft-delete a current fact in the batch.
-    /// Returns true if the quad was found and deleted, false otherwise.
+    /// Returns true if the atoms exist and the delete was buffered, false if atoms are unknown.
     /// </summary>
     public bool DeleteCurrentBatched(
         ReadOnlySpan<char> subject,
@@ -434,8 +454,25 @@ public sealed class QuadStore : IDisposable
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
 
+            // 1. Write CommitTx marker and fsync — batch is now durable
             _wal.CommitBatch(_activeBatchTxId);
             _activeBatchTxId = -1;
+
+            // 2. Materialize buffered records into indexes
+            if (_batchBuffer != null)
+            {
+                foreach (var (record, graph, subject, predicate, obj) in _batchBuffer)
+                {
+                    var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
+                    var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
+
+                    if (record.Operation == LogOperation.Add)
+                        ApplyToIndexes(subject, predicate, obj, validFrom, validTo, record.TransactionTimeTicks, graph);
+                    else if (record.Operation == LogOperation.Delete)
+                        ApplyDeleteToIndexes(subject, predicate, obj, validFrom, validTo, record.TransactionTimeTicks, graph);
+                }
+                _batchBuffer.Clear();
+            }
 
             CheckpointIfNeeded();
 
@@ -450,11 +487,12 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Rollback the current batch (releases lock without committing).
-    /// In-memory index changes remain but WAL records are uncommitted.
-    /// Recovery will not replay these records.
+    /// Indexes are untouched — deferred materialization means no mutations to undo.
+    /// WAL records have BeginTx but no CommitTx, so recovery will discard them.
     /// </summary>
     public void RollbackBatch()
     {
+        _batchBuffer?.Clear();
         _activeBatchTxId = -1;
         _lock.ExitWriteLock();
     }
@@ -486,12 +524,13 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
+        long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
-        _gspoIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, graph);
-        _gposIndex.AddHistorical(predicate, @object, subject, validFrom, validTo, graph);
-        _gospIndex.AddHistorical(@object, subject, predicate, validFrom, validTo, graph);
-        _tgspIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, graph);
+        _gspoIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
+        _gposIndex.AddHistorical(predicate, @object, subject, validFrom, validTo, transactionTime, graph);
+        _gospIndex.AddHistorical(@object, subject, predicate, validFrom, validTo, transactionTime, graph);
+        _tgspIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
 
         // Index object for full-text search if it's a literal (starts with ")
         if (!@object.IsEmpty && @object[0] == '"')
@@ -515,13 +554,14 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
+        long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
         // Delete from all 4 indexes - use the appropriate dimension order for each
-        var d1 = _gspoIndex.DeleteHistorical(subject, predicate, @object, validFrom, validTo, graph);
-        var d2 = _gposIndex.DeleteHistorical(predicate, @object, subject, validFrom, validTo, graph);
-        var d3 = _gospIndex.DeleteHistorical(@object, subject, predicate, validFrom, validTo, graph);
-        var d4 = _tgspIndex.DeleteHistorical(subject, predicate, @object, validFrom, validTo, graph);
+        var d1 = _gspoIndex.DeleteHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
+        var d2 = _gposIndex.DeleteHistorical(predicate, @object, subject, validFrom, validTo, transactionTime, graph);
+        var d3 = _gospIndex.DeleteHistorical(@object, subject, predicate, validFrom, validTo, transactionTime, graph);
+        var d4 = _tgspIndex.DeleteHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
 
         return d1 || d2 || d3 || d4;
     }
@@ -552,8 +592,8 @@ public sealed class QuadStore : IDisposable
                     var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
                     var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
 
-                    // Apply to indexes (no WAL write - already in log)
-                    ApplyToIndexes(subject, predicate, @object, validFrom, validTo, graph);
+                    // Apply to indexes with original transaction time from WAL record
+                    ApplyToIndexes(subject, predicate, @object, validFrom, validTo, record.TransactionTimeTicks, graph);
                     recoveredCount++;
                 }
                 else if (record.Operation == LogOperation.Delete)
@@ -567,8 +607,8 @@ public sealed class QuadStore : IDisposable
                     var validFrom = new DateTimeOffset(record.ValidFromTicks, TimeSpan.Zero);
                     var validTo = new DateTimeOffset(record.ValidToTicks, TimeSpan.Zero);
 
-                    // Apply delete to indexes (no WAL write - already in log)
-                    ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, graph);
+                    // Apply delete to indexes with original transaction time from WAL record
+                    ApplyDeleteToIndexes(subject, predicate, @object, validFrom, validTo, record.TransactionTimeTicks, graph);
                     recoveredCount++;
                 }
             }

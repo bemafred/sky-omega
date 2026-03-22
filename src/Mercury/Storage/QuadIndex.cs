@@ -37,7 +37,6 @@ internal sealed unsafe class QuadIndex : IDisposable
     private long _rootPageId;
     private long _nextPageId;
     private long _quadCount;
-    private long _currentTransactionTime;
 
     /// <summary>
     /// Create a temporal quad store with its own atom store
@@ -104,7 +103,6 @@ internal sealed unsafe class QuadIndex : IDisposable
         _pageCache = new PageCache(capacity: 10_000);
 
         LoadMetadata();
-        _currentTransactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     }
 
     /// <summary>
@@ -136,14 +134,13 @@ internal sealed unsafe class QuadIndex : IDisposable
         ReadOnlySpan<char> tertiary,
         long validFrom,
         long validTo,
-        long? transactionTime = null,
+        long transactionTime,
         ReadOnlySpan<char> graph = default)
     {
         var g = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var a = _atoms.Intern(primary);
         var b = _atoms.Intern(secondary);
         var c = _atoms.Intern(tertiary);
-        var tt = transactionTime ?? _currentTransactionTime;
 
         var temporalKey = new TemporalKey
         {
@@ -153,7 +150,7 @@ internal sealed unsafe class QuadIndex : IDisposable
             Tertiary = c,
             ValidFrom = validFrom,
             ValidTo = validTo,
-            TransactionTime = tt
+            TransactionTime = transactionTime
         };
 
         InsertIntoTree(temporalKey, _rootPageId);
@@ -171,7 +168,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         Add(primary, secondary, tertiary,
             DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             long.MaxValue,
-            transactionTime: null,
+            transactionTime: DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             graph: graph);
     }
 
@@ -184,12 +181,14 @@ internal sealed unsafe class QuadIndex : IDisposable
         ReadOnlySpan<char> tertiary,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
+        long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
+        var tt = transactionTime != 0 ? transactionTime : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         Add(primary, secondary, tertiary,
             validFrom.ToUnixTimeMilliseconds(),
             validTo.ToUnixTimeMilliseconds(),
-            transactionTime: null,
+            transactionTime: tt,
             graph: graph);
     }
 
@@ -203,6 +202,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         ReadOnlySpan<char> tertiary,
         long validFrom,
         long validTo,
+        long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
         // Look up atom IDs - if any don't exist, the triple doesn't exist
@@ -216,6 +216,8 @@ internal sealed unsafe class QuadIndex : IDisposable
         if (!graph.IsEmpty && g == 0)
             return false;
 
+        var tt = transactionTime != 0 ? transactionTime : DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
         var key = new TemporalKey
         {
             Graph = g,
@@ -224,7 +226,7 @@ internal sealed unsafe class QuadIndex : IDisposable
             Tertiary = c,
             ValidFrom = validFrom,
             ValidTo = validTo,
-            TransactionTime = _currentTransactionTime
+            TransactionTime = tt
         };
 
         return DeleteFromTree(key);
@@ -240,11 +242,13 @@ internal sealed unsafe class QuadIndex : IDisposable
         ReadOnlySpan<char> tertiary,
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
+        long transactionTime = 0,
         ReadOnlySpan<char> graph = default)
     {
         return Delete(primary, secondary, tertiary,
             validFrom.ToUnixTimeMilliseconds(),
             validTo.ToUnixTimeMilliseconds(),
+            transactionTime,
             graph);
     }
 
@@ -268,7 +272,7 @@ internal sealed unsafe class QuadIndex : IDisposable
                 if (entry.Key.ValidFrom <= key.ValidTo && entry.Key.ValidTo >= key.ValidFrom)
                 {
                     entry.IsDeleted = true;
-                    entry.ModifiedAt = _currentTransactionTime;
+                    entry.ModifiedAt = key.TransactionTime;
                     FlushPage(page);
                     return true;
                 }
@@ -798,25 +802,26 @@ internal sealed unsafe class QuadIndex : IDisposable
             insertPos++;
         }
 
-        // Check for updates (same GSPO, overlapping time)
+        // Check for updates (same GSPO dimensions)
         if (insertPos > 0)
         {
             ref var prevEntry = ref page->GetEntry(insertPos - 1);
             if (IsSameDimensions(key, prevEntry.Key))
             {
-                // If both entries are "current" (ValidTo is far future), treat as duplicate.
-                // RDF semantics: adding a duplicate triple should be idempotent.
-                // Do NOT truncate the existing entry - just skip the insert.
-                // Note: DateTimeOffset.MaxValue.ToUnixTimeMilliseconds() = 253402300799999L
-                // We use a threshold of year 9000 (253370764800000L) to catch both long.MaxValue
-                // and DateTimeOffset.MaxValue conversions.
+                // Case A: Exact full-key duplicate (all 7 TemporalKey fields match) — replayed no-op
+                if (prevEntry.Key.ValidFrom == key.ValidFrom &&
+                    prevEntry.Key.ValidTo == key.ValidTo &&
+                    prevEntry.Key.TransactionTime == key.TransactionTime)
+                    return default;
+
+                // Case B: Both entries are "current" (ValidTo is far future) — RDF idempotency
                 const long FarFutureThreshold = 253370764800000L; // Year 9000 in Unix ms
                 if (prevEntry.Key.ValidTo >= FarFutureThreshold && key.ValidTo >= FarFutureThreshold)
-                    return default; // Skip duplicate, existing entry remains valid
+                    return default;
 
-                // Otherwise handle temporal update (truncate existing for new version)
+                // Case C: Same dimensions, different temporal key — truncate predecessor, then insert new row
                 HandleTemporalUpdate(page, insertPos - 1, key);
-                return default; // No split for updates
+                // Fall through to insert the new committed row
             }
         }
 
@@ -835,8 +840,8 @@ internal sealed unsafe class QuadIndex : IDisposable
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = 0;
-        newEntry.CreatedAt = _currentTransactionTime;
-        newEntry.ModifiedAt = _currentTransactionTime;
+        newEntry.CreatedAt = key.TransactionTime;
+        newEntry.ModifiedAt = key.TransactionTime;
         newEntry.Version = 1;
         newEntry.IsDeleted = false;
 
@@ -859,13 +864,13 @@ internal sealed unsafe class QuadIndex : IDisposable
     private void HandleTemporalUpdate(TemporalBTreePage* page, int existingIndex, TemporalKey newKey)
     {
         ref var existing = ref page->GetEntry(existingIndex);
-        
+
         // Temporal update: adjust valid time of existing entry
         if (newKey.ValidFrom < existing.Key.ValidTo)
         {
             // Truncate existing entry
             existing.Key.ValidTo = newKey.ValidFrom;
-            existing.ModifiedAt = _currentTransactionTime;
+            existing.ModifiedAt = newKey.TransactionTime;
             FlushPage(page);
         }
     }
@@ -947,8 +952,8 @@ internal sealed unsafe class QuadIndex : IDisposable
         ref var newEntry = ref page->GetEntry(insertPos);
         newEntry.Key = key;
         newEntry.ChildOrValue = rightChildPageId;
-        newEntry.CreatedAt = _currentTransactionTime;
-        newEntry.ModifiedAt = _currentTransactionTime;
+        newEntry.CreatedAt = key.TransactionTime;
+        newEntry.ModifiedAt = key.TransactionTime;
         newEntry.Version = 1;
         newEntry.IsDeleted = false;
 
@@ -1228,7 +1233,6 @@ internal sealed unsafe class QuadIndex : IDisposable
         _rootPageId = 1;
         _nextPageId = 2;
         _quadCount = 0;
-        _currentTransactionTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         // Reinitialize root page as empty leaf
         var root = GetPage(_rootPageId);

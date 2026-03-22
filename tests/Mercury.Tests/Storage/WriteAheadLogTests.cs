@@ -207,7 +207,8 @@ public class WriteAheadLogTests : IDisposable
 
         wal.CommitBatch(batchTxId);
 
-        Assert.Equal(100 * WriteAheadLog.RecordSize, wal.LogSize);
+        // 100 data records + 1 BeginTx + 1 CommitTx = 102 records
+        Assert.Equal(102 * WriteAheadLog.RecordSize, wal.LogSize);
     }
 
     #endregion
@@ -648,20 +649,11 @@ public class WriteAheadLogTests : IDisposable
                 records.Add(enumerator.Current);
             }
 
-            // The batch record has TxId = 1 (batchTxId), but CurrentTxId was only 1 (from first append)
-            // Wait - let me reconsider. The first Append sets CurrentTxId = 1.
-            // BeginBatch returns _currentTxId + 1 = 2
-            // AppendBatch writes record with TxId = 2, but doesn't update _currentTxId
-            // On recovery, we read records and set _currentTxId to max TxId seen = 2
-            // But the batch was never committed, so the data might be inconsistent
-
-            // Actually the current design writes the batch records to WAL but doesn't fsync until commit.
-            // If the process crashes before CommitBatch, the records may or may not be on disk.
-            // If they ARE on disk (fsync happened opportunistically), they'll be replayed.
-            // This test verifies the TxId tracking behavior.
-
-            // Both records (TxId 1 and 2) should be present and valid
-            Assert.Equal(2, records.Count);
+            // The committed single write (TxId 1) should be replayed.
+            // The uncommitted batch (TxId 2, has BeginTx but no CommitTx) must be discarded.
+            var single = Assert.Single(records);
+            Assert.Equal(LogOperation.Add, single.Operation);
+            Assert.Equal(1L, single.SubjectId);
         }
         finally
         {

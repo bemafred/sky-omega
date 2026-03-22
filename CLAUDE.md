@@ -234,7 +234,7 @@ For the vision, methodology (EEE), and broader context, see [docs/architecture/s
 Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 
 1. **Write path**: WAL append → fsync → apply to indexes
-2. **Recovery**: Replay uncommitted WAL entries after last checkpoint
+2. **Recovery**: Replay only committed WAL entries after last checkpoint (uncommitted batches discarded)
 3. **Checkpointing**: Hybrid trigger (size OR time, whichever first)
 
 **Design decisions:**
@@ -242,6 +242,9 @@ Sky Omega uses Write-Ahead Logging (WAL) for crash safety:
 - **AtomStore has no separate WAL**: Append-only by design. On recovery, validate tail and rebuild hash index.
 - **WAL stores atom IDs, not strings**: Atoms persisted before WAL write (we need IDs to write the record).
 - **Batch-first design**: TxId in WAL records enables batching. Amortizing fsync across N triples is critical for performance.
+- **Transaction boundaries**: `BeginTx`/`CommitTx` markers in WAL. Recovery two-pass: collect committed TxIds, then replay only committed records.
+- **Deferred materialization**: Batched writes buffer in memory, apply to indexes only at `CommitBatch()`. `RollbackBatch()` discards buffer — indexes untouched.
+- **Transaction time per-write**: Each write generates `DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()` stored in WAL and indexes. Preserved through crash recovery.
 - **Hybrid checkpoint trigger**: Size-based (16MB) adapts to bursts; time-based (60s) bounds recovery during idle.
 
 ### Batch Write API
@@ -261,7 +264,7 @@ QuadStore supports RDF named graphs for domain isolation. See [docs/api/api-usag
 - **Multiple index paths**: GSPO, GPOS, GOSP, TGSP for efficient query patterns from any entry point
 - **Graph isolation**: Default graph (atom 0) and named graphs are fully isolated
 - **TemporalKey**: 56 bytes (GraphAtom + SubjectAtom + PredicateAtom + ObjectAtom + ValidFrom + ValidTo + TransactionTime)
-- **WAL record**: 72 bytes (includes GraphId for crash recovery)
+- **WAL record**: 80 bytes (v2: includes GraphId, TransactionTimeTicks, BeginTx/CommitTx markers)
 
 ### Pruning (`SkyOmega.Mercury.Pruning`)
 

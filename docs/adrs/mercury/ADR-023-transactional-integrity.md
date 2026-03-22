@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** — 2026-03-22
+**Accepted** — 2026-03-22
 
 ## Context
 
@@ -206,10 +206,10 @@ Suggested order: **1 → 2 → 3**, with tests written alongside each phase.
 
 ## Success Criteria
 
-- [ ] `RollbackBatch()` leaves indexes unchanged — verified by query after rollback
-- [ ] WAL recovery discards uncommitted batch records — verified by crash simulation
-- [ ] Crash after durable `CommitTx` but before full index materialization does not duplicate or truncate history on recovery
-- [ ] Transaction time varies per-write in a long-lived store — verified by temporal query
-- [ ] Transaction time survives recovery — verified by comparing pre/post-crash query results
-- [ ] Existing 329 storage tests continue to pass
+- [x] `RollbackBatch()` leaves indexes unchanged — verified by query after rollback
+- [x] WAL recovery discards uncommitted batch records — verified by crash simulation
+- [x] Crash after durable `CommitTx` but before full index materialization does not duplicate or truncate history on recovery
+- [x] Transaction time varies per-write in a long-lived store — verified by temporal query
+- [x] Transaction time survives recovery — verified by comparing pre/post-crash query results
+- [x] Existing 3976 tests continue to pass (was 329 storage-only; full suite is 3976+25)
 - [ ] Batch write throughput regression < 10% (benchmark)

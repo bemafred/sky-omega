@@ -1258,10 +1258,8 @@ public class QuadStoreTests : IDisposable
 
         // Now delete in a batch
         store.BeginBatch();
-        var deleted = store.DeleteCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
+        store.DeleteCurrentBatched("<http://ex.org/s2>", "<http://ex.org/p>", "<http://ex.org/o>");
         store.CommitBatch();
-
-        Assert.True(deleted);
 
         // Verify s1 and s3 remain, s2 is deleted
         store.AcquireReadLock();
