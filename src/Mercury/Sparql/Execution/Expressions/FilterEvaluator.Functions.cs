@@ -309,10 +309,10 @@ internal ref partial struct FilterEvaluator
             return new Value { Type = ValueType.Boolean, BooleanValue = false };
         }
 
-        // Case-insensitive contains check (handles Unicode including Swedish å, ä, ö)
-        // Use CurrentCultureIgnoreCase for proper Unicode case-folding
-        // Use lexical form to strip quotes from RDF literals
-        var matches = textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.CurrentCultureIgnoreCase);
+        // Case-insensitive contains check using OrdinalIgnoreCase for locale-independent
+        // Unicode case-folding (handles Swedish å, ä, ö). Consistent with TrigramIndex
+        // which uses ToLowerInvariant() — both use Unicode simple case folding tables.
+        var matches = textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.OrdinalIgnoreCase);
         return new Value { Type = ValueType.Boolean, BooleanValue = matches };
     }
 
