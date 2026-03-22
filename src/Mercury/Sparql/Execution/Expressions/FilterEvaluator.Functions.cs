@@ -2,12 +2,19 @@ using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using SkyOmega.Mercury.Sparql.Types;
 
 namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
 internal ref partial struct FilterEvaluator
 {
+#if DEBUG
+    private static long _textMatchEvaluationCount;
+    internal static long TextMatchEvaluationCount => _textMatchEvaluationCount;
+    internal static void ResetTextMatchEvaluationCount() => Interlocked.Exchange(ref _textMatchEvaluationCount, 0);
+#endif
+
     /// <summary>
     /// Parse IF(condition, thenExpr, elseExpr)
     /// </summary>
@@ -279,9 +286,10 @@ internal ref partial struct FilterEvaluator
     /// Returns true if text contains query (case-insensitive).
     /// </summary>
     /// <remarks>
-    /// This function is designed to work with the trigram index for pre-filtering,
-    /// but the actual matching is done here with case-insensitive comparison.
-    /// The trigram index provides candidate filtering at query planning time.
+    /// ADR-024: The trigram index provides set-based pre-filtering at scan level —
+    /// MultiPatternScan restricts the enumerator to candidate object atoms before
+    /// bindings reach this evaluator. This Contains check is the verification step
+    /// that eliminates trigram false positives. Both paths are required for correctness.
     /// </remarks>
     private Value ParseTextMatchFunction()
     {
@@ -312,6 +320,9 @@ internal ref partial struct FilterEvaluator
         // Case-insensitive contains check using OrdinalIgnoreCase for locale-independent
         // Unicode case-folding (handles Swedish å, ä, ö). Consistent with TrigramIndex
         // which uses ToLowerInvariant() — both use Unicode simple case folding tables.
+#if DEBUG
+        Interlocked.Increment(ref _textMatchEvaluationCount);
+#endif
         var matches = textArg.GetLexicalForm().Contains(queryArg.GetLexicalForm(), StringComparison.OrdinalIgnoreCase);
         return new Value { Type = ValueType.Boolean, BooleanValue = matches };
     }

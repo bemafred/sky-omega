@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -874,6 +875,48 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
+    /// Query the trigram index for candidate atom IDs matching a text search.
+    /// Caller must hold read lock.
+    /// </summary>
+    internal List<long> QueryTrigramCandidates(ReadOnlySpan<char> searchQuery)
+    {
+        return _trigramIndex.QueryCandidates(searchQuery);
+    }
+
+    /// <summary>
+    /// Query current state with candidate object atom ID filtering.
+    /// The enumerator skips quads whose object atom ID is not in the candidate set,
+    /// avoiding string decode for non-candidates.
+    /// Caller must hold read lock.
+    /// </summary>
+    internal TemporalResultEnumerator QueryCurrentWithCandidates(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        HashSet<long> candidateObjectAtomIds,
+        ReadOnlySpan<char> graph = default)
+    {
+        var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, TemporalQueryType.AsOf);
+
+        ReadOnlySpan<char> arg1, arg2, arg3;
+        switch (indexType)
+        {
+            case TemporalIndexType.GPOS:
+                arg1 = predicate; arg2 = @object; arg3 = subject;
+                break;
+            case TemporalIndexType.GOSP:
+                arg1 = @object; arg2 = subject; arg3 = predicate;
+                break;
+            default:
+                arg1 = subject; arg2 = predicate; arg3 = @object;
+                break;
+        }
+
+        var enumerator = selectedIndex.QueryAsOf(arg1, arg2, arg3, DateTimeOffset.UtcNow, graph);
+        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
+    }
+
+    /// <summary>
     /// Get all named graph IRIs in the store.
     /// Returns graph IRIs as strings. Default graph (empty) is not included.
     /// Caller must hold read lock.
@@ -1038,6 +1081,7 @@ public struct TemporalResultEnumerator
     private QuadIndex.TemporalQuadEnumerator _baseEnumerator;
     private readonly TemporalIndexType _indexType;
     private readonly AtomStore _atoms;
+    private readonly HashSet<long>? _candidateObjectAtomIds;
 
     // Pooled buffer for zero-allocation string decoding
     private char[]? _buffer;
@@ -1052,6 +1096,21 @@ public struct TemporalResultEnumerator
         _baseEnumerator = baseEnumerator;
         _indexType = indexType;
         _atoms = atoms;
+        _candidateObjectAtomIds = null;
+        _buffer = null;
+        _bufferOffset = 0;
+    }
+
+    internal TemporalResultEnumerator(
+        QuadIndex.TemporalQuadEnumerator baseEnumerator,
+        TemporalIndexType indexType,
+        AtomStore atoms,
+        HashSet<long>? candidateObjectAtomIds)
+    {
+        _baseEnumerator = baseEnumerator;
+        _indexType = indexType;
+        _atoms = atoms;
+        _candidateObjectAtomIds = candidateObjectAtomIds;
         _buffer = null;
         _bufferOffset = 0;
     }
@@ -1060,7 +1119,26 @@ public struct TemporalResultEnumerator
     {
         // Reset buffer offset for new result - reuse same buffer
         _bufferOffset = 0;
-        return _baseEnumerator.MoveNext();
+
+        if (_candidateObjectAtomIds == null)
+            return _baseEnumerator.MoveNext();
+
+        // Candidate-filtered iteration: skip non-candidate objects at atom-ID level
+        // (before expensive UTF-8 → UTF-16 string decode)
+        while (_baseEnumerator.MoveNext())
+        {
+            var quad = _baseEnumerator.Current;
+            long objectAtomId = _indexType switch
+            {
+                TemporalIndexType.GPOS => quad.Secondary,
+                TemporalIndexType.GOSP => quad.Primary,
+                _ => quad.Tertiary // GSPO, TGSP
+            };
+
+            if (_candidateObjectAtomIds.Contains(objectAtomId))
+                return true;
+        }
+        return false;
     }
 
     public ResolvedTemporalQuad Current

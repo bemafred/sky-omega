@@ -329,6 +329,119 @@ internal static class FilterAnalyzer
 
     private static int ComputeHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 
+    /// <summary>
+    /// Detect text:match(?var, "constant") filters suitable for trigram pre-filtering.
+    /// Only filters where the variable is bound to an object position qualify.
+    /// </summary>
+    public static List<TextMatchHint>? DetectTextMatchFilters(
+        in GraphPattern pattern,
+        ReadOnlySpan<char> source,
+        int[]? patternOrder = null)
+    {
+        int filterCount = pattern.FilterCount;
+        if (filterCount == 0)
+            return null;
+
+        List<TextMatchHint>? hints = null;
+
+        for (int i = 0; i < filterCount; i++)
+        {
+            var filter = pattern.GetFilter(i);
+            var expr = source.Slice(filter.Start, filter.Length);
+
+            // Skip leading parenthesis (FilterExpr Start is after FILTER keyword, includes parens)
+            var inner = expr;
+            if (inner.Length > 0 && inner[0] == '(')
+                inner = inner.Slice(1);
+            // Trim trailing paren
+            if (inner.Length > 0 && inner[inner.Length - 1] == ')')
+                inner = inner.Slice(0, inner.Length - 1);
+            inner = inner.Trim();
+
+            // Detect text:match( or match( prefix
+            int funcStart = -1;
+            if (inner.StartsWith("text:match(", StringComparison.Ordinal))
+                funcStart = 11;
+            else if (inner.StartsWith("match(", StringComparison.Ordinal))
+                funcStart = 6;
+
+            if (funcStart < 0)
+                continue;
+
+            var args = inner.Slice(funcStart);
+
+            // First arg must be ?variable
+            if (args.Length < 2 || args[0] != '?')
+                continue;
+
+            // Extract variable name
+            int varEnd = 1;
+            while (varEnd < args.Length && IsVarChar(args[varEnd]))
+                varEnd++;
+
+            if (varEnd <= 1)
+                continue;
+
+            var varName = args.Slice(1, varEnd - 1);
+            int varHash = ComputeHash(varName);
+
+            // Skip whitespace and comma
+            int pos = varEnd;
+            while (pos < args.Length && (args[pos] == ' ' || args[pos] == ','))
+                pos++;
+
+            // Second arg must be "constant"
+            if (pos >= args.Length || args[pos] != '"')
+                continue;
+
+            // Extract the constant string (between quotes)
+            int strStart = pos + 1;
+            int strEnd = strStart;
+            while (strEnd < args.Length && args[strEnd] != '"')
+                strEnd++;
+
+            if (strEnd >= args.Length)
+                continue;
+
+            var searchTerm = args.Slice(strStart, strEnd - strStart).ToString();
+
+            // Find which pattern level binds this variable in the object position
+            int patternCount = pattern.RequiredPatternCount;
+            int objectLevel = -1;
+
+            for (int level = 0; level < patternCount; level++)
+            {
+                int patternIdx = patternOrder != null && level < patternOrder.Length
+                    ? patternOrder[level]
+                    : level;
+
+                var tp = pattern.GetPattern(patternIdx);
+                if (tp.Object.IsVariable)
+                {
+                    var objVarName = source.Slice(tp.Object.Start + 1, tp.Object.Length - 1); // skip ?
+                    if (ComputeHash(objVarName) == varHash)
+                    {
+                        objectLevel = level;
+                        break;
+                    }
+                }
+            }
+
+            if (objectLevel < 0)
+                continue;
+
+            hints ??= new List<TextMatchHint>();
+            hints.Add(new TextMatchHint
+            {
+                SearchTerm = searchTerm,
+                PatternLevel = objectLevel,
+                FilterIndex = i
+            });
+        }
+
+        return hints;
+    }
+
     #endregion
 }
 
@@ -348,4 +461,19 @@ internal struct FilterAssignment
 
     /// <summary>True if this filter can be pushed down.</summary>
     public bool CanPush;
+}
+
+/// <summary>
+/// Describes a text:match filter suitable for trigram index pre-filtering.
+/// </summary>
+internal struct TextMatchHint
+{
+    /// <summary>The constant search string from text:match(?var, "constant").</summary>
+    public string SearchTerm;
+
+    /// <summary>Pattern level where the variable is bound as the object.</summary>
+    public int PatternLevel;
+
+    /// <summary>Index of the filter in the graph pattern.</summary>
+    public int FilterIndex;
 }

@@ -411,9 +411,13 @@ internal partial class QueryExecutor : IDisposable
                 var unpushableFilters = levelFilters != null
                     ? FilterAnalyzer.GetUnpushableFilters(in pattern, _source, null)
                     : null;
+                var textMatchHints = pattern.FilterCount > 0
+                    ? FilterAnalyzer.DetectTextMatchFilters(in pattern, _source, null)
+                    : null;
 
                 var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri.AsSpan(),
-                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters, _buffer.Prefixes);
+                    _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters, _buffer.Prefixes,
+                    textMatchHints);
                 try
                 {
                     while (multiScan.MoveNext(ref bindingTable))
@@ -698,9 +702,13 @@ internal partial class QueryExecutor : IDisposable
             var unpushableFilters = levelFilters != null
                 ? FilterAnalyzer.GetUnpushableFilters(in pattern, _source, null)
                 : null;
+            var textMatchHints = pattern.FilterCount > 0
+                ? FilterAnalyzer.DetectTextMatchFilters(in pattern, _source, null)
+                : null;
 
             var multiScan = new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters, _buffer.Prefixes);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, levelFilters, _buffer.Prefixes,
+                textMatchHints);
             try
             {
                 while (multiScan.MoveNext(ref bindingTable))
@@ -855,9 +863,15 @@ internal partial class QueryExecutor : IDisposable
         // Multiple required patterns - need join
         // Note: This can cause stack overflow with very large cross-products (e.g., variable predicates)
         // due to the ~4KB GraphPattern struct being copied in hot loops. See ADR-009 for details.
+        // ADR-024: Detect text:match filters for trigram pre-filtering
+        var textMatchHints = pattern.FilterCount > 0
+            ? FilterAnalyzer.DetectTextMatchFilters(in pattern, _source, _optimizedPatternOrder)
+            : null;
+
         return new QueryResults(
             new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, null, _buffer.Prefixes),
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, null, _buffer.Prefixes,
+                textMatchHints),
             _buffer,
             _source,
             _store,

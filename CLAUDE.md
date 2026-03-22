@@ -653,6 +653,8 @@ SELECT ?city ?name WHERE {
 
 **Features:**
 - Case-insensitive matching with Unicode case-folding (supports Swedish å, ä, ö)
+- ADR-024: Trigram pre-filtering at scan level — `MultiPatternScan` restricts enumerator to candidate object atoms, reducing text:match from O(N) to O(k × log N)
+- Selectivity-based fallback: candidate sets > 10,000 revert to brute-force scan
 - Memory-mapped two-file architecture (trigram.hash + trigram.posts)
 - FNV-1a hashing with quadratic probing
 - Alternative `match()` syntax supported

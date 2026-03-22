@@ -244,4 +244,90 @@ public class SparqlTextSearchTests : IDisposable
     }
 
     #endregion
+
+    #region ADR-024: Trigram Pre-Filtering Verification
+
+#if DEBUG
+    [Fact]
+    public void TextMatch_TrigramPreFiltering_ReducesEvaluations()
+    {
+        // Create a store with many literals — only a few match "stockholm"
+        var tempPath = TempPath.Test("trigram-prefilter");
+        tempPath.MarkOwnership();
+        using var store = new QuadStore(tempPath);
+
+        // Add 200 distinct literals, only 2 contain "stockholm"
+        store.BeginBatch();
+        store.AddCurrentBatched("<http://ex.org/match1>", "<http://ex.org/name>", "\"City of Stockholm\"");
+        store.AddCurrentBatched("<http://ex.org/match1>", "<http://ex.org/type>", "<http://ex.org/City>");
+        store.AddCurrentBatched("<http://ex.org/match2>", "<http://ex.org/name>", "\"Stockholm Municipality\"");
+        store.AddCurrentBatched("<http://ex.org/match2>", "<http://ex.org/type>", "<http://ex.org/City>");
+        for (int i = 0; i < 198; i++)
+        {
+            store.AddCurrentBatched($"<http://ex.org/city{i}>", "<http://ex.org/name>", $"\"City number {i} in the world\"");
+            store.AddCurrentBatched($"<http://ex.org/city{i}>", "<http://ex.org/type>", "<http://ex.org/City>");
+        }
+        store.CommitBatch();
+
+        SkyOmega.Mercury.Sparql.Execution.Expressions.FilterEvaluator.ResetTextMatchEvaluationCount();
+
+        // Two patterns needed to route through MultiPatternScan (which has trigram integration)
+        var sparql = @"SELECT ?s ?name WHERE {
+            ?s <http://ex.org/type> <http://ex.org/City> .
+            ?s <http://ex.org/name> ?name .
+            FILTER(text:match(?name, ""stockholm""))
+        }";
+
+        var parser = new SkyOmega.Mercury.Sparql.Parsing.SparqlParser(sparql.AsSpan());
+        var query = parser.ParseQuery();
+
+        store.AcquireReadLock();
+        try
+        {
+            var executor = new SkyOmega.Mercury.Sparql.Execution.QueryExecutor(store, sparql.AsSpan(), query);
+            var results = executor.Execute();
+            int count = 0;
+            while (results.MoveNext()) count++;
+            results.Dispose();
+
+            Assert.Equal(2, count); // Correctness: exactly 2 matches
+
+            var evaluations = SkyOmega.Mercury.Sparql.Execution.Expressions.FilterEvaluator.TextMatchEvaluationCount;
+
+            // With trigram pre-filtering, evaluations should be much less than 200
+            // The trigram index should narrow to only a few candidates
+            Assert.True(evaluations < 50,
+                $"Expected < 50 text:match evaluations with trigram pre-filtering, got {evaluations}");
+        }
+        finally
+        {
+            store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
+    public void TextMatch_ShortQuery_FallsBackToBruteForce()
+    {
+        // Query "ab" (< 3 chars) cannot use trigram pre-filtering
+        // This tests the single-pattern path (TriplePatternScan), which doesn't have
+        // trigram integration yet — brute force is the expected behavior
+        SkyOmega.Mercury.Sparql.Execution.Expressions.FilterEvaluator.ResetTextMatchEvaluationCount();
+
+        var sparql = @"SELECT ?city ?name WHERE {
+            ?city <http://ex.org/name> ?name .
+            FILTER(text:match(?name, ""ab""))
+        }";
+
+        var resultCount = ExecuteQueryCount(sparql);
+
+        var evaluations = SkyOmega.Mercury.Sparql.Execution.Expressions.FilterEvaluator.TextMatchEvaluationCount;
+
+        // Short query: all 4 name bindings should be evaluated (brute force)
+        Assert.Equal(0, resultCount); // No names contain "ab"
+        Assert.True(evaluations >= 4,
+            $"Short query should fall back to brute-force, but only {evaluations} evaluations (expected >= 4)");
+    }
+#endif
+
+    #endregion
 }

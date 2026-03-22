@@ -52,6 +52,10 @@ internal ref struct MultiPatternScan
     private string? _expandedPredicate;
     private string? _expandedObject;
 
+    // Trigram candidate object atom IDs per pattern level (ADR-024)
+    // null means no trigram pre-filtering for that level
+    private readonly HashSet<long>?[]? _trigramCandidates;
+
     // Current state for each pattern level (support up to 12 patterns for SPARQL-star with multiple annotations)
     // ADR-011: Changed from 12 inline fields to pooled array to reduce stack size from ~18KB to ~15KB
     // Note: Nullable because default-constructed struct (as field in another struct) will have null
@@ -124,6 +128,7 @@ internal ref struct MultiPatternScan
         _rangeStart = default;
         _rangeEnd = default;
         _prefixes = prefixes;
+        _trigramCandidates = null;
         _expandedSubject = null;
         _expandedPredicate = null;
         _expandedObject = null;
@@ -167,6 +172,7 @@ internal ref struct MultiPatternScan
         _rangeStart = default;
         _rangeEnd = default;
         _prefixes = prefixes;
+        _trigramCandidates = null;
         _expandedSubject = null;
         _expandedPredicate = null;
         _expandedObject = null;
@@ -198,7 +204,8 @@ internal ref struct MultiPatternScan
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
         DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
         int[]? patternOrder = null, List<int>[]? levelFilters = null,
-        PrefixMapping[]? prefixes = null)
+        PrefixMapping[]? prefixes = null,
+        List<TextMatchHint>? textMatchHints = null)
     {
         _store = store;
         _source = source;
@@ -254,6 +261,23 @@ internal ref struct MultiPatternScan
 
                 for (int i = 0; i < count; i++)
                     SetLevelFilter(level, i, filters[i]);
+            }
+        }
+
+        // ADR-024: Resolve trigram candidate sets for text:match pre-filtering
+        _trigramCandidates = null;
+        if (textMatchHints != null && textMatchHints.Count > 0)
+        {
+            _trigramCandidates = new HashSet<long>?[MaxPatternLevels];
+            foreach (var hint in textMatchHints)
+            {
+                if (hint.PatternLevel >= 0 && hint.PatternLevel < MaxPatternLevels)
+                {
+                    var candidates = store.QueryTrigramCandidates(hint.SearchTerm.AsSpan());
+                    // Selectivity fallback: skip pre-filtering when candidate set is too large
+                    if (candidates.Count > 0 && candidates.Count < 10_000)
+                        _trigramCandidates[hint.PatternLevel] = new HashSet<long>(candidates);
+                }
             }
         }
 
@@ -886,8 +910,15 @@ internal ref struct MultiPatternScan
         // Resolve object - store in _expandedObject if expansion needed
         obj = ResolveTerm(pattern.Object, ref bindings, TermPosition.Object);
 
-        // For inverse paths, swap subject and object in the query
-        if (isInverse)
+        // ADR-024: Check for trigram candidate filtering at current pattern level
+        HashSet<long>? candidates = _trigramCandidates?[_currentLevel];
+
+        if (candidates != null && _temporalMode == TemporalQueryMode.Current && !isInverse)
+        {
+            // Use candidate-filtered query — skips non-candidate objects at atom-ID level
+            enumerator = _store.QueryCurrentWithCandidates(subject, predicate, obj, candidates, _graph);
+        }
+        else if (isInverse)
         {
             enumerator = ExecuteTemporalQuery(obj, predicate, subject);
         }
