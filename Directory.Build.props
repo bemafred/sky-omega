@@ -1,15 +1,15 @@
 <Project>
   <PropertyGroup>
     <!-- Version information -->
-    <Version>1.4.0</Version>
-    <AssemblyVersion>1.4.0.0</AssemblyVersion>
-    <FileVersion>1.4.0.0</FileVersion>
-    <InformationalVersion>1.4.0</InformationalVersion>
+    <Version>1.5.0</Version>
+    <AssemblyVersion>1.5.0.0</AssemblyVersion>
+    <FileVersion>1.5.0.0</FileVersion>
+    <InformationalVersion>1.5.0</InformationalVersion>
 
     <!-- Package metadata -->
     <Authors>Sky Omega Contributors</Authors>
     <Company>Sky Omega</Company>
-    <Product>Sky Omega Mercury</Product>
+    <Product>Sky Omega</Product>
     <Description>Semantic-aware storage and query engine with zero-GC performance design</Description>
     <Copyright>Copyright (c) 2026 Sky Omega Contributors</Copyright>
 

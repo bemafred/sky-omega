@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.4.0 Released** — Transactional integrity (WAL v2, deferred materialization) and trigram read path (scan-level pre-filtering for `text:match`).
+> **v1.5.0 Released** — DrHook runtime observation substrate joins Sky Omega as a peer MCP server alongside Mercury. .NET process inspection via EventPipe and controlled stepping via DAP/netcoredbg.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
@@ -123,6 +123,8 @@ Everything below has code in `src/`, tests, and benchmarks.
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
 | **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
+| **DrHook**             | Runtime observation substrate — EventPipe profiling and DAP stepping for AI coding agents   |
+| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP)                               |
 
 ## 🔭 Architectural Vision
 

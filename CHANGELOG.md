@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2026-03-23
+
+DrHook runtime observation substrate — Sky Omega's second MCP server.
+
+### Added
+
+#### DrHook — Runtime Observation Substrate (ADR-004)
+- **DrHook core library** — .NET runtime inspection with two observation layers:
+  - **EventPipe observation** — passive profiling (thread sampling, GC events, exception tracing, contention detection) with structured anomaly detection
+  - **DAP stepping** — controlled execution via Debug Adapter Protocol (breakpoints, step-through, variable inspection) using netcoredbg
+- **DrHook MCP server** (`drhook-mcp`) — 13 MCP tools exposing observation and stepping to AI coding agents, packaged as .NET global tool
+- **Hypothesis-driven inspection** — every observation requires a stated hypothesis, forcing epistemic discipline (what do you expect vs what do you see)
+- **Code version anchoring** — assembly version captured with every observation to prevent bitemporal desync
+- **Signal summarization** — EventPipe output collapsed to structured summaries with anomaly flags (HOTSPOT, GC_PRESSURE, CONTENTION, EXCEPTIONS, IDLE)
+- **File-based inspection target** (`examples/drhook-target.cs`) — five scenarios for testing DrHook capabilities
+- **16 unit tests** across ProcessAttacher, DapClient, NetCoreDbgLocator, and SteppingSessionManager
+
+### Changed
+- **Mercury MCP server version** now reads from assembly attribute instead of hardcoded string
+- **Directory.Build.props** Product name updated from "Sky Omega Mercury" to "Sky Omega"
+- **install-tools.sh/.ps1** updated to include `drhook-mcp` in global tool installation
+- **.mcp.json** updated with DrHook dev-time server configuration
+
+---
+
 ## [1.4.0] - 2026-03-22
 
 Transactional integrity and trigram read path — two major architectural advances.

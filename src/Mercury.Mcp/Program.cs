@@ -147,7 +147,9 @@ builder.Services
         options.ServerInfo = new()
         {
             Name = "mercury-mcp",
-            Version = "1.3.12"
+            Version = Assembly.GetExecutingAssembly()
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion ?? "unknown"
         };
     })
     .WithStdioServerTransport()
