@@ -4,6 +4,11 @@
       "type": "stdio",
       "command": "dotnet",
       "args": ["run", "--project", "src/Mercury.Mcp"]
+    },
+    "drhook": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--project", "src/DrHook.Mcp"]
     }
   }
 }

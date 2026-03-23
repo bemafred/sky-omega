@@ -16,7 +16,8 @@ $packages = @(
     "SkyOmega.Mercury.Cli",
     "SkyOmega.Mercury.Cli.Sparql",
     "SkyOmega.Mercury.Cli.Turtle",
-    "SkyOmega.Mercury.Mcp"
+    "SkyOmega.Mercury.Mcp",
+    "SkyOmega.DrHook.Mcp"
 )
 
 foreach ($pkg in $packages) {
@@ -34,3 +35,4 @@ Write-Host "  mercury         - SPARQL CLI with persistent store"
 Write-Host "  mercury-sparql  - SPARQL query engine demo"
 Write-Host "  mercury-turtle  - Turtle parser demo"
 Write-Host "  mercury-mcp     - MCP server for Claude"
+Write-Host "  drhook-mcp      - MCP server for .NET runtime inspection"

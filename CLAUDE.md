@@ -61,7 +61,7 @@ Use `#:package Name@version` for NuGet references, `#:project path` for project 
 
 ## Global Tools
 
-Mercury tools are packaged as .NET global tools for use from any directory.
+Sky Omega tools are packaged as .NET global tools for use from any directory.
 
 ```bash
 # Install all tools from local source
@@ -78,6 +78,7 @@ dotnet tool install -g SkyOmega.Mercury.Mcp --add-source ./nupkg
 | `mercury-mcp` | MCP server for Claude with persistent store at `~/Library/SkyOmega/stores/mcp/` |
 | `mercury-sparql` | SPARQL query engine demo |
 | `mercury-turtle` | Turtle parser demo |
+| `drhook-mcp` | MCP server for .NET runtime inspection (EventPipe + DAP) |
 
 All tools support `-v`/`--version`.
 
@@ -88,6 +89,7 @@ All tools support `-v`/`--version`.
 **Production** (any repo):
 ```bash
 claude mcp add --transport stdio --scope user mercury -- mercury-mcp
+claude mcp add --transport stdio --scope user drhook -- drhook-mcp
 ```
 
 ### Semantic Memory
@@ -106,6 +108,7 @@ Architecture Decision Records track planning and progress for complex features:
 ls docs/adrs/             # Cross-cutting ADRs (e.g., ADR-000 repo structure)
 ls docs/adrs/mercury/     # Mercury ADRs
 ls docs/adrs/minerva/     # Minerva ADRs
+ls docs/adrs/drhook/      # DrHook ADRs
 ```
 
 **ADR workflow:** Plan in ADR → implement → check off success criteria → update status to "Accepted".
@@ -134,7 +137,8 @@ SkyOmega.sln
 ├── docs/
 │   ├── adrs/                # Architecture Decision Records
 │   │   ├── mercury/         # Mercury-specific ADRs
-│   │   └── minerva/         # Minerva-specific ADRs
+│   │   ├── minerva/         # Minerva-specific ADRs
+│   │   └── drhook/          # DrHook-specific ADRs
 │   ├── specs/               # External format specifications
 │   │   ├── rdf/             # RDF specs (future: SPARQL, Turtle, etc.)
 │   │   └── llm/             # LLM specs (GGUF, SafeTensors, Tokenizers)
@@ -173,7 +177,12 @@ SkyOmega.sln
 │   │   ├── Tensors/         # Tensor operations
 │   │   └── Inference/       # Model inference
 │   ├── Minerva.Cli/         # Minerva CLI
-│   └── Minerva.Mcp/         # Minerva MCP server
+│   ├── Minerva.Mcp/         # Minerva MCP server
+│   │
+│   ├── DrHook/              # Runtime observation substrate (EventPipe + DAP)
+│   │   ├── Diagnostics/     # ProcessAttacher, StackInspector (EventPipe)
+│   │   └── Stepping/        # DapClient, SteppingSessionManager, NetCoreDbgLocator
+│   └── DrHook.Mcp/          # MCP server for .NET runtime inspection
 ├── tests/
 │   ├── Mercury.Tests/       # Mercury xUnit tests
 │   │   ├── Diagnostics/     # Diagnostic system tests
@@ -186,6 +195,7 @@ SkyOmega.sln
 │   │   ├── Storage/         # Storage layer tests (QuadStore, AtomStore, WAL)
 │   │   └── W3C/             # W3C conformance test suites
 │   ├── Mercury.Solid.Tests/ # Mercury Solid protocol tests
+│   ├── DrHook.Tests/        # DrHook xUnit tests
 │   ├── Minerva.Tests/       # Minerva xUnit tests
 │   ├── w3c-json-ld-api/     # W3C JSON-LD conformance test suite data
 │   └── w3c-rdf-tests/       # W3C RDF conformance test suite data

@@ -14,7 +14,8 @@ echo ""
 echo "Installing tools..."
 
 for pkg in SkyOmega.Mercury.Cli SkyOmega.Mercury.Cli.Sparql \
-           SkyOmega.Mercury.Cli.Turtle SkyOmega.Mercury.Mcp; do
+           SkyOmega.Mercury.Cli.Turtle SkyOmega.Mercury.Mcp \
+           SkyOmega.DrHook.Mcp; do
     echo "  $pkg"
     dotnet tool install -g "$pkg" --prerelease --add-source "$NUPKG_DIR" 2>/dev/null \
         || dotnet tool update -g "$pkg" --prerelease --add-source "$NUPKG_DIR"
@@ -26,3 +27,4 @@ echo "  mercury         - SPARQL CLI with persistent store"
 echo "  mercury-sparql  - SPARQL query engine demo"
 echo "  mercury-turtle  - Turtle parser demo"
 echo "  mercury-mcp     - MCP server for Claude"
+echo "  drhook-mcp      - MCP server for .NET runtime inspection"
