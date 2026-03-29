@@ -77,6 +77,7 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 | [Mercury CLI](docs/tutorials/mercury-cli.md) | CLI REPL deep dive                        |
 | [Mercury MCP](docs/tutorials/mercury-mcp.md) | Claude integration and persistent memory  |
 | [API Reference](docs/api/api-usage.md) | Detailed code examples for all APIs             |
+| [The Collected Poems of Kjell Silverstein](docs/poetry/kjell-silverstein-collected.md) | Sky Omega explained without a single line of code |
 
 ---
 
