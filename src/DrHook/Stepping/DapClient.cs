@@ -18,7 +18,7 @@ namespace SkyOmega.DrHook.Stepping;
 public sealed class DapClient : IAsyncDisposable
 {
     private Process? _debugger;
-    private StreamReader? _stdout;
+    private Stream? _stream;
     private StreamWriter? _stdin;
     private int _seq = 1;
     private readonly System.Collections.Concurrent.ConcurrentQueue<JsonObject> _stoppedEvents = new();
@@ -42,7 +42,7 @@ public sealed class DapClient : IAsyncDisposable
         };
 
         _debugger.Start();
-        _stdout = _debugger.StandardOutput;
+        _stream = _debugger.StandardOutput.BaseStream;
         _stdin = _debugger.StandardInput;
 
         // Initialize DAP session
@@ -62,6 +62,17 @@ public sealed class DapClient : IAsyncDisposable
         await SendRequestAsync("attach", new JsonObject
         {
             ["processId"] = pid,
+        }, ct);
+    }
+
+    public async Task LaunchTargetAsync(string program, string[] args, string? cwd, bool stopAtEntry, CancellationToken ct)
+    {
+        await SendRequestAsync("launch", new JsonObject
+        {
+            ["program"] = program,
+            ["args"] = new JsonArray(args.Select(a => (JsonNode)JsonValue.Create(a)!).ToArray()),
+            ["cwd"] = cwd ?? Environment.CurrentDirectory,
+            ["stopAtEntry"] = stopAtEntry,
         }, ct);
     }
 
@@ -192,7 +203,7 @@ public sealed class DapClient : IAsyncDisposable
         }, ct);
     }
 
-    public async Task DisconnectAsync(CancellationToken ct)
+    public async Task DisconnectAsync(bool terminateDebuggee, CancellationToken ct)
     {
         if (IsConnected)
         {
@@ -200,7 +211,7 @@ public sealed class DapClient : IAsyncDisposable
             {
                 await SendRequestAsync("disconnect", new JsonObject
                 {
-                    ["terminateDebuggee"] = false
+                    ["terminateDebuggee"] = terminateDebuggee
                 }, ct);
             }
             catch
@@ -212,7 +223,7 @@ public sealed class DapClient : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        await DisconnectAsync(CancellationToken.None);
+        await DisconnectAsync(terminateDebuggee: true, CancellationToken.None);
 
         if (_debugger is not null && !_debugger.HasExited)
         {
@@ -249,7 +260,7 @@ public sealed class DapClient : IAsyncDisposable
 
     private async Task<JsonObject> SendRequestAsync(string command, JsonObject arguments, CancellationToken ct)
     {
-        if (_stdin is null || _stdout is null)
+        if (_stdin is null || _stream is null)
             throw new InvalidOperationException("DAP client not connected");
 
         var seq = _seq++;
@@ -303,36 +314,51 @@ public sealed class DapClient : IAsyncDisposable
 
     private async Task<JsonObject?> ReadDapMessageAsync(CancellationToken ct)
     {
-        if (_stdout is null) return null;
+        if (_stream is null) return null;
 
-        // Read headers until empty line
+        // Read headers byte-by-byte until \r\n\r\n.
+        // DAP headers are ASCII — reading bytes is safe.
+        // We must not use StreamReader because it buffers ahead and
+        // would consume body bytes that Content-Length counts as raw bytes.
         var contentLength = -1;
+        var headerBytes = new List<byte>(128);
+
         while (true)
         {
-            var headerLine = await _stdout.ReadLineAsync(ct);
-            if (headerLine is null) return null;
-            if (string.IsNullOrWhiteSpace(headerLine)) break;
+            var b = _stream.ReadByte();
+            if (b < 0) return null;
 
-            if (headerLine.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+            headerBytes.Add((byte)b);
+
+            // Check for \r\n\r\n (end of headers)
+            if (headerBytes.Count >= 4 &&
+                headerBytes[^4] == '\r' && headerBytes[^3] == '\n' &&
+                headerBytes[^2] == '\r' && headerBytes[^1] == '\n')
             {
-                var value = headerLine["Content-Length:".Length..].Trim();
-                contentLength = int.Parse(value);
+                var headerText = Encoding.ASCII.GetString(headerBytes.ToArray());
+                foreach (var line in headerText.Split("\r\n", StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase))
+                        contentLength = int.Parse(line["Content-Length:".Length..].Trim());
+                }
+                break;
             }
         }
 
         if (contentLength <= 0) return null;
 
-        // Read body
-        var buffer = new char[contentLength];
+        // Read body as raw bytes — Content-Length is byte count, not char count.
+        // Critical for non-ASCII content (Swedish chars, Unicode paths).
+        var buffer = new byte[contentLength];
         var totalRead = 0;
         while (totalRead < contentLength)
         {
-            var read = await _stdout.ReadAsync(buffer.AsMemory(totalRead, contentLength - totalRead), ct);
+            var read = await _stream.ReadAsync(buffer.AsMemory(totalRead, contentLength - totalRead), ct);
             if (read == 0) return null;
             totalRead += read;
         }
 
-        var body = new string(buffer, 0, totalRead);
+        var body = Encoding.UTF8.GetString(buffer, 0, totalRead);
         return JsonNode.Parse(body) as JsonObject;
     }
 }

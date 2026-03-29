@@ -20,6 +20,7 @@ public sealed class SteppingSessionManager
     private string? _sessionHypothesis;
     private string? _targetVersion;
     private int _stepCount;
+    private bool _ownsProcess;
 
     public bool IsActive => _client?.IsConnected == true;
 
@@ -44,6 +45,7 @@ public sealed class SteppingSessionManager
         _client = new DapClient();
         _sessionHypothesis = hypothesis;
         _stepCount = 0;
+        _ownsProcess = false;
 
         try
         {
@@ -84,6 +86,57 @@ public sealed class SteppingSessionManager
         {
             await CleanupAsync();
             return Error($"Failed to launch stepping session: {ex.Message}");
+        }
+    }
+
+    public async Task<string> RunAsync(
+        string program, string[] args, string? cwd,
+        string sourceFile, int line, string hypothesis,
+        CancellationToken ct)
+    {
+        if (IsActive)
+            return Error("A stepping session is already active. Use drhook:step-stop first.");
+
+        var netcoredbgPath = NetCoreDbgLocator.LocateOrThrow();
+
+        _client = new DapClient();
+        _sessionHypothesis = hypothesis;
+        _targetVersion = "launched";
+        _stepCount = 0;
+        _ownsProcess = true;
+
+        try
+        {
+            await _client.LaunchAsync(netcoredbgPath, ct);
+            await _client.LaunchTargetAsync(program, args, cwd, stopAtEntry: true, ct);
+            await _client.SetBreakpointAsync(sourceFile, line, ct);
+            await _client.ConfigurationDoneAsync(ct);
+
+            // With stopAtEntry, netcoredbg sends a "stopped" event after configurationDone.
+            // We must wait for it before threads are available.
+            UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
+
+            // Now continue from entry to the actual breakpoint.
+            await _client.ContinueAsync(_activeThreadId, ct);
+            UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
+
+            var state = await GetCurrentStateAsync(ct);
+
+            return JsonSerializer.Serialize(new JsonObject
+            {
+                ["status"] = "launched",
+                ["program"] = program,
+                ["args"] = new JsonArray(args.Select(a => (JsonNode)JsonValue.Create(a)!).ToArray()),
+                ["breakpoint"] = new JsonObject { ["file"] = sourceFile, ["line"] = line },
+                ["hypothesis"] = hypothesis,
+                ["currentState"] = state,
+                ["instruction"] = "Process launched and stopped at breakpoint. Use drhook:step-next, drhook:step-into, drhook:step-vars to inspect."
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            await CleanupAsync();
+            return Error($"Failed to run stepping session: {ex.Message}");
         }
     }
 
@@ -556,6 +609,7 @@ public sealed class SteppingSessionManager
     {
         if (_client is not null)
         {
+            await _client.DisconnectAsync(terminateDebuggee: _ownsProcess, CancellationToken.None);
             await _client.DisposeAsync();
             _client = null;
         }
@@ -563,6 +617,7 @@ public sealed class SteppingSessionManager
         _sessionHypothesis = null;
         _targetVersion = null;
         _stepCount = 0;
+        _ownsProcess = false;
     }
 
     private static string Error(string message) =>

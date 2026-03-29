@@ -43,10 +43,28 @@ public sealed class DrHookTools
 
     // ─── Stepping layer (DAP / netcoredbg) ──────────────────────────────────
 
+    [McpServerTool(Name = "drhook_step_run"), Description(
+        "Launch a .NET executable under debugger control, set a breakpoint, and run to it. " +
+        "DrHook owns the process lifecycle — no race conditions, no external process management needed. " +
+        "The process starts paused, breakpoints are set, then execution continues to the first hit. " +
+        "Use this for test runners (dotnet test), console apps, or any .NET executable.")]
+    public async Task<string> StepRun(
+        [Description("Executable path (e.g. 'dotnet' or '/path/to/app')")] string program,
+        [Description("Arguments as JSON array (e.g. [\"test\", \"--filter\", \"MyTest\"])")] string[] args,
+        [Description("Source file path for the initial breakpoint")] string sourceFile,
+        [Description("Line number for the initial breakpoint")] int line,
+        [Description("What you expect to observe at this breakpoint")] string hypothesis,
+        [Description("Working directory (optional, defaults to current)")] string? cwd = null,
+        CancellationToken ct = default)
+    {
+        return await _session.RunAsync(program, args, cwd, sourceFile, line, hypothesis, ct);
+    }
+
     [McpServerTool(Name = "drhook_step_launch"), Description(
-        "Launch a controlled stepping session against a .NET process. " +
+        "Launch a controlled stepping session against an already-running .NET process. " +
         "Uses netcoredbg (MIT, DAP over stdio). Sets an initial breakpoint and runs to it. " +
-        "The process halts at the breakpoint — use drhook_step_next to advance.")]
+        "The process halts at the breakpoint — use drhook_step_next to advance. " +
+        "Prefer drhook_step_run when you can launch the process yourself.")]
     public async Task<string> StepLaunch(
         [Description("Target process ID to attach to")] int pid,
         [Description("Source file path for the initial breakpoint")] string sourceFile,
