@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-03-23
+**Last updated:** 2026-03-29
 
 ## Line Counts
 
@@ -32,9 +32,9 @@ Codebase metrics are tracked over time. Update after significant changes.
 | **Mercury Tool Libraries** | **1,471** | Sparql.Tool + Turtle.Tool |
 | **Mercury CLIs** | **1,516** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,276** | Copy-and-switch pruning + PruneEngine |
-| **DrHook (total)** | **1,549** | Runtime observation substrate |
-| ├─ Core | 1,284 | EventPipe observation + DAP stepping |
-| └─ DrHook.Mcp | 265 | MCP server shim (13 tools) |
+| **DrHook (total)** | **1,648** | Runtime observation substrate |
+| ├─ Core | 1,365 | EventPipe observation + DAP stepping (byte-level framing) |
+| └─ DrHook.Mcp | 283 | MCP server shim (14 tools, incl. step_run) |
 | **Minerva** | **—** | Thought substrate (planned) |
 
 ### Tests
@@ -59,25 +59,26 @@ Codebase metrics are tracked over time. Update after significant changes.
 |---------|------:|
 | Mercury.Examples | 851 |
 | drhook-target.cs | 155 |
+| drhook-verify.cs | 21 |
 | Minerva.Examples | — |
 
 ### Documentation
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 28,952 |
-| CLAUDE.md | 879 |
+| All docs (*.md, *.ttl) | 29,558 |
+| CLAUDE.md | 271 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~88,527 |
+| Source code | ~88,331 |
 | Tests | ~50,605 |
 | Benchmarks | ~3,408 |
-| Examples | ~1,006 |
-| Documentation | ~28,952 |
-| **Grand total** | **~172,498** |
+| Examples | ~1,027 |
+| Documentation | ~29,558 |
+| **Grand total** | **~172,929** |
 
 ## W3C Conformance
 
