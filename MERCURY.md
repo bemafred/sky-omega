@@ -54,11 +54,17 @@ SELECT ?s ?label ?comment WHERE {
 
 If the store is empty, that's fine — you're starting fresh. Load `docs/knowledge/bootstrap.ttl` (see Bootstrap section below) for grounded context, or begin with your own assertions. An empty store is a valid starting point; the bootstrap provides a productive seed, not a requirement.
 
-### End Every Session by Considering What to Remember
+### Record Observations as They Happen
+
+This is the discipline that turns Mercury from a write-only database into cognitive memory. When you discover something — a bug, a design insight, a confirmed hypothesis, a falsified assumption — record it immediately. Don't batch observations for later. Don't wait to be asked.
+
+Create a session graph (`<urn:sky-omega:session:YYYY-MM-DD>`) at the start of substantive work. Add observations with `sky:status` values: `confirmed`, `problem-identified`, `design-insight`, `root-cause`, `fixed`, `milestone`. This is reflexive — if you're not recording, you're not remembering.
+
+### End Every Session by Considering What to Consolidate
 
 Not "dump everything." Ask: what did this session produce that a future session would need? A decision? A validated assumption? A discovered constraint? A corrected misunderstanding?
 
-If nothing is worth storing, store nothing. That's fine too.
+If nothing is worth consolidating, that's fine. The in-session observations are already stored.
 
 ---
 

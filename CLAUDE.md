@@ -96,7 +96,11 @@ claude mcp add --transport stdio --scope user drhook -- drhook-mcp
 
 Mercury MCP provides persistent semantic memory across sessions. The store at `~/Library/SkyOmega/stores/mcp/` survives between sessions — what you write, future sessions can query.
 
-**At session start:** check what's in memory. If `mercury_stats` reports zero quads, follow the bootstrap procedure in [MERCURY.md](MERCURY.md) to load foundational knowledge from `docs/knowledge/bootstrap.ttl`. **At session end:** consider what's worth remembering.
+**At session start:** check what's in memory. If `mercury_stats` reports zero quads, follow the bootstrap procedure in [MERCURY.md](MERCURY.md) to load foundational knowledge from `docs/knowledge/bootstrap.ttl`.
+
+**During the session:** record observations, discoveries, and decisions in Mercury *as they happen* — don't wait to be asked. Create a session graph, add findings as they emerge. This is reflexive, not prompted. If you discover something, store it immediately.
+
+**At session end:** consider what's worth consolidating.
 
 See **[MERCURY.md](MERCURY.md)** for when, why, and how to use semantic memory — including EEE discipline, provenance conventions, and consolidation patterns.
 
