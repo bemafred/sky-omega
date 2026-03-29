@@ -11,6 +11,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.1] - 2026-03-29
+
+DrHook process-owning stepping and DAP robustness — validated via ad-hoc Sky Omega MVP.
+
+### Added
+
+#### DrHook — Process-Owning Stepping (ADR-004)
+- **`drhook_step_run` MCP tool** — launches a .NET executable under debugger control via DAP `launch` with `stopAtEntry`. Eliminates race conditions and MCP timeout issues that made `step_launch` (attach mode) impractical for AI agents. DrHook owns the target process lifecycle.
+- **`DapClient.LaunchTargetAsync`** — sends DAP `launch` request with `program`, `args`, `cwd`, `stopAtEntry` parameters
+- **Process lifecycle ownership** — `SteppingSessionManager` tracks `_ownsProcess` flag; launch mode terminates debuggee on disconnect, attach mode preserves it
+- **ADR-004** — documents design, unknowns, and 5/6 verified success criteria
+
+### Fixed
+
+- **DAP byte framing for non-ASCII** — `Content-Length` is byte count but `DapClient` read chars via `StreamReader`. Non-ASCII characters (Swedish å, ö in type names, paths) caused byte/char misalignment, corrupting the DAP message stream. Fix: read raw bytes from `BaseStream`, decode UTF-8. Header parsing moved to byte-level to avoid `StreamReader` internal buffering. Bug was masked in DrHook.Poc because SteppingHost used ASCII-only code.
+
+### Changed
+
+- **CLAUDE.md** reduced from 879 to 271 lines (69%) — architecture details, SPARQL reference, and production hardening extracted to `docs/architecture/technical/`
+- **README.md** documentation guide updated with link to Kjell Silverstein poetry collection
+
+### Documentation
+
+- **`docs/architecture/technical/mercury-internals.md`** — storage, durability, concurrency, zero-GC patterns
+- **`docs/architecture/technical/sparql-reference.md`** — features, operators, formats, temporal extensions
+- **`docs/architecture/technical/production-hardening.md`** — benchmarks, NCrunch, cross-process coordination
+- **`docs/poetry/kjell-silverstein-collected.md`** — Sky Omega explained without a single line of code
+
+---
+
 ## [1.5.0] - 2026-03-23
 
 DrHook runtime observation substrate — Sky Omega's second MCP server.

@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.5.0 Released** — DrHook runtime observation substrate joins Sky Omega as a peer MCP server alongside Mercury. .NET process inspection via EventPipe and controlled stepping via DAP/netcoredbg.
+> **v1.5.1 Released** — DrHook `step_run` enables process-owning stepping (DAP launch, no race conditions). DAP byte framing fixed for non-ASCII (Swedish chars). Validated via ad-hoc Sky Omega MVP — first AI agent to step through runtime expression trees with persistent semantic memory.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
