@@ -22,6 +22,12 @@ public sealed class SteppingSessionManager
     private int _stepCount;
     private bool _ownsProcess;
 
+    // Breakpoint registry — tracks all active breakpoints so DAP's
+    // set-and-replace semantics don't silently discard previous ones.
+    private readonly Dictionary<string, Dictionary<int, string?>> _sourceBreakpoints = new();
+    private readonly Dictionary<string, string?> _functionBreakpoints = new();
+    private readonly HashSet<string> _exceptionFilters = new();
+
     public bool IsActive => _client?.IsConnected == true;
 
     public async Task<string> LaunchAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
@@ -51,7 +57,8 @@ public sealed class SteppingSessionManager
         {
             await _client.LaunchAsync(netcoredbgPath, ct);
             await _client.AttachAsync(pid, ct);
-            await _client.SetBreakpointAsync(sourceFile, line, ct);
+            _sourceBreakpoints[sourceFile] = new Dictionary<int, string?> { [line] = null };
+            await SyncSourceBreakpointsAsync(sourceFile, ct);
             await _client.ConfigurationDoneAsync(ct);
 
             // Get threads — use first thread for initial continue only
@@ -92,6 +99,7 @@ public sealed class SteppingSessionManager
     public async Task<string> RunAsync(
         string program, string[] args, string? cwd,
         string sourceFile, int line, string hypothesis,
+        Dictionary<string, string>? env,
         CancellationToken ct)
     {
         if (IsActive)
@@ -108,8 +116,9 @@ public sealed class SteppingSessionManager
         try
         {
             await _client.LaunchAsync(netcoredbgPath, ct);
-            await _client.LaunchTargetAsync(program, args, cwd, stopAtEntry: true, ct);
-            await _client.SetBreakpointAsync(sourceFile, line, ct);
+            await _client.LaunchTargetAsync(program, args, cwd, stopAtEntry: true, env, ct);
+            _sourceBreakpoints[sourceFile] = new Dictionary<int, string?> { [line] = null };
+            await SyncSourceBreakpointsAsync(sourceFile, ct);
             await _client.ConfigurationDoneAsync(ct);
 
             // With stopAtEntry, netcoredbg sends a "stopped" event after configurationDone.
@@ -343,9 +352,15 @@ public sealed class SteppingSessionManager
 
         try
         {
-            var response = await _client.SetBreakpointAsync(sourceFile, line, condition, ct);
-            var breakpoints = response["breakpoints"] as JsonArray;
-            var verified = breakpoints?[0]?["verified"]?.GetValue<bool>() ?? false;
+            if (!_sourceBreakpoints.TryGetValue(sourceFile, out var fileBps))
+            {
+                fileBps = new Dictionary<int, string?>();
+                _sourceBreakpoints[sourceFile] = fileBps;
+            }
+            fileBps[line] = condition;
+
+            var response = await SyncSourceBreakpointsAsync(sourceFile, ct);
+            var verified = GetVerifiedStatus(response, line);
 
             var result = new JsonObject
             {
@@ -354,12 +369,11 @@ public sealed class SteppingSessionManager
                 ["line"] = line,
                 ["verified"] = verified,
                 ["assemblyVersion"] = _targetVersion,
+                ["totalInFile"] = fileBps.Count,
             };
 
             if (condition is not null)
                 result["condition"] = condition;
-
-            result["note"] = "DAP uses set-and-replace semantics: this replaces ALL breakpoints in this file. Multi-breakpoint-per-file registry is deferred.";
 
             return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
@@ -376,9 +390,11 @@ public sealed class SteppingSessionManager
 
         try
         {
-            var response = await _client.SetFunctionBreakpointsAsync(functionName, condition, ct);
+            _functionBreakpoints[functionName] = condition;
+
+            var response = await SyncFunctionBreakpointsAsync(ct);
             var breakpoints = response["breakpoints"] as JsonArray;
-            var verified = breakpoints?[0]?["verified"]?.GetValue<bool>() ?? false;
+            var verified = breakpoints?.LastOrDefault()?["verified"]?.GetValue<bool>() ?? false;
 
             var result = new JsonObject
             {
@@ -386,12 +402,11 @@ public sealed class SteppingSessionManager
                 ["functionName"] = functionName,
                 ["verified"] = verified,
                 ["assemblyVersion"] = _targetVersion,
+                ["totalFunctionBreakpoints"] = _functionBreakpoints.Count,
             };
 
             if (condition is not null)
                 result["condition"] = condition;
-
-            result["note"] = "DAP uses set-and-replace semantics: this replaces ALL function breakpoints. Multi-breakpoint registry is deferred.";
 
             return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
@@ -408,14 +423,15 @@ public sealed class SteppingSessionManager
 
         try
         {
-            await _client.SetExceptionBreakpointsAsync([filter], ct);
+            _exceptionFilters.Add(filter);
+            await SyncExceptionBreakpointsAsync(ct);
 
             var result = new JsonObject
             {
                 ["operation"] = "setExceptionBreakpoint",
                 ["filter"] = filter,
                 ["assemblyVersion"] = _targetVersion,
-                ["note"] = "Exception breakpoints use DAP filters ('all' or 'user-unhandled'), not exception type names. Type-specific exceptions require DrHook.Engine.",
+                ["activeFilters"] = new JsonArray(_exceptionFilters.Select(f => (JsonNode)JsonValue.Create(f)!).ToArray()),
             };
 
             return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
@@ -423,6 +439,159 @@ public sealed class SteppingSessionManager
         catch (Exception ex)
         {
             return Error($"Set exception breakpoint failed: {ex.Message}");
+        }
+    }
+
+    public async Task<string> RemoveBreakpointAsync(string sourceFile, int line, CancellationToken ct)
+    {
+        if (!IsActive || _client is null)
+            return Error("No active stepping session. Use drhook:step-launch first.");
+
+        try
+        {
+            if (!_sourceBreakpoints.TryGetValue(sourceFile, out var fileBps) || !fileBps.Remove(line))
+                return Error($"No breakpoint at {sourceFile}:{line}");
+
+            if (fileBps.Count == 0)
+                _sourceBreakpoints.Remove(sourceFile);
+
+            await SyncSourceBreakpointsAsync(sourceFile, ct);
+
+            return JsonSerializer.Serialize(new JsonObject
+            {
+                ["operation"] = "removeBreakpoint",
+                ["sourceFile"] = sourceFile,
+                ["line"] = line,
+                ["assemblyVersion"] = _targetVersion,
+                ["remainingInFile"] = fileBps.Count,
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            return Error($"Remove breakpoint failed: {ex.Message}");
+        }
+    }
+
+    public async Task<string> RemoveFunctionBreakpointAsync(string functionName, CancellationToken ct)
+    {
+        if (!IsActive || _client is null)
+            return Error("No active stepping session. Use drhook:step-launch first.");
+
+        try
+        {
+            if (!_functionBreakpoints.Remove(functionName))
+                return Error($"No function breakpoint for '{functionName}'");
+
+            await SyncFunctionBreakpointsAsync(ct);
+
+            return JsonSerializer.Serialize(new JsonObject
+            {
+                ["operation"] = "removeFunctionBreakpoint",
+                ["functionName"] = functionName,
+                ["assemblyVersion"] = _targetVersion,
+                ["remainingFunctionBreakpoints"] = _functionBreakpoints.Count,
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            return Error($"Remove function breakpoint failed: {ex.Message}");
+        }
+    }
+
+    public async Task<string> RemoveExceptionBreakpointAsync(string filter, CancellationToken ct)
+    {
+        if (!IsActive || _client is null)
+            return Error("No active stepping session. Use drhook:step-launch first.");
+
+        try
+        {
+            if (!_exceptionFilters.Remove(filter))
+                return Error($"No exception filter '{filter}'");
+
+            await SyncExceptionBreakpointsAsync(ct);
+
+            return JsonSerializer.Serialize(new JsonObject
+            {
+                ["operation"] = "removeExceptionBreakpoint",
+                ["filter"] = filter,
+                ["assemblyVersion"] = _targetVersion,
+                ["activeFilters"] = new JsonArray(_exceptionFilters.Select(f => (JsonNode)JsonValue.Create(f)!).ToArray()),
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            return Error($"Remove exception breakpoint failed: {ex.Message}");
+        }
+    }
+
+    public string ListBreakpoints()
+    {
+        var sourceArray = new JsonArray();
+        foreach (var (file, bps) in _sourceBreakpoints)
+        {
+            foreach (var (line, condition) in bps)
+            {
+                var bp = new JsonObject { ["file"] = file, ["line"] = line };
+                if (condition is not null) bp["condition"] = condition;
+                sourceArray.Add(bp);
+            }
+        }
+
+        var functionArray = new JsonArray();
+        foreach (var (name, condition) in _functionBreakpoints)
+        {
+            var bp = new JsonObject { ["name"] = name };
+            if (condition is not null) bp["condition"] = condition;
+            functionArray.Add(bp);
+        }
+
+        return JsonSerializer.Serialize(new JsonObject
+        {
+            ["source"] = sourceArray,
+            ["function"] = functionArray,
+            ["exception"] = new JsonArray(_exceptionFilters.Select(f => (JsonNode)JsonValue.Create(f)!).ToArray()),
+            ["totalCount"] = sourceArray.Count + functionArray.Count + _exceptionFilters.Count,
+        }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    public async Task<string> ClearBreakpointsAsync(string? category, CancellationToken ct)
+    {
+        if (!IsActive || _client is null)
+            return Error("No active stepping session. Use drhook:step-launch first.");
+
+        try
+        {
+            var cleared = new JsonObject { ["operation"] = "clearBreakpoints" };
+
+            if (category is null or "source")
+            {
+                var files = _sourceBreakpoints.Keys.ToList();
+                _sourceBreakpoints.Clear();
+                foreach (var file in files)
+                    await SyncSourceBreakpointsAsync(file, ct);
+                cleared["sourceCleared"] = true;
+            }
+
+            if (category is null or "function")
+            {
+                _functionBreakpoints.Clear();
+                await SyncFunctionBreakpointsAsync(ct);
+                cleared["functionCleared"] = true;
+            }
+
+            if (category is null or "exception")
+            {
+                _exceptionFilters.Clear();
+                await SyncExceptionBreakpointsAsync(ct);
+                cleared["exceptionCleared"] = true;
+            }
+
+            cleared["assemblyVersion"] = _targetVersion;
+            return JsonSerializer.Serialize(cleared, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            return Error($"Clear breakpoints failed: {ex.Message}");
         }
     }
 
@@ -492,6 +661,60 @@ public sealed class SteppingSessionManager
         catch (Exception ex)
         {
             return Error($"Variable inspection failed: {ex.Message}");
+        }
+    }
+
+    public async Task<string> EvaluateExpressionAsync(string expression, int depth, CancellationToken ct)
+    {
+        if (!IsActive || _client is null)
+            return Error("No active stepping session. Use drhook:step-launch first.");
+
+        try
+        {
+            var stackTrace = await _client.GetStackTraceAsync(_activeThreadId, ct);
+            var frames = stackTrace["stackFrames"] as JsonArray;
+            if (frames is null || frames.Count == 0)
+                return Error("No stack frames available.");
+
+            var topFrameId = frames[0]?["id"]?.GetValue<int>() ?? 0;
+
+            JsonObject response;
+            try
+            {
+                response = await _client.EvaluateAsync(topFrameId, expression, "watch", ct);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("DAP error"))
+            {
+                return JsonSerializer.Serialize(new JsonObject
+                {
+                    ["expression"] = expression,
+                    ["error"] = ex.Message,
+                    ["step"] = _stepCount,
+                    ["assemblyVersion"] = _targetVersion,
+                }, new JsonSerializerOptions { WriteIndented = true });
+            }
+
+            var result = new JsonObject
+            {
+                ["expression"] = expression,
+                ["result"] = response["result"]?.DeepClone(),
+                ["type"] = response["type"]?.DeepClone(),
+                ["step"] = _stepCount,
+                ["assemblyVersion"] = _targetVersion,
+            };
+
+            var variablesReference = response["variablesReference"]?.GetValue<int>() ?? 0;
+            if (variablesReference > 0 && depth > 1)
+            {
+                var visited = new HashSet<int>();
+                result["children"] = await ExpandVariableAsync(variablesReference, depth - 1, visited, ct);
+            }
+
+            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            return Error($"Expression evaluation failed: {ex.Message}");
         }
     }
 
@@ -578,6 +801,44 @@ public sealed class SteppingSessionManager
         return result;
     }
 
+    // ─── Breakpoint registry sync ─────────────────────────────────────────
+
+    private async Task<JsonObject> SyncSourceBreakpointsAsync(string sourceFile, CancellationToken ct)
+    {
+        if (_client is null) throw new InvalidOperationException("No DAP client");
+
+        if (_sourceBreakpoints.TryGetValue(sourceFile, out var fileBps) && fileBps.Count > 0)
+            return await _client.SetBreakpointsAsync(sourceFile, fileBps.Select(kv => (kv.Key, kv.Value)).ToList(), ct);
+
+        // No breakpoints left in this file — send empty to clear DAP
+        return await _client.SetBreakpointsAsync(sourceFile, Array.Empty<(int, string?)>(), ct);
+    }
+
+    private async Task<JsonObject> SyncFunctionBreakpointsAsync(CancellationToken ct)
+    {
+        if (_client is null) throw new InvalidOperationException("No DAP client");
+        return await _client.SetFunctionBreakpointsAsync(_functionBreakpoints.Select(kv => (kv.Key, kv.Value)).ToList(), ct);
+    }
+
+    private async Task SyncExceptionBreakpointsAsync(CancellationToken ct)
+    {
+        if (_client is null) throw new InvalidOperationException("No DAP client");
+        await _client.SetExceptionBreakpointsAsync(_exceptionFilters.ToArray(), ct);
+    }
+
+    private static bool GetVerifiedStatus(JsonObject response, int line)
+    {
+        if (response["breakpoints"] is not JsonArray breakpoints) return false;
+
+        foreach (var bp in breakpoints)
+        {
+            if (bp?["line"]?.GetValue<int>() == line)
+                return bp?["verified"]?.GetValue<bool>() ?? false;
+        }
+
+        return breakpoints.LastOrDefault()?["verified"]?.GetValue<bool>() ?? false;
+    }
+
     private void UpdateActiveThread(JsonObject stoppedEvent)
     {
         var threadId = stoppedEvent["threadId"]?.GetValue<int>();
@@ -618,6 +879,9 @@ public sealed class SteppingSessionManager
         _targetVersion = null;
         _stepCount = 0;
         _ownsProcess = false;
+        _sourceBreakpoints.Clear();
+        _functionBreakpoints.Clear();
+        _exceptionFilters.Clear();
     }
 
     private static string Error(string message) =>

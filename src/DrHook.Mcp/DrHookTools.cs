@@ -47,7 +47,9 @@ public sealed class DrHookTools
         "Launch a .NET executable under debugger control, set a breakpoint, and run to it. " +
         "DrHook owns the process lifecycle — no race conditions, no external process management needed. " +
         "The process starts paused, breakpoints are set, then execution continues to the first hit. " +
-        "Use this for test runners (dotnet test), console apps, or any .NET executable.")]
+        "Use this for console apps, prebuilt test wrappers, or any .NET executable. " +
+        "Note: dotnet test spawns a child process that the debugger cannot follow — " +
+        "wrap test code in a file-based app and use dotnet exec instead.")]
     public async Task<string> StepRun(
         [Description("Executable path (e.g. 'dotnet' or '/path/to/app')")] string program,
         [Description("Arguments as JSON array (e.g. [\"test\", \"--filter\", \"MyTest\"])")] string[] args,
@@ -55,9 +57,22 @@ public sealed class DrHookTools
         [Description("Line number for the initial breakpoint")] int line,
         [Description("What you expect to observe at this breakpoint")] string hypothesis,
         [Description("Working directory (optional, defaults to current)")] string? cwd = null,
+        [Description("Environment variables as KEY=VALUE strings (e.g. [\"DOTNET_TieredCompilation=0\"])")] string[]? env = null,
         CancellationToken ct = default)
     {
-        return await _session.RunAsync(program, args, cwd, sourceFile, line, hypothesis, ct);
+        Dictionary<string, string>? envDict = null;
+        if (env is { Length: > 0 })
+        {
+            envDict = new Dictionary<string, string>();
+            foreach (var entry in env)
+            {
+                var eqIndex = entry.IndexOf('=');
+                if (eqIndex > 0)
+                    envDict[entry[..eqIndex]] = entry[(eqIndex + 1)..];
+            }
+        }
+
+        return await _session.RunAsync(program, args, cwd, sourceFile, line, hypothesis, envDict, ct);
     }
 
     [McpServerTool(Name = "drhook_step_launch"), Description(
@@ -131,9 +146,9 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint"), Description(
-        "Set a source breakpoint at a specific file and line. Optionally conditional. " +
-        "WARNING: DAP uses set-and-replace semantics — this replaces ALL breakpoints " +
-        "in the specified file. Use drhook_step_continue to run to the breakpoint.")]
+        "Add a source breakpoint at a specific file and line. Optionally conditional. " +
+        "Multiple breakpoints per file are supported — each call adds to the set. " +
+        "Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakpoint(
         [Description("Absolute path to the source file")] string sourceFile,
         [Description("Line number for the breakpoint")] int line,
@@ -144,9 +159,9 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_break_function"), Description(
-        "Set a function breakpoint by method name. Stops at method entry. " +
-        "Optionally conditional. WARNING: DAP uses set-and-replace semantics — " +
-        "this replaces ALL function breakpoints. Use drhook_step_continue to run to the breakpoint.")]
+        "Add a function breakpoint by method name. Stops at method entry. " +
+        "Optionally conditional. Multiple function breakpoints are supported — " +
+        "each call adds to the set. Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakFunction(
         [Description("Fully qualified or simple method name (e.g. 'Fibonacci' or 'MyNamespace.MyClass.Fibonacci')")] string functionName,
         [Description("Optional condition expression")] string? condition = null,
@@ -156,15 +171,53 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_break_exception"), Description(
-        "Set an exception breakpoint using DAP exception filters. " +
+        "Add an exception breakpoint using DAP exception filters. " +
         "Stops execution when an exception matching the filter is thrown. " +
         "'all' breaks on every throw, 'user-unhandled' breaks only on exceptions not caught in user code. " +
-        "Type-specific exception breakpoints require DrHook.Engine (deferred).")]
+        "Multiple filters can be active simultaneously.")]
     public async Task<string> StepBreakException(
         [Description("Exception filter: 'all' or 'user-unhandled'")] string filter,
         CancellationToken ct = default)
     {
         return await _session.SetExceptionBreakpointAsync(filter, ct);
+    }
+
+    [McpServerTool(Name = "drhook_step_breakpoint_remove"), Description(
+        "Remove a specific breakpoint. Specify source file + line to remove a source breakpoint, " +
+        "or functionName to remove a function breakpoint, or filter to remove an exception filter.")]
+    public async Task<string> StepBreakpointRemove(
+        [Description("Source file path (for source breakpoints)")] string? sourceFile = null,
+        [Description("Line number (for source breakpoints)")] int? line = null,
+        [Description("Function name (for function breakpoints)")] string? functionName = null,
+        [Description("Exception filter to remove ('all' or 'user-unhandled')")] string? filter = null,
+        CancellationToken ct = default)
+    {
+        if (sourceFile is not null && line is not null)
+            return await _session.RemoveBreakpointAsync(sourceFile, line.Value, ct);
+        if (functionName is not null)
+            return await _session.RemoveFunctionBreakpointAsync(functionName, ct);
+        if (filter is not null)
+            return await _session.RemoveExceptionBreakpointAsync(filter, ct);
+
+        return "{\"error\": \"Specify sourceFile+line, functionName, or filter to remove.\"}";
+    }
+
+    [McpServerTool(Name = "drhook_step_breakpoint_list"), Description(
+        "List all active breakpoints — source, function, and exception. " +
+        "Shows file, line, condition, and function name for each.")]
+    public string StepBreakpointList()
+    {
+        return _session.ListBreakpoints();
+    }
+
+    [McpServerTool(Name = "drhook_step_breakpoint_clear"), Description(
+        "Clear all breakpoints, or clear by category: 'source', 'function', or 'exception'. " +
+        "Omit category to clear everything.")]
+    public async Task<string> StepBreakpointClear(
+        [Description("Optional category: 'source', 'function', or 'exception'. Omit to clear all.")] string? category = null,
+        CancellationToken ct = default)
+    {
+        return await _session.ClearBreakpointsAsync(category, ct);
     }
 
     [McpServerTool(Name = "drhook_step_vars"), Description("Inspect local variables at the current stepping position.")]
@@ -173,6 +226,18 @@ public sealed class DrHookTools
         CancellationToken ct = default)
     {
         return await _session.InspectVariablesAsync(depth, ct);
+    }
+
+    [McpServerTool(Name = "drhook_step_eval"), Description(
+        "Evaluate a C# expression in the context of the current stack frame. " +
+        "Supports property access, indexing, method calls, arithmetic, and boolean logic. " +
+        "More targeted than drhook_step_vars — use this when you know what you're looking for.")]
+    public async Task<string> StepEval(
+        [Description("C# expression to evaluate (e.g. 'myList.Count', 'x > 5', 'obj.ToString()')")] string expression,
+        [Description("Expansion depth for complex results (default 1)")] int depth = 1,
+        CancellationToken ct = default)
+    {
+        return await _session.EvaluateExpressionAsync(expression, depth, ct);
     }
 
     [McpServerTool(Name = "drhook_step_stop"), Description("End the active stepping session and detach from the process.")]

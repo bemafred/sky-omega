@@ -1,7 +1,7 @@
 # ADR-004: Process-Owning Stepping via DAP Launch
 
-**Status:** Proposed
-**Date:** 2026-03-29
+**Status:** Accepted
+**Date:** 2026-03-29 (validated 2026-03-30)
 **Context:** Emergence observation during ad-hoc Sky Omega MVP evaluation
 
 ## Problem
@@ -119,7 +119,7 @@ Register one new tool: `drhook_step_run`.
 - [x] `drhook_step_run` launches a simple .NET console app and stops at entry — **verified 2026-03-29** with `dotnet exec Mercury.Examples.dll demo`, stopped at `Program.Main` line 7
 - [x] Breakpoints set after launch are hit — **verified** breakpoint at line 7 hit correctly
 - [x] All existing step tools work after `step_run` (next, into, out, vars, continue) — **verified** step-next, step-vars both work, command="demo" observed
-- [ ] `drhook_step_run` with `dotnet test --filter ...` reaches test code (validates child process behavior)
+- [x] `drhook_step_run` with `dotnet test --filter ...` — **validated 2026-03-30**: netcoredbg does NOT follow into child processes. `dotnet test` spawns `testhost.dll` via socket protocol; the breakpoint in test code is never hit (timeout). **Workaround validated**: prebuilt file-based apps (`dotnet exec run-test.dll`) hit breakpoints in test code correctly. The test runner orchestration layer is the barrier, not the debugger.
 - [x] `step_stop` terminates the launched process cleanly — **verified**
 - [x] MCP call completes within timeout (no blocking on long sleeps) — **verified**, response in seconds
 
@@ -127,5 +127,5 @@ Register one new tool: `drhook_step_run`.
 
 ## Falsification Criteria
 
-- If netcoredbg's `launch` cannot debug `dotnet test` child processes, the tool is limited to standalone executables — still valuable but doesn't solve the test runner problem. Fallback: launch `testhost.dll` directly.
+- ~~If netcoredbg's `launch` cannot debug `dotnet test` child processes, the tool is limited to standalone executables — still valuable but doesn't solve the test runner problem. Fallback: launch `testhost.dll` directly.~~ **Confirmed 2026-03-30**: netcoredbg launch does not follow child processes. `testhost.dll` cannot be launched standalone (requires vstest socket protocol). Practical workaround: wrap test code in a file-based app, `dotnet build` it, then `drhook_step_run` with `dotnet exec`. Alternatively, use `VSTEST_HOST_DEBUG=1` via `drhook_step_run`'s `env` parameter + `drhook_step_launch` (attach) to connect to the paused testhost. Environment variable support added 2026-03-30.
 - If `stopAtEntry` doesn't reliably pause before user code, breakpoints may be missed — same race condition as `attach`. Fallback: use function breakpoints on known entry points.

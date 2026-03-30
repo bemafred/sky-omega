@@ -65,15 +65,25 @@ public sealed class DapClient : IAsyncDisposable
         }, ct);
     }
 
-    public async Task LaunchTargetAsync(string program, string[] args, string? cwd, bool stopAtEntry, CancellationToken ct)
+    public async Task LaunchTargetAsync(string program, string[] args, string? cwd, bool stopAtEntry, Dictionary<string, string>? env, CancellationToken ct)
     {
-        await SendRequestAsync("launch", new JsonObject
+        var request = new JsonObject
         {
             ["program"] = program,
             ["args"] = new JsonArray(args.Select(a => (JsonNode)JsonValue.Create(a)!).ToArray()),
             ["cwd"] = cwd ?? Environment.CurrentDirectory,
             ["stopAtEntry"] = stopAtEntry,
-        }, ct);
+        };
+
+        if (env is { Count: > 0 })
+        {
+            var envObj = new JsonObject();
+            foreach (var (key, value) in env)
+                envObj[key] = value;
+            request["env"] = envObj;
+        }
+
+        await SendRequestAsync("launch", request, ct);
     }
 
     public async Task ConfigurationDoneAsync(CancellationToken ct)
@@ -164,11 +174,59 @@ public sealed class DapClient : IAsyncDisposable
         }, ct);
     }
 
+    public async Task<JsonObject> SetBreakpointsAsync(string sourceFile, IReadOnlyList<(int Line, string? Condition)> breakpoints, CancellationToken ct)
+    {
+        var bpArray = new JsonArray();
+        foreach (var (line, condition) in breakpoints)
+        {
+            var obj = new JsonObject { ["line"] = line };
+            if (condition is not null)
+                obj["condition"] = condition;
+            bpArray.Add(obj);
+        }
+
+        return await SendRequestAsync("setBreakpoints", new JsonObject
+        {
+            ["source"] = new JsonObject
+            {
+                ["path"] = sourceFile
+            },
+            ["breakpoints"] = bpArray
+        }, ct);
+    }
+
+    public async Task<JsonObject> SetFunctionBreakpointsAsync(IReadOnlyList<(string Name, string? Condition)> breakpoints, CancellationToken ct)
+    {
+        var bpArray = new JsonArray();
+        foreach (var (name, condition) in breakpoints)
+        {
+            var obj = new JsonObject { ["name"] = name };
+            if (condition is not null)
+                obj["condition"] = condition;
+            bpArray.Add(obj);
+        }
+
+        return await SendRequestAsync("setFunctionBreakpoints", new JsonObject
+        {
+            ["breakpoints"] = bpArray
+        }, ct);
+    }
+
     public async Task<JsonObject> SetExceptionBreakpointsAsync(string[] filters, CancellationToken ct)
     {
         return await SendRequestAsync("setExceptionBreakpoints", new JsonObject
         {
             ["filters"] = new JsonArray(filters.Select(f => (JsonNode)JsonValue.Create(f)!).ToArray())
+        }, ct);
+    }
+
+    public async Task<JsonObject> EvaluateAsync(int frameId, string expression, string context, CancellationToken ct)
+    {
+        return await SendRequestAsync("evaluate", new JsonObject
+        {
+            ["expression"] = expression,
+            ["frameId"] = frameId,
+            ["context"] = context
         }, ct);
     }
 
