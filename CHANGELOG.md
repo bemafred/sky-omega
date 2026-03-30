@@ -11,6 +11,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.1] - 2026-03-30
+
+Closes the test debugging gap — DrHook can now debug .NET test code through `dotnet test`.
+
+### Added
+
+- **`drhook_step_test` MCP tool** — debug .NET test methods end-to-end. Launches `dotnet test` with `VSTEST_HOST_DEBUG=1`, parses the testhost PID from stdout, attaches netcoredbg to the child process, sets breakpoints, and continues to the first hit. Same technique VS Code uses. Test code was the last unreachable target for DrHook stepping.
+
+### Fixed
+
+- **Test debugging gap** — previously documented as a known limitation ("dotnet test spawns a child process that the debugger cannot follow"). The limitation was in the approach (launching under debugger), not in the tooling. Hybrid launch-then-attach solves it.
+
+## [1.6.0] - 2026-03-30
+
+DrHook breakpoint registry, expression evaluation, and environment variable support.
+
+### Added
+
+#### DrHook — Breakpoint Registry (ADR-001)
+- **Breakpoint registry** in `SteppingSessionManager` — tracks source, function, and exception breakpoints. Every mutation syncs the full set to DAP, eliminating silent set-and-replace behavior.
+- **`drhook_step_breakpoint_remove`** — remove a specific source, function, or exception breakpoint
+- **`drhook_step_breakpoint_list`** — list all active breakpoints with file, line, condition, and type
+- **`drhook_step_breakpoint_clear`** — clear all breakpoints or by category (source/function/exception)
+- **Multi-breakpoint DapClient overloads** — `SetBreakpointsAsync` and `SetFunctionBreakpointsAsync` accept lists
+- **Registry seeding** — initial breakpoints from `LaunchAsync`/`RunAsync` seed the registry
+
+#### DrHook — Expression Evaluation (ADR-002)
+- **`drhook_step_eval` MCP tool** — evaluate C# expressions in the current stack frame via DAP `evaluate`. Supports property access, indexing, method calls, arithmetic, boolean logic. More targeted than `drhook_step_vars`.
+- **`DapClient.EvaluateAsync`** — sends DAP `evaluate` request with frame context
+- **Structured error returns** — failed evaluations return JSON with error message, not exceptions. The agent learns from what doesn't work.
+
+#### DrHook — Environment Variables
+- **`drhook_step_run` env support** — pass environment variables as `KEY=VALUE` strings to the launched process via DAP `launch` env field
+
+### Changed
+
+- **Tool descriptions updated** — breakpoint tools now say "Add" instead of "Set", removed "WARNING: set-and-replace" notes
+- **`drhook_step_launch` description** — recommends `drhook_step_run` or `drhook_step_test` when possible
+
+### Validated
+
+- **ADR-004 final criterion** — netcoredbg `launch` does not follow `dotnet test` child processes. Confirmed empirically: testhost spawned via vstest socket protocol, breakpoint in test code never hit. Workaround validated: prebuilt file-based apps via `dotnet exec`.
+- **All four DrHook ADRs accepted** — ADR-001, ADR-002, ADR-003, ADR-004
+
 ## [1.5.1] - 2026-03-29
 
 DrHook process-owning stepping and DAP robustness — validated via ad-hoc Sky Omega MVP.
