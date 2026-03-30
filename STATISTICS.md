@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-03-29
+**Last updated:** 2026-03-30
 
 ## Line Counts
 
@@ -32,9 +32,9 @@ Codebase metrics are tracked over time. Update after significant changes.
 | **Mercury Tool Libraries** | **1,471** | Sparql.Tool + Turtle.Tool |
 | **Mercury CLIs** | **1,516** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
 | **Mercury.Pruning** | **1,276** | Copy-and-switch pruning + PruneEngine |
-| **DrHook (total)** | **1,648** | Runtime observation substrate |
-| ├─ Core | 1,365 | EventPipe observation + DAP stepping (byte-level framing) |
-| └─ DrHook.Mcp | 283 | MCP server shim (14 tools, incl. step_run) |
+| **DrHook (total)** | **2,035** | Runtime observation substrate |
+| ├─ Core | 1,687 | EventPipe observation + DAP stepping + breakpoint registry |
+| └─ DrHook.Mcp | 348 | MCP server shim (18 tools) |
 | **Minerva** | **—** | Thought substrate (planned) |
 
 ### Tests
@@ -43,7 +43,7 @@ Codebase metrics are tracked over time. Update after significant changes.
 |---------|------:|----------:|
 | Mercury.Tests | 49,961 | 3,978 |
 | Mercury.Solid.Tests | 455 | 25 |
-| DrHook.Tests | 189 | 16 |
+| DrHook.Tests | 256 | 22 |
 | Minerva.Tests | — | — |
 
 ### Benchmarks
@@ -73,12 +73,12 @@ Codebase metrics are tracked over time. Update after significant changes.
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~88,331 |
-| Tests | ~50,605 |
+| Source code | ~88,718 |
+| Tests | ~50,672 |
 | Benchmarks | ~3,408 |
 | Examples | ~1,027 |
 | Documentation | ~29,558 |
-| **Grand total** | **~172,929** |
+| **Grand total** | **~173,383** |
 
 ## W3C Conformance
 
