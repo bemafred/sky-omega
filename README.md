@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.5.1 Released** — DrHook `step_run` enables process-owning stepping (DAP launch, no race conditions). DAP byte framing fixed for non-ASCII (Swedish chars). Validated via ad-hoc Sky Omega MVP — first AI agent to step through runtime expression trees with persistent semantic memory.
+> **v1.6.1 Released** — DrHook breakpoint registry (ADR-001), expression evaluation (ADR-002), and `step_test` — debug .NET test code through `dotnet test` via hybrid launch-then-attach. 19 tools, zero gaps: any .NET code is observable regardless of how it's hosted.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
