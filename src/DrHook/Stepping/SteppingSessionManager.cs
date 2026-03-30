@@ -16,6 +16,7 @@ namespace SkyOmega.DrHook.Stepping;
 public sealed class SteppingSessionManager
 {
     private DapClient? _client;
+    private Process? _testProcess;
     private int _activeThreadId;
     private string? _sessionHypothesis;
     private string? _targetVersion;
@@ -146,6 +147,114 @@ public sealed class SteppingSessionManager
         {
             await CleanupAsync();
             return Error($"Failed to run stepping session: {ex.Message}");
+        }
+    }
+
+    public async Task<string> RunTestAsync(
+        string project, string? filter, string? cwd,
+        string sourceFile, int line, string hypothesis,
+        CancellationToken ct)
+    {
+        if (IsActive)
+            return Error("A stepping session is already active. Use drhook:step-stop first.");
+
+        // Phase 1: Launch dotnet test with VSTEST_HOST_DEBUG=1 as a regular process.
+        // testhost will pause and print its PID to stdout.
+        var args = new List<string> { "test", "--no-build" };
+        if (filter is not null)
+        {
+            args.Add("--filter");
+            args.Add(filter);
+        }
+        args.Add(project);
+
+        var testProcess = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = cwd ?? Environment.CurrentDirectory,
+            }
+        };
+        foreach (var arg in args)
+            testProcess.StartInfo.ArgumentList.Add(arg);
+        testProcess.StartInfo.Environment["VSTEST_HOST_DEBUG"] = "1";
+
+        testProcess.Start();
+        _testProcess = testProcess;
+
+        // Phase 2: Read stdout until we find the testhost PID.
+        // Pattern: "Process Id: 12345, Name: dotnet"
+        int testhostPid = -1;
+        var pidPattern = new System.Text.RegularExpressions.Regex(@"Process Id:\s*(\d+)");
+
+        while (!ct.IsCancellationRequested)
+        {
+            var line2 = await testProcess.StandardOutput.ReadLineAsync(ct);
+            if (line2 is null) break;
+
+            var match = pidPattern.Match(line2);
+            if (match.Success)
+            {
+                testhostPid = int.Parse(match.Groups[1].Value);
+                break;
+            }
+        }
+
+        if (testhostPid < 0)
+        {
+            testProcess.Kill();
+            _testProcess = null;
+            return Error("dotnet test exited without producing a testhost PID. Is VSTEST_HOST_DEBUG supported?");
+        }
+
+        // Phase 3: Attach netcoredbg to the testhost process (same as LaunchAsync).
+        _targetVersion = "testhost";
+        var netcoredbgPath = NetCoreDbgLocator.LocateOrThrow();
+
+        _client = new DapClient();
+        _sessionHypothesis = hypothesis;
+        _stepCount = 0;
+        _ownsProcess = false; // netcoredbg attached, not launched — testProcess owns the lifecycle
+
+        try
+        {
+            await _client.LaunchAsync(netcoredbgPath, ct);
+            await _client.AttachAsync(testhostPid, ct);
+            _sourceBreakpoints[sourceFile] = new Dictionary<int, string?> { [line] = null };
+            await SyncSourceBreakpointsAsync(sourceFile, ct);
+            await _client.ConfigurationDoneAsync(ct);
+
+            var threads = await _client.GetThreadsAsync(ct);
+            var threadArray = threads["threads"] as JsonArray;
+            _activeThreadId = threadArray?[0]?["id"]?.GetValue<int>() ?? 1;
+
+            // Continue — testhost resumes from its debug pause, runs to our breakpoint.
+            await _client.ContinueAsync(_activeThreadId, ct);
+            UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
+
+            var state = await GetCurrentStateAsync(ct);
+
+            return JsonSerializer.Serialize(new JsonObject
+            {
+                ["status"] = "attached-to-testhost",
+                ["testhostPid"] = testhostPid,
+                ["project"] = project,
+                ["filter"] = filter,
+                ["breakpoint"] = new JsonObject { ["file"] = sourceFile, ["line"] = line },
+                ["hypothesis"] = hypothesis,
+                ["currentState"] = state,
+                ["instruction"] = "Attached to testhost and stopped at breakpoint. Use drhook:step-next, drhook:step-into, drhook:step-vars to inspect."
+            }, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (Exception ex)
+        {
+            await CleanupAsync();
+            return Error($"Failed to attach to testhost: {ex.Message}");
         }
     }
 
@@ -873,6 +982,12 @@ public sealed class SteppingSessionManager
             await _client.DisconnectAsync(terminateDebuggee: _ownsProcess, CancellationToken.None);
             await _client.DisposeAsync();
             _client = null;
+        }
+        if (_testProcess is not null)
+        {
+            try { _testProcess.Kill(); } catch { }
+            _testProcess.Dispose();
+            _testProcess = null;
         }
         _activeThreadId = 0;
         _sessionHypothesis = null;

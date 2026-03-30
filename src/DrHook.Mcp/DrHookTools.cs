@@ -75,11 +75,28 @@ public sealed class DrHookTools
         return await _session.RunAsync(program, args, cwd, sourceFile, line, hypothesis, envDict, ct);
     }
 
+    [McpServerTool(Name = "drhook_step_test"), Description(
+        "Debug a .NET test method. Launches 'dotnet test' with VSTEST_HOST_DEBUG=1, " +
+        "waits for testhost to pause and report its PID, then attaches the debugger to the " +
+        "testhost process and runs to the breakpoint. This is how VS Code debugs tests — " +
+        "launch the parent normally, attach to the child.")]
+    public async Task<string> StepTest(
+        [Description("Path to the test project (e.g. 'tests/MyTests/MyTests.csproj')")] string project,
+        [Description("Source file path for the breakpoint")] string sourceFile,
+        [Description("Line number for the breakpoint")] int line,
+        [Description("What you expect to observe at this breakpoint")] string hypothesis,
+        [Description("Test filter expression (e.g. 'MyTestMethod' or 'FullyQualifiedName~MyClass')")] string? filter = null,
+        [Description("Working directory (optional, defaults to current)")] string? cwd = null,
+        CancellationToken ct = default)
+    {
+        return await _session.RunTestAsync(project, filter, cwd, sourceFile, line, hypothesis, ct);
+    }
+
     [McpServerTool(Name = "drhook_step_launch"), Description(
         "Launch a controlled stepping session against an already-running .NET process. " +
         "Uses netcoredbg (MIT, DAP over stdio). Sets an initial breakpoint and runs to it. " +
         "The process halts at the breakpoint — use drhook_step_next to advance. " +
-        "Prefer drhook_step_run when you can launch the process yourself.")]
+        "Prefer drhook_step_run or drhook_step_test when possible.")]
     public async Task<string> StepLaunch(
         [Description("Target process ID to attach to")] int pid,
         [Description("Source file path for the initial breakpoint")] string sourceFile,

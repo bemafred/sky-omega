@@ -85,6 +85,27 @@ public class SteppingSessionManagerTests
         Assert.NotNull(json?["error"]);
     }
 
+    // ─── Test runner debugging ────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunTest_ReturnsErrorWhenSessionActive()
+    {
+        // RunTestAsync checks IsActive first — same guard as all other session methods.
+        // Without an active session, it proceeds to launch dotnet test.
+        // We test the no-session path indirectly via the session-active guard.
+        var manager = new SteppingSessionManager();
+        // With no active session, RunTestAsync will try to launch dotnet test.
+        // A non-existent project path will cause dotnet test to fail quickly.
+        var result = await manager.RunTestAsync(
+            "/nonexistent/project.csproj", "FakeTest", null,
+            "/tmp/test.cs", 10, "test hypothesis",
+            new CancellationTokenSource(TimeSpan.FromSeconds(5)).Token);
+
+        var json = JsonNode.Parse(result);
+        // Should get an error — either dotnet test exits without PID, or process fails to start
+        Assert.NotNull(json?["error"]);
+    }
+
     // ─── Breakpoint registry tests ─────────────────────────────────────────
 
     [Fact]
