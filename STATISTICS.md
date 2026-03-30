@@ -164,22 +164,53 @@ dotnet run --project benchmarks/Mercury.Benchmarks -c Release -- --filter "*Clas
 
 Results written to `BenchmarkDotNet.Artifacts/results/` (gitignored).
 
-### Storage Performance (reference)
+### Hardware Comparison: M1 Pro vs M5 Max
+
+Benchmarks run on identical .NET 10.0.0 / Arm64 RyuJIT AdvSIMD. M1 results from 2026-02-07, M5 Max from 2026-03-30.
+
+#### Query Performance
+
+| Query | M1 Pro | M5 Max | Speedup | Allocated |
+|-------|-------:|-------:|--------:|----------:|
+| QueryBySubject | 647 ns | 488 ns | **1.33x** | 8.02 KB |
+| QueryByObject | 25,542 ns | 15,679 ns | **1.63x** | 8.02 KB |
+| QueryByPredicate | 256,178 ns | 163,536 ns | **1.57x** | 8.02 KB |
+| FullScan | 2,309,110 ns | 1,501,273 ns | **1.54x** | 8.02 KB |
+
+Allocations are byte-identical across hardware. Zero-GC design makes performance portable — speedup comes purely from faster cores.
+
+#### Turtle Parser Performance
+
+| Parser | M1 Pro | M5 Max | Speedup | Allocated |
+|--------|-------:|-------:|--------:|----------:|
+| 100K triples (zero-GC) | 145.3 ms | 88.4 ms | **1.64x** | 57.26 KB |
+| 100K triples (IAsyncEnumerable) | 217.6 ms | 124.6 ms | **1.75x** | 263,181 KB |
+| 10K triples (zero-GC) | 14.5 ms | 8.8 ms | **1.65x** | 57.26 KB |
+| 10K prefixed (zero-GC) | 6.1 ms | 3.6 ms | **1.68x** | 1,621 KB |
+
+Zero-GC path: 57 KB allocated regardless of input size or hardware. IAsyncEnumerable path: same allocations, but M1 needed 4,333 gen0 collections vs 1,400 on M5 Max.
+
+#### Storage Write Performance
+
+| Write | M1 Pro | M5 Max | Notes |
+|-------|-------:|-------:|-------|
+| Single 1K (fsync each) | 5,623 ms | 6,499 ms | M1 SSD has lower fsync latency |
+| Batch 1K (single fsync) | 885 ms | 1,045 ms | ~same |
+| Single 10K (fsync each) | 50,374 ms | 119,666 ms | M5 Max SSD fsync variance |
+| Batch 10K (single fsync) | 5,926 ms | 9,589 ms | SSD controller difference |
+
+Write performance is fsync-dominated — measures SSD controller behavior, not CPU. M5 Max SSD has higher and more variable fsync latency. Batch writes (the production path) amortize this.
+
+### Throughput Summary (M5 Max)
 
 | Operation | Throughput | Notes |
 |-----------|------------|-------|
-| Single write | ~250-300/sec | fsync per write |
-| Batch 1K | ~25,000+/sec | 1 fsync per batch |
-| Batch 10K | ~100,000+/sec | Amortized fsync |
-
-### Query Performance (reference)
-
-| Operation | Throughput | Notes |
-|-----------|------------|-------|
-| Point-in-time (cached) | ~100K queries/sec | Hot page cache |
-| Point-in-time (cold) | ~5K queries/sec | Disk access |
-| Range scan | ~200K triples/sec | Sequential read |
-| Evolution scan | ~500K triples/sec | Full history |
+| Subject lookup | ~2M queries/sec | 488 ns per query |
+| Object lookup | ~64K queries/sec | B+Tree index scan |
+| Predicate scan | ~6K queries/sec | Broader index traversal |
+| Full scan | ~667 scans/sec | Complete store traversal |
+| Turtle parse (zero-GC) | ~1.1M triples/sec | 57 KB total allocation |
+| Batch write 10K | ~1,043 triples/sec | Single fsync, SSD-bound |
 
 ## Maintenance Instructions
 

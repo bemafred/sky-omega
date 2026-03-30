@@ -27,3 +27,4 @@
 | [ADR-022](ADR-022-quadindex-generic-keys-and-temporal-sort-order.md) | QuadIndex Generic Key Fields and Time-Leading Sort Order | Accepted |
 | [ADR-023](ADR-023-transactional-integrity.md) | Transactional Integrity — WAL, Batch Rollback, Transaction Time | Accepted |
 | [ADR-024](ADR-024-trigram-index-read-path-disconnection.md) | Trigram Index Read Path Disconnection | Accepted |
+| [ADR-025](ADR-025-repl-line-editor.md) | REPL Line Editor | Accepted |

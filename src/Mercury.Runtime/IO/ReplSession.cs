@@ -125,6 +125,7 @@ public sealed class ReplSession : IDisposable
 
     private readonly Dictionary<string, string> _prefixes = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _history = new();
+    private readonly LineEditor _lineEditor;
     private string _baseIri = string.Empty;
     private bool _disposed;
 
@@ -164,6 +165,7 @@ public sealed class ReplSession : IDisposable
         _executePrune = executePrune;
         _getStorePath = getStorePath;
         _executeAttach = executeAttach;
+        _lineEditor = new LineEditor(_history);
 
         // Pre-register common prefixes
         foreach (var (prefix, iri) in WellKnownPrefixes)
@@ -296,19 +298,23 @@ public sealed class ReplSession : IDisposable
         }
     }
 
-    private static string? ReadInput(TextReader input, TextWriter output, ReplOptions options, bool isInteractive)
+    private string? ReadInput(TextReader input, TextWriter output, ReplOptions options, bool isInteractive)
     {
         if (isInteractive)
             output.Write(options.Prompt);
 
-        var firstLine = input.ReadLine();
+        var firstLine = isInteractive
+            ? _lineEditor.ReadLine(options.Prompt.Length)
+            : input.ReadLine();
+
         if (firstLine == null)
             return null;
 
         if (!options.EnableMultiLine || !NeedsMoreInput(firstLine))
             return firstLine;
 
-        // Multi-line mode
+        // Multi-line mode — continuation lines use standard input
+        // (the first line got editing; continuations are short additions)
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(firstLine);
 
@@ -317,7 +323,10 @@ public sealed class ReplSession : IDisposable
             if (isInteractive)
                 output.Write(options.ContinuationPrompt);
 
-            var line = input.ReadLine();
+            var line = isInteractive
+                ? _lineEditor.ReadLine(options.ContinuationPrompt.Length)
+                : input.ReadLine();
+
             if (line == null)
                 break;
 
