@@ -28,3 +28,4 @@
 | [ADR-023](ADR-023-transactional-integrity.md) | Transactional Integrity — WAL, Batch Rollback, Transaction Time | Accepted |
 | [ADR-024](ADR-024-trigram-index-read-path-disconnection.md) | Trigram Index Read Path Disconnection | Accepted |
 | [ADR-025](ADR-025-repl-line-editor.md) | REPL Line Editor | Accepted |
+| [ADR-026](ADR-026-bulk-load-path.md) | Bulk Load Path | Proposed |
