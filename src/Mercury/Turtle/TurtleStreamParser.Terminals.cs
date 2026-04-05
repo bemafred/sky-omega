@@ -518,13 +518,17 @@ internal sealed partial class TurtleStreamParser
     {
         _sb.Clear();
 
-        // Parse language tag (preserve original case per W3C test suite)
+        // Parse language tag per BCP-47: primary subtag is letters only,
+        // subsequent subtags allow letters and digits (e.g., @es-419, @x-t0).
+        // First character must be a letter (@1 is invalid).
+        bool firstChar = true;
         while (true)
         {
             var ch = Peek();
 
-            if (char.IsLetter((char)ch))
+            if (firstChar ? char.IsLetter((char)ch) : char.IsLetterOrDigit((char)ch))
             {
+                firstChar = false;
                 Consume();
                 _sb.Append((char)ch);
             }
@@ -539,7 +543,7 @@ internal sealed partial class TurtleStreamParser
                     _sb.Append("--");
 
                     // Parse direction
-                    while (char.IsLetter((char)Peek()))
+                    while (char.IsLetterOrDigit((char)Peek()))
                     {
                         ch = Peek();
                         Consume();
@@ -1319,13 +1323,17 @@ internal sealed partial class TurtleStreamParser
     /// </summary>
     private void ParseLangDirSpan()
     {
-        // Parse language tag (preserve original case per W3C test suite)
+        // Parse language tag per BCP-47: primary subtag is letters only,
+        // subsequent subtags allow letters and digits (e.g., @es-419, @x-t0).
+        // First character must be a letter (@1 is invalid).
+        bool firstChar = true;
         while (true)
         {
             var ch = Peek();
 
-            if (char.IsLetter((char)ch))
+            if (firstChar ? char.IsLetter((char)ch) : char.IsLetterOrDigit((char)ch))
             {
+                firstChar = false;
                 Consume();
                 AppendToOutput((char)ch);
             }
@@ -1339,7 +1347,7 @@ internal sealed partial class TurtleStreamParser
                     AppendToOutput('-');
                     AppendToOutput('-');
 
-                    while (char.IsLetter((char)Peek()))
+                    while (char.IsLetterOrDigit((char)Peek()))
                     {
                         ch = Peek();
                         Consume();
