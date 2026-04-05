@@ -45,6 +45,28 @@ public sealed class LoadProgress
     public long TriplesLoaded { get; init; }
     public TimeSpan Elapsed { get; init; }
     public double TriplesPerSecond => Elapsed.TotalSeconds > 0 ? TriplesLoaded / Elapsed.TotalSeconds : 0;
+
+    /// <summary>GC heap size in bytes.</summary>
+    public long GcHeapBytes { get; init; }
+
+    /// <summary>Process working set in bytes.</summary>
+    public long WorkingSetBytes { get; init; }
+
+    /// <summary>Triples loaded at previous progress report (for interval rate calculation).</summary>
+    public long PreviousTripleCount { get; init; }
+
+    /// <summary>Elapsed at previous progress report.</summary>
+    public TimeSpan PreviousElapsed { get; init; }
+
+    /// <summary>Triples/sec over the most recent interval (not lifetime average).</summary>
+    public double RecentTriplesPerSecond
+    {
+        get
+        {
+            var dt = (Elapsed - PreviousElapsed).TotalSeconds;
+            return dt > 0 ? (TriplesLoaded - PreviousTripleCount) / dt : 0;
+        }
+    }
 }
 
 /// <summary>
@@ -124,6 +146,8 @@ public static class RdfEngine
         long totalCount = 0;
         var buffer = new List<(string Graph, string Subject, string Predicate, string Object)>(chunkSize);
         var sw = Stopwatch.StartNew();
+        long prevCount = 0;
+        TimeSpan prevElapsed = TimeSpan.Zero;
 
         void FlushBuffer()
         {
@@ -148,7 +172,19 @@ public static class RdfEngine
             }
 
             buffer.Clear();
-            onProgress?.Invoke(new LoadProgress { TriplesLoaded = totalCount, Elapsed = sw.Elapsed });
+
+            var elapsed = sw.Elapsed;
+            onProgress?.Invoke(new LoadProgress
+            {
+                TriplesLoaded = totalCount,
+                Elapsed = elapsed,
+                GcHeapBytes = GC.GetTotalMemory(false),
+                WorkingSetBytes = Environment.WorkingSet,
+                PreviousTripleCount = prevCount,
+                PreviousElapsed = prevElapsed
+            });
+            prevCount = totalCount;
+            prevElapsed = elapsed;
         }
 
         // Triple formats (Turtle, NTriples, RdfXml)

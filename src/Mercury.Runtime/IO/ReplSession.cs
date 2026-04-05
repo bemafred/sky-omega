@@ -672,17 +672,17 @@ public sealed class ReplSession : IDisposable
 
         try
         {
-            var lastReport = "";
+            var lastDisplay = DateTimeOffset.MinValue;
             var count = _executeLoad(filePath, bulk, (loaded, elapsed) =>
             {
+                var now = DateTimeOffset.UtcNow;
+                if ((now - lastDisplay).TotalSeconds < 5) return;
+                lastDisplay = now;
                 var rate = elapsed.TotalSeconds > 0 ? loaded / elapsed.TotalSeconds : 0;
-                lastReport = $"\r  {loaded:N0} triples  {rate:N0}/sec  {elapsed.TotalSeconds:F1}s";
-                Console.Error.Write(lastReport);
+                Console.Error.Write($"\r  {elapsed:hh\\:mm\\:ss}  {loaded:N0} triples  {rate:N0}/sec");
             }).GetAwaiter().GetResult();
 
-            if (lastReport.Length > 0)
-                Console.Error.WriteLine();
-
+            Console.Error.WriteLine();
             return ExecutionResult.Command($"Loaded {count:N0} triples.");
         }
         catch (Exception ex)

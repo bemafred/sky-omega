@@ -272,13 +272,48 @@ if (fileToLoad != null)
 {
     var mode = bulkLoadFile != null ? "bulk" : "standard";
     Console.WriteLine($"Loading {fileToLoad} ({mode})...");
+    Console.WriteLine();
+
+    var lastDisplayTime = DateTimeOffset.MinValue;
+    var loadStartTime = DateTimeOffset.UtcNow;
+
     var count = await RdfEngine.LoadFileAsync(pool.Active, fileToLoad, onProgress: p =>
     {
-        var rate = p.Elapsed.TotalSeconds > 0 ? p.TriplesLoaded / p.Elapsed.TotalSeconds : 0;
-        Console.Error.Write($"\r  {p.TriplesLoaded:N0} triples  {rate:N0}/sec  {p.Elapsed.TotalSeconds:F1}s");
+        // Throttle display to every 10 seconds
+        var now = DateTimeOffset.UtcNow;
+        if ((now - lastDisplayTime).TotalSeconds < 10) return;
+        lastDisplayTime = now;
+
+        var elapsed = p.Elapsed;
+        var gcMB = p.GcHeapBytes / (1024.0 * 1024);
+        var wsMB = p.WorkingSetBytes / (1024.0 * 1024);
+
+        Console.Error.WriteLine(
+            $"  {elapsed:hh\\:mm\\:ss}  " +
+            $"{p.TriplesLoaded:N0} triples  " +
+            $"avg {p.TriplesPerSecond:N0}/sec  " +
+            $"recent {p.RecentTriplesPerSecond:N0}/sec  " +
+            $"GC {gcMB:N0} MB  " +
+            $"RSS {wsMB:N0} MB");
     });
+
     Console.Error.WriteLine();
-    Console.WriteLine($"Loaded {count:N0} triples.");
+
+    // Summary
+    var totalElapsed = DateTimeOffset.UtcNow - loadStartTime;
+    var avgRate = totalElapsed.TotalSeconds > 0 ? count / totalElapsed.TotalSeconds : 0;
+    var finalGcMB = GC.GetTotalMemory(false) / (1024.0 * 1024);
+    var finalWsMB = Environment.WorkingSet / (1024.0 * 1024);
+    var freeAfter = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
+
+    Console.WriteLine($"--- Load complete ---");
+    Console.WriteLine($"  Triples:       {count:N0}");
+    Console.WriteLine($"  Elapsed:       {totalElapsed:hh\\:mm\\:ss}");
+    Console.WriteLine($"  Avg rate:      {avgRate:N0} triples/sec");
+    Console.WriteLine($"  GC heap:       {finalGcMB:N0} MB");
+    Console.WriteLine($"  Working set:   {finalWsMB:N0} MB");
+    Console.WriteLine($"  Free disk:     {freeAfter / (1024.0 * 1024 * 1024):F1} GB");
+    Console.WriteLine();
 }
 
 if (rebuildIndexes)
