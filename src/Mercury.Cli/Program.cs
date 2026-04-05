@@ -22,6 +22,7 @@ string? bulkLoadFile = null;
 string? convertInput = null;
 string? convertOutput = null;
 bool rebuildIndexes = false;
+long? minFreeSpaceGB = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -80,6 +81,10 @@ for (int i = 0; i < args.Length; i++)
         case "--rebuild-indexes":
             rebuildIndexes = true;
             break;
+        case "--min-free-space":
+            if (i + 1 < args.Length && long.TryParse(args[++i], out var gb))
+                minFreeSpaceGB = gb;
+            break;
         default:
             if (args[i].StartsWith('-'))
             {
@@ -135,6 +140,7 @@ if (showHelp)
           --bulk-load <file>         Bulk load (GSPO only, no fsync), then enter REPL
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
+          --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
 
         Examples:
           mercury                                # Default store (cli)
@@ -180,6 +186,12 @@ QuadStorePool pool;
 string resolvedStorePath;
 bool isBulkLoad = bulkLoadFile != null;
 
+// Determine minimum free disk space: explicit flag > bulk default (100 GB) > normal default (1 GB)
+var minFreeSpace = minFreeSpaceGB.HasValue
+    ? minFreeSpaceGB.Value * 1024L * 1024L * 1024L
+    : isBulkLoad ? 100L * 1024L * 1024L * 1024L
+    : StorageOptions.DefaultMinimumFreeDiskSpace;
+
 if (inMemory)
 {
     pool = QuadStorePool.CreateTemp("cli-session");
@@ -190,10 +202,12 @@ else
     resolvedStorePath = storePath ?? (storeName != null ? MercuryPaths.Store(storeName) : MercuryPaths.Store("cli"));
     try
     {
-        var poolOptions = isBulkLoad
-            ? new QuadStorePoolOptions { StorageOptions = new StorageOptions { BulkMode = true } }
-            : null;
-        pool = new QuadStorePool(resolvedStorePath, poolOptions);
+        var storeOpts = new StorageOptions
+        {
+            BulkMode = isBulkLoad,
+            MinimumFreeDiskSpace = minFreeSpace
+        };
+        pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts });
     }
     catch (StoreInUseException ex)
     {
@@ -207,6 +221,20 @@ else
 // (new pools and temp pools start with no stores; persistent pools
 // may have been created by an older version without pool metadata)
 pool.EnsureActive("primary");
+
+// Print startup diagnostics when loading or rebuilding
+if (loadFile != null || bulkLoadFile != null || rebuildIndexes)
+{
+    var freeSpace = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
+    Console.WriteLine($"Store:           {resolvedStorePath}");
+    Console.WriteLine($"Index state:     {pool.Active.IndexState}");
+    if (isBulkLoad)
+        Console.WriteLine($"Mode:            bulk (GSPO only, no fsync)");
+    if (freeSpace >= 0)
+        Console.WriteLine($"Free disk space: {freeSpace / (1024.0 * 1024 * 1024):F1} GB");
+    Console.WriteLine($"Min free space:  {minFreeSpace / (1024.0 * 1024 * 1024):F0} GB");
+    Console.WriteLine();
+}
 
 // Start HTTP server if enabled
 SparqlHttpServer? httpServer = null;
