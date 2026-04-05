@@ -19,8 +19,15 @@ internal sealed partial class TurtleStreamParser
             if (_endOfStream)
                 return -1;
 
-            // Buffer exhausted during sync parsing - main loop handles refills at statement boundaries
-            return -1;
+            // Buffer exhausted during sync parsing — refill synchronously.
+            // This handles constructs that span buffer boundaries (blank node
+            // property lists, large statements, etc.) without requiring the
+            // caller to be async-aware.
+            FillBufferSync();
+
+            if (_bufferPosition >= _bufferLength)
+                return -1; // True EOF after refill
+
         }
 
         // Decode UTF-8 to get Unicode code point
@@ -186,7 +193,7 @@ internal sealed partial class TurtleStreamParser
     {
         if (_endOfStream)
             return;
-        
+
         // Shift remaining data to beginning
         if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
         {
@@ -200,12 +207,74 @@ internal sealed partial class TurtleStreamParser
             _bufferPosition = 0;
             _bufferLength = 0;
         }
-        
+
+        // Grow the buffer if remaining data fills >75% of capacity.
+        // This handles large statements (e.g., OWL classes with hundreds of
+        // rdfs:subClassOf restrictions) that exceed the initial buffer size.
+        var freeSpace = _inputBuffer.Length - _bufferLength;
+        if (freeSpace < _inputBuffer.Length / 4 && _bufferLength > 0)
+        {
+            var newSize = _inputBuffer.Length * 2;
+            var newBuffer = new byte[newSize];
+            Array.Copy(_inputBuffer, 0, newBuffer, 0, _bufferLength);
+            _bufferManager.Return(_inputBuffer);
+            _inputBuffer = newBuffer;
+            freeSpace = newSize - _bufferLength;
+        }
+
         // Fill remaining space
         var bytesRead = await _stream.ReadAsync(
-            _inputBuffer.AsMemory(_bufferLength, _inputBuffer.Length - _bufferLength),
+            _inputBuffer.AsMemory(_bufferLength, freeSpace),
             cancellationToken);
-        
+
+        if (bytesRead == 0)
+        {
+            _endOfStream = true;
+        }
+        else
+        {
+            _bufferLength += bytesRead;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous buffer refill. Called by Peek() when the buffer is exhausted
+    /// mid-statement. Handles buffer growth for large statements.
+    /// </summary>
+    private void FillBufferSync()
+    {
+        if (_endOfStream)
+            return;
+
+        // Shift remaining data to beginning
+        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
+        {
+            var remaining = _bufferLength - _bufferPosition;
+            Array.Copy(_inputBuffer, _bufferPosition, _inputBuffer, 0, remaining);
+            _bufferLength = remaining;
+            _bufferPosition = 0;
+        }
+        else if (_bufferPosition >= _bufferLength)
+        {
+            _bufferPosition = 0;
+            _bufferLength = 0;
+        }
+
+        // Grow the buffer if remaining data fills >75% of capacity
+        var freeSpace = _inputBuffer.Length - _bufferLength;
+        if (freeSpace < _inputBuffer.Length / 4 && _bufferLength > 0)
+        {
+            var newSize = _inputBuffer.Length * 2;
+            var newBuffer = new byte[newSize];
+            Array.Copy(_inputBuffer, 0, newBuffer, 0, _bufferLength);
+            _bufferManager.Return(_inputBuffer);
+            _inputBuffer = newBuffer;
+            freeSpace = newSize - _bufferLength;
+        }
+
+        // Synchronous read — no thread hops
+        var bytesRead = _stream.Read(_inputBuffer, _bufferLength, freeSpace);
+
         if (bytesRead == 0)
         {
             _endOfStream = true;

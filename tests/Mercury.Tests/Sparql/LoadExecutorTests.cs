@@ -653,13 +653,12 @@ public class LoadExecutorStressTests : IDisposable
 
     [Fact]
     [Trait("Category", "Stress")]
-    public async Task Stress_VeryLongIRI_HitsParserBufferLimit()
+    public async Task Stress_VeryLongIRI_HandledByBufferGrowth()
     {
-        // DISCOVERED LIMITATION: Turtle parser has ~8KB buffer limit for single tokens
-        // This test documents the limitation and verifies graceful failure
+        // Parser buffer grows dynamically — no fixed token size limit.
+        // A 100KB IRI is handled by FillBufferSync doubling the buffer as needed.
         var store = CreateStore();
 
-        // Create IRI that exceeds the parser's buffer limit (~8KB)
         var longPath = new string('x', 100_000); // 100KB path
         var turtle = $"<http://example.org/{longPath}> <http://example.org/p> \"value\" .";
 
@@ -669,10 +668,7 @@ public class LoadExecutorStressTests : IDisposable
 
         var result = await executor.ExecuteAsync("http://stress.test/huge.ttl", null, false, store);
 
-        // This SHOULD fail - IRI exceeds parser buffer limit (not atom limit)
-        Assert.False(result.Success);
-        // Graceful failure with clear error message
-        Assert.Contains("input", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Success, result.ErrorMessage);
     }
 
     [Fact]
@@ -698,10 +694,9 @@ public class LoadExecutorStressTests : IDisposable
 
     [Fact]
     [Trait("Category", "Stress")]
-    public async Task Stress_VeryLongLiteral_HitsParserBufferLimit()
+    public async Task Stress_VeryLongLiteral_HandledByBufferGrowth()
     {
-        // DISCOVERED LIMITATION: Turtle parser has ~8KB buffer limit for single tokens
-        // This test documents the limitation and verifies graceful failure
+        // Parser buffer grows dynamically — no fixed token size limit.
         var store = CreateStore();
 
         var longLiteral = new string('A', 500_000); // 500KB literal
@@ -713,10 +708,7 @@ public class LoadExecutorStressTests : IDisposable
 
         var result = await executor.ExecuteAsync("http://stress.test/longliteral.ttl", null, false, store);
 
-        // This SHOULD fail - literal exceeds parser buffer limit
-        Assert.False(result.Success);
-        // Graceful failure with clear error message
-        Assert.Contains("input", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.True(result.Success, result.ErrorMessage);
     }
 
     #endregion
