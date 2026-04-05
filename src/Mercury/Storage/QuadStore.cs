@@ -40,6 +40,7 @@ public sealed class QuadStore : IDisposable
     private List<(LogRecord Record, string Graph, string Subject, string Predicate, string Object)>? _batchBuffer;
     private bool _disposed;
     private bool _diskSpaceLow; // Set when disk space drops below threshold
+    private bool _bulkLoadMode; // When true: skip fsync on CommitBatch, skip secondary indexes in ApplyToIndexes
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory.
@@ -93,9 +94,10 @@ public sealed class QuadStore : IDisposable
         _atoms = new AtomStore(atomPath, _bufferManager, options.MaxAtomSize,
             options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity);
 
-        // Create WAL for durability
+        // Create WAL for durability (bulk mode: no write-through, larger buffer)
+        _bulkLoadMode = options.BulkMode;
         _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
-            WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager);
+            WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
 
         // Create indexes with shared atom store
         // Entity-first indexes sort by Graph → dimensions → time
@@ -455,8 +457,11 @@ public sealed class QuadStore : IDisposable
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
 
-            // 1. Write CommitTx marker and fsync — batch is now durable
-            _wal.CommitBatch(_activeBatchTxId);
+            // 1. Write CommitTx marker — fsync in cognitive mode, deferred in bulk mode
+            if (_bulkLoadMode)
+                _wal.CommitBatchNoSync(_activeBatchTxId);
+            else
+                _wal.CommitBatch(_activeBatchTxId);
             _activeBatchTxId = -1;
 
             // 2. Materialize buffered records into indexes
@@ -503,6 +508,20 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public bool IsBatchActive => _activeBatchTxId >= 0;
 
+    /// <summary>
+    /// Returns true if the store was opened in bulk load mode.
+    /// </summary>
+    public bool IsBulkLoadMode => _bulkLoadMode;
+
+    /// <summary>
+    /// Flush all WAL writes to durable storage. Call once at bulk load completion
+    /// to make the entire load durable. No-op in cognitive mode (each CommitBatch fsyncs).
+    /// </summary>
+    public void FlushToDisk()
+    {
+        _wal.FlushToDisk();
+    }
+
     #endregion
 
     private void ThrowIfDisposed()
@@ -529,18 +548,22 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         _gspoIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
-        _gposIndex.AddHistorical(predicate, @object, subject, validFrom, validTo, transactionTime, graph);
-        _gospIndex.AddHistorical(@object, subject, predicate, validFrom, validTo, transactionTime, graph);
-        _tgspIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
 
-        // Index object for full-text search if it's a literal (starts with ")
-        if (!@object.IsEmpty && @object[0] == '"')
+        if (!_bulkLoadMode)
         {
-            var objectId = _atoms.GetAtomId(@object);
-            if (objectId > 0)
+            _gposIndex.AddHistorical(predicate, @object, subject, validFrom, validTo, transactionTime, graph);
+            _gospIndex.AddHistorical(@object, subject, predicate, validFrom, validTo, transactionTime, graph);
+            _tgspIndex.AddHistorical(subject, predicate, @object, validFrom, validTo, transactionTime, graph);
+
+            // Index object for full-text search if it's a literal (starts with ")
+            if (!@object.IsEmpty && @object[0] == '"')
             {
-                var utf8Span = _atoms.GetAtomSpan(objectId);
-                _trigramIndex.IndexAtom(objectId, utf8Span);
+                var objectId = _atoms.GetAtomId(@object);
+                if (objectId > 0)
+                {
+                    var utf8Span = _atoms.GetAtomSpan(objectId);
+                    _trigramIndex.IndexAtom(objectId, utf8Span);
+                }
             }
         }
     }

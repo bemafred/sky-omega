@@ -57,6 +57,13 @@ public sealed class StorageOptions
     public long AtomOffsetInitialCapacity { get; init; } = 1L << 20;
 
     /// <summary>
+    /// Enables bulk load mode: WAL uses FileOptions.None (no write-through) with 64KB buffer,
+    /// and CommitBatch skips fsync. Caller is responsible for final FlushToDisk.
+    /// No crash recovery during load — if it fails, delete the store and retry.
+    /// </summary>
+    public bool BulkMode { get; init; }
+
+    /// <summary>
     /// Default options with reasonable limits.
     /// </summary>
     public static StorageOptions Default { get; } = new();

@@ -15,6 +15,16 @@ using SkyOmega.Mercury.Runtime.Buffers;
 namespace SkyOmega.Mercury.Rdf;
 
 /// <summary>
+/// Compression type detected from file extension.
+/// </summary>
+internal enum CompressionType
+{
+    None,
+    GZip,   // .gz — BCL System.IO.Compression.GZipStream
+    BZip2   // .bz2 — requires external library (SharpZipLib)
+}
+
+/// <summary>
 /// Content negotiation for RDF formats.
 /// Maps MIME types and file extensions to RDF formats.
 /// </summary>
@@ -158,6 +168,42 @@ internal static class RdfFormatNegotiator
         }
 
         return FromExtension(extension);
+    }
+
+    /// <summary>
+    /// Detect RDF format from a file path, stripping compression extensions first.
+    /// Handles compound extensions like .ttl.bz2, .nt.gz.
+    /// </summary>
+    /// <param name="path">File path (e.g., "data.ttl.bz2").</param>
+    /// <returns>The detected RDF format and compression type.</returns>
+    public static (RdfFormat Format, CompressionType Compression) FromPathStrippingCompression(ReadOnlySpan<char> path)
+    {
+        if (path.IsEmpty)
+            return (RdfFormat.Unknown, CompressionType.None);
+
+        // Check for compression extension
+        var compression = CompressionType.None;
+        var effectivePath = path;
+
+        var lastDot = path.LastIndexOf('.');
+        if (lastDot >= 0 && lastDot < path.Length - 1)
+        {
+            var ext = path.Slice(lastDot + 1);
+
+            if (ext.Equals("gz".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            {
+                compression = CompressionType.GZip;
+                effectivePath = path.Slice(0, lastDot);
+            }
+            else if (ext.Equals("bz2".AsSpan(), StringComparison.OrdinalIgnoreCase))
+            {
+                compression = CompressionType.BZip2;
+                effectivePath = path.Slice(0, lastDot);
+            }
+        }
+
+        var format = FromPath(effectivePath);
+        return (format, compression);
     }
 
     /// <summary>
