@@ -157,6 +157,28 @@ internal sealed unsafe class QuadIndex : IDisposable
     }
 
     /// <summary>
+    /// Insert a key with pre-resolved atom IDs. Used during secondary index rebuild
+    /// to avoid re-interning billions of strings — atom IDs are already known from
+    /// the primary index scan.
+    /// </summary>
+    internal void AddRaw(long graph, long primary, long secondary, long tertiary,
+        long validFrom, long validTo, long transactionTime)
+    {
+        var temporalKey = new TemporalKey
+        {
+            Graph = graph,
+            Primary = primary,
+            Secondary = secondary,
+            Tertiary = tertiary,
+            ValidFrom = validFrom,
+            ValidTo = validTo,
+            TransactionTime = transactionTime
+        };
+
+        InsertIntoTree(temporalKey, _rootPageId);
+    }
+
+    /// <summary>
     /// Add a current fact (valid from now to end of time)
     /// </summary>
     public void AddCurrent(

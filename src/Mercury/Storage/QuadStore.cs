@@ -41,6 +41,7 @@ public sealed class QuadStore : IDisposable
     private bool _disposed;
     private bool _diskSpaceLow; // Set when disk space drops below threshold
     private bool _bulkLoadMode; // When true: skip fsync on CommitBatch, skip secondary indexes in ApplyToIndexes
+    private StoreIndexState _indexState;
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory.
@@ -110,6 +111,14 @@ public sealed class QuadStore : IDisposable
         // Create trigram index for full-text search
         var trigramPath = Path.Combine(baseDirectory, "trigram");
         _trigramIndex = new TrigramIndex(trigramPath, _bufferManager);
+
+        // Read index construction state
+        _indexState = StoreStateFile.Read(baseDirectory);
+        if (_bulkLoadMode && _indexState == StoreIndexState.Ready)
+        {
+            _indexState = StoreIndexState.PrimaryOnly;
+            StoreStateFile.Write(baseDirectory, _indexState);
+        }
 
         _logger.Info("Opening store at {0}".AsSpan(), baseDirectory);
 
@@ -520,6 +529,93 @@ public sealed class QuadStore : IDisposable
     public void FlushToDisk()
     {
         _wal.FlushToDisk();
+    }
+
+    /// <summary>
+    /// Returns the current index construction state.
+    /// </summary>
+    public StoreIndexState IndexState => _indexState;
+
+    /// <summary>
+    /// Rebuild all secondary indexes (GPOS, GOSP, TGSP) and trigram index
+    /// by scanning the primary GSPO index. Call after a bulk load to make
+    /// all query patterns available.
+    /// </summary>
+    /// <param name="onProgress">Optional progress callback with (indexName, entriesProcessed).</param>
+    public void RebuildSecondaryIndexes(Action<string, long>? onProgress = null)
+    {
+        ThrowIfDisposed();
+        _lock.EnterWriteLock();
+        try
+        {
+            RebuildIndex(_gposIndex, "GPOS", StoreIndexState.BuildingGPOS,
+                (q) => (q.Secondary, q.Tertiary, q.Primary), onProgress);
+
+            RebuildIndex(_gospIndex, "GOSP", StoreIndexState.BuildingGOSP,
+                (q) => (q.Tertiary, q.Primary, q.Secondary), onProgress);
+
+            RebuildIndex(_tgspIndex, "TGSP", StoreIndexState.BuildingTGSP,
+                (q) => (q.Primary, q.Secondary, q.Tertiary), onProgress);
+
+            // Trigram rebuild
+            _indexState = StoreIndexState.BuildingTrigram;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+            long trigramCount = 0;
+            var gspoEnum = _gspoIndex.QueryHistory(
+                ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+            while (gspoEnum.MoveNext())
+            {
+                var quad = gspoEnum.Current;
+                // In GSPO: Tertiary = object. Check if it's a literal (atom starts with ")
+                var objectId = quad.Tertiary;
+                if (objectId > 0)
+                {
+                    var utf8Span = _atoms.GetAtomSpan(objectId);
+                    if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    {
+                        _trigramIndex.IndexAtom(objectId, utf8Span);
+                        trigramCount++;
+                    }
+                }
+            }
+            onProgress?.Invoke("Trigram", trigramCount);
+
+            // All done
+            _indexState = StoreIndexState.Ready;
+            _bulkLoadMode = false;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Rebuild a single secondary index from the primary GSPO index.
+    /// </summary>
+    private void RebuildIndex(QuadIndex target, string name, StoreIndexState duringState,
+        Func<TemporalQuad, (long Primary, long Secondary, long Tertiary)> remapDimensions,
+        Action<string, long>? onProgress)
+    {
+        _indexState = duringState;
+        StoreStateFile.Write(_baseDirectory, _indexState);
+
+        long count = 0;
+        var gspoEnum = _gspoIndex.QueryHistory(
+            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+
+        while (gspoEnum.MoveNext())
+        {
+            var quad = gspoEnum.Current;
+            var (primary, secondary, tertiary) = remapDimensions(quad);
+
+            target.AddRaw(quad.Graph, primary, secondary, tertiary,
+                quad.ValidFrom, quad.ValidTo, quad.TransactionTime);
+            count++;
+        }
+
+        onProgress?.Invoke(name, count);
     }
 
     #endregion
@@ -958,6 +1054,33 @@ public sealed class QuadStore : IDisposable
         var subjectBound = !subject.IsEmpty && subject[0] != '?';
         var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
         var objectBound = !@object.IsEmpty && @object[0] != '?';
+
+        // When secondary indexes are not available, fall back to GSPO for everything.
+        // Queries still work — just slower (full GSPO scan instead of targeted index).
+        if (_indexState != StoreIndexState.Ready)
+        {
+            // TGSP is only available after full rebuild
+            // GPOS is available after BuildingGPOS completes
+            // GOSP is available after BuildingGOSP completes
+            var gposAvailable = _indexState != StoreIndexState.PrimaryOnly
+                && _indexState != StoreIndexState.BuildingGPOS;
+            var gospAvailable = gposAvailable
+                && _indexState != StoreIndexState.BuildingGOSP;
+            var tgspAvailable = gospAvailable
+                && _indexState != StoreIndexState.BuildingTGSP
+                && _indexState != StoreIndexState.BuildingTrigram;
+
+            if (queryType == TemporalQueryType.Range && tgspAvailable)
+                return (_tgspIndex, TemporalIndexType.TGSP);
+            if (subjectBound)
+                return (_gspoIndex, TemporalIndexType.GSPO);
+            if (predicateBound && gposAvailable)
+                return (_gposIndex, TemporalIndexType.GPOS);
+            if (objectBound && gospAvailable)
+                return (_gospIndex, TemporalIndexType.GOSP);
+
+            return (_gspoIndex, TemporalIndexType.GSPO);
+        }
 
         // For time-range queries, prefer TGSP index
         if (queryType == TemporalQueryType.Range)
