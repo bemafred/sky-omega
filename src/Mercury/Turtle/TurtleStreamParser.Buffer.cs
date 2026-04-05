@@ -208,23 +208,9 @@ internal sealed partial class TurtleStreamParser
             _bufferLength = 0;
         }
 
-        // Grow the buffer if remaining data fills >75% of capacity.
-        // This handles large statements (e.g., OWL classes with hundreds of
-        // rdfs:subClassOf restrictions) that exceed the initial buffer size.
-        var freeSpace = _inputBuffer.Length - _bufferLength;
-        if (freeSpace < _inputBuffer.Length / 4 && _bufferLength > 0)
-        {
-            var newSize = _inputBuffer.Length * 2;
-            var newBuffer = new byte[newSize];
-            Array.Copy(_inputBuffer, 0, newBuffer, 0, _bufferLength);
-            _bufferManager.Return(_inputBuffer);
-            _inputBuffer = newBuffer;
-            freeSpace = newSize - _bufferLength;
-        }
-
         // Fill remaining space
         var bytesRead = await _stream.ReadAsync(
-            _inputBuffer.AsMemory(_bufferLength, freeSpace),
+            _inputBuffer.AsMemory(_bufferLength, _inputBuffer.Length - _bufferLength),
             cancellationToken);
 
         if (bytesRead == 0)
@@ -260,20 +246,8 @@ internal sealed partial class TurtleStreamParser
             _bufferLength = 0;
         }
 
-        // Grow the buffer if remaining data fills >75% of capacity
-        var freeSpace = _inputBuffer.Length - _bufferLength;
-        if (freeSpace < _inputBuffer.Length / 4 && _bufferLength > 0)
-        {
-            var newSize = _inputBuffer.Length * 2;
-            var newBuffer = new byte[newSize];
-            Array.Copy(_inputBuffer, 0, newBuffer, 0, _bufferLength);
-            _bufferManager.Return(_inputBuffer);
-            _inputBuffer = newBuffer;
-            freeSpace = newSize - _bufferLength;
-        }
-
         // Synchronous read — no thread hops
-        var bytesRead = _stream.Read(_inputBuffer, _bufferLength, freeSpace);
+        var bytesRead = _stream.Read(_inputBuffer, _bufferLength, _inputBuffer.Length - _bufferLength);
 
         if (bytesRead == 0)
         {
