@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.6.1 Released** — DrHook breakpoint registry (ADR-001), expression evaluation (ADR-002), and `step_test` — debug .NET test code through `dotnet test` via hybrid launch-then-attach. 19 tools, zero gaps: any .NET code is observable regardless of how it's hosted.
+> **v1.7.0 Released** — Wikidata-scale ingestion pipeline (ADR-027). Bulk load mode (no fsync, GSPO-only), streaming Turtle parser with sliding buffer, deferred secondary indexing with rebuild, CLI convergence (`--store`, `--bulk-load`, `--convert`, `--rebuild-indexes`). Turtle parser buffer boundary fix — handles arbitrarily large statements at any buffer size. 4,030 tests, 0 failures.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**

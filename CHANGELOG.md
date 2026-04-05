@@ -11,6 +11,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.0] - 2026-04-05
+
+Wikidata-scale ingestion pipeline — Mercury can now load the full Wikidata dump (16.6B triples, 912 GB Turtle) on a single machine.
+
+### Added
+
+#### Bulk Load Foundation (ADR-027 Phase 1)
+- **WAL bulk mode** — `FileOptions.None` with 64 KB buffer bypasses OS write-through cache. 4.3x faster than `WriteThrough` per micro-benchmark (40.8M records/sec at 3.1 GB/sec).
+- **`CommitBatchNoSync`** — WAL commit marker without fsync. Single `FlushToDisk()` at load completion.
+- **`StorageOptions.BulkMode`** — GSPO-only indexing during bulk load, skip GPOS/GOSP/TGSP/trigram.
+
+#### Streaming I/O (ADR-027 Phase 2)
+- **`LoadFileAsync` rewritten** — streams directly from disk with chunked batch commits. No MemoryStream buffering. Decoupled parse-then-write: parser fills buffer (no lock), buffer flushed to store (lock only during materialization).
+- **Compression-aware format detection** — `FromPathStrippingCompression` handles `.ttl.gz`, `.nt.bz2`, etc.
+- **Transparent GZip decompression** — BCL `GZipStream`, no external dependencies.
+- **`ConvertAsync`** — streaming parser-to-writer pipeline, no store. Pure throughput test for parser validation.
+- **Progress reporting** — `LoadProgress` with triples/sec, GC heap, working set, interval rate.
+
+#### Deferred Secondary Indexing (ADR-027 Phase 4)
+- **`RebuildSecondaryIndexes`** — scans GSPO, populates GPOS/GOSP/TGSP with dimension remapping via `AddRaw` (raw atom-ID insertion, no re-interning). Trigram index rebuilt from object literals.
+- **`StoreIndexState`** — persisted state metadata (`Ready`/`PrimaryOnly`/`Building:<index>`). Query planner falls back to GSPO when secondaries unavailable.
+
+#### CLI Convergence (ADR-027 Phase 5)
+- **`--store <name>`** — named stores via `MercuryPaths` (e.g., `--store wikidata`)
+- **`--bulk-load <file>`** — bulk load with deferred indexing
+- **`--load <file>`** — standard load at startup
+- **`--convert <in> <out>`** — streaming format conversion (no store, exits after)
+- **`--rebuild-indexes`** — build secondary indexes from GSPO
+- **`--min-free-space <GB>`** — disk space safeguard (default: 100 GB for bulk loads)
+- **REPL commands** — `:load [--bulk] <file>`, `:convert <in> <out>`, `:rebuild-indexes`
+
+#### Runtime Diagnostics
+- **Startup diagnostics** — store path, index state, mode, free disk space, min threshold
+- **Progress display** — every 10 seconds: elapsed (h:m:s), triples, avg rate, recent rate, GC heap, RSS
+- **Completion summary** — triples, elapsed, avg rate, GC heap, working set, free disk remaining
+
+### Fixed
+
+- **Turtle parser buffer boundary bug** — `Peek()` returned `-1` when the input buffer was exhausted mid-statement, even when more data existed in the stream. Fix: `FillBufferSync()` shifts remaining data left and reads more, synchronously. The buffer slides through the stream at any fixed size — 32 bytes parses the same as 8 KB. No dynamic buffer growth needed.
+- **FHIR ontology** (88,428 triples, statements up to 3,965 lines) now loads successfully.
+- **100 KB IRI and 500 KB literal** — previously documented as parser buffer limitations. Eliminated by the sliding buffer fix.
+
+### Added (Documentation)
+- **DEBUGGING.md** — DrHook debugging methodology: when to observe, how to set breakpoints, workflow examples.
+
 ## [1.6.1] - 2026-03-30
 
 Closes the test debugging gap — DrHook can now debug .NET test code through `dotnet test`.
