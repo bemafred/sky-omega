@@ -122,6 +122,9 @@ public sealed class ReplSession : IDisposable
     private readonly Func<string, PruneResult>? _executePrune;
     private readonly Func<string>? _getStorePath;
     private readonly Func<string, Task>? _executeAttach;
+    private readonly Func<string, bool, Action<long, TimeSpan>?, Task<long>>? _executeLoad;
+    private readonly Func<string, string, Action<long, TimeSpan>?, Task<long>>? _executeConvert;
+    private readonly Func<Action<string, long>?, Task>? _executeRebuildIndexes;
 
     private readonly Dictionary<string, string> _prefixes = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _history = new();
@@ -156,7 +159,10 @@ public sealed class ReplSession : IDisposable
         Func<IEnumerable<string>> getNamedGraphs,
         Func<string, PruneResult>? executePrune = null,
         Func<string>? getStorePath = null,
-        Func<string, Task>? executeAttach = null)
+        Func<string, Task>? executeAttach = null,
+        Func<string, bool, Action<long, TimeSpan>?, Task<long>>? executeLoad = null,
+        Func<string, string, Action<long, TimeSpan>?, Task<long>>? executeConvert = null,
+        Func<Action<string, long>?, Task>? executeRebuildIndexes = null)
     {
         _executeQuery = executeQuery ?? throw new ArgumentNullException(nameof(executeQuery));
         _executeUpdate = executeUpdate ?? throw new ArgumentNullException(nameof(executeUpdate));
@@ -165,6 +171,9 @@ public sealed class ReplSession : IDisposable
         _executePrune = executePrune;
         _getStorePath = getStorePath;
         _executeAttach = executeAttach;
+        _executeLoad = executeLoad;
+        _executeConvert = executeConvert;
+        _executeRebuildIndexes = executeRebuildIndexes;
         _lineEditor = new LineEditor(_history);
 
         // Pre-register common prefixes
@@ -450,6 +459,9 @@ public sealed class ReplSession : IDisposable
             ":store" => ExecuteStore(),
             ":prune" => ExecutePrune(args),
             ":attach" or ":a" => ExecuteAttach(args),
+            ":load" or ":l" => ExecuteLoad(args),
+            ":convert" => ExecuteConvert(args),
+            ":rebuild-indexes" => ExecuteRebuildIndexes(),
             ":quit" or ":q" or ":exit" => ExecutionResult.Command("EXIT"),
             _ => ExecutionResult.Error($"Unknown command: {command}. Type :help for available commands.")
         };
@@ -636,6 +648,95 @@ public sealed class ReplSession : IDisposable
         }
     }
 
+    private ExecutionResult ExecuteLoad(string args)
+    {
+        if (_executeLoad == null)
+            return ExecutionResult.Error("Load is not available in this session.");
+
+        var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return ExecutionResult.Error("Usage: :load [--bulk] <file>");
+
+        var bulk = false;
+        var filePath = "";
+        foreach (var part in parts)
+        {
+            if (part == "--bulk")
+                bulk = true;
+            else
+                filePath = part;
+        }
+
+        if (string.IsNullOrEmpty(filePath))
+            return ExecutionResult.Error("Usage: :load [--bulk] <file>");
+
+        try
+        {
+            var lastReport = "";
+            var count = _executeLoad(filePath, bulk, (loaded, elapsed) =>
+            {
+                var rate = elapsed.TotalSeconds > 0 ? loaded / elapsed.TotalSeconds : 0;
+                lastReport = $"\r  {loaded:N0} triples  {rate:N0}/sec  {elapsed.TotalSeconds:F1}s";
+                Console.Error.Write(lastReport);
+            }).GetAwaiter().GetResult();
+
+            if (lastReport.Length > 0)
+                Console.Error.WriteLine();
+
+            return ExecutionResult.Command($"Loaded {count:N0} triples.");
+        }
+        catch (Exception ex)
+        {
+            return ExecutionResult.Error($"Load failed: {ex.Message}");
+        }
+    }
+
+    private ExecutionResult ExecuteConvert(string args)
+    {
+        if (_executeConvert == null)
+            return ExecutionResult.Error("Convert is not available in this session.");
+
+        var parts = args.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
+            return ExecutionResult.Error("Usage: :convert <input> <output>");
+
+        try
+        {
+            var count = _executeConvert(parts[0], parts[1], (converted, elapsed) =>
+            {
+                var rate = elapsed.TotalSeconds > 0 ? converted / elapsed.TotalSeconds : 0;
+                Console.Error.Write($"\r  {converted:N0} triples  {rate:N0}/sec  {elapsed.TotalSeconds:F1}s");
+            }).GetAwaiter().GetResult();
+
+            Console.Error.WriteLine();
+            return ExecutionResult.Command($"Converted {count:N0} triples.");
+        }
+        catch (Exception ex)
+        {
+            return ExecutionResult.Error($"Convert failed: {ex.Message}");
+        }
+    }
+
+    private ExecutionResult ExecuteRebuildIndexes()
+    {
+        if (_executeRebuildIndexes == null)
+            return ExecutionResult.Error("Rebuild is not available in this session.");
+
+        try
+        {
+            _executeRebuildIndexes((name, count) =>
+            {
+                Console.Error.WriteLine($"  {name}: {count:N0} entries");
+            }).GetAwaiter().GetResult();
+
+            return ExecutionResult.Command("Secondary indexes rebuilt.");
+        }
+        catch (Exception ex)
+        {
+            return ExecutionResult.Error($"Rebuild failed: {ex.Message}");
+        }
+    }
+
     private ExecutionResult ExecuteClear()
     {
         _history.Clear();
@@ -724,6 +825,9 @@ public sealed class ReplSession : IDisposable
           :attach, :a [target]  Attach to running instance (default: mcp)
           :count [pattern]  Count triples (optionally matching pattern)
           :prune [options]  Compact the store (remove soft-deleted data)
+          :load, :l [--bulk] <file>  Load RDF file into store
+          :convert <in> <out>        Streaming format conversion (no store)
+          :rebuild-indexes           Build secondary indexes from GSPO
           :quit, :q, :exit  Exit the REPL
 
         Prune options:

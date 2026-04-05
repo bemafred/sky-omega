@@ -10,12 +10,18 @@ using SkyOmega.Mercury.Storage;
 
 // Parse command line arguments
 string? storePath = null;
+string? storeName = null;
 bool inMemory = false;
 bool showHelp = false;
 bool showVersion = false;
 int httpPort = MercuryPorts.Cli;
 bool enableHttp = true;
 string? attachTarget = null;
+string? loadFile = null;
+string? bulkLoadFile = null;
+string? convertInput = null;
+string? convertOutput = null;
+bool rebuildIndexes = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -38,6 +44,10 @@ for (int i = 0; i < args.Length; i++)
             if (i + 1 < args.Length)
                 storePath = args[++i];
             break;
+        case "--store":
+            if (i + 1 < args.Length)
+                storeName = args[++i];
+            break;
         case "-p":
         case "--port":
             if (i + 1 < args.Length && int.TryParse(args[++i], out var port))
@@ -51,6 +61,24 @@ for (int i = 0; i < args.Length; i++)
             attachTarget = i + 1 < args.Length && !args[i + 1].StartsWith('-')
                 ? args[++i]
                 : "mcp";
+            break;
+        case "--load":
+            if (i + 1 < args.Length)
+                loadFile = args[++i];
+            break;
+        case "--bulk-load":
+            if (i + 1 < args.Length)
+                bulkLoadFile = args[++i];
+            break;
+        case "--convert":
+            if (i + 2 < args.Length)
+            {
+                convertInput = args[++i];
+                convertOutput = args[++i];
+            }
+            break;
+        case "--rebuild-indexes":
+            rebuildIndexes = true;
             break;
         default:
             if (args[i].StartsWith('-'))
@@ -95,20 +123,26 @@ if (showHelp)
         Usage: mercury [options] [store-path]
 
         Options:
-          -v, --version      Show version information
-          -h, --help         Show this help message
-          -m, --memory       Use temporary in-memory store (deleted on exit)
-          -d, --data <path>  Path to data directory
-          -p, --port <port>  HTTP port (default: 3031)
-          --no-http          Disable HTTP endpoint
-          -a, --attach [target]  Attach to running instance (default: mcp)
+          -v, --version              Show version information
+          -h, --help                 Show this help message
+          -m, --memory               Use temporary in-memory store (deleted on exit)
+          -d, --data <path>          Path to data directory
+          --store <name>             Named store (e.g., wikidata, fhir)
+          -p, --port <port>          HTTP port (default: 3031)
+          --no-http                  Disable HTTP endpoint
+          -a, --attach [target]      Attach to running instance (default: mcp)
+          --load <file>              Load RDF file at startup, then enter REPL
+          --bulk-load <file>         Bulk load (GSPO only, no fsync), then enter REPL
+          --convert <in> <out>       Streaming format conversion (no store, exits after)
+          --rebuild-indexes          Rebuild secondary indexes, then enter REPL
 
         Examples:
-          mercury                     # Persistent store at ~/Library/SkyOmega/stores/cli/
-          mercury ./mydata            # Custom store path
-          mercury -m                  # Temporary store (deleted on exit)
-          mercury -a mcp              # Attach to MCP instance via pipe
-          mercury -a                  # Same as above
+          mercury                                # Default store (cli)
+          mercury --store wikidata               # Named store (wikidata)
+          mercury --store wikidata --bulk-load data.nt   # Bulk load into named store
+          mercury --convert data.ttl data.nt     # Convert Turtle to N-Triples
+          mercury --store wikidata --rebuild-indexes     # Build GPOS/GOSP/TGSP
+          mercury -m                             # Temporary store (deleted on exit)
 
         Inside the REPL:
           :help              Show REPL commands
@@ -127,9 +161,24 @@ if (attachTarget != null)
     return await RunAttachMode(attachTarget);
 }
 
+// Handle --convert (no store needed, exits after completion)
+if (convertInput != null && convertOutput != null)
+{
+    Console.WriteLine($"Converting {convertInput} -> {convertOutput}...");
+    var count = await RdfEngine.ConvertAsync(convertInput, convertOutput, p =>
+    {
+        var rate = p.Elapsed.TotalSeconds > 0 ? p.TriplesLoaded / p.Elapsed.TotalSeconds : 0;
+        Console.Error.Write($"\r  {p.TriplesLoaded:N0} triples  {rate:N0}/sec  {p.Elapsed.TotalSeconds:F1}s");
+    });
+    Console.Error.WriteLine();
+    Console.WriteLine($"Converted {count:N0} triples.");
+    return 0;
+}
+
 // Create or open pool
 QuadStorePool pool;
 string resolvedStorePath;
+bool isBulkLoad = bulkLoadFile != null;
 
 if (inMemory)
 {
@@ -138,10 +187,13 @@ if (inMemory)
 }
 else
 {
-    resolvedStorePath = storePath ?? MercuryPaths.Store("cli");
+    resolvedStorePath = storePath ?? (storeName != null ? MercuryPaths.Store(storeName) : MercuryPaths.Store("cli"));
     try
     {
-        pool = new QuadStorePool(resolvedStorePath);
+        var poolOptions = isBulkLoad
+            ? new QuadStorePoolOptions { StorageOptions = new StorageOptions { BulkMode = true } }
+            : null;
+        pool = new QuadStorePool(resolvedStorePath, poolOptions);
     }
     catch (StoreInUseException ex)
     {
@@ -186,6 +238,31 @@ if (enableHttp)
     }
 }
 
+// Handle startup actions (before REPL)
+var fileToLoad = bulkLoadFile ?? loadFile;
+if (fileToLoad != null)
+{
+    var mode = bulkLoadFile != null ? "bulk" : "standard";
+    Console.WriteLine($"Loading {fileToLoad} ({mode})...");
+    var count = await RdfEngine.LoadFileAsync(pool.Active, fileToLoad, onProgress: p =>
+    {
+        var rate = p.Elapsed.TotalSeconds > 0 ? p.TriplesLoaded / p.Elapsed.TotalSeconds : 0;
+        Console.Error.Write($"\r  {p.TriplesLoaded:N0} triples  {rate:N0}/sec  {p.Elapsed.TotalSeconds:F1}s");
+    });
+    Console.Error.WriteLine();
+    Console.WriteLine($"Loaded {count:N0} triples.");
+}
+
+if (rebuildIndexes)
+{
+    Console.WriteLine("Rebuilding secondary indexes...");
+    pool.Active.RebuildSecondaryIndexes((name, count) =>
+    {
+        Console.Error.WriteLine($"  {name}: {count:N0} entries");
+    });
+    Console.WriteLine("Secondary indexes rebuilt.");
+}
+
 // Create ReplSession with facade calls and run REPL
 using (pool)
 using (httpServer)
@@ -196,7 +273,26 @@ using (var session = new ReplSession(
     getNamedGraphs: () => SparqlEngine.GetNamedGraphs(pool.Active),
     executePrune: pruneArgs => ExecutePrune(pool, pruneArgs),
     getStorePath: () => resolvedStorePath,
-    executeAttach: target => RunAttachSession(target)))
+    executeAttach: target => RunAttachSession(target),
+    executeLoad: async (path, bulk, progress) =>
+    {
+        Action<LoadProgress>? onProgress = progress != null
+            ? p => progress(p.TriplesLoaded, p.Elapsed)
+            : null;
+        return await RdfEngine.LoadFileAsync(pool.Active, path, onProgress: onProgress);
+    },
+    executeConvert: async (input, output, progress) =>
+    {
+        Action<LoadProgress>? onProgress = progress != null
+            ? p => progress(p.TriplesLoaded, p.Elapsed)
+            : null;
+        return await RdfEngine.ConvertAsync(input, output, onProgress);
+    },
+    executeRebuildIndexes: progress =>
+    {
+        pool.Active.RebuildSecondaryIndexes(progress);
+        return Task.CompletedTask;
+    }))
 {
     session.RunInteractive();
 }
