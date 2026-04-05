@@ -28,7 +28,7 @@ Mercury is not competing to replace Blazegraph — different architecture, singl
 
 ### The Dataset
 
-The Wikidata full RDF dump is distributed as Turtle (`latest-all.ttl.bz2`). On Omega (`~/Library/SkyOmega/datasets/wikidata/full`):
+The Wikidata full RDF dump is distributed as Turtle (`latest-all.ttl.bz2`). On `omega` (`~/Library/SkyOmega/datasets/wikidata/full`):
 
 - **114 GB** bzip2-compressed (`latest-all.ttl.bz2`)
 - **912 GB** uncompressed (`latest-all.ttl`)
