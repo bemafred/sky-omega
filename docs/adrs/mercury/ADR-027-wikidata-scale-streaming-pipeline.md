@@ -337,6 +337,56 @@ A benchmark artifact with:
 
 Mercury's differentiators in this context: zero-GC architecture, zero external dependencies (BCL only), bitemporal by default, single-machine consumer hardware. These are not claims of superiority — they are architectural facts that let the benchmark speak for itself.
 
+## Horizontal Scaling: Read-Replica Fleet
+
+Mercury already has a production-grade W3C SPARQL 1.1 Protocol HTTP endpoint (`SparqlHttpServer`) running in both Mercury.Cli (port 3031) and Mercury.Mcp (port 3030). BCL-only, `HttpListener`, full content negotiation (JSON, XML, CSV, TSV for results; Turtle, N-Triples, RDF/XML for graphs), CORS, service description. This is not future work — it exists today.
+
+This means horizontal scaling is an operational concern, not an architectural one:
+
+1. Load Wikidata once on a single machine (this ADR)
+2. Copy the store directory to N machines (it's just files — memory-mapped, no daemon state)
+3. Start `mercury` or `mercury-mcp` on each node
+4. Place a load balancer in front
+
+Each node is fully independent for reads. No coordination protocol, no distributed consensus, no cluster management. The load balancer distributes queries; each node answers from its local store.
+
+### Why This Works
+
+**Zero-GC eliminates the scaling tax.** JVM-based stores (Blazegraph, Jena) suffer GC pause lottery across nodes — one node enters a major collection while others are fine, creating tail latency spikes that the load balancer cannot predict. Mercury has no GC pauses. Every node delivers predictable latency. This is the property that makes load balancing actually work at scale.
+
+**BCL-only means trivial deployment.** Copy binary, copy store files, start. No dependency graph, no configuration drift, no JVM tuning per node. The deployment artifact is the same across all nodes.
+
+**Append-only store means consistent snapshots.** The store can be copied while serving reads — no locking, no quiescing. New nodes join the fleet by receiving a store copy.
+
+**Memory-mapped I/O lets the OS optimize per machine.** Each node's page cache adapts to its available memory independently. No application-level cache coordination needed.
+
+### Write Model
+
+Wikidata dumps are periodic — the current model (even for QLever) is weekly reload from dumps. The write propagation model matches: one ingestion node loads the new dump, snapshots the store, distributes to the fleet. No real-time write replication needed.
+
+For the cognitive write path (Lucy, MCP sessions), writes go to a designated writer node. Read replicas receive periodic snapshots. This is the same model that works for database read replicas everywhere — simple, proven, no distributed transaction complexity.
+
+### Throughput Scaling
+
+If one M5 Max handles X queries/sec on the full Wikidata graph, N machines handle N*X. Linearly. No coordination tax. This is the benchmark number worth publishing — single-node latency AND fleet throughput projection.
+
+## Sky Omega 2.0: Cognitive Nodes
+
+Every other Wikidata backend candidate — QLever, Virtuoso, Blazegraph — is infrastructure. A query engine. A pipe that data flows through.
+
+Sky Omega is not infrastructure. When 2.0 is complete, each node in the fleet runs the full cognitive stack:
+
+- **Mercury** — the knowledge substrate (storage, SPARQL, HTTP endpoint)
+- **Minerva** — local LLM inference (zero-GC, Metal/CUDA, no API dependency)
+- **Lucy** — semantic memory (structured knowledge, not embeddings)
+- **James** — orchestration (judgment, attention, strategy)
+- **Sky** — cognitive agent (reasoning, reflection, learning)
+- **Mira** — interaction surfaces (CLI, chat, IDE, voice)
+
+Each node doesn't just answer SPARQL queries — it understands the data. A fleet of Sky Omega nodes serving Wikidata is not a query service. It is a distributed knowledge system where every node can reason about its contents, explain its answers, learn from interactions, and maintain epistemic provenance for every assertion.
+
+No other triple store has this trajectory. QLever will always be a fast C++ query engine. Virtuoso will always be database infrastructure. Sky Omega is infrastructure that thinks — and the Wikidata benchmark is the proof that the foundation can hold the weight.
+
 ## Validation Sequence
 
 The Wikidata load is validated in stages, each building confidence before committing to the next:
@@ -404,9 +454,12 @@ Stages 1–4 produce the publishable benchmark artifact. Stage 5 proves generali
 - Existence proof exceeds specification compliance — this is what "state of the art" means for a triple store
 - Every component of the pipeline is independently testable: decompression, parsing, conversion, loading, indexing
 - The benchmark artifact enters the conversation at exactly the moment the Wikidata community is evaluating SPARQL backends
+- Horizontal scaling is operational, not architectural — the HTTP endpoint and store-as-files model already exist
+- Zero-GC across a fleet eliminates the tail latency problem that plagues JVM-based stores
 - Streaming pipeline handles any size dataset — not just Wikidata but any future corpus
 - Memory-aware flushing adapts to any hardware (16GB laptop to 128GB workstation)
 - Cognitive write path untouched — no risk to semantic memory durability
+- Sky Omega 2.0 transforms query nodes into cognitive nodes — a trajectory no other triple store can match
 
 ### Trade-offs
 - BZip2 introduces a non-BCL dependency (SharpZipLib) — required since Wikidata ships as `.bz2`. Explicitly accepted as isolated and replaceable.
