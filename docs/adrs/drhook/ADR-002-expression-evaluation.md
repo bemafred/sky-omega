@@ -1,7 +1,8 @@
 # ADR-002 - Expression Evaluation
 
 ## Status
-Accepted (2026-03-30) — implemented in all three phases
+
+**Status:** Completed — 2026-03-30. Implemented in all three phases.
 
 ## Context
 

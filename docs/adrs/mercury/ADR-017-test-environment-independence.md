@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by [ADR-018: CLI Library Extraction](ADR-018-cli-library-extraction.md)
+**Status:** Superseded — by [ADR-018: CLI Library Extraction](ADR-018-cli-library-extraction.md)
 
 ## Context
 

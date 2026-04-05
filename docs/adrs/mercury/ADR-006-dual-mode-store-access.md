@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** — Core attach mode implemented (2026-02)
+**Status:** Completed — 2026-02. Core attach mode implemented.
 
 ### Implementation Note
 

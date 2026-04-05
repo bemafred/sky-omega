@@ -1,7 +1,6 @@
 # ADR-005: Cognitive Component Libraries — Lucy, James, Sky, Minerva
 
-**Status:** Proposed
-**Date:** 2026-03-29
+**Status:** Proposed — 2026-03-29
 **Context:** Ad-hoc Sky Omega MVP validation proved the three-substrate architecture works. Time to create the library projects that will become Sky Omega 2.0.
 
 ## Problem

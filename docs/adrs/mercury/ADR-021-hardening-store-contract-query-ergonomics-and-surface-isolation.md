@@ -2,7 +2,7 @@
 
 ## Status
 
-**Deferred** (proposed 2026-02-09) — §6 applied 2026-02-15; remaining sections deferred, see Disposition below
+**Status:** Deferred — 2026-02-09. §6 applied 2026-02-15; remaining sections deferred, see Disposition below.
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** — 2026-03-22
+**Status:** Completed — 2026-03-22
 
 ## Context
 

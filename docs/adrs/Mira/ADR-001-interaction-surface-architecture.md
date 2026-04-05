@@ -1,8 +1,7 @@
 # ADR-001: Interaction Surface Architecture
 
 **Component:** Mira (embodied integration surface — perception and expression)
-**Status:** Proposed
-**Date:** 2026-03-08
+**Status:** Proposed — 2026-03-08
 
 ## Summary
 

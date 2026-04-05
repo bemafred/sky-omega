@@ -1,7 +1,6 @@
 # ADR-004: Process-Owning Stepping via DAP Launch
 
-**Status:** Accepted
-**Date:** 2026-03-29 (validated 2026-03-30)
+**Status:** Completed — 2026-03-29 (validated 2026-03-30)
 **Context:** Emergence observation during ad-hoc Sky Omega MVP evaluation
 
 ## Problem

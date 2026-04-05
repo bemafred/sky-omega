@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** — clarifies the intended single-owner/single-writer model and removes ambiguous concurrency semantics (proposed 2026-02-09, implemented 2026-02-15)
+**Status:** Completed — 2026-02-15. Clarifies the intended single-owner/single-writer model and removes ambiguous concurrency semantics.
 
 ## Context
 

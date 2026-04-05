@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (implemented)
+**Status:** Completed
 
 ## Related ADRs
 

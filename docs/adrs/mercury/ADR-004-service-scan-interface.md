@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Implemented 2026-01-03)
+**Status:** Completed — 2026-01-03
 
 ## Related ADRs
 

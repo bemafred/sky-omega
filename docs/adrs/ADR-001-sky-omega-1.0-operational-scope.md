@@ -1,7 +1,8 @@
 # ADR-001 - Sky Omega 1.0.0 Operational Scope: CLI and MCP First
 
 ## Status
-Accepted (2026-01-31)
+
+**Status:** Accepted — 2026-01-31
 
 ## Implementation Summary
 

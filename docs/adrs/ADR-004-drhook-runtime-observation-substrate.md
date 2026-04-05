@@ -1,7 +1,8 @@
 # ADR-004 - DrHook: Runtime Observation Substrate for AI Coding Workflows
 
 ## Status
-Proposed (2026-03-22)
+
+**Status:** Proposed — 2026-03-22
 
 ## Context
 

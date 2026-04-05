@@ -1,5 +1,9 @@
 # ADR-011b Implementation Plan: QueryResults Stack Reduction
 
+## Status
+
+**Status:** Completed — 2026-01-26
+
 ## Executive Summary
 
 This plan details the implementation of ADR-011 to reduce `QueryResults` from ~22KB to ~2KB, eliminating the stack overflow issue affecting 335 tests.

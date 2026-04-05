@@ -1,8 +1,7 @@
 # ADR-001: LLM Pool Architecture
 
 **Component:** Sky (language interaction — pooled LLM dispatch)
-**Status:** Proposed
-**Date:** 2026-03-08
+**Status:** Proposed — 2026-03-08
 
 ## Summary
 

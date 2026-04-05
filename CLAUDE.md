@@ -115,7 +115,23 @@ ls docs/adrs/minerva/     # Minerva ADRs
 ls docs/adrs/drhook/      # DrHook ADRs
 ```
 
-**ADR workflow:** Plan in ADR → implement → check off success criteria → update status to "Accepted".
+### ADR Status Lifecycle (EEE-aligned)
+
+ADR statuses map directly to the EEE methodology. This is mandatory — every ADR must use exactly one of these statuses:
+
+| Status | EEE Phase | Meaning |
+|--------|-----------|---------|
+| **Proposed** | Emergence | Unknown unknowns surfaced, decision drafted. Not yet validated. |
+| **Accepted** | Epistemics | Decision validated, approach approved, ready for engineering. |
+| **Completed** | Engineering | Fully implemented, tests passing, integrated into codebase. |
+| **Superseded** | — | Replaced by a newer ADR (link to successor required). |
+| **Deferred** | — | Validated but implementation postponed (reason required). |
+
+**Status format:** `**Status:** Value — date` (e.g., `**Status:** Completed — 2026-03-10`)
+
+**Transitions:** Proposed → Accepted → Completed (normal path). Any status → Superseded or Deferred.
+
+**ADR workflow:** Draft ADR (Proposed) → validate approach (Accepted) → implement and verify (Completed). Update the ADR status **and** the corresponding index README when transitioning.
 
 See individual ADRs for current implementation status. Don't duplicate progress tracking in CLAUDE.md.
 

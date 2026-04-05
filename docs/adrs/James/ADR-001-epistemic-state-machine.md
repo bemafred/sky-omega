@@ -1,8 +1,7 @@
 # ADR-001: Epistemic State Machine and the Cognitive Loop
 
-**Component:** James (Bond/orchestration — supportive epistemic guidance)  
-**Status:** Proposed  
-**Date:** 2026-03-07  
+**Component:** James (Bond/orchestration — supportive epistemic guidance)
+**Status:** Proposed — 2026-03-07
 **Authors:** Martin Fredriksson, Claude (collaborative emergence)
 
 ## Summary

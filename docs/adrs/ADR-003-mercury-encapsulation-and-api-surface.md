@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-02-18) — All four phases complete
+**Status:** Completed — 2026-02-18. All four phases complete.
 
 ## Context
 

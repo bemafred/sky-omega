@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (January 2026) — 100% conformance achieved in v0.6.1
+**Status:** Completed — 2026-01. 100% conformance achieved in v0.6.1.
 
 ## Problem
 

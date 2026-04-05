@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 1 and 2 complete)
+**Status:** Completed. Phase 1 and 2 complete.
 
 ## Context
 

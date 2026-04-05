@@ -1,7 +1,8 @@
 # ADR-001: Minerva Weight and Tokenizer Format Support
 
 ## Status
-Proposed
+
+**Status:** Proposed
 
 ## Context
 Minerva is a zero-GC, .NET-native tensor inference substrate. To load pre-trained models, Minerva must parse industry-standard weight and tokenizer formats. We follow the same philosophy as Mercury: 100% spec compliance, memory-mapped where possible, zero external dependencies beyond BCL.

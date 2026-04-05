@@ -1,7 +1,8 @@
 # ADR-019: Global Tool Packaging and Persistent Stores
 
-**Status:** Accepted
-**Date:** 2026-02-07
+## Status
+
+**Status:** Completed — 2026-02-07
 
 ## Context
 

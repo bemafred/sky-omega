@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** (January 2026) — All 3 gaps resolved
+**Status:** Completed — 2026-01. All 3 gaps resolved.
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted (2026-02-02)**
+**Status:** Completed — 2026-02-02
 
 ## Implementation Notes
 

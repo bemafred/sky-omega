@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase 5 Partially Accepted** (2026-02-15) — Phases 1-4 implemented and merged. Phase 5: Solid and EEE tutorials implemented; Minerva deferred (skeleton stage, nothing executable to demonstrate).
+**Status:** Completed — 2026-02-15. Phases 1-4 implemented and merged. Phase 5: Solid and EEE tutorials implemented; Minerva deferred (skeleton stage, nothing executable to demonstrate).
 
 ## Context
 

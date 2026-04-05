@@ -1,8 +1,7 @@
 # ADR-001: Semantic Memory Architecture
 
 **Component:** Lucy (deep memory — structured semantic memory over Mercury)
-**Status:** Proposed
-**Date:** 2026-03-08
+**Status:** Proposed — 2026-03-08
 
 ## Summary
 

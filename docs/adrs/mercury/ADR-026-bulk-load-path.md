@@ -1,13 +1,16 @@
 # ADR-026 - Bulk Load Path
 
 ## Status
-Proposed (2026-03-30)
+
+**Status:** Superseded — 2026-04-05
+
+Superseded by: [ADR-027 Wikidata-Scale Ingestion Pipeline](ADR-027-wikidata-scale-streaming-pipeline.md)
 
 ## Context
 
 Mercury's write path is designed for cognitive use — ACID-compliant, fsync per write, durable thoughts that survive crashes. This is correct and non-negotiable for its primary role as semantic memory.
 
-But Mercury also needs to ingest large external datasets: Wikipedia (20B triples), DBpedia, FHIR ontologies, Schema.org. These are bulk loads from immutable sources. If the load fails, you delete the store and start over. Per-write fsync is pure waste here — on the M5 Max SSD, each fsync costs ~4.2ms, making single-write ingestion of 20B triples take ~970 days.
+But Mercury also needs to ingest large external datasets: Wikidata (~10B triples), DBpedia, FHIR ontologies, Schema.org. These are bulk loads from immutable sources. If the load fails, you delete the store and start over. Per-write fsync is pure waste here — on the M5 Max SSD, each fsync costs ~4.2ms, making single-write ingestion of 10B triples take ~485 days.
 
 ### Two Access Patterns
 
@@ -18,7 +21,7 @@ But Mercury also needs to ingest large external datasets: Wikipedia (20B triples
 
 ### Memory as the Governing Constraint
 
-For bulk loading at scale, the fsync interval is not a fixed number. It's governed by **memory capacity**. The B+Tree indexes, WAL, and atom store all accumulate dirty pages during ingestion. On a 128GB machine loading 20B triples:
+For bulk loading at scale, the fsync interval is not a fixed number. It's governed by **memory capacity**. The B+Tree indexes, WAL, and atom store all accumulate dirty pages during ingestion. On a 128GB machine loading 10B triples:
 
 - The atom store grows as new IRIs/literals are interned
 - B+Tree pages split and accumulate in memory-mapped regions
@@ -145,5 +148,5 @@ This is explicit and documented. The caller opts into bulk load mode knowing the
 
 ## References
 - fsync micro-benchmark (2026-03-30): M5 Max fsync latency ~4.2ms, constant regardless of write size
-- [Wikidata dump](https://www.wikidata.org/wiki/Wikidata:Database_download): ~20B triples, ~35GB compressed N-Triples
+- [Wikidata dump](https://www.wikidata.org/wiki/Wikidata:Database_download): ~10B triples, 114 GB bzip2-compressed Turtle, 912 GB uncompressed
 - PostgreSQL group commit: prior art for batched fsync in databases

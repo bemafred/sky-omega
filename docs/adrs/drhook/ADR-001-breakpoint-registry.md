@@ -1,7 +1,8 @@
 # ADR-001 - Breakpoint Registry
 
 ## Status
-Accepted (2026-03-30) — implemented in all four phases
+
+**Status:** Completed — 2026-03-30. Implemented in all four phases.
 
 ## Context
 

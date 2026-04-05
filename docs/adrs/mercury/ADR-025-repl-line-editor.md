@@ -1,7 +1,8 @@
 # ADR-025 - REPL Line Editor
 
 ## Status
-Accepted (2026-03-30) — implemented, all tests passing
+
+**Status:** Completed — 2026-03-30. Implemented, all tests passing.
 
 ## Context
 

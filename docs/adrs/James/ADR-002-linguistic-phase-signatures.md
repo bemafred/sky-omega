@@ -1,8 +1,7 @@
 # ADR-002: Linguistic Phase Signatures and Epistemic Lubricants
 
-**Component:** James (Bond/orchestration — supportive epistemic guidance)  
-**Status:** Proposed  
-**Date:** 2026-03-17  
+**Component:** James (Bond/orchestration — supportive epistemic guidance)
+**Status:** Proposed — 2026-03-17
 **Authors:** Martin Fredriksson, Claude (collaborative emergence)
 
 ## Summary

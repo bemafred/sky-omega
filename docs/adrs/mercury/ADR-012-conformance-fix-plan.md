@@ -1,6 +1,6 @@
 # ADR-012: W3C SPARQL Conformance Fix Plan
 
-**Status:** Accepted
+**Status:** Completed — 2026-01-26
 **Created:** 2026-01-19
 **Updated:** 2026-01-26
 **Baseline:** 1904 W3C tests total, 1791 passing (94%), 97 failing, 16 skipped

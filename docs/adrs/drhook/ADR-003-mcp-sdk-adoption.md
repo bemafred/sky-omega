@@ -1,7 +1,8 @@
 # ADR-003 - MCP SDK Adoption
 
 ## Status
-Accepted (2026-03-23) — retroactive
+
+**Status:** Completed — 2026-03-23. Retroactive — already implemented before ADR was written.
 
 ## Context
 
