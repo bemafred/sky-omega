@@ -1,9 +1,12 @@
 // Verification target for DrHook integration tests.
 // Built once by VerifyTargetFixture, run via dotnet exec per test.
 
+using System.Diagnostics;
+
 Console.WriteLine($"PID: {Environment.ProcessId}");
 
 DoWork();
+ConditionalStop();
 ThrowAndCatch();
 ObjectInspection();
 
@@ -18,6 +21,23 @@ static void DoWork()
         Console.WriteLine($"  i={i}, sum={sum}");
     }
     Console.WriteLine($"Final sum: {sum}");
+}
+
+static void ConditionalStop()
+{
+    // Pattern 1: Unconditional breakpoint inside code-level if — no func-eval
+    for (var i = 1; i <= 5; i++)
+    {
+        if (i == 3)
+            Console.WriteLine($"  conditional stop at i={i}"); // ← breakpoint target
+    }
+
+    // Pattern 2: Debugger.Break() — target breaks itself, no breakpoint needed
+    for (var j = 1; j <= 5; j++)
+    {
+        if (j == 4)
+            Debugger.Break(); // ← triggers stopped event in DAP
+    }
 }
 
 static void ThrowAndCatch()

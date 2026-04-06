@@ -249,7 +249,63 @@ public class SteppingIntegrationTests : IAsyncLifetime
         Assert.Equal(0, list["totalCount"]!.GetValue<int>());
     }
 
-    // ConditionalBreakpoint test removed — netcoredbg evaluates breakpoint conditions
-    // using the same func-eval machinery that hangs on macOS/ARM64. Conditional breakpoints
-    // are blocked until DrHook.Engine replaces netcoredbg.
+    // ─── Group 5: Conditional stopping (no func-eval) ──────────────────
+
+    [Fact]
+    public async Task ConditionalStop_BreakpointInsideIf()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Breakpoint inside if (i == 3) body — condition is in the target code, not netcoredbg
+        var line = FindLine("conditional stop at i=");
+        var resultJson = await _session.RunAsync(
+            "dotnet", ["exec", VerifyTargetDll],
+            cwd: null,
+            "Program.cs", line,
+            "Should stop only when i == 3",
+            env: null, cts.Token);
+
+        var result = Parse(resultJson);
+        Assert.Null(result["error"]);
+        Assert.Equal("launched", result["status"]!.GetValue<string>());
+
+        var state = result["currentState"]!.AsObject();
+        Assert.Contains("ConditionalStop", state["functionName"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ConditionalStop_DebuggerBreak()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        // Set breakpoint on DoWork to get past it, then continue to Debugger.Break()
+        var sumLine = FindLine("sum += i;");
+        var resultJson = await _session.RunAsync(
+            "dotnet", ["exec", VerifyTargetDll],
+            cwd: null,
+            "Program.cs", sumLine,
+            "Launch at DoWork, then continue past to hit Debugger.Break()",
+            env: null, cts.Token);
+
+        var result = Parse(resultJson);
+        Assert.Null(result["error"]);
+
+        // Clear breakpoints and continue — Debugger.Break() should stop us
+        await _session.ClearBreakpointsAsync(null, cts.Token);
+        var contJson = await _session.ContinueAsync(null, waitForBreakpoint: true, cts.Token);
+        var cont = Parse(contJson);
+        Assert.Null(cont["error"]);
+
+        // Verify we stopped inside ConditionalStop at the Debugger.Break() line
+        var state = cont["currentState"]!.AsObject();
+        Assert.Contains("ConditionalStop", state["functionName"]!.GetValue<string>());
+
+        // Verify j == 4 via vars
+        var varsJson = await _session.InspectVariablesAsync(1, cts.Token);
+        var vars = Parse(varsJson);
+        var variables = vars["variables"]!.AsArray();
+        var jVar = variables.FirstOrDefault(v => v?["name"]?.GetValue<string>() == "j");
+        Assert.NotNull(jVar);
+        Assert.Equal("4", jVar["value"]!.GetValue<string>());
+    }
 }
