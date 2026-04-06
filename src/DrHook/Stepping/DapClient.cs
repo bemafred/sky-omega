@@ -25,6 +25,12 @@ public sealed class DapClient : IAsyncDisposable
 
     public bool IsConnected => _debugger is not null && !_debugger.HasExited;
 
+    /// <summary>
+    /// Target process ID captured from the DAP "process" event.
+    /// Available after the launch/attach sequence completes.
+    /// </summary>
+    public int? TargetProcessId { get; private set; }
+
     public async Task LaunchAsync(string netcoredbgPath, CancellationToken ct)
     {
         _debugger = new Process
@@ -361,6 +367,16 @@ public sealed class DapClient : IAsyncDisposable
             if (type == "event" && message["event"]?.GetValue<string>() == "stopped")
             {
                 _stoppedEvents.Enqueue(message["body"] as JsonObject ?? new JsonObject());
+                continue;
+            }
+
+            // Capture target PID from DAP process event
+            if (type == "event" && message["event"]?.GetValue<string>() == "process")
+            {
+                var body = message["body"] as JsonObject;
+                var sysPid = body?["systemProcessId"]?.GetValue<int>();
+                if (sysPid is not null and > 0)
+                    TargetProcessId = sysPid.Value;
                 continue;
             }
 

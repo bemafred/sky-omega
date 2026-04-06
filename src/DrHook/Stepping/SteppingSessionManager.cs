@@ -26,6 +26,7 @@ public sealed class SteppingSessionManager
     private string? _targetVersion;
     private int _stepCount;
     private bool _ownsProcess;
+    private string? _stoppedReason;
 
     // Process metrics — OS-level via syscall, managed-level via eval (with timeout)
     private int _targetPid;
@@ -97,16 +98,20 @@ public sealed class SteppingSessionManager
             // Get current state
             var (state, _) = await GetCurrentStateAsync(ct);
 
-            return JsonSerializer.Serialize(new JsonObject
+            var result = new JsonObject
             {
                 ["status"] = "attached",
                 ["pid"] = pid,
                 ["assemblyVersion"] = _targetVersion,
                 ["breakpoint"] = new JsonObject { ["file"] = sourceFile, ["line"] = line },
                 ["hypothesis"] = hypothesis,
+                ["stoppedReason"] = _stoppedReason,
                 ["currentState"] = state,
-                ["instruction"] = "Use drhook:step-next (over), drhook:step-into (in), drhook:step-out (out) to navigate. Use drhook:step-continue to run to next breakpoint. Use drhook:step-vars for variable details."
-            }, new JsonSerializerOptions { WriteIndented = true });
+                ["metrics"] = await CaptureMetricsAsync(ct),
+                ["prompt"] = $"Attached and stopped at breakpoint. Compare state with hypothesis: \"{hypothesis}\""
+            };
+
+            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
         {
@@ -148,18 +153,36 @@ public sealed class SteppingSessionManager
             await _client.ContinueAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
+            // Resolve target PID and version from the launched process
+            if (_client.TargetProcessId is > 0)
+                _targetPid = _client.TargetProcessId.Value;
+            if (_targetPid > 0)
+            {
+                try
+                {
+                    var proc = Process.GetProcessById(_targetPid);
+                    _targetVersion = proc.MainModule?.FileVersionInfo.FileVersion ?? "launched";
+                }
+                catch { _targetVersion = "launched"; }
+            }
+
             var (state, _) = await GetCurrentStateAsync(ct);
 
-            return JsonSerializer.Serialize(new JsonObject
+            var result = new JsonObject
             {
                 ["status"] = "launched",
                 ["program"] = program,
                 ["args"] = new JsonArray(args.Select(a => (JsonNode)JsonValue.Create(a)!).ToArray()),
+                ["assemblyVersion"] = _targetVersion,
                 ["breakpoint"] = new JsonObject { ["file"] = sourceFile, ["line"] = line },
                 ["hypothesis"] = hypothesis,
+                ["stoppedReason"] = _stoppedReason,
                 ["currentState"] = state,
-                ["instruction"] = "Process launched and stopped at breakpoint. Use drhook:step-next, drhook:step-into, drhook:step-vars to inspect."
-            }, new JsonSerializerOptions { WriteIndented = true });
+                ["metrics"] = await CaptureMetricsAsync(ct),
+                ["prompt"] = $"Launched and stopped at breakpoint. Compare state with hypothesis: \"{hypothesis}\""
+            };
+
+            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
         {
@@ -258,17 +281,30 @@ public sealed class SteppingSessionManager
 
             var (state, _) = await GetCurrentStateAsync(ct);
 
-            return JsonSerializer.Serialize(new JsonObject
+            // Resolve actual assembly version
+            try
+            {
+                var proc = Process.GetProcessById(testhostPid);
+                _targetVersion = proc.MainModule?.FileVersionInfo.FileVersion ?? "testhost";
+            }
+            catch { _targetVersion = "testhost"; }
+
+            var result = new JsonObject
             {
                 ["status"] = "attached-to-testhost",
                 ["testhostPid"] = testhostPid,
                 ["project"] = project,
                 ["filter"] = filter,
+                ["assemblyVersion"] = _targetVersion,
                 ["breakpoint"] = new JsonObject { ["file"] = sourceFile, ["line"] = line },
                 ["hypothesis"] = hypothesis,
+                ["stoppedReason"] = _stoppedReason,
                 ["currentState"] = state,
-                ["instruction"] = "Attached to testhost and stopped at breakpoint. Use drhook:step-next, drhook:step-into, drhook:step-vars to inspect."
-            }, new JsonSerializerOptions { WriteIndented = true });
+                ["metrics"] = await CaptureMetricsAsync(ct),
+                ["prompt"] = $"Attached to testhost and stopped at breakpoint. Compare state with hypothesis: \"{hypothesis}\""
+            };
+
+            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
         {
@@ -295,6 +331,7 @@ public sealed class SteppingSessionManager
                 ["operation"] = "next",
                 ["step"] = _stepCount,
                 ["assemblyVersion"] = _targetVersion,
+                ["stoppedReason"] = _stoppedReason,
                 ["currentState"] = state,
             };
 
@@ -333,6 +370,7 @@ public sealed class SteppingSessionManager
                 ["operation"] = "stepIn",
                 ["step"] = _stepCount,
                 ["assemblyVersion"] = _targetVersion,
+                ["stoppedReason"] = _stoppedReason,
                 ["currentState"] = state,
             };
 
@@ -370,6 +408,7 @@ public sealed class SteppingSessionManager
             {
                 ["operation"] = "stepOut",
                 ["step"] = _stepCount,
+                ["stoppedReason"] = _stoppedReason,
                 ["assemblyVersion"] = _targetVersion,
                 ["currentState"] = state,
             };
@@ -412,6 +451,7 @@ public sealed class SteppingSessionManager
                     ["operation"] = "continue",
                     ["step"] = _stepCount,
                     ["assemblyVersion"] = _targetVersion,
+                    ["stoppedReason"] = _stoppedReason,
                     ["currentState"] = state,
                 };
 
@@ -451,7 +491,7 @@ public sealed class SteppingSessionManager
         }
     }
 
-    public async Task<string> PauseAsync(CancellationToken ct)
+    public async Task<string> PauseAsync(string? hypothesis, CancellationToken ct)
     {
         if (!IsActive || _client is null)
             return Error("No active stepping session. Use drhook:step-launch first.");
@@ -468,12 +508,18 @@ public sealed class SteppingSessionManager
                 ["operation"] = "pause",
                 ["step"] = _stepCount,
                 ["assemblyVersion"] = _targetVersion,
+                ["stoppedReason"] = _stoppedReason,
                 ["currentState"] = state,
             };
 
+            if (hypothesis is not null)
+                result["hypothesis"] = hypothesis;
+
             result["metrics"] = await CaptureMetricsAsync(ct);
 
-            result["prompt"] = "Process paused. Inspect current location and variables to understand where execution was interrupted.";
+            result["prompt"] = hypothesis is not null
+                ? $"Process paused. Compare state with hypothesis: \"{hypothesis}\""
+                : "Process paused. Describe what you observe at the interrupted location.";
 
             return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
@@ -733,7 +779,7 @@ public sealed class SteppingSessionManager
         }
     }
 
-    public async Task<string> InspectVariablesAsync(int depth, CancellationToken ct)
+    public async Task<string> InspectVariablesAsync(int depth, string? hypothesis, CancellationToken ct)
     {
         if (!IsActive || _client is null)
             return Error("No active stepping session. Use drhook:step-launch first.");
@@ -789,12 +835,23 @@ public sealed class SteppingSessionManager
                 }
             }
 
-            return JsonSerializer.Serialize(new JsonObject
+            var result = new JsonObject
             {
                 ["step"] = _stepCount,
+                ["assemblyVersion"] = _targetVersion,
                 ["variableCount"] = allVars.Count,
-                ["variables"] = allVars
-            }, new JsonSerializerOptions { WriteIndented = true });
+                ["variables"] = allVars,
+                ["metrics"] = await CaptureMetricsAsync(ct),
+            };
+
+            if (hypothesis is not null)
+                result["hypothesis"] = hypothesis;
+
+            result["prompt"] = hypothesis is not null
+                ? $"Step {_stepCount} variables inspected. Compare values with hypothesis: \"{hypothesis}\""
+                : $"Step {_stepCount} variables inspected. Describe what you observe — do values match expectations?";
+
+            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
         }
         catch (Exception ex)
         {
@@ -872,28 +929,13 @@ public sealed class SteppingSessionManager
             result["privateBytesMB"] = Math.Round(privateBytesMB, 1);
             result["threadCount"] = threadCount;
 
-            // Managed layer — EventPipe System.Runtime counters (no eval, no DAP)
+            // Managed layer — skipped during stepping.
+            // EventPipe requires the runtime to be running; StartEventPipeSession
+            // blocks indefinitely when the target is suspended by the debugger.
+            // OS-level metrics (above) work on paused processes. EventPipe counters
+            // belong in drhook_snapshot, which runs against live processes.
             long? managedHeap = null;
             int? gen0 = null, gen1 = null, gen2 = null;
-
-            try
-            {
-                var counters = await CaptureRuntimeCountersAsync(_targetPid, ct);
-                managedHeap = counters.GcHeapBytes;
-                gen0 = counters.GcGen0;
-                gen1 = counters.GcGen1;
-                gen2 = counters.GcGen2;
-            }
-            catch
-            {
-                // EventPipe may not be available (process exiting, permissions) — degrade gracefully
-            }
-
-            if (managedHeap is not null)
-                result["managedHeapMB"] = Math.Round(managedHeap.Value / (1024.0 * 1024.0), 1);
-            if (gen0 is not null) result["gcGen0"] = gen0.Value;
-            if (gen1 is not null) result["gcGen1"] = gen1.Value;
-            if (gen2 is not null) result["gcGen2"] = gen2.Value;
 
             var current = new ProcessMetrics(workingSetMB, privateBytesMB, threadCount,
                 managedHeap, gen0, gen1, gen2);
@@ -903,12 +945,27 @@ public sealed class SteppingSessionManager
             {
                 result["deltaWorkingSetMB"] = Math.Round(
                     workingSetMB - _previousMetrics.WorkingSetMB, 1);
-                if (managedHeap is not null && _previousMetrics.ManagedHeapBytes is not null)
-                    result["deltaManagedHeapMB"] = Math.Round(
-                        (managedHeap.Value - _previousMetrics.ManagedHeapBytes.Value) / (1024.0 * 1024.0), 1);
-                if (gen2 is not null && _previousMetrics.GcGen2 is not null)
-                    result["deltaGcGen2"] = gen2.Value - _previousMetrics.GcGen2.Value;
+                result["deltaThreadCount"] = threadCount - _previousMetrics.ThreadCount;
             }
+
+            // ─── Anomaly detection (mirrors snapshot pattern) ──────────────
+            var anomalies = new List<string>();
+
+            if (_previousMetrics is not null)
+            {
+                var deltaWS = workingSetMB - _previousMetrics.WorkingSetMB;
+                if (deltaWS > 50)
+                    anomalies.Add(string.Format(CultureInfo.InvariantCulture,
+                        "MEMORY_SPIKE: Working set grew {0:F1}MB in one step — possible large allocation or leak", deltaWS));
+
+                var deltaThreads = threadCount - _previousMetrics.ThreadCount;
+                if (deltaThreads > 5)
+                    anomalies.Add(string.Format(CultureInfo.InvariantCulture,
+                        "THREAD_EXPLOSION: {0} new threads since last step — possible unbounded parallelism", deltaThreads));
+            }
+
+            if (anomalies.Count > 0)
+                result["anomalies"] = new JsonArray(anomalies.Select(a => (JsonNode)JsonValue.Create(a)!).ToArray());
 
             _previousMetrics = current;
         }
@@ -925,57 +982,62 @@ public sealed class SteppingSessionManager
 
     private static async Task<RuntimeCounters> CaptureRuntimeCountersAsync(int pid, CancellationToken ct)
     {
-        long? heapBytes = null;
-        int? gen0 = null, gen1 = null, gen2 = null;
-
-        var client = new DiagnosticsClient(pid);
-        var providers = new[]
+        // Run entirely on a background thread — StartEventPipeSession is synchronous
+        // and blocks indefinitely when the target process is suspended by the debugger.
+        return await Task.Run(() =>
         {
-            new EventPipeProvider(
-                "System.Runtime",
-                System.Diagnostics.Tracing.EventLevel.Informational,
-                (long)ClrTraceEventParser.Keywords.None,
-                new Dictionary<string, string> { ["EventCounterIntervalSec"] = "0" })
-        };
+            long? heapBytes = null;
+            int? gen0 = null, gen1 = null, gen2 = null;
 
-        using var session = client.StartEventPipeSession(providers, requestRundown: false);
-        using var source = new EventPipeEventSource(session.EventStream);
-
-        source.Dynamic.All += e =>
-        {
-            if (e.EventName != "EventCounters") return;
-            var payload = e.PayloadByName("Payload") as IDictionary<string, object>;
-            if (payload is null) return;
-
-            var name = payload.TryGetValue("Name", out var n) ? n as string : null;
-            var value = payload.TryGetValue("Mean", out var m) ? m
-                      : payload.TryGetValue("Increment", out var i) ? i : null;
-
-            switch (name)
+            var client = new DiagnosticsClient(pid);
+            var providers = new[]
             {
-                case "gc-heap-size":
-                    if (value is double d) heapBytes = (long)(d * 1024 * 1024); // reported in MB
-                    break;
-                case "gen-0-gc-count":
-                    if (value is double g0) gen0 = (int)g0;
-                    break;
-                case "gen-1-gc-count":
-                    if (value is double g1) gen1 = (int)g1;
-                    break;
-                case "gen-2-gc-count":
-                    if (value is double g2) gen2 = (int)g2;
-                    break;
-            }
-        };
+                new EventPipeProvider(
+                    "System.Runtime",
+                    System.Diagnostics.Tracing.EventLevel.Informational,
+                    (long)ClrTraceEventParser.Keywords.None,
+                    new Dictionary<string, string> { ["EventCounterIntervalSec"] = "0" })
+            };
 
-        // Process events briefly — counters are emitted on session start
-        using var timeout = new CancellationTokenSource(1000);
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-        try { await Task.Run(() => source.Process(), linked.Token); }
-        catch (OperationCanceledException) { }
+            using var session = client.StartEventPipeSession(providers, requestRundown: false);
+            using var source = new EventPipeEventSource(session.EventStream);
 
-        await session.StopAsync(ct);
-        return new RuntimeCounters(heapBytes, gen0, gen1, gen2);
+            source.Dynamic.All += e =>
+            {
+                if (e.EventName != "EventCounters") return;
+                var payload = e.PayloadByName("Payload") as IDictionary<string, object>;
+                if (payload is null) return;
+
+                var name = payload.TryGetValue("Name", out var n) ? n as string : null;
+                var value = payload.TryGetValue("Mean", out var m) ? m
+                          : payload.TryGetValue("Increment", out var i) ? i : null;
+
+                switch (name)
+                {
+                    case "gc-heap-size":
+                        if (value is double d) heapBytes = (long)(d * 1024 * 1024); // reported in MB
+                        break;
+                    case "gen-0-gc-count":
+                        if (value is double g0) gen0 = (int)g0;
+                        break;
+                    case "gen-1-gc-count":
+                        if (value is double g1) gen1 = (int)g1;
+                        break;
+                    case "gen-2-gc-count":
+                        if (value is double g2) gen2 = (int)g2;
+                        break;
+                }
+            };
+
+            // Process events briefly — counters are emitted on session start
+            using var timeout = new CancellationTokenSource(1000);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            try { source.Process(); }
+            catch (Exception) when (linked.IsCancellationRequested) { }
+
+            try { session.Stop(); } catch { }
+            return new RuntimeCounters(heapBytes, gen0, gen1, gen2);
+        }, ct);
     }
 
     private async Task<JsonArray> ExpandVariableAsync(int variablesReference, int remainingDepth, HashSet<int> visited, CancellationToken ct)
@@ -1056,6 +1118,7 @@ public sealed class SteppingSessionManager
         var threadId = stoppedEvent["threadId"]?.GetValue<int>();
         if (threadId is not null and > 0)
             _activeThreadId = threadId.Value;
+        _stoppedReason = stoppedEvent["reason"]?.GetValue<string>();
     }
 
     private static bool IsNoiseVariable(JsonNode? v)
@@ -1098,6 +1161,7 @@ public sealed class SteppingSessionManager
         _stepCount = 0;
         _ownsProcess = false;
         _targetPid = 0;
+        _stoppedReason = null;
         _previousMetrics = null;
         _sourceBreakpoints.Clear();
         _functionBreakpoints.Clear();

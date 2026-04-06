@@ -156,10 +156,12 @@ public sealed class DrHookTools
     [McpServerTool(Name = "drhook_step_pause"), Description(
         "Pause a running process immediately. Use after drhook_step_continue when " +
         "you need to interrupt execution — e.g. to inspect a tight loop or when " +
-        "no breakpoint was hit. Returns the current source location.")]
-    public async Task<string> StepPause(CancellationToken ct = default)
+        "no breakpoint was hit. Returns the current source location and metrics.")]
+    public async Task<string> StepPause(
+        [Description("What you expect to find when execution is interrupted (optional but valuable)")] string? hypothesis = null,
+        CancellationToken ct = default)
     {
-        return await _session.PauseAsync(ct);
+        return await _session.PauseAsync(hypothesis, ct);
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint"), Description(
@@ -235,12 +237,15 @@ public sealed class DrHookTools
         return await _session.ClearBreakpointsAsync(category, ct);
     }
 
-    [McpServerTool(Name = "drhook_step_vars"), Description("Inspect local variables at the current stepping position.")]
+    [McpServerTool(Name = "drhook_step_vars"), Description(
+        "Inspect local variables at the current stepping position. " +
+        "Returns variable names, values, types, and process metrics.")]
     public async Task<string> StepVars(
+        [Description("What you expect the variables to show (optional but valuable)")] string? hypothesis = null,
         [Description("Object inspection depth (default 1)")] int depth = 1,
         CancellationToken ct = default)
     {
-        return await _session.InspectVariablesAsync(depth, ct);
+        return await _session.InspectVariablesAsync(depth, hypothesis, ct);
     }
 
     [McpServerTool(Name = "drhook_step_stop"), Description("End the active stepping session and detach from the process.")]
