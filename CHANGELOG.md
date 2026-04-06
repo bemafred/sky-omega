@@ -11,6 +11,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.2] - 2026-04-06
+
+DrHook validation — diagnosed netcoredbg func-eval deadlock, removed broken tools, added integration tests and process metrics.
+
+### Removed
+- **`drhook_step_eval`** — netcoredbg's DAP evaluate request hangs indefinitely on macOS/ARM64. The func-eval machinery deadlocks; its internal 15s command timeout never fires. Diagnosed via file-based tracing in `DapClient.SendRequestAsync`. The DAP `context` parameter is irrelevant — netcoredbg ignores it.
+- **Watch mode** (`drhook_step_watch_add/remove/list`) — depends on evaluate.
+
+### Added
+- **Process metrics in every step response** — OS-level (WorkingSet, PrivateBytes, ThreadCount) via `Process.GetProcessById` syscalls; managed-level (GC heap size, collection counts) via EventPipe `System.Runtime` counters. Deltas from previous capture included. No DAP eval needed.
+- **11 integration tests** — exercise session lifecycle, stepping, variable inspection, breakpoint management, and conditional stopping against a live DAP session with pre-built VerifyTarget.
+- **Conditional stopping patterns** — netcoredbg conditional breakpoints hang (same func-eval path). Two workarounds validated: (1) unconditional breakpoint inside code-level `if`; (2) `Debugger.Break()`.
+- **VerifyTarget project** — pre-built .NET console app for integration tests (`tests/DrHook.Tests/Stepping/VerifyTarget/`).
+
+### Fixed
+- **`_sourceBreakpoints.Clear()` missing from `CleanupAsync`** — breakpoint registry was not fully reset between sessions.
+
+### Changed
+- **DEBUGGING.md** — documents known limitations, conditional stopping workarounds, launch requirements.
+- **ADR-005** — status changed to Superseded. ADR-002 amended with eval hang findings.
+
+## [1.7.1] - 2026-04-05
+
+### Fixed
+- **Turtle parser BCP-47 language tags** — tags containing digits (e.g., `@be-tarask`) were rejected. Fixed character class in `LANGTAG` production to include digits per RFC 5646.
+
 ## [1.7.0] - 2026-04-05
 
 Wikidata-scale ingestion pipeline — Mercury can now load the full Wikidata dump (16.6B triples, 912 GB Turtle) on a single machine.
