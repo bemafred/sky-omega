@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.3] - 2026-04-06
+
+### Removed
+- **Conditional breakpoint parameters** from `drhook_step_breakpoint` and `drhook_step_break_function` MCP tools — netcoredbg conditional breakpoints use the same func-eval path that deadlocks on macOS/ARM64. Underlying DAP plumbing preserved for future re-enablement.
+
 ## [1.7.2] - 2026-04-06
 
 DrHook validation — diagnosed netcoredbg func-eval deadlock, removed broken tools, added integration tests and process metrics.
