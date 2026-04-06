@@ -29,9 +29,9 @@ DrHook is Sky Omega's runtime observation substrate. Use it when you need to und
 
 | Tool | Purpose |
 |------|---------|
-| `drhook_step_run` | Launch a .NET executable under debugger with `stopAtEntry` |
+| `drhook_step_run` | Launch a .NET executable under debugger control |
 | `drhook_step_test` | Launch a specific test method under debugger |
-| `drhook_step_breakpoint` | Set a source breakpoint (file:line) |
+| `drhook_step_breakpoint` | Set a source breakpoint (file:line), optionally conditional |
 | `drhook_step_break_function` | Set a function breakpoint (method name) |
 | `drhook_step_break_exception` | Break on exception type |
 | `drhook_step_continue` | Continue execution until next breakpoint |
@@ -39,7 +39,6 @@ DrHook is Sky Omega's runtime observation substrate. Use it when you need to und
 | `drhook_step_into` | Step into method call |
 | `drhook_step_out` | Step out of current method |
 | `drhook_step_vars` | Inspect variables in current scope |
-| `drhook_step_eval` | Evaluate a C# expression in current context |
 | `drhook_step_pause` | Pause execution |
 | `drhook_step_stop` | Stop debugging session |
 | `drhook_step_breakpoint_list` | List all breakpoints |
@@ -48,13 +47,63 @@ DrHook is Sky Omega's runtime observation substrate. Use it when you need to und
 | `drhook_processes` | List .NET processes |
 | `drhook_snapshot` | Capture thread/stack snapshot of running process |
 
+Every step, continue, and pause response includes **process metrics** — working set, private bytes, thread count, GC heap size, and collection counts with deltas from the previous capture. No extra tool call needed.
+
+## Known Limitations (netcoredbg on macOS/ARM64)
+
+**`drhook_step_eval` removed.** netcoredbg's DAP `evaluate` request hangs indefinitely — the func-eval machinery deadlocks. `drhook_step_vars` (which uses the scopes/variables DAP path, not evaluate) works reliably and is the inspection surface.
+
+**Conditional breakpoints hang.** netcoredbg evaluates breakpoint conditions using the same func-eval path. Do not pass a `condition` parameter to `drhook_step_breakpoint`.
+
+### Conditional Stopping Workarounds
+
+Two patterns achieve conditional stopping without func-eval:
+
+**Pattern 1 — Breakpoint inside an `if`:**
+The condition lives in the target code. Set an unconditional breakpoint on a line inside the `if` body.
+
+```csharp
+for (var i = 0; i < count; i++)
+{
+    if (i == targetValue)
+        Console.WriteLine("hit");  // ← set breakpoint here
+}
+```
+
+**Pattern 2 — `Debugger.Break()`:**
+The target breaks itself. No breakpoint needed.
+
+```csharp
+using System.Diagnostics;
+
+for (var i = 0; i < count; i++)
+{
+    if (i == targetValue)
+        Debugger.Break();  // ← triggers stopped event in DAP
+}
+```
+
+Both patterns are validated by integration tests. Use `drhook_step_vars` after stopping to inspect state.
+
+## Launch Requirements
+
+**Always pre-build targets.** `dotnet run --file` compiles before executing — the compilation delay causes the MCP call to hang while waiting for the breakpoint hit.
+
+```bash
+# Build first
+dotnet build path/to/Project.csproj -c Debug
+
+# Then launch with dotnet exec
+drhook_step_run: program=dotnet, args=["exec", "path/to/bin/Debug/net10.0/Project.dll"]
+```
+
 ## Workflow Example: Parser Buffer Bug
 
 ```
 # 1. Write minimal repro as file-based app
 tools/repro-parser-bug.cs
 
-# 2. Build it
+# 2. Build it to a DLL (do NOT use dotnet run --file)
 dotnet build tools/repro-parser-bug.cs
 
 # 3. Launch under DrHook
