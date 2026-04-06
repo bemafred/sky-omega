@@ -163,28 +163,26 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint"), Description(
-        "Add a source breakpoint at a specific file and line. Optionally conditional. " +
+        "Add a source breakpoint at a specific file and line. " +
         "Multiple breakpoints per file are supported — each call adds to the set. " +
         "Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakpoint(
         [Description("Absolute path to the source file")] string sourceFile,
         [Description("Line number for the breakpoint")] int line,
-        [Description("Optional condition expression (e.g. 'counter > 1000')")] string? condition = null,
         CancellationToken ct = default)
     {
-        return await _session.SetBreakpointAsync(sourceFile, line, condition, ct);
+        return await _session.SetBreakpointAsync(sourceFile, line, null, ct);
     }
 
     [McpServerTool(Name = "drhook_step_break_function"), Description(
         "Add a function breakpoint by method name. Stops at method entry. " +
-        "Optionally conditional. Multiple function breakpoints are supported — " +
-        "each call adds to the set. Use drhook_step_continue to run to the breakpoint.")]
+        "Multiple function breakpoints are supported — each call adds to the set. " +
+        "Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakFunction(
         [Description("Fully qualified or simple method name (e.g. 'Fibonacci' or 'MyNamespace.MyClass.Fibonacci')")] string functionName,
-        [Description("Optional condition expression")] string? condition = null,
         CancellationToken ct = default)
     {
-        return await _session.SetFunctionBreakpointAsync(functionName, condition, ct);
+        return await _session.SetFunctionBreakpointAsync(functionName, null, ct);
     }
 
     [McpServerTool(Name = "drhook_step_break_exception"), Description(
@@ -221,7 +219,7 @@ public sealed class DrHookTools
 
     [McpServerTool(Name = "drhook_step_breakpoint_list"), Description(
         "List all active breakpoints — source, function, and exception. " +
-        "Shows file, line, condition, and function name for each.")]
+        "Shows file, line, and function name for each.")]
     public string StepBreakpointList()
     {
         return _session.ListBreakpoints();
