@@ -245,18 +245,6 @@ public sealed class DrHookTools
         return await _session.InspectVariablesAsync(depth, ct);
     }
 
-    [McpServerTool(Name = "drhook_step_eval"), Description(
-        "Evaluate a C# expression in the context of the current stack frame. " +
-        "Supports property access, indexing, method calls, arithmetic, and boolean logic. " +
-        "More targeted than drhook_step_vars — use this when you know what you're looking for.")]
-    public async Task<string> StepEval(
-        [Description("C# expression to evaluate (e.g. 'myList.Count', 'x > 5', 'obj.ToString()')")] string expression,
-        [Description("Expansion depth for complex results (default 1)")] int depth = 1,
-        CancellationToken ct = default)
-    {
-        return await _session.EvaluateExpressionAsync(expression, depth, ct);
-    }
-
     [McpServerTool(Name = "drhook_step_stop"), Description("End the active stepping session and detach from the process.")]
     public async Task<string> StepStop(CancellationToken ct = default)
     {

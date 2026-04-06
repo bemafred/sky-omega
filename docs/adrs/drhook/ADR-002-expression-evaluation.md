@@ -192,6 +192,14 @@ Expression evaluation can fail for many reasons (syntax error, null reference, t
      methods may not. We could include a "known to work" / "may fail" table in the
      tool description or in documentation. -->
 
+## Amendment — 2026-04-06
+
+**Expression evaluation is blocked by a netcoredbg hang.** On macOS/ARM64, the DAP `evaluate` request hangs indefinitely — netcoredbg never responds. Diagnosed via file-based tracing in `DapClient.SendRequestAsync` (2026-04-06). The `context` parameter (`"watch"` vs `"repl"`) is irrelevant: netcoredbg ignores it entirely (`vscodeprotocol.cpp:718`). The hang is in netcoredbg's CLR func-eval machinery — its internal 15s command timeout and 5s eval timeout never fire.
+
+The `drhook_step_eval` MCP tool and `EvaluateExpressionAsync` method have been removed. Variable inspection via `drhook_step_vars` (which uses the scopes/variables DAP path, not evaluate) works reliably and is the supported inspection surface.
+
+Long-term fix: DrHook.Engine — a native .NET debugger engine replacing netcoredbg, owned by Sky Omega. See [ADR-005](ADR-005-inspection-surface.md) (Superseded).
+
 ## References
 - [DAP Specification — evaluate](https://microsoft.github.io/debug-adapter-protocol/specification#Requests_Evaluate)
 - [netcoredbg expression evaluation](https://github.com/Samsung/netcoredbg/wiki/Evaluate)

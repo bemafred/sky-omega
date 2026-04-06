@@ -15,6 +15,11 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
   </ItemGroup>
 
+  <!-- Exclude VerifyTarget — it's a standalone project used as a debug target, not part of tests -->
+  <ItemGroup>
+    <Compile Remove="Stepping/VerifyTarget/**" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\DrHook\DrHook.csproj" />
   </ItemGroup>

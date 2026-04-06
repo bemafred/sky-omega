@@ -1,7 +1,5 @@
-#!/usr/bin/env -S dotnet
-
-// Minimal verification target for DrHook stepping.
-// No gates or waits — DrHook owns the lifecycle via drhook_step_run.
+// Verification target for DrHook integration tests.
+// Built once by VerifyTargetFixture, run via dotnet exec per test.
 
 Console.WriteLine($"PID: {Environment.ProcessId}");
 

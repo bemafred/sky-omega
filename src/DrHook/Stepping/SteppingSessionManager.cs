@@ -23,6 +23,9 @@ public sealed class SteppingSessionManager
     private int _stepCount;
     private bool _ownsProcess;
 
+    // Target process ID — for future OS-level metrics (no eval needed)
+    private int _targetPid;
+
     // Breakpoint registry — tracks all active breakpoints so DAP's
     // set-and-replace semantics don't silently discard previous ones.
     private readonly Dictionary<string, Dictionary<int, string?>> _sourceBreakpoints = new();
@@ -53,6 +56,7 @@ public sealed class SteppingSessionManager
         _sessionHypothesis = hypothesis;
         _stepCount = 0;
         _ownsProcess = false;
+        _targetPid = pid;
 
         try
         {
@@ -77,7 +81,7 @@ public sealed class SteppingSessionManager
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
             // Get current state
-            var state = await GetCurrentStateAsync(ct);
+            var (state, _) = await GetCurrentStateAsync(ct);
 
             return JsonSerializer.Serialize(new JsonObject
             {
@@ -130,7 +134,7 @@ public sealed class SteppingSessionManager
             await _client.ContinueAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-            var state = await GetCurrentStateAsync(ct);
+            var (state, _) = await GetCurrentStateAsync(ct);
 
             return JsonSerializer.Serialize(new JsonObject
             {
@@ -220,6 +224,7 @@ public sealed class SteppingSessionManager
         _sessionHypothesis = hypothesis;
         _stepCount = 0;
         _ownsProcess = false; // netcoredbg attached, not launched — testProcess owns the lifecycle
+        _targetPid = testhostPid;
 
         try
         {
@@ -237,7 +242,7 @@ public sealed class SteppingSessionManager
             await _client.ContinueAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-            var state = await GetCurrentStateAsync(ct);
+            var (state, _) = await GetCurrentStateAsync(ct);
 
             return JsonSerializer.Serialize(new JsonObject
             {
@@ -269,7 +274,7 @@ public sealed class SteppingSessionManager
             await _client.StepNextAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-            var state = await GetCurrentStateAsync(ct);
+            var (state, topFrameId) = await GetCurrentStateAsync(ct);
 
             var result = new JsonObject
             {
@@ -305,7 +310,7 @@ public sealed class SteppingSessionManager
             await _client.StepInAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-            var state = await GetCurrentStateAsync(ct);
+            var (state, topFrameId) = await GetCurrentStateAsync(ct);
 
             var result = new JsonObject
             {
@@ -341,7 +346,7 @@ public sealed class SteppingSessionManager
             await _client.StepOutAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-            var state = await GetCurrentStateAsync(ct);
+            var (state, topFrameId) = await GetCurrentStateAsync(ct);
 
             var result = new JsonObject
             {
@@ -380,7 +385,7 @@ public sealed class SteppingSessionManager
                 // Block until a breakpoint is hit — the cancellation token is the only timeout.
                 UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-                var state = await GetCurrentStateAsync(ct);
+                var (state, topFrameId) = await GetCurrentStateAsync(ct);
 
                 var result = new JsonObject
                 {
@@ -434,7 +439,7 @@ public sealed class SteppingSessionManager
             await _client.PauseAsync(_activeThreadId, ct);
             UpdateActiveThread(await _client.WaitForStoppedAsync(ct));
 
-            var state = await GetCurrentStateAsync(ct);
+            var (state, topFrameId) = await GetCurrentStateAsync(ct);
 
             var result = new JsonObject
             {
@@ -773,60 +778,6 @@ public sealed class SteppingSessionManager
         }
     }
 
-    public async Task<string> EvaluateExpressionAsync(string expression, int depth, CancellationToken ct)
-    {
-        if (!IsActive || _client is null)
-            return Error("No active stepping session. Use drhook:step-launch first.");
-
-        try
-        {
-            var stackTrace = await _client.GetStackTraceAsync(_activeThreadId, ct);
-            var frames = stackTrace["stackFrames"] as JsonArray;
-            if (frames is null || frames.Count == 0)
-                return Error("No stack frames available.");
-
-            var topFrameId = frames[0]?["id"]?.GetValue<int>() ?? 0;
-
-            JsonObject response;
-            try
-            {
-                response = await _client.EvaluateAsync(topFrameId, expression, "watch", ct);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.StartsWith("DAP error"))
-            {
-                return JsonSerializer.Serialize(new JsonObject
-                {
-                    ["expression"] = expression,
-                    ["error"] = ex.Message,
-                    ["step"] = _stepCount,
-                    ["assemblyVersion"] = _targetVersion,
-                }, new JsonSerializerOptions { WriteIndented = true });
-            }
-
-            var result = new JsonObject
-            {
-                ["expression"] = expression,
-                ["result"] = response["result"]?.DeepClone(),
-                ["type"] = response["type"]?.DeepClone(),
-                ["step"] = _stepCount,
-                ["assemblyVersion"] = _targetVersion,
-            };
-
-            var variablesReference = response["variablesReference"]?.GetValue<int>() ?? 0;
-            if (variablesReference > 0 && depth > 1)
-            {
-                var visited = new HashSet<int>();
-                result["children"] = await ExpandVariableAsync(variablesReference, depth - 1, visited, ct);
-            }
-
-            return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
-        }
-        catch (Exception ex)
-        {
-            return Error($"Expression evaluation failed: {ex.Message}");
-        }
-    }
-
     public async Task<string> StopAsync(CancellationToken ct)
     {
         if (!IsActive)
@@ -847,20 +798,21 @@ public sealed class SteppingSessionManager
         return JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    private async Task<JsonObject> GetCurrentStateAsync(CancellationToken ct)
+    private async Task<(JsonObject State, int FrameId)> GetCurrentStateAsync(CancellationToken ct)
     {
-        if (_client is null) return new JsonObject { ["error"] = "No client" };
+        if (_client is null) return (new JsonObject { ["error"] = "No client" }, 0);
 
         var stackTrace = await _client.GetStackTraceAsync(_activeThreadId, ct);
         var frames = stackTrace["stackFrames"] as JsonArray;
 
         if (frames is null || frames.Count == 0)
-            return new JsonObject { ["location"] = "unknown" };
+            return (new JsonObject { ["location"] = "unknown" }, 0);
 
         var topFrame = frames[0] as JsonObject;
+        var topFrameId = topFrame?["id"]?.GetValue<int>() ?? 0;
         var source = topFrame?["source"] as JsonObject;
 
-        return new JsonObject
+        var state = new JsonObject
         {
             ["file"] = source?["path"]?.DeepClone(),
             ["line"] = topFrame?["line"]?.DeepClone(),
@@ -873,6 +825,8 @@ public sealed class SteppingSessionManager
                 ["line"] = f?["line"]?.DeepClone(),
             }).ToArray())
         };
+
+        return (state, topFrameId);
     }
 
     private async Task<JsonArray> ExpandVariableAsync(int variablesReference, int remainingDepth, HashSet<int> visited, CancellationToken ct)
@@ -994,6 +948,7 @@ public sealed class SteppingSessionManager
         _targetVersion = null;
         _stepCount = 0;
         _ownsProcess = false;
+        _targetPid = 0;
         _sourceBreakpoints.Clear();
         _functionBreakpoints.Clear();
         _exceptionFilters.Clear();
