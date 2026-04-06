@@ -1,6 +1,10 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Diagnostics.NETCore.Client;
+using Microsoft.Diagnostics.Tracing;
+using Microsoft.Diagnostics.Tracing.Parsers;
 
 namespace SkyOmega.DrHook.Stepping;
 
@@ -23,8 +27,18 @@ public sealed class SteppingSessionManager
     private int _stepCount;
     private bool _ownsProcess;
 
-    // Target process ID — for future OS-level metrics (no eval needed)
+    // Process metrics — OS-level via syscall, managed-level via eval (with timeout)
     private int _targetPid;
+    private ProcessMetrics? _previousMetrics;
+
+    private record ProcessMetrics(
+        double WorkingSetMB,
+        double PrivateBytesMB,
+        int ThreadCount,
+        long? ManagedHeapBytes,
+        int? GcGen0,
+        int? GcGen1,
+        int? GcGen2);
 
     // Breakpoint registry — tracks all active breakpoints so DAP's
     // set-and-replace semantics don't silently discard previous ones.
@@ -287,6 +301,8 @@ public sealed class SteppingSessionManager
             if (hypothesis is not null)
                 result["hypothesis"] = hypothesis;
 
+            result["metrics"] = await CaptureMetricsAsync(ct);
+
             result["prompt"] = hypothesis is not null
                 ? $"Step {_stepCount} complete (next). Compare state with hypothesis: \"{hypothesis}\""
                 : $"Step {_stepCount} complete (next). Describe what you observe and whether it matches expectations.";
@@ -323,6 +339,8 @@ public sealed class SteppingSessionManager
             if (hypothesis is not null)
                 result["hypothesis"] = hypothesis;
 
+            result["metrics"] = await CaptureMetricsAsync(ct);
+
             result["prompt"] = hypothesis is not null
                 ? $"Step {_stepCount} complete (into). Compare state with hypothesis: \"{hypothesis}\""
                 : $"Step {_stepCount} complete (into). Describe what you observe — did stepping into the call reveal the expected code path?";
@@ -358,6 +376,8 @@ public sealed class SteppingSessionManager
 
             if (hypothesis is not null)
                 result["hypothesis"] = hypothesis;
+
+            result["metrics"] = await CaptureMetricsAsync(ct);
 
             result["prompt"] = hypothesis is not null
                 ? $"Step {_stepCount} complete (out). Compare state with hypothesis: \"{hypothesis}\""
@@ -397,6 +417,8 @@ public sealed class SteppingSessionManager
 
                 if (hypothesis is not null)
                     result["hypothesis"] = hypothesis;
+
+                result["metrics"] = await CaptureMetricsAsync(ct);
 
                 result["prompt"] = hypothesis is not null
                     ? $"Continued to breakpoint. Compare state with hypothesis: \"{hypothesis}\""
@@ -448,6 +470,8 @@ public sealed class SteppingSessionManager
                 ["assemblyVersion"] = _targetVersion,
                 ["currentState"] = state,
             };
+
+            result["metrics"] = await CaptureMetricsAsync(ct);
 
             result["prompt"] = "Process paused. Inspect current location and variables to understand where execution was interrupted.";
 
@@ -829,6 +853,131 @@ public sealed class SteppingSessionManager
         return (state, topFrameId);
     }
 
+    // ─── Process metrics (OS syscalls + EventPipe counters, no DAP/eval) ──
+
+    private async Task<JsonObject> CaptureMetricsAsync(CancellationToken ct)
+    {
+        var result = new JsonObject();
+        if (_targetPid <= 0) return result;
+
+        try
+        {
+            // OS layer — always available, even when paused
+            var proc = Process.GetProcessById(_targetPid);
+            var workingSetMB = proc.WorkingSet64 / (1024.0 * 1024.0);
+            var privateBytesMB = proc.PrivateMemorySize64 / (1024.0 * 1024.0);
+            var threadCount = proc.Threads.Count;
+
+            result["workingSetMB"] = Math.Round(workingSetMB, 1);
+            result["privateBytesMB"] = Math.Round(privateBytesMB, 1);
+            result["threadCount"] = threadCount;
+
+            // Managed layer — EventPipe System.Runtime counters (no eval, no DAP)
+            long? managedHeap = null;
+            int? gen0 = null, gen1 = null, gen2 = null;
+
+            try
+            {
+                var counters = await CaptureRuntimeCountersAsync(_targetPid, ct);
+                managedHeap = counters.GcHeapBytes;
+                gen0 = counters.GcGen0;
+                gen1 = counters.GcGen1;
+                gen2 = counters.GcGen2;
+            }
+            catch
+            {
+                // EventPipe may not be available (process exiting, permissions) — degrade gracefully
+            }
+
+            if (managedHeap is not null)
+                result["managedHeapMB"] = Math.Round(managedHeap.Value / (1024.0 * 1024.0), 1);
+            if (gen0 is not null) result["gcGen0"] = gen0.Value;
+            if (gen1 is not null) result["gcGen1"] = gen1.Value;
+            if (gen2 is not null) result["gcGen2"] = gen2.Value;
+
+            var current = new ProcessMetrics(workingSetMB, privateBytesMB, threadCount,
+                managedHeap, gen0, gen1, gen2);
+
+            // Delta from previous capture
+            if (_previousMetrics is not null)
+            {
+                result["deltaWorkingSetMB"] = Math.Round(
+                    workingSetMB - _previousMetrics.WorkingSetMB, 1);
+                if (managedHeap is not null && _previousMetrics.ManagedHeapBytes is not null)
+                    result["deltaManagedHeapMB"] = Math.Round(
+                        (managedHeap.Value - _previousMetrics.ManagedHeapBytes.Value) / (1024.0 * 1024.0), 1);
+                if (gen2 is not null && _previousMetrics.GcGen2 is not null)
+                    result["deltaGcGen2"] = gen2.Value - _previousMetrics.GcGen2.Value;
+            }
+
+            _previousMetrics = current;
+        }
+        catch (ArgumentException)
+        {
+            // Process exited
+            result["error"] = "Target process has exited";
+        }
+
+        return result;
+    }
+
+    private record RuntimeCounters(long? GcHeapBytes, int? GcGen0, int? GcGen1, int? GcGen2);
+
+    private static async Task<RuntimeCounters> CaptureRuntimeCountersAsync(int pid, CancellationToken ct)
+    {
+        long? heapBytes = null;
+        int? gen0 = null, gen1 = null, gen2 = null;
+
+        var client = new DiagnosticsClient(pid);
+        var providers = new[]
+        {
+            new EventPipeProvider(
+                "System.Runtime",
+                System.Diagnostics.Tracing.EventLevel.Informational,
+                (long)ClrTraceEventParser.Keywords.None,
+                new Dictionary<string, string> { ["EventCounterIntervalSec"] = "0" })
+        };
+
+        using var session = client.StartEventPipeSession(providers, requestRundown: false);
+        using var source = new EventPipeEventSource(session.EventStream);
+
+        source.Dynamic.All += e =>
+        {
+            if (e.EventName != "EventCounters") return;
+            var payload = e.PayloadByName("Payload") as IDictionary<string, object>;
+            if (payload is null) return;
+
+            var name = payload.TryGetValue("Name", out var n) ? n as string : null;
+            var value = payload.TryGetValue("Mean", out var m) ? m
+                      : payload.TryGetValue("Increment", out var i) ? i : null;
+
+            switch (name)
+            {
+                case "gc-heap-size":
+                    if (value is double d) heapBytes = (long)(d * 1024 * 1024); // reported in MB
+                    break;
+                case "gen-0-gc-count":
+                    if (value is double g0) gen0 = (int)g0;
+                    break;
+                case "gen-1-gc-count":
+                    if (value is double g1) gen1 = (int)g1;
+                    break;
+                case "gen-2-gc-count":
+                    if (value is double g2) gen2 = (int)g2;
+                    break;
+            }
+        };
+
+        // Process events briefly — counters are emitted on session start
+        using var timeout = new CancellationTokenSource(1000);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        try { await Task.Run(() => source.Process(), linked.Token); }
+        catch (OperationCanceledException) { }
+
+        await session.StopAsync(ct);
+        return new RuntimeCounters(heapBytes, gen0, gen1, gen2);
+    }
+
     private async Task<JsonArray> ExpandVariableAsync(int variablesReference, int remainingDepth, HashSet<int> visited, CancellationToken ct)
     {
         if (!visited.Add(variablesReference) || _client is null)
@@ -949,6 +1098,7 @@ public sealed class SteppingSessionManager
         _stepCount = 0;
         _ownsProcess = false;
         _targetPid = 0;
+        _previousMetrics = null;
         _sourceBreakpoints.Clear();
         _functionBreakpoints.Clear();
         _exceptionFilters.Clear();
