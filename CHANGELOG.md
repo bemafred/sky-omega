@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.5] - 2026-04-17
+
+### Added
+- **`--metrics-out <file>` flag** (mercury CLI) — appends JSONL records for `--convert`, `--load`/`--bulk-load`, and `--rebuild-indexes` operations. Each progress callback emits one record (denser than the throttled terminal display); each phase ends with a `*.summary` record. Captures triple counts, throughput (avg + recent), elapsed time, GC heap, working set, and free disk for benchmark artifacts and post-run analysis.
+
+## [1.7.4] - 2026-04-17
+
+### Fixed
+- **Turtle parser sliding-buffer lookahead** — `PeekAhead` and `PeekUtf8CodePoint` now self-refill when the requested bytes lie past the current buffer end, looping until either enough bytes are present or the stream reaches EOF. Previously, multi-byte UTF-8 sequences and multi-character lookaheads (`@prefix`, `<<`, `"""`, `^^`) silently truncated when they straddled the buffer boundary, producing the cumulative "Expected '.' after triple" failure observed during Wikidata ingestion at line 12,741,234. Fixes the parser blocker tracked since 2026-04-06.
+- **`PeekAhead` negative-offset guard** — added `pos < 0` check to prevent IndexOutOfRangeException in the triple-term parser's backward-lookahead path.
+
+### Added
+- **Boundary-differential test suite** (`ParserBoundaryDifferentialTests`) — 30 cases covering boundary positions for `@prefix`, `<<`, `"""`, multi-byte UTF-8, blank nodes, dot runs, and combined constructs under 1-byte-per-Read slow streams. Reproduces the Wikidata failure mode on synthetic ~5 KB inputs in milliseconds, eliminating the need for the 912 GB dataset to validate parser correctness.
+
 ## [1.7.3] - 2026-04-06
 
 ### Removed

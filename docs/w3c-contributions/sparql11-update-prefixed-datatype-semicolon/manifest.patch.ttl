@@ -1,0 +1,26 @@
+# Proposed additions to tests/w3c-rdf-tests/sparql/sparql11/syntax-update-1/manifest.ttl
+#
+# Insert these two entries BEFORE the closing ')' that terminates mf:entries,
+# and add `:test_55` and `:test_56` to the entry list.
+#
+# Coverage gap addressed: neither the PositiveSyntaxTest11 nor the UpdateEval
+# tests in sparql11 exercise a prefixed-name datatype IRI (e.g. xsd:date) in
+# the '^^ iri' slot of an RDFLiteral followed by a ';' continuation of
+# PropertyListNotEmpty inside QuadData. Per productions [37] InsertData,
+# [47] QuadData, [50] TriplesTemplate, [51] TriplesSameSubject,
+# [52] PropertyListNotEmpty, [129] RDFLiteral, [136] iri, [137] PrefixedName,
+# this syntax is legal SPARQL 1.1 Update. Confirmed 2026-04-17 by Mercury
+# (Sky Omega) during differential testing — the full-IRI form works,
+# the prefixed form exposes parser drift in downstream implementations.
+
+:test_55 rdf:type   mf:PositiveUpdateSyntaxTest11 ;
+    dawgt:approval dawgt:Submitted ;
+   mf:name    "syntax-update-55.ru" ;
+   rdfs:comment "INSERT DATA: prefixed-name datatype IRI in RDFLiteral followed by ';' continuation" ;
+   mf:action  <syntax-update-55.ru> ;.
+
+:test_56 rdf:type   mf:PositiveUpdateSyntaxTest11 ;
+    dawgt:approval dawgt:Submitted ;
+   mf:name    "syntax-update-56.ru" ;
+   rdfs:comment "INSERT DATA with GRAPH: prefixed-name datatype IRI in RDFLiteral followed by ';' continuation" ;
+   mf:action  <syntax-update-56.ru> ;.

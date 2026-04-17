@@ -2,7 +2,9 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-04-05
+**Last updated:** 2026-04-17
+
+Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts. (Mercury-as-triple-store benchmarks will get their own directory when Phase 4 of ADR-027 produces them.)
 
 ## Line Counts
 
@@ -209,8 +211,15 @@ Write performance is fsync-dominated — measures SSD controller behavior, not C
 | Object lookup | ~64K queries/sec | B+Tree index scan |
 | Predicate scan | ~6K queries/sec | Broader index traversal |
 | Full scan | ~667 scans/sec | Complete store traversal |
-| Turtle parse (zero-GC) | ~1.1M triples/sec | 57 KB total allocation |
+| Turtle parse (zero-GC, micro) | ~1.1M triples/sec | 57 KB total allocation, 100K triples |
+| Turtle parse + NT write (real-world, 912 GB) | **2.7M triples/sec** | Full Wikidata convert, 21.3B triples sustained — see [docs/validations/parser-at-wikidata-scale-2026-04-17.md](docs/validations/parser-at-wikidata-scale-2026-04-17.md) |
 | Batch write 10K | ~1,043 triples/sec | Single fsync, SSD-bound |
+
+### Scale-validation runs
+
+| Date | Subject | Scope | Key measurement |
+|------|---------|-------|-----------------|
+| 2026-04-17 | [Turtle parser at Wikidata scale](docs/validations/parser-at-wikidata-scale-2026-04-17.md) | Parser + NT writer only; no store | 21.3B triples at 2.7M/sec sustained, flat throughput over 2h 11m |
 
 ## Maintenance Instructions
 

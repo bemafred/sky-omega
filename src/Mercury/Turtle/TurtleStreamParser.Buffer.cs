@@ -36,79 +36,119 @@ internal sealed partial class TurtleStreamParser
 
     /// <summary>
     /// Peek the current UTF-8 code point and return its byte length.
-    /// Returns -1 if at end of input.
+    /// Returns -1 if at end of input. If a multi-byte sequence is split
+    /// across the buffer boundary, refills the buffer to complete it.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int PeekUtf8CodePoint(out int byteLength)
     {
+        // Ensure at least one byte is available
         if (_bufferPosition >= _bufferLength)
         {
-            byteLength = 0;
-            return -1;
+            if (_endOfStream)
+            {
+                byteLength = 0;
+                return -1;
+            }
+            FillBufferSync();
+            if (_bufferPosition >= _bufferLength)
+            {
+                byteLength = 0;
+                return -1;
+            }
         }
 
         var b0 = _inputBuffer[_bufferPosition];
 
-        // ASCII (0x00-0x7F): single byte
+        // ASCII fast path (0x00-0x7F): single byte
         if (b0 < 0x80)
         {
             byteLength = 1;
             return b0;
         }
 
-        // 2-byte sequence (0xC0-0xDF)
-        if ((b0 & 0xE0) == 0xC0)
+        // Determine expected sequence length from leader byte
+        int needed;
+        if ((b0 & 0xE0) == 0xC0) needed = 2;        // 0xC0-0xDF
+        else if ((b0 & 0xF0) == 0xE0) needed = 3;   // 0xE0-0xEF
+        else if ((b0 & 0xF8) == 0xF0) needed = 4;   // 0xF0-0xF7
+        else
         {
-            if (_bufferPosition + 1 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0; // Incomplete sequence, return first byte
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            byteLength = 2;
-            return ((b0 & 0x1F) << 6) | (b1 & 0x3F);
+            // Invalid leader (continuation byte at leader position, etc.)
+            byteLength = 1;
+            return b0;
         }
 
-        // 3-byte sequence (0xE0-0xEF)
-        if ((b0 & 0xF0) == 0xE0)
+        // Ensure the full sequence is in the buffer; refill until we have
+        // enough bytes or hit EOF. A single FillBufferSync may not be enough
+        // when the stream returns small chunks, so loop until needed bytes
+        // are present. Without this, partial sequences silently truncate to
+        // the leader byte and Consume() walks into mid-codepoint.
+        while (_bufferPosition + needed > _bufferLength && !_endOfStream)
         {
-            if (_bufferPosition + 2 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0; // Incomplete sequence
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            var b2 = _inputBuffer[_bufferPosition + 2];
-            byteLength = 3;
-            return ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+            FillBufferSync();
         }
 
-        // 4-byte sequence (0xF0-0xF7)
-        if ((b0 & 0xF8) == 0xF0)
+        if (_bufferPosition >= _bufferLength)
         {
-            if (_bufferPosition + 3 >= _bufferLength)
-            {
-                byteLength = 1;
-                return b0; // Incomplete sequence
-            }
-            var b1 = _inputBuffer[_bufferPosition + 1];
-            var b2 = _inputBuffer[_bufferPosition + 2];
-            var b3 = _inputBuffer[_bufferPosition + 3];
-            byteLength = 4;
-            return ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+            byteLength = 0;
+            return -1;
         }
 
-        // Invalid UTF-8 lead byte, return as-is
-        byteLength = 1;
-        return b0;
+        // Re-read leader in case FillBufferSync shifted the buffer
+        b0 = _inputBuffer[_bufferPosition];
+
+        if (_bufferPosition + needed > _bufferLength)
+        {
+            // Truly incomplete at stream EOF (malformed input)
+            byteLength = 1;
+            return b0;
+        }
+
+        // Decode the complete sequence
+        switch (needed)
+        {
+            case 2:
+                byteLength = 2;
+                return ((b0 & 0x1F) << 6)
+                     | (_inputBuffer[_bufferPosition + 1] & 0x3F);
+            case 3:
+                byteLength = 3;
+                return ((b0 & 0x0F) << 12)
+                     | ((_inputBuffer[_bufferPosition + 1] & 0x3F) << 6)
+                     | (_inputBuffer[_bufferPosition + 2] & 0x3F);
+            default: // 4
+                byteLength = 4;
+                return ((b0 & 0x07) << 18)
+                     | ((_inputBuffer[_bufferPosition + 1] & 0x3F) << 12)
+                     | ((_inputBuffer[_bufferPosition + 2] & 0x3F) << 6)
+                     | (_inputBuffer[_bufferPosition + 3] & 0x3F);
+        }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// Peek the byte at <paramref name="offset"/> from the current position.
+    /// Refills the buffer if the requested offset lies past the current
+    /// buffer end. Returns -1 if no byte is available (true EOF or negative
+    /// offset before the start of buffered data).
+    /// </summary>
     private int PeekAhead(int offset)
     {
         var pos = _bufferPosition + offset;
-        if (pos >= _bufferLength)
+
+        if (pos < 0)
             return -1;
+
+        // Loop FillBufferSync because the stream may return less than the
+        // requested count per Read (slow streams, network reads).
+        while (pos >= _bufferLength)
+        {
+            if (_endOfStream)
+                return -1;
+            FillBufferSync();
+            pos = _bufferPosition + offset;
+            if (pos < 0)
+                return -1;
+        }
 
         return _inputBuffer[pos];
     }

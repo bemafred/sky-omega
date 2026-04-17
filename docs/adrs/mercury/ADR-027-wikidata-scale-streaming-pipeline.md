@@ -12,7 +12,7 @@ Mercury has 100% W3C SPARQL conformance (2,069/2,069 tests) and 3,978 passing te
 
 ### Wikidata and the Blazegraph Crisis
 
-The Wikidata Query Service (WDQS) runs on Blazegraph — unmaintained, end-of-life software failing at scale. The graph contains **16.6 billion triples**, growing ~1 billion per year. Database rebuilds take 1–2 months and crash unpredictably. Recovery from corruption requires restarting from scratch — 60+ day cycles. Queries that previously worked now time out as the graph grows.
+The Wikidata Query Service (WDQS) runs on Blazegraph — unmaintained, end-of-life software failing at scale. As of April 2026 the April dump contains **21.3 billion triples** (measured via Mercury convert — see [parser-at-wikidata-scale-2026-04-17](../../validations/parser-at-wikidata-scale-2026-04-17.md)), up from the **16.6 billion** figure in WMF's Sept 2025 baseline — growth has outpaced the prior "+1 billion/year" estimate. Database rebuilds take 1–2 months and crash unpredictably. Recovery from corruption requires restarting from scratch — 60+ day cycles. Queries that previously worked now time out as the graph grows.
 
 The Wikimedia Foundation formed the Wikidata Platform (WDP) team in September 2025 to find a replacement. Two finalists remain: **QLever** (University of Freiburg, C++, Apache-licensed) and **Virtuoso** (OpenLink). The evaluation runs July 2025 – June 2026, with migration planned after July 2026.
 
@@ -32,7 +32,7 @@ The Wikidata full RDF dump is distributed as Turtle (`latest-all.ttl.bz2`). On `
 
 - **114 GB** bzip2-compressed (`latest-all.ttl.bz2`)
 - **912 GB** uncompressed (`latest-all.ttl`)
-- **~16.6 billion triples** (current Wikidata graph size)
+- **21.3 billion triples** — measured via Mercury convert on the April 2026 dump ([validation record](../../validations/parser-at-wikidata-scale-2026-04-17.md)). The Sept 2025 WMF baseline cited 16.6 billion; arithmetic in this ADR written against that baseline remains qualitatively correct but scales linearly to the current measurement.
 
 The dump is prefix-heavy Turtle with 30+ prefixes declared at the top of the file (`wd:`, `wdt:`, `wds:`, `p:`, `ps:`, `pq:`, `schema:`, `skos:`, `prov:`, etc.). Each entity (e.g., `wd:Q42`) spans many lines using `;` and `,` continuation syntax.
 
@@ -481,7 +481,7 @@ Stages 1–4 produce the publishable benchmark artifact. Stage 5 proves generali
 - Bulk load has no crash recovery — explicit design choice, not a limitation
 
 ### Risks
-- B+Tree behavior at 16.6B entries is untested territory — page split frequency, cache eviction patterns, and I/O amplification at this scale are unknown unknowns. This is exactly the emergence surface we want to expose.
+- B+Tree behavior at 21.3B entries (April 2026 measurement) is untested territory — page split frequency, cache eviction patterns, and I/O amplification at this scale are unknown unknowns. This is exactly the emergence surface we want to expose. The Turtle parser path is now validated at this scale (see [parser-at-wikidata-scale-2026-04-17](../../validations/parser-at-wikidata-scale-2026-04-17.md)); the store-side path is not.
 - Atom table memory pressure — interning billions of unique IRIs may stress `AtomStore` in ways not seen at smaller scale. Wikidata has high atom cardinality (millions of unique predicates via property-specific prefixes like `p:P31`, `ps:P31`, `pq:P31`).
 - macOS mmap limits at multi-TB store sizes — may require `vm.max_map_count` tuning or architectural changes to how `QuadIndex` manages memory-mapped regions.
 - Store size may approach 5 TB — viable on 8 TB SSD but demands careful space monitoring during load.

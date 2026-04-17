@@ -2,6 +2,8 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System.Reflection;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime.IO;
@@ -23,6 +25,7 @@ string? convertInput = null;
 string? convertOutput = null;
 bool rebuildIndexes = false;
 long? minFreeSpaceGB = null;
+string? metricsOutPath = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -85,6 +88,10 @@ for (int i = 0; i < args.Length; i++)
             if (i + 1 < args.Length && long.TryParse(args[++i], out var gb))
                 minFreeSpaceGB = gb;
             break;
+        case "--metrics-out":
+            if (i + 1 < args.Length)
+                metricsOutPath = args[++i];
+            break;
         default:
             if (args[i].StartsWith('-'))
             {
@@ -141,6 +148,7 @@ if (showHelp)
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
+          --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
 
         Examples:
           mercury                                # Default store (cli)
@@ -167,17 +175,58 @@ if (attachTarget != null)
     return await RunAttachMode(attachTarget);
 }
 
+// Open metrics output stream once if requested — flushed/disposed on process exit.
+StreamWriter? metricsWriter = metricsOutPath != null
+    ? new StreamWriter(new FileStream(metricsOutPath, FileMode.Append, FileAccess.Write, FileShare.Read)) { AutoFlush = true }
+    : null;
+
+var metricsJsonOptions = new JsonSerializerOptions
+{
+    Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+};
+
+void WriteMetric(object record)
+{
+    if (metricsWriter == null) return;
+    metricsWriter.WriteLine(JsonSerializer.Serialize(record, metricsJsonOptions));
+}
+
 // Handle --convert (no store needed, exits after completion)
 if (convertInput != null && convertOutput != null)
 {
     Console.WriteLine($"Converting {convertInput} -> {convertOutput}...");
+    var convertStart = DateTimeOffset.UtcNow;
     var count = await RdfEngine.ConvertAsync(convertInput, convertOutput, p =>
     {
         var rate = p.Elapsed.TotalSeconds > 0 ? p.TriplesLoaded / p.Elapsed.TotalSeconds : 0;
         Console.Error.Write($"\r  {p.TriplesLoaded:N0} triples  {rate:N0}/sec  {p.Elapsed.TotalSeconds:F1}s");
+
+        WriteMetric(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("o"),
+            phase = "convert",
+            input = convertInput,
+            output = convertOutput,
+            triples = p.TriplesLoaded,
+            triples_per_sec = rate,
+            elapsed_sec = p.Elapsed.TotalSeconds,
+        });
     });
     Console.Error.WriteLine();
     Console.WriteLine($"Converted {count:N0} triples.");
+
+    var convertElapsed = DateTimeOffset.UtcNow - convertStart;
+    WriteMetric(new
+    {
+        ts = DateTimeOffset.UtcNow.ToString("o"),
+        phase = "convert.summary",
+        input = convertInput,
+        output = convertOutput,
+        triples = count,
+        elapsed_sec = convertElapsed.TotalSeconds,
+        avg_triples_per_sec = convertElapsed.TotalSeconds > 0 ? count / convertElapsed.TotalSeconds : 0,
+    });
+    metricsWriter?.Dispose();
     return 0;
 }
 
@@ -279,7 +328,22 @@ if (fileToLoad != null)
 
     var count = await RdfEngine.LoadFileAsync(pool.Active, fileToLoad, onProgress: p =>
     {
-        // Throttle display to every 10 seconds
+        // Metrics file gets every progress callback (denser than terminal display)
+        WriteMetric(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("o"),
+            phase = "load",
+            mode,
+            file = fileToLoad,
+            triples = p.TriplesLoaded,
+            triples_per_sec_avg = p.TriplesPerSecond,
+            triples_per_sec_recent = p.RecentTriplesPerSecond,
+            gc_heap_bytes = p.GcHeapBytes,
+            working_set_bytes = p.WorkingSetBytes,
+            elapsed_sec = p.Elapsed.TotalSeconds,
+        });
+
+        // Throttle terminal display to every 10 seconds
         var now = DateTimeOffset.UtcNow;
         if ((now - lastDisplayTime).TotalSeconds < 10) return;
         lastDisplayTime = now;
@@ -314,17 +378,49 @@ if (fileToLoad != null)
     Console.WriteLine($"  Working set:   {finalWsMB:N0} MB");
     Console.WriteLine($"  Free disk:     {freeAfter / (1024.0 * 1024 * 1024):F1} GB");
     Console.WriteLine();
+
+    WriteMetric(new
+    {
+        ts = DateTimeOffset.UtcNow.ToString("o"),
+        phase = "load.summary",
+        mode,
+        file = fileToLoad,
+        triples = count,
+        elapsed_sec = totalElapsed.TotalSeconds,
+        avg_triples_per_sec = avgRate,
+        gc_heap_bytes = (long)(finalGcMB * 1024 * 1024),
+        working_set_bytes = (long)(finalWsMB * 1024 * 1024),
+        free_disk_bytes = freeAfter,
+    });
 }
 
 if (rebuildIndexes)
 {
     Console.WriteLine("Rebuilding secondary indexes...");
-    pool.Active.RebuildSecondaryIndexes((name, count) =>
+    var rebuildStart = DateTimeOffset.UtcNow;
+    pool.Active.RebuildSecondaryIndexes((name, entries) =>
     {
-        Console.Error.WriteLine($"  {name}: {count:N0} entries");
+        Console.Error.WriteLine($"  {name}: {entries:N0} entries");
+        WriteMetric(new
+        {
+            ts = DateTimeOffset.UtcNow.ToString("o"),
+            phase = "rebuild",
+            index = name,
+            entries,
+        });
+    });
+    var rebuildElapsed = DateTimeOffset.UtcNow - rebuildStart;
+    WriteMetric(new
+    {
+        ts = DateTimeOffset.UtcNow.ToString("o"),
+        phase = "rebuild.summary",
+        elapsed_sec = rebuildElapsed.TotalSeconds,
     });
     Console.WriteLine("Secondary indexes rebuilt.");
 }
+
+// Flush/close metrics file before entering REPL
+metricsWriter?.Dispose();
 
 // Create ReplSession with facade calls and run REPL
 using (pool)

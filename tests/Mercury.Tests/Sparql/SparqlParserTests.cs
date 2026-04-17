@@ -610,6 +610,47 @@ public class SparqlParserTests
         Assert.True(result.InsertData[0].GraphLength > 0);
     }
 
+    // Regression: prefixed-datatype literal followed by ';' in a PropertyListNotEmpty
+    // chain inside INSERT DATA. Legal SPARQL 1.1 Update grammar (productions [37, 47,
+    // 50, 51, 52, 129, 136, 137]), but not exercised by the W3C sparql11-update
+    // conformance suite, and the parser mishandles it (discovered 2026-04-17 while
+    // storing session observations in Mercury). Full-IRI datatype works — only the
+    // PrefixedName form in the '^^' iri slot triggers the bug.
+
+    [Fact]
+    public void InsertData_PrefixedDatatypeFollowedBySemicolon_DefaultGraph()
+    {
+        var update = @"PREFIX ex: <http://example.org/>
+                       PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+                       INSERT DATA {
+                         ex:s ex:date ""2026-04-17""^^xsd:date ;
+                              ex:topic ""first"" .
+                       }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Equal(2, result.InsertData.Length);
+    }
+
+    [Fact]
+    public void InsertData_PrefixedDatatypeFollowedBySemicolon_InGraph()
+    {
+        var update = @"PREFIX ex: <http://example.org/>
+                       PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+                       INSERT DATA {
+                         GRAPH <urn:test:g> {
+                           ex:s ex:date ""2026-04-17""^^xsd:date ;
+                                ex:topic ""first"" .
+                         }
+                       }";
+        var parser = new SparqlParser(update.AsSpan());
+        var result = parser.ParseUpdate();
+
+        Assert.Equal(QueryType.InsertData, result.Type);
+        Assert.Equal(2, result.InsertData.Length);
+    }
+
     [Fact]
     public void DeleteData_ParsesBasicDelete()
     {
