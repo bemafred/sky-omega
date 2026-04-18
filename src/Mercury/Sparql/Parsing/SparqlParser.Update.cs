@@ -593,13 +593,22 @@ internal ref partial struct SparqlParser
             else if (Peek() == '^' && _position + 1 < _source.Length && _source[_position + 1] == '^')
             {
                 Advance(); Advance(); // ^^
-                // Parse datatype IRI
+                // Parse datatype IRI — either full <...> or a PrefixedName like xsd:date.
+                // SPARQL 1.1 Update grammar productions [129] RDFLiteral and [136] iri
+                // both allow PrefixedName in the ^^ slot; the previous code only accepted
+                // <iri> form, which caused the parser to stop mid-literal and misread the
+                // trailing "xsd:date ;" as a new triple. Regression tests pin this behavior.
                 if (Peek() == '<')
                 {
                     Advance();
                     while (!IsAtEnd() && Peek() != '>')
                         Advance();
                     if (Peek() == '>') Advance();
+                }
+                else if (char.IsLetter(Peek()) || Peek() == ':')
+                {
+                    while (!IsAtEnd() && (char.IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-' || Peek() == ':'))
+                        Advance();
                 }
             }
             return (start, _position - start, TermType.Literal);
