@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.15] - 2026-04-18
+
+### Performance
+- **Bulk load 10 M: +275 % throughput (64.7 K → 243 K triples/sec).** `QuadIndex.SaveMetadata` unconditionally called `_accessor.Flush()` on every invocation — and on macOS that's an msync of the *entire* 256 GB sparse-mmap region, not a single metadata page. Under bulk load, `AllocatePage` calls `SaveMetadata` per new B+Tree page, so the load was issuing thousands of whole-region msyncs. dotTrace sampling reported it at 1.56 % of profile time — a severe under-count because sampling measures wall-clock hits, not the kernel-time amplification of a blocking msync stalling the whole pipeline. Fix: same shape as the 1.7.9 `FlushPage` fix (Bug 1). In bulk mode `SaveMetadata` does the mmap writes (no syscall) and returns; the single `Flush()` at `QuadStore.FlushToDisk()` covers durability for every metadata update made during the load. Cognitive mode unchanged — per-update durability preserved.
+
 ## [1.7.14] - 2026-04-18
 
 ### Added

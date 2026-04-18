@@ -1277,10 +1277,17 @@ internal sealed unsafe class QuadIndex : IDisposable
 
     private void SaveMetadata()
     {
+        // The writes go straight to mmap memory (no syscall). The msync is the
+        // expensive part — on macOS _accessor.Flush() syncs the whole region.
+        // AllocatePage calls SaveMetadata per new page; at bulk-load rates that
+        // was 1.56% of profile time in the dominant Flush call. Same class of
+        // fix as FlushPage (1.7.9 Bug 1): defer the msync in bulk mode and let
+        // QuadStore.FlushToDisk() at load completion sync once.
         _accessor.Write(0, _rootPageId);
         _accessor.Write(8, _nextPageId);
         _accessor.Write(16, _quadCount);
         _accessor.Write(24, MagicNumber);
+        if (_bulkMode) return;
         _accessor.Flush();
     }
 
