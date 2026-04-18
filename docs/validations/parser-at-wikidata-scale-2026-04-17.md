@@ -104,3 +104,13 @@ The `.ttl.bz2` source can be decompressed with `bzip2 -dk latest-all.ttl.bz2` (k
 - Convert logs captured in session transcript, 2026-04-17
 - Measurements stored in Mercury semantic memory (graph `urn:sky-omega:session:2026-04-17`), including the scope-correction record after an initial overreach was caught
 - Parser fix landed as Mercury 1.7.4; structured-metrics CLI flag as 1.7.5
+
+## Historical note — 2026-04-17 evening / 2026-04-18 morning
+
+On the evening of 2026-04-17, the first bulk-load attempt against this run's output file exposed two bugs in the convert *writer* path (not the parser): `NTriplesStreamWriter.WriteLiteral` failed to re-escape internal `"` characters, and `RdfEngine.ConvertAsync` bypassed the writer entirely. Both were fixed and released as 1.7.6 and 1.7.7 respectively; a fresh convert with 1.7.7 demonstrably produces valid N-Triples end-to-end (round-trip verified).
+
+The parser throughput measurements recorded above stand unchanged — the Turtle parser reached EOF on 21.3 B triples and the reported triples/sec is for the parser pipeline, which was never the subject of the writer bug. What was temporarily invalid was the *byte artifact* produced by the convert; that is now fixed.
+
+The coverage gap that let the writer bugs through remains noteworthy: W3C conformance tests Turtle→triples and N-Triples→triples separately, never the round-trip. New regression tests in `NTriplesStreamWriterTests` close that gap.
+
+See [`bulk-load-gradient-2026-04-17.md`](bulk-load-gradient-2026-04-17.md) for the full bug-and-fix timeline.

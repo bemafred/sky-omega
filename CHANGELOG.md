@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.7] - 2026-04-17
+
+### Fixed
+- **`RdfEngine.ConvertAsync` now routes N-Triples output through `NTriplesStreamWriter`** — the convert fast-path previously wrote spans directly to a `StreamWriter`, bypassing the writer's `WriteLiteral` escape logic entirely. This made the 1.7.6 `WriteLiteral` fix dormant for the convert code path. Now the convert emits valid N-Triples end-to-end. Without this, `mercury --convert` kept producing invalid output even with 1.7.6 installed.
+
+## [1.7.6] - 2026-04-17
+
+### Fixed
+- **N-Triples writer re-escapes unescaped quotes in literals** — `NTriplesStreamWriter.WriteLiteral` now determines the close-quote position by scanning backward from the suffix shape (`^^<...>` datatype, `@lang-tag`, or plain), rather than forward with backslash tracking. The Turtle parser unescapes `\"` to `"` in memory (the in-memory form is the logical value), so forward escape-tracking in the writer was unreliable once the escape information was lost. Symptom: any literal containing an unescaped quote in the in-memory representation — whose source Turtle used `\"` — was truncated at the first internal quote, producing invalid N-Triples. Discovered when the full Wikidata dump `latest-all.nt` (3.0 TB produced by 1.7.4 convert) failed the Mercury N-Triples parser at triple 2,718.
+- **Round-trip regression tests added** — Turtle → N-Triples → parse round-trip for literals with escaped quotes, lang tags, datatypes, and internal backslashes. Closes the coverage gap where writers were never tested against their own readers in the "convert" combination. (`NTriplesStreamWriterTests.WriteTriple_*InternalQuotes*` and `RoundTrip_TurtleLiteralWithEscapedQuotes_ParsesBack`.)
+
 ## [1.7.5] - 2026-04-17
 
 ### Added

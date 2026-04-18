@@ -562,7 +562,16 @@ public static class RdfEngine
         var inputStream = WrapWithDecompression(inputFileStream, compression);
 
         await using var outputFileStream = File.Create(outputPath);
-        using var writer = new StreamWriter(outputFileStream);
+        using var streamWriter = new StreamWriter(outputFileStream);
+
+        // For N-Triples output, route through NTriplesStreamWriter so literals
+        // are properly re-escaped. The in-memory lexical form produced by the
+        // Turtle parser has `\"` unescaped to `"`; writing those spans directly
+        // produces invalid N-Triples. See ADR commits and
+        // docs/validations/bulk-load-gradient-2026-04-17.md.
+        NTriples.NTriplesStreamWriter? ntWriter = outputFormat == RdfFormat.NTriples
+            ? new NTriples.NTriplesStreamWriter(streamWriter)
+            : null;
 
         long count = 0;
         var sw = Stopwatch.StartNew();
@@ -570,16 +579,10 @@ public static class RdfEngine
         await ParseAsync(inputStream, inputFormat, (s, p, o) =>
         {
             count++;
-            // Write directly — NTriples writer is the simplest zero-state path
             switch (outputFormat)
             {
                 case RdfFormat.NTriples:
-                    writer.Write(s);
-                    writer.Write(' ');
-                    writer.Write(p);
-                    writer.Write(' ');
-                    writer.Write(o);
-                    writer.WriteLine(" .");
+                    ntWriter!.WriteTriple(s, p, o);
                     break;
                 default:
                     // For other formats, fall through to materialized write below
@@ -589,6 +592,9 @@ public static class RdfEngine
             if (count % 1_000_000 == 0)
                 onProgress?.Invoke(new LoadProgress { TriplesLoaded = count, Elapsed = sw.Elapsed });
         }).ConfigureAwait(false);
+
+        ntWriter?.Flush();
+        ntWriter?.Dispose();
 
         if (inputStream != inputFileStream)
             await inputStream.DisposeAsync().ConfigureAwait(false);

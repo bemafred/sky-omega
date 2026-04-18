@@ -135,49 +135,101 @@ internal sealed class NTriplesStreamWriter : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Write a literal with proper N-Triples escaping.
-    /// Input format: "value", "value"@lang, or "value"^^<datatype>
+    /// Input format: "value", "value"@lang, or "value"^^&lt;datatype&gt;
     /// </summary>
+    /// <remarks>
+    /// The upstream Turtle parser unescapes <c>\"</c> in memory — the in-memory
+    /// lexical form is the logical value, not the wire form. That means
+    /// forward-scanning with backslash tracking cannot reliably find the close
+    /// quote, because the distinction between "internal quote" and "close quote"
+    /// is lost. Instead, determine close quote position by recognizing the
+    /// canonical suffix shape and scanning from the end:
+    ///
+    /// - ends with <c>&gt;</c> → datatype form, find <c>"^^&lt;</c> backward
+    /// - ends with lang-tag chars + <c>@</c> → lang form, find <c>"@</c> backward
+    /// - ends with <c>"</c> → plain form, last char is the close quote
+    ///
+    /// This matches the output shape produced by the Turtle parser's
+    /// ParseLiteral, where datatype IRIs are always canonicalized to <c>&lt;...&gt;</c>
+    /// form. See docs/validations/bulk-load-gradient-2026-04-17.md for the
+    /// failure mode this replaces.
+    /// </remarks>
     private void WriteLiteral(ReadOnlySpan<char> literal)
     {
-        // Find the end of the quoted string
-        int closeQuote = 1;
-        bool inEscape = false;
-        for (int i = 1; i < literal.Length; i++)
+        if (literal.Length < 2)
         {
-            if (inEscape)
+            // Degenerate — write as-is and bail
+            WriteSpan(literal);
+            return;
+        }
+
+        int closeQuote;
+        int suffixStart;
+
+        char last = literal[literal.Length - 1];
+
+        if (last == '>')
+        {
+            // Datatype form: "lexical"^^<iri>
+            // Find the `^^<` marker by scanning backward from the end.
+            var idx = literal.LastIndexOf("^^<".AsSpan());
+            if (idx >= 1 && literal[idx - 1] == '"')
             {
-                inEscape = false;
-                continue;
+                closeQuote = idx - 1;
+                suffixStart = closeQuote + 1;
             }
-            if (literal[i] == '\\')
+            else
             {
-                inEscape = true;
-                continue;
+                // Malformed input — fall back to plain treatment
+                closeQuote = literal.Length - 1;
+                suffixStart = literal.Length;
             }
-            if (literal[i] == '"')
+        }
+        else if (last == '"')
+        {
+            // Plain form: "lexical"
+            closeQuote = literal.Length - 1;
+            suffixStart = literal.Length;
+        }
+        else
+        {
+            // Lang-tag form: "lexical"@lang[-subtags]
+            // Walk back over valid BCP-47 lang-tag chars, then require '@'
+            // preceded by '"'.
+            int i = literal.Length - 1;
+            while (i > 0 && IsLangChar(literal[i])) i--;
+            if (i >= 2 && literal[i] == '@' && literal[i - 1] == '"')
             {
-                closeQuote = i;
-                break;
+                closeQuote = i - 1;
+                suffixStart = closeQuote + 1;
+            }
+            else
+            {
+                // Malformed input — fall back: use last '"' as close if present.
+                var lastQuote = literal.LastIndexOf('"');
+                closeQuote = lastQuote > 0 ? lastQuote : literal.Length - 1;
+                suffixStart = closeQuote + 1;
             }
         }
 
-        // Write opening quote
         WriteChar('"');
 
-        // Write escaped content
+        // Re-escape internal content. WriteEscapedString handles `"` -> `\"`,
+        // `\` -> `\\`, control chars, and non-ASCII as \uXXXX / \UXXXXXXXX.
         var content = literal.Slice(1, closeQuote - 1);
         WriteEscapedString(content);
 
-        // Write closing quote
         WriteChar('"');
 
-        // Write suffix (language tag or datatype) as-is
-        if (closeQuote + 1 < literal.Length)
+        if (suffixStart < literal.Length)
         {
-            var suffix = literal.Slice(closeQuote + 1);
-            WriteSpan(suffix);
+            WriteSpan(literal.Slice(suffixStart));
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsLangChar(char c)
+        => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
 
     /// <summary>
     /// Write a string with N-Triples escape sequences.

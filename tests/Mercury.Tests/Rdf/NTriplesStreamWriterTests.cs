@@ -337,4 +337,151 @@ public class NTriplesStreamWriterTests
     }
 
     #endregion
+
+    #region Literals With Unescaped Quotes (regression for bulk-load-gradient-2026-04-17)
+
+    // The Turtle parser unescapes `\"` → `"` in memory. The writer used to
+    // treat the first internal `"` as the close quote (forward scan with
+    // escape tracking), which broke when the escape info was gone. Fix:
+    // backward suffix-aware close-quote detection. These tests lock that in.
+
+    [Fact]
+    public void WriteTriple_PlainLiteralWithInternalQuotes_ReEscapes()
+    {
+        // Simulates in-memory form emitted by Turtle parser after unescaping \"
+        var literal = "\"Entity[\"HistoricalCountry\", \"Belgium\"]\"";
+
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), literal.AsSpan());
+
+        var expected = "<http://ex/s> <http://ex/p> \"Entity[\\\"HistoricalCountry\\\", \\\"Belgium\\\"]\" .\n";
+        Assert.Equal(expected, sw.ToString());
+    }
+
+    [Fact]
+    public void WriteTriple_LangTaggedLiteralWithInternalQuotes_ReEscapes()
+    {
+        var literal = "\"say \"hi\" please\"@en";
+
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), literal.AsSpan());
+
+        var expected = "<http://ex/s> <http://ex/p> \"say \\\"hi\\\" please\"@en .\n";
+        Assert.Equal(expected, sw.ToString());
+    }
+
+    [Fact]
+    public void WriteTriple_DatatypedLiteralWithInternalQuotes_ReEscapes()
+    {
+        var literal = "\"a\"b\"^^<http://www.w3.org/2001/XMLSchema#string>";
+
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), literal.AsSpan());
+
+        var expected = "<http://ex/s> <http://ex/p> \"a\\\"b\"^^<http://www.w3.org/2001/XMLSchema#string> .\n";
+        Assert.Equal(expected, sw.ToString());
+    }
+
+    [Fact]
+    public void WriteTriple_LiteralWithInternalBackslashAndQuote_ReEscapesBoth()
+    {
+        // Lexical value is: a"b\c → in-memory after parser unescape is `"a"b\c"`
+        var literal = "\"a\"b\\c\"";
+
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), literal.AsSpan());
+
+        var expected = "<http://ex/s> <http://ex/p> \"a\\\"b\\\\c\" .\n";
+        Assert.Equal(expected, sw.ToString());
+    }
+
+    [Fact]
+    public void WriteTriple_EmptyLiteral_PlainPreserved()
+    {
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), "\"\"".AsSpan());
+        Assert.Equal("<http://ex/s> <http://ex/p> \"\" .\n", sw.ToString());
+    }
+
+    [Fact]
+    public void WriteTriple_EmptyLiteralWithLang_LangPreserved()
+    {
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), "\"\"@en".AsSpan());
+        Assert.Equal("<http://ex/s> <http://ex/p> \"\"@en .\n", sw.ToString());
+    }
+
+    [Fact]
+    public void WriteTriple_LexicalEndsWithQuoteAndHasLang_ClosingFound()
+    {
+        // Lexical value is literally: prefix" (ends with a quote)
+        // In-memory form: `"prefix""@en`
+        var literal = "\"prefix\"\"@en";
+
+        using var sw = new StringWriter();
+        using var writer = new NTriplesStreamWriter(sw);
+        writer.WriteTriple("<http://ex/s>".AsSpan(), "<http://ex/p>".AsSpan(), literal.AsSpan());
+
+        var expected = "<http://ex/s> <http://ex/p> \"prefix\\\"\"@en .\n";
+        Assert.Equal(expected, sw.ToString());
+    }
+
+    [Fact]
+    public async Task WriteTripleAsync_PlainLiteralWithInternalQuotes_ReEscapes()
+    {
+        var literal = "\"Entity[\"HistoricalCountry\", \"Belgium\"]\"";
+
+        using var sw = new StringWriter();
+        await using var writer = new NTriplesStreamWriter(sw);
+        await writer.WriteTripleAsync(
+            "<http://ex/s>".AsMemory(),
+            "<http://ex/p>".AsMemory(),
+            literal.AsMemory());
+
+        var expected = "<http://ex/s> <http://ex/p> \"Entity[\\\"HistoricalCountry\\\", \\\"Belgium\\\"]\" .\n";
+        Assert.Equal(expected, sw.ToString());
+    }
+
+    // End-to-end round-trip: Turtle parse → N-Triples write → N-Triples parse.
+    // This is the coverage gap that let the bug through W3C conformance: writers
+    // were never tested against their own readers for the convert combination.
+
+    [Fact]
+    public async Task RoundTrip_TurtleLiteralWithEscapedQuotes_ParsesBack()
+    {
+        var turtle = "@prefix ex: <http://example.org/> .\n" +
+                     "ex:s ex:p \"Entity[\\\"HistoricalCountry\\\", \\\"Belgium\\\"]\" .\n";
+
+        // Convert Turtle → N-Triples via the same pipeline the CLI uses
+        var ntMem = new MemoryStream();
+        var ntWriter = new StreamWriter(ntMem, leaveOpen: true);
+        var writer = new NTriplesStreamWriter(ntWriter);
+        var ttlStream = new MemoryStream(Encoding.UTF8.GetBytes(turtle));
+        var parser = new SkyOmega.Mercury.Rdf.Turtle.TurtleStreamParser(ttlStream);
+        await parser.ParseAsync((s, p, o) => writer.WriteTriple(s, p, o));
+        writer.Flush();
+        ntWriter.Flush();
+        var ntText = Encoding.UTF8.GetString(ntMem.ToArray());
+
+        // Now parse the N-Triples back to ensure it round-trips without error
+        var ntBytes = Encoding.UTF8.GetBytes(ntText);
+        using var ntInput = new MemoryStream(ntBytes);
+        var ntParser = new SkyOmega.Mercury.NTriples.NTriplesStreamParser(ntInput);
+        var roundTripped = new List<(string S, string P, string O)>();
+        await ntParser.ParseAsync((s, p, o) =>
+            roundTripped.Add((s.ToString(), p.ToString(), o.ToString())));
+
+        Assert.Single(roundTripped);
+        // Lexical value should survive the round trip unchanged
+        Assert.Contains("HistoricalCountry", roundTripped[0].O);
+        Assert.Contains("Belgium", roundTripped[0].O);
+    }
+
+    #endregion
 }
