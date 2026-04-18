@@ -65,10 +65,10 @@ public sealed class QuadStorePool : IDisposable
     /// </summary>
     public const double DefaultDiskBudgetFraction = 0.33;
 
-    /// <summary>
-    /// Fixed hash table size in bytes (512MB) - not configurable, included in estimates.
-    /// </summary>
-    private const long HashTableSizeBytes = 512L << 20;
+    // AtomStore hash bucket is 32 bytes (AtomId, Hash, Offset, Length — 4 × long).
+    private const long HashBucketBytes = 32;
+    // Bulk mode bumps the hash table to 256M buckets; mirrors AtomStore.BulkModeHashTableSize.
+    private const long BulkModeHashTableCapacity = 1L << 28;
 
     private const string PoolJsonFileName = "pool.json";
     private const string StoresDirectoryName = "stores";
@@ -798,9 +798,13 @@ public sealed class QuadStorePool : IDisposable
 
     private static long EstimateStoreSize(StorageOptions options)
     {
+        var hashTableCapacity = options.BulkMode
+            ? Math.Max(options.AtomHashTableInitialCapacity, BulkModeHashTableCapacity)
+            : options.AtomHashTableInitialCapacity;
+
         return (options.IndexInitialSizeBytes * 4)
              + options.AtomDataInitialSizeBytes
-             + HashTableSizeBytes
+             + (hashTableCapacity * HashBucketBytes)
              + (options.AtomOffsetInitialCapacity * sizeof(long));
     }
 

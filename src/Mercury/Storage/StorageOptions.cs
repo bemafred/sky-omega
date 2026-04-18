@@ -57,6 +57,15 @@ public sealed class StorageOptions
     public long AtomOffsetInitialCapacity { get; init; } = 1L << 20;
 
     /// <summary>
+    /// Initial bucket count for the AtomStore hash table. Default: 16M (preserves legacy behavior).
+    /// File size is this value × 32 bytes (sizeof HashBucket).
+    /// Fixed at store creation — reopening an existing store always uses the recorded size.
+    /// Bulk mode bumps this to 256M buckets (8 GB sparse file) so Wikidata-scale ingests
+    /// never overflow the table. See ADR-027 and <see cref="BulkMode"/>.
+    /// </summary>
+    public long AtomHashTableInitialCapacity { get; init; } = 1L << 24;
+
+    /// <summary>
     /// Enables bulk load mode: WAL and B+Tree indexes both use FileOptions.None
     /// (no write-through), CommitBatch skips fsync, secondary indexes are deferred,
     /// and durability is provided by a single FlushToDisk at load completion.
@@ -91,6 +100,7 @@ public sealed class StorageOptions
         IndexInitialSizeBytes = 64L << 20,        // 64 MB per index (4 indexes = 256 MB)
         AtomDataInitialSizeBytes = 64L << 20,     // 64 MB atoms
         AtomOffsetInitialCapacity = 64L << 10,    // 64K atoms (~512 KB)
+        AtomHashTableInitialCapacity = 64L << 10, // 64K buckets (~2 MB)
         MinimumFreeDiskSpace = 512L << 20         // 512 MB minimum (relaxed for testing)
     };
 

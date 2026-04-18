@@ -93,7 +93,8 @@ public sealed class QuadStore : IDisposable
 
         // Create shared atom store for all indexes
         _atoms = new AtomStore(atomPath, _bufferManager, options.MaxAtomSize,
-            options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity);
+            options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
+            options.AtomHashTableInitialCapacity, options.BulkMode);
 
         // Create WAL for durability (bulk mode: no write-through, larger buffer)
         _bulkLoadMode = options.BulkMode;

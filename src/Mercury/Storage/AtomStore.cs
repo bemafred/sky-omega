@@ -48,11 +48,16 @@ namespace SkyOmega.Mercury.Storage;
 internal sealed unsafe class AtomStore : IDisposable
 {
     private const int PageSize = 4096; // 4KB pages
-    private const long HashTableSize = 1L << 24; // 16M buckets for TB-scale
+    private const long DefaultHashTableSize = 1L << 24; // 16M buckets for cognitive-scale stores
+    private const long BulkModeHashTableSize = 1L << 28; // 256M buckets for Wikidata-scale bulk loads
     private const long InitialDataSize = 1L << 30; // 1GB initial
     private const long InitialOffsetCapacity = 1L << 20; // 1M atoms initial
     private const int QuadraticProbeLimit = 64; // Quadratic probing reduces clustering
     private const int MaxProbeDistance = 4096; // Extended fallback for high-load scenarios
+
+    // Hash table size fixed at creation and derived from the index file length on re-open.
+    // The full table is a sparse mmap — physical disk usage tracks only touched buckets.
+    private readonly long _hashTableSize;
 
     /// <summary>
     /// Default maximum atom size (1MB). Prevents resource exhaustion from oversized values.
@@ -105,13 +110,17 @@ internal sealed unsafe class AtomStore : IDisposable
     private readonly long _maxAtomSize;
 
     public AtomStore(string baseFilePath)
-        : this(baseFilePath, null, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity) { }
+        : this(baseFilePath, null, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
     public AtomStore(string baseFilePath, IBufferManager? bufferManager)
-        : this(baseFilePath, bufferManager, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity) { }
+        : this(baseFilePath, bufferManager, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
     public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize)
-        : this(baseFilePath, bufferManager, maxAtomSize, InitialDataSize, InitialOffsetCapacity) { }
+        : this(baseFilePath, bufferManager, maxAtomSize, InitialDataSize, InitialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
+
+    public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
+                     long initialDataSize, long initialOffsetCapacity)
+        : this(baseFilePath, bufferManager, maxAtomSize, initialDataSize, initialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
     /// <summary>
     /// Creates an AtomStore with configurable initial sizes.
@@ -121,8 +130,11 @@ internal sealed unsafe class AtomStore : IDisposable
     /// <param name="maxAtomSize">Maximum size of a single atom in bytes.</param>
     /// <param name="initialDataSize">Initial size for the data file in bytes.</param>
     /// <param name="initialOffsetCapacity">Initial capacity for the offset index (number of atoms).</param>
+    /// <param name="hashTableInitialCapacity">Initial bucket count for the hash table (fixed at creation).</param>
+    /// <param name="bulkMode">When true, sizes the hash table for Wikidata-scale ingests using a sparse mmap.</param>
     public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
-                     long initialDataSize, long initialOffsetCapacity)
+                     long initialDataSize, long initialOffsetCapacity,
+                     long hashTableInitialCapacity, bool bulkMode)
     {
         if (maxAtomSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxAtomSize), "Max atom size must be positive");
@@ -130,6 +142,8 @@ internal sealed unsafe class AtomStore : IDisposable
             throw new ArgumentOutOfRangeException(nameof(initialDataSize), "Initial data size must be positive");
         if (initialOffsetCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(initialOffsetCapacity), "Initial offset capacity must be positive");
+        if (hashTableInitialCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(hashTableInitialCapacity), "Hash table capacity must be positive");
 
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _maxAtomSize = maxAtomSize;
@@ -163,10 +177,27 @@ internal sealed unsafe class AtomStore : IDisposable
             FileOptions.RandomAccess
         );
 
-        var indexSize = HashTableSize * sizeof(HashBucket);
+        // In bulk mode, pre-size the hash table to 256M buckets so it never overflows
+        // during Wikidata-scale ingests. APFS/ZFS/NTFS sparse-file semantics mean physical
+        // disk usage tracks only touched buckets — the 8 GB virtual file is cheap.
+        // Mirrors the sparse-mmap pattern used by QuadIndex in bulk mode.
+        var requestedCapacity = bulkMode
+            ? Math.Max(hashTableInitialCapacity, BulkModeHashTableSize)
+            : hashTableInitialCapacity;
+
+        long indexSize;
         if (_indexFile.Length == 0)
         {
+            _hashTableSize = requestedCapacity;
+            indexSize = _hashTableSize * sizeof(HashBucket);
             _indexFile.SetLength(indexSize);
+        }
+        else
+        {
+            // Existing store — hash table size is whatever the file was created with.
+            // Changing it would invalidate every bucket computation.
+            _hashTableSize = _indexFile.Length / sizeof(HashBucket);
+            indexSize = _hashTableSize * sizeof(HashBucket);
         }
 
         // Open/create offset index file (atomId → offset mapping)
@@ -282,13 +313,13 @@ internal sealed unsafe class AtomStore : IDisposable
                 nameof(utf8Value));
 
         var hash = ComputeHashUtf8(utf8Value);
-        var bucket = (long)((ulong)hash % (ulong)HashTableSize);
+        var bucket = (long)((ulong)hash % (ulong)_hashTableSize);
 
         // Use quadratic probing to reduce clustering
         for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
             var probeOffset = ComputeProbeOffset(probe);
-            var currentBucket = (bucket + probeOffset) % HashTableSize;
+            var currentBucket = (bucket + probeOffset) % _hashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
@@ -340,13 +371,13 @@ internal sealed unsafe class AtomStore : IDisposable
             return 0;
 
         var hash = ComputeHashUtf8(utf8Value);
-        var bucket = (long)((ulong)hash % (ulong)HashTableSize);
+        var bucket = (long)((ulong)hash % (ulong)_hashTableSize);
 
         // Use quadratic probing to match insertion pattern
         for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
             var probeOffset = ComputeProbeOffset(probe);
-            var currentBucket = (bucket + probeOffset) % HashTableSize;
+            var currentBucket = (bucket + probeOffset) % _hashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
@@ -539,7 +570,7 @@ internal sealed unsafe class AtomStore : IDisposable
         for (int probe = 0; probe < MaxProbeDistance; probe++)
         {
             var probeOffset = ComputeProbeOffset(probe);
-            var currentBucket = (bucket + probeOffset) % HashTableSize;
+            var currentBucket = (bucket + probeOffset) % _hashTableSize;
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
@@ -559,7 +590,7 @@ internal sealed unsafe class AtomStore : IDisposable
         }
 
         // Hash table truly full - should not happen with 16M buckets and 4096 probes
-        var loadFactor = (double)_atomCount / HashTableSize * 100;
+        var loadFactor = (double)_atomCount / _hashTableSize * 100;
         throw new InvalidOperationException(
             $"Hash table overflow at bucket {bucket} after {MaxProbeDistance} probes. " +
             $"Load factor: {loadFactor:F2}%. Consider increasing hash table size.");
@@ -800,10 +831,16 @@ internal sealed unsafe class AtomStore : IDisposable
             _atomCount = 0;
             _totalBytes = 0;
 
-            // Zero the entire hash table (16M buckets × 32 bytes each)
-            // Note: sizeof(HashBucket) is 32 bytes (4 × 8-byte longs)
-            var hashTableBytes = (int)(HashTableSize * sizeof(HashBucket));
-            new Span<byte>(_hashTable, hashTableBytes).Clear();
+            // Zero the entire hash table. sizeof(HashBucket) is 32 bytes (4 × 8-byte longs).
+            // Chunked in int-sized spans because bulk-mode hash tables (8 GB) exceed Span's 2 GB limit.
+            var hashTableBytes = _hashTableSize * sizeof(HashBucket);
+            const int ChunkSize = 1 << 30; // 1 GB per iteration — well under int.MaxValue
+            var basePtr = (byte*)_hashTable;
+            for (long cleared = 0; cleared < hashTableBytes; cleared += ChunkSize)
+            {
+                var span = (int)Math.Min(ChunkSize, hashTableBytes - cleared);
+                new Span<byte>(basePtr + cleared, span).Clear();
+            }
 
             // Offset index doesn't need clearing - stale entries are ignored
             // since lookups check atomId <= _nextAtomId
