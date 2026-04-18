@@ -26,6 +26,7 @@ string? convertOutput = null;
 bool rebuildIndexes = false;
 long? minFreeSpaceGB = null;
 string? metricsOutPath = null;
+bool noRepl = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -92,6 +93,9 @@ for (int i = 0; i < args.Length; i++)
             if (i + 1 < args.Length)
                 metricsOutPath = args[++i];
             break;
+        case "--no-repl":
+            noRepl = true;
+            break;
         default:
             if (args[i].StartsWith('-'))
             {
@@ -149,6 +153,7 @@ if (showHelp)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
           --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
+          --no-repl                  Skip the REPL after --load/--bulk-load/--rebuild-indexes (auto-enabled when stdin is not a TTY)
 
         Examples:
           mercury                                # Default store (cli)
@@ -453,7 +458,14 @@ using (var session = new ReplSession(
         return Task.CompletedTask;
     }))
 {
-    session.RunInteractive();
+    // Skip the REPL for unattended/scripted runs: explicit --no-repl, or stdin
+    // redirected (pipe, file, /dev/null). A TTY stdin still drops into the REPL as
+    // documented. Non-TTY REPL would block in read(stdin) forever under profilers,
+    // CI, and child-process launches.
+    if (!noRepl && !Console.IsInputRedirected)
+    {
+        session.RunInteractive();
+    }
 }
 
 return 0;

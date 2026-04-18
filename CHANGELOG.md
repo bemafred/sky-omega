@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.14] - 2026-04-18
+
+### Added
+- **CLI: `--no-repl` flag and auto-detection of non-TTY stdin.** `mercury --bulk-load file.nt` used to always drop into the REPL after the load — which blocks forever in `read(stdin)` under profilers, CI, child-process launches, or anything else that doesn't have a terminal. Now: if stdin is redirected (pipe, file, `/dev/null`), or `--no-repl` is passed, the CLI exits after the load completes. TTY stdin still drops into the REPL as documented. Discovered when the first dotTrace run wedged because the profiler's stdin isn't a TTY.
+
+### Fixed
+- **SPARQL parser: prefixed-name datatype before `;` in INSERT DATA.** `ParseTermForUpdate` only accepted `^^<full-iri>` and ignored `^^prefix:local`. A triple like `ex:s ex:date "2026-04-17"^^xsd:date ; ex:topic "first"` left the parser mid-literal, which misread the trailing `xsd:date ;` and either hung (default graph variant) or threw `Expected '}' but found ';'` (in-graph variant). Full-IRI datatypes were not affected. Legal per SPARQL 1.1 Update grammar but not exercised by the W3C sparql11-update conformance suite. Two regression tests landed yesterday pin this behavior; both pass now.
+
+### Performance
+- **Bulk load 10 M: +12 % throughput (57.7 K → 64.7 K triples/sec), GC heap −46 % (154 MB → 83 MB).** Four changes, all identified by dotTrace sampling on a release build:
+  - *Atom IDs instead of strings through the batch buffer.* `QuadStore.AddBatched` was calling `AtomStore.GetAtomString` four times per triple to materialize IDs back into strings, buffering those strings, then having `QuadIndex.Add` re-intern them at commit. 40 M string allocations and 40 M redundant hash lookups per 10 M load. The buffer now holds `List<LogRecord>` (atom IDs already live in the record), and a new `ApplyToIndexesById` / `ApplyDeleteToIndexesById` pair routes IDs straight to `QuadIndex.AddRaw` / the new `DeleteRaw`. Removes 1.03 % of profile time in `GetAtomString`, 0.2 % in redundant intern, 0.86 % in `BulkMoveWithWriteBarrier` (string refs no longer tracked by GC). `Recover` and immediate-mode `Add`/`Delete` also switched to the ID path — fewer lookups, same semantics.
+  - *Cache `DateTimeOffset.UtcNow` once per batch.* `AddBatched` was calling `UtcNow` per triple for the transaction-time column and `AddCurrentBatched` was calling it again for valid-from. Both now read `_batchTransactionTimeTicks` / `_batchCurrentFrom` captured in `BeginBatch`. Bitemporally equivalent (a batch is one moment) and removes 1.37 % of profile time.
+  - *Stop fstat'ing the data file on every atom insert.* `AtomStore.EnsureDataCapacity` read `_dataFile.Length`, which on macOS is an `fstat()` syscall. Added a tracked `_dataCapacity` field updated in lock-step with `SetLength`. Saves 0.57 % of profile time.
+  - *Stop fstat'ing the index file on every page allocation.* Same pattern in `QuadIndex.AllocatePage`. Added `_fileCapacity`. Saves 0.54 %.
+
+## [1.7.13] - 2026-04-18
+
+### Fixed
+- **`AtomStore` hash table is no longer fixed at 16 M buckets.** The previous `HashTableSize` const (1 << 24) overflowed at ~15.5 M unique atoms (96.72 % load factor, 4096-probe limit). Crashed the 100 M bulk-load gradient at 58.3 M triples — which by then had exhausted 16 M buckets worth of unique entity IRIs, predicates, and literals. The const is now a per-instance `_hashTableSize` initialized from `StorageOptions.AtomHashTableInitialCapacity` (default 16 M, preserves cognitive behavior). Bulk mode bumps the table to 256 M buckets (8 GB sparse mmap), mirroring the `QuadIndex` 256 GB sparse-mmap pattern — physical disk usage tracks touched buckets, not virtual size. Existing stores reopen with their original layout because the bucket count is derived from the index file length. `Clear()` now zeroes in 1 GB chunks so bulk-mode tables don't overflow `Span`'s 2 GB limit. Option B (dynamic rehash-on-grow) stays on the roadmap; only relevant if a cognitive store ever approaches its configured ceiling.
+
 ## [1.7.12] - 2026-04-18
 
 ### Fixed (workaround)

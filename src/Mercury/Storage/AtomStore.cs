@@ -89,6 +89,10 @@ internal sealed unsafe class AtomStore : IDisposable
     private long _dataPosition;
     private long _nextAtomId;
     private long _offsetCapacity;
+    // Tracked data-file capacity. Mirrors _dataFile.Length but updated in lock-step
+    // with SetLength so the hot-path check in EnsureDataCapacity never calls fstat().
+    // Bulk-load profiling showed FileStream.Length taking ~0.5% of total time on macOS.
+    private long _dataCapacity;
 
     // Hash table for lookups (memory-mapped)
     private HashBucket* _hashTable;
@@ -166,6 +170,7 @@ internal sealed unsafe class AtomStore : IDisposable
         {
             _dataFile.SetLength(initialDataSize);
         }
+        _dataCapacity = _dataFile.Length;
 
         // Open/create index file (hash table)
         _indexFile = new FileStream(
@@ -598,12 +603,14 @@ internal sealed unsafe class AtomStore : IDisposable
 
     private void EnsureDataCapacity(long requiredSize)
     {
-        if (requiredSize <= _dataFile.Length)
+        // Fast path reads tracked capacity (no fstat syscall). Under the writer
+        // lock _dataCapacity is always in sync with the underlying file length.
+        if (requiredSize <= _dataCapacity)
             return;
 
         lock (_resizeLock)
         {
-            if (requiredSize <= _dataFile.Length)
+            if (requiredSize <= _dataCapacity)
                 return;
 
 #if DEBUG
@@ -613,13 +620,14 @@ internal sealed unsafe class AtomStore : IDisposable
 #endif
             try
             {
-                var newSize = Math.Max(_dataFile.Length * 2, requiredSize + InitialDataSize);
+                var newSize = Math.Max(_dataCapacity * 2, requiredSize + InitialDataSize);
 
                 // ADR-020 §4: extend file before creating mapping, so mapped
                 // region never transiently exceeds file length.
 
-                // 1. Extend the underlying file length
+                // 1. Extend the underlying file length (tracked capacity mirrors it)
                 _dataFile.SetLength(newSize);
+                _dataCapacity = newSize;
 
                 // 2. Create new map and accessor over the extended file
                 var newMap = MemoryMappedFile.CreateFromFile(

@@ -38,6 +38,10 @@ internal sealed unsafe class QuadIndex : IDisposable
     private long _rootPageId;
     private long _nextPageId;
     private long _quadCount;
+    // Tracked file capacity. Reading FileStream.Length on every page allocation
+    // issued fstat() — up to 0.5% of bulk-load time on macOS. Mirror SetLength
+    // so the hot path in AllocatePage stays in process.
+    private long _fileCapacity;
 
     /// <summary>
     /// Create a temporal quad store with its own atom store
@@ -91,6 +95,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         {
             _fileStream.SetLength(actualInitialSize);
         }
+        _fileCapacity = _fileStream.Length;
 
         _mmapFile = MemoryMappedFile.CreateFromFile(
             _fileStream,
@@ -194,6 +199,29 @@ internal sealed unsafe class QuadIndex : IDisposable
         };
 
         InsertIntoTree(temporalKey, _rootPageId);
+    }
+
+    /// <summary>
+    /// Soft-delete a key with pre-resolved atom IDs. Used by QuadStore when replaying
+    /// WAL records or materializing a batch — the IDs are already known, so we skip
+    /// the string lookup roundtrip that the public Delete(span) path does.
+    /// Returns true if the entry was found and marked deleted.
+    /// </summary>
+    internal bool DeleteRaw(long graph, long primary, long secondary, long tertiary,
+        long validFrom, long validTo, long transactionTime)
+    {
+        var key = new TemporalKey
+        {
+            Graph = graph,
+            Primary = primary,
+            Secondary = secondary,
+            Tertiary = tertiary,
+            ValidFrom = validFrom,
+            ValidTo = validTo,
+            TransactionTime = transactionTime
+        };
+
+        return DeleteFromTree(key);
     }
 
     /// <summary>
@@ -1080,19 +1108,22 @@ internal sealed unsafe class QuadIndex : IDisposable
     {
         var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
 
-        // Extend file if needed
+        // Extend file if needed — uses tracked capacity to avoid fstat() on every
+        // page allocation (profile showed ~0.5% of bulk-load time in FStat).
         var requiredSize = (pageId + 1) * PageSize;
-        if (requiredSize > _fileStream.Length)
+        if (requiredSize > _fileCapacity)
         {
             lock (_fileStream)
             {
-                if (requiredSize > _fileStream.Length)
+                if (requiredSize > _fileCapacity)
                 {
-                    _fileStream.SetLength(Math.Max(_fileStream.Length * 2, requiredSize));
+                    var newSize = Math.Max(_fileCapacity * 2, requiredSize);
+                    _fileStream.SetLength(newSize);
+                    _fileCapacity = newSize;
                 }
             }
         }
-        
+
         SaveMetadata();
         return pageId;
     }
