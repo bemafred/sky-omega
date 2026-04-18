@@ -11,7 +11,7 @@ Phase 4.1 of [ADR-027](../adrs/mercury/ADR-027-wikidata-scale-streaming-pipeline
 | 1 M (orphans contention) | 1,464 /sec | 11 m 23 s | 685 | 1.7.7 (broken WriteThrough) |
 | 1 M (clean, fix) | **54,978 /sec** | 18.4 s | 685 | 1.7.9 (msync fix) |
 | 10 M (clean, fix) | **137,780 /sec** | 1 m 12 s | 220 | 1.7.9 |
-| 100 M (in progress) | TBD | TBD | TBD | **1.7.12** |
+| 100 M (1.7.12, **crashed at 58.3 M**) | 77,936 /sec avg, 137,206 /sec recent | 12 m 22 s to crash | ~241 (14 GB / 58 M) | **1.7.12** — atom hash overflow |
 | 1 B | not run | — | — | — |
 | 21.3 B | not run | — | — | — |
 
@@ -46,7 +46,17 @@ Phase 4.1 of [ADR-027](../adrs/mercury/ADR-027-wikidata-scale-streaming-pipeline
   - **Option 3 (mmap-grow):** Unmap, recreate mmap with new size, reacquire `_basePtr`. Invasive in unsafe code; risky.
   - Recommendation: **Option 1 first, Option 2 as the strategic answer when datasets ever exceed per-process VM (~64 TB).**
 
-### Bug 5 (incidental) — Orphaned `dotnet test` processes
+### Bug 5 — `AtomStore` hash table fixed at 1 M buckets (no rehash-on-grow)
+- **Symptom:** `InvalidOperationException: Hash table overflow at bucket 9415495 after 4096 probes. Load factor: 96.72%.` at 58.3 M triples on the 1.7.12 100 M run.
+- **Root cause:** `AtomOffsetInitialCapacity` defaults to `1 << 20` (1 M entries). At ~58 M Wikidata triples we have ~5-10 M unique atoms, well past 1 M; load factor exceeded the 4096-probe threshold and the implementation throws rather than rehashing.
+- **Status:** **NOT YET FIXED** — this is the next bug to address tomorrow.
+- **Fix options:**
+  - **Option A (workaround):** bump `AtomOffsetInitialCapacity` to e.g. 1 << 28 (~268 M entries) for bulk mode. Same sparse-mmap pattern as the QuadIndex 256 GB workaround. Disk usage tracks actual touched buckets.
+  - **Option B (proper):** rehash-on-grow — when load factor exceeds threshold, allocate a new hash table at 2× size, walk all atoms, re-insert. Standard hash table dynamic-sizing pattern.
+- **Recommendation:** **Option A first**, Option B later. Option A is one-line change matching the `QuadIndex` mmap workaround pattern. Option B is the right long-term answer but more invasive (atom hash insert is on the hot path).
+- **Wikidata atom estimate for sizing:** 100-200 M unique entity IRIs + 10-50 K predicate IRIs + 500 M-2 B literals → on the order of 1-2 B unique atoms total. Need a hash table sized for ~3 B buckets at < 50 % load factor → 4 GB of bucket array per atom store. Sparse-mmap tolerates this fine.
+
+### Bug 6 (incidental) — Orphaned `dotnet test` processes
 - **Symptom:** Four `testhost.dll` processes at 100 % CPU each, leftover from earlier `dotnet test` invocations I detached and didn't reap. Starved the bulk-load process of CPU during the first 1 M run, depressing the throughput baseline.
 - **Fix:** Killed them. Going forward, I should not detach `dotnet test` runs without ensuring host process cleanup.
 - **Not a code bug;** an operational mistake on my part. Captured here so the contaminated 1 M baseline measurement (1,464/sec) is understood as the combination of orphans + WriteThrough + msync, not a clean Mercury number.
@@ -70,11 +80,16 @@ Each bug's fix unlocked the next scale's failure. Without the gradient, all five
 
 When the session resumes (after Martin's overnight OS reboot/upgrade):
 
-1. **Check what completed overnight:**
-   - The 100 M load (PID 16974 at session end, started 14:02) ran detached — but `nohup` does NOT survive an OS reboot, only shell exit. The reboot will have killed it. Status will be in `/tmp/load-100m-1.7.12.log` and `/tmp/load-100m-1.7.12.jsonl` (might not have a summary record if killed mid-load).
-2. **Check git state:** all 1.7.8 → 1.7.12 changes should be on origin/main (this session committed them — see commit list below).
-3. **Decide:** rerun 100 M, or skip directly to 1 B. Either way, gradient continuation needs Mercury 1.7.12 installed (`./tools/install-tools.sh` if not already from disk).
-4. **mmap proper fix:** before running 1 B, decide whether 256 GB cap is enough (1 B should be ~85 GB per index — fits). For full 21.3 B the cap needs to be raised to ~2 TB per index, OR Option 2 (chunked mmap) is implemented.
+1. **Confirmed status at session end:** the 100 M run with 1.7.12 made it to **58.3 M triples** (more than 2× past previous high of 27.9 M before mmap workaround). Crashed on `AtomStore` hash table overflow (Bug 5 above). The mmap-grow workaround held through the 27.9 M boundary that previously crashed; the next ceiling is atom interning capacity.
+2. **Git state:** commits `719fa94` (1.7.8-1.7.12) and the prior `1c3f813` (1.7.6-1.7.7) are on origin/main. The 5th bug (atom hash overflow) is documented but **not yet fixed** in code.
+3. **Next code change:** apply Option A workaround for Bug 5 — bump `AtomOffsetInitialCapacity` to ~256 M for bulk mode (matches the QuadIndex 256 GB pattern). Single-line change in `StorageOptions` or `AtomStore` constructor. Then redo 100 M, expect completion. Then 1 B.
+4. **Before running 21.3 B:** Bug 4 mmap cap may need raising from 256 GB to ~2 TB per index. Bug 5 atom hash may need raising from 256 M to ~3 B buckets. Both are sparse-mmap workarounds; proper rehash and chunked-mmap fixes can come later.
+5. **Re-extract the slices** (lost on reboot if /tmp cleared):
+   ```bash
+   head -n 1000000   ~/Library/SkyOmega/datasets/wikidata/full/latest-all.nt > /tmp/wikidata-1m-clean.nt
+   head -n 10000000  ~/Library/SkyOmega/datasets/wikidata/full/latest-all.nt > /tmp/wikidata-10m-clean.nt
+   head -n 100000000 ~/Library/SkyOmega/datasets/wikidata/full/latest-all.nt > /tmp/wikidata-100m-clean.nt
+   ```
 
 ## Reproduction
 
