@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.12] - 2026-04-18
+
+### Fixed (workaround)
+- **Bulk-mode `QuadIndex` pre-sizes the mmap to 256 GB per index.** Previously the mmap was created at the initial file size (default 1 GB). When `AllocatePage` extended the file via `SetLength`, the existing mmap still covered only 1 GB — writes to pages past that boundary hit `AccessViolationException` in `SplitLeafPage`. Crashed during 100 M bulk-load gradient at 27.9 M triples (~150 K pages × 16 KB = 2.4 GB into a 1 GB mmap). This is a temporary workaround: macOS allocates 256 GB of virtual address space immediately but physical pages only on touch (sparse file), and the per-process VM ceiling (~64 TB) leaves room for full Wikidata at ~1.8 TB per index. Proper fix (mmap-grow via unmap + recreate, OR chunked mmap with stable per-chunk pointers) is a follow-up workstream — not required while this baseline is sufficient. Cognitive mode still uses the original 1 GB initial size; small stores stay small.
+
+## [1.7.11] - 2026-04-18
+
+### Fixed
+- **N-Triples parser sliding-buffer lookahead.** Same class of bug as the Turtle parser fix in 1.7.4: `Peek` and `PeekAhead` did not refill the buffer when bytes lay past the current end. Worse, the original `Peek` had `return _endOfStream ? -1 : -1;` — a typo where the refill case was missing entirely (both branches return -1). Any literal larger than the 8 KB buffer hit "Unterminated string literal" prematurely. Discovered when the 100 M bulk-load gradient run crashed at line 27,515,974 of the Wikidata N-Triples slice — a 4,202-character MathML literal exceeded the buffer. Fix: looped self-refill via new `FillBufferSync` (mirror of `FillBufferAsync` using sync `_stream.Read`), same pattern as `TurtleStreamParser.Buffer.cs`. The N-Triples parser now handles arbitrarily long literals correctly, and slow-stream cases (Read returning small chunks) work via the loop.
+
+## [1.7.10] - 2026-04-18
+
+### Fixed
+- **Bulk load no longer crashes during checkpoint with `AccessViolationException`.** `CheckpointIfNeeded` was running unconditionally during bulk load, calling `CollectPredicateStatistics` which scans the GPOS index. In bulk mode, GPOS receives no writes (only GSPO is populated; secondaries are deferred to `RebuildSecondaryIndexes`), so scanning an uninitialized B+Tree page walked into invalid memory. Crashed at ~20.8 M triples on the 100 M gradient run when WAL size triggered checkpoint. Fix: skip `CheckpointIfNeeded` entirely when `_bulkLoadMode` — bulk-load contract defers all durability to a single `FlushToDisk()` at load completion. (Defensive guards against scanning uninitialized indexes are a follow-up; this unblocks the gradient.)
+
+## [1.7.9] - 2026-04-18
+
+### Fixed
+- **Bulk load no longer issues msync per page write.** `QuadIndex.FlushPage` was calling `MemoryMappedViewAccessor.Flush()` on every B+Tree page modification — that's `msync()` on macOS, and it flushes the **entire** mapped region (multi-GB), not a single page. With ~5 page writes per triple insert × 100 K triples per chunk, the bulk-load path was issuing 500 K full-region msyncs per chunk and pinning the SSD random-write IOPS at ~5,500/sec. This was the actual bottleneck (the 1.7.8 `FileOptions.WriteThrough` change was a no-op for the mmap write path). Now `FlushPage` is a no-op in bulk mode; `QuadIndex.Flush()` exposes the deferred msync; `QuadStore.FlushToDisk()` calls it on all four indexes at load completion alongside the WAL flush. Cognitive mode keeps per-page durability semantics. Expected throughput improvement: 10–100× — depends on how IOPS-bound the previous gradient was vs other costs (atom interning likely the next ceiling).
+
+## [1.7.8] - 2026-04-18
+
+### Fixed
+- **`QuadIndex` honors `bulkMode` in its `FileStream` open options.** Previously opened with `FileOptions.WriteThrough` unconditionally; now branches the same way `WriteAheadLog` does. (Effect on the bulk-load hot path turned out to be minimal because writes go through the mmap accessor, not the FileStream — but the option mismatch was inconsistent with WAL design and worth correcting. The actual write-amplification bottleneck is fixed in 1.7.9.)
+
 ## [1.7.7] - 2026-04-17
 
 ### Fixed

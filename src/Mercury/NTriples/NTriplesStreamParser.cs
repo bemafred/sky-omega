@@ -611,22 +611,32 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
 
     #region Buffer Management
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int Peek()
     {
-        if (_bufferPosition >= _bufferLength)
-            return _endOfStream ? -1 : -1;
-
+        // Refill on exhaustion. Loop because slow streams may return less than
+        // the requested count per Read. Same pattern as TurtleStreamParser.Peek
+        // (fixed in 1.7.4); the original `_endOfStream ? -1 : -1` was a typo —
+        // the refill case was missing and any literal larger than the buffer
+        // hit "Unterminated string literal" prematurely.
+        while (_bufferPosition >= _bufferLength)
+        {
+            if (_endOfStream) return -1;
+            FillBufferSync();
+        }
         return _inputBuffer[_bufferPosition];
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int PeekAhead(int offset)
     {
         var pos = _bufferPosition + offset;
-        if (pos >= _bufferLength)
-            return -1;
-
+        if (pos < 0) return -1;
+        while (pos >= _bufferLength)
+        {
+            if (_endOfStream) return -1;
+            FillBufferSync();
+            pos = _bufferPosition + offset;
+            if (pos < 0) return -1;
+        }
         return _inputBuffer[pos];
     }
 
@@ -683,6 +693,41 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
         var bytesRead = await _stream.ReadAsync(
             _inputBuffer.AsMemory(_bufferLength, _inputBuffer.Length - _bufferLength),
             cancellationToken);
+
+        if (bytesRead == 0)
+        {
+            _endOfStream = true;
+        }
+        else
+        {
+            _bufferLength += bytesRead;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous buffer refill. Called by Peek/PeekAhead when the buffer is
+    /// exhausted mid-statement. Mirrors FillBufferAsync but uses synchronous
+    /// _stream.Read so it can be invoked from the sync parser hot path.
+    /// </summary>
+    private void FillBufferSync()
+    {
+        if (_endOfStream)
+            return;
+
+        if (_bufferPosition > 0 && _bufferPosition < _bufferLength)
+        {
+            var remaining = _bufferLength - _bufferPosition;
+            Array.Copy(_inputBuffer, _bufferPosition, _inputBuffer, 0, remaining);
+            _bufferLength = remaining;
+            _bufferPosition = 0;
+        }
+        else if (_bufferPosition >= _bufferLength)
+        {
+            _bufferPosition = 0;
+            _bufferLength = 0;
+        }
+
+        var bytesRead = _stream.Read(_inputBuffer, _bufferLength, _inputBuffer.Length - _bufferLength);
 
         if (bytesRead == 0)
         {

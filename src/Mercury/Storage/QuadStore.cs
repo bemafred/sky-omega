@@ -103,10 +103,10 @@ public sealed class QuadStore : IDisposable
         // Create indexes with shared atom store
         // Entity-first indexes sort by Graph → dimensions → time
         // TGSP uses time-first sort for O(log N + k) temporal range queries
-        _gspoIndex = new QuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
-        _gposIndex = new QuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
-        _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst);
-        _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.TimeFirst);
+        _gspoIndex = new QuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+        _gposIndex = new QuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+        _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+        _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.TimeFirst, options.BulkMode);
 
         // Create trigram index for full-text search
         var trigramPath = Path.Combine(baseDirectory, "trigram");
@@ -523,12 +523,19 @@ public sealed class QuadStore : IDisposable
     public bool IsBulkLoadMode => _bulkLoadMode;
 
     /// <summary>
-    /// Flush all WAL writes to durable storage. Call once at bulk load completion
-    /// to make the entire load durable. No-op in cognitive mode (each CommitBatch fsyncs).
+    /// Flush all WAL writes and B+Tree index pages to durable storage. Call once
+    /// at bulk load completion to make the entire load durable. No-op in cognitive
+    /// mode for the WAL (each CommitBatch fsyncs); the index Flush() calls are
+    /// the only durability guarantee for B+Tree pages written in bulk mode, where
+    /// per-page msync is deferred to avoid O(N×region) full-region flushes.
     /// </summary>
     public void FlushToDisk()
     {
         _wal.FlushToDisk();
+        _gspoIndex.Flush();
+        _gposIndex.Flush();
+        _gospIndex.Flush();
+        _tgspIndex.Flush();
     }
 
     /// <summary>
@@ -795,8 +802,16 @@ public sealed class QuadStore : IDisposable
     /// Check if checkpoint is needed and perform it.
     /// Must be called within write lock.
     /// </summary>
+    /// <remarks>
+    /// In bulk-load mode, checkpoints are skipped entirely. The bulk-load
+    /// contract defers all durability to a single FlushToDisk() at load
+    /// completion, and the secondary indexes (which CollectPredicateStatistics
+    /// scans during checkpoint) receive no writes during bulk load — scanning
+    /// an uninitialized secondary index hits AccessViolationException.
+    /// </remarks>
     private void CheckpointIfNeeded()
     {
+        if (_bulkLoadMode) return;
         if (_wal.ShouldCheckpoint())
         {
             CheckpointInternal();

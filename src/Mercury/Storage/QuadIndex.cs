@@ -30,6 +30,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     private readonly PageCache _pageCache;
     private readonly KeyComparer _comparer;
     private readonly KeySortOrder _sortOrder;
+    private readonly bool _bulkMode;
 
     // Cached base pointer acquired once during construction (avoids repeated AcquirePointer calls)
     private byte* _basePtr;
@@ -54,24 +55,41 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Use this constructor only when sharing an AtomStore across indexes.
     /// </remarks>
     internal QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30,
-        KeySortOrder sortOrder = KeySortOrder.EntityFirst)
+        KeySortOrder sortOrder = KeySortOrder.EntityFirst, bool bulkMode = false)
     {
         _sortOrder = sortOrder;
+        _bulkMode = bulkMode;
         _comparer = sortOrder == KeySortOrder.TimeFirst
             ? TemporalKey.CompareTimeFirst
             : TemporalKey.CompareEntityFirst;
+        // Bulk mode: FileOptions.None lets the OS write cache batch B+Tree page
+        // writes; durability is deferred to QuadStore.FlushToDisk() at end of load.
+        // Cognitive mode: FileOptions.WriteThrough makes every page write reach
+        // storage immediately, matching the WAL's per-write fsync discipline.
+        // Same pattern WriteAheadLog already uses for its own file open.
         _fileStream = new FileStream(
             filePath,
             FileMode.OpenOrCreate,
             FileAccess.ReadWrite,
             FileShare.None,
             bufferSize: 4096,
-            FileOptions.RandomAccess | FileOptions.WriteThrough
+            FileOptions.RandomAccess | (bulkMode ? FileOptions.None : FileOptions.WriteThrough)
         );
+
+        // In bulk mode, pre-size the file to a large mmap capacity so AllocatePage
+        // can extend the underlying file via SetLength without ever needing to
+        // remap. Sparse-file behavior (APFS, ZFS, NTFS) means disk usage tracks
+        // actual touched pages, not this size. macOS per-process VM ceiling is
+        // ~64 TB so 256 GB per index leaves comfortable headroom for full Wikidata.
+        // Cognitive mode keeps the original 1 GB initial — small stores never grow
+        // past it, large cognitive stores stay rare.
+        var actualInitialSize = bulkMode
+            ? Math.Max(initialSizeBytes, 256L << 30)  // 256 GB
+            : initialSizeBytes;
 
         if (_fileStream.Length == 0)
         {
-            _fileStream.SetLength(initialSizeBytes);
+            _fileStream.SetLength(actualInitialSize);
         }
 
         _mmapFile = MemoryMappedFile.CreateFromFile(
@@ -1175,6 +1193,23 @@ internal sealed unsafe class QuadIndex : IDisposable
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void FlushPage(TemporalBTreePage* page)
+    {
+        // In bulk mode, defer all msync to a single Flush() at load completion.
+        // _accessor.Flush() on macOS is msync of the ENTIRE mapped region (not a
+        // page) — calling it per page write produces O(N×region_size) work and
+        // saturates the SSD random-write IOPS at ~5,500/sec, capping bulk-load
+        // throughput at ~1,000 triples/sec independent of CPU. The OS page cache
+        // holds dirty pages; QuadStore.FlushToDisk() at end of bulk load issues
+        // the single msync. Cognitive mode keeps per-page durability.
+        if (_bulkMode) return;
+        _accessor.Flush();
+    }
+
+    /// <summary>
+    /// Force all pending mmap writes to disk. Called once at the end of a bulk
+    /// load to flush dirty pages that FlushPage skipped in bulk mode.
+    /// </summary>
+    public void Flush()
     {
         _accessor.Flush();
     }

@@ -57,8 +57,10 @@ public sealed class StorageOptions
     public long AtomOffsetInitialCapacity { get; init; } = 1L << 20;
 
     /// <summary>
-    /// Enables bulk load mode: WAL uses FileOptions.None (no write-through) with 64KB buffer,
-    /// and CommitBatch skips fsync. Caller is responsible for final FlushToDisk.
+    /// Enables bulk load mode: WAL and B+Tree indexes both use FileOptions.None
+    /// (no write-through), CommitBatch skips fsync, secondary indexes are deferred,
+    /// and durability is provided by a single FlushToDisk at load completion.
+    /// Caller is responsible for calling FlushToDisk and (if needed) RebuildSecondaryIndexes.
     /// No crash recovery during load — if it fails, delete the store and retry.
     /// </summary>
     public bool BulkMode { get; init; }
