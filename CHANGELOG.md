@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.16] - 2026-04-19
+
+### Performance
+- **Bulk load 10 M: +12 % throughput (243 K → 272 K triples/sec).** `AtomStore.ComputeHashUtf8` was a byte-at-a-time FNV-1a loop; release profiling after the 1.7.15 SaveMetadata fix showed it at ~7 % of total time, dominated by the existing-atom probe path (each lookup pays one hash computation). Word-wise variant uses the same FNV-1a constants but processes 8 bytes per iteration via `BinaryPrimitives.ReadUInt64LittleEndian`, with a byte-wise tail for the last 0-7 bytes. `ComputeHash(ReadOnlySpan<char>)` reinterprets the chars as bytes and reuses the UTF-8 path. Hashes are recomputed on every lookup (never persisted across versions), so swapping the hash function is safe. BCL-only — no `System.IO.Hashing` dependency.
+
 ## [1.7.15] - 2026-04-18
 
 ### Performance
