@@ -1,6 +1,6 @@
 # Full Pipeline Gradient — 2026-04-19
 
-**Status (2026-04-19):** Bulk load + rebuild both validated at 1 M / 10 M / 100 M. 1 B rebuild in progress (bulk was validated 2026-04-18, see [bulk-load-gradient-2026-04-17.md](bulk-load-gradient-2026-04-17.md)).
+**Status (2026-04-19, completed):** Bulk load + rebuild both validated at 1 M / 10 M / 100 M / **1 B**. 1 B rebuild completed in 3 h 7 m 32 s, no new bugs. (Bulk-load half validated 2026-04-18, see [bulk-load-gradient-2026-04-17.md](bulk-load-gradient-2026-04-17.md).)
 
 Extends the yesterday gradient. Yesterday only exercised **bulk load** — the store after load was in `PrimaryOnly` state, GPOS/GOSP/TGSP/Trigram empty. Today's gradient validates the **rebuild** half of the pipeline: turning a bulk-loaded `PrimaryOnly` store into a `Ready` production-queryable store.
 
@@ -17,13 +17,34 @@ Rebuild is therefore the step that makes bulk-loaded data *actually usable* for 
 | 1 M  |    4 s (250 K/sec) |  2.9 s  |  130 ms | 438 K |
 | 10 M |   46 s (217 K/sec) |   42 s  |  857 ms | 4.37 M |
 | 100 M |   5 m 49 s (286 K/sec) | **11 m 35 s** | 6.5 s | 45.67 M |
-| 1 B  |   (validated 2026-04-18, 50 m 17 s @ 331 K/sec) | **in progress** | — | — |
+| 1 B  |   50 m 17 s @ 331 K/sec (2026-04-18) | **3 h 7 m 32 s** | **49.3 s** | 444.00 M |
 
 Predicate-bound query: `SELECT (COUNT(*) AS ?n) WHERE { ?s <http://schema.org/about> ?o }`.
 
-### Rebuild scales ~1.6× per decade
+### Rebuild scales ~16× per decade
 
-Rebuild time is super-linear in data size (expected for B+Tree insert at growing depth). Trigram entries scale linearly (4.4× per decade, matching the literal-atom-to-triple ratio).
+Rebuild time is super-linear in data size (expected for B+Tree insert at growing depth):
+
+| Transition | Time factor | Data factor |
+|---|---|---|
+| 1 M → 10 M | 14.5× | 10× |
+| 10 M → 100 M | 16.5× | 10× |
+| 100 M → 1 B | 16.2× | 10× |
+
+Consistent ~16× per decade across three orders of magnitude. Trigram entries scale linearly (~10× per decade), matching the literal-atom-to-triple ratio.
+
+### Query scaling — GPOS index works
+
+Predicate-bound count across scales:
+
+| Scale | Query time | Matching rows |
+|---|---|---|
+| 1 M | 130 ms | 53,561 |
+| 10 M | 857 ms | 439,703 |
+| 100 M | 6.5 s | 3,212,485 |
+| 1 B | 49.3 s | 14,831,540 |
+
+Query time is proportional to **matching rows**, not total triples — GPOS is doing its job (scan only the predicate's subtree). `schema:about` distribution across Wikidata isn't uniform, which is why the 1 B result count grew 4.6× from 100 M, not 10×.
 
 ## Bugs surfaced during the gradient
 
@@ -101,9 +122,25 @@ Every scale step in this gradient surfaced exactly one class of bug, matching ye
 | 1 M | Defer-msync flag construction-time only (R-1) |
 | 10 M | TrigramIndex stale pointer + SetLength order (R-2, R-3) |
 | 100 M | *(no new bugs — throughput and correctness as projected)* |
-| 1 B | *(pending)* |
+| 1 B | *(no new bugs — rebuild completed in 3 h 7 m, 14.8 M results via GPOS in 49 s)* |
 
-Yesterday's gradient found 5 bugs in the bulk-load path. Today's gradient found 3 more in the rebuild path. Each bug was invisible at smaller scale and guaranteed to hit in production.
+Yesterday's gradient found 5 bugs in the bulk-load path. Today's gradient found 3 more in the rebuild path. **8 bug classes total, each invisible at smaller scale, each guaranteed to hit in production.**
+
+The 1 B result is the important one: at the largest non-toy scale we can run on a single workstation, the pipeline works end-to-end with no new surprises. The three rebuild-path fixes (R-1, R-2, R-3) hold.
+
+### Store state after 1 B rebuild
+
+| Metric | Value |
+|---|---|
+| Triples queryable | 991,797,873 |
+| Unique atoms | ~213 M |
+| Trigram entries | 444,002,714 |
+| Physical disk | 648 GB |
+| Index state | `Ready` (all 4 indexes populated) |
+
+### A cosmetic observation
+
+After the 1 B rebuild exits cleanly (`exit=0`), the *next* mercury invocation (the query) takes ~14 min of Dispose time on exit after its 49 s query. That's msync across the 648 GB of mmap'd indexes on a cold-opened cognitive-mode store. Not a bug, but a UX wart — opening and closing a 1 B store is expensive by design when msync semantics are honored. If this becomes a problem in practice we can revisit: defer msync on read-only opens, or skip msync on Dispose entirely for read-only sessions.
 
 ## Reproduction
 
