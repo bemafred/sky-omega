@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.18] - 2026-04-19
+
+### Fixed
+- **SPARQL `SELECT (COUNT(*) AS ?n)` and similar aggregate-only projections now surface the alias.** `SparqlEngine.ExecuteSelect` built its `projectedNames` array from `SelectClause.ProjectedVariableCount` only, ignoring the separate `AggregateCount` list the parser maintains for expressions like `(COUNT(*) AS ?n)`. A query whose only projection was an aggregate produced `Variables = []`, which the formatter rendered as `(no variables selected)` even though the executor correctly computed the value and bound it to `?n`. Discovered while sanity-checking a 10 M bulk load via `:count` in the REPL — the REPL reported `Count: 0` against a store that actually held 9,993,790 triples. Fix: after populating projected variables in the original order, append aggregate aliases (non-empty `AliasLength`) to `projectedNames`. The executor bindings already carried `?n`; only the projection list was wrong. `SELECT *` unaffected. Mixed shapes like `SELECT ?g (COUNT(*) AS ?n) WHERE {} GROUP BY ?g` also now surface `?n`. Regression test added.
+
 ## [1.7.17] - 2026-04-19
 
 ### Changed

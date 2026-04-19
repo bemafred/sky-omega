@@ -255,15 +255,34 @@ public static class SparqlEngine
 
                 if (!parsed.SelectClause.SelectAll)
                 {
-                    // Explicit SELECT — expose only projected variables in SELECT clause order
-                    projectedNames = new string[parsed.SelectClause.ProjectedVariableCount];
-                    for (int i = 0; i < parsed.SelectClause.ProjectedVariableCount; i++)
+                    // Explicit SELECT — expose projected variables AND aggregate aliases.
+                    // The parser stores regular variables and aggregate expressions in
+                    // separate inline lists (SelectClause), so the original lexical order
+                    // is not preserved; we surface projected variables first and aggregate
+                    // aliases after. That covers the common `SELECT ?x (COUNT(*) AS ?n)`
+                    // and pure-aggregate `SELECT (COUNT(*) AS ?n)` shapes. Before this,
+                    // any SELECT whose only projection was an aggregate expression
+                    // produced an empty Variables array and rendered as
+                    // "(no variables selected)", silently dropping the count result.
+                    var varCount = parsed.SelectClause.ProjectedVariableCount;
+                    var aggCount = parsed.SelectClause.AggregateCount;
+                    projectedNames = new string[varCount + aggCount];
+                    for (int i = 0; i < varCount; i++)
                     {
                         var (start, length) = parsed.SelectClause.GetProjectedVariable(i);
                         var varSpan = sparql.AsSpan().Slice(start, length);
                         if (varSpan.Length > 0 && (varSpan[0] == '?' || varSpan[0] == '$'))
                             varSpan = varSpan.Slice(1);
                         projectedNames[i] = varSpan.ToString();
+                    }
+                    for (int i = 0; i < aggCount; i++)
+                    {
+                        var agg = parsed.SelectClause.GetAggregate(i);
+                        if (agg.AliasLength == 0) continue;
+                        var aliasSpan = sparql.AsSpan().Slice(agg.AliasStart, agg.AliasLength);
+                        if (aliasSpan.Length > 0 && (aliasSpan[0] == '?' || aliasSpan[0] == '$'))
+                            aliasSpan = aliasSpan.Slice(1);
+                        projectedNames[varCount + i] = aliasSpan.ToString();
                     }
                 }
                 else

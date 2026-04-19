@@ -233,4 +233,25 @@ public class SparqlEngineTests : PooledStoreTestBase
         Assert.NotNull(result.Rows);
         Assert.Single(result.Rows);
     }
+
+    // Regression: `SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }` used to produce an
+    // empty Variables array because ExecuteSelect built projectedNames from
+    // ProjectedVariableCount only, ignoring aggregate aliases. Result rendered as
+    // "(no variables selected)" even though the executor computed the right count.
+    // Discovered verifying a 10M bulk-load via :count in the REPL.
+    [Fact]
+    public void Query_SelectAggregateOnly_ExposesAliasInVariables()
+    {
+        PopulateTestData();
+
+        var result = SparqlEngine.Query(Store, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+
+        Assert.True(result.Success);
+        Assert.NotNull(result.Variables);
+        Assert.Contains("n", result.Variables);
+        Assert.NotNull(result.Rows);
+        Assert.Single(result.Rows);
+        Assert.True(result.Rows[0].ContainsKey("n"),
+            "Count result should be keyed by the aggregate alias 'n'");
+    }
 }
