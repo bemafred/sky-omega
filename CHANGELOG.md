@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.19] - 2026-04-19
+
+### Fixed
+- **Revert 1.7.16 word-wise FNV — it caused hash clustering on the 1 B bulk load.** `AtomStore.InternUtf8` overflowed the 4096-probe cap at bucket 178,897,824 with the hash table at **11.93 % load factor** (~30.5 M atoms of 256 M buckets) during a 1 B Wikidata ingest, around 116.5 M triples in. Root cause: the 1.7.16 word-wise FNV processed 8 bytes per round, but FNV-1a's avalanche is per-byte — collapsing 8 rounds into 1 weakened bit distribution on strings that share 8-byte prefixes (e.g., `<…entity/Q1000001>`, `<…entity/Q1000002>`), producing correlated hash trajectories for families of Wikidata entity IRIs. The 100 M slice didn't contain enough such atoms to trigger it; the 1 B slice did. Reverted `ComputeHashUtf8` to byte-at-a-time FNV-1a, which has known-good distribution. Gives back the ~12 % throughput win from 1.7.16 — correctness first. A faster hash with proper per-word mixing (xxHash64-style rounds) is deferred until we have a distribution-quality regression harness to verify it against adversarial Wikidata patterns.
+
 ## [1.7.18] - 2026-04-19
 
 ### Fixed

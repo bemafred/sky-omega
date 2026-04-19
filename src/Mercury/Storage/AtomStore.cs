@@ -499,46 +499,36 @@ internal sealed unsafe class AtomStore : IDisposable
         return (long)(QuadraticProbeLimit - 1) * (QuadraticProbeLimit - 1) + (probe - QuadraticProbeLimit + 1);
     }
 
-    // FNV-1a 64-bit constants. Keeping FNV's well-studied distribution properties
-    // while processing 8 bytes per iteration rather than one. Release profiling
-    // after the SaveMetadata fix (1.7.15) showed ComputeHashUtf8 at ~7% of total
-    // time; byte-at-a-time was the bottleneck. BCL-only (no System.IO.Hashing).
+    // FNV-1a 64-bit. Byte-at-a-time is slower than a word-wise variant but has
+    // known-good avalanche on adjacent strings (e.g., <…entity/Q1000001>,
+    // <…entity/Q1000002>) where the varying bytes fall inside a shared 8-byte
+    // word. An earlier word-wise FNV (1.7.16) caused hash clustering on the
+    // 1B-triple slice: 4096-probe overflow at 11.93% load factor. Reverted.
+    // A faster hash with proper per-word mixing (xxHash64-style rounds) would
+    // need inline BCL-only implementation; deferred until we have a
+    // distribution-quality regression harness to stress-test it.
     private const ulong FnvOffsetBasis = 14695981039346656037UL;
     private const ulong FnvPrime = 1099511628211UL;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long ComputeHash(ReadOnlySpan<char> value)
     {
-        // chars are 2 bytes; reinterpret as bytes and let ComputeHashUtf8 do the
-        // word-wise work. The hash value differs from the byte-wise original,
-        // but the hash is not persisted across Mercury versions — it is
-        // recomputed on every lookup, so changing the function is safe.
-        return ComputeHashUtf8(MemoryMarshal.AsBytes(value));
+        ulong hash = FnvOffsetBasis;
+        foreach (var ch in value)
+        {
+            hash = (hash ^ ch) * FnvPrime;
+        }
+        return (long)hash;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long ComputeHashUtf8(ReadOnlySpan<byte> value)
     {
         ulong hash = FnvOffsetBasis;
-        int i = 0;
-        int length = value.Length;
-
-        // Word-wise main loop: 8 bytes per FNV round instead of 1. ~4-8× fewer
-        // iterations on typical Wikidata atoms (IRIs, literals).
-        while (i + 8 <= length)
+        foreach (var b in value)
         {
-            var word = BinaryPrimitives.ReadUInt64LittleEndian(value.Slice(i));
-            hash = (hash ^ word) * FnvPrime;
-            i += 8;
+            hash = (hash ^ b) * FnvPrime;
         }
-
-        // Tail: byte-at-a-time for the last 0-7 bytes.
-        while (i < length)
-        {
-            hash = (hash ^ value[i]) * FnvPrime;
-            i++;
-        }
-
         return (long)hash;
     }
 
