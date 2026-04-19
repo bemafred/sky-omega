@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.0 Released** — Wikidata-scale ingestion pipeline (ADR-027). Bulk load mode (no fsync, GSPO-only), streaming Turtle parser with sliding buffer, deferred secondary indexing with rebuild, CLI convergence (`--store`, `--bulk-load`, `--convert`, `--rebuild-indexes`). Turtle parser buffer boundary fix — handles arbitrarily large statements at any buffer size. 4,030 tests, 0 failures.
+> **v1.7.19 Released** — Bulk load validated at 1 B Wikidata triples: **331 K triples/sec** average, 50 m 17 s wall, clean completion. Session hardening (1.7.13 → 1.7.19) surfaced and fixed ten distinct bug classes that only appear at real-data scale — atom hash table overflow, `SaveMetadata` msync amplification, `GetAtomString` round-trip, `FStat`-per-insert, hash clustering from a premature word-wise FNV. Throughput scales with data size through the 10 M → 100 M → 1 B gradient (243 K → 304 K → 331 K/sec) as the atom cache warms. 1,937 storage + SPARQL tests pass.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
