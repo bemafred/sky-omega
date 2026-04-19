@@ -491,8 +491,16 @@ internal sealed unsafe class TrigramIndex : IDisposable
 
             EnsurePostingCapacity(newOffset + newListSize);
 
-            // Copy existing entries
+            // Recompute atomsPtr AFTER EnsurePostingCapacity. A grow remaps the
+            // posting file, so _postingPtr changes and any pointer computed before
+            // the grow points into the now-unmapped old region — reading from it
+            // is a SIGBUS/AccessViolationException (reproduced at 10 M rebuild,
+            // v3). Same class of stale-pointer-across-remap bug as ADR-020 covers
+            // for AtomStore; trigram was missed.
+            atomsPtr = (long*)(_postingPtr + offset + sizeof(int) + sizeof(int));
             var newAtomsPtr = (long*)(_postingPtr + newOffset + sizeof(int) + sizeof(int));
+
+            // Copy existing entries
             for (int i = 0; i < count; i++)
             {
                 newAtomsPtr[i] = atomsPtr[i];
@@ -620,7 +628,17 @@ internal sealed unsafe class TrigramIndex : IDisposable
 
             var newSize = Math.Max(_postingFile.Length * 2, requiredSize + InitialPostingSize);
 
-            // Create new map and accessor
+            // ADR-020 §4: extend the file BEFORE creating the mapping. The old code
+            // created the mmap at the new capacity first, swapped pointers, then
+            // extended the file — meaning writes to the new region hit unmapped
+            // pages and triggered AccessViolationException (first reproduced during
+            // the 10 M rebuild gradient, the same class of bug as 1.7.12 Bug 4 on
+            // QuadIndex). Same fix: SetLength → map → swap → unmap old.
+
+            // 1. Extend the underlying file length
+            _postingFile.SetLength(newSize);
+
+            // 2. Create new map and accessor over the extended file
             var newMap = MemoryMappedFile.CreateFromFile(
                 _postingFile,
                 mapName: null,
@@ -635,14 +653,11 @@ internal sealed unsafe class TrigramIndex : IDisposable
             byte* newPtr = null;
             newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref newPtr);
 
-            // Atomic swap
+            // 3. Atomic swap
             _postingPtr = newPtr;
             Thread.MemoryBarrier();
 
-            // Extend file
-            _postingFile.SetLength(newSize);
-
-            // Cleanup old
+            // 4. Cleanup old
             _postingAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
             _postingAccessor.Dispose();
             _postingMap.Dispose();

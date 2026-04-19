@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.22] - 2026-04-19
+
+### Fixed
+- **`RebuildSecondaryIndexes` was ~25× slower than `--bulk-load` because `QuadIndex.SaveMetadata` msync ran per page allocation during rebuild.** The 1.7.15 defer-msync fix only applied when the index was opened in `BulkMode` (construction-time flag). Rebuild runs against a cognitive-mode-opened store, so every page split during GPOS/GOSP/TGSP construction triggered a full-region msync of the 256 GB sparse mmap. A 1 M rebuild didn't complete in 10 min. Fix: split the conflated `_bulkMode` flag in `QuadIndex` into (a) a construction-time decision that still pre-sizes the mmap for bulk loads, and (b) a runtime `_deferMsync` field with an `internal SetDeferMsync(bool)` method. `QuadStore.RebuildIndex` enables deferral around the rebuild loop, calls `Flush()` once at the end, then disables it. Same durability contract as the bulk-load path (single msync per rebuild phase). Measured: 1 M rebuild 2.9 s, 10 M rebuild 42 s, 100 M rebuild 11 m 35 s — same ~1.5× scaling factor as bulk load.
+- **`TrigramIndex.AppendToPostingList` dereferenced a stale pointer after the posting-list mmap was remapped.** When a posting list exceeded its inline capacity, `AppendToPostingList` computed `atomsPtr = _postingPtr + offset + …` *before* calling `EnsurePostingCapacity`, which can grow the file and atomically swap `_postingPtr` to a new mmap. The loop that copies old entries into the newly-allocated larger list then read from the stale pointer, hitting the previous (now unmapped) region — `System.AccessViolationException` at 10 M rebuild. Fix: recompute `atomsPtr` after `EnsurePostingCapacity` returns. Same class of bug as the ADR-020 remap-pointer invariants for `AtomStore`, just in a code path that predated that guidance.
+- **`TrigramIndex.EnsurePostingCapacity` created the new mmap before extending the file.** Writes past the old file length into the newly-mapped-but-not-yet-extended region hit unmapped pages — same class as 1.7.12 Bug 4 (`QuadIndex` mmap didn't grow with the file). Fix: `SetLength` → map → swap → unmap old (the order ADR-020 §4 requires). Discovered together with the stale-pointer bug above during the 10 M rebuild gradient.
+
 ## [1.7.19] - 2026-04-19
 
 ### Fixed

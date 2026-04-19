@@ -30,7 +30,14 @@ internal sealed unsafe class QuadIndex : IDisposable
     private readonly PageCache _pageCache;
     private readonly KeyComparer _comparer;
     private readonly KeySortOrder _sortOrder;
-    private readonly bool _bulkMode;
+    // _deferMsync controls whether FlushPage and SaveMetadata issue _accessor.Flush()
+    // (an msync over the whole mapped region — the expensive part). It is initialized
+    // from the constructor's bulkMode parameter but is NOT readonly: RebuildSecondaryIndexes
+    // toggles it around the rebuild loop so secondary-index construction avoids the same
+    // per-page msync cost that the 1.7.15 bulk-load fix removed from the primary path.
+    // "Bulk mode" conflated a construction-time decision (pre-size the mmap) with a
+    // runtime behavior (defer msync); this field is the runtime half.
+    private bool _deferMsync;
 
     // Cached base pointer acquired once during construction (avoids repeated AcquirePointer calls)
     private byte* _basePtr;
@@ -62,7 +69,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         KeySortOrder sortOrder = KeySortOrder.EntityFirst, bool bulkMode = false)
     {
         _sortOrder = sortOrder;
-        _bulkMode = bulkMode;
+        _deferMsync = bulkMode;
         _comparer = sortOrder == KeySortOrder.TimeFirst
             ? TemporalKey.CompareTimeFirst
             : TemporalKey.CompareEntityFirst;
@@ -1232,7 +1239,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         // throughput at ~1,000 triples/sec independent of CPU. The OS page cache
         // holds dirty pages; QuadStore.FlushToDisk() at end of bulk load issues
         // the single msync. Cognitive mode keeps per-page durability.
-        if (_bulkMode) return;
+        if (_deferMsync) return;
         _accessor.Flush();
     }
 
@@ -1244,6 +1251,15 @@ internal sealed unsafe class QuadIndex : IDisposable
     {
         _accessor.Flush();
     }
+
+    /// <summary>
+    /// Toggle whether FlushPage / SaveMetadata issue per-operation msyncs.
+    /// Used by QuadStore.RebuildSecondaryIndexes to borrow the bulk-load msync-deferral
+    /// semantics during secondary-index construction — same pattern, same durability
+    /// contract ("call Flush() when done"). Caller MUST invoke Flush() before turning
+    /// deferral off again, or dirty mmap pages may never reach disk.
+    /// </summary>
+    internal void SetDeferMsync(bool value) => _deferMsync = value;
 
     private const long MagicNumber = 0x54454D504F52414C; // "TEMPORAL" as long
 
@@ -1287,7 +1303,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         _accessor.Write(8, _nextPageId);
         _accessor.Write(16, _quadCount);
         _accessor.Write(24, MagicNumber);
-        if (_bulkMode) return;
+        if (_deferMsync) return;
         _accessor.Flush();
     }
 

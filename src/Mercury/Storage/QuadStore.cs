@@ -615,18 +615,34 @@ public sealed class QuadStore : IDisposable
         _indexState = duringState;
         StoreStateFile.Write(_baseDirectory, _indexState);
 
+        // Secondary-index construction is a bulk-shape operation: each AllocatePage
+        // would otherwise trigger a full-region msync via SaveMetadata (the same
+        // 1.7.15 bug, hidden behind a different code path). Borrow the bulk-mode
+        // msync-deferral semantics for the duration of the rebuild, then Flush once.
+        target.SetDeferMsync(true);
         long count = 0;
-        var gspoEnum = _gspoIndex.QueryHistory(
-            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
-
-        while (gspoEnum.MoveNext())
+        try
         {
-            var quad = gspoEnum.Current;
-            var (primary, secondary, tertiary) = remapDimensions(quad);
+            var gspoEnum = _gspoIndex.QueryHistory(
+                ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
 
-            target.AddRaw(quad.Graph, primary, secondary, tertiary,
-                quad.ValidFrom, quad.ValidTo, quad.TransactionTime);
-            count++;
+            while (gspoEnum.MoveNext())
+            {
+                var quad = gspoEnum.Current;
+                var (primary, secondary, tertiary) = remapDimensions(quad);
+
+                target.AddRaw(quad.Graph, primary, secondary, tertiary,
+                    quad.ValidFrom, quad.ValidTo, quad.TransactionTime);
+                count++;
+            }
+        }
+        finally
+        {
+            // One msync covers every deferred metadata write and page flush
+            // performed during the rebuild. Must run before SetDeferMsync(false)
+            // so subsequent cognitive-mode writes see a consistent durable state.
+            target.Flush();
+            target.SetDeferMsync(false);
         }
 
         onProgress?.Invoke(name, count);
