@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.17] - 2026-04-19
+
+### Changed
+- **Removed `Console.IsInputRedirected` auto-detect from `--no-repl`.** The 1.7.14 auto-detect was too clever — it broke legitimate REPL scripting like `echo ":stats" | mercury --store foo` or `cat queries.sparql | mercury`, silently exiting with no output instead of processing the piped commands. The REPL already handles piped stdin correctly: `StreamReader.ReadLine()` returns null on EOF and the loop exits. The actual motivating case (Rider's profiler keeping stdin open with no data) is now handled by passing `--no-repl` explicitly. Piped stdin with EOF works out of the box again. Explicit opt-out, no magic.
+
 ## [1.7.16] - 2026-04-19
 
 ### Performance
