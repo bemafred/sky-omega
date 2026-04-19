@@ -32,7 +32,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.19 Released** — Bulk load validated at 1 B Wikidata triples: **331 K triples/sec** average, 50 m 17 s wall, clean completion. Session hardening (1.7.13 → 1.7.19) surfaced and fixed ten distinct bug classes that only appear at real-data scale — atom hash table overflow, `SaveMetadata` msync amplification, `GetAtomString` round-trip, `FStat`-per-insert, hash clustering from a premature word-wise FNV. Throughput scales with data size through the 10 M → 100 M → 1 B gradient (243 K → 304 K → 331 K/sec) as the atom cache warms. 1,937 storage + SPARQL tests pass.
+> **v1.7.22 Released** — Full ingest pipeline (bulk-load + secondary-index rebuild) validated end-to-end at 1 B Wikidata triples: **331 K triples/sec** bulk, **3 h 7 m** rebuild, clean completion, queryable cognitive-profile store. Session hardening (1.7.13 → 1.7.22) surfaced and fixed ten distinct bug classes that only appear at real-data scale — atom hash table overflow, `SaveMetadata` msync amplification (bulk *and* rebuild paths), `TrigramIndex` stale-pointer-after-remap and map-before-extend, `GetAtomString` round-trip, `FStat`-per-insert, hash clustering from a premature word-wise FNV. Throughput scales cleanly through the 10 M → 100 M → 1 B gradient. Three new ADRs (028 rehash-on-grow, 029 store profiles, 030 bulk+rebuild perf) propose the path to 21.3 B on 8 TB. 1,937 storage + SPARQL tests pass.
 > See [CHANGELOG.md](CHANGELOG.md) for details.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
