@@ -349,6 +349,72 @@ A benchmark artifact with:
 
 Mercury's existing benchmarks already establish competitive baselines: 1.1M triples/sec Turtle parsing (zero-GC, 57 KB allocation), 488 ns subject lookup, 831 ns temporal queries. These numbers, combined with zero-GC architecture, zero external dependencies (BCL only), bitemporal semantics, and single-machine consumer hardware, are not claims of superiority — they are architectural facts that let the benchmark speak for itself.
 
+## Measured Storage Footprint (2026-04-19)
+
+The full-pipeline gradient (see [full-pipeline-gradient-2026-04-19.md](../../validations/full-pipeline-gradient-2026-04-19.md)) measured the on-disk footprint of a Mercury store at 1 M, 10 M, 100 M, and 1 B triples. These are hard measurements — no projections — on the same hardware (M5 Max, APFS sparse-mmap) that will run the full dump.
+
+### Per-scale totals and scaling
+
+| Scale | Bytes/triple | Total on disk | Source `.nt` | Inflation |
+|---|---|---|---|---|
+| 1 M | 4.3 KB | 4.3 GB | 140 MB | 31× |
+| 10 M | 1.5 KB | 15 GB | 1.4 GB | 11× |
+| 100 M | 720 B | 72 GB | 14 GB | 5× |
+| **1 B** | **648 B** | **648 GB** | **144 GB** | **4.5×** |
+
+Per-triple cost drops sharply as scale grows because fixed overheads (8 GB atom hash table, 16 MB trigram hash, B+Tree internal nodes) amortize. At 1 B the footprint is close to steady state. Inflation over raw source ≈ 4.5×, driven structurally by **four secondary indexes each storing the same data in a different key order** plus the atom store.
+
+### Per-file breakdown at 1 B (991,797,873 queryable triples)
+
+| File | Size | What it holds |
+|---|---|---|
+| `gspo.tdb` | 147 GB | Primary: graph-subject-predicate-object |
+| `gpos.tdb` | 158 GB | Predicate-bound queries |
+| `gosp.tdb` | 151 GB | Object-bound queries |
+| `tgsp.tdb` | 166 GB | Time-range (bitemporal) queries |
+| `atoms.atoms` | 13 GB | UTF-8 atom data (213 M unique atoms × ~60 B avg) |
+| `atoms.atomidx` | 8 GB | 256 M-bucket hash table (sparse, 83 % load) |
+| `atoms.offsets` | 1.6 GB | atomId → offset mapping |
+| `trigram.posts` | 3 GB | Full-text posting lists (444 M entries) |
+| `trigram.hash` | 16 MB | Fixed 1 M trigram buckets |
+| `wal.log` | 4 KB | Truncated after final checkpoint |
+| **Total** | **648 GB** | |
+
+Four B+Trees account for 622 GB of the 648 GB (96 %). Trigram full-text search is cheap at 3 GB (~2 % of total).
+
+### Extrapolation to 21.3 B Wikidata
+
+Linear extrapolation from 1 B (slightly super-linear in practice due to B+Tree depth):
+
+| Component | Projected |
+|---|---|
+| GSPO | ~3.1 TB |
+| GPOS | ~3.4 TB |
+| GOSP | ~3.2 TB |
+| TGSP | ~3.5 TB |
+| Atom data + offsets + trigram | ~380 GB |
+| **Total (all four indexes)** | **~13.8 TB** |
+
+### Storage-constraint consequence — hard fact
+
+**The full-index 21.3 B Wikidata ingest does not fit on the validation hardware's 8 TB SSD.** This is not a Mercury architectural limit — it's the cost of four-index coverage at Wikidata scale on commodity hardware. Three practical paths preserve the gradient's integrity:
+
+**A. Drop two indexes.** Keep GSPO (primary) and GPOS (predicate-bound, the most common Wikidata query pattern). Drop GOSP and TGSP:
+- Projected size: ~6.6 TB (fits 8 TB with 1 TB margin)
+- Query cost: object-bound and time-range queries fall back to full GSPO scan (correct, slower)
+- Reversible: secondary indexes can be added later via `RebuildSecondaryIndexes`
+- **Recommended for the initial 21.3 B validation** — proves the pipeline without demanding storage we don't have
+
+**B. External storage.** Thunderbolt-4 NVMe enclosure (16-20 TB, ~2-3 GB/s sustained). Bulk load is CPU-bound at current rates, so the lower-bandwidth external drive has minimal impact on load time. Adds ~$500-800 in hardware and an external dependency, but unlocks the full four-index 21.3 B run.
+
+**C. Partial load.** Load the first ~12 B triples of the dump (fits in 7-8 TB with all four indexes). Sufficient to validate everything ADR-028 cares about (atom hash table behavior past 250 M atoms, rehash-on-grow triggering). The blocker for 21.3 B becomes a disk problem, not a Mercury problem.
+
+### Implications for ADR-028 (rehash-on-grow)
+
+At 1 B, `atoms.atomidx` was 8 GB virtual / 8 GB physical / 83 % load. At 21.3 B the same 256 M-bucket table would overflow around 250 M atoms — approximately 4-5 B triples in. **Rehash-on-grow is the next required capability** regardless of which of Options A-C we pick, because even Option C (partial load of 12 B) crosses that threshold.
+
+ADR-028 remains the right next ADR to close — these storage measurements give its "why" a concrete scale, and confirm that the atom-hash ceiling is closer than any of the B+Tree ceilings.
+
 ## Horizontal Scaling: Read-Replica Fleet
 
 Mercury already has a production-grade W3C SPARQL 1.1 Protocol HTTP endpoint (`SparqlHttpServer`) running in both Mercury.Cli (port 3031) and Mercury.Mcp (port 3030). BCL-only, `HttpListener`, full content negotiation (JSON, XML, CSV, TSV for results; Turtle, N-Triples, RDF/XML for graphs), CORS, service description. This is not future work — it exists today.
