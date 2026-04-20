@@ -55,10 +55,14 @@ internal sealed unsafe class AtomStore : IDisposable
     private const long InitialOffsetCapacity = 1L << 20; // 1M atoms initial
     private const int QuadraticProbeLimit = 64; // Quadratic probing reduces clustering
     private const int MaxProbeDistance = 4096; // Extended fallback for high-load scenarios
+    private const int MaxLoadFactorPercent = 75; // ADR-028: trigger rehash-on-grow past this load
 
-    // Hash table size fixed at creation and derived from the index file length on re-open.
-    // The full table is a sparse mmap — physical disk usage tracks only touched buckets.
-    private readonly long _hashTableSize;
+    // Hash table size. Grows via rehash-on-grow (ADR-028) when load factor exceeds
+    // MaxLoadFactorPercent. On reopen, derived from the index file length. Sparse mmap
+    // on POSIX; physical file size doubles on each Windows rehash.
+    private long _hashTableSize;
+    private readonly string _indexPath;
+    private long _rehashCount;
 
     /// <summary>
     /// Default maximum atom size (1MB). Prevents resource exhaustion from oversized values.
@@ -67,13 +71,13 @@ internal sealed unsafe class AtomStore : IDisposable
 
     // Memory-mapped files
     private readonly FileStream _dataFile;
-    private readonly FileStream _indexFile;
+    private FileStream _indexFile;
     private readonly FileStream _offsetFile;
     private MemoryMappedFile _dataMap;
-    private readonly MemoryMappedFile _indexMap;
+    private MemoryMappedFile _indexMap;
     private MemoryMappedFile _offsetMap;
     private MemoryMappedViewAccessor _dataAccessor;
-    private readonly MemoryMappedViewAccessor _indexAccessor;
+    private MemoryMappedViewAccessor _indexAccessor;
     private MemoryMappedViewAccessor _offsetAccessor;
 
     // Cached pointers acquired once during construction/resize (avoids repeated AcquirePointer calls)
@@ -156,6 +160,7 @@ internal sealed unsafe class AtomStore : IDisposable
         var dataPath = baseFilePath + ".atoms";
         var indexPath = baseFilePath + ".atomidx";
         var offsetPath = baseFilePath + ".offsets";
+        _indexPath = indexPath;
 
         // Open/create data file
         _dataFile = new FileStream(
@@ -172,6 +177,11 @@ internal sealed unsafe class AtomStore : IDisposable
             _dataFile.SetLength(initialDataSize);
         }
         _dataCapacity = _dataFile.Length;
+
+        // Reconcile any .new/.old orphans left by an interrupted rehash before we pin the
+        // canonical .atomidx via FileStream. ADR-028 §4c: prefer pre-rehash state when
+        // swap was in-flight.
+        ReconcileIndexFileState(indexPath);
 
         // Open/create index file (hash table)
         _indexFile = new FileStream(
@@ -554,6 +564,15 @@ internal sealed unsafe class AtomStore : IDisposable
     /// </remarks>
     private long InsertAtomUtf8(ReadOnlySpan<byte> utf8Value, long hash, long bucket)
     {
+        // ADR-028: proactively grow the hash table before this insert pushes load factor
+        // past the threshold. Rehash invalidates `bucket` (derived from old _hashTableSize),
+        // so recompute from the stored hash against the new table size.
+        if ((_atomCount + 1) * 100 > _hashTableSize * MaxLoadFactorPercent)
+        {
+            EnsureHashCapacity(_hashTableSize * 2);
+            bucket = (long)((ulong)hash % (ulong)_hashTableSize);
+        }
+
         // Allocate atom ID
         var atomId = System.Threading.Interlocked.Increment(ref _nextAtomId);
 
@@ -737,6 +756,201 @@ internal sealed unsafe class AtomStore : IDisposable
 #endif
         }
     }
+
+    /// <summary>
+    /// Rehash-on-grow (ADR-028): build a new hash table file at <paramref name="newSize"/>
+    /// buckets, re-insert every live entry using its stored hash (no recompute, no data-file
+    /// access), fsync, then two-step atomic rename to swap files. Runs under the QuadStore
+    /// writer lock (ADR-020) — no concurrent readers/writers possible.
+    /// </summary>
+    private void EnsureHashCapacity(long newSize)
+    {
+        if (newSize <= _hashTableSize)
+            return;
+
+        lock (_resizeLock)
+        {
+            if (newSize <= _hashTableSize)
+                return;
+
+#if DEBUG
+            Interlocked.Exchange(ref _resizeInProgress, 1);
+#endif
+            try
+            {
+                var newPath = _indexPath + ".new";
+                var oldPath = _indexPath + ".old";
+
+                // Clean any stale orphans from a previous crash before allocating fresh files.
+                if (File.Exists(newPath)) File.Delete(newPath);
+                if (File.Exists(oldPath)) File.Delete(oldPath);
+
+                long newIndexBytes = newSize * sizeof(HashBucket);
+
+                // Build the new file in a scoped block so all handles release before rename.
+                using (var newFile = new FileStream(
+                    newPath,
+                    FileMode.CreateNew,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.RandomAccess))
+                {
+                    newFile.SetLength(newIndexBytes);
+
+                    using var newMap = MemoryMappedFile.CreateFromFile(
+                        newFile,
+                        mapName: null,
+                        capacity: newIndexBytes,
+                        MemoryMappedFileAccess.ReadWrite,
+                        HandleInheritability.None,
+                        leaveOpen: true);
+
+                    using var newAccessor = newMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+
+                    byte* newIndexBytePtr = null;
+                    try
+                    {
+                        newAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref newIndexBytePtr);
+                        var newTable = (HashBucket*)newIndexBytePtr;
+
+                        for (long b = 0; b < _hashTableSize; b++)
+                        {
+                            var entry = _hashTable[b];
+                            if (entry.AtomId == 0)
+                                continue;
+
+                            var startBucket = (long)((ulong)entry.Hash % (ulong)newSize);
+                            bool placed = false;
+                            for (int probe = 0; probe < MaxProbeDistance; probe++)
+                            {
+                                var probeOffset = ComputeProbeOffset(probe);
+                                var currentBucket = (startBucket + probeOffset) % newSize;
+                                ref var slot = ref newTable[currentBucket];
+                                if (slot.AtomId == 0)
+                                {
+                                    slot.Hash = entry.Hash;
+                                    slot.Length = entry.Length;
+                                    slot.Offset = entry.Offset;
+                                    slot.AtomId = entry.AtomId;
+                                    placed = true;
+                                    break;
+                                }
+                            }
+
+                            if (!placed)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Rehash failed to place atom {entry.AtomId} in {newSize:N0}-bucket table " +
+                                    $"within {MaxProbeDistance} probes. Hash distribution degraded.");
+                            }
+                        }
+
+                        newAccessor.Flush();
+                    }
+                    finally
+                    {
+                        if (newIndexBytePtr != null)
+                            newAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                    }
+                }
+
+                // Release the live .atomidx so rename can succeed cross-platform.
+                _indexAccessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                _indexAccessor.Dispose();
+                _indexMap.Dispose();
+                _indexFile.Dispose();
+                _hashTable = null;
+
+                // Two-step rename. Crash between the two steps is recovered by
+                // ReconcileIndexFileState on next open.
+                File.Move(_indexPath, oldPath);
+                File.Move(newPath, _indexPath);
+
+                // Open fresh handles against the promoted file.
+                var activeFile = new FileStream(
+                    _indexPath,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    FileOptions.RandomAccess);
+
+                var activeMap = MemoryMappedFile.CreateFromFile(
+                    activeFile,
+                    mapName: null,
+                    capacity: newIndexBytes,
+                    MemoryMappedFileAccess.ReadWrite,
+                    HandleInheritability.None,
+                    leaveOpen: true);
+
+                var activeAccessor = activeMap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+
+                byte* activePtr = null;
+                activeAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref activePtr);
+
+                _indexFile = activeFile;
+                _indexMap = activeMap;
+                _indexAccessor = activeAccessor;
+                _hashTable = (HashBucket*)activePtr;
+                _hashTableSize = newSize;
+                Thread.MemoryBarrier();
+
+                // Best-effort cleanup of .old; on Windows this can fail if AV scanners
+                // are still holding a handle. Leaving it for the next reconcile is safe.
+                try { File.Delete(oldPath); } catch { /* reconciled on next open */ }
+
+                _rehashCount++;
+            }
+#if DEBUG
+            finally
+            {
+                Interlocked.Exchange(ref _resizeInProgress, 0);
+            }
+#else
+            finally { }
+#endif
+        }
+    }
+
+    /// <summary>
+    /// Reconcile the three possible interrupted-rehash states on open. Called before
+    /// the index file is opened so we can rename files freely (ADR-028 §4c).
+    /// </summary>
+    private static void ReconcileIndexFileState(string indexPath)
+    {
+        var newPath = indexPath + ".new";
+        var oldPath = indexPath + ".old";
+
+        if (File.Exists(indexPath))
+        {
+            // Canonical file exists. Any orphans are stale — discard.
+            if (File.Exists(newPath)) File.Delete(newPath);
+            if (File.Exists(oldPath)) File.Delete(oldPath);
+            return;
+        }
+
+        // Canonical file missing — rehash was interrupted mid-swap.
+        if (File.Exists(oldPath))
+        {
+            // Prefer pre-rehash state: discard the new table, promote .old.
+            if (File.Exists(newPath)) File.Delete(newPath);
+            File.Move(oldPath, indexPath);
+        }
+        else if (File.Exists(newPath))
+        {
+            // No .old — can happen if step-1 rename failed after .new was built.
+            // Salvage the fully-populated .new as canonical.
+            File.Move(newPath, indexPath);
+        }
+        // else: no state, constructor's OpenOrCreate path handles a fresh store.
+    }
+
+    /// <summary>Current hash table bucket count. Grows via <see cref="EnsureHashCapacity"/>.</summary>
+    internal long HashTableSize => _hashTableSize;
+
+    /// <summary>Number of times the hash table has been rehashed in this session.</summary>
+    internal long RehashCount => _rehashCount;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long GetAtomOffset(long atomId)

@@ -610,4 +610,178 @@ public class AtomStoreTests : IDisposable
     }
 
     #endregion
+
+    #region Rehash-on-Grow (ADR-028)
+
+    // Small-cap constructor: starts with a tiny hash table so load factor crosses
+    // 75% quickly and the rehash path is exercised in under a second.
+    private static AtomStore CreateStoreWithSmallHashTable(string path, long initialBuckets = 64)
+        => new AtomStore(
+            path,
+            bufferManager: null,
+            maxAtomSize: AtomStore.DefaultMaxAtomSize,
+            initialDataSize: 1L << 20,   // 1 MB — enough for a few thousand atoms in tests
+            initialOffsetCapacity: 1024,
+            hashTableInitialCapacity: initialBuckets,
+            bulkMode: false);
+
+    [Fact]
+    public void Rehash_ForcedByLoadFactor_AllAtomsResolvePostGrowth()
+    {
+        var path = _testPath + "_rehash_force";
+        using var store = CreateStoreWithSmallHashTable(path, initialBuckets: 64);
+
+        const int atomCount = 10_000;
+        var ids = new long[atomCount];
+        for (int i = 0; i < atomCount; i++)
+            ids[i] = store.Intern($"http://wikidata.org/entity/Q{i}");
+
+        // From 64 → at least 10_000/0.75 ≈ 13_334 buckets: several doublings required.
+        Assert.True(store.RehashCount >= 8, $"Expected multiple rehashes from 64 buckets, got {store.RehashCount}");
+        Assert.True(store.HashTableSize >= 16384, $"Expected hash table ≥ 16K buckets, got {store.HashTableSize}");
+
+        // Every prior atom still resolves to the same ID, and the stored content matches.
+        for (int i = 0; i < atomCount; i++)
+        {
+            var expected = $"http://wikidata.org/entity/Q{i}";
+            Assert.Equal(ids[i], store.GetAtomId(expected));
+            Assert.Equal(expected, store.GetAtomString(ids[i]));
+        }
+
+        // Deduplication still enforced across the rehashed table.
+        for (int i = 0; i < atomCount; i++)
+        {
+            var reInterned = store.Intern($"http://wikidata.org/entity/Q{i}");
+            Assert.Equal(ids[i], reInterned);
+        }
+    }
+
+    [Fact]
+    public void Rehash_Persistence_SurvivesReopen()
+    {
+        var path = _testPath + "_rehash_reopen";
+        const int atomCount = 5_000;
+        var expectedIds = new long[atomCount];
+        long grownSize;
+
+        using (var store1 = CreateStoreWithSmallHashTable(path, initialBuckets: 64))
+        {
+            for (int i = 0; i < atomCount; i++)
+                expectedIds[i] = store1.Intern($"persistent_Q{i}");
+
+            Assert.True(store1.RehashCount > 0, "Test should force at least one rehash");
+            grownSize = store1.HashTableSize;
+            store1.Flush();
+        }
+
+        using (var store2 = new AtomStore(path))
+        {
+            // Reopen derives hash table size from file length — must match post-rehash size.
+            Assert.Equal(grownSize, store2.HashTableSize);
+            Assert.Equal(atomCount, store2.AtomCount);
+
+            for (int i = 0; i < atomCount; i++)
+            {
+                Assert.Equal(expectedIds[i], store2.GetAtomId($"persistent_Q{i}"));
+                Assert.Equal($"persistent_Q{i}", store2.GetAtomString(expectedIds[i]));
+            }
+        }
+    }
+
+    [Fact]
+    public void Rehash_OrphanedDotOld_DeletedOnReopen()
+    {
+        var path = _testPath + "_orphan_old";
+        using (var store = new AtomStore(path))
+        {
+            store.Intern("alpha");
+            store.Intern("beta");
+            store.Flush();
+        }
+
+        // Simulate a post-rehash state where .old cleanup failed.
+        File.WriteAllBytes(path + ".atomidx.old", new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
+        Assert.True(File.Exists(path + ".atomidx.old"));
+
+        using (var reopened = new AtomStore(path))
+        {
+            Assert.False(File.Exists(path + ".atomidx.old"), ".old orphan should be deleted on open");
+            Assert.Equal("alpha", reopened.GetAtomString(reopened.GetAtomId("alpha")));
+            Assert.Equal("beta", reopened.GetAtomString(reopened.GetAtomId("beta")));
+        }
+    }
+
+    [Fact]
+    public void Rehash_OrphanedDotNew_DeletedOnReopen()
+    {
+        var path = _testPath + "_orphan_new";
+        using (var store = new AtomStore(path))
+        {
+            store.Intern("alpha");
+            store.Flush();
+        }
+
+        // Simulate aborted rehash before the step-1 rename: .new exists alongside canonical .atomidx.
+        File.WriteAllBytes(path + ".atomidx.new", new byte[] { 0x00, 0x00, 0x00, 0x00 });
+
+        using (var reopened = new AtomStore(path))
+        {
+            Assert.False(File.Exists(path + ".atomidx.new"), ".new orphan should be deleted on open");
+            Assert.Equal("alpha", reopened.GetAtomString(reopened.GetAtomId("alpha")));
+        }
+    }
+
+    [Fact]
+    public void Rehash_InterruptedMidSwap_PromotesDotOld()
+    {
+        var path = _testPath + "_mid_swap";
+        long alphaId;
+        using (var store = new AtomStore(path))
+        {
+            alphaId = store.Intern("alpha");
+            store.Intern("beta");
+            store.Flush();
+        }
+
+        // Simulate a crash between the two renames: .atomidx → .atomidx.old succeeded,
+        // .atomidx.new → .atomidx did not. The .new file may be fully populated but ADR-028
+        // prefers the pre-rehash state; test asserts the ADR's recovery choice.
+        File.Move(path + ".atomidx", path + ".atomidx.old");
+        File.WriteAllBytes(path + ".atomidx.new", new byte[] { 0xFF, 0xFF, 0xFF, 0xFF });
+        Assert.False(File.Exists(path + ".atomidx"));
+
+        using (var reopened = new AtomStore(path))
+        {
+            Assert.True(File.Exists(path + ".atomidx"), "reconcile should promote .old back to .atomidx");
+            Assert.False(File.Exists(path + ".atomidx.old"));
+            Assert.False(File.Exists(path + ".atomidx.new"), ".new should be discarded (ADR prefers .old)");
+            Assert.Equal(alphaId, reopened.GetAtomId("alpha"));
+            Assert.Equal("beta", reopened.GetAtomString(reopened.GetAtomId("beta")));
+        }
+    }
+
+    [Fact]
+    public void Rehash_InterruptedWithOnlyDotNew_SalvagesDotNew()
+    {
+        var path = _testPath + "_only_new";
+        long alphaId;
+        using (var store = new AtomStore(path))
+        {
+            alphaId = store.Intern("alpha");
+            store.Flush();
+        }
+
+        // No .old present (step-0 rename skipped). Reconcile must salvage .new as canonical.
+        File.Move(path + ".atomidx", path + ".atomidx.new");
+        Assert.False(File.Exists(path + ".atomidx"));
+
+        using (var reopened = new AtomStore(path))
+        {
+            Assert.True(File.Exists(path + ".atomidx"));
+            Assert.False(File.Exists(path + ".atomidx.new"));
+            Assert.Equal(alphaId, reopened.GetAtomId("alpha"));
+        }
+    }
+
+    #endregion
 }
