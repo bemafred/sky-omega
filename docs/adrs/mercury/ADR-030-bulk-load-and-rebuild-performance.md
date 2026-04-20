@@ -118,6 +118,21 @@ Three things explicitly NOT in this ADR:
 - **Offset/ID bit-packing.** Real savings but much smaller than the schema-reduction win in [ADR-029](ADR-029-store-profiles.md). Defer until after ADR-029 is shipped and measured. Tracked in the limits register: [bit-packed-atom-ids](../../limits/bit-packed-atom-ids.md).
 - **Query planner optimizations.** The planner today picks an index and scans it. Cost-based planning (use column statistics to pick joins) is potentially a large gain for multi-pattern queries but is a significant body of work. Separate ADR if taken up.
 
+### 5 — The bulk/rebuild split is profile-invariant
+
+_Amended 2026-04-20 after the Reference gradient (see [adr-029-reference-gradient-2026-04-20.md](../../validations/adr-029-reference-gradient-2026-04-20.md))._
+
+The split between "bulk-load writes the primary-key index only" and "rebuild populates secondaries from the sorted primary" is not a Cognitive-specific design accident. It is the structural answer to the hard problem of writing to multiple B+Trees in different sort orders from the same loop: every triple generates random-access writes into each secondary index, and as soon as the combined working set exceeds RAM the page cache thrashes and throughput collapses. The Cognitive pipeline was built this way on purpose; the purpose is profile-independent.
+
+The [ADR-029](ADR-029-store-profiles.md) Phase 2 implementation (1.7.29) inlined GPOS and trigram writes into the Reference bulk-load loop, contradicting this principle. The 2026-04-20 gradient measured the cost: Reference bulk rate declined from **210 K triples/sec at 1 M** to **80 K/sec at 10 M** to **31 K/sec at 100 M**, with recent rate at end of 100 M down to ~24 K/sec. Extrapolated to 21.3 B at sustained 24 K/sec, a full-Wikidata Reference bulk-load would take ~10 days — not deployable. Meanwhile Cognitive at 100 M completes bulk + rebuild in 17 m 24 s.
+
+**Commitment.** The bulk-load path for every profile with ≥ 2 indexes writes only the primary index inline. Secondary indexes (and trigram) are populated by `RebuildSecondaryIndexes`, which reuses the Phase 2 parallel and Phase 3 sort-insert infrastructure regardless of profile. Reference gets:
+
+- Bulk phase: sequential writes to `_gspoReference` only; `StoreIndexState` transitions to `PrimaryOnly`.
+- Rebuild phase: scan GSPO, fan out to `_gposReference` and trigram; state transitions to `Ready`.
+
+This also means Phase 2 and Phase 3 — originally scoped to Cognitive's GPOS/GOSP/TGSP rebuild — inherit Reference's GPOS + trigram rebuild for free. One code path, two profiles.
+
 ## Consequences
 
 ### Positive
@@ -161,6 +176,7 @@ Three things explicitly NOT in this ADR:
 - TGSP keeps random-insert (dimensional sort mismatch). Or evaluate whether a distinct TGSP-sort pattern helps.
 - Tests: sort-insert output matches regular insert for all profiles; DEBUG-mode unsorted-input assertion fires as expected.
 - Baseline measurement: 100 M rebuild at sort-insert vs random-insert.
+- **Refactor Reference bulk-load (Decision 5 follow-through).** `QuadStore.AddBatched` / `AddCurrentBatched` / `CommitBatch` stop writing to `_gposReference` and trigram inline; bulk phase writes only `_gspoReference`, state transitions to `PrimaryOnly` (skip currently guarded on `_schema.HasTemporal` — remove that guard). Extend `RebuildSecondaryIndexes` to the Reference profile: scan GSPO, populate GPOS and trigram via the same parallel + sort-insert machinery as Cognitive. Post-rebuild state is `Ready`. Expected throughput: GSPO-only bulk matches Cognitive's rate (~300 K+/sec), and Reference's single-secondary rebuild is far smaller than Cognitive's four, so total time-to-Ready lands below Cognitive at every scale.
 
 **Phase 4 — Full Wikidata Reference profile run with all optimizations**
 - Combine ADR-029 Reference profile + ADR-030 optimizations.
