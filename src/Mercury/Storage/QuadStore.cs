@@ -100,10 +100,12 @@ public sealed class QuadStore : IDisposable
 
         var options = storageOptions ?? StorageOptions.Default;
 
-        // Create shared atom store for all indexes
+        // Create shared atom store for all indexes.
+        // ForceAtomHashCapacity suppresses the bulk-mode floor for ADR-028 validation.
+        var effectiveBulkMode = options.BulkMode && !options.ForceAtomHashCapacity;
         _atoms = new AtomStore(atomPath, _bufferManager, options.MaxAtomSize,
             options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
-            options.AtomHashTableInitialCapacity, options.BulkMode);
+            options.AtomHashTableInitialCapacity, effectiveBulkMode);
 
         // Create WAL for durability (bulk mode: no write-through, larger buffer)
         _bulkLoadMode = options.BulkMode;

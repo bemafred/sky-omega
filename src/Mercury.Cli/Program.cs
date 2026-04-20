@@ -269,10 +269,23 @@ else
     resolvedStorePath = storePath ?? (storeName != null ? MercuryPaths.Store(storeName) : MercuryPaths.Store("cli"));
     try
     {
+        // ADR-028 Stage 2 validation knob: when set, honor this exactly as the AtomStore
+        // initial hash capacity (bypasses the bulk-mode 256M floor) so rehash-on-grow
+        // is exercised during bulk load. Unset in normal operation.
+        long? atomHashOverride = null;
+        if (Environment.GetEnvironmentVariable("MERCURY_ATOM_HASH_INITIAL_CAPACITY") is string capVar
+            && long.TryParse(capVar, out var parsedCap) && parsedCap > 0)
+        {
+            atomHashOverride = parsedCap;
+            Console.WriteLine($"Override:        MERCURY_ATOM_HASH_INITIAL_CAPACITY={parsedCap:N0} buckets (forces rehash-on-grow)");
+        }
+
         var storeOpts = new StorageOptions
         {
             BulkMode = isBulkLoad,
-            MinimumFreeDiskSpace = minFreeSpace
+            MinimumFreeDiskSpace = minFreeSpace,
+            AtomHashTableInitialCapacity = atomHashOverride ?? new StorageOptions().AtomHashTableInitialCapacity,
+            ForceAtomHashCapacity = atomHashOverride.HasValue,
         };
         pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts });
     }

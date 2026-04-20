@@ -75,6 +75,14 @@ public sealed class StorageOptions
     public bool BulkMode { get; init; }
 
     /// <summary>
+    /// When true, <see cref="AtomHashTableInitialCapacity"/> is honored exactly even in
+    /// bulk mode — bypasses the 256M-bucket floor that <see cref="BulkMode"/> normally
+    /// applies. Used by ADR-028 Stage 2 validation to exercise rehash-on-grow under
+    /// bulk load. Production bulk loads should leave this false.
+    /// </summary>
+    public bool ForceAtomHashCapacity { get; init; }
+
+    /// <summary>
     /// Default options with reasonable limits.
     /// </summary>
     public static StorageOptions Default { get; } = new();
