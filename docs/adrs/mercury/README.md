@@ -29,7 +29,8 @@
 | [ADR-024](ADR-024-trigram-index-read-path-disconnection.md) | Trigram Index Read Path Disconnection | Completed |
 | [ADR-025](ADR-025-repl-line-editor.md) | REPL Line Editor | Completed |
 | [ADR-026](ADR-026-bulk-load-path.md) | Bulk Load Path | Superseded |
-| [ADR-027](ADR-027-wikidata-scale-streaming-pipeline.md) | Wikidata-Scale Ingestion Pipeline | Proposed |
+| [ADR-027](ADR-027-wikidata-scale-streaming-pipeline.md) | Wikidata-Scale Ingestion Pipeline | Completed |
 | [ADR-028](ADR-028-atomstore-rehash-on-grow.md) | AtomStore Rehash-on-Grow | Proposed |
 | [ADR-029](ADR-029-store-profiles.md) | Store Profiles — Cognitive, Graph, Reference, Minimal | Proposed |
 | [ADR-030](ADR-030-bulk-load-and-rebuild-performance.md) | Bulk Load and Rebuild Performance Architecture | Proposed |
+| [ADR-031](ADR-031-read-only-session-fast-path.md) | Read-Only Session Fast Path | Proposed |

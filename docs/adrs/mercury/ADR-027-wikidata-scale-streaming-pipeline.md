@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-04-05
+**Status:** Completed — 2026-04-19
 
 Supersedes: [ADR-026 Bulk Load Path](ADR-026-bulk-load-path.md)
 
