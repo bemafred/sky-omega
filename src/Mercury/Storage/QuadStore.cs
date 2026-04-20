@@ -22,10 +22,10 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 public sealed class QuadStore : IDisposable
 {
-    private readonly QuadIndex _gspoIndex; // Primary index: S→Primary, P→Secondary, O→Tertiary
-    private readonly QuadIndex _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
-    private readonly QuadIndex _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
-    private readonly QuadIndex _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
+    private readonly TemporalQuadIndex _gspoIndex; // Primary index: S→Primary, P→Secondary, O→Tertiary
+    private readonly TemporalQuadIndex _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
+    private readonly TemporalQuadIndex _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
+    private readonly TemporalQuadIndex _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
     private readonly TrigramIndex _trigramIndex;
 
     private readonly AtomStore _atoms;
@@ -134,10 +134,10 @@ public sealed class QuadStore : IDisposable
         // Create indexes with shared atom store
         // Entity-first indexes sort by Graph → dimensions → time
         // TGSP uses time-first sort for O(log N + k) temporal range queries
-        _gspoIndex = new QuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
-        _gposIndex = new QuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
-        _gospIndex = new QuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
-        _tgspIndex = new QuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, QuadIndex.KeySortOrder.TimeFirst, options.BulkMode);
+        _gspoIndex = new TemporalQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+        _gposIndex = new TemporalQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+        _gospIndex = new TemporalQuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+        _tgspIndex = new TemporalQuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.TimeFirst, options.BulkMode);
 
         // Create trigram index for full-text search
         var trigramPath = Path.Combine(baseDirectory, "trigram");
@@ -511,7 +511,7 @@ public sealed class QuadStore : IDisposable
             _activeBatchTxId = -1;
 
             // 2. Materialize buffered records into indexes. IDs are already in the
-            // record — use the by-ID path so QuadIndex doesn't re-intern strings.
+            // record — use the by-ID path so TemporalQuadIndex doesn't re-intern strings.
             if (_batchBuffer != null)
             {
                 foreach (var record in _batchBuffer)
@@ -636,7 +636,7 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Rebuild a single secondary index from the primary GSPO index.
     /// </summary>
-    private void RebuildIndex(QuadIndex target, string name, StoreIndexState duringState,
+    private void RebuildIndex(TemporalQuadIndex target, string name, StoreIndexState duringState,
         Func<TemporalQuad, (long Primary, long Secondary, long Tertiary)> remapDimensions,
         Action<string, long>? onProgress)
     {
@@ -698,7 +698,7 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Convert DateTimeOffset.UtcTicks to Unix milliseconds. LogRecord stores valid-time
-    /// as UtcTicks (via DateTimeOffset.UtcTicks in CreateAdd/CreateDelete); QuadIndex
+    /// as UtcTicks (via DateTimeOffset.UtcTicks in CreateAdd/CreateDelete); TemporalQuadIndex
     /// keys use Unix ms. Cheaper than round-tripping through DateTimeOffset.
     /// </summary>
     private static long UtcTicksToUnixMs(long utcTicks) =>
@@ -1111,7 +1111,7 @@ public sealed class QuadStore : IDisposable
         return new NamedGraphEnumerator(_gspoIndex, _atoms);
     }
 
-    private (QuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
+    private (TemporalQuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
         ReadOnlySpan<char> @object,
@@ -1290,7 +1290,7 @@ public sealed class QuadStore : IDisposable
 /// </summary>
 public struct TemporalResultEnumerator
 {
-    private QuadIndex.TemporalQuadEnumerator _baseEnumerator;
+    private TemporalQuadIndex.TemporalQuadEnumerator _baseEnumerator;
     private readonly TemporalIndexType _indexType;
     private readonly AtomStore _atoms;
     private readonly HashSet<long>? _candidateObjectAtomIds;
@@ -1301,7 +1301,7 @@ public struct TemporalResultEnumerator
     private const int InitialBufferSize = 4096; // 4KB - typical for 3 URIs
 
     internal TemporalResultEnumerator(
-        QuadIndex.TemporalQuadEnumerator baseEnumerator,
+        TemporalQuadIndex.TemporalQuadEnumerator baseEnumerator,
         TemporalIndexType indexType,
         AtomStore atoms)
     {
@@ -1314,7 +1314,7 @@ public struct TemporalResultEnumerator
     }
 
     internal TemporalResultEnumerator(
-        QuadIndex.TemporalQuadEnumerator baseEnumerator,
+        TemporalQuadIndex.TemporalQuadEnumerator baseEnumerator,
         TemporalIndexType indexType,
         AtomStore atoms,
         HashSet<long>? candidateObjectAtomIds)
@@ -1506,12 +1506,12 @@ public readonly ref struct ResolvedTemporalQuad
 /// </summary>
 public ref struct NamedGraphEnumerator
 {
-    private QuadIndex.TemporalQuadEnumerator _enumerator;
+    private TemporalQuadIndex.TemporalQuadEnumerator _enumerator;
     private readonly AtomStore _atoms;
     private long _lastGraphAtom;
     private string? _current;
 
-    internal NamedGraphEnumerator(QuadIndex index, AtomStore atoms)
+    internal NamedGraphEnumerator(TemporalQuadIndex index, AtomStore atoms)
     {
         // Query all current quads across ALL graphs (default + named)
         _enumerator = index.QueryCurrentAllGraphs();

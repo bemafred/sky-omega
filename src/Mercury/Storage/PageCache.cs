@@ -10,7 +10,7 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 /// <remarks>
 /// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
-/// implementation detail of <see cref="QuadIndex"/>. The page cache is managed
+/// implementation detail of <see cref="TemporalQuadIndex"/>. The page cache is managed
 /// automatically by the storage layer.</para>
 /// </remarks>
 internal sealed unsafe class PageCache : IDisposable

@@ -633,7 +633,7 @@ internal sealed unsafe class TrigramIndex : IDisposable
             // extended the file — meaning writes to the new region hit unmapped
             // pages and triggered AccessViolationException (first reproduced during
             // the 10 M rebuild gradient, the same class of bug as 1.7.12 Bug 4 on
-            // QuadIndex). Same fix: SetLength → map → swap → unmap old.
+            // TemporalQuadIndex). Same fix: SetLength → map → swap → unmap old.
 
             // 1. Extend the underlying file length
             _postingFile.SetLength(newSize);

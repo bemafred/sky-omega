@@ -196,7 +196,7 @@ internal sealed unsafe class AtomStore : IDisposable
         // In bulk mode, pre-size the hash table to 256M buckets so it never overflows
         // during Wikidata-scale ingests. APFS/ZFS/NTFS sparse-file semantics mean physical
         // disk usage tracks only touched buckets — the 8 GB virtual file is cheap.
-        // Mirrors the sparse-mmap pattern used by QuadIndex in bulk mode.
+        // Mirrors the sparse-mmap pattern used by TemporalQuadIndex in bulk mode.
         var requestedCapacity = bulkMode
             ? Math.Max(hashTableInitialCapacity, BulkModeHashTableSize)
             : hashTableInitialCapacity;

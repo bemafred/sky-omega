@@ -15,9 +15,9 @@ namespace SkyOmega.Mercury.Storage;
 /// <remarks>
 /// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
 /// implementation detail of <see cref="QuadStore"/>. Users should access storage
-/// through QuadStore's public API, not directly through QuadIndex.</para>
+/// through QuadStore's public API, not directly through TemporalQuadIndex.</para>
 /// </remarks>
-internal sealed unsafe class QuadIndex : IDisposable
+internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 {
     private const int PageSize = 16384;
     private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry
@@ -53,7 +53,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// <summary>
     /// Create a temporal quad store with its own atom store
     /// </summary>
-    public QuadIndex(string filePath, long initialSizeBytes = 1L << 30)
+    public TemporalQuadIndex(string filePath, long initialSizeBytes = 1L << 30)
         : this(filePath, null, initialSizeBytes, KeySortOrder.EntityFirst)
     {
     }
@@ -65,7 +65,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// Internal: AtomStore parameter requires external synchronization.
     /// Use this constructor only when sharing an AtomStore across indexes.
     /// </remarks>
-    internal QuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30,
+    internal TemporalQuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30,
         KeySortOrder sortOrder = KeySortOrder.EntityFirst, bool bulkMode = false)
     {
         _sortOrder = sortOrder;
@@ -517,7 +517,7 @@ internal sealed unsafe class QuadIndex : IDisposable
 
     /// <summary>
     /// Sort order for TemporalKey comparisons.
-    /// Selected once at QuadIndex construction; the JIT optimizes monomorphic delegate call sites.
+    /// Selected once at TemporalQuadIndex construction; the JIT optimizes monomorphic delegate call sites.
     /// </summary>
     internal enum KeySortOrder
     {
@@ -535,7 +535,7 @@ internal sealed unsafe class QuadIndex : IDisposable
 
     /// <summary>
     /// Temporal key: Graph + 3 generic dimensions + ValidTime + TransactionTime (56 bytes)
-    /// QuadIndex is a generic multi-dimensional B+Tree. The RDF-to-dimension mapping
+    /// TemporalQuadIndex is a generic multi-dimensional B+Tree. The RDF-to-dimension mapping
     /// (Subject→Primary, Predicate→Secondary, Object→Tertiary) lives in QuadStore.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -656,7 +656,7 @@ internal sealed unsafe class QuadIndex : IDisposable
     /// </summary>
     internal struct TemporalQuadEnumerator
     {
-        private readonly QuadIndex _store;
+        private readonly TemporalQuadIndex _store;
         private long _currentPageId;
         private int _currentSlot;
         private readonly TemporalKey _minKey;
@@ -666,7 +666,7 @@ internal sealed unsafe class QuadIndex : IDisposable
         private bool _currentIsDeleted;
 
         internal TemporalQuadEnumerator(
-            QuadIndex store,
+            TemporalQuadIndex store,
             long startPageId,
             TemporalKey minKey,
             TemporalKey maxKey,

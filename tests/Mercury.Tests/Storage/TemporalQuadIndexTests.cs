@@ -7,15 +7,15 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Storage;
 
 /// <summary>
-/// Tests for QuadIndex - B+Tree index with bitemporal semantics.
+/// Tests for TemporalQuadIndex - B+Tree index with bitemporal semantics.
 /// </summary>
-public class QuadIndexTests : IDisposable
+public class TemporalQuadIndexTests : IDisposable
 {
     private readonly string _testDir;
     private readonly string _testPath;
-    private QuadIndex? _index;
+    private TemporalQuadIndex? _index;
 
-    public QuadIndexTests()
+    public TemporalQuadIndexTests()
     {
         var tempPath = TempPath.Test("index");
         tempPath.MarkOwnership();
@@ -29,10 +29,10 @@ public class QuadIndexTests : IDisposable
         TempPath.SafeCleanup(_testDir);
     }
 
-    private QuadIndex CreateIndex()
+    private TemporalQuadIndex CreateIndex()
     {
         _index?.Dispose();
-        _index = new QuadIndex(_testPath);
+        _index = new TemporalQuadIndex(_testPath);
         return _index;
     }
 
@@ -295,13 +295,13 @@ public class QuadIndexTests : IDisposable
     public void Persistence_ReopenIndex_DataSurvives()
     {
         // First session
-        using (var index1 = new QuadIndex(_testPath))
+        using (var index1 = new TemporalQuadIndex(_testPath))
         {
             index1.AddCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
         }
 
         // Second session
-        using (var index2 = new QuadIndex(_testPath))
+        using (var index2 = new TemporalQuadIndex(_testPath))
         {
             var results = index2.QueryCurrent("<http://ex.org/s>", "<http://ex.org/p>", "<http://ex.org/o>");
             Assert.True(results.MoveNext());
@@ -312,7 +312,7 @@ public class QuadIndexTests : IDisposable
     public void Persistence_QuadCountSurvives()
     {
         // First session
-        using (var index1 = new QuadIndex(_testPath))
+        using (var index1 = new TemporalQuadIndex(_testPath))
         {
             for (int i = 0; i < 10; i++)
             {
@@ -321,7 +321,7 @@ public class QuadIndexTests : IDisposable
         }
 
         // Second session
-        using (var index2 = new QuadIndex(_testPath))
+        using (var index2 = new TemporalQuadIndex(_testPath))
         {
             Assert.Equal(10, index2.QuadCount);
         }
@@ -338,7 +338,7 @@ public class QuadIndexTests : IDisposable
         try
         {
             using var sharedAtoms = new AtomStore(atomsPath);
-            using var index = new QuadIndex(_testPath, sharedAtoms);
+            using var index = new TemporalQuadIndex(_testPath, sharedAtoms);
 
             Assert.Same(sharedAtoms, index.Atoms);
 
@@ -522,7 +522,7 @@ public class QuadIndexTests : IDisposable
     {
         // Create a TimeFirst index
         var timeFirstPath = Path.Combine(_testDir, "timefirst.tdb");
-        using var index = new QuadIndex(timeFirstPath, null, sortOrder: QuadIndex.KeySortOrder.TimeFirst);
+        using var index = new TemporalQuadIndex(timeFirstPath, null, sortOrder: TemporalQuadIndex.KeySortOrder.TimeFirst);
 
         // Entry A: low entity ID, HIGH time
         var highTime = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -565,7 +565,7 @@ public class QuadIndexTests : IDisposable
     {
         // Create an EntityFirst index for comparison
         var entityFirstPath = Path.Combine(_testDir, "entityfirst.tdb");
-        using var index = new QuadIndex(entityFirstPath, null, sortOrder: QuadIndex.KeySortOrder.EntityFirst);
+        using var index = new TemporalQuadIndex(entityFirstPath, null, sortOrder: TemporalQuadIndex.KeySortOrder.EntityFirst);
 
         // Same data as above
         var highTime = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -597,8 +597,8 @@ public class QuadIndexTests : IDisposable
         // Create two indexes with the same data: one EntityFirst, one TimeFirst
         var entityPath = Path.Combine(_testDir, "pages_entity.tdb");
         var timePath = Path.Combine(_testDir, "pages_time.tdb");
-        using var entityIndex = new QuadIndex(entityPath, null, sortOrder: QuadIndex.KeySortOrder.EntityFirst);
-        using var timeIndex = new QuadIndex(timePath, null, sortOrder: QuadIndex.KeySortOrder.TimeFirst);
+        using var entityIndex = new TemporalQuadIndex(entityPath, null, sortOrder: TemporalQuadIndex.KeySortOrder.EntityFirst);
+        using var timeIndex = new TemporalQuadIndex(timePath, null, sortOrder: TemporalQuadIndex.KeySortOrder.TimeFirst);
 
         // Insert 5000 entries spread across 10 years (2020-2030)
         // ~27 leaf pages (5000 / 185 entries per page)

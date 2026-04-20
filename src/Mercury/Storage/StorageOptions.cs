@@ -5,7 +5,7 @@ using SkyOmega.Mercury.Abstractions;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// Configuration options for storage components (AtomStore, QuadIndex, WriteAheadLog, QuadStore).
+/// Configuration options for storage components (AtomStore, TemporalQuadIndex, WriteAheadLog, QuadStore).
 /// </summary>
 public sealed class StorageOptions
 {
@@ -36,7 +36,7 @@ public sealed class StorageOptions
     public long MaxAtomSize { get; init; } = AtomStore.DefaultMaxAtomSize;
 
     /// <summary>
-    /// Initial size for each QuadIndex file (4 indexes: GSPO, GPOS, GOSP, TGSP). Default: 1GB.
+    /// Initial size for each TemporalQuadIndex file (4 indexes: GSPO, GPOS, GOSP, TGSP). Default: 1GB.
     /// For testing, use smaller values (e.g., 64MB) to reduce disk footprint.
     /// Files grow automatically when capacity is exceeded.
     /// </summary>
