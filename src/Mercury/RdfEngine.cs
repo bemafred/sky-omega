@@ -109,9 +109,10 @@ public static class RdfEngine
     /// <param name="filePath">Path to the RDF file (.ttl, .nt, .ttl.gz, etc.).</param>
     /// <param name="chunkSize">Triples per batch commit. Default 100,000.</param>
     /// <param name="onProgress">Optional progress callback, invoked at each chunk boundary.</param>
+    /// <param name="limit">Optional cap on triples added to the store. When set, parsing stops after exactly <paramref name="limit"/> triples have been added.</param>
     /// <returns>The number of triples/quads loaded.</returns>
     public static async Task<long> LoadFileAsync(QuadStore store, string filePath,
-        int chunkSize = 100_000, Action<LoadProgress>? onProgress = null)
+        int chunkSize = 100_000, Action<LoadProgress>? onProgress = null, long? limit = null)
     {
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"File not found: {filePath}", filePath);
@@ -125,7 +126,7 @@ public static class RdfEngine
         var stream = WrapWithDecompression(fileStream, compression);
         try
         {
-            return await LoadStreamingAsync(store, stream, format, chunkSize, onProgress).ConfigureAwait(false);
+            return await LoadStreamingAsync(store, stream, format, chunkSize, onProgress, limit: limit).ConfigureAwait(false);
         }
         finally
         {
@@ -141,13 +142,16 @@ public static class RdfEngine
     /// This avoids ReaderWriterLockSlim thread-affinity issues with async I/O.
     /// </summary>
     internal static async Task<long> LoadStreamingAsync(QuadStore store, Stream stream, RdfFormat format,
-        int chunkSize = 100_000, Action<LoadProgress>? onProgress = null, string? baseUri = null)
+        int chunkSize = 100_000, Action<LoadProgress>? onProgress = null, string? baseUri = null, long? limit = null)
     {
         long totalCount = 0;
         var buffer = new List<(string Graph, string Subject, string Predicate, string Object)>(chunkSize);
         var sw = Stopwatch.StartNew();
         long prevCount = 0;
         TimeSpan prevElapsed = TimeSpan.Zero;
+
+        using var cts = limit.HasValue ? new CancellationTokenSource() : null;
+        var ct = cts?.Token ?? CancellationToken.None;
 
         void FlushBuffer()
         {
@@ -190,6 +194,11 @@ public static class RdfEngine
         // Triple formats (Turtle, NTriples, RdfXml)
         void OnTriple(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
         {
+            if (limit.HasValue && totalCount >= limit.Value)
+            {
+                cts!.Cancel();
+                return;
+            }
             buffer.Add((string.Empty, subject.ToString(), predicate.ToString(), obj.ToString()));
             totalCount++;
             if (buffer.Count >= chunkSize)
@@ -199,46 +208,58 @@ public static class RdfEngine
         // Quad formats (NQuads, TriG, JsonLd)
         void OnQuad(ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj, ReadOnlySpan<char> graph)
         {
+            if (limit.HasValue && totalCount >= limit.Value)
+            {
+                cts!.Cancel();
+                return;
+            }
             buffer.Add((graph.IsEmpty ? string.Empty : graph.ToString(), subject.ToString(), predicate.ToString(), obj.ToString()));
             totalCount++;
             if (buffer.Count >= chunkSize)
                 FlushBuffer();
         }
 
-        switch (format)
+        try
         {
-            case RdfFormat.Turtle:
-                using (var parser = new TurtleStreamParser(stream, baseUri: baseUri))
-                    await parser.ParseAsync((s, p, o) => OnTriple(s, p, o)).ConfigureAwait(false);
-                break;
+            switch (format)
+            {
+                case RdfFormat.Turtle:
+                    using (var parser = new TurtleStreamParser(stream, baseUri: baseUri))
+                        await parser.ParseAsync((s, p, o) => OnTriple(s, p, o), ct).ConfigureAwait(false);
+                    break;
 
-            case RdfFormat.NTriples:
-                using (var parser = new NTriplesStreamParser(stream))
-                    await parser.ParseAsync((s, p, o) => OnTriple(s, p, o)).ConfigureAwait(false);
-                break;
+                case RdfFormat.NTriples:
+                    using (var parser = new NTriplesStreamParser(stream))
+                        await parser.ParseAsync((s, p, o) => OnTriple(s, p, o), ct).ConfigureAwait(false);
+                    break;
 
-            case RdfFormat.RdfXml:
-                using (var parser = new RdfXmlStreamParser(stream, baseUri: baseUri))
-                    await parser.ParseAsync((s, p, o) => OnTriple(s, p, o)).ConfigureAwait(false);
-                break;
+                case RdfFormat.RdfXml:
+                    using (var parser = new RdfXmlStreamParser(stream, baseUri: baseUri))
+                        await parser.ParseAsync((s, p, o) => OnTriple(s, p, o), ct).ConfigureAwait(false);
+                    break;
 
-            case RdfFormat.NQuads:
-                using (var parser = new NQuadsStreamParser(stream))
-                    await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g)).ConfigureAwait(false);
-                break;
+                case RdfFormat.NQuads:
+                    using (var parser = new NQuadsStreamParser(stream))
+                        await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g), ct).ConfigureAwait(false);
+                    break;
 
-            case RdfFormat.TriG:
-                using (var parser = new TriGStreamParser(stream, baseUri))
-                    await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g)).ConfigureAwait(false);
-                break;
+                case RdfFormat.TriG:
+                    using (var parser = new TriGStreamParser(stream, baseUri))
+                        await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g), ct).ConfigureAwait(false);
+                    break;
 
-            case RdfFormat.JsonLd:
-                using (var parser = new JsonLdStreamParser(stream, baseUri))
-                    await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g)).ConfigureAwait(false);
-                break;
+                case RdfFormat.JsonLd:
+                    using (var parser = new JsonLdStreamParser(stream, baseUri))
+                        await parser.ParseAsync((s, p, o, g) => OnQuad(s, p, o, g), ct).ConfigureAwait(false);
+                    break;
 
-            default:
-                throw new NotSupportedException($"Unsupported RDF format: {format}");
+                default:
+                    throw new NotSupportedException($"Unsupported RDF format: {format}");
+            }
+        }
+        catch (OperationCanceledException) when (limit.HasValue && totalCount >= limit.Value)
+        {
+            // Expected: parser cancelled once the limit was reached.
         }
 
         // Flush remaining triples
@@ -543,9 +564,10 @@ public static class RdfEngine
     /// <param name="inputPath">Input RDF file path (format auto-detected, .gz supported).</param>
     /// <param name="outputPath">Output RDF file path (format auto-detected from extension).</param>
     /// <param name="onProgress">Optional progress callback, invoked every 1M triples.</param>
+    /// <param name="limit">Optional cap on triples written to the output. When set, conversion stops after exactly <paramref name="limit"/> triples have been emitted.</param>
     /// <returns>The number of triples converted.</returns>
     public static async Task<long> ConvertAsync(string inputPath, string outputPath,
-        Action<LoadProgress>? onProgress = null)
+        Action<LoadProgress>? onProgress = null, long? limit = null)
     {
         if (!File.Exists(inputPath))
             throw new FileNotFoundException($"File not found: {inputPath}", inputPath);
@@ -576,22 +598,37 @@ public static class RdfEngine
         long count = 0;
         var sw = Stopwatch.StartNew();
 
-        await ParseAsync(inputStream, inputFormat, (s, p, o) =>
-        {
-            count++;
-            switch (outputFormat)
-            {
-                case RdfFormat.NTriples:
-                    ntWriter!.WriteTriple(s, p, o);
-                    break;
-                default:
-                    // For other formats, fall through to materialized write below
-                    break;
-            }
+        using var cts = limit.HasValue ? new CancellationTokenSource() : null;
+        var ct = cts?.Token ?? CancellationToken.None;
 
-            if (count % 1_000_000 == 0)
-                onProgress?.Invoke(new LoadProgress { TriplesLoaded = count, Elapsed = sw.Elapsed });
-        }).ConfigureAwait(false);
+        try
+        {
+            await ParseAsync(inputStream, inputFormat, (s, p, o) =>
+            {
+                if (limit.HasValue && count >= limit.Value)
+                {
+                    cts!.Cancel();
+                    return;
+                }
+                count++;
+                switch (outputFormat)
+                {
+                    case RdfFormat.NTriples:
+                        ntWriter!.WriteTriple(s, p, o);
+                        break;
+                    default:
+                        // For other formats, fall through to materialized write below
+                        break;
+                }
+
+                if (count % 1_000_000 == 0)
+                    onProgress?.Invoke(new LoadProgress { TriplesLoaded = count, Elapsed = sw.Elapsed });
+            }, ct: ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (limit.HasValue && count >= limit.Value)
+        {
+            // Expected: parser cancelled once the limit was reached.
+        }
 
         ntWriter?.Flush();
         ntWriter?.Dispose();

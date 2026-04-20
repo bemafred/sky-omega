@@ -166,6 +166,119 @@ public class RdfEngineTests : PooledStoreTestBase
         await Assert.ThrowsAnyAsync<Exception>(() => RdfEngine.LoadAsync(Store, stream, RdfFormat.Turtle));
     }
 
+    [Fact]
+    public async Task LoadStreamingAsync_WithLimit_StopsAtExactlyN()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 100; i++)
+            sb.Append($"<http://test/rdfengine/limit-stops/s{i}> <http://ex/p> \"v{i}\" .\n");
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
+        var count = await RdfEngine.LoadStreamingAsync(Store, stream, RdfFormat.NTriples, limit: 10);
+
+        Assert.Equal(10, count);
+    }
+
+    [Fact]
+    public async Task LoadStreamingAsync_LimitZero_LoadsNone()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 50; i++)
+            sb.Append($"<http://test/rdfengine/limit-zero/s{i}> <http://ex/p> \"v{i}\" .\n");
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
+        var count = await RdfEngine.LoadStreamingAsync(Store, stream, RdfFormat.NTriples, limit: 0);
+
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public async Task LoadStreamingAsync_LimitGreaterThanSource_LoadsAll()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 5; i++)
+            sb.Append($"<http://test/rdfengine/limit-greater/s{i}> <http://ex/p> \"v{i}\" .\n");
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
+        var count = await RdfEngine.LoadStreamingAsync(Store, stream, RdfFormat.NTriples, limit: 1000);
+
+        Assert.Equal(5, count);
+    }
+
+    [Fact]
+    public async Task LoadStreamingAsync_LimitNull_DefaultsToLoadAll()
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < 7; i++)
+            sb.Append($"<http://test/rdfengine/limit-null/s{i}> <http://ex/p> \"v{i}\" .\n");
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
+        var count = await RdfEngine.LoadStreamingAsync(Store, stream, RdfFormat.NTriples);
+
+        Assert.Equal(7, count);
+    }
+
+    [Fact]
+    public async Task LoadStreamingAsync_WithLimit_Turtle_StopsAtExactlyN()
+    {
+        var sb = new StringBuilder();
+        sb.Append("@prefix ex: <http://test/rdfengine/limit-ttl/> .\n");
+        for (int i = 0; i < 30; i++)
+            sb.Append($"ex:s{i} ex:p \"v{i}\" .\n");
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(sb.ToString()));
+        var count = await RdfEngine.LoadStreamingAsync(Store, stream, RdfFormat.Turtle, limit: 8);
+
+        Assert.Equal(8, count);
+    }
+
+    [Fact]
+    public async Task LoadFileAsync_WithLimit_StopsAtExactlyN()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"rdfengine-limit-file-{Guid.NewGuid():N}.nt");
+        try
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < 50; i++)
+                sb.Append($"<http://test/rdfengine/limit-file/s{i}> <http://ex/p> \"v{i}\" .\n");
+            await File.WriteAllTextAsync(path, sb.ToString());
+
+            var count = await RdfEngine.LoadFileAsync(Store, path, limit: 15);
+
+            Assert.Equal(15, count);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertAsync_WithLimit_EmitsExactlyN()
+    {
+        var inPath = Path.Combine(Path.GetTempPath(), $"rdfengine-limit-conv-in-{Guid.NewGuid():N}.nt");
+        var outPath = Path.Combine(Path.GetTempPath(), $"rdfengine-limit-conv-out-{Guid.NewGuid():N}.nt");
+        try
+        {
+            var sb = new StringBuilder();
+            for (int i = 0; i < 40; i++)
+                sb.Append($"<http://test/rdfengine/convert-limit/s{i}> <http://ex/p> \"v{i}\" .\n");
+            await File.WriteAllTextAsync(inPath, sb.ToString());
+
+            var count = await RdfEngine.ConvertAsync(inPath, outPath, limit: 12);
+            Assert.Equal(12, count);
+
+            var outputLines = (await File.ReadAllLinesAsync(outPath))
+                .Count(l => l.TrimEnd().EndsWith(" ."));
+            Assert.Equal(12, outputLines);
+        }
+        finally
+        {
+            if (File.Exists(inPath)) File.Delete(inPath);
+            if (File.Exists(outPath)) File.Delete(outPath);
+        }
+    }
+
     #endregion
 
     #region Parsing

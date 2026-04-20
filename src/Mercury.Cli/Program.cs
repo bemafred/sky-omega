@@ -25,6 +25,7 @@ string? convertInput = null;
 string? convertOutput = null;
 bool rebuildIndexes = false;
 long? minFreeSpaceGB = null;
+long? loadLimit = null;
 string? metricsOutPath = null;
 bool noRepl = false;
 
@@ -89,6 +90,15 @@ for (int i = 0; i < args.Length; i++)
             if (i + 1 < args.Length && long.TryParse(args[++i], out var gb))
                 minFreeSpaceGB = gb;
             break;
+        case "--limit":
+            if (i + 1 < args.Length && long.TryParse(args[++i], out var lim) && lim >= 0)
+                loadLimit = lim;
+            else
+            {
+                Console.Error.WriteLine("Error: --limit requires a non-negative integer.");
+                return 1;
+            }
+            break;
         case "--metrics-out":
             if (i + 1 < args.Length)
                 metricsOutPath = args[++i];
@@ -152,6 +162,7 @@ if (showHelp)
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
+          --limit <N>                Cap triples added (--bulk-load/--load) or emitted (--convert) at N
           --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
           --no-repl                  Skip the REPL after --load/--bulk-load/--rebuild-indexes (for profilers, CI, or pipes that stay open)
 
@@ -200,6 +211,8 @@ void WriteMetric(object record)
 if (convertInput != null && convertOutput != null)
 {
     Console.WriteLine($"Converting {convertInput} -> {convertOutput}...");
+    if (loadLimit.HasValue)
+        Console.WriteLine($"Limit:           {loadLimit.Value:N0} triples");
     var convertStart = DateTimeOffset.UtcNow;
     var count = await RdfEngine.ConvertAsync(convertInput, convertOutput, p =>
     {
@@ -216,7 +229,7 @@ if (convertInput != null && convertOutput != null)
             triples_per_sec = rate,
             elapsed_sec = p.Elapsed.TotalSeconds,
         });
-    });
+    }, limit: loadLimit);
     Console.Error.WriteLine();
     Console.WriteLine($"Converted {count:N0} triples.");
 
@@ -287,6 +300,8 @@ if (loadFile != null || bulkLoadFile != null || rebuildIndexes)
     if (freeSpace >= 0)
         Console.WriteLine($"Free disk space: {freeSpace / (1024.0 * 1024 * 1024):F1} GB");
     Console.WriteLine($"Min free space:  {minFreeSpace / (1024.0 * 1024 * 1024):F0} GB");
+    if (loadLimit.HasValue)
+        Console.WriteLine($"Limit:           {loadLimit.Value:N0} triples");
     Console.WriteLine();
 }
 
@@ -364,7 +379,7 @@ if (fileToLoad != null)
             $"recent {p.RecentTriplesPerSecond:N0}/sec  " +
             $"GC {gcMB:N0} MB  " +
             $"RSS {wsMB:N0} MB");
-    });
+    }, limit: loadLimit);
 
     Console.Error.WriteLine();
 
