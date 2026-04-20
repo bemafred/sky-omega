@@ -121,7 +121,17 @@ The Context above frames Reference as "immutable, non-temporal, dump-sourced". T
 
 Non-trivial but bounded. The escape hatch exists; the choice is not irreversible, just load-bearing.
 
-**Open question defined by this clause:** how does bulk-append handle duplicate triples already present in the store? Options are silent dedup (extra B+Tree lookup per entry — cost at 21.3 B scale is meaningful), error on conflict (correctness-safe, operationally hostile), or accept-duplicates (simplest, wastes storage, distinguishes the two entries by atom IDs not structure — impossible since structural equality is the only equality we have). Defer explicit resolution to the bulk-append implementation, but flag as required-before-Reference-ships.
+**Uniqueness invariant (inherited, not a new design decision).** An earlier draft of this clause framed "bulk-append dedup" as an open policy question (silent dedup vs error). That framing was wrong: RDF semantics define a graph as a set of triples, so a triple-store must never expose duplicates in an as-of-now view. This is not a Mercury design choice; it is what "RDF store" means.
+
+Mercury's existing `TemporalQuadIndex` already enforces this invariant in `InsertIntoLeaf` at `src/Mercury/Storage/QuadIndex.cs:886-895`:
+
+- **Case A** — exact full-key duplicate (all seven TemporalKey fields match) → silent no-op ("replayed no-op").
+- **Case B** — same (graph, subject, predicate, object), both entries currently valid (ValidTo ≥ far-future) → silent no-op. The comment in source labels this "RDF idempotency."
+- **Case C** — same (g, s, p, o), different temporal key → temporal update (truncate predecessor, insert new).
+
+The 2026-04-19 1 B bulk-load is evidence the invariant is working as designed: 1,000,000,000 source lines produced 991,797,873 queryable triples ([full-pipeline-gradient-2026-04-19.md:135](../../validations/full-pipeline-gradient-2026-04-19.md)). The ~8.2 M difference is Wikidata's duplicate statements collapsed by Case B during insert. The `head -n N` at the source is a line count, not a distinct-triple count; the store correctly represents the underlying graph.
+
+**Implementation implication for `ReferenceQuadIndex`:** Reference profile has no temporal dimension, so Cases A/B collapse: the key IS (graph, subject, predicate, object), and inserting the same key twice is a no-op. The `ReferenceQuadIndex` must enforce this on every insert path (both incremental and bulk-append). Under ADR-030's sort-insert fast path this is essentially free — a single equality check against the previously-inserted key. Under random insertion it is a standard B+Tree point lookup. Either way, uniqueness enforcement is a requirement, not a choice.
 
 ## Consequences
 
