@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using SkyOmega.Mercury.Abstractions;
@@ -1116,6 +1117,20 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset? rangeEnd = null,
         ReadOnlySpan<char> graph = default)
     {
+        // ADR-029 Phase 2d query dispatch. A Reference store has no time dimension, so
+        // only "current state" queries make sense. Range, AllTime, and asOf-at-a-
+        // specific-past-time are all temporal queries and fail loudly at the API boundary
+        // (Decision 4). QueryCurrent's pass-through lands here with queryType=AsOf and
+        // asOfTime=null, which is exactly the supported shape.
+        if (_schema.Profile == StoreProfile.Reference)
+        {
+            if (queryType != TemporalQueryType.AsOf)
+                throw new ProfileCapabilityException(
+                    $"Query type {queryType} requires temporal semantics. This store's profile is Reference, " +
+                    "which has no temporal dimension — only current-state (AsOf, no explicit time) queries are supported.");
+            return QueryReferenceCurrent(subject, predicate, @object, graph);
+        }
+
         RequireTemporalProfile(nameof(Query));
         // Select optimal index
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, queryType);
@@ -1186,6 +1201,9 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset asOfTime,
         ReadOnlySpan<char> graph = default)
     {
+        // Explicit time-travel — Reference can't satisfy this even with synthesized fields,
+        // so reject here rather than silently ignoring the time in Query's dispatch.
+        RequireTemporalProfile(nameof(QueryAsOf));
         return Query(subject, predicate, @object, TemporalQueryType.AsOf, asOfTime: asOfTime, graph: graph);
     }
 
@@ -1199,6 +1217,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object,
         ReadOnlySpan<char> graph = default)
     {
+        RequireTemporalProfile(nameof(QueryEvolution));
         return Query(subject, predicate, @object, TemporalQueryType.AllTime, graph: graph);
     }
 
@@ -1213,6 +1232,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object = default,
         ReadOnlySpan<char> graph = default)
     {
+        RequireTemporalProfile(nameof(TimeTravelTo));
         return Query(subject, predicate, @object, TemporalQueryType.AsOf, asOfTime: targetTime, graph: graph);
     }
 
@@ -1228,6 +1248,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> @object = default,
         ReadOnlySpan<char> graph = default)
     {
+        RequireTemporalProfile(nameof(QueryChanges));
         return Query(
             subject, predicate, @object,
             TemporalQueryType.Range,
@@ -1258,6 +1279,11 @@ public sealed class QuadStore : IDisposable
         HashSet<long> candidateObjectAtomIds,
         ReadOnlySpan<char> graph = default)
     {
+        // Reference profile also indexes literal objects in the trigram index during
+        // bulk-load, so candidate-filtered iteration works there too.
+        if (_schema.Profile == StoreProfile.Reference)
+            return QueryReferenceCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
+
         RequireTemporalProfile(nameof(QueryCurrentWithCandidates));
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, TemporalQueryType.AsOf);
 
@@ -1288,6 +1314,88 @@ public sealed class QuadStore : IDisposable
     {
         RequireTemporalProfile(nameof(GetNamedGraphs));
         return new NamedGraphEnumerator(_gspoIndex, _atoms);
+    }
+
+    /// <summary>
+    /// Resolve a SPARQL term (IRI, literal, or variable) to an atom ID for Reference-profile
+    /// queries. Empty spans and ?-prefixed variables become -1 (wildcard); IRIs/literals are
+    /// looked up in the AtomStore (returning 0 if not present, which matches nothing).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long ResolveQueryTerm(ReadOnlySpan<char> term)
+    {
+        if (term.IsEmpty || term[0] == '?')
+            return -1;
+        return _atoms.GetAtomId(term);
+    }
+
+    /// <summary>
+    /// Resolve a graph IRI for query. Empty = default graph (0); not-found = -2 sentinel so
+    /// the scan matches nothing; otherwise the atom ID.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long ResolveQueryGraph(ReadOnlySpan<char> graph)
+    {
+        if (graph.IsEmpty || graph[0] == '?')
+            return graph.IsEmpty ? 0 : -1;
+        var id = _atoms.GetAtomId(graph);
+        return id == 0 ? -2 : id;
+    }
+
+    /// <summary>
+    /// Pick GSPO or GPOS for a Reference-profile query. Predicate-bound-without-subject
+    /// picks GPOS (predicate-first layout); everything else falls back to GSPO. Reference
+    /// has no GOSP or TGSP, so object-only queries still go through GSPO — correct but a
+    /// full scan bound only by graph. Cost-based selection is a later ADR.
+    /// </summary>
+    private (ReferenceQuadIndex Index, TemporalIndexType Type) SelectOptimalReferenceIndex(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object)
+    {
+        _ = @object; // reserved for future cost-based selection
+        var subjectBound = !subject.IsEmpty && subject[0] != '?';
+        var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
+
+        if (predicateBound && !subjectBound)
+            return (_gposReference!, TemporalIndexType.GPOS);
+        return (_gspoReference!, TemporalIndexType.GSPO);
+    }
+
+    /// <summary>
+    /// Query entry for Reference profile. Resolves SPARQL-shaped spans to atom IDs,
+    /// chooses the right index (GSPO or GPOS), remaps dimensions, and wraps the
+    /// resulting <see cref="ReferenceQuadIndex.ReferenceQuadEnumerator"/> in a
+    /// <see cref="TemporalResultEnumerator"/> for uniform consumption by the SPARQL
+    /// executor.
+    /// </summary>
+    private TemporalResultEnumerator QueryReferenceCurrent(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph,
+        HashSet<long>? candidateObjectAtomIds = null)
+    {
+        var (refIndex, indexType) = SelectOptimalReferenceIndex(subject, predicate, @object);
+
+        var g = ResolveQueryGraph(graph);
+        long primary, secondary, tertiary;
+        switch (indexType)
+        {
+            case TemporalIndexType.GPOS:
+                primary = ResolveQueryTerm(predicate);
+                secondary = ResolveQueryTerm(@object);
+                tertiary = ResolveQueryTerm(subject);
+                break;
+            default: // GSPO
+                primary = ResolveQueryTerm(subject);
+                secondary = ResolveQueryTerm(predicate);
+                tertiary = ResolveQueryTerm(@object);
+                break;
+        }
+
+        var refEnum = refIndex.Query(g, primary, secondary, tertiary);
+        return new TemporalResultEnumerator(refEnum, indexType, _atoms, candidateObjectAtomIds);
     }
 
     private (TemporalQuadIndex Index, TemporalIndexType Type) SelectOptimalIndex(
@@ -1475,7 +1583,12 @@ public sealed class QuadStore : IDisposable
 /// </summary>
 public struct TemporalResultEnumerator
 {
+    // Exactly one of these backing enumerators is active, chosen at construction time
+    // based on the profile of the store that produced the result. ADR-029 Phase 2d.
     private TemporalQuadIndex.TemporalQuadEnumerator _baseEnumerator;
+    private ReferenceQuadIndex.ReferenceQuadEnumerator _referenceEnumerator;
+    private readonly bool _isReference;
+
     private readonly TemporalIndexType _indexType;
     private readonly AtomStore _atoms;
     private readonly HashSet<long>? _candidateObjectAtomIds;
@@ -1491,6 +1604,8 @@ public struct TemporalResultEnumerator
         AtomStore atoms)
     {
         _baseEnumerator = baseEnumerator;
+        _referenceEnumerator = default;
+        _isReference = false;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = null;
@@ -1505,6 +1620,30 @@ public struct TemporalResultEnumerator
         HashSet<long>? candidateObjectAtomIds)
     {
         _baseEnumerator = baseEnumerator;
+        _referenceEnumerator = default;
+        _isReference = false;
+        _indexType = indexType;
+        _atoms = atoms;
+        _candidateObjectAtomIds = candidateObjectAtomIds;
+        _buffer = null;
+        _bufferOffset = 0;
+    }
+
+    /// <summary>
+    /// Wrap a Reference-profile enumeration. Temporal fields in the projected
+    /// <see cref="ResolvedTemporalQuad"/> are synthesized (ValidFrom=MinValue,
+    /// ValidTo=MaxValue, TransactionTime=MinValue, IsDeleted=false) because a Reference
+    /// store has no temporal dimension — every triple is current by construction.
+    /// </summary>
+    internal TemporalResultEnumerator(
+        ReferenceQuadIndex.ReferenceQuadEnumerator referenceEnumerator,
+        TemporalIndexType indexType,
+        AtomStore atoms,
+        HashSet<long>? candidateObjectAtomIds = null)
+    {
+        _baseEnumerator = default;
+        _referenceEnumerator = referenceEnumerator;
+        _isReference = true;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
@@ -1516,6 +1655,25 @@ public struct TemporalResultEnumerator
     {
         // Reset buffer offset for new result - reuse same buffer
         _bufferOffset = 0;
+
+        if (_isReference)
+        {
+            if (_candidateObjectAtomIds is null)
+                return _referenceEnumerator.MoveNext();
+
+            while (_referenceEnumerator.MoveNext())
+            {
+                var key = _referenceEnumerator.Current;
+                long objectAtomId = _indexType switch
+                {
+                    TemporalIndexType.GPOS => key.Secondary,
+                    _ => key.Tertiary // GSPO (Reference has no GOSP/TGSP)
+                };
+                if (_candidateObjectAtomIds.Contains(objectAtomId))
+                    return true;
+            }
+            return false;
+        }
 
         if (_candidateObjectAtomIds == null)
             return _baseEnumerator.MoveNext();
@@ -1542,11 +1700,42 @@ public struct TemporalResultEnumerator
     {
         get
         {
+            long graph, s, p, o;
+
+            if (_isReference)
+            {
+                var key = _referenceEnumerator.Current;
+                graph = key.Graph;
+                // Reference supports only GSPO and GPOS.
+                switch (_indexType)
+                {
+                    case TemporalIndexType.GSPO:
+                        s = key.Primary; p = key.Secondary; o = key.Tertiary;
+                        break;
+                    case TemporalIndexType.GPOS:
+                        p = key.Primary; o = key.Secondary; s = key.Tertiary;
+                        break;
+                    default:
+                        s = p = o = 0;
+                        break;
+                }
+
+                return new ResolvedTemporalQuad(
+                    graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph),
+                    DecodeAtomToBuffer(s),
+                    DecodeAtomToBuffer(p),
+                    DecodeAtomToBuffer(o),
+                    // Synthesized temporal fields: Reference has no time dimension.
+                    DateTimeOffset.MinValue,
+                    DateTimeOffset.MaxValue,
+                    DateTimeOffset.MinValue,
+                    false);
+            }
+
             var quad = _baseEnumerator.Current;
+            graph = quad.Graph;
 
             // Remap generic dimensions back to RDF terms based on index type
-            long s, p, o;
-
             switch (_indexType)
             {
                 case TemporalIndexType.GSPO:
@@ -1582,7 +1771,7 @@ public struct TemporalResultEnumerator
             const long MaxValidMs = 253402300799999L; // Dec 31, 9999
 
             return new ResolvedTemporalQuad(
-                quad.Graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(quad.Graph),
+                graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph),
                 DecodeAtomToBuffer(s),
                 DecodeAtomToBuffer(p),
                 DecodeAtomToBuffer(o),

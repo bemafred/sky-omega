@@ -120,15 +120,40 @@ public class QuadStoreProfileDispatchTests : IDisposable
     }
 
     [Fact]
-    public void Reference_TemporalQuery_ThrowsProfileCapability()
+    public void Reference_QueryCurrent_Succeeds()
     {
+        // Session 6: QueryCurrent works for Reference (current state is the only state).
+        // QueryAsOf with a specific past time still throws — that's an explicit time-travel.
         var dir = NewStoreDir("ref_query");
         Directory.CreateDirectory(dir);
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
+        // Empty store — no results, no exception.
+        var enumerator = store.QueryCurrent(
+            ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+        Assert.False(enumerator.MoveNext());
+        enumerator.Dispose();
+
+        // Explicit time-travel (QueryAsOf) still rejected — Reference has no history.
         var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.QueryCurrent(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty));
+            store.QueryAsOf(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty,
+                DateTimeOffset.UtcNow));
         Assert.Contains("temporal", ex.Message);
+    }
+
+    [Fact]
+    public void Reference_TemporalRangeQuery_ThrowsProfileCapability()
+    {
+        var dir = NewStoreDir("ref_range");
+        Directory.CreateDirectory(dir);
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
+
+        Assert.Throws<ProfileCapabilityException>(() =>
+            store.QueryChanges(DateTimeOffset.MinValue, DateTimeOffset.MaxValue));
+        Assert.Throws<ProfileCapabilityException>(() =>
+            store.QueryEvolution(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty));
+        Assert.Throws<ProfileCapabilityException>(() =>
+            store.TimeTravelTo(DateTimeOffset.UtcNow));
     }
 
     [Fact]
