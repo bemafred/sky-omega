@@ -61,13 +61,51 @@ public class QuadStoreProfileDispatchTests : IDisposable
     }
 
     [Fact]
-    public void Reference_SessionApiBatch_ThrowsProfileCapability()
+    public void Reference_BatchApiIsTheBulkLoadEntry()
     {
-        var dir = NewStoreDir("ref_batch");
+        // Session 5 amendment to Session 4's stance: BeginBatch/AddCurrentBatched/
+        // CommitBatch is the programmatic bulk-load interface per ADR-029 Decision 7.
+        // For Reference these bypass the WAL and write directly to the two indexes.
+        var dir = NewStoreDir("ref_batch_ok");
         Directory.CreateDirectory(dir);
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
-        Assert.Throws<ProfileCapabilityException>(() => store.BeginBatch());
+        store.BeginBatch();
+        try
+        {
+            store.AddCurrentBatched("alice", "knows", "bob", graph: "g1");
+            store.AddCurrentBatched("alice", "knows", "carol", graph: "g1");
+            store.CommitBatch();
+        }
+        catch
+        {
+            store.RollbackBatch();
+            throw;
+        }
+
+        Assert.Equal(2, store.GetStatistics().QuadCount);
+    }
+
+    [Fact]
+    public void Reference_RollbackBatch_ReleasesLockWithoutUndo()
+    {
+        var dir = NewStoreDir("ref_rollback");
+        Directory.CreateDirectory(dir);
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
+
+        store.BeginBatch();
+        store.AddCurrentBatched("alice", "knows", "bob");
+        // Reference has no WAL to roll back — the triple is already in the indexes.
+        // RollbackBatch just releases the write lock so the caller can Dispose or retry.
+        store.RollbackBatch();
+
+        // After rollback the lock is free, so another BeginBatch should succeed.
+        store.BeginBatch();
+        store.AddCurrentBatched("alice", "knows", "dave");
+        store.CommitBatch();
+
+        // Both the pre-rollback triple and the post-rollback one are durably present.
+        Assert.Equal(2, store.GetStatistics().QuadCount);
     }
 
     [Fact]
@@ -94,13 +132,17 @@ public class QuadStoreProfileDispatchTests : IDisposable
     }
 
     [Fact]
-    public void Reference_RebuildSecondaryIndexes_ThrowsProfileCapability()
+    public void Reference_RebuildSecondaryIndexes_IsSilentNoOp()
     {
+        // Reference builds GSPO and GPOS inline during bulk-load — there is no separate
+        // rebuild phase. Calling rebuild should succeed silently so that the common
+        // `bulk-load → rebuild-indexes` pipeline doesn't need to branch on profile.
         var dir = NewStoreDir("ref_rebuild");
         Directory.CreateDirectory(dir);
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
-        Assert.Throws<ProfileCapabilityException>(() => store.RebuildSecondaryIndexes());
+        // No exception, no state change.
+        store.RebuildSecondaryIndexes();
     }
 
     [Fact]

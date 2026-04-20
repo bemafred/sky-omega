@@ -45,6 +45,10 @@ public sealed class QuadStore : IDisposable
     private readonly long _minimumFreeDiskSpace;
     private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
+    // Reference profile has no WAL and therefore no batch transaction id. A simple
+    // in-bulk flag lets AddCurrentBatched / CommitBatch enforce the "must be inside
+    // BeginBatch" contract without fabricating a tx id that has no durable meaning.
+    private bool _referenceBulkActive;
     // Batched records hold atom IDs only. Resolving IDs back to strings just so
     // ApplyToIndexes could re-intern them was a 1% hot path in bulk-load profiles,
     // plus one string allocation per atom per triple. The IDs are already in the
@@ -172,9 +176,13 @@ public sealed class QuadStore : IDisposable
                     $"Unknown StoreProfile {_schema.Profile} — this build does not know how to dispatch index construction for it.");
         }
 
-        // Read index construction state
+        // Read index construction state.
         _indexState = StoreStateFile.Read(baseDirectory);
-        if (_bulkLoadMode && _indexState == StoreIndexState.Ready)
+        // Cognitive/Graph bulk-load populates only GSPO; the rest is built by
+        // RebuildSecondaryIndexes. Reference has no separate rebuild phase — both
+        // of its indexes are written inline during bulk-load — so the store stays
+        // in Ready state throughout.
+        if (_bulkLoadMode && _indexState == StoreIndexState.Ready && _schema.HasTemporal)
         {
             _indexState = StoreIndexState.PrimaryOnly;
             StoreStateFile.Write(baseDirectory, _indexState);
@@ -442,13 +450,26 @@ public sealed class QuadStore : IDisposable
     public void BeginBatch()
     {
         ThrowIfDisposed();
-        RequireWriteCapableProfile(nameof(BeginBatch));
         ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
         {
-            if (_activeBatchTxId >= 0)
+            if (_activeBatchTxId >= 0 || _referenceBulkActive)
                 throw new InvalidOperationException("A batch is already active.");
+
+            // ADR-029 Decision 7: Reference allows bulk-load as a programmatic interface
+            // but has no WAL. Hold the writer lock and set a flag; all writes go straight
+            // into the Reference indexes and become durable on CommitBatch's Flush.
+            if (_schema.Profile == StoreProfile.Reference)
+            {
+                _referenceBulkActive = true;
+                return;
+            }
+
+            // Cognitive / Graph: WAL-backed batch with transactional semantics.
+            if (_wal is null)
+                throw new ProfileCapabilityException(
+                    $"BeginBatch for profile {_schema.Profile} is not supported — no WAL available and no bulk dispatch defined.");
 
             _activeBatchTxId = _wal.BeginBatch();
             _batchBuffer ??= new();
@@ -476,6 +497,14 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
+        // Reference-profile bulk: write directly to the two indexes, no WAL buffering.
+        // Valid-time bounds are discarded — Reference has no temporal dimension.
+        if (_schema.Profile == StoreProfile.Reference)
+        {
+            AddReferenceBulkTriple(subject, predicate, @object, graph);
+            return;
+        }
+
         RequireWriteCapableProfile(nameof(AddBatched));
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
@@ -493,6 +522,35 @@ public sealed class QuadStore : IDisposable
 
         // 3. Buffer the record itself; ApplyToIndexesById uses IDs from it at commit.
         _batchBuffer!.Add(record);
+    }
+
+    /// <summary>
+    /// Materialize a single Reference-profile triple inside an active bulk load. Shared
+    /// by AddBatched and AddCurrentBatched because the temporal dimensions they differ on
+    /// are meaningless for Reference — both reduce to "insert (g,s,p,o)."
+    /// </summary>
+    private void AddReferenceBulkTriple(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph)
+    {
+        if (!_referenceBulkActive)
+            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
+
+        var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
+        var subjectId = _atoms.Intern(subject);
+        var predicateId = _atoms.Intern(predicate);
+        var objectId = _atoms.Intern(@object);
+
+        // Both indexes are populated inline — Reference has no separate rebuild phase.
+        _gspoReference!.AddRaw(graphId, subjectId, predicateId, objectId);
+        _gposReference!.AddRaw(graphId, predicateId, objectId, subjectId);
+
+        // Trigram the literal object so full-text search works over Reference stores too.
+        var utf8Span = _atoms.GetAtomSpan(objectId);
+        if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+            _trigramIndex.IndexAtom(objectId, utf8Span);
     }
 
     /// <summary>
@@ -572,6 +630,19 @@ public sealed class QuadStore : IDisposable
     {
         try
         {
+            // Reference-profile commit: flush the two indexes and the trigram index,
+            // leave atom-store durability to its own Flush/mmap semantics, release lock.
+            // No WAL → no tx-id machinery → no buffered replay.
+            if (_referenceBulkActive)
+            {
+                _gspoReference!.Flush();
+                _gposReference!.Flush();
+                _trigramIndex.Flush();
+                _referenceBulkActive = false;
+                CheckDiskSpaceAfterWrite();
+                return;
+            }
+
             RequireWriteCapableProfile(nameof(CommitBatch));
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
@@ -615,6 +686,16 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void RollbackBatch()
     {
+        // Reference profile has no WAL — once AddCurrentBatched writes a triple, it is
+        // already in the indexes. Per ADR-026, a mid-bulk failure means "delete the store
+        // and retry." RollbackBatch here just releases the lock so the caller can do that.
+        if (_referenceBulkActive)
+        {
+            _referenceBulkActive = false;
+            _lock.ExitWriteLock();
+            return;
+        }
+
         _batchBuffer?.Clear();
         _activeBatchTxId = -1;
         _lock.ExitWriteLock();
@@ -662,6 +743,16 @@ public sealed class QuadStore : IDisposable
     public void RebuildSecondaryIndexes(Action<string, long>? onProgress = null)
     {
         ThrowIfDisposed();
+
+        // Reference builds all of its indexes inline during bulk-load — there is nothing
+        // separately to rebuild. Log and return so `mercury --bulk-load --rebuild-indexes`
+        // pipelines work uniformly across profiles without the caller having to branch.
+        if (_schema.Profile == StoreProfile.Reference)
+        {
+            _logger.Info("Reference profile: indexes are built inline during bulk-load — rebuild is a no-op.".AsSpan());
+            return;
+        }
+
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
         _lock.EnterWriteLock();
         try
