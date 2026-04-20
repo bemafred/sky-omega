@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-04-20 (amended 2026-04-20 with Dispose-profile findings)
+**Status:** Accepted — 2026-04-20 (amended 2026-04-20 with Dispose-profile findings)
 
 ## Context
 
@@ -21,7 +21,7 @@ At 1 B cognitive profile, the dominant cost is **`CollectPredicateStatistics` (f
 Read-only is not one concept. It is two, and they deserve separate treatment:
 
 - **Structural read-only (declared by the store).** A [Reference profile](ADR-029-store-profiles.md) store is immutable, non-temporal, dump-sourced — that's its entire purpose. The profile declaration *is* the read-only declaration. Any session opened against a Reference store is read-only because the store cannot accept writes, not because the session happened not to make any. Declaring this at the store level (via profile metadata) is not ceremony — it is load-bearing, because the store's schema, lifecycle, and intended use all hinge on it.
-- **Situational read-only (inferred from the session).** A Cognitive / Graph / Minimal store accepts writes. Any given session against it may or may not mutate. Asking the caller to declare `OpenReadOnly` when `Query(...)` already tells us nothing will mutate is ceremony — it is a knob that restates what the call site already encodes. Here inference is correct: the session is read-only iff nothing was written by Dispose.
+- **Situational read-only (inferred from the session).** A Cognitive / Graph / Minimal store accepts writes. Any given session against it may or may not mutate. Asking the caller to declare `OpenReadOnly` when `Query(...)` already tells us nothing will mutate is ceremony — it is a knob that restates what the call site already encodes. Here inference is correct: the session is read-only if nothing was written by Dispose.
 
 The two cases get different mechanisms, and this ADR treats them separately. Declared read-only (piece 1) needs no flag and no state machine — the store's profile says "read-only", every session opened against it starts and stays read-only, and the Dispose fast path runs unconditionally. Inferred read-only needs the flag-tracked Dispose (piece 2) and the optimistic escalation machinery (piece 3).
 
@@ -188,6 +188,10 @@ Not part of the 1.8.0 timeline. If a future workload measurement shows open-side
 ## Closed questions
 
 - ~~**Does `msync(MS_SYNC)` on a clean mmap actually cost 14 min, or is something else in the Dispose path dominant?**~~ **Answered 2026-04-20 by the Dispose profile: `CollectPredicateStatistics` is the cost, not msync.** See [dispose-profile-2026-04-20.md](../../validations/dispose-profile-2026-04-20.md). Piece 2's mechanism rewritten accordingly.
+
+## Related limits
+
+- [predicate-statistics-memory](../../limits/predicate-statistics-memory.md) — `CollectPredicateStatistics`'s `HashSet<long>` allocation can grow beyond memory at 21.3 B scale. ADR-031 Piece 2 narrows the trigger set (skips `CheckpointInternal` on read-only Dispose) but does not eliminate the underlying limit. Tracked separately because the fix is independent of this ADR.
 
 ## References
 

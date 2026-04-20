@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-04-19
+**Status:** Accepted — 2026-04-20
 
 ## Context
 
@@ -31,7 +31,7 @@ Neither is where we want to be. The WDP team's Blazegraph replacement evaluation
 
 - **ADR-020** — AtomStore single-writer contract. Unchanged: profiles do not alter concurrency semantics.
 - **ADR-027** — Wikidata bulk ingest pipeline, validated through 1 B. The `Reference` profile targets the Stage-3 case where storage is the constraint.
-- **ADR-028** (proposed) — Rehash-on-grow. Orthogonal to this ADR: atom hash table grows the same way regardless of profile.
+- **ADR-028** — Rehash-on-grow. Orthogonal to this ADR: atom hash table grows the same way regardless of profile.
 - **BCL-only**. Profiles add schema variants but no external dependencies; the existing `FileStream`, `MemoryMappedFile`, `System.Buffers.Binary` machinery is sufficient.
 - **SPARQL semantics** are profile-independent for everything except temporal queries. A `Reference` store simply cannot answer `AS_OF` — the planner surfaces that as a query error, not silent wrong results.
 
@@ -69,6 +69,8 @@ Cognitive stays the default. Everything today works unchanged.
 
 A mismatch between the recorded schema and the runtime's supported schemas (e.g., opening a `Reference` store with a build that only knows `Cognitive`) is a hard error on open, not a silent degradation.
 
+> Amendment: How is this mechanically verified on open? 
+
 ### 3 — Two concrete key/entry variants, not generics
 
 Rather than parameterizing `QuadIndex<TKey, TEntry>` and paying for layer-of-indirection everywhere, introduce two concrete types:
@@ -86,7 +88,7 @@ Mercury's `QueryExecutor` already uses `StoreIndexState` to know which indexes a
 
 ### 5 — Offset and ID widths stay at 64-bit signed (`long`) for now
 
-The savings from moving atom IDs to packed 48-bit integers (~680 GB at full Wikidata) are real but much smaller than the schema-reduction win (~7-10 TB). Bit-packing adds subtle serialization complexity with no upside until the schema-reduction win is banked. Defer to a future ADR if needed.
+The savings from moving atom IDs to packed 48-bit integers (~680 GB at full Wikidata) are real but much smaller than the schema-reduction win (~7-10 TB). Bit-packing adds subtle serialization complexity with no upside until the schema-reduction win is banked. Tracked in the limits register: [bit-packed-atom-ids](../../limits/bit-packed-atom-ids.md).
 
 ### 6 — The cognitive profile is the default — explicitly
 

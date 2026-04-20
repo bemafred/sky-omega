@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-04-19
+**Status:** Accepted — 2026-04-20
 
 ## Context
 
@@ -114,8 +114,8 @@ This is scaffolding, not glamorous work. But without it, every future optimizati
 
 Three things explicitly NOT in this ADR:
 
-- **Hash function replacement.** The 1.7.16 word-wise FNV disaster was caught without a regression harness; a proper SIMD-friendly hash (xxHash64-style) requires one. That's a separate ADR once the regression-harness scaffolding exists.
-- **Offset/ID bit-packing.** Real savings but much smaller than the schema-reduction win in [ADR-029](ADR-029-store-profiles.md). Defer until after ADR-029 is shipped and measured.
+- **Hash function replacement.** The 1.7.16 word-wise FNV disaster was caught without a regression harness; a proper SIMD-friendly hash (xxHash64-style) requires one. That's a separate ADR once the regression-harness scaffolding exists. Tracked in the limits register: [hash-function-quality](../../limits/hash-function-quality.md).
+- **Offset/ID bit-packing.** Real savings but much smaller than the schema-reduction win in [ADR-029](ADR-029-store-profiles.md). Defer until after ADR-029 is shipped and measured. Tracked in the limits register: [bit-packed-atom-ids](../../limits/bit-packed-atom-ids.md).
 - **Query planner optimizations.** The planner today picks an index and scans it. Cost-based planning (use column statistics to pick joins) is potentially a large gain for multi-pattern queries but is a significant body of work. Separate ADR if taken up.
 
 ## Consequences
