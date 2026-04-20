@@ -28,6 +28,7 @@ long? minFreeSpaceGB = null;
 long? loadLimit = null;
 string? metricsOutPath = null;
 bool noRepl = false;
+StoreProfile? requestedProfile = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -105,6 +106,17 @@ for (int i = 0; i < args.Length; i++)
             break;
         case "--no-repl":
             noRepl = true;
+            break;
+        case "--profile":
+            if (i + 1 < args.Length && System.Enum.TryParse<StoreProfile>(args[++i], ignoreCase: true, out var parsedProfile))
+            {
+                requestedProfile = parsedProfile;
+            }
+            else
+            {
+                Console.Error.WriteLine($"Error: --profile requires one of: {string.Join(", ", System.Enum.GetNames<StoreProfile>())}.");
+                return 1;
+            }
             break;
         default:
             if (args[i].StartsWith('-'))
@@ -286,6 +298,9 @@ else
             MinimumFreeDiskSpace = minFreeSpace,
             AtomHashTableInitialCapacity = atomHashOverride ?? new StorageOptions().AtomHashTableInitialCapacity,
             ForceAtomHashCapacity = atomHashOverride.HasValue,
+            // --profile only takes effect at store creation; existing stores honor their
+            // persisted store-schema.json regardless of what the caller passed.
+            Profile = requestedProfile ?? StoreProfile.Cognitive,
         };
         pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts });
     }
@@ -307,6 +322,7 @@ if (loadFile != null || bulkLoadFile != null || rebuildIndexes)
 {
     var freeSpace = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
     Console.WriteLine($"Store:           {resolvedStorePath}");
+    Console.WriteLine($"Profile:         {pool.Active.Schema.Profile}");
     Console.WriteLine($"Index state:     {pool.Active.IndexState}");
     if (isBulkLoad)
         Console.WriteLine($"Mode:            bulk (GSPO only, no fsync)");

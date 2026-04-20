@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -22,14 +23,21 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 public sealed class QuadStore : IDisposable
 {
-    private readonly TemporalQuadIndex _gspoIndex; // Primary index: S→Primary, P→Secondary, O→Tertiary
-    private readonly TemporalQuadIndex _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
-    private readonly TemporalQuadIndex _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
-    private readonly TemporalQuadIndex _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
+    // Temporal-profile indexes (Cognitive, Graph). Null for Reference/Minimal.
+    private readonly TemporalQuadIndex? _gspoIndex; // Primary index: S→Primary, P→Secondary, O→Tertiary
+    private readonly TemporalQuadIndex? _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
+    private readonly TemporalQuadIndex? _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
+    private readonly TemporalQuadIndex? _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
+    // Reference-profile indexes. Null for Cognitive/Graph.
+    private readonly ReferenceQuadIndex? _gspoReference;
+    private readonly ReferenceQuadIndex? _gposReference;
     private readonly TrigramIndex _trigramIndex;
 
     private readonly AtomStore _atoms;
-    private readonly WriteAheadLog _wal;
+    // WAL is only constructed for profiles that provide versioning (Cognitive, Graph).
+    // Reference has no WAL by design — bulk-load is the only write path, and its
+    // durability is provided by FlushToDisk at load completion (ADR-029 / ADR-026).
+    private readonly WriteAheadLog? _wal;
     private readonly string _baseDirectory;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private readonly ILogger _logger;
@@ -126,22 +134,43 @@ public sealed class QuadStore : IDisposable
             options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
             options.AtomHashTableInitialCapacity, effectiveBulkMode);
 
-        // Create WAL for durability (bulk mode: no write-through, larger buffer)
         _bulkLoadMode = options.BulkMode;
-        _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
-            WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
 
-        // Create indexes with shared atom store
-        // Entity-first indexes sort by Graph → dimensions → time
-        // TGSP uses time-first sort for O(log N + k) temporal range queries
-        _gspoIndex = new TemporalQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
-        _gposIndex = new TemporalQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
-        _gospIndex = new TemporalQuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
-        _tgspIndex = new TemporalQuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.TimeFirst, options.BulkMode);
-
-        // Create trigram index for full-text search
+        // Create trigram index for full-text search (both profile families index it).
         var trigramPath = Path.Combine(baseDirectory, "trigram");
         _trigramIndex = new TrigramIndex(trigramPath, _bufferManager);
+
+        // ADR-029 Phase 2d: dispatch index-family and WAL creation on the store's
+        // schema profile. Cognitive/Graph produce four TemporalQuadIndex instances
+        // and a WAL; Reference produces two ReferenceQuadIndex instances and no WAL
+        // (bulk-load is the only write path per Decision 7, no per-session durability).
+        switch (_schema.Profile)
+        {
+            case StoreProfile.Cognitive:
+            case StoreProfile.Graph:
+                _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
+                    WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
+                _gspoIndex = new TemporalQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+                _gposIndex = new TemporalQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+                _gospIndex = new TemporalQuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
+                _tgspIndex = new TemporalQuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.TimeFirst, options.BulkMode);
+                break;
+
+            case StoreProfile.Reference:
+                // No WAL: Reference bulk-load durability = one FlushToDisk at completion.
+                _gspoReference = new ReferenceQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
+                _gposReference = new ReferenceQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
+                break;
+
+            case StoreProfile.Minimal:
+                throw new System.NotSupportedException(
+                    "Minimal profile is defined in ADR-029 but not yet dispatched by QuadStore. " +
+                    "Use Cognitive or Reference until Minimal-profile work begins.");
+
+            default:
+                throw new System.NotSupportedException(
+                    $"Unknown StoreProfile {_schema.Profile} — this build does not know how to dispatch index construction for it.");
+        }
 
         // Read index construction state
         _indexState = StoreStateFile.Read(baseDirectory);
@@ -153,8 +182,9 @@ public sealed class QuadStore : IDisposable
 
         _logger.Info("Opening store at {0}".AsSpan(), baseDirectory);
 
-        // Recover any uncommitted transactions
-        Recover();
+        // Recover any uncommitted transactions — WAL only exists for versioned profiles.
+        if (_wal is not null)
+            Recover();
     }
 
     /// <summary>
@@ -163,6 +193,43 @@ public sealed class QuadStore : IDisposable
     /// changing profiles requires a reload from source (ADR-029).
     /// </summary>
     public StoreSchema Schema => _schema;
+
+    /// <summary>
+    /// Throws <see cref="ProfileCapabilityException"/> when the store's profile does not
+    /// permit session-API writes. Reference (and future Minimal) are read-only at the
+    /// session API per ADR-029 Decision 7 — bulk-load is the only write path.
+    /// After this call returns, <see cref="_gspoIndex"/>/<see cref="_gposIndex"/>/
+    /// <see cref="_gospIndex"/>/<see cref="_tgspIndex"/>/<see cref="_wal"/> are non-null.
+    /// </summary>
+    [MemberNotNull(nameof(_gspoIndex), nameof(_gposIndex), nameof(_gospIndex), nameof(_tgspIndex), nameof(_wal))]
+    private void RequireWriteCapableProfile(string operation)
+    {
+        if (_schema.HasVersioning && _gspoIndex is not null && _gposIndex is not null
+            && _gospIndex is not null && _tgspIndex is not null && _wal is not null)
+            return;
+        throw new ProfileCapabilityException(
+            $"Operation '{operation}' requires a store profile that supports session-API writes. " +
+            $"This store's profile is {_schema.Profile}, which per ADR-029 Decision 7 is session-API immutable " +
+            "(bulk-load is the only write path). Reload from source to change profiles.");
+    }
+
+    /// <summary>
+    /// Throws <see cref="ProfileCapabilityException"/> when the store's profile has no
+    /// temporal dimension. Per ADR-029 Decision 4, temporal queries against non-temporal
+    /// profiles fail at the API boundary — never silently degraded. After this call
+    /// returns, the four temporal-index fields are non-null.
+    /// </summary>
+    [MemberNotNull(nameof(_gspoIndex), nameof(_gposIndex), nameof(_gospIndex), nameof(_tgspIndex))]
+    private void RequireTemporalProfile(string operation)
+    {
+        if (_schema.HasTemporal && _gspoIndex is not null && _gposIndex is not null
+            && _gospIndex is not null && _tgspIndex is not null)
+            return;
+        throw new ProfileCapabilityException(
+            $"Operation '{operation}' requires temporal semantics (profile must declare HasTemporal). " +
+            $"This store's profile is {_schema.Profile}, which has no temporal dimension. " +
+            "Use a Cognitive-profile store for temporal queries or reload from source.");
+    }
 
     /// <summary>
     /// Access to predicate statistics for query optimization.
@@ -241,6 +308,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
+        RequireWriteCapableProfile(nameof(Add));
         ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
@@ -299,6 +367,7 @@ public sealed class QuadStore : IDisposable
         ReadOnlySpan<char> graph = default)
     {
         ThrowIfDisposed();
+        RequireWriteCapableProfile(nameof(Delete));
         ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
@@ -373,6 +442,7 @@ public sealed class QuadStore : IDisposable
     public void BeginBatch()
     {
         ThrowIfDisposed();
+        RequireWriteCapableProfile(nameof(BeginBatch));
         ThrowIfDiskSpaceLow();
         _lock.EnterWriteLock();
         try
@@ -406,6 +476,7 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
+        RequireWriteCapableProfile(nameof(AddBatched));
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
@@ -453,6 +524,7 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset validTo,
         ReadOnlySpan<char> graph = default)
     {
+        RequireWriteCapableProfile(nameof(DeleteBatched));
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
@@ -500,6 +572,7 @@ public sealed class QuadStore : IDisposable
     {
         try
         {
+            RequireWriteCapableProfile(nameof(CommitBatch));
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
 
@@ -566,11 +639,13 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void FlushToDisk()
     {
-        _wal.FlushToDisk();
-        _gspoIndex.Flush();
-        _gposIndex.Flush();
-        _gospIndex.Flush();
-        _tgspIndex.Flush();
+        _wal?.FlushToDisk();
+        _gspoIndex?.Flush();
+        _gposIndex?.Flush();
+        _gospIndex?.Flush();
+        _tgspIndex?.Flush();
+        _gspoReference?.Flush();
+        _gposReference?.Flush();
     }
 
     /// <summary>
@@ -587,6 +662,7 @@ public sealed class QuadStore : IDisposable
     public void RebuildSecondaryIndexes(Action<string, long>? onProgress = null)
     {
         ThrowIfDisposed();
+        RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
         _lock.EnterWriteLock();
         try
         {
@@ -651,7 +727,7 @@ public sealed class QuadStore : IDisposable
         long count = 0;
         try
         {
-            var gspoEnum = _gspoIndex.QueryHistory(
+            var gspoEnum = _gspoIndex!.QueryHistory(
                 ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
 
             while (gspoEnum.MoveNext())
@@ -707,7 +783,9 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Apply an add to all indexes using pre-resolved atom IDs (no string round-trip,
     /// no re-intern). Reads validFrom/validTo/transactionTime and all four atom IDs
-    /// directly from the WAL record.
+    /// directly from the WAL record. Preconditions: caller has gone through
+    /// <see cref="RequireWriteCapableProfile"/> (via Add/Delete/CommitBatch/Recover),
+    /// so all four temporal indexes are non-null.
     /// </summary>
     private void ApplyToIndexesById(in LogRecord record)
     {
@@ -716,16 +794,16 @@ public sealed class QuadStore : IDisposable
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
         var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
 
-        _gspoIndex.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
+        _gspoIndex!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
             validFromMs, validToMs, record.TransactionTimeTicks);
 
         if (!_bulkLoadMode)
         {
-            _gposIndex.AddRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId,
+            _gposIndex!.AddRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId,
                 validFromMs, validToMs, record.TransactionTimeTicks);
-            _gospIndex.AddRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId,
+            _gospIndex!.AddRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId,
                 validFromMs, validToMs, record.TransactionTimeTicks);
-            _tgspIndex.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
+            _tgspIndex!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
                 validFromMs, validToMs, record.TransactionTimeTicks);
 
             // Full-text trigram indexing for literal objects. Peek the first UTF-8
@@ -749,16 +827,17 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private bool ApplyDeleteToIndexesById(in LogRecord record)
     {
+        // Precondition mirrors ApplyToIndexesById: temporal indexes non-null on entry.
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
         var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
 
-        var d1 = _gspoIndex.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
+        var d1 = _gspoIndex!.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
             validFromMs, validToMs, record.TransactionTimeTicks);
-        var d2 = _gposIndex.DeleteRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId,
+        var d2 = _gposIndex!.DeleteRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId,
             validFromMs, validToMs, record.TransactionTimeTicks);
-        var d3 = _gospIndex.DeleteRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId,
+        var d3 = _gospIndex!.DeleteRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId,
             validFromMs, validToMs, record.TransactionTimeTicks);
-        var d4 = _tgspIndex.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
+        var d4 = _tgspIndex!.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId,
             validFromMs, validToMs, record.TransactionTimeTicks);
 
         return d1 || d2 || d3 || d4;
@@ -766,11 +845,13 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Recover uncommitted transactions from WAL after crash.
+    /// Precondition: <see cref="_wal"/> is non-null (constructor only calls this for
+    /// profiles that instantiate a WAL — Cognitive and Graph).
     /// </summary>
     private void Recover()
     {
         _logger.Debug("Starting WAL recovery".AsSpan());
-        var enumerator = _wal.GetUncommittedRecords();
+        var enumerator = _wal!.GetUncommittedRecords();
         var recoveredCount = 0;
 
         try
@@ -832,10 +913,11 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private void CheckpointInternal()
     {
-        _logger.Debug("Starting checkpoint".AsSpan());
+        // Non-versioned profiles (Reference/Minimal) have no WAL and no statistics —
+        // checkpoint is a no-op. Flush-to-disk durability is handled by FlushToDisk.
+        if (_wal is null) return;
 
-        // Flush all indexes (memory-mapped files auto-flush, but we can force it)
-        // In a more complete implementation, we'd flush the mmap views here
+        _logger.Debug("Starting checkpoint".AsSpan());
 
         // Collect predicate statistics for query optimization
         CollectPredicateStatistics();
@@ -863,6 +945,7 @@ public sealed class QuadStore : IDisposable
     private void CheckpointIfNeeded()
     {
         if (_bulkLoadMode) return;
+        if (_wal is null) return;
         if (_wal.ShouldCheckpoint())
         {
             CheckpointInternal();
@@ -880,8 +963,10 @@ public sealed class QuadStore : IDisposable
         long totalTriples = 0;
 
         // Scan GPOS index using QueryAsOf with empty bounds
-        // GPOS ordering: Predicate-Object-Subject, so grouped by predicate
-        var enumerator = _gposIndex.QueryAsOf(
+        // GPOS ordering: Predicate-Object-Subject, so grouped by predicate.
+        // CollectPredicateStatistics is only called from CheckpointInternal, which
+        // short-circuits on non-versioned profiles — _gposIndex is non-null here.
+        var enumerator = _gposIndex!.QueryAsOf(
             ReadOnlySpan<char>.Empty,  // All predicates
             ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
             ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
@@ -908,7 +993,7 @@ public sealed class QuadStore : IDisposable
         }
 
         // Convert to immutable PredicateStats
-        var txId = _wal.CurrentTxId;
+        var txId = _wal!.CurrentTxId;
         var predicateStats = new System.Collections.Generic.Dictionary<long, PredicateStats>();
         foreach (var (predicateId, (count, subjects, objects)) in stats)
         {
@@ -940,6 +1025,7 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset? rangeEnd = null,
         ReadOnlySpan<char> graph = default)
     {
+        RequireTemporalProfile(nameof(Query));
         // Select optimal index
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, queryType);
 
@@ -1081,6 +1167,7 @@ public sealed class QuadStore : IDisposable
         HashSet<long> candidateObjectAtomIds,
         ReadOnlySpan<char> graph = default)
     {
+        RequireTemporalProfile(nameof(QueryCurrentWithCandidates));
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, TemporalQueryType.AsOf);
 
         ReadOnlySpan<char> arg1, arg2, arg3;
@@ -1108,6 +1195,7 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public NamedGraphEnumerator GetNamedGraphs()
     {
+        RequireTemporalProfile(nameof(GetNamedGraphs));
         return new NamedGraphEnumerator(_gspoIndex, _atoms);
     }
 
@@ -1137,39 +1225,39 @@ public sealed class QuadStore : IDisposable
                 && _indexState != StoreIndexState.BuildingTrigram;
 
             if (queryType == TemporalQueryType.Range && tgspAvailable)
-                return (_tgspIndex, TemporalIndexType.TGSP);
+                return (_tgspIndex!, TemporalIndexType.TGSP);
             if (subjectBound)
-                return (_gspoIndex, TemporalIndexType.GSPO);
+                return (_gspoIndex!, TemporalIndexType.GSPO);
             if (predicateBound && gposAvailable)
-                return (_gposIndex, TemporalIndexType.GPOS);
+                return (_gposIndex!, TemporalIndexType.GPOS);
             if (objectBound && gospAvailable)
-                return (_gospIndex, TemporalIndexType.GOSP);
+                return (_gospIndex!, TemporalIndexType.GOSP);
 
-            return (_gspoIndex, TemporalIndexType.GSPO);
+            return (_gspoIndex!, TemporalIndexType.GSPO);
         }
 
         // For time-range queries, prefer TGSP index
         if (queryType == TemporalQueryType.Range)
         {
-            return (_tgspIndex, TemporalIndexType.TGSP);
+            return (_tgspIndex!, TemporalIndexType.TGSP);
         }
 
         // Otherwise select based on bound variables
         if (subjectBound)
         {
-            return (_gspoIndex, TemporalIndexType.GSPO);
+            return (_gspoIndex!, TemporalIndexType.GSPO);
         }
         else if (predicateBound)
         {
-            return (_gposIndex, TemporalIndexType.GPOS);
+            return (_gposIndex!, TemporalIndexType.GPOS);
         }
         else if (objectBound)
         {
-            return (_gospIndex, TemporalIndexType.GOSP);
+            return (_gospIndex!, TemporalIndexType.GOSP);
         }
         else
         {
-            return (_gspoIndex, TemporalIndexType.GSPO);
+            return (_gspoIndex!, TemporalIndexType.GSPO);
         }
     }
 
@@ -1205,6 +1293,8 @@ public sealed class QuadStore : IDisposable
         _gposIndex?.Dispose();
         _gospIndex?.Dispose();
         _tgspIndex?.Dispose();
+        _gspoReference?.Dispose();
+        _gposReference?.Dispose();
         _trigramIndex.Dispose();
         _atoms?.Dispose();
         _lock?.Dispose();
@@ -1228,14 +1318,14 @@ public sealed class QuadStore : IDisposable
         {
             _logger.Info("Clearing store".AsSpan());
 
-            // Clear WAL first (durability layer)
-            _wal.Clear();
-
-            // Clear all indexes
-            _gspoIndex.Clear();
-            _gposIndex.Clear();
-            _gospIndex.Clear();
-            _tgspIndex.Clear();
+            // WAL and indexes: clear only what the profile actually instantiated.
+            _wal?.Clear();
+            _gspoIndex?.Clear();
+            _gposIndex?.Clear();
+            _gospIndex?.Clear();
+            _tgspIndex?.Clear();
+            _gspoReference?.Clear();
+            _gposReference?.Clear();
 
             // Clear atom store
             _atoms.Clear();
@@ -1262,17 +1352,21 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public (long QuadCount, long AtomCount, long TotalBytes) GetStatistics()
     {
-        var quadCount = _gspoIndex.QuadCount;
+        // Whichever index family this store has, GSPO is always the primary. Sum its
+        // count; for WAL bytes, non-versioned profiles have no WAL so report 0.
+        var quadCount = (_gspoIndex?.QuadCount) ?? (_gspoReference?.QuadCount) ?? 0;
         var (atomCount, atomBytes, _) = _atoms.GetStatistics();
-        var walBytes = _wal.LogSize;
+        var walBytes = _wal?.LogSize ?? 0;
         return (quadCount, atomCount, atomBytes + walBytes);
     }
 
     /// <summary>
-    /// Get WAL statistics for monitoring
+    /// Get WAL statistics for monitoring. Returns zeros for non-versioned profiles
+    /// (Reference/Minimal) which have no WAL by design.
     /// </summary>
     public (long CurrentTxId, long LastCheckpointTxId, long LogSize) GetWalStatistics()
     {
+        if (_wal is null) return (0, 0, 0);
         return (_wal.CurrentTxId, _wal.LastCheckpointTxId, _wal.LogSize);
     }
 }
