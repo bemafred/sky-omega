@@ -110,17 +110,19 @@ Pull ADR-030 Phase 1 forward from its position in the ADR's own phased plan. The
 ### Phase 4 — Read-only UX wins (ADR-031 Pieces 1 and 2)
 
 **Target versions:** 1.7.32–1.7.33
-**Objective:** Collapse Dispose time for read-only sessions from ~14 min (measured at 1 B) to seconds; ship Reference profile's structural read-only fast path.
+**Objective:** Collapse Dispose time for read-only sessions from ~14 min (measured at 1 B) to essentially zero; ship Reference profile's structural read-only fast path.
 
-Piece 1: `QuadStore.Open` branches on profile; Reference profile skips writer lock, opens mmap for read-only, skips WAL recovery, unconditionally skips Dispose msync. Follows directly from ADR-029 Decision 7.
+**Mechanism update (from the 2026-04-20 Dispose profile):** The 14 min is not msync as originally assumed in ADR-031's draft — it is `CollectPredicateStatistics` called from `CheckpointInternal()` during `Dispose()`. See [dispose-profile-2026-04-20.md](../validations/dispose-profile-2026-04-20.md). The fix is a one-line gate (`if (_sessionMutated) CheckpointInternal();`) rather than any msync-skip machinery.
 
-Piece 2: Add `volatile bool _sessionMutated` flag. Every mutation path (AtomStore writes, QuadIndex adds/removes, WAL appends, trigram updates, posting-file growth) sets it. Dispose skips msync when the flag stayed false. No API change; inference is correct-by-construction for mutable profiles.
+Piece 1: `QuadStore.Open` branches on profile; Reference profile skips writer lock, opens mmap for read-only, skips WAL recovery, unconditionally skips `CheckpointInternal` on Dispose. Follows directly from ADR-029 Decision 7 (Reference has no WAL, no statistics maintenance).
+
+Piece 2: Add `volatile bool _sessionMutated` flag. Every mutation path (AtomStore writes, QuadIndex adds/removes, WAL appends, WAL replay on Open, trigram updates) sets it. `Dispose` gates `CheckpointInternal` on the flag. No API change; inference is correct-by-construction for mutable profiles.
 
 **Exit criterion:**
-- 1 B cognitive store predicate-bound COUNT query: Dispose time under 5 seconds (down from ~14 min).
+- 1 B cognitive store predicate-bound COUNT: total wall time (open + query + Dispose) under 60 s, Dispose phase under 1 s.
 - Reference profile 21.3 B query: open + query + Dispose under 2 minutes total.
 - Flag-enumeration test: every public mutation API flips the flag; every pure-query session leaves it false.
-- No regression on write-path correctness — the flag is additive only.
+- Behavior after a mutating session unchanged: `CheckpointInternal` still runs, `_statistics` still gets updated for the next Open, WAL checkpoint marker still written.
 
 **Why before phase 5:** Pieces 1 and 2 are days of work with large user-facing impact (queries stop taking 14 min to close). ADR-030's parallel rebuild is weeks of harder engineering with impact mostly visible to operators running full reloads. Ship the user-facing wins first; both user and maintainer see the system become immediately more usable.
 
@@ -148,11 +150,10 @@ Phase 4 (from ADR-030): Full 21.3 B Reference profile run with all optimizations
 **Target version:** **1.8.0**
 **Objective:** Clean release marker: production hardening complete.
 
-Optional before release:
-- ADR-031 Piece 3 (optimistic read-open with live mmap escalation). If it ships cleanly, include in 1.8; if it derails, split to 031b and ship 1.8 without it. Piece 2's win is already ~95 % of the cost.
+**ADR-031 Piece 3 is explicitly deferred to 031b** based on the 2026-04-20 Dispose profile: with Piece 2 capturing the entire 14 min (CheckpointInternal, not msync), Piece 3's remaining open-side wins are in the low-seconds range and do not justify the live mmap escalation complexity in this timeline. ADR-031 closes at Pieces 1 and 2 for 1.8.0.
 
 Required before release:
-- All four ADRs moved from Proposed → Accepted → Completed with dated status fields.
+- All four ADRs moved from Proposed → Accepted → Completed with dated status fields. ADR-031 Completed at Pieces 1 + 2 (Piece 3 deferred to 031b by ADR scope decision — not pending work).
 - Full W3C SPARQL + Turtle conformance suites green on all four profiles (Cognitive, Graph, Reference, Minimal — or justify Minimal deferral to post-1.8).
 - Wikidata Reference profile 21.3 B live at a documented endpoint (internal or external). Captured WDBench-style query latencies against it, comparable to QLever/Virtuoso published numbers.
 - `STATISTICS.md` updated with the final line counts and benchmark summary.
