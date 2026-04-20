@@ -92,6 +92,37 @@ The savings from moving atom IDs to packed 48-bit integers (~680 GB at full Wiki
 
 `--profile` without a value defaults to Cognitive. This preserves current behavior for every existing user: any `mercury --store foo` command today gets a Cognitive store, same as before this ADR. Profiles are opt-in, not opt-out.
 
+### 7 — Reference profile mutation semantics — bulk-mutable, session-API immutable
+
+The Context above frames Reference as "immutable, non-temporal, dump-sourced". That framing is true in spirit but imprecise as a contract. Production hardening requires an explicit commitment to *what* is immutable and *at which layer*. This clause makes that commitment.
+
+**The decision.** A Reference profile store accepts mutations **only** via the bulk-load path, never via the session API.
+
+- **Session API** (SPARQL UPDATE, `QuadStore.Add`, `QuadStore.Delete`, any per-triple write): rejected at plan time with a clear error. Same discipline as the temporal-query rejection in Decision 4 — a `Reference` store is a different *kind* of store, and queries/updates that require capabilities it doesn't have fail loudly, not silently.
+- **Bulk-load path** (`mercury --store X --bulk-load file.nt` or the equivalent programmatic interface): allowed, including against an existing Reference store. Subsequent bulk loads append to the GSPO/GPOS indexes. The bulk-load path owns the store exclusively during load (consistent with ADR-020 single-writer), honors its own durability discipline (see [ADR-030](ADR-030-bulk-load-and-rebuild-performance.md)), and writes metadata (schema, index-state) on completion.
+- **Deletion** is out of scope for this decision. Without versioning, a Reference store cannot soft-delete; a hard-deletion workflow would require B+Tree entry removal and atom-store GC and is a separate ADR if demanded. Today, "deleting" from a Reference store means reloading from an updated source.
+
+**Alternatives considered and rejected:**
+
+- *(A) Session-API mutable without versioning.* Would collapse the distinction between Reference's write model and Graph's. Rejected because it forces Reference to carry a WAL and per-session mutation tracking ([ADR-031](ADR-031-read-only-session-fast-path.md) piece 2), losing the structural-read-only fast path that makes Reference's cost model predictable. Also erodes the profile matrix — if Reference is session-mutable, Graph's distinctness needs separate justification (see open question).
+- *(B) Strictly immutable after initial load (no incremental bulk).* Cleaner in principle but forces full reload for every source update. Wikidata publishes new dumps on a cadence that's faster than a full reload takes at projected throughput — forcing a full reload for every update is operationally heavy. Keeping Reference bulk-appendable matches real reference-data maintenance without compromising session-API semantics.
+- *(C) Delete Reference profile entirely; use Graph for all mutable reference-like cases.* Considered and rejected: the 32 B vs 64 B entry-size win is the primary motivation for Reference's existence at all, and that win requires schema simplifications (no versioning, no soft-delete metadata, no per-entry timestamps) that Graph cannot share.
+
+**Commitments this decision makes downstream:**
+
+- The bulk-load path must support appending to an existing Reference store — profile mismatch remains a hard error (Decision 2), but profile match is a valid append. Already implicitly true of today's bulk-load; Decision 7 makes it explicit.
+- [ADR-031](ADR-031-read-only-session-fast-path.md) piece 1 (Reference-profile unconditional read-only session fast path) is compatible: bulk-load runs in a separate process-level session with its own Dispose discipline; session-API callers only ever see a read-only store.
+- Deletion workflows are not provided by this ADR. If they become required, a separate ADR must define hard-delete semantics (B+Tree removal, atom-store GC, trigram cleanup).
+
+**What walk-back would cost.** If Reference ever needs session-API mutability:
+1. Add a WAL to the Reference profile (currently absent by Decision 1's schema).
+2. Add per-session mutation tracking and (likely) escalation (ADR-031 piece 2/3 machinery).
+3. Decide hard-delete semantics or explicitly forbid DELETE.
+
+Non-trivial but bounded. The escape hatch exists; the choice is not irreversible, just load-bearing.
+
+**Open question defined by this clause:** how does bulk-append handle duplicate triples already present in the store? Options are silent dedup (extra B+Tree lookup per entry — cost at 21.3 B scale is meaningful), error on conflict (correctness-safe, operationally hostile), or accept-duplicates (simplest, wastes storage, distinguishes the two entries by atom IDs not structure — impossible since structural equality is the only equality we have). Defer explicit resolution to the bulk-append implementation, but flag as required-before-Reference-ships.
+
 ## Consequences
 
 ### Positive
