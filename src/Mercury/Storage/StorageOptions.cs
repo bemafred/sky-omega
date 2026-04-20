@@ -75,6 +75,14 @@ public sealed class StorageOptions
     public bool BulkMode { get; init; }
 
     /// <summary>
+    /// Storage profile for this store. Honored at creation and written to
+    /// <c>store-schema.json</c>; on subsequent opens, the persisted schema is the source
+    /// of truth — a mismatch between the persisted profile and this value is a hard error.
+    /// Default: <see cref="StoreProfile.Cognitive"/> (ADR-029 Decision 6).
+    /// </summary>
+    public StoreProfile Profile { get; init; } = StoreProfile.Cognitive;
+
+    /// <summary>
     /// When true, <see cref="AtomHashTableInitialCapacity"/> is honored exactly even in
     /// bulk mode — bypasses the 256M-bucket floor that <see cref="BulkMode"/> normally
     /// applies. Used by ADR-028 Stage 2 validation to exercise rehash-on-grow under

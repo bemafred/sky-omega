@@ -51,6 +51,7 @@ public sealed class QuadStore : IDisposable
     private bool _diskSpaceLow; // Set when disk space drops below threshold
     private bool _bulkLoadMode; // When true: skip fsync on CommitBatch, skip secondary indexes in ApplyToIndexes
     private StoreIndexState _indexState;
+    private readonly StoreSchema _schema;
 
     /// <summary>
     /// Creates a new QuadStore at the specified directory.
@@ -100,6 +101,24 @@ public sealed class QuadStore : IDisposable
 
         var options = storageOptions ?? StorageOptions.Default;
 
+        // ADR-029: resolve store schema. Persisted schema wins over caller intent;
+        // legacy stores without a schema file are assumed Cognitive and backfilled.
+        var persistedSchema = StoreSchema.ReadFrom(baseDirectory);
+        if (persistedSchema is not null)
+        {
+            _schema = persistedSchema;
+        }
+        else if (File.Exists(gspoPath))
+        {
+            _schema = StoreSchema.ForProfile(StoreProfile.Cognitive);
+            _schema.WriteTo(baseDirectory);
+        }
+        else
+        {
+            _schema = StoreSchema.ForProfile(options.Profile);
+            _schema.WriteTo(baseDirectory);
+        }
+
         // Create shared atom store for all indexes.
         // ForceAtomHashCapacity suppresses the bulk-mode floor for ADR-028 validation.
         var effectiveBulkMode = options.BulkMode && !options.ForceAtomHashCapacity;
@@ -137,6 +156,13 @@ public sealed class QuadStore : IDisposable
         // Recover any uncommitted transactions
         Recover();
     }
+
+    /// <summary>
+    /// Durable schema for this store. Resolved at open time from <c>store-schema.json</c>
+    /// (or backfilled as Cognitive for legacy stores). Immutable for the life of the store —
+    /// changing profiles requires a reload from source (ADR-029).
+    /// </summary>
+    public StoreSchema Schema => _schema;
 
     /// <summary>
     /// Access to predicate statistics for query optimization.
