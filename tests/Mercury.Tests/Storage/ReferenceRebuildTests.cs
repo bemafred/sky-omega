@@ -108,15 +108,17 @@ public class ReferenceRebuildTests : IDisposable
         store.RebuildMetricsListener = listener;
         store.RebuildSecondaryIndexes();
 
-        var trigramPhase = listener.Phases.Find(p => p.IndexName == "Trigram");
+        var trigramPhase = listener.Phases.First(p => p.IndexName == "Trigram");
         Assert.NotEqual(default, trigramPhase);
         // Two literal objects ("Alice", "Bob"); the IRI object is not indexed.
         Assert.Equal(2, trigramPhase.EntriesProcessed);
     }
 
     [Fact]
-    public async Task Rebuild_EmitsGposAndTrigramPhases_InThatOrder()
+    public async Task Rebuild_EmitsGposAndTrigramPhases()
     {
+        // ADR-030 Phase 2 parallel rebuild fires OnRebuildPhase from consumer threads
+        // concurrently — emission order is non-deterministic. Assert the set.
         var dir = Path.Combine(_testDir, "phase_order");
         using var store = await BulkLoadReferenceAsync(dir,
             "<http://ex/a> <http://ex/p> \"x\" .\n");
@@ -126,10 +128,12 @@ public class ReferenceRebuildTests : IDisposable
         store.RebuildSecondaryIndexes();
 
         Assert.Equal(2, listener.Phases.Count);
-        Assert.Equal("GPOS", listener.Phases[0].IndexName);
-        Assert.Equal("Trigram", listener.Phases[1].IndexName);
+        var names = new System.Collections.Generic.HashSet<string>(
+            listener.Phases.Select(p => p.IndexName));
+        Assert.Contains("GPOS", names);
+        Assert.Contains("Trigram", names);
         Assert.Single(listener.Summaries);
-        Assert.False(listener.Summaries[0].WasNoOp);
+        Assert.False(listener.Summaries.First().WasNoOp);
     }
 
     [Fact]
@@ -153,6 +157,48 @@ public class ReferenceRebuildTests : IDisposable
             "SELECT (COUNT(*) AS ?n) WHERE { ?s <http://ex/p> ?o }").Rows![0].Values.First();
 
         Assert.Equal(firstCount, secondCount);
+    }
+
+    [Fact]
+    public async Task ParallelRebuild_LargeDataset_QueryEquivalent()
+    {
+        // Correctness stress for ADR-030 Phase 2: many triples, small channel capacity
+        // via back-pressure, verify every SPARQL pattern returns expected results. If
+        // the broadcast/consumer plumbing had a race (lost quads, duplicates, corrupt
+        // page splits under concurrency), this test would fail with wrong row counts.
+        var dir = Path.Combine(_testDir, "parallel_stress");
+        Directory.CreateDirectory(dir);
+
+        // Build a dataset with mixed IRI and literal objects so GPOS + Trigram both
+        // see non-trivial work. 2000 triples across 10 predicates, half literals.
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < 2000; i++)
+        {
+            var predicate = $"<http://ex/p{i % 10}>";
+            var subject = $"<http://ex/s{i}>";
+            var obj = (i % 2 == 0) ? $"\"lit-{i}\"" : $"<http://ex/o{i}>";
+            sb.AppendLine($"{subject} {predicate} {obj} .");
+        }
+
+        using var store = await BulkLoadReferenceAsync(dir, sb.ToString());
+        store.RebuildSecondaryIndexes();
+
+        // Full scan
+        var all = SparqlEngine.Query(store, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }");
+        Assert.True(all.Success);
+        Assert.Contains("2000", all.Rows![0].Values.First());
+
+        // Predicate-bound (through GPOS) — 10 predicates × 200 subjects = 200 each
+        var perPredicate = SparqlEngine.Query(store,
+            "SELECT (COUNT(*) AS ?n) WHERE { ?s <http://ex/p5> ?o }");
+        Assert.True(perPredicate.Success);
+        Assert.Contains("200", perPredicate.Rows![0].Values.First());
+
+        // Subject-bound (through GSPO)
+        var perSubject = SparqlEngine.Query(store,
+            "SELECT ?p ?o WHERE { <http://ex/s123> ?p ?o }");
+        Assert.True(perSubject.Success);
+        Assert.Single(perSubject.Rows!);
     }
 
     [Fact]
@@ -182,8 +228,9 @@ public class ReferenceRebuildTests : IDisposable
 
     private sealed class TestRebuildListener : IRebuildMetricsListener
     {
-        public readonly System.Collections.Generic.List<RebuildPhaseMetrics> Phases = new();
-        public readonly System.Collections.Generic.List<RebuildMetrics> Summaries = new();
+        // Thread-safe: parallel rebuild fires OnRebuildPhase from consumer threads.
+        public readonly System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics> Phases = new();
+        public readonly System.Collections.Concurrent.ConcurrentBag<RebuildMetrics> Summaries = new();
         public void OnRebuildPhase(in RebuildPhaseMetrics phase) => Phases.Add(phase);
         public void OnRebuildComplete(RebuildMetrics summary) => Summaries.Add(summary);
     }

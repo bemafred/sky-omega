@@ -38,8 +38,10 @@ public class MetricsListenerTests : IDisposable
 
     private sealed class CapturingRebuildListener : IRebuildMetricsListener
     {
-        public readonly List<RebuildPhaseMetrics> Phases = new();
-        public readonly List<RebuildMetrics> Summaries = new();
+        // Thread-safe: ADR-030 Phase 2 parallel rebuild fires OnRebuildPhase from
+        // consumer threads concurrently. Listener implementations must tolerate that.
+        public readonly System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics> Phases = new();
+        public readonly System.Collections.Concurrent.ConcurrentBag<RebuildMetrics> Summaries = new();
         public void OnRebuildPhase(in RebuildPhaseMetrics phase) => Phases.Add(phase);
         public void OnRebuildComplete(RebuildMetrics summary) => Summaries.Add(summary);
     }
@@ -125,19 +127,23 @@ public class MetricsListenerTests : IDisposable
         store.RebuildMetricsListener = listener;
         store.RebuildSecondaryIndexes();
 
-        // Expected phases: GPOS, GOSP, TGSP, Trigram
+        // Expected phases: GPOS, GOSP, TGSP, Trigram. Parallel rebuild fires OnRebuildPhase
+        // from four consumer threads in non-deterministic order — assert the set, not a sequence.
         Assert.Equal(4, listener.Phases.Count);
-        Assert.Equal("GPOS", listener.Phases[0].IndexName);
-        Assert.Equal("GOSP", listener.Phases[1].IndexName);
-        Assert.Equal("TGSP", listener.Phases[2].IndexName);
-        Assert.Equal("Trigram", listener.Phases[3].IndexName);
+        var names = new System.Collections.Generic.HashSet<string>(
+            listener.Phases.Select(p => p.IndexName));
+        Assert.Contains("GPOS", names);
+        Assert.Contains("GOSP", names);
+        Assert.Contains("TGSP", names);
+        Assert.Contains("Trigram", names);
         Assert.All(listener.Phases, p => Assert.True(p.EntriesProcessed >= 0));
 
         // Summary fires exactly once with profile and per-phase records.
         Assert.Single(listener.Summaries);
-        Assert.Equal(StoreProfile.Cognitive, listener.Summaries[0].Profile);
-        Assert.Equal(4, listener.Summaries[0].Phases.Count);
-        Assert.False(listener.Summaries[0].WasNoOp);
+        var summary = listener.Summaries.First();
+        Assert.Equal(StoreProfile.Cognitive, summary.Profile);
+        Assert.Equal(4, summary.Phases.Count);
+        Assert.False(summary.WasNoOp);
     }
 
     [Fact]
@@ -158,17 +164,20 @@ public class MetricsListenerTests : IDisposable
         store.RebuildMetricsListener = listener;
         store.RebuildSecondaryIndexes();
 
-        // Two phase records (GPOS and Trigram) plus a summary.
+        // Two phase records (GPOS + Trigram) plus a summary. Parallel rebuild means
+        // emission order is non-deterministic — check the set, not the sequence.
         Assert.Equal(2, listener.Phases.Count);
-        Assert.Equal("GPOS", listener.Phases[0].IndexName);
-        Assert.Equal(1, listener.Phases[0].EntriesProcessed);
-        Assert.Equal("Trigram", listener.Phases[1].IndexName);
-        Assert.Equal(1, listener.Phases[1].EntriesProcessed); // one literal object
+        var names = new System.Collections.Generic.HashSet<string>(
+            listener.Phases.Select(p => p.IndexName));
+        Assert.Contains("GPOS", names);
+        Assert.Contains("Trigram", names);
+        Assert.All(listener.Phases, p => Assert.Equal(1, p.EntriesProcessed));
 
         Assert.Single(listener.Summaries);
-        Assert.False(listener.Summaries[0].WasNoOp);
-        Assert.Equal(StoreProfile.Reference, listener.Summaries[0].Profile);
-        Assert.Equal(2, listener.Summaries[0].Phases.Count);
+        var summary = listener.Summaries.First();
+        Assert.False(summary.WasNoOp);
+        Assert.Equal(StoreProfile.Reference, summary.Profile);
+        Assert.Equal(2, summary.Phases.Count);
     }
 
     [Fact]
