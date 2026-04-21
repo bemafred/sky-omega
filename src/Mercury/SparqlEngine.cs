@@ -30,6 +30,8 @@ public static class SparqlEngine
     public static QueryResult Query(QuadStore store, string sparql, CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
+        QueryResult result;
+        var queryKind = QueryMetricsKind.Select; // updated once the parser identifies the query type
 
         try
         {
@@ -42,9 +44,12 @@ public static class SparqlEngine
             }
             catch (SparqlParseException ex)
             {
-                return new QueryResult { Success = false, Kind = ExecutionResultKind.Error, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
+                result = new QueryResult { Success = false, Kind = ExecutionResultKind.Error, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
+                EmitQueryMetrics(store, queryKind, result);
+                return result;
             }
 
+            queryKind = MapQueryKind(parsed.Type);
             var parseTime = sw.Elapsed;
             sw.Restart();
 
@@ -53,10 +58,10 @@ public static class SparqlEngine
             try
             {
                 var planner = new QueryPlanner(store.Statistics, store.Atoms);
-                    
+
                 using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, null, planner);
 
-                return parsed.Type switch
+                result = parsed.Type switch
                 {
                     QueryType.Select => ExecuteSelect(executor, sparql, parsed, parseTime, sw),
                     QueryType.Ask => new QueryResult
@@ -87,13 +92,52 @@ public static class SparqlEngine
         }
         catch (OperationCanceledException)
         {
-            return new QueryResult { Success = false, Kind = ExecutionResultKind.Error, ErrorMessage = "Query cancelled", ParseTime = sw.Elapsed };
+            result = new QueryResult { Success = false, Kind = ExecutionResultKind.Error, ErrorMessage = "Query cancelled", ParseTime = sw.Elapsed };
         }
         catch (Exception ex)
         {
-            return new QueryResult { Success = false, Kind = ExecutionResultKind.Error, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
+            result = new QueryResult { Success = false, Kind = ExecutionResultKind.Error, ErrorMessage = ex.Message, ParseTime = sw.Elapsed };
         }
+
+        EmitQueryMetrics(store, queryKind, result);
+        return result;
     }
+
+    /// <summary>
+    /// Emit a <see cref="QueryMetrics"/> record to the store's listener if one is attached.
+    /// The null-check on the listener gates struct construction so the no-listener path
+    /// stays zero-overhead per the ADR-030 Phase 1 contract.
+    /// </summary>
+    private static void EmitQueryMetrics(QuadStore store, QueryMetricsKind kind, QueryResult result)
+    {
+        var listener = store.QueryMetricsListener;
+        if (listener is null) return;
+
+        var rows = result.Rows?.Count
+            ?? result.Triples?.Count
+            ?? (result.Kind == ExecutionResultKind.Ask ? (result.AskResult == true ? 1L : 0L) : 0L);
+
+        var metrics = new QueryMetrics(
+            Timestamp: DateTimeOffset.UtcNow,
+            Profile: store.Schema.Profile,
+            Kind: kind,
+            ParseTime: result.ParseTime,
+            ExecutionTime: result.ExecutionTime,
+            RowsReturned: rows,
+            Success: result.Success,
+            ErrorMessage: result.ErrorMessage);
+
+        listener.OnQueryMetrics(in metrics);
+    }
+
+    private static QueryMetricsKind MapQueryKind(QueryType type) => type switch
+    {
+        QueryType.Select => QueryMetricsKind.Select,
+        QueryType.Ask => QueryMetricsKind.Ask,
+        QueryType.Construct => QueryMetricsKind.Construct,
+        QueryType.Describe => QueryMetricsKind.Describe,
+        _ => QueryMetricsKind.Select
+    };
 
     /// <summary>
     /// Execute a SPARQL UPDATE (INSERT DATA, DELETE DATA, CLEAR, DROP, etc.).

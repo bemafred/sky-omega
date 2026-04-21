@@ -6,6 +6,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Diagnostics;
 using SkyOmega.Mercury.Runtime.IO;
 using SkyOmega.Mercury.Sparql.Protocol;
 using SkyOmega.Mercury.Storage;
@@ -316,6 +317,16 @@ else
 // (new pools and temp pools start with no stores; persistent pools
 // may have been created by an older version without pool metadata)
 pool.EnsureActive("primary");
+
+// ADR-030 Phase 1: when --metrics-out is set, install the JSONL listener on the
+// active store so query and rebuild records land in the same file as load progress.
+JsonlMetricsListener? jsonlListener = null;
+if (metricsOutPath != null)
+{
+    jsonlListener = new JsonlMetricsListener(metricsOutPath);
+    pool.Active.QueryMetricsListener = jsonlListener;
+    pool.Active.RebuildMetricsListener = jsonlListener;
+}
 
 // Print startup diagnostics when loading or rebuilding
 if (loadFile != null || bulkLoadFile != null || rebuildIndexes)

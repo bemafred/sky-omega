@@ -204,6 +204,20 @@ public sealed class QuadStore : IDisposable
     public StoreSchema Schema => _schema;
 
     /// <summary>
+    /// Optional listener that receives <see cref="QueryMetrics"/> on every SPARQL query
+    /// execution. Default null: zero overhead on the query hot path — no struct is
+    /// allocated unless a listener is attached. ADR-030 Phase 1.
+    /// </summary>
+    public IQueryMetricsListener? QueryMetricsListener { get; set; }
+
+    /// <summary>
+    /// Optional listener that receives <see cref="RebuildPhaseMetrics"/> per secondary
+    /// index and a <see cref="RebuildMetrics"/> summary per rebuild invocation. Default
+    /// null: zero overhead. ADR-030 Phase 1.
+    /// </summary>
+    public IRebuildMetricsListener? RebuildMetricsListener { get; set; }
+
+    /// <summary>
     /// Throws <see cref="ProfileCapabilityException"/> when the store's profile does not
     /// permit session-API writes. Reference (and future Minimal) are read-only at the
     /// session API per ADR-029 Decision 7 — bulk-load is the only write path.
@@ -746,30 +760,39 @@ public sealed class QuadStore : IDisposable
         ThrowIfDisposed();
 
         // Reference builds all of its indexes inline during bulk-load — there is nothing
-        // separately to rebuild. Log and return so `mercury --bulk-load --rebuild-indexes`
-        // pipelines work uniformly across profiles without the caller having to branch.
+        // separately to rebuild. Log, emit a no-op summary for the metrics stream, and
+        // return so `mercury --bulk-load --rebuild-indexes` pipelines work uniformly.
         if (_schema.Profile == StoreProfile.Reference)
         {
             _logger.Info("Reference profile: indexes are built inline during bulk-load — rebuild is a no-op.".AsSpan());
+            RebuildMetricsListener?.OnRebuildComplete(new RebuildMetrics(
+                Timestamp: DateTimeOffset.UtcNow,
+                Profile: _schema.Profile,
+                TotalElapsed: TimeSpan.Zero,
+                Phases: System.Array.Empty<RebuildPhaseMetrics>(),
+                WasNoOp: true));
             return;
         }
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
         _lock.EnterWriteLock();
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(4) : null;
         try
         {
             RebuildIndex(_gposIndex, "GPOS", StoreIndexState.BuildingGPOS,
-                (q) => (q.Secondary, q.Tertiary, q.Primary), onProgress);
+                (q) => (q.Secondary, q.Tertiary, q.Primary), onProgress, phases);
 
             RebuildIndex(_gospIndex, "GOSP", StoreIndexState.BuildingGOSP,
-                (q) => (q.Tertiary, q.Primary, q.Secondary), onProgress);
+                (q) => (q.Tertiary, q.Primary, q.Secondary), onProgress, phases);
 
             RebuildIndex(_tgspIndex, "TGSP", StoreIndexState.BuildingTGSP,
-                (q) => (q.Primary, q.Secondary, q.Tertiary), onProgress);
+                (q) => (q.Primary, q.Secondary, q.Tertiary), onProgress, phases);
 
             // Trigram rebuild
             _indexState = StoreIndexState.BuildingTrigram;
             StoreStateFile.Write(_baseDirectory, _indexState);
+            var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
             long trigramCount = 0;
             var gspoEnum = _gspoIndex.QueryHistory(
                 ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
@@ -788,7 +811,19 @@ public sealed class QuadStore : IDisposable
                     }
                 }
             }
+            trigramStopwatch.Stop();
             onProgress?.Invoke("Trigram", trigramCount);
+
+            if (RebuildMetricsListener is not null)
+            {
+                var trigramPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "Trigram",
+                    EntriesProcessed: trigramCount,
+                    Elapsed: trigramStopwatch.Elapsed);
+                phases!.Add(trigramPhase);
+                RebuildMetricsListener.OnRebuildPhase(in trigramPhase);
+            }
 
             // All done
             _indexState = StoreIndexState.Ready;
@@ -797,7 +832,18 @@ public sealed class QuadStore : IDisposable
         }
         finally
         {
+            totalStopwatch.Stop();
             _lock.ExitWriteLock();
+
+            if (RebuildMetricsListener is not null)
+            {
+                RebuildMetricsListener.OnRebuildComplete(new RebuildMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Profile: _schema.Profile,
+                    TotalElapsed: totalStopwatch.Elapsed,
+                    Phases: phases ?? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>(),
+                    WasNoOp: false));
+            }
         }
     }
 
@@ -806,7 +852,8 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private void RebuildIndex(TemporalQuadIndex target, string name, StoreIndexState duringState,
         Func<TemporalQuad, (long Primary, long Secondary, long Tertiary)> remapDimensions,
-        Action<string, long>? onProgress)
+        Action<string, long>? onProgress,
+        List<RebuildPhaseMetrics>? phases)
     {
         _indexState = duringState;
         StoreStateFile.Write(_baseDirectory, _indexState);
@@ -817,6 +864,7 @@ public sealed class QuadStore : IDisposable
         // msync-deferral semantics for the duration of the rebuild, then Flush once.
         target.SetDeferMsync(true);
         long count = 0;
+        var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             var gspoEnum = _gspoIndex!.QueryHistory(
@@ -839,9 +887,21 @@ public sealed class QuadStore : IDisposable
             // so subsequent cognitive-mode writes see a consistent durable state.
             target.Flush();
             target.SetDeferMsync(false);
+            phaseStopwatch.Stop();
         }
 
         onProgress?.Invoke(name, count);
+
+        if (phases is not null)
+        {
+            var phase = new RebuildPhaseMetrics(
+                Timestamp: DateTimeOffset.UtcNow,
+                IndexName: name,
+                EntriesProcessed: count,
+                Elapsed: phaseStopwatch.Elapsed);
+            phases.Add(phase);
+            RebuildMetricsListener?.OnRebuildPhase(in phase);
+        }
     }
 
     #endregion
