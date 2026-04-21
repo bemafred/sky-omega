@@ -2,6 +2,19 @@
 
 **Status:** Drafted 2026-04-20. Sequences ADR-028, ADR-029, ADR-030, ADR-031 toward a 1.8.0 release.
 
+## Progress (updated 2026-04-21)
+
+| # | Phase | Target versions | Status | Evidence |
+|---|---|---|---|---|
+| 1 | ADR-028 rehash-on-grow | 1.7.24–1.7.26 | ✅ Shipped 1.7.24 | `docs/validations/adr-028-rehash-gradient-2026-04-20.md` — 1 M / 10 M / 100 M exact-match to pre-rehash baseline. Stage 3 (full Wikidata) deferred with ADR-029. |
+| 2 | ADR-029 Reference profile | 1.7.27–1.7.30 | ✅ Functionally complete 1.7.30 | `docs/validations/adr-029-reference-gradient-2026-04-20.md` — 5× B+Tree index reduction at 100 M confirmed; 21.3 B projection fits 8 TB. ADR-030 Decision 5 amended after the gradient exposed the inline-secondary-write cost. |
+| 3 | ADR-030 Phase 1 measurement infrastructure | 1.7.31 | ✅ Shipped 1.7.31 | `QueryMetrics` / `RebuildMetrics` + `IQueryMetricsListener` / `IRebuildMetricsListener` + `JsonlMetricsListener` + CLI `--metrics-out` integration. 8 tests. First practical use during Phase 4 validation. |
+| 4 | ADR-031 Pieces 1+2 | 1.7.32–1.7.33 | ✅ Shipped 1.7.32, validated 1.7.33 | `docs/validations/adr-031-dispose-gate-2026-04-21.md` — 1 B Cognitive Dispose 14 min → 0.84 s on wiki-1b. 13 flag tests. Phase 3 metrics captured the measurement. |
+| 5 | ADR-030 Phases 2-4 (parallel rebuild + sort-insert + Reference bulk refactor + 21.3 B validation) | 1.7.34–1.7.38 | ⏭ Next | Incorporates ADR-030 Decision 5 Reference refactor (bulk-writes-GSPO-only mirroring Cognitive). |
+| 6 | Release 1.8.0 | 1.8.0 | ⏭ Pending | After Phase 5 completes and the full 21.3 B Reference run lands at a documented endpoint. |
+
+Phases 1-4 took roughly two days of focused work (2026-04-20 and 2026-04-21). The remaining work in Phase 5 is the substantial piece of the 1.8.0 roadmap — both in code complexity (parallel broadcast + sort-insert) and in validation wall-clock (one full 21.3 B run). See [Risks and mitigations](#risks-and-mitigations) below for the budget.
+
 ## Purpose
 
 Four architectural ADRs (028, 029, 030, 031) emerged from the 2026-04-17 through 2026-04-19 Wikidata-scale validation work. Each was forced by a specific hard finding. All four are in Proposed status with Martin's working-assumption that they are viable. They compose but are orthogonal — any one can be accepted or deferred independently.
