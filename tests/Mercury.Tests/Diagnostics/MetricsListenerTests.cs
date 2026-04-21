@@ -141,27 +141,34 @@ public class MetricsListenerTests : IDisposable
     }
 
     [Fact]
-    public async Task RebuildListener_Reference_EmitsNoOpSummary()
+    public async Task RebuildListener_Reference_EmitsGposAndTrigramPhases()
     {
+        // ADR-030 Decision 5: Reference rebuild now populates GPOS + trigram from
+        // the GSPO-only bulk output (mirrors Cognitive's bulk/rebuild split).
         var dir = Path.Combine(_testDir, "rebuild_ref");
         Directory.CreateDirectory(dir);
 
         using var store = new QuadStore(dir, null, null,
             new StorageOptions { Profile = StoreProfile.Reference });
         using var nt = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
-            "<http://ex/a> <http://ex/p> <http://ex/b> .\n"));
+            "<http://ex/a> <http://ex/p> \"literal\" .\n"));
         await RdfEngine.LoadStreamingAsync(store, nt, RdfFormat.NTriples);
 
         var listener = new CapturingRebuildListener();
         store.RebuildMetricsListener = listener;
         store.RebuildSecondaryIndexes();
 
-        // Reference rebuild emits exactly one summary with WasNoOp=true, zero phases.
-        Assert.Empty(listener.Phases);
+        // Two phase records (GPOS and Trigram) plus a summary.
+        Assert.Equal(2, listener.Phases.Count);
+        Assert.Equal("GPOS", listener.Phases[0].IndexName);
+        Assert.Equal(1, listener.Phases[0].EntriesProcessed);
+        Assert.Equal("Trigram", listener.Phases[1].IndexName);
+        Assert.Equal(1, listener.Phases[1].EntriesProcessed); // one literal object
+
         Assert.Single(listener.Summaries);
-        Assert.True(listener.Summaries[0].WasNoOp);
+        Assert.False(listener.Summaries[0].WasNoOp);
         Assert.Equal(StoreProfile.Reference, listener.Summaries[0].Profile);
-        Assert.Equal(TimeSpan.Zero, listener.Summaries[0].TotalElapsed);
+        Assert.Equal(2, listener.Summaries[0].Phases.Count);
     }
 
     [Fact]

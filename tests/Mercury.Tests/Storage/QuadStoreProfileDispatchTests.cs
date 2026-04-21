@@ -157,17 +157,19 @@ public class QuadStoreProfileDispatchTests : IDisposable
     }
 
     [Fact]
-    public void Reference_RebuildSecondaryIndexes_IsSilentNoOp()
+    public void Reference_RebuildSecondaryIndexes_Succeeds()
     {
-        // Reference builds GSPO and GPOS inline during bulk-load — there is no separate
-        // rebuild phase. Calling rebuild should succeed silently so that the common
-        // `bulk-load → rebuild-indexes` pipeline doesn't need to branch on profile.
+        // ADR-030 Decision 5: Reference rebuild populates GPOS + trigram from the
+        // primary-only GSPO bulk output. The same CLI pipeline (bulk-load →
+        // rebuild-indexes) works uniformly across profiles — no branching at the
+        // caller, just different targets inside the rebuild.
         var dir = NewStoreDir("ref_rebuild");
         Directory.CreateDirectory(dir);
         using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
 
-        // No exception, no state change.
+        // Empty store rebuild — no exception, state stays Ready.
         store.RebuildSecondaryIndexes();
+        Assert.Equal(StoreIndexState.Ready, store.IndexState);
     }
 
     [Fact]

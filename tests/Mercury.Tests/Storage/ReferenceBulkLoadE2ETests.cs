@@ -125,10 +125,12 @@ public class ReferenceBulkLoadE2ETests : IDisposable
     }
 
     [Fact]
-    public async Task RebuildAfterBulkLoad_IsSilentNoOp()
+    public async Task RebuildAfterBulkLoad_PipelineCompletes()
     {
-        // The common CLI pipeline is bulk-load → rebuild-indexes. Reference's rebuild
-        // is a no-op so the pipeline works uniformly across profiles.
+        // ADR-030 Decision 5: the common CLI pipeline (bulk-load → rebuild-indexes)
+        // works uniformly across profiles. Reference's rebuild populates GPOS + trigram
+        // from the inline-only GSPO bulk output; Cognitive's rebuild populates
+        // GPOS/GOSP/TGSP + trigram. Different targets, same shape of invocation.
         var dir = Path.Combine(_testDir, "nt_pipeline");
         Directory.CreateDirectory(dir);
 
@@ -137,9 +139,13 @@ public class ReferenceBulkLoadE2ETests : IDisposable
             new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
 
         await RdfEngine.LoadStreamingAsync(store, StreamFrom(nt), RdfFormat.NTriples);
-        store.RebuildSecondaryIndexes(); // no-op, no exception
+        // PrimaryOnly after bulk — GSPO only, GPOS/trigram pending rebuild.
+        Assert.Equal(StoreIndexState.PrimaryOnly, store.IndexState);
+
+        store.RebuildSecondaryIndexes();
         store.FlushToDisk();
 
+        Assert.Equal(StoreIndexState.Ready, store.IndexState);
         Assert.Equal(1, store.GetStatistics().QuadCount);
     }
 }

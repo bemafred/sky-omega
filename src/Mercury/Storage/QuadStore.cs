@@ -186,11 +186,12 @@ public sealed class QuadStore : IDisposable
 
         // Read index construction state.
         _indexState = StoreStateFile.Read(baseDirectory);
-        // Cognitive/Graph bulk-load populates only GSPO; the rest is built by
-        // RebuildSecondaryIndexes. Reference has no separate rebuild phase — both
-        // of its indexes are written inline during bulk-load — so the store stays
-        // in Ready state throughout.
-        if (_bulkLoadMode && _indexState == StoreIndexState.Ready && _schema.HasTemporal)
+        // Bulk-load populates only the primary GSPO index per ADR-030 Decision 5;
+        // secondary indexes (GPOS / GOSP / TGSP / Trigram depending on the profile)
+        // are populated by RebuildSecondaryIndexes. Any profile with more than one
+        // index enters PrimaryOnly during bulk load. Minimal (GSPO-only) stays Ready
+        // because it has no secondaries to rebuild.
+        if (_bulkLoadMode && _indexState == StoreIndexState.Ready && _schema.Indexes.Count > 1)
         {
             _indexState = StoreIndexState.PrimaryOnly;
             StoreStateFile.Write(baseDirectory, _indexState);
@@ -557,6 +558,15 @@ public sealed class QuadStore : IDisposable
     /// by AddBatched and AddCurrentBatched because the temporal dimensions they differ on
     /// are meaningless for Reference — both reduce to "insert (g,s,p,o)."
     /// </summary>
+    /// <remarks>
+    /// ADR-030 Decision 5: writes only to the primary GSPO index inline. GPOS and the
+    /// trigram posting list are populated by <see cref="RebuildSecondaryIndexes"/> from
+    /// a single sorted GSPO scan — mirrors Cognitive's bulk/rebuild split. Writing to
+    /// multiple B+Trees in different sort orders from the same loop thrashes the page
+    /// cache as soon as the combined working set exceeds RAM; 2026-04-20's gradient
+    /// measured the cost (210K → 31K triples/sec at 100M). Keep inline writes to one
+    /// index, defer the secondaries.
+    /// </remarks>
     private void AddReferenceBulkTriple(
         ReadOnlySpan<char> subject,
         ReadOnlySpan<char> predicate,
@@ -566,8 +576,8 @@ public sealed class QuadStore : IDisposable
         if (!_referenceBulkActive)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
-        // ADR-031 Piece 2: Reference bulk mutates indexes directly, no WAL — still
-        // a mutation for flag purposes. Dispose will short-circuit anyway because
+        // ADR-031 Piece 2: Reference bulk mutates the primary index directly, no WAL —
+        // still a mutation for flag purposes. Dispose short-circuits anyway because
         // Reference has no WAL and CheckpointInternal returns early, but keeping the
         // flag consistent makes the invariant "pure-query leaves flag false" hold
         // for every profile.
@@ -578,14 +588,7 @@ public sealed class QuadStore : IDisposable
         var predicateId = _atoms.Intern(predicate);
         var objectId = _atoms.Intern(@object);
 
-        // Both indexes are populated inline — Reference has no separate rebuild phase.
         _gspoReference!.AddRaw(graphId, subjectId, predicateId, objectId);
-        _gposReference!.AddRaw(graphId, predicateId, objectId, subjectId);
-
-        // Trigram the literal object so full-text search works over Reference stores too.
-        var utf8Span = _atoms.GetAtomSpan(objectId);
-        if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
-            _trigramIndex.IndexAtom(objectId, utf8Span);
     }
 
     /// <summary>
@@ -779,18 +782,13 @@ public sealed class QuadStore : IDisposable
     {
         ThrowIfDisposed();
 
-        // Reference builds all of its indexes inline during bulk-load — there is nothing
-        // separately to rebuild. Log, emit a no-op summary for the metrics stream, and
-        // return so `mercury --bulk-load --rebuild-indexes` pipelines work uniformly.
+        // ADR-030 Decision 5: Reference's bulk-load writes only _gspoReference. The
+        // rebuild phase populates _gposReference and the trigram index from a single
+        // GSPO scan — structurally identical to Cognitive's rebuild, just two targets
+        // instead of four.
         if (_schema.Profile == StoreProfile.Reference)
         {
-            _logger.Info("Reference profile: indexes are built inline during bulk-load — rebuild is a no-op.".AsSpan());
-            RebuildMetricsListener?.OnRebuildComplete(new RebuildMetrics(
-                Timestamp: DateTimeOffset.UtcNow,
-                Profile: _schema.Profile,
-                TotalElapsed: TimeSpan.Zero,
-                Phases: System.Array.Empty<RebuildPhaseMetrics>(),
-                WasNoOp: true));
+            RebuildReferenceSecondaryIndexes(onProgress);
             return;
         }
 
@@ -925,6 +923,117 @@ public sealed class QuadStore : IDisposable
                 Elapsed: phaseStopwatch.Elapsed);
             phases.Add(phase);
             RebuildMetricsListener?.OnRebuildPhase(in phase);
+        }
+    }
+
+    /// <summary>
+    /// Rebuild secondary indexes for a Reference-profile store — ADR-030 Decision 5
+    /// follow-through. Scans the primary GSPO index once to populate GPOS via key
+    /// remap, then scans again to index literal objects in the trigram posting list.
+    /// State transitions PrimaryOnly → BuildingGPOS → BuildingTrigram → Ready.
+    /// </summary>
+    private void RebuildReferenceSecondaryIndexes(Action<string, long>? onProgress)
+    {
+        _lock.EnterWriteLock();
+        _sessionMutated = true;
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(2) : null;
+        try
+        {
+            // GPOS rebuild: scan _gspoReference, remap Graph/Subject/Predicate/Object →
+            // Graph/Predicate/Object/Subject, append to _gposReference. The ReferenceQuadIndex
+            // uniqueness invariant (Decision 7) deduplicates identical G/P/S/T tuples on the
+            // way in — matches the RDF-is-a-set semantics the primary enforced on bulk-load.
+            _indexState = StoreIndexState.BuildingGPOS;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+
+            _gposReference!.SetDeferMsync(true);
+            long gposCount = 0;
+            var gposStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                var gspoEnum = _gspoReference!.Query(-1, -1, -1, -1);
+                while (gspoEnum.MoveNext())
+                {
+                    var key = gspoEnum.Current;
+                    // GSPO layout: Primary=Subject, Secondary=Predicate, Tertiary=Object.
+                    // GPOS layout: Primary=Predicate, Secondary=Object, Tertiary=Subject.
+                    _gposReference.AddRaw(key.Graph, key.Secondary, key.Tertiary, key.Primary);
+                    gposCount++;
+                }
+            }
+            finally
+            {
+                _gposReference.Flush();
+                _gposReference.SetDeferMsync(false);
+                gposStopwatch.Stop();
+            }
+
+            onProgress?.Invoke("GPOS", gposCount);
+            if (phases is not null)
+            {
+                var gposPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "GPOS",
+                    EntriesProcessed: gposCount,
+                    Elapsed: gposStopwatch.Elapsed);
+                phases.Add(gposPhase);
+                RebuildMetricsListener?.OnRebuildPhase(in gposPhase);
+            }
+
+            // Trigram rebuild: a second GSPO scan indexing literal objects only.
+            _indexState = StoreIndexState.BuildingTrigram;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+
+            long trigramCount = 0;
+            var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var trigramEnum = _gspoReference.Query(-1, -1, -1, -1);
+            while (trigramEnum.MoveNext())
+            {
+                var objectId = trigramEnum.Current.Tertiary;
+                if (objectId > 0)
+                {
+                    var utf8Span = _atoms.GetAtomSpan(objectId);
+                    if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    {
+                        _trigramIndex.IndexAtom(objectId, utf8Span);
+                        trigramCount++;
+                    }
+                }
+            }
+            _trigramIndex.Flush();
+            trigramStopwatch.Stop();
+
+            onProgress?.Invoke("Trigram", trigramCount);
+            if (phases is not null)
+            {
+                var trigramPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "Trigram",
+                    EntriesProcessed: trigramCount,
+                    Elapsed: trigramStopwatch.Elapsed);
+                phases.Add(trigramPhase);
+                RebuildMetricsListener?.OnRebuildPhase(in trigramPhase);
+            }
+
+            _indexState = StoreIndexState.Ready;
+            _bulkLoadMode = false;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+        }
+        finally
+        {
+            totalStopwatch.Stop();
+            _lock.ExitWriteLock();
+
+            if (RebuildMetricsListener is not null)
+            {
+                RebuildMetricsListener.OnRebuildComplete(new RebuildMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Profile: _schema.Profile,
+                    TotalElapsed: totalStopwatch.Elapsed,
+                    Phases: phases ?? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>(),
+                    WasNoOp: false));
+            }
         }
     }
 
