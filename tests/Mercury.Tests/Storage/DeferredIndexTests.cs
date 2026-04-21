@@ -220,22 +220,20 @@ public class DeferredIndexTests : IDisposable
         LoadTestData(store);
         store.FlushToDisk();
 
-        // ADR-030 Phase 2 parallel rebuild: onProgress is called from consumer threads
-        // in non-deterministic order. Use a thread-safe collection and assert the set.
-        var reported = new System.Collections.Concurrent.ConcurrentBag<(string Name, long Count)>();
+        var reported = new List<(string Name, long Count)>();
         store.RebuildSecondaryIndexes((name, count) => reported.Add((name, count)));
 
+        // Should report GPOS, GOSP, TGSP, Trigram
         Assert.Equal(4, reported.Count);
-        var byName = reported.ToDictionary(r => r.Name, r => r.Count);
-        Assert.True(byName.ContainsKey("GPOS"));
-        Assert.True(byName.ContainsKey("GOSP"));
-        Assert.True(byName.ContainsKey("TGSP"));
-        Assert.True(byName.ContainsKey("Trigram"));
+        Assert.Equal("GPOS", reported[0].Name);
+        Assert.Equal("GOSP", reported[1].Name);
+        Assert.Equal("TGSP", reported[2].Name);
+        Assert.Equal("Trigram", reported[3].Name);
 
         // All B+Tree indexes should have 6 entries (6 triples loaded)
-        Assert.Equal(6, byName["GPOS"]);
-        Assert.Equal(6, byName["GOSP"]);
-        Assert.Equal(6, byName["TGSP"]);
+        Assert.Equal(6, reported[0].Count);
+        Assert.Equal(6, reported[1].Count);
+        Assert.Equal(6, reported[2].Count);
     }
 
     [Fact]

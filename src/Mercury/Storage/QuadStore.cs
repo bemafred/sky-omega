@@ -794,14 +794,60 @@ public sealed class QuadStore : IDisposable
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
         _lock.EnterWriteLock();
-        // ADR-031 Piece 2: rebuilding secondary indexes touches every B+Tree.
+        // ADR-031 Piece 2: rebuilding secondary indexes touches every B+Tree. Even
+        // though the data came from the primary, the secondaries are now different.
+        // Mark mutated so Dispose runs CheckpointInternal for the new statistics.
         _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var phases = RebuildMetricsListener is not null ? new System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>() : null;
+        var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(4) : null;
         try
         {
-            RebuildCognitiveParallel(onProgress, phases);
+            RebuildIndex(_gposIndex, "GPOS", StoreIndexState.BuildingGPOS,
+                (q) => (q.Secondary, q.Tertiary, q.Primary), onProgress, phases);
 
+            RebuildIndex(_gospIndex, "GOSP", StoreIndexState.BuildingGOSP,
+                (q) => (q.Tertiary, q.Primary, q.Secondary), onProgress, phases);
+
+            RebuildIndex(_tgspIndex, "TGSP", StoreIndexState.BuildingTGSP,
+                (q) => (q.Primary, q.Secondary, q.Tertiary), onProgress, phases);
+
+            // Trigram rebuild
+            _indexState = StoreIndexState.BuildingTrigram;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+            var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            long trigramCount = 0;
+            var gspoEnum = _gspoIndex.QueryHistory(
+                ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+            while (gspoEnum.MoveNext())
+            {
+                var quad = gspoEnum.Current;
+                // In GSPO: Tertiary = object. Check if it's a literal (atom starts with ")
+                var objectId = quad.Tertiary;
+                if (objectId > 0)
+                {
+                    var utf8Span = _atoms.GetAtomSpan(objectId);
+                    if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    {
+                        _trigramIndex.IndexAtom(objectId, utf8Span);
+                        trigramCount++;
+                    }
+                }
+            }
+            trigramStopwatch.Stop();
+            onProgress?.Invoke("Trigram", trigramCount);
+
+            if (RebuildMetricsListener is not null)
+            {
+                var trigramPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "Trigram",
+                    EntriesProcessed: trigramCount,
+                    Elapsed: trigramStopwatch.Elapsed);
+                phases!.Add(trigramPhase);
+                RebuildMetricsListener.OnRebuildPhase(in trigramPhase);
+            }
+
+            // All done
             _indexState = StoreIndexState.Ready;
             _bulkLoadMode = false;
             StoreStateFile.Write(_baseDirectory, _indexState);
@@ -813,194 +859,68 @@ public sealed class QuadStore : IDisposable
 
             if (RebuildMetricsListener is not null)
             {
-                var phaseList = phases is null
-                    ? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>()
-                    : phases.ToArray();
                 RebuildMetricsListener.OnRebuildComplete(new RebuildMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
                     Profile: _schema.Profile,
                     TotalElapsed: totalStopwatch.Elapsed,
-                    Phases: phaseList,
+                    Phases: phases ?? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>(),
                     WasNoOp: false));
             }
         }
     }
 
     /// <summary>
-    /// ADR-030 Phase 2: parallel rebuild for Cognitive. Scan GSPO once, fan out to four
-    /// consumer Tasks (GPOS, GOSP, TGSP, Trigram) via a bounded broadcast channel. Each
-    /// consumer is the sole writer to its target — ADR-020 single-writer per index is
-    /// preserved. Back-pressure keeps the producer within capacity of the slowest
-    /// consumer.
+    /// Rebuild a single secondary index from the primary GSPO index.
     /// </summary>
-    private void RebuildCognitiveParallel(
+    private void RebuildIndex(TemporalQuadIndex target, string name, StoreIndexState duringState,
+        Func<TemporalQuad, (long Primary, long Secondary, long Tertiary)> remapDimensions,
         Action<string, long>? onProgress,
-        System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>? phases)
+        List<RebuildPhaseMetrics>? phases)
     {
-        _indexState = StoreIndexState.BuildingGPOS;
+        _indexState = duringState;
         StoreStateFile.Write(_baseDirectory, _indexState);
 
-        using var cts = new CancellationTokenSource();
-        var channel = new BroadcastChannel<TemporalQuad>(consumerCount: 4, boundedCapacity: 1024);
-
-        var gposTask = Task.Run(() => ConsumeIntoTemporalIndex(
-            _gspoIndex!, _gposIndex!, "GPOS",
-            q => (q.Secondary, q.Tertiary, q.Primary),
-            channel.Reader(0), onProgress, phases, cts));
-
-        var gospTask = Task.Run(() => ConsumeIntoTemporalIndex(
-            _gspoIndex!, _gospIndex!, "GOSP",
-            q => (q.Tertiary, q.Primary, q.Secondary),
-            channel.Reader(1), onProgress, phases, cts));
-
-        var tgspTask = Task.Run(() => ConsumeIntoTemporalIndex(
-            _gspoIndex!, _tgspIndex!, "TGSP",
-            q => (q.Primary, q.Secondary, q.Tertiary),
-            channel.Reader(2), onProgress, phases, cts));
-
-        var trigramTask = Task.Run(() => ConsumeIntoTrigram(
-            channel.Reader(3), onProgress, phases, cts));
-
-        var producerTask = Task.Run(async () =>
-        {
-            try
-            {
-                var enumerator = _gspoIndex!.QueryHistory(
-                    ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
-                while (enumerator.MoveNext())
-                {
-                    cts.Token.ThrowIfCancellationRequested();
-                    await channel.WriteAsync(enumerator.Current, cts.Token).ConfigureAwait(false);
-                }
-                channel.Complete();
-            }
-            catch (Exception ex)
-            {
-                channel.CompleteWithException(ex);
-                cts.Cancel();
-                throw;
-            }
-        });
-
-        // Wait for producer and all consumers. Exceptions are aggregated — the try/catch
-        // above cancels siblings so they don't hang when one fails.
-        try
-        {
-            Task.WaitAll(producerTask, gposTask, gospTask, tgspTask, trigramTask);
-        }
-        catch (AggregateException ae)
-        {
-            cts.Cancel();
-            throw ae.Flatten().InnerException ?? ae;
-        }
-    }
-
-    /// <summary>
-    /// Consumer: read TemporalQuads from the channel, remap dimensions, AddRaw to target.
-    /// Single-writer-per-index — this task is the sole writer to <paramref name="target"/>.
-    /// </summary>
-    private void ConsumeIntoTemporalIndex(
-        TemporalQuadIndex gspoSource,
-        TemporalQuadIndex target,
-        string indexName,
-        Func<TemporalQuad, (long Primary, long Secondary, long Tertiary)> remapDimensions,
-        System.Threading.Channels.ChannelReader<TemporalQuad> reader,
-        Action<string, long>? onProgress,
-        System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>? phases,
-        CancellationTokenSource cts)
-    {
-        _ = gspoSource; // source enumerator lives in producer; kept as parameter for symmetry / future use
+        // Secondary-index construction is a bulk-shape operation: each AllocatePage
+        // would otherwise trigger a full-region msync via SaveMetadata (the same
+        // 1.7.15 bug, hidden behind a different code path). Borrow the bulk-mode
+        // msync-deferral semantics for the duration of the rebuild, then Flush once.
         target.SetDeferMsync(true);
         long count = 0;
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            while (reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult())
+            var gspoEnum = _gspoIndex!.QueryHistory(
+                ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+
+            while (gspoEnum.MoveNext())
             {
-                while (reader.TryRead(out var quad))
-                {
-                    var (primary, secondary, tertiary) = remapDimensions(quad);
-                    target.AddRaw(quad.Graph, primary, secondary, tertiary,
-                        quad.ValidFrom, quad.ValidTo, quad.TransactionTime);
-                    count++;
-                }
+                var quad = gspoEnum.Current;
+                var (primary, secondary, tertiary) = remapDimensions(quad);
+
+                target.AddRaw(quad.Graph, primary, secondary, tertiary,
+                    quad.ValidFrom, quad.ValidTo, quad.TransactionTime);
+                count++;
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Sibling failure cancelled us — let the AggregateException carry the cause.
         }
         finally
         {
+            // One msync covers every deferred metadata write and page flush
+            // performed during the rebuild. Must run before SetDeferMsync(false)
+            // so subsequent cognitive-mode writes see a consistent durable state.
             target.Flush();
             target.SetDeferMsync(false);
-            stopwatch.Stop();
+            phaseStopwatch.Stop();
         }
 
-        onProgress?.Invoke(indexName, count);
-
-        if (phases is not null)
-        {
-            var phase = new RebuildPhaseMetrics(
-                Timestamp: DateTimeOffset.UtcNow,
-                IndexName: indexName,
-                EntriesProcessed: count,
-                Elapsed: stopwatch.Elapsed);
-            phases.Add(phase);
-            RebuildMetricsListener?.OnRebuildPhase(in phase);
-        }
-    }
-
-    /// <summary>
-    /// Trigram consumer: filter for literal objects, index them. Reads AtomStore
-    /// (shared, read-only during rebuild) and writes the trigram posting list
-    /// (single-writer contract preserved — this task is the only writer).
-    /// </summary>
-    private void ConsumeIntoTrigram(
-        System.Threading.Channels.ChannelReader<TemporalQuad> reader,
-        Action<string, long>? onProgress,
-        System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>? phases,
-        CancellationTokenSource cts)
-    {
-        long count = 0;
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            while (reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult())
-            {
-                while (reader.TryRead(out var quad))
-                {
-                    var objectId = quad.Tertiary;
-                    if (objectId > 0)
-                    {
-                        var utf8Span = _atoms.GetAtomSpan(objectId);
-                        if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
-                        {
-                            _trigramIndex.IndexAtom(objectId, utf8Span);
-                            count++;
-                        }
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            _trigramIndex.Flush();
-            stopwatch.Stop();
-        }
-
-        onProgress?.Invoke("Trigram", count);
+        onProgress?.Invoke(name, count);
 
         if (phases is not null)
         {
             var phase = new RebuildPhaseMetrics(
                 Timestamp: DateTimeOffset.UtcNow,
-                IndexName: "Trigram",
+                IndexName: name,
                 EntriesProcessed: count,
-                Elapsed: stopwatch.Elapsed);
+                Elapsed: phaseStopwatch.Elapsed);
             phases.Add(phase);
             RebuildMetricsListener?.OnRebuildPhase(in phase);
         }
@@ -1008,58 +928,92 @@ public sealed class QuadStore : IDisposable
 
     /// <summary>
     /// Rebuild secondary indexes for a Reference-profile store — ADR-030 Decision 5
-    /// follow-through. Scans the primary GSPO index once, fan out via a broadcast
-    /// channel to two consumer Tasks: GPOS (key remap) and Trigram (literal-object
-    /// indexing). State transitions PrimaryOnly → BuildingGPOS → Ready.
+    /// follow-through. Scans the primary GSPO index once to populate GPOS via key
+    /// remap, then scans again to index literal objects in the trigram posting list.
+    /// State transitions PrimaryOnly → BuildingGPOS → BuildingTrigram → Ready.
     /// </summary>
     private void RebuildReferenceSecondaryIndexes(Action<string, long>? onProgress)
     {
         _lock.EnterWriteLock();
         _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var phases = RebuildMetricsListener is not null ? new System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>() : null;
+        var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(2) : null;
         try
         {
+            // GPOS rebuild: scan _gspoReference, remap Graph/Subject/Predicate/Object →
+            // Graph/Predicate/Object/Subject, append to _gposReference. The ReferenceQuadIndex
+            // uniqueness invariant (Decision 7) deduplicates identical G/P/S/T tuples on the
+            // way in — matches the RDF-is-a-set semantics the primary enforced on bulk-load.
             _indexState = StoreIndexState.BuildingGPOS;
             StoreStateFile.Write(_baseDirectory, _indexState);
 
-            using var cts = new CancellationTokenSource();
-            var channel = new BroadcastChannel<ReferenceQuadIndex.ReferenceKey>(consumerCount: 2, boundedCapacity: 1024);
-
-            var gposTask = Task.Run(() => ConsumeReferenceIntoGpos(
-                channel.Reader(0), onProgress, phases, cts));
-
-            var trigramTask = Task.Run(() => ConsumeReferenceIntoTrigram(
-                channel.Reader(1), onProgress, phases, cts));
-
-            var producerTask = Task.Run(async () =>
-            {
-                try
-                {
-                    var enumerator = _gspoReference!.Query(-1, -1, -1, -1);
-                    while (enumerator.MoveNext())
-                    {
-                        cts.Token.ThrowIfCancellationRequested();
-                        await channel.WriteAsync(enumerator.Current, cts.Token).ConfigureAwait(false);
-                    }
-                    channel.Complete();
-                }
-                catch (Exception ex)
-                {
-                    channel.CompleteWithException(ex);
-                    cts.Cancel();
-                    throw;
-                }
-            });
-
+            _gposReference!.SetDeferMsync(true);
+            long gposCount = 0;
+            var gposStopwatch = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                Task.WaitAll(producerTask, gposTask, trigramTask);
+                var gspoEnum = _gspoReference!.Query(-1, -1, -1, -1);
+                while (gspoEnum.MoveNext())
+                {
+                    var key = gspoEnum.Current;
+                    // GSPO layout: Primary=Subject, Secondary=Predicate, Tertiary=Object.
+                    // GPOS layout: Primary=Predicate, Secondary=Object, Tertiary=Subject.
+                    _gposReference.AddRaw(key.Graph, key.Secondary, key.Tertiary, key.Primary);
+                    gposCount++;
+                }
             }
-            catch (AggregateException ae)
+            finally
             {
-                cts.Cancel();
-                throw ae.Flatten().InnerException ?? ae;
+                _gposReference.Flush();
+                _gposReference.SetDeferMsync(false);
+                gposStopwatch.Stop();
+            }
+
+            onProgress?.Invoke("GPOS", gposCount);
+            if (phases is not null)
+            {
+                var gposPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "GPOS",
+                    EntriesProcessed: gposCount,
+                    Elapsed: gposStopwatch.Elapsed);
+                phases.Add(gposPhase);
+                RebuildMetricsListener?.OnRebuildPhase(in gposPhase);
+            }
+
+            // Trigram rebuild: a second GSPO scan indexing literal objects only.
+            _indexState = StoreIndexState.BuildingTrigram;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+
+            long trigramCount = 0;
+            var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var trigramEnum = _gspoReference.Query(-1, -1, -1, -1);
+            while (trigramEnum.MoveNext())
+            {
+                var objectId = trigramEnum.Current.Tertiary;
+                if (objectId > 0)
+                {
+                    var utf8Span = _atoms.GetAtomSpan(objectId);
+                    if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    {
+                        _trigramIndex.IndexAtom(objectId, utf8Span);
+                        trigramCount++;
+                    }
+                }
+            }
+            _trigramIndex.Flush();
+            trigramStopwatch.Stop();
+
+            onProgress?.Invoke("Trigram", trigramCount);
+            if (phases is not null)
+            {
+                var trigramPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "Trigram",
+                    EntriesProcessed: trigramCount,
+                    Elapsed: trigramStopwatch.Elapsed);
+                phases.Add(trigramPhase);
+                RebuildMetricsListener?.OnRebuildPhase(in trigramPhase);
             }
 
             _indexState = StoreIndexState.Ready;
@@ -1073,115 +1027,13 @@ public sealed class QuadStore : IDisposable
 
             if (RebuildMetricsListener is not null)
             {
-                var phaseList = phases is null
-                    ? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>()
-                    : phases.ToArray();
                 RebuildMetricsListener.OnRebuildComplete(new RebuildMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
                     Profile: _schema.Profile,
                     TotalElapsed: totalStopwatch.Elapsed,
-                    Phases: phaseList,
+                    Phases: phases ?? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>(),
                     WasNoOp: false));
             }
-        }
-    }
-
-    /// <summary>
-    /// Reference-profile GPOS consumer: remap Graph/Subject/Predicate/Object →
-    /// Graph/Predicate/Object/Subject and AddRaw. Sole writer to _gposReference.
-    /// </summary>
-    private void ConsumeReferenceIntoGpos(
-        System.Threading.Channels.ChannelReader<ReferenceQuadIndex.ReferenceKey> reader,
-        Action<string, long>? onProgress,
-        System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>? phases,
-        CancellationTokenSource cts)
-    {
-        _gposReference!.SetDeferMsync(true);
-        long count = 0;
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            while (reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult())
-            {
-                while (reader.TryRead(out var key))
-                {
-                    _gposReference.AddRaw(key.Graph, key.Secondary, key.Tertiary, key.Primary);
-                    count++;
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            _gposReference.Flush();
-            _gposReference.SetDeferMsync(false);
-            stopwatch.Stop();
-        }
-
-        onProgress?.Invoke("GPOS", count);
-
-        if (phases is not null)
-        {
-            var phase = new RebuildPhaseMetrics(
-                Timestamp: DateTimeOffset.UtcNow,
-                IndexName: "GPOS",
-                EntriesProcessed: count,
-                Elapsed: stopwatch.Elapsed);
-            phases.Add(phase);
-            RebuildMetricsListener?.OnRebuildPhase(in phase);
-        }
-    }
-
-    /// <summary>Reference-profile Trigram consumer: filter for literal objects, index them.</summary>
-    private void ConsumeReferenceIntoTrigram(
-        System.Threading.Channels.ChannelReader<ReferenceQuadIndex.ReferenceKey> reader,
-        Action<string, long>? onProgress,
-        System.Collections.Concurrent.ConcurrentBag<RebuildPhaseMetrics>? phases,
-        CancellationTokenSource cts)
-    {
-        long count = 0;
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            while (reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult())
-            {
-                while (reader.TryRead(out var key))
-                {
-                    var objectId = key.Tertiary;
-                    if (objectId > 0)
-                    {
-                        var utf8Span = _atoms.GetAtomSpan(objectId);
-                        if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
-                        {
-                            _trigramIndex.IndexAtom(objectId, utf8Span);
-                            count++;
-                        }
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            _trigramIndex.Flush();
-            stopwatch.Stop();
-        }
-
-        onProgress?.Invoke("Trigram", count);
-
-        if (phases is not null)
-        {
-            var phase = new RebuildPhaseMetrics(
-                Timestamp: DateTimeOffset.UtcNow,
-                IndexName: "Trigram",
-                EntriesProcessed: count,
-                Elapsed: stopwatch.Elapsed);
-            phases.Add(phase);
-            RebuildMetricsListener?.OnRebuildPhase(in phase);
         }
     }
 
