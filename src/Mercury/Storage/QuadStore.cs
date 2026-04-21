@@ -1023,6 +1023,13 @@ public sealed class QuadStore : IDisposable
             _indexState = StoreIndexState.BuildingGPOS;
             StoreStateFile.Write(_baseDirectory, _indexState);
 
+            // Sort-insert requires the target to be empty — appending to an already-
+            // populated GPOS would violate the non-decreasing contract. Clearing makes
+            // RebuildSecondaryIndexes idempotent: the source of truth is GSPO, and the
+            // secondary targets are always reconstructed from it.
+            _gposReference!.Clear();
+            _trigramIndex.Clear();
+
             using var cts = new CancellationTokenSource();
             var channel = new BroadcastChannel<ReferenceQuadIndex.ReferenceKey>(consumerCount: 2, boundedCapacity: 1024);
 
@@ -1087,9 +1094,25 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Reference-profile GPOS consumer: remap Graph/Subject/Predicate/Object →
-    /// Graph/Predicate/Object/Subject and AddRaw. Sole writer to _gposReference.
+    /// Reference-profile GPOS consumer — ADR-030 Phase 3 sort-insert.
+    /// Three phases: (1) drain the broadcast channel, remap each GSPO key to GPOS
+    /// layout (Graph/Predicate/Object/Subject), buffer to a list; (2) sort the
+    /// buffer by GPOS key order; (3) AppendSorted into _gposReference.
     /// </summary>
+    /// <remarks>
+    /// <para>Why buffer+sort instead of streaming append: GSPO's scan order is
+    /// (Graph, Subject, Predicate, Object). Remapping to GPOS (Graph, Predicate,
+    /// Object, Subject) breaks monotonicity — the stream is not sorted for GPOS
+    /// input. Sort-insert requires non-decreasing input; buffering lets us feed
+    /// it correctly.</para>
+    ///
+    /// <para>Memory footprint: one <see cref="ReferenceQuadIndex.ReferenceKey"/>
+    /// per triple = 32 B. 100 M = 3.2 GB; 1 B = 32 GB (fits on 128 GB). 21.3 B
+    /// = 682 GB — too large. External merge-sort is a later follow-up for that
+    /// scale.</para>
+    ///
+    /// <para>Sole writer to <c>_gposReference</c> — ADR-020 contract preserved.</para>
+    /// </remarks>
     private void ConsumeReferenceIntoGpos(
         System.Threading.Channels.ChannelReader<ReferenceQuadIndex.ReferenceKey> reader,
         Action<string, long>? onProgress,
@@ -1099,15 +1122,45 @@ public sealed class QuadStore : IDisposable
         _gposReference!.SetDeferMsync(true);
         long count = 0;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        // Buffer: remapped to GPOS layout as we drain. Pre-sized not possible without
+        // the total count, so it grows; List<T> resize cost is amortized O(1).
+        var buffer = new List<ReferenceQuadIndex.ReferenceKey>(1 << 20);
         try
         {
+            // Phase 1: drain the channel, remap each key to GPOS layout.
             while (reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult())
             {
                 while (reader.TryRead(out var key))
                 {
-                    _gposReference.AddRaw(key.Graph, key.Secondary, key.Tertiary, key.Primary);
+                    // GSPO → GPOS: Primary=Predicate, Secondary=Object, Tertiary=Subject.
+                    buffer.Add(new ReferenceQuadIndex.ReferenceKey
+                    {
+                        Graph = key.Graph,
+                        Primary = key.Secondary,
+                        Secondary = key.Tertiary,
+                        Tertiary = key.Primary,
+                    });
+                }
+            }
+
+            // Phase 2: sort the buffer in GPOS key order.
+            var asArray = buffer.ToArray();
+            Array.Sort(asArray, static (a, b) => ReferenceQuadIndex.ReferenceKey.Compare(in a, in b));
+
+            // Phase 3: append in sorted order. AppendSorted is O(1) per entry on the
+            // fast path; a single log-N walk per ~LeafDegree entries on the fallback.
+            _gposReference.BeginAppendSorted();
+            try
+            {
+                for (int i = 0; i < asArray.Length; i++)
+                {
+                    _gposReference.AppendSorted(asArray[i]);
                     count++;
                 }
+            }
+            finally
+            {
+                _gposReference.EndAppendSorted();
             }
         }
         catch (OperationCanceledException)

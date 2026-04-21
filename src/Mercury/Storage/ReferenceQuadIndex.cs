@@ -177,6 +177,108 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         InsertIntoTree(key, _rootPageId);
     }
 
+    // Cached rightmost-leaf page id for the ADR-030 Phase 3 sort-insert fast path.
+    // Valid only while a sort-insert run is active (caller enters via BeginAppendSorted,
+    // exits via EndAppendSorted). Zero means "no active sort run" — AppendSorted will
+    // find the rightmost leaf the first time it's called.
+    private long _sortInsertTailLeafPageId;
+
+    /// <summary>
+    /// Begin a sort-insert run — primes the rightmost-leaf cache. Caller guarantees that
+    /// subsequent <see cref="AppendSorted"/> calls supply keys in non-decreasing order
+    /// per <see cref="ReferenceKey.Compare"/>. Must be paired with <see cref="EndAppendSorted"/>.
+    /// ADR-030 Phase 3.
+    /// </summary>
+    internal void BeginAppendSorted()
+    {
+        _sortInsertTailLeafPageId = FindRightmostLeaf();
+    }
+
+    /// <summary>
+    /// Append a key to the rightmost leaf. Fast path (leaf has room, key ≥ last) is
+    /// O(1) per entry; tail-full fallback reuses <see cref="InsertIntoTree"/> which
+    /// handles splits correctly at the cost of one O(log N) tree walk per new leaf
+    /// (~once every <see cref="LeafDegree"/> entries). Net: ~25× fewer operations
+    /// than <see cref="AddRaw"/> random-insert at 100 M scale.
+    /// </summary>
+    /// <remarks>
+    /// <para><strong>Contract:</strong> keys must arrive in non-decreasing order per
+    /// <see cref="ReferenceKey.Compare"/>. DEBUG builds assert; RELEASE is undefined
+    /// behavior (same discipline as <see cref="System.Span{T}"/> bounds checks).</para>
+    ///
+    /// <para>Exact duplicates are silent no-ops per ADR-029 Decision 7 uniqueness — a
+    /// monotonic sequence with equal consecutive keys is legal input, and the dedup
+    /// preserves the "RDF is a set of triples" invariant without the caller doing
+    /// explicit dedup upstream.</para>
+    /// </remarks>
+    internal void AppendSorted(ReferenceKey key)
+    {
+        if (_sortInsertTailLeafPageId == 0)
+            _sortInsertTailLeafPageId = FindRightmostLeaf();
+
+        var view = GetView(_sortInsertTailLeafPageId);
+        ref var header = ref view.Header;
+
+        if (header.EntryCount > 0)
+        {
+            ref var lastKey = ref view.LeafEntry(header.EntryCount - 1);
+            var cmp = ReferenceKey.Compare(in lastKey, in key);
+#if DEBUG
+            System.Diagnostics.Debug.Assert(cmp <= 0,
+                "AppendSorted contract violation: input is not non-decreasing. " +
+                "Sort-insert corrupts the B+Tree when given unsorted input. " +
+                "Buffer + Array.Sort before appending.");
+#endif
+            if (cmp == 0)
+                return; // Decision 7 uniqueness — exact duplicate is a no-op.
+        }
+
+        if (header.EntryCount < LeafDegree)
+        {
+            // Fast path: append directly to the tail leaf.
+            view.LeafEntry(header.EntryCount) = key;
+            header.EntryCount = (short)(header.EntryCount + 1);
+            System.Threading.Interlocked.Increment(ref _quadCount);
+            FlushPage();
+            return;
+        }
+
+        // Tail leaf is full — fall back to the full-tree insert which handles splits,
+        // then refresh the cached tail. Cost: one log-N tree walk per ~LeafDegree
+        // entries, amortized to near-zero per entry.
+        InsertIntoTree(key, _rootPageId);
+        _sortInsertTailLeafPageId = FindRightmostLeaf();
+    }
+
+    /// <summary>
+    /// End a sort-insert run — clears the rightmost-leaf cache. Does not flush;
+    /// caller is responsible for <see cref="Flush"/> under its own durability
+    /// discipline (bulk/rebuild pattern uses <see cref="SetDeferMsync"/>).
+    /// </summary>
+    internal void EndAppendSorted()
+    {
+        _sortInsertTailLeafPageId = 0;
+    }
+
+    private long FindRightmostLeaf()
+    {
+        var pageId = _rootPageId;
+        while (true)
+        {
+            var view = GetView(pageId);
+            ref var header = ref view.Header;
+            if (header.IsLeaf) return pageId;
+
+            // Internal node: rightmost child is either the last entry's ChildPageId,
+            // or — if no entries yet — NextLeafOrLeftmostChild (the leftmost pointer
+            // that doubles as the only child in a degenerate empty-internal case).
+            if (header.EntryCount == 0)
+                pageId = header.NextLeafOrLeftmostChild;
+            else
+                pageId = view.InternalEntry(header.EntryCount - 1).ChildPageId;
+        }
+    }
+
     /// <summary>
     /// Mirrors TemporalQuadIndex.SetDeferMsync — toggled by QuadStore around bulk
     /// phases. Caller is responsible for invoking Flush() before turning deferral off.
