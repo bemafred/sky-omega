@@ -50,6 +50,13 @@ public sealed class QuadStore : IDisposable
     // in-bulk flag lets AddCurrentBatched / CommitBatch enforce the "must be inside
     // BeginBatch" contract without fabricating a tx id that has no durable meaning.
     private bool _referenceBulkActive;
+    // ADR-031 Piece 2: tracks whether anything has actually been written since the
+    // last checkpoint. Set by every mutation entry point; reset by CheckpointInternal.
+    // Dispose gates the 14-min CollectPredicateStatistics + WAL-checkpoint-marker path
+    // on this flag — read-only sessions see Dispose drop from minutes to milliseconds.
+    // Volatile because Dispose reads it without re-acquiring the writer lock under
+    // which mutations set it.
+    private volatile bool _sessionMutated;
     // Batched records hold atom IDs only. Resolving IDs back to strings just so
     // ApplyToIndexes could re-intern them was a 1% hot path in bulk-load profiles,
     // plus one string allocation per atom per triple. The IDs are already in the
@@ -216,6 +223,12 @@ public sealed class QuadStore : IDisposable
     /// null: zero overhead. ADR-030 Phase 1.
     /// </summary>
     public IRebuildMetricsListener? RebuildMetricsListener { get; set; }
+
+    /// <summary>
+    /// Internal accessor for the ADR-031 Piece 2 session-mutation flag. Tests assert
+    /// that every public mutation flips it and every pure-query path leaves it false.
+    /// </summary>
+    internal bool SessionMutated => _sessionMutated;
 
     /// <summary>
     /// Throws <see cref="ProfileCapabilityException"/> when the store's profile does not
@@ -553,6 +566,13 @@ public sealed class QuadStore : IDisposable
         if (!_referenceBulkActive)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
+        // ADR-031 Piece 2: Reference bulk mutates indexes directly, no WAL — still
+        // a mutation for flag purposes. Dispose will short-circuit anyway because
+        // Reference has no WAL and CheckpointInternal returns early, but keeping the
+        // flag consistent makes the invariant "pure-query leaves flag false" hold
+        // for every profile.
+        _sessionMutated = true;
+
         var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var subjectId = _atoms.Intern(subject);
         var predicateId = _atoms.Intern(predicate);
@@ -776,6 +796,10 @@ public sealed class QuadStore : IDisposable
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
         _lock.EnterWriteLock();
+        // ADR-031 Piece 2: rebuilding secondary indexes touches every B+Tree. Even
+        // though the data came from the primary, the secondaries are now different.
+        // Mark mutated so Dispose runs CheckpointInternal for the new statistics.
+        _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(4) : null;
         try
@@ -941,6 +965,10 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private void ApplyToIndexesById(in LogRecord record)
     {
+        // ADR-031 Piece 2: any mutation that reaches the indexes bumps the session-
+        // mutated flag so Dispose knows to run CheckpointInternal.
+        _sessionMutated = true;
+
         // LogRecord stores valid-time as .UtcTicks (100-ns since year 1); the B+Tree
         // keys are Unix milliseconds. Convert once per record instead of per index.
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
@@ -979,6 +1007,9 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     private bool ApplyDeleteToIndexesById(in LogRecord record)
     {
+        // ADR-031 Piece 2: delete is a mutation — track it.
+        _sessionMutated = true;
+
         // Precondition mirrors ApplyToIndexesById: temporal indexes non-null on entry.
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
         var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
@@ -1071,7 +1102,9 @@ public sealed class QuadStore : IDisposable
 
         _logger.Debug("Starting checkpoint".AsSpan());
 
-        // Collect predicate statistics for query optimization
+        // Collect predicate statistics for query optimization. This is the ~14-min
+        // dominant cost at 1 B cognitive scale (per 2026-04-20 Dispose profile);
+        // gated out of read-only Dispose via _sessionMutated (ADR-031 Piece 2).
         CollectPredicateStatistics();
 
         // Flush trigram index if enabled
@@ -1079,6 +1112,12 @@ public sealed class QuadStore : IDisposable
 
         // Write checkpoint marker to WAL
         _wal.Checkpoint();
+
+        // ADR-031 Piece 2: state is now durable on disk — future Dispose without
+        // additional mutations can skip CheckpointInternal. Reset the flag last so
+        // a crash mid-checkpoint leaves it true and the next Open's Recover +
+        // auto-checkpoint cleans up.
+        _sessionMutated = false;
 
         _logger.Debug("Checkpoint complete".AsSpan());
     }
@@ -1543,9 +1582,14 @@ public sealed class QuadStore : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Checkpoint before closing to minimize recovery on next open
-        // Note: Skip locking here - we're disposing, no concurrent access expected
-        CheckpointInternal();
+        // ADR-031 Piece 2: Dispose's CheckpointInternal is the 14-minute-at-1B dominant
+        // cost (CollectPredicateStatistics scans the entire GPOS index). A session that
+        // never mutated anything has no new statistics to collect and no WAL checkpoint
+        // marker to write — skip unconditionally. For Reference/Minimal profiles the
+        // inner `_wal is null` short-circuit makes this redundant but cheap.
+        // Locking note: skip — we're disposing, no concurrent access expected.
+        if (_sessionMutated)
+            CheckpointInternal();
 
         _wal?.Dispose();
         _gspoIndex?.Dispose();
@@ -1575,6 +1619,9 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
+            // ADR-031 Piece 2: Clear is an all-encompassing mutation.
+            _sessionMutated = true;
+
             _logger.Info("Clearing store".AsSpan());
 
             // WAL and indexes: clear only what the profile actually instantiated.
