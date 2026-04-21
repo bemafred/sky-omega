@@ -70,7 +70,17 @@ total: 32 passes worst case
 - **16-bit digits where dense.** For the low 4 bytes of each field where most variation lives, optionally process two bytes per pass (65536 buckets, half the passes). Trades buckets-per-pass overhead against pass count. Probably not worth the complexity until measured.
 - **Branchless write-offset update.** Each distribute step is a tight loop: `output[offsets[byte]++] = entry`. No comparisons, no branches except loop bounds. Highly cache-friendly when the buffer fits in L2.
 
-**Expected performance at 100M:** 12-16 effective passes × 100M entries × ~5ns per entry-copy ≈ 6-8 seconds for the in-memory sort. Versus 80.6 s measured for `Array.Sort` with comparator at 100M — a 10× speedup. The sort drops from a load-bearing cost to a trivial one.
+**Measured performance (Phase 1, microbenchmark vs `Array.Sort` with comparator):**
+
+| N | `Array.Sort` | `RadixSort` | Speedup |
+|---|---:|---:|---:|
+| 100K | 16.6 ms | 3.7 ms | 4.4× |
+| 1M | 55.2 ms | 34.8 ms | 1.6× |
+| 10M | 690.3 ms | 313.4 ms | 2.2× |
+
+Both algorithms allocate zero managed bytes. The 1M speedup narrows because the working set (32 MB) is just past L2 cache, so memory bandwidth dominates both algorithms equally; at 10M and above the radix sort's linear scaling pulls ahead. The 100M sort projects to ~3.1 s (linear extrapolation) vs the 80.6 s measured for `Array.Sort` in the actual rebuild context — about a **20× difference at scale**, the gap widening beyond pure microbenchmark conditions because the rebuild's `Array.Sort` paid additional comparator-delegate overhead.
+
+The relevant framing: the radix sort is fast enough that **sort time stops being load-bearing in the rebuild**. Phase 5.2 measured sort as ~14% of the 100M rebuild; after radix, sort drops to <1%. The remaining wall-clock cost belongs to the I/O pattern, which Phases 2-4 address.
 
 ### 2 — External streaming, not a monolithic buffer
 
