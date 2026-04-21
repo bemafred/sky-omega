@@ -32,8 +32,8 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.22 Released** — Full ingest pipeline (bulk-load + secondary-index rebuild) validated end-to-end at 1 B Wikidata triples: **331 K triples/sec** bulk, **3 h 7 m** rebuild, clean completion, queryable cognitive-profile store. Session hardening (1.7.13 → 1.7.22) surfaced and fixed ten distinct bug classes that only appear at real-data scale — atom hash table overflow, `SaveMetadata` msync amplification (bulk *and* rebuild paths), `TrigramIndex` stale-pointer-after-remap and map-before-extend, `GetAtomString` round-trip, `FStat`-per-insert, hash clustering from a premature word-wise FNV. Throughput scales cleanly through the 10 M → 100 M → 1 B gradient. Three new ADRs (028 rehash-on-grow, 029 store profiles, 030 bulk+rebuild perf) propose the path to 21.3 B on 8 TB. 1,937 storage + SPARQL tests pass.
-> See [CHANGELOG.md](CHANGELOG.md) for details.
+> **v1.7.30 Released** — Two of six production-hardening phases shipped. **ADR-028 rehash-on-grow** (1.7.24) removes the 256 M-bucket hash table ceiling that blocked Wikidata-scale loads; validated 1 M / 10 M / 100 M with exact-match query correctness. **ADR-029 store profiles** (1.7.25–1.7.30) introduces the `Reference` profile — 32 B B+Tree entries, no temporal dimension, no WAL — and wires it end-to-end: `mercury --create-store --profile Reference`, bulk-load through `RdfEngine.LoadStreamingAsync`, and SPARQL queries through `SparqlEngine.Query` all work against Reference stores via the standard API surfaces. The 2026-04-20 gradient confirms the core ADR-029 thesis: **B+Tree indexes are ~5× smaller at Reference profile** (11 GB vs 60 GB at 100 M), projecting full Wikidata to ~3.4 TB — fits 8 TB commodity storage with >2× margin. Gradient also surfaced a worthwhile design lesson: inlining secondary writes into Reference's bulk loop thrashes the page cache at scale (ADR-030 Decision 5 amended to make the bulk/rebuild split profile-invariant). 4,151 Mercury tests pass; the next session lands ADR-030 Phase 1 measurement infrastructure.
+> See [CHANGELOG.md](CHANGELOG.md) for details and [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md) for the full 1.8.0 plan.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
 
@@ -101,9 +101,9 @@ The broader Sky Omega vision is a **stand-alone cognitive agent** built on this 
 | 100% W3C SPARQL 1.1 conformance  | 618 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
 | 100% W3C conformance (all formats)| 2,063 passing tests  | `dotnet test --filter "W3C"`                 |
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 3,978 tests passing              | Test suite            | `dotnet test`                                |
+| 4,151 Mercury tests passing      | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | ~170K lines           | See [STATISTICS.md](STATISTICS.md)           |
+| Development velocity             | ~180K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
 ---
 
@@ -119,7 +119,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 74,750 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC     |
+| **Mercury**            | Temporal RDF substrate — 77,615 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). |
 | **Mercury.Solid**      | W3C Solid Protocol server with WAC/ACP access control                                      |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |

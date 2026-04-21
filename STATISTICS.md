@@ -2,9 +2,9 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-04-17
+**Last updated:** 2026-04-21 (after 1.7.30 — ADR-028 Stages 1+2, ADR-029 Phase 2 end-to-end)
 
-Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts. (Mercury-as-triple-store benchmarks will get their own directory when Phase 4 of ADR-027 produces them.)
+Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts.
 
 ## Line Counts
 
@@ -12,47 +12,42 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **75,860** | Knowledge substrate |
-| ├─ Sparql | 44,773 | SPARQL parser, executor, protocol |
+| **Mercury (total)** | **77,615** | Knowledge substrate |
+| ├─ Sparql | 44,966 | SPARQL parser, executor, protocol |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
-| ├─ Storage | 6,132 | B+Tree indexes, AtomStore, WAL |
-| ├─ Turtle | 4,017 | Turtle parser and writer |
+| ├─ Storage | 8,267 | B+Tree indexes (temporal + reference), AtomStore rehash, WAL, schema plumbing |
+| ├─ Turtle | 4,108 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
 | ├─ TriG | 2,836 | TriG parser and writer |
 | ├─ NQuads | 1,476 | N-Quads parser and writer |
-| ├─ NTriples | 1,244 | N-Triples parser and writer |
-| ├─ Facades | 792 | SparqlEngine, RdfEngine |
+| ├─ NTriples | 1,341 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
-| └─ Rdf | 490 | Core RDF types |
-| **Mercury.Solid (total)** | **4,459** | W3C Solid Protocol |
-| ├─ Http | 1,365 | Resource, Container, Patch handlers |
-| ├─ N3 | 1,348 | N3 Patch parser and executor |
-| ├─ AccessControl | 894 | WAC and ACP implementations |
-| ├─ Models | 297 | SolidResource, SolidContainer |
-| └─ SolidServer | 481 | HTTP server |
-| **Mercury Runtime** | **3,503** | Runtime + Abstractions |
-| **Mercury Tool Libraries** | **1,471** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,516** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
-| **Mercury.Pruning** | **1,276** | Copy-and-switch pruning + PruneEngine |
-| **DrHook (total)** | **2,167** | Runtime observation substrate |
-| ├─ Core | 1,802 | EventPipe observation + DAP stepping + breakpoint registry |
-| └─ DrHook.Mcp | 365 | MCP server shim (19 tools, incl. step_test) |
+| └─ Rdf | 536 | Core RDF types |
+| **Mercury.Abstractions** | **632** | `StoreProfile`, `StoreSchema`, exceptions, shared types |
+| **Mercury.Runtime** | **3,329** | Buffers, cross-process gate, temp paths |
+| **Mercury.Solid (total)** | **4,385** | W3C Solid Protocol (WAC/ACP, N3 Patch, HTTP handlers) |
+| **Mercury Tool Libraries** | **1,327** | Sparql.Tool + Turtle.Tool |
+| **Mercury CLIs** | **1,568** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury.Pruning** | **1,204** | Copy-and-switch pruning + PruneEngine |
+| **DrHook (total)** | **2,343** | Runtime observation substrate (EventPipe + DAP) |
 | **Minerva** | **—** | Thought substrate (planned) |
+
+ADR-028 + ADR-029 additions since 2026-04-17: `Storage` grew by ~2 K lines (`ReferenceQuadIndex`, schema plumbing, profile-aware `QuadStore`); `Mercury.Abstractions` grew to 632 lines from the new profile types. `TemporalQuadIndex` is the rename of the former `QuadIndex`; the rename was tracked as git-rename (98 % / 95 % similarity) so `git log --follow` stitches history intact.
 
 ### Tests
 
-| Project | Lines | Test Cases |
-|---------|------:|----------:|
-| Mercury.Tests | 52,044 | 4,030 |
-| Mercury.Solid.Tests | 455 | 25 |
-| DrHook.Tests | 277 | 23 |
-| Minerva.Tests | — | — |
+| Project | Lines | Test Cases | Notes |
+|---------|------:|----------:|-------|
+| Mercury.Tests | 53,695 | 4,151 | +121 tests since 2026-04-17 (StoreSchema, ReferenceQuadIndex, QuadStore profile dispatch, Reference bulk-load E2E, SPARQL-against-Reference) |
+| Mercury.Solid.Tests | 455 | 25 | |
+| DrHook.Tests | 277 | 23 | |
+| Minerva.Tests | — | — | |
 
 ### Benchmarks
 
 | Project | Lines | Methods |
 |---------|------:|--------:|
-| Mercury.Benchmarks | 3,408 | 74 |
+| Mercury.Benchmarks | 2,968 | 74 |
 | Minerva.Benchmarks | — | — |
 
 ### Examples
@@ -68,19 +63,19 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 29,558 |
+| All docs (*.md, *.ttl) | 33,035 |
 | CLAUDE.md | 271 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~88,850 |
-| Tests | ~50,693 |
-| Benchmarks | ~3,408 |
+| Source code | ~93,506 |
+| Tests | ~54,427 |
+| Benchmarks | ~2,968 |
 | Examples | ~1,027 |
-| Documentation | ~29,558 |
-| **Grand total** | **~173,536** |
+| Documentation | ~33,035 |
+| **Grand total** | **~184,963** |
 
 ## W3C Conformance
 
@@ -220,6 +215,12 @@ Write performance is fsync-dominated — measures SSD controller behavior, not C
 | Date | Subject | Scope | Key measurement |
 |------|---------|-------|-----------------|
 | 2026-04-17 | [Turtle parser at Wikidata scale](docs/validations/parser-at-wikidata-scale-2026-04-17.md) | Parser + NT writer only; no store | 21.3B triples at 2.7M/sec sustained, flat throughput over 2h 11m |
+| 2026-04-17 | [Bulk-load gradient](docs/validations/bulk-load-gradient-2026-04-17.md) | NT bulk-load 1M → 100M Cognitive | 5 bug classes caught and fixed across the 1.7.13 → 1.7.22 arc |
+| 2026-04-19 | [Full-pipeline gradient](docs/validations/full-pipeline-gradient-2026-04-19.md) | Bulk + rebuild through 1 B Cognitive | 1 B rebuild 3 h 7 m, 14.8 M predicate-bound rows in 49 s, 3 rebuild-path bugs fixed |
+| 2026-04-20 | [Turtle at Wikidata scale](docs/validations/turtle-at-wikidata-scale-2026-04-20.md) | Turtle bulk-load at 100 M | 292 K triples/sec, ~12 % slower than NT at source-triple level, zero parser errors |
+| 2026-04-20 | [Dispose profile](docs/validations/dispose-profile-2026-04-20.md) | 1 B read-only Dispose | 14 min attributed to `CollectPredicateStatistics` from `CheckpointInternal`, not msync — ADR-031 Piece 2 mechanism rewritten |
+| 2026-04-20 | [ADR-028 rehash gradient](docs/validations/adr-028-rehash-gradient-2026-04-20.md) | 1 M / 10 M / 100 M with forced 16 K initial hash | 8 / 11 / 14 rehashes per scale, exact-match query rows to baseline, 100 M past the 58 M Bug-5 ceiling cleanly |
+| 2026-04-20 | [ADR-029 Reference gradient](docs/validations/adr-029-reference-gradient-2026-04-20.md) | Reference vs Cognitive at 1 M / 10 M / 100 M | **~5× index reduction (thesis validated)**; bulk rate collapse 210K → 31K triples/sec exposes inline-secondary-write cost (ADR-030 Decision 5 amendment) |
 
 ## Maintenance Instructions
 
