@@ -34,3 +34,4 @@
 | [ADR-029](ADR-029-store-profiles.md) | Store Profiles — Cognitive, Graph, Reference, Minimal | Accepted |
 | [ADR-030](ADR-030-bulk-load-and-rebuild-performance.md) | Bulk Load and Rebuild Performance Architecture | Accepted |
 | [ADR-031](ADR-031-read-only-session-fast-path.md) | Read-Only Session Fast Path | Accepted |
+| [ADR-032](ADR-032-radix-external-sort.md) | Radix External Sort for Index Rebuild | Proposed |
