@@ -246,6 +246,114 @@ public class MetricsListenerTests : IDisposable
     }
 
     [Fact]
+    public async Task JsonlMetricsListener_ConcurrentWrites_NoTornRecords()
+    {
+        // Parallel rebuild (ADR-030 Phase 5.1.b) will have multiple consumer threads
+        // emitting records concurrently. Zero tolerance for torn records — every line
+        // in the output must be a complete, parseable JSON object. Spawn a mix of
+        // callers hitting every public entry point hard and verify every line parses.
+        using var buffer = new MemoryStream();
+        using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
+
+        const int threadCount = 16;
+        const int recordsPerThread = 500;
+
+        var barrier = new System.Threading.Barrier(threadCount);
+        var tasks = new Task[threadCount];
+        for (int t = 0; t < threadCount; t++)
+        {
+            int threadId = t;
+            tasks[t] = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                for (int i = 0; i < recordsPerThread; i++)
+                {
+                    switch ((threadId + i) % 4)
+                    {
+                        case 0:
+                            jsonl.OnQueryMetrics(new QueryMetrics(
+                                DateTimeOffset.UtcNow, StoreProfile.Cognitive,
+                                QueryMetricsKind.Select,
+                                TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(2),
+                                42, true, null));
+                            break;
+                        case 1:
+                            jsonl.OnRebuildPhase(new RebuildPhaseMetrics(
+                                DateTimeOffset.UtcNow, "GPOS", 1000, TimeSpan.FromSeconds(1)));
+                            break;
+                        case 2:
+                            jsonl.OnRebuildComplete(new RebuildMetrics(
+                                DateTimeOffset.UtcNow, StoreProfile.Reference,
+                                TimeSpan.FromSeconds(5),
+                                System.Array.Empty<RebuildPhaseMetrics>(), false));
+                            break;
+                        case 3:
+                            // External-producer path — the CLI's WriteMetric uses this
+                            // for load-progress records. Must coexist with listener paths.
+                            jsonl.WriteLine($"{{\"phase\":\"load\",\"thread\":{threadId},\"i\":{i}}}");
+                            break;
+                    }
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks);
+        jsonl.Flush();
+
+        // Every line must be valid JSON. No torn records, no interleaving, no empty lines.
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, leaveOpen: true);
+        int lineCount = 0;
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (line.Length == 0) continue; // tolerant of trailing newline
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                Assert.True(doc.RootElement.ValueKind == JsonValueKind.Object);
+            }
+            catch (JsonException ex)
+            {
+                Assert.Fail($"Line {lineCount} was not valid JSON: {ex.Message}\nLine: {line}");
+            }
+            lineCount++;
+        }
+
+        // Every call produced exactly one record.
+        Assert.Equal(threadCount * recordsPerThread, lineCount);
+    }
+
+    [Fact]
+    public void JsonlMetricsListener_WriteLine_RoutesExternalRecords()
+    {
+        // The public WriteLine method lets the CLI share this listener's single
+        // writer for its legacy load-progress records — critical for the
+        // "one writer per --metrics-out file" contract.
+        using var buffer = new MemoryStream();
+        using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
+
+        jsonl.WriteLine("{\"phase\":\"load\",\"triples\":100000}");
+        jsonl.OnQueryMetrics(new QueryMetrics(
+            DateTimeOffset.UtcNow, StoreProfile.Cognitive, QueryMetricsKind.Select,
+            TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 0, true, null));
+        jsonl.WriteLine("{\"phase\":\"load.summary\",\"triples\":100000}");
+        jsonl.Flush();
+
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, leaveOpen: true);
+        var lines = new System.Collections.Generic.List<string>();
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+            if (line.Length > 0) lines.Add(line);
+
+        Assert.Equal(3, lines.Count);
+        Assert.Contains("\"load\"", lines[0]);
+        Assert.Contains("\"query\"", lines[1]);
+        Assert.Contains("\"load.summary\"", lines[2]);
+    }
+
+    [Fact]
     public void JsonlMetricsListener_ErrorMessage_Serialized()
     {
         using var buffer = new MemoryStream();

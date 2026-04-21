@@ -204,9 +204,14 @@ if (attachTarget != null)
     return await RunAttachMode(attachTarget);
 }
 
-// Open metrics output stream once if requested — flushed/disposed on process exit.
-StreamWriter? metricsWriter = metricsOutPath != null
-    ? new StreamWriter(new FileStream(metricsOutPath, FileMode.Append, FileAccess.Write, FileShare.Read)) { AutoFlush = true }
+// ADR-030 Phase 1 + follow-up: the CLI's load-progress records and the
+// JsonlMetricsListener's query/rebuild records share a single writer so every
+// --metrics-out line goes through one lock and one buffer. Parallel rebuild
+// (Phase 5.1.b) will have multiple consumer threads emitting records concurrently;
+// two independent writers (as 1.7.31-1.7.34 had) produce interleaved/torn records
+// mid-byte, which destroys downstream analysis. One writer, one truth.
+JsonlMetricsListener? jsonlListener = metricsOutPath != null
+    ? new JsonlMetricsListener(metricsOutPath)
     : null;
 
 var metricsJsonOptions = new JsonSerializerOptions
@@ -216,8 +221,8 @@ var metricsJsonOptions = new JsonSerializerOptions
 
 void WriteMetric(object record)
 {
-    if (metricsWriter == null) return;
-    metricsWriter.WriteLine(JsonSerializer.Serialize(record, metricsJsonOptions));
+    if (jsonlListener is null) return;
+    jsonlListener.WriteLine(JsonSerializer.Serialize(record, metricsJsonOptions));
 }
 
 // Handle --convert (no store needed, exits after completion)
@@ -257,7 +262,7 @@ if (convertInput != null && convertOutput != null)
         elapsed_sec = convertElapsed.TotalSeconds,
         avg_triples_per_sec = convertElapsed.TotalSeconds > 0 ? count / convertElapsed.TotalSeconds : 0,
     });
-    metricsWriter?.Dispose();
+    jsonlListener?.Dispose();
     return 0;
 }
 
@@ -318,12 +323,11 @@ else
 // may have been created by an older version without pool metadata)
 pool.EnsureActive("primary");
 
-// ADR-030 Phase 1: when --metrics-out is set, install the JSONL listener on the
-// active store so query and rebuild records land in the same file as load progress.
-JsonlMetricsListener? jsonlListener = null;
-if (metricsOutPath != null)
+// Attach the already-constructed listener to pool.Active so store events (query +
+// rebuild) use the same writer as the CLI's load-progress records. Shared lock,
+// shared buffer, no torn writes.
+if (jsonlListener is not null)
 {
-    jsonlListener = new JsonlMetricsListener(metricsOutPath);
     pool.Active.QueryMetricsListener = jsonlListener;
     pool.Active.RebuildMetricsListener = jsonlListener;
 }
@@ -480,7 +484,7 @@ if (rebuildIndexes)
 }
 
 // Flush/close metrics file before entering REPL
-metricsWriter?.Dispose();
+jsonlListener?.Dispose();
 
 // Create ReplSession with facade calls and run REPL
 using (pool)

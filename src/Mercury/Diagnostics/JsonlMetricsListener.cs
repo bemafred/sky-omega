@@ -63,7 +63,7 @@ public sealed class JsonlMetricsListener : IQueryMetricsListener, IRebuildMetric
                 json.WriteString("error", metrics.ErrorMessage);
             json.WriteEndObject();
         }
-        WriteLine(buffer);
+        WriteBufferedLine(buffer);
     }
 
     public void OnRebuildPhase(in RebuildPhaseMetrics phase)
@@ -79,7 +79,7 @@ public sealed class JsonlMetricsListener : IQueryMetricsListener, IRebuildMetric
             json.WriteNumber("elapsed_ms", phase.Elapsed.TotalMilliseconds);
             json.WriteEndObject();
         }
-        WriteLine(buffer);
+        WriteBufferedLine(buffer);
     }
 
     public void OnRebuildComplete(RebuildMetrics summary)
@@ -96,16 +96,33 @@ public sealed class JsonlMetricsListener : IQueryMetricsListener, IRebuildMetric
             json.WriteBoolean("no_op", summary.WasNoOp);
             json.WriteEndObject();
         }
-        WriteLine(buffer);
+        WriteBufferedLine(buffer);
     }
 
-    private void WriteLine(MemoryStream buffer)
+    private void WriteBufferedLine(MemoryStream buffer)
     {
         var json = System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
         lock (_gate)
         {
             if (_disposed) return;
             _writer.WriteLine(json);
+        }
+    }
+
+    /// <summary>
+    /// Write a caller-serialized JSON line to the underlying stream under the same
+    /// lock the listener uses for its own records. Lets external record producers
+    /// (e.g. the CLI's load-progress path) share the listener's writer so every
+    /// record — query, rebuild-phase, rebuild-complete, load, load.summary — goes
+    /// through one lock and one buffer. This is the contract parallel rebuild will
+    /// rely on: many concurrent producers, zero torn records.
+    /// </summary>
+    public void WriteLine(string jsonLine)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _writer.WriteLine(jsonLine);
         }
     }
 
