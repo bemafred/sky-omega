@@ -158,6 +158,35 @@ Phase 4 (from ADR-030): Full 21.3 B Reference profile run with all optimizations
 
 **Why last among the core four:** Substantial engineering, substantial correctness risk (parallel coordination bugs), substantial validation wall-clock cost per iteration. Do it after the foundation (028, 029) is solid and the UX wins (031 piece 2) are banked.
 
+#### Phase 5 methodology — gradient before scale, profile before commit
+
+Added 2026-04-21. Every optimization landing in Phase 5 goes through the same discipline that surfaced ten bug classes across Phases 1-4 and took bulk-load from 57 K → 331 K triples/sec across 1.7.13 → 1.7.22.
+
+**5.1 Gradient before scale.** Each architectural optimization is exercised through the 1 M / 10 M / 100 M gradient against the captured pre-change baseline before the next optimization lands on top of it. Metrics are captured through the ADR-030 Phase 1 `--metrics-out` JSONL path so every claim has an evidence file, not a recollection. The sequence:
+
+1. Parallel rebuild lands → gradient rebuild vs sequential baseline at 1 M / 10 M / 100 M → confirm byte-identical secondary-index output at every scale, measure wall-clock win.
+2. Sort-insert fast path lands → gradient rebuild vs random-insert baseline → same correctness + perf check.
+3. Reference bulk refactor lands (Decision 5 follow-through) → gradient bulk throughput vs the inline-writes baseline (the 210 K → 31 K triples/sec collapse captured 2026-04-20) → confirm the refactor closes the gap.
+4. All three composed → 1 B Cognitive + Reference dry run on `wiki-1b` and a fresh 1 B Reference slice → confirm the combined optimizations hold at the largest non-toy scale before the 21.3 B commitment.
+
+Budget: ~10-20 gradient runs (each 1 M / 10 M / 100 M is ~30-60 min; each 1 B is ~3-4 h after the optimizations) spread across the three architectural changes = roughly 40-80 h wall-clock before the 21.3 B run. Keeps all intermediate runs recoverable — if any one step regresses, we roll it back and iterate without having wasted a full-scale run.
+
+**5.2 dotTrace-driven micro-optimization pass.** After 5.1's architectural wins are banked, profile the composed system with dotTrace against a 100 M bulk + rebuild. The architectural changes will have re-shuffled the hot paths — ADR-030's call-out of "60-70 % of cores idle at bulk-load peak" is the pre-parallel baseline; after parallel rebuild the hot path moves. That's the invariant of high-level optimization: it changes what's slow, so the cycle repeats.
+
+Pattern mirrors the 1.7.13 → 1.7.22 arc:
+
+- dotTrace sampling pass identifies top-N hot methods
+- Each candidate micro-optimization: implement → 1 M / 10 M / 100 M gradient → captured JSONL metrics proving the win → commit
+- Refuse any micro-opt that can't be measured (hash-function replacement already queued in `docs/limits/hash-function-quality.md` for exactly this reason)
+
+Examples the 1.7.x arc shipped this way: atom-ID routing kills the `GetAtomString` round-trip (1.7.14), `UtcNow` caching in AddBatched (1.7.14), fstat elimination in `EnsureDataCapacity` (1.7.14), `SaveMetadata` msync deferral (1.7.15, 1.7.22). Each was a percent-level win individually; in aggregate they were the 4.7× throughput gain.
+
+Budget: 5-10 iterations post-5.1, each measured, each gradient-verified. ~20-40 h additional wall-clock.
+
+**5.3 Full 21.3 B commitment.** Only after 5.1 + 5.2 are clean through the 1 B dry run. One `mercury --store wiki-ref --profile Reference --bulk-load latest-all.nt` invocation with `--metrics-out` capturing the JSONL record stream. Validation doc at `docs/validations/21.3b-reference-first-landing-<date>.md`. If it fails mid-run, we have 5.1/5.2 numbers to compare against to localize the regression — unlike a blind 21.3 B attempt where failure is unattributable.
+
+**Why structural, not implicit.** The gradient discipline caught every bug class in Phases 1-4 by design: a 1 M run has a 6-order-of-magnitude lower cost of iteration than a 21.3 B run, and every failure mode we've hit in production is latent at some smaller scale if you look. Not gradient-testing pre-21.3B is equivalent to betting a ~24 h wall-clock run (plus cleanup + retry) on unverified code.
+
 ### Phase 6 — Release
 
 **Target version:** **1.8.0**
