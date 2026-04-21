@@ -30,7 +30,10 @@ public sealed class JsonlMetricsListener : IQueryMetricsListener, IRebuildMetric
     /// <summary>Wrap an existing stream. The caller keeps ownership unless <paramref name="leaveOpen"/> is false.</summary>
     public JsonlMetricsListener(Stream stream, bool leaveOpen = true)
     {
-        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8, leaveOpen: leaveOpen) { AutoFlush = false };
+        // AutoFlush=true so a missed explicit Dispose (e.g. process exit without a
+        // shutdown hook) still leaves the file complete on disk. Per-record flush cost
+        // is negligible relative to the query/rebuild work being measured.
+        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8, leaveOpen: leaveOpen) { AutoFlush = true };
         _ownsWriter = !leaveOpen;
     }
 
@@ -38,7 +41,7 @@ public sealed class JsonlMetricsListener : IQueryMetricsListener, IRebuildMetric
     public JsonlMetricsListener(string path)
     {
         var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
-        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8) { AutoFlush = false };
+        _writer = new StreamWriter(stream, System.Text.Encoding.UTF8) { AutoFlush = true };
         _ownsWriter = true;
     }
 
