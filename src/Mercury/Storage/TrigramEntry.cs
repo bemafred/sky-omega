@@ -1,3 +1,4 @@
+using System;
 using System.Runtime.InteropServices;
 
 namespace SkyOmega.Mercury.Storage;
@@ -16,8 +17,18 @@ namespace SkyOmega.Mercury.Storage;
 /// indexes into the struct by absolute byte offset and depends on this layout.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-internal struct TrigramEntry
+internal struct TrigramEntry : IComparable<TrigramEntry>, IEquatable<TrigramEntry>
 {
     public uint Hash;   // bytes 0..3, unsigned (no signed-bias on radix MSB)
     public long AtomId; // bytes 4..11, signed (MSB at byte 11 needs signed-bias)
+
+    public readonly int CompareTo(TrigramEntry other)
+    {
+        int cmp = Hash.CompareTo(other.Hash);
+        return cmp != 0 ? cmp : AtomId.CompareTo(other.AtomId);
+    }
+
+    public readonly bool Equals(TrigramEntry other) => Hash == other.Hash && AtomId == other.AtomId;
+    public override readonly bool Equals(object? obj) => obj is TrigramEntry e && Equals(e);
+    public override readonly int GetHashCode() => HashCode.Combine(Hash, AtomId);
 }
