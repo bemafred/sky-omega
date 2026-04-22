@@ -46,6 +46,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [Hash function quality](hash-function-quality.md) | Latent | Need for sustained ingest throughput improvement once schema-reduction wins (ADR-029) are banked, OR adversarial-input concerns surface |
 | [Bit-packed atom IDs](bit-packed-atom-ids.md) | Latent | Storage becoming binding even after Reference profile (~680 GB additional savings projected at 21.3 B Wikidata) |
 | [B+Tree index mmap remap](btree-mmap-remap.md) | Latent | Single store past 1 TB of B+Tree data (~33B ReferenceKey entries) or incremental workloads that cannot plan size at open time |
+| [Bulk-load memory pressure](bulk-load-memory-pressure.md) | Latent | Bulk-load swap activity correlating with throughput drop, OR host with < 128 GB RAM, OR scale past full Wikidata 21.3B |
 
 ## Adding a new entry
 
