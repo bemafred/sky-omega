@@ -1018,22 +1018,64 @@ public sealed class QuadStore : IDisposable
             StoreStateFile.Write(_baseDirectory, _indexState);
             _trigramIndex.Clear();
 
-            long trigramCount = 0;
+            // Trigram rebuild via ADR-032 Phase 4 radix external sort: extract
+            // (trigram, atomId) pairs from each literal, sort by trigram so all atoms
+            // for one trigram arrive contiguously, batch-append each trigram's atoms
+            // in one allocation. Each posting list is touched once instead of N times,
+            // eliminating the random-write amplification on hash-bucket pages.
+            long trigramCount = 0;          // atoms with at least one trigram
             var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var trigramEnum = _gspoReference.Query(-1, -1, -1, -1);
-            while (trigramEnum.MoveNext())
+            var trigramTempDir = Path.Combine(_baseDirectory, "rebuild-tmp", "trigram");
+            using (var sorter = new ExternalSorter<TrigramEntry, TrigramEntryChunkSorter>(
+                tempDir: trigramTempDir,
+                chunkSize: 16_000_000)) // 192 MB scratch per chunk for the 12-byte entries
             {
-                var objectId = trigramEnum.Current.Tertiary;
-                if (objectId > 0)
+                var trigramEnum = _gspoReference.Query(-1, -1, -1, -1);
+                while (trigramEnum.MoveNext())
                 {
-                    var utf8Span = _atoms.GetAtomSpan(objectId);
-                    if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    var objectId = trigramEnum.Current.Tertiary;
+                    if (objectId > 0)
                     {
-                        _trigramIndex.IndexAtom(objectId, utf8Span);
-                        trigramCount++;
+                        var utf8Span = _atoms.GetAtomSpan(objectId);
+                        if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                        {
+                            _trigramIndex.EmitTrigramsToSorter(objectId, utf8Span, sorter);
+                            trigramCount++;
+                        }
                     }
                 }
+                sorter.Complete();
+
+                // Drain sorted (trigram, atomId) pairs and batch-append per trigram group.
+                // Adjacent dedup handles both within-atom duplicates (same trigram in one
+                // literal) and cross-quad duplicates (same atom as object of multiple quads).
+                var atomBuffer = new List<long>(64);
+                uint currentTrigram = 0;
+                bool hasCurrent = false;
+                while (sorter.TryDrainNext(out var entry))
+                {
+                    if (!hasCurrent || entry.Hash != currentTrigram)
+                    {
+                        if (hasCurrent)
+                        {
+                            _trigramIndex.AppendBatch(currentTrigram, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(atomBuffer));
+                            atomBuffer.Clear();
+                        }
+                        currentTrigram = entry.Hash;
+                        hasCurrent = true;
+                        atomBuffer.Add(entry.AtomId);
+                    }
+                    else if (atomBuffer[^1] != entry.AtomId)
+                    {
+                        atomBuffer.Add(entry.AtomId);
+                    }
+                }
+                if (hasCurrent)
+                {
+                    _trigramIndex.AppendBatch(currentTrigram, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(atomBuffer));
+                }
             }
+            _trigramIndex.SetIndexedAtomCount(trigramCount);
             _trigramIndex.Flush();
             trigramStopwatch.Stop();
 

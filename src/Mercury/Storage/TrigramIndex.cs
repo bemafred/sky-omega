@@ -209,6 +209,124 @@ internal sealed unsafe class TrigramIndex : IDisposable
     }
 
     /// <summary>
+    /// Bulk-rebuild surface (ADR-032 Phase 4): emit (trigram, atomId) pairs for an
+    /// atom's literal value into the supplied external sorter. Does NOT update posting
+    /// lists or the indexed-atom counter — those are settled during the
+    /// <see cref="AppendBatch"/> drain phase.
+    /// </summary>
+    /// <remarks>
+    /// Trigrams are emitted directly without per-atom deduplication. Adjacent duplicates
+    /// (same trigram appearing multiple times in one literal, or same atom appearing as
+    /// the object of multiple quads) are dedup'd by the consumer when batching by
+    /// <see cref="TrigramEntry.Hash"/>. The producer-side savings of HashSet dedup are
+    /// not worth the per-atom HashSet management cost at 100 M+ scale.
+    /// </remarks>
+    internal void EmitTrigramsToSorter(
+        long atomId,
+        ReadOnlySpan<byte> utf8Text,
+        ExternalSorter<TrigramEntry, TrigramEntryChunkSorter> sorter)
+    {
+        if (atomId <= 0 || utf8Text.Length < MinTextLength) return;
+
+        var literalValue = ExtractLiteralValue(utf8Text);
+        if (literalValue.Length < MinTextLength) return;
+
+        var text = Utf8.GetString(literalValue);
+        var normalized = text.ToLowerInvariant();
+
+        var normalizedByteCount = Utf8.GetByteCount(normalized);
+        Span<byte> stackBuffer = stackalloc byte[Math.Min(normalizedByteCount, 512)];
+        var normalizedBytes = _bufferManager.AllocateSmart(normalizedByteCount, stackBuffer, out var rentedBuffer);
+        try
+        {
+            Utf8.GetBytes(normalized, normalizedBytes);
+            if (normalizedBytes.Length < MinTextLength) return;
+
+            for (int i = 0; i <= normalizedBytes.Length - 3; i++)
+            {
+                uint trigram = ((uint)normalizedBytes[i] << 16)
+                             | ((uint)normalizedBytes[i + 1] << 8)
+                             | normalizedBytes[i + 2];
+                var entry = new TrigramEntry { Hash = trigram, AtomId = atomId };
+                sorter.Add(in entry);
+            }
+        }
+        finally
+        {
+            rentedBuffer.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Bulk-rebuild surface (ADR-032 Phase 4): write a complete posting list for one
+    /// trigram in a single allocation. Caller is responsible for dedup'ing
+    /// <paramref name="atomIds"/> (the bulk path does this by skipping adjacent
+    /// duplicates in the sorted stream); this method writes whatever it's given,
+    /// up to <see cref="MaxPostingListSize"/>.
+    /// </summary>
+    /// <remarks>
+    /// Assumes a freshly-cleared trigram index — the bucket for this trigram must be
+    /// empty. The rebuild path calls <see cref="Clear"/> before invoking this.
+    /// Probing handles hash-table collisions exactly as <see cref="AddToPostingList"/>
+    /// does on first insert.
+    /// </remarks>
+    internal void AppendBatch(uint trigram, ReadOnlySpan<long> atomIds)
+    {
+        if (atomIds.Length == 0) return;
+        var hash = ComputeTrigramHash(trigram);
+        var bucket = (int)((ulong)hash % (ulong)HashTableBuckets);
+
+        for (int probe = 0; probe < MaxProbeDistance; probe++)
+        {
+            var probeOffset = ComputeProbeOffset(probe);
+            var currentBucket = (bucket + probeOffset) % HashTableBuckets;
+            ref var entry = ref _hashTable[currentBucket];
+
+            if (entry.Trigram == 0 && entry.PostingOffset == 0)
+            {
+                int writeCount = Math.Min(atomIds.Length, MaxPostingListSize);
+                int capacity = writeCount;
+                long listSize = sizeof(int) + sizeof(int) + (long)capacity * sizeof(long);
+                long offset = Interlocked.Add(ref _postingPosition, listSize) - listSize;
+                EnsurePostingCapacity(offset + listSize);
+
+                *(int*)(_postingPtr + offset) = writeCount;
+                *(int*)(_postingPtr + offset + sizeof(int)) = capacity;
+                var dst = (long*)(_postingPtr + offset + sizeof(int) + sizeof(int));
+                for (int i = 0; i < writeCount; i++) dst[i] = atomIds[i];
+
+                entry.Trigram = trigram;
+                entry.PostingOffset = offset;
+                entry.PostingCount = writeCount;
+                Interlocked.Increment(ref _totalTrigrams);
+                return;
+            }
+
+            if (entry.Trigram == trigram)
+            {
+                // Should not happen during a rebuild against a Cleared index — but if
+                // it does, fall through to per-atom append for correctness.
+                for (int i = 0; i < atomIds.Length; i++)
+                    AppendToPostingList(ref entry, atomIds[i]);
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Trigram hash table overflow after {MaxProbeDistance} probes during bulk rebuild.");
+    }
+
+    /// <summary>
+    /// Bulk-rebuild surface (ADR-032 Phase 4): set the indexed-atom counter at the
+    /// end of a bulk rebuild. The per-atom path uses <see cref="Interlocked.Increment"/>;
+    /// the bulk path tallies once and writes the total here.
+    /// </summary>
+    internal void SetIndexedAtomCount(long count)
+    {
+        Interlocked.Exchange(ref _indexedAtomCount, count);
+    }
+
+    /// <summary>
     /// Remove an atom from the trigram index (lazy tombstone).
     /// </summary>
     /// <param name="atomId">The atom ID to remove.</param>
