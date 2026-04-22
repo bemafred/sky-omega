@@ -90,6 +90,71 @@ Latent. Phase 6 21.3B Wikidata is running against the hash-based atom store and 
 2. **MARISA-trie-style prefix-shared structure**. More compact (30-50% smaller) but BCL-only implementation non-trivial. Could live in `Mercury.Compression` if added.
 3. **ART (Adaptive Radix Tree)**. Balanced performance/size. Faster than binary search for common prefixes. Again, BCL-only implementation non-trivial.
 
+## Phase 2 refinement: minimal perfect hashing (MPHF) on the finalized vocabulary
+
+The sorted-vocabulary approach (Phase 1) gives O(log N) lookup via binary search — cache-friendly but still log(N) probes. Once the vocabulary is finalized and immutable, we can do strictly better: build a **minimal perfect hash function** over the known N strings. O(1) deterministic lookup with zero collisions, ever.
+
+### What an MPHF is
+
+Given N known keys, an MPHF `h(key) → {0, 1, …, N-1}` maps each key to a unique slot. No collisions. Space overhead is **1.5 – 3 bits per key** depending on the algorithm (vs 32 B/bucket for open-addressing hash tables). The catch: the MPHF can only be constructed when the complete key set is known. You cannot add a key without rebuilding the entire MPHF (or layering a delta — see "Diff ingestion" section above).
+
+**This constraint is precisely why MPHF fits the Reference profile's read-only-after-bulk contract.** Once the external merge sort finalizes the vocabulary, the set is closed.
+
+### Algorithms
+
+| Algorithm | Authors, year | Bits/key | Implementation complexity |
+|---|---|---:|---|
+| **CHD** (Compress, Hash, Displace) | Belazzougui, Botelho, Dietzfelbinger, 2009 | ~1.6 | Two-level with displacement array. Denser, harder. |
+| **BBHash** (BooHash) | Limasset, Rizk, Chikhi, 2017 | ~3.0 | Stacked bit arrays. Simplest. Best fit for BCL-only C#. |
+| **RecSplit** | Esposito, Graf, Vigna, 2020 | ~1.5 | Current state-of-the-art space-wise. More complex. |
+
+**BBHash** is the recommended starting point: conceptually simple (level-by-level bitmap marking), implementable in a few hundred lines, uses popcount for rank/select (native ARM/x64 instruction via `System.Numerics.BitOperations.PopCount`).
+
+### Compose with Phase 1
+
+Phase 1 alone → sorted vocabulary file + offsets, binary-search lookup.
+Phase 2 adds → `atoms.mphf` file, ~1 GB at Wikidata 4B-atom scale.
+
+At query time:
+- `StringToId(key)`: evaluate MPHF → get slot N → read string at sorted-vocab[N] → strcmp to confirm key membership (MPHF maps *in-domain* keys correctly; out-of-domain keys return *some* slot, hence the membership check).
+- `IdToString(id)`: direct offset lookup, unchanged from Phase 1.
+
+One MPHF evaluation (a handful of hash calls and bit-array lookups, ~50-100 ns) + one cache-line read at the vocab slot + strcmp. Replaces ~32 binary-search probes (~500 ns warm, ~2 µs cold).
+
+### Non-member validation
+
+MPHF alone does NOT answer "is this string in the vocabulary?" — it maps *any* bit pattern to *some* slot. Validation requires comparing against the string stored at that slot. Mercury's SortedAtomStore stores strings anyway (to support `IdToString`), so this check is zero additional storage and adds only the strcmp cost. No separate membership filter (Bloom, etc.) needed.
+
+### Space comparison at Wikidata 4B atoms
+
+| Structure | Size |
+|---|---:|
+| Current hash table (BulkMode, 256M buckets × 32 B, sparse) | 8 GB |
+| Phase 1 sorted-vocab offsets (4B × 8 B) | 32 GB |
+| Phase 2 BBHash MPHF on top of Phase 1 | **~1.5 GB additional** |
+
+The MPHF is essentially free compared to the vocabulary itself. The "10× smaller than the current hash table" headline comes from dropping bucket overhead, not from the MPHF specifically.
+
+### References for the MPHF literature
+
+- **Fredman, Komlós, Szemerédi** (1984): *"Storing a Sparse Table with O(1) Worst Case Access Time"*. The foundational theorem — O(1) lookups on a static set with linear space.
+- **Belazzougui, Botelho, Dietzfelbinger** (2009): CHD.
+- **Limasset, Rizk, Chikhi** (2017): BBHash.
+- **Esposito, Graf, Vigna** (2020): RecSplit.
+- Mehlhorn, K. (1984): *"Data Structures and Algorithms"* Vol. 1 — textbook context.
+
+Knuth TAOCP Vol 3 §6.4 mentions perfect hashing briefly but predates the modern MPHF algorithms — the craft lives in the 1984 → 2020 papers above.
+
+### Phase progression
+
+The SortedAtomStore limit becomes ADR-034 (or similar) when triggered, with internal phases:
+
+1. **Phase 1**: Sorted vocabulary + binary-search lookup. Most of the structural win (eliminate hash drift, 10× smaller, enable bit-packed IDs).
+2. **Phase 2**: BBHash MPHF on top of Phase 1. Tightens query latency from O(log N) to O(1). Adds ~1.5 GB to the structure.
+3. **Phase 3 (speculative)**: Delta-plus-merge layer for incremental writes, if future workloads need it. Would be its own ADR.
+
+Phase 1 alone is probably sufficient for Wikidata 21.3B query workloads (32 binary-search probes at 500 ns warm = ~16 µs per lookup is not the bottleneck anywhere). Phase 2 becomes relevant when query-time atom lookup latency becomes load-bearing — unusual but possible for tight query loops.
+
 ## References
 
 - [ADR-026](../adrs/mercury/ADR-026-bulk-load-path.md) — bulk-load "delete and retry" contract.

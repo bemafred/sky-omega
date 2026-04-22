@@ -34,11 +34,38 @@ The 1.7.16 disaster proved the danger of changing the hash without rigorous test
 
 When promoted, candidates to consider:
 
-1. **xxHash64-style word-wise hash with proper per-word mixing.** Designed to avoid exactly the clustering pathology that broke 1.7.16. BCL-only implementation feasible (no dependencies). Word-aligned reads with per-word avalanche rounds; should give comparable throughput to the failed 1.7.16 attempt with markedly better distribution.
-2. **SIMD-vectorized FNV variant.** Maintains FNV's known-good distribution properties on adjacent strings while processing multiple bytes per cycle via NEON / AVX intrinsics. Requires per-platform paths but no algorithmic change.
-3. **Adopt `System.IO.Hashing.XxHash64`.** Available in BCL since .NET 6. Sky Omega's BCL-only constraint *permits* this (it is BCL). Loses the in-source visibility of the algorithm but gains MSFT-maintained correctness.
+1. **Adopt `System.IO.Hashing.XxHash3` (.NET 10 BCL, hardware-accelerated).** This is now the strongest candidate and Sky Omega's BCL-only constraint permits it — it's in BCL. On Apple Silicon the implementation emits NEON vectorized code (10-15 GB/s single-threaded); on x64 it uses AVX2/AVX-512 where available. Zero implementation work. MSFT-maintained correctness. By far the cleanest path once the regression harness exists.
+2. **`System.IO.Hashing.XxHash64` (.NET 6+ BCL).** Same provenance, slightly older algorithm, same hardware acceleration. Marginally slower than XxHash3 but well-validated.
+3. **`System.IO.Hashing.Crc32C` (BCL, uses ARMv8 CRC32 instruction / Intel CRC32 instruction).** ~20+ GB/s. But only 32-bit output and weaker avalanche — viable for a secondary "quick-check" hash layer but not as the primary 64-bit hash for a multi-billion-atom table.
+4. **Hand-rolled wyhash (Wang Yi, 2019).** If we want source-visible per Sky Omega's transparency ethos, wyhash is ~100-200 lines of BCL C#, competitive with XxHash3 per recent SMHasher runs, and simpler than porting xxHash. Lower priority than #1 unless transparency trumps "just use BCL."
+5. **SIMD-vectorized FNV variant.** Maintains FNV's known-good distribution properties on adjacent strings while processing multiple bytes per cycle via NEON / AVX intrinsics. Requires per-platform paths but no algorithmic change. Historical interest; #1 dominates.
 
-All three need the regression harness before adoption.
+All five need the regression harness before adoption (see below).
+
+## Hardware acceleration on target platforms
+
+| Hardware feature | Benefit | .NET 10 access |
+|---|---|---|
+| ARMv8 NEON SIMD (128-bit) | Parallel byte ops in `XxHash3` round function | `System.Runtime.Intrinsics.Vector128<T>`; used implicitly by `System.IO.Hashing.XxHash3` |
+| ARMv8 CRC32 instructions | 20+ GB/s throughput | `System.IO.Hashing.Crc32C` or `System.Runtime.Intrinsics.Arm.Crc32` |
+| ARMv8 AES instructions | AES-round-based hashing ("meow hash" pattern), 15-20 GB/s with good quality | `System.Runtime.Intrinsics.Arm.Aes` — direct intrinsic use |
+| ARMv8 POPCNT | Fast bit counting (useful for perfect-hashing rank/select) | `System.Numerics.BitOperations.PopCount` |
+
+**NVIDIA / Apple GPU: not applicable for atom interning.** Kernel dispatch cost + memory marshaling dwarfs hash computation for 4 small strings per triple. GPU hashing shines for bulk cryptographic operations, not fine-grained per-triple work. Minerva's LLM inference work is the right GPU target in Sky Omega.
+
+## The bucket-probe ceiling
+
+**Hash computation is not the dominant cost of `Intern`.** At 250 K triples/sec × 4 atoms/triple = 1 M hashes/sec on ~50-byte URIs — 50 MB/sec hashed. Any modern 64-bit hash handles this at a small fraction of its throughput ceiling.
+
+The dominant cost is the **bucket probe**: at 4 B atoms in a 32 GB hash table, each probe misses L3 and hits main memory (~100 ns). Four probes per triple → 400 ns/triple memory latency floor, equivalent to ~2.5 M triples/sec ceiling from memory alone.
+
+Consequence: a free 100 GB/s hash saves maybe 10-20% of the total `Intern` cost. The remaining 80% is the bucket memory access.
+
+Larger wins require addressing the probe pattern, not the hash function:
+
+- **Software prefetching.** Issue `System.Runtime.Intrinsics.Arm.ArmBase.Prefetch1` at the bucket address several hundred ns before reading. Overlaps memory fetch with other work. Well-applied in a batched Intern loop, plausibly recovers 30-50% of cache-miss cost.
+- **Pipelined batch intern.** For bulk-load, process N atoms in a shifted pipeline: hash + prefetch atom k+1 while comparing atom k while writing atom k-1. Hides memory latency via ILP. More invasive refactor but 2-3× throughput is plausible.
+- **Eliminate the hash probe entirely for Reference.** See [sorted-atom-store-for-reference](sorted-atom-store-for-reference.md) — sorted vocabulary + perfect hashing moves to O(1) deterministic lookup with no chain traversal.
 
 ## Required prerequisite — regression harness
 
