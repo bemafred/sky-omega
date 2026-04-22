@@ -70,6 +70,20 @@ public sealed class QuadStore : IDisposable
     private bool _disposed;
     private bool _diskSpaceLow; // Set when disk space drops below threshold
     private bool _bulkLoadMode; // When true: skip fsync on CommitBatch, skip secondary indexes in ApplyToIndexes
+    // ADR-033: Reference bulk-load buffers (G,S,P,O) tuples through an external sorter
+    // so the GSPO B+Tree append is sequential instead of random-write-amplified.
+    //
+    // Lifecycle: allocated lazily on the first AddReferenceBulkTriple call when
+    // _bulkLoadMode is set; persists across many BeginBatch/CommitBatch cycles within
+    // the same bulk session (RdfEngine.LoadStreamingAsync flushes every 100K triples,
+    // so a 1B-triple load makes ~10K BeginBatch/CommitBatch round-trips). Drained on
+    // FlushToDisk (the explicit "bulk-load complete" signal) via AppendSorted, then
+    // disposed (which removes the temp dir).
+    //
+    // Per-batch alloc/drain would trigger a 1 GB LOH allocation per cycle plus break
+    // AppendSorted's "non-decreasing keys" contract from batch 2 onward — both
+    // observed as 25× slowdowns in the v1 implementation.
+    private ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>? _bulkSorter;
     private StoreIndexState _indexState;
     private readonly StoreSchema _schema;
 
@@ -492,6 +506,9 @@ public sealed class QuadStore : IDisposable
             if (_schema.Profile == StoreProfile.Reference)
             {
                 _referenceBulkActive = true;
+                // ADR-033: sorter is allocated lazily on first AddReferenceBulkTriple
+                // and persists across many BeginBatch/CommitBatch cycles. See _bulkSorter
+                // declaration for lifecycle.
                 return;
             }
 
@@ -588,7 +605,33 @@ public sealed class QuadStore : IDisposable
         var predicateId = _atoms.Intern(predicate);
         var objectId = _atoms.Intern(@object);
 
-        _gspoReference!.AddRaw(graphId, subjectId, predicateId, objectId);
+        if (_bulkLoadMode)
+        {
+            // ADR-033 fast path: buffer through the external sorter so the eventual
+            // GSPO append is sequential. Sorter is allocated lazily here on first call
+            // and persists across BeginBatch/CommitBatch cycles for the entire bulk
+            // session — drained at FlushToDisk. GSPO key layout: (Graph, Subject,
+            // Predicate, Object) maps to (Graph, Primary, Secondary, Tertiary).
+            if (_bulkSorter is null)
+            {
+                var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp");
+                _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
+                    tempDir: bulkTempDir,
+                    chunkSize: 16_000_000); // 512 MB scratch on the LOH for the bulk session
+            }
+            var key = new ReferenceQuadIndex.ReferenceKey
+            {
+                Graph = graphId,
+                Primary = subjectId,
+                Secondary = predicateId,
+                Tertiary = objectId,
+            };
+            _bulkSorter.Add(in key);
+        }
+        else
+        {
+            _gspoReference!.AddRaw(graphId, subjectId, predicateId, objectId);
+        }
     }
 
     /// <summary>
@@ -673,9 +716,17 @@ public sealed class QuadStore : IDisposable
             // No WAL → no tx-id machinery → no buffered replay.
             if (_referenceBulkActive)
             {
-                _gspoReference!.Flush();
-                _gposReference!.Flush();
-                _trigramIndex.Flush();
+                // ADR-033: when _bulkSorter is active the GSPO writes are deferred to
+                // FlushToDisk's drain. Skipping the per-CommitBatch index Flush() avoids
+                // ~10K msync-on-256GB-sparse-mmap calls over a 1B-triple bulk session
+                // (the parser flushes every 100K triples). The session-end FlushToDisk
+                // is the single durability boundary in that mode.
+                if (_bulkSorter is null)
+                {
+                    _gspoReference!.Flush();
+                    _gposReference!.Flush();
+                    _trigramIndex.Flush();
+                }
                 _referenceBulkActive = false;
                 CheckDiskSpaceAfterWrite();
                 return;
@@ -729,6 +780,14 @@ public sealed class QuadStore : IDisposable
         // and retry." RollbackBatch here just releases the lock so the caller can do that.
         if (_referenceBulkActive)
         {
+            // ADR-033: dispose the sorter (removes {storeRoot}/bulk-tmp). The contract
+            // for Reference rollback per ADR-026 is "delete the store and retry"; the
+            // sorter cleanup ensures the temp dir does not leak between retry attempts.
+            if (_bulkSorter is not null)
+            {
+                _bulkSorter.Dispose();
+                _bulkSorter = null;
+            }
             _referenceBulkActive = false;
             _lock.ExitWriteLock();
             return;
@@ -758,6 +817,12 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void FlushToDisk()
     {
+        // ADR-033: drain the bulk-load external sorter (if any) before flushing GSPO.
+        // The sorter has been accumulating across BeginBatch/CommitBatch cycles since
+        // the first AddReferenceBulkTriple call; this is the explicit "bulk-load
+        // complete" boundary where we stream the sorted (G,S,P,O) tuples into the
+        // GSPO B+Tree as a single sequential AppendSorted run.
+        DrainBulkSorter();
         _wal?.FlushToDisk();
         _gspoIndex?.Flush();
         _gposIndex?.Flush();
@@ -765,6 +830,39 @@ public sealed class QuadStore : IDisposable
         _tgspIndex?.Flush();
         _gspoReference?.Flush();
         _gposReference?.Flush();
+    }
+
+    private void DrainBulkSorter()
+    {
+        if (_bulkSorter is null) return;
+
+        _lock.EnterWriteLock();
+        try
+        {
+            if (_bulkSorter is null) return; // re-check under lock
+
+            _bulkSorter.Complete();
+            _gspoReference!.SetDeferMsync(true);
+            try
+            {
+                _gspoReference!.BeginAppendSorted();
+                while (_bulkSorter.TryDrainNext(out var key))
+                {
+                    _gspoReference.AppendSorted(key);
+                }
+                _gspoReference.EndAppendSorted();
+            }
+            finally
+            {
+                _gspoReference.SetDeferMsync(false);
+                _bulkSorter.Dispose(); // removes {storeRoot}/bulk-tmp
+                _bulkSorter = null;
+            }
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -1765,6 +1863,12 @@ public sealed class QuadStore : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        // ADR-033: defensive drain — if a bulk-load session is still holding the sorter
+        // (caller forgot FlushToDisk) the buffered tuples must reach GSPO before the
+        // index files are closed. The drain is idempotent if FlushToDisk was already
+        // called (sorter is null).
+        DrainBulkSorter();
 
         // ADR-031 Piece 2: Dispose's CheckpointInternal is the 14-minute-at-1B dominant
         // cost (CollectPredicateStatistics scans the entire GPOS index). A session that

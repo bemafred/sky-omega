@@ -425,6 +425,15 @@ if (fileToLoad != null)
             $"RSS {wsMB:N0} MB");
     }, limit: loadLimit);
 
+    // ADR-033: Reference bulk-load defers all GSPO writes through an external sorter
+    // for sequential append. Drain it here so the wall-clock summary includes the
+    // sorted-merge phase (otherwise the drain would happen at process Dispose, after
+    // our timing window).
+    if (isBulkLoad)
+    {
+        pool.Active.FlushToDisk();
+    }
+
     Console.Error.WriteLine();
 
     // Summary
