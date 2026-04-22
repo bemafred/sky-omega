@@ -235,6 +235,108 @@ public class ReferenceQuadIndexTests : IDisposable
 
     #endregion
 
+    #region Sort-insert (ADR-032)
+
+    [Fact]
+    public void AppendSorted_QueryResultsMatchRandomInsert()
+    {
+        // Equivalence check: two stores with the same data via different insert paths
+        // must produce the same query results. Sort-insert is a fast path, not a new
+        // semantic.
+        var randomPath = _testPath + "_random";
+        var sortedPath = _testPath + "_sorted";
+
+        // Build the same 300 quads via random AddRaw and sorted AppendSorted.
+        var keys = new List<ReferenceQuadIndex.ReferenceKey>(300);
+        for (int i = 0; i < 300; i++)
+        {
+            keys.Add(new ReferenceQuadIndex.ReferenceKey
+            {
+                Graph = 1,
+                Primary = i / 10,          // 30 distinct primaries × 10 secondaries
+                Secondary = i % 10,
+                Tertiary = i,
+            });
+        }
+
+        using (var random = new ReferenceQuadIndex(randomPath, sharedAtoms: null, initialSizeBytes: 1L << 20))
+        {
+            for (int i = 0; i < keys.Count; i++)
+                random.AddRaw(keys[i].Graph, keys[i].Primary, keys[i].Secondary, keys[i].Tertiary);
+        }
+
+        using (var sorted = new ReferenceQuadIndex(sortedPath, sharedAtoms: null, initialSizeBytes: 1L << 20))
+        {
+            var sortedKeys = keys.ToArray();
+            Array.Sort(sortedKeys, static (a, b) => ReferenceQuadIndex.ReferenceKey.Compare(in a, in b));
+            sorted.BeginAppendSorted();
+            foreach (var k in sortedKeys) sorted.AppendSorted(k);
+            sorted.EndAppendSorted();
+        }
+
+        using var randomReopened = new ReferenceQuadIndex(randomPath, sharedAtoms: null, initialSizeBytes: 1L << 20);
+        using var sortedReopened = new ReferenceQuadIndex(sortedPath, sharedAtoms: null, initialSizeBytes: 1L << 20);
+
+        Assert.Equal(randomReopened.QuadCount, sortedReopened.QuadCount);
+        Assert.Equal(300, sortedReopened.QuadCount);
+
+        int randomCount = 0, sortedCount = 0;
+        var re = randomReopened.Query(1, 5, -1, -1);
+        while (re.MoveNext()) randomCount++;
+        var se = sortedReopened.Query(1, 5, -1, -1);
+        while (se.MoveNext()) sortedCount++;
+        Assert.Equal(randomCount, sortedCount);
+        Assert.Equal(10, sortedCount);
+    }
+
+    [Fact]
+    public void AppendSorted_DuplicateKey_IsSilentNoOp()
+    {
+        var idx = CreateIndex();
+        idx.BeginAppendSorted();
+        idx.AppendSorted(new ReferenceQuadIndex.ReferenceKey { Graph = 1, Primary = 1, Secondary = 1, Tertiary = 1 });
+        idx.AppendSorted(new ReferenceQuadIndex.ReferenceKey { Graph = 1, Primary = 1, Secondary = 1, Tertiary = 1 });
+        idx.AppendSorted(new ReferenceQuadIndex.ReferenceKey { Graph = 1, Primary = 1, Secondary = 1, Tertiary = 1 });
+        idx.EndAppendSorted();
+
+        Assert.Equal(1, idx.QuadCount);
+    }
+
+    [Fact]
+    public void AppendSorted_LargeMonotonicRun_ExceedsLeafAndPromotes()
+    {
+        // Exercise the tail-full fallback path: far more keys than LeafDegree, all in
+        // strictly increasing order. Correct output requires the fallback's split-and-
+        // refind-tail logic to work.
+        var idx = CreateIndex();
+
+        const int N = 5000; // LeafDegree is 511; this forces ~10 leaf splits.
+        idx.BeginAppendSorted();
+        for (int i = 0; i < N; i++)
+        {
+            idx.AppendSorted(new ReferenceQuadIndex.ReferenceKey
+            {
+                Graph = 1,
+                Primary = i,
+                Secondary = 0,
+                Tertiary = 0,
+            });
+        }
+        idx.EndAppendSorted();
+
+        Assert.Equal(N, idx.QuadCount);
+
+        for (int i = 0; i < N; i++)
+        {
+            int matched = 0;
+            var e = idx.Query(1, i, -1, -1);
+            while (e.MoveNext()) matched++;
+            Assert.Equal(1, matched);
+        }
+    }
+
+    #endregion
+
     #region Clear
 
     [Fact]

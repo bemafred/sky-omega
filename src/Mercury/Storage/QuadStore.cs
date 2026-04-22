@@ -940,27 +940,56 @@ public sealed class QuadStore : IDisposable
         var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(2) : null;
         try
         {
-            // GPOS rebuild: scan _gspoReference, remap Graph/Subject/Predicate/Object →
-            // Graph/Predicate/Object/Subject, append to _gposReference. The ReferenceQuadIndex
-            // uniqueness invariant (Decision 7) deduplicates identical G/P/S/T tuples on the
-            // way in — matches the RDF-is-a-set semantics the primary enforced on bulk-load.
+            // GPOS rebuild via ADR-032 radix external sort: scan _gspoReference, remap
+            // Graph/Subject/Predicate/Object → Graph/Predicate/Object/Subject, buffer
+            // into ExternalSorter chunks (radix-sorted in memory, spilled to temp files
+            // when the in-memory buffer fills), k-way-merge the chunks, AppendSorted
+            // each entry to _gposReference. Sequential append touches each B+Tree leaf
+            // once instead of N times, eliminating the random-insert write amplification
+            // measured at ~3× useful I/O in Phase 5.2 (docs/validations/adr-030-phase52-
+            // trace-2026-04-21.md).
+            //
+            // Idempotence requirement: AppendSorted demands an empty target (its
+            // contract is "non-decreasing keys" — appending to a populated tree would
+            // violate that on the first call against the new range). Clear() first.
             _indexState = StoreIndexState.BuildingGPOS;
             StoreStateFile.Write(_baseDirectory, _indexState);
+            _gposReference!.Clear();
 
             _gposReference!.SetDeferMsync(true);
             long gposCount = 0;
             var gposStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var gposTempDir = Path.Combine(_baseDirectory, "rebuild-tmp", "gpos");
             try
             {
+                using var sorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
+                    tempDir: gposTempDir,
+                    chunkSize: 16_000_000); // 512 MB scratch; 7 chunks at 100M scale
+
                 var gspoEnum = _gspoReference!.Query(-1, -1, -1, -1);
                 while (gspoEnum.MoveNext())
                 {
                     var key = gspoEnum.Current;
                     // GSPO layout: Primary=Subject, Secondary=Predicate, Tertiary=Object.
                     // GPOS layout: Primary=Predicate, Secondary=Object, Tertiary=Subject.
-                    _gposReference.AddRaw(key.Graph, key.Secondary, key.Tertiary, key.Primary);
+                    var gposKey = new ReferenceQuadIndex.ReferenceKey
+                    {
+                        Graph = key.Graph,
+                        Primary = key.Secondary,
+                        Secondary = key.Tertiary,
+                        Tertiary = key.Primary,
+                    };
+                    sorter.Add(in gposKey);
+                }
+                sorter.Complete();
+
+                _gposReference.BeginAppendSorted();
+                while (sorter.TryDrainNext(out var sortedKey))
+                {
+                    _gposReference.AppendSorted(sortedKey);
                     gposCount++;
                 }
+                _gposReference.EndAppendSorted();
             }
             finally
             {
@@ -982,8 +1011,12 @@ public sealed class QuadStore : IDisposable
             }
 
             // Trigram rebuild: a second GSPO scan indexing literal objects only.
+            // Clear first so a re-run of rebuild against a Ready store does not
+            // double-add atoms to existing posting lists (the IndexAtom path is
+            // incremental, not idempotent).
             _indexState = StoreIndexState.BuildingTrigram;
             StoreStateFile.Write(_baseDirectory, _indexState);
+            _trigramIndex.Clear();
 
             long trigramCount = 0;
             var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
