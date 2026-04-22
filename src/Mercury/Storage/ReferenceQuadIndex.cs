@@ -74,8 +74,15 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
             FileOptions.RandomAccess | (bulkMode ? FileOptions.None : FileOptions.WriteThrough)
         );
 
+        // Bulk-mode floor set to 1 TB so 21.3B Wikidata Reference bulk-load doesn't
+        // overrun the mmap view. A 256 GB allocation (the earlier floor) fits ~8.2B
+        // triples at 16 KB pages × 511 entries/leaf; past that the file must grow,
+        // but this class acquires a single fixed-size mmap view at open and has no
+        // remap logic (docs/limits/btree-mmap-remap.md). 1 TB covers the full
+        // Wikidata 21.3B case (~670 GB actual on APFS sparse storage); anything
+        // larger would currently need the proper remap implementation.
         var actualInitialSize = bulkMode
-            ? Math.Max(initialSizeBytes, 256L << 30)
+            ? Math.Max(initialSizeBytes, 1024L << 30)
             : initialSizeBytes;
 
         if (_fileStream.Length == 0)

@@ -45,6 +45,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [Predicate-statistics memory](predicate-statistics-memory.md) | Latent | `CollectPredicateStatistics` running on a Cognitive store > ~5 B triples, or any non-bulk write path on a 21.3 B Reference store |
 | [Hash function quality](hash-function-quality.md) | Latent | Need for sustained ingest throughput improvement once schema-reduction wins (ADR-029) are banked, OR adversarial-input concerns surface |
 | [Bit-packed atom IDs](bit-packed-atom-ids.md) | Latent | Storage becoming binding even after Reference profile (~680 GB additional savings projected at 21.3 B Wikidata) |
+| [B+Tree index mmap remap](btree-mmap-remap.md) | Latent | Single store past 1 TB of B+Tree data (~33B ReferenceKey entries) or incremental workloads that cannot plan size at open time |
 
 ## Adding a new entry
 
