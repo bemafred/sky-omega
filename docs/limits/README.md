@@ -50,6 +50,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [Sorted atom store for Reference](sorted-atom-store-for-reference.md) | Latent | Atom-store hash cache pressure becomes binding on Reference bulk throughput, OR scale past 21.3B Wikidata, OR memory footprint becomes load-bearing |
 | [Streaming source decompression](streaming-source-decompression.md) | Latent | Disk-constrained deployment ingesting Wikidata-class datasets, OR compressed-only workflow (cloud blob), OR measured BZip2 < 30 MB/sec, OR parse pipeline acceleration shifts bottleneck to source-read |
 | [Rebuild progress observability](rebuild-progress-observability.md) | Latent | Rebuild silent phase exceeds ~1 hour, OR automation/CI needs stuck-vs-progressing detection, OR a future architectural change introduces another silent phase |
+| [Metrics coverage review](metrics-coverage-review.md) | Latent (review) | Catalog of 8 categories of observability gaps. Individual categories split out into their own entries when triggered (rebuild progress already split). |
 
 ## Adding a new entry
 
