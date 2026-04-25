@@ -48,6 +48,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [B+Tree index mmap remap](btree-mmap-remap.md) | Latent | Single store past 1 TB of B+Tree data (~33B ReferenceKey entries) or incremental workloads that cannot plan size at open time |
 | [Bulk-load memory pressure](bulk-load-memory-pressure.md) | Latent | Bulk-load swap activity correlating with throughput drop, OR host with < 128 GB RAM, OR scale past full Wikidata 21.3B |
 | [Sorted atom store for Reference](sorted-atom-store-for-reference.md) | Latent | Atom-store hash cache pressure becomes binding on Reference bulk throughput, OR scale past 21.3B Wikidata, OR memory footprint becomes load-bearing |
+| [Streaming source decompression](streaming-source-decompression.md) | Latent | Disk-constrained deployment ingesting Wikidata-class datasets, OR compressed-only workflow (cloud blob), OR measured BZip2 < 30 MB/sec, OR parse pipeline acceleration shifts bottleneck to source-read |
 
 ## Adding a new entry
 
