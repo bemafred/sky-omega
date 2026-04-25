@@ -49,6 +49,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [Bulk-load memory pressure](bulk-load-memory-pressure.md) | Latent | Bulk-load swap activity correlating with throughput drop, OR host with < 128 GB RAM, OR scale past full Wikidata 21.3B |
 | [Sorted atom store for Reference](sorted-atom-store-for-reference.md) | Latent | Atom-store hash cache pressure becomes binding on Reference bulk throughput, OR scale past 21.3B Wikidata, OR memory footprint becomes load-bearing |
 | [Streaming source decompression](streaming-source-decompression.md) | Latent | Disk-constrained deployment ingesting Wikidata-class datasets, OR compressed-only workflow (cloud blob), OR measured BZip2 < 30 MB/sec, OR parse pipeline acceleration shifts bottleneck to source-read |
+| [Rebuild progress observability](rebuild-progress-observability.md) | Latent | Rebuild silent phase exceeds ~1 hour, OR automation/CI needs stuck-vs-progressing detection, OR a future architectural change introduces another silent phase |
 
 ## Adding a new entry
 
