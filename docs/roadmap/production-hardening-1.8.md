@@ -2,18 +2,25 @@
 
 **Status:** Drafted 2026-04-20. Sequences ADR-028, ADR-029, ADR-030, ADR-031 toward a 1.8.0 release.
 
-## Progress (updated 2026-04-21)
+## Progress (updated 2026-04-25)
 
 | # | Phase | Target versions | Status | Evidence |
 |---|---|---|---|---|
-| 1 | ADR-028 rehash-on-grow | 1.7.24–1.7.26 | ✅ Shipped 1.7.24 | `docs/validations/adr-028-rehash-gradient-2026-04-20.md` — 1 M / 10 M / 100 M exact-match to pre-rehash baseline. Stage 3 (full Wikidata) deferred with ADR-029. |
-| 2 | ADR-029 Reference profile | 1.7.27–1.7.30 | ✅ Functionally complete 1.7.30 | `docs/validations/adr-029-reference-gradient-2026-04-20.md` — 5× B+Tree index reduction at 100 M confirmed; 21.3 B projection fits 8 TB. ADR-030 Decision 5 amended after the gradient exposed the inline-secondary-write cost. |
-| 3 | ADR-030 Phase 1 measurement infrastructure | 1.7.31 | ✅ Shipped 1.7.31 | `QueryMetrics` / `RebuildMetrics` + `IQueryMetricsListener` / `IRebuildMetricsListener` + `JsonlMetricsListener` + CLI `--metrics-out` integration. 8 tests. First practical use during Phase 4 validation. |
-| 4 | ADR-031 Pieces 1+2 | 1.7.32–1.7.33 | ✅ Shipped 1.7.32, validated 1.7.33 | `docs/validations/adr-031-dispose-gate-2026-04-21.md` — 1 B Cognitive Dispose 14 min → 0.84 s on wiki-1b. 13 flag tests. Phase 3 metrics captured the measurement. |
-| 5 | ADR-030 Phases 2-4 (parallel rebuild + sort-insert + Reference bulk refactor + 21.3 B validation) | 1.7.34–1.7.38 | ⏭ Next | Incorporates ADR-030 Decision 5 Reference refactor (bulk-writes-GSPO-only mirroring Cognitive). |
-| 6 | Release 1.8.0 | 1.8.0 | ⏭ Pending | After Phase 5 completes and the full 21.3 B Reference run lands at a documented endpoint. |
+| 1 | ADR-028 rehash-on-grow | 1.7.24–1.7.26 | ✅ Shipped 1.7.24 | `docs/validations/adr-028-rehash-gradient-2026-04-20.md` — 1 M / 10 M / 100 M exact-match to pre-rehash baseline. |
+| 2 | ADR-029 Reference profile | 1.7.27–1.7.30 | ✅ Functionally complete 1.7.30 | `docs/validations/adr-029-reference-gradient-2026-04-20.md` — 5× B+Tree index reduction at 100 M confirmed. ADR-030 Decision 5 amended. |
+| 3 | ADR-030 Phase 1 measurement infrastructure | 1.7.31 | ✅ Shipped 1.7.31 | `QueryMetrics` / `RebuildMetrics` listeners + `JsonlMetricsListener` + CLI `--metrics-out` integration. |
+| 4 | ADR-031 Pieces 1+2 | 1.7.32–1.7.33 | ✅ Shipped 1.7.32, validated 1.7.33 | `docs/validations/adr-031-dispose-gate-2026-04-21.md` — 1 B Cognitive Dispose 14 min → 0.84 s. |
+| 5a | ADR-030 Phase 2 parallel rebuild | 1.7.36 | ⚠️ Shipped, **reverted** in 1.7.38 | `docs/validations/adr-030-phase2-parallel-rebuild-2026-04-21.md` — wall-clock-neutral at 100 M; Phase 5.2 trace exposed hidden cost (453 s GC + 552 s lock-acquire-slowpath that didn't exist in sequential baseline). |
+| 5b | ADR-030 Phase 3 sort-insert | 1.7.37 | ⚠️ Shipped, **reverted** in 1.7.38 | `docs/validations/adr-030-phase3-sort-insert-2026-04-21.md` — concept right (eliminate write amplification) but `Array.Sort` with comparator + 3.2 GB monolithic buffer cost as much as it saved. |
+| 5.2 | Phase 5.2 dotnet-trace + iostat (architectural pivot) | 1.7.38 | ✅ Pivot complete 1.7.38 | `docs/validations/adr-030-phase52-trace-2026-04-21.md` — identified write amplification (~3× useful I/O) as the binding bottleneck, ruled out CPU and bandwidth. Drove the revert + the radix architecture in ADR-032/033. |
+| 5c | ADR-032 Phases 1-4 (radix external sort for rebuild) | 1.7.39–1.7.42 | ✅ Shipped + validated 1.7.42 | Phase 1: `RadixSort` primitive (LSD, 8-bit digits, signed-long bias). Phase 2: `ExternalSorter<T,TSorter>` (chunked spill + k-way merge). Phase 3: `docs/validations/adr-032-phase3-gpos-radix-2026-04-22.md` — GPOS rebuild 3× faster, peak 2463 MB/s. Phase 4: `docs/validations/adr-032-phase4-trigram-radix-2026-04-22.md` — **10.5× total rebuild speedup at 100 M**. |
+| 5d | ADR-033 (radix external sort for bulk-load) | 1.7.43 | ✅ Shipped + validated 1.7.43 | `docs/validations/adr-033-phase5-bulk-radix-2026-04-22.md` — 1 B end-to-end ~3h57m → **60m36s** (3.92× combined speedup). |
+| 5e | Phase 6 — 21.3 B Wikidata Reference end-to-end | 1.7.44 | 🟡 In progress | `aa35514` bumped Reference index BulkMode floor 256 GB → 1 TB. Launched 2026-04-22; expected ~65-72h total wall-clock. Validation doc lands on completion. |
+| 6 | Release 1.8.0 | 1.8.0 | ⏭ Pending | After Phase 6 lands and the public writeup completes. |
 
-Phases 1-4 took roughly two days of focused work (2026-04-20 and 2026-04-21). The remaining work in Phase 5 is the substantial piece of the 1.8.0 roadmap — both in code complexity (parallel broadcast + sort-insert) and in validation wall-clock (one full 21.3 B run). See [Risks and mitigations](#risks-and-mitigations) below for the budget.
+Phases 5c-5d (the radix architecture) took roughly two days of focused work (2026-04-21 → 2026-04-23) after the Phase 5.2 pivot exposed the architectural mistake in Phases 5a+5b. The discipline of **measuring before claiming, reverting when the evidence demands, and documenting limits as they surface** is what turned a wall-clock-neutral failure into a 10.5× rebuild speedup and a 3.92× combined speedup at 1 B.
+
+The Phase 6 run is the longest-tail validation: ~65-72 hours wall-clock on consumer hardware (M5 Max, 128 GB RAM), validating the architecture at the full Wikidata target size — past the Blazegraph WDQS scaling ceiling (~12-13 B triples) where incumbent RDF infrastructure has historically given up.
 
 ## Purpose
 

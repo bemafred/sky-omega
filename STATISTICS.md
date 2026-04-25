@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-04-21 (after 1.7.30 — ADR-028 Stages 1+2, ADR-029 Phase 2 end-to-end)
+**Last updated:** 2026-04-25 (after 1.7.44 — ADR-032 Phases 1-4 + ADR-033 + Phase 6 21.3B Wikidata in progress)
 
 Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts.
 
@@ -12,10 +12,10 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **77,615** | Knowledge substrate |
+| **Mercury (total)** | **78,878** | Knowledge substrate |
 | ├─ Sparql | 44,966 | SPARQL parser, executor, protocol |
+| ├─ Storage | 9,456 | B+Tree indexes (temporal + reference), AtomStore rehash, RadixSort, ExternalSorter, AppendSorted, WAL, schema plumbing |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
-| ├─ Storage | 8,267 | B+Tree indexes (temporal + reference), AtomStore rehash, WAL, schema plumbing |
 | ├─ Turtle | 4,108 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
 | ├─ TriG | 2,836 | TriG parser and writer |
@@ -23,22 +23,24 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 | ├─ NTriples | 1,341 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
 | └─ Rdf | 536 | Core RDF types |
-| **Mercury.Abstractions** | **632** | `StoreProfile`, `StoreSchema`, exceptions, shared types |
+| **Mercury.Abstractions** | **721** | `StoreProfile`, `StoreSchema`, exceptions, shared types |
 | **Mercury.Runtime** | **3,329** | Buffers, cross-process gate, temp paths |
 | **Mercury.Solid (total)** | **4,385** | W3C Solid Protocol (WAC/ACP, N3 Patch, HTTP handlers) |
 | **Mercury Tool Libraries** | **1,327** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,568** | mercury, mercury-mcp, mercury-sparql, mercury-turtle |
+| **Mercury CLIs** | **1,083** | mercury, mercury-sparql, mercury-turtle, mercury-mcp |
 | **Mercury.Pruning** | **1,204** | Copy-and-switch pruning + PruneEngine |
 | **DrHook (total)** | **2,343** | Runtime observation substrate (EventPipe + DAP) |
 | **Minerva** | **—** | Thought substrate (planned) |
 
-ADR-028 + ADR-029 additions since 2026-04-17: `Storage` grew by ~2 K lines (`ReferenceQuadIndex`, schema plumbing, profile-aware `QuadStore`); `Mercury.Abstractions` grew to 632 lines from the new profile types. `TemporalQuadIndex` is the rename of the former `QuadIndex`; the rename was tracked as git-rename (98 % / 95 % similarity) so `git log --follow` stitches history intact.
+ADR-028 + ADR-029 additions since 2026-04-17: `Storage` grew by ~2 K lines (`ReferenceQuadIndex`, schema plumbing, profile-aware `QuadStore`); `Mercury.Abstractions` grew to 721 lines from the new profile types and shared interfaces. `TemporalQuadIndex` is the rename of the former `QuadIndex`; the rename was tracked as git-rename (98 % / 95 % similarity) so `git log --follow` stitches history intact.
+
+ADR-032 + ADR-033 additions (2026-04-21 → 2026-04-23, versions 1.7.38 → 1.7.44): `Storage` grew another ~1.2 K lines for `RadixSort` (LSD radix sort with 8-bit digits, signed-long bias, skip-trivial-passes optimization), `ExternalSorter<T, TSorter>` (chunked spill + k-way merge via binary heap), `TrigramEntry` (12-byte sort key for the trigram rebuild), `AppendSorted` (sort-insert fast path for `ReferenceQuadIndex`), and the bulk-load + rebuild integration points in `QuadStore`. Phases 5.1.b and 5.1.c (parallel rebuild via broadcast channel; sort-insert via comparator) were shipped, validated as wall-clock-neutral, then **reverted** when Phase 5.2 dotnet-trace + iostat showed they had traded compute for overhead. The reverts retired ~600 lines from `QuadStore` + the `BroadcastChannel.cs` file. The radix external-sort architecture replaced both, preserving the architectural goal (sequential I/O via sort-insert) without the implementation cost. Reference 100M rebuild dropped from 511 s baseline to **48.64 s** (10.5× faster) after ADR-032 Phase 4; 1B end-to-end (bulk + rebuild) dropped from ~3h57m baseline to **60m36s** (3.92× faster). 21.3B Reference end-to-end (Phase 6) is in progress as of 2026-04-25 — full Wikidata Reference profile bulk + rebuild on a single M5 Max laptop, BCL-only, expected total wall-clock ~65-72h.
 
 ### Tests
 
 | Project | Lines | Test Cases | Notes |
 |---------|------:|----------:|-------|
-| Mercury.Tests | 53,695 | 4,151 | +121 tests since 2026-04-17 (StoreSchema, ReferenceQuadIndex, QuadStore profile dispatch, Reference bulk-load E2E, SPARQL-against-Reference) |
+| Mercury.Tests | 55,310 | 4,205 | +54 since 2026-04-21 (15 RadixSort tests, 9 ExternalSorter tests, 3 AppendSorted tests reintroduced from reverted 1.7.37, plus parameterized expansions) |
 | Mercury.Solid.Tests | 455 | 25 | |
 | DrHook.Tests | 277 | 23 | |
 | Minerva.Tests | — | — | |
@@ -47,7 +49,7 @@ ADR-028 + ADR-029 additions since 2026-04-17: `Storage` grew by ~2 K lines (`Ref
 
 | Project | Lines | Methods |
 |---------|------:|--------:|
-| Mercury.Benchmarks | 2,968 | 74 |
+| Mercury.Benchmarks | 3,034 | 76 |
 | Minerva.Benchmarks | — | — |
 
 ### Examples
@@ -63,19 +65,19 @@ ADR-028 + ADR-029 additions since 2026-04-17: `Storage` grew by ~2 K lines (`Ref
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 33,035 |
+| All docs (*.md, *.ttl) | 34,884 |
 | CLAUDE.md | 271 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~93,506 |
-| Tests | ~54,427 |
-| Benchmarks | ~2,968 |
+| Source code | ~93,812 |
+| Tests | ~55,310 |
+| Benchmarks | ~3,034 |
 | Examples | ~1,027 |
-| Documentation | ~33,035 |
-| **Grand total** | **~184,963** |
+| Documentation | ~34,884 |
+| **Grand total** | **~188,067** |
 
 ## W3C Conformance
 
@@ -221,6 +223,15 @@ Write performance is fsync-dominated — measures SSD controller behavior, not C
 | 2026-04-20 | [Dispose profile](docs/validations/dispose-profile-2026-04-20.md) | 1 B read-only Dispose | 14 min attributed to `CollectPredicateStatistics` from `CheckpointInternal`, not msync — ADR-031 Piece 2 mechanism rewritten |
 | 2026-04-20 | [ADR-028 rehash gradient](docs/validations/adr-028-rehash-gradient-2026-04-20.md) | 1 M / 10 M / 100 M with forced 16 K initial hash | 8 / 11 / 14 rehashes per scale, exact-match query rows to baseline, 100 M past the 58 M Bug-5 ceiling cleanly |
 | 2026-04-20 | [ADR-029 Reference gradient](docs/validations/adr-029-reference-gradient-2026-04-20.md) | Reference vs Cognitive at 1 M / 10 M / 100 M | **~5× index reduction (thesis validated)**; bulk rate collapse 210K → 31K triples/sec exposes inline-secondary-write cost (ADR-030 Decision 5 amendment) |
+| 2026-04-21 | [ADR-031 Dispose gate](docs/validations/adr-031-dispose-gate-2026-04-21.md) | 1 B Cognitive read-only Dispose | 14 min → 0.84 s, mutation-tracked Dispose gates the `CollectPredicateStatistics` work — ADR-031 Pieces 1+2 shipped |
+| 2026-04-21 | [ADR-030 Decision 5 Reference refactor](docs/validations/adr-030-decision5-reference-refactor-2026-04-21.md) | Reference 100 M end-to-end with bulk/rebuild split | Reference matches Cognitive bulk rate; rebuild path lands ahead of full secondary-inline cost |
+| 2026-04-21 | [ADR-030 Phase 2 parallel rebuild](docs/validations/adr-030-phase2-parallel-rebuild-2026-04-21.md) | Reference 100 M parallel rebuild via broadcast channel | Wall-clock NEUTRAL at 100 M (524 s vs 512 s sequential) — shipped, then reverted after Phase 5.2 trace exposed the hidden GC + lock cost |
+| 2026-04-21 | [ADR-030 Phase 3 sort-insert](docs/validations/adr-030-phase3-sort-insert-2026-04-21.md) | Reference 100 M sort-insert via Array.Sort comparator | Wall-clock NEUTRAL at 100 M — shipped, then reverted; the *concept* (sort-insert) was right but the *implementation* (comparator-sort + 3.2 GB monolithic buffer) cost as much as it saved |
+| 2026-04-21 | [Phase 5.2 trace + I/O measurement](docs/validations/adr-030-phase52-trace-2026-04-21.md) | dotnet-trace + iostat + 1.7.34 vs 1.7.37 A/B at 100 M | **Architectural pivot point.** Wall-clock equality was hiding a structural cost shift. 1.7.37 had 453 s GC.RunFinalizers + 552 s Monitor.Enter_Slowpath that 1.7.34 did not. Bottleneck identified as write amplification (~3× useful I/O), not CPU and not bandwidth. Drove the revert + the radix external-sort architecture |
+| 2026-04-22 | [ADR-032 Phase 3 GPOS radix](docs/validations/adr-032-phase3-gpos-radix-2026-04-22.md) | GPOS rebuild via radix external sort at 100 M | Wall-clock 511 s → 457 s; GPOS portion ~3× faster (76 s → 24 s); peak iostat **2463 MB/s** (7.5× the baseline 327 MB/s) — sequential GPOS append finally hitting NVMe bandwidth |
+| 2026-04-22 | [ADR-032 Phase 4 trigram radix](docs/validations/adr-032-phase4-trigram-radix-2026-04-22.md) | Trigram rebuild via radix at 100 M | Wall-clock 457 s → **48.64 s** (9.4× faster); trigram portion 17× faster; both indexes now sequential. Total rebuild speedup vs 1.7.38 baseline: **10.5×** |
+| 2026-04-22 | [ADR-033 Phase 5 bulk radix](docs/validations/adr-033-phase5-bulk-radix-2026-04-22.md) | Bulk-load + rebuild gradient 1M → 1B | 1B end-to-end ~3h57m → **60m36s** (**3.92× combined**); rebuild contributes 13.8× while bulk holds steady at 1B (defensive at this scale). Three independent confirmations of the Phase 5.2 hypothesis across three code paths |
+| 2026-04-25 | Phase 6 21.3B Wikidata Reference end-to-end | Full `latest-all.nt` bulk + rebuild on a single M5 Max laptop, BCL-only | **In progress** as of 2026-04-25. Past Blazegraph WDQS reference ceiling (~12-13B) at hour 24; past 96% triples loaded at hour 64; expected ~65-72h total wall-clock. Validation doc lands on completion |
 
 ## Maintenance Instructions
 
