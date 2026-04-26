@@ -104,14 +104,14 @@ public static class SparqlEngine
     }
 
     /// <summary>
-    /// Emit a <see cref="QueryMetrics"/> record to the store's listener if one is attached.
-    /// The null-check on the listener gates struct construction so the no-listener path
-    /// stays zero-overhead per the ADR-030 Phase 1 contract.
+    /// Emit a <see cref="QueryMetrics"/> record to the store's listeners if any are attached.
+    /// The early-out gates struct construction so the no-listener path stays zero-overhead.
+    /// ADR-035: fans out to both legacy <c>QueryMetricsListener</c> and umbrella
+    /// <c>ObservabilityListener</c>; reference-equality avoids double emission.
     /// </summary>
     private static void EmitQueryMetrics(QuadStore store, QueryMetricsKind kind, QueryResult result)
     {
-        var listener = store.QueryMetricsListener;
-        if (listener is null) return;
+        if (store.QueryMetricsListener is null && store.ObservabilityListener is null) return;
 
         var rows = result.Rows?.Count
             ?? result.Triples?.Count
@@ -127,7 +127,7 @@ public static class SparqlEngine
             Success: result.Success,
             ErrorMessage: result.ErrorMessage);
 
-        listener.OnQueryMetrics(in metrics);
+        store.EmitQueryMetrics(in metrics);
     }
 
     private static QueryMetricsKind MapQueryKind(QueryType type) => type switch

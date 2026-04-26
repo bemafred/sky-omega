@@ -354,6 +354,128 @@ public class MetricsListenerTests : IDisposable
     }
 
     [Fact]
+    public void JsonlMetricsListener_AllRecords_CarrySchemaVersionAndRecordKind()
+    {
+        // ADR-035 Decision 4: every record carries schema_version. Decision 5: every record
+        // carries record_kind ("event" | "state"). Round-trip an event-class and a
+        // state-class record; both must include both fields.
+        using var buffer = new MemoryStream();
+        var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
+
+        jsonl.OnQueryMetrics(new QueryMetrics(
+            DateTimeOffset.UtcNow, StoreProfile.Cognitive, QueryMetricsKind.Select,
+            TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1), 0, true, null));
+
+        jsonl.OnRssState(new RssState(DateTimeOffset.UtcNow, 1_000_000, 800_000));
+        jsonl.Flush();
+
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, leaveOpen: true);
+        var line1 = reader.ReadLine();
+        var line2 = reader.ReadLine();
+
+        using var doc1 = JsonDocument.Parse(line1!);
+        using var doc2 = JsonDocument.Parse(line2!);
+
+        Assert.Equal("1", doc1.RootElement.GetProperty("schema_version").GetString());
+        Assert.Equal("event", doc1.RootElement.GetProperty("record_kind").GetString());
+        Assert.Equal("query", doc1.RootElement.GetProperty("phase").GetString());
+
+        Assert.Equal("1", doc2.RootElement.GetProperty("schema_version").GetString());
+        Assert.Equal("state", doc2.RootElement.GetProperty("record_kind").GetString());
+        Assert.Equal("rss", doc2.RootElement.GetProperty("phase").GetString());
+    }
+
+    [Fact]
+    public void JsonlMetricsListener_RebuildProgress_RoundTrip()
+    {
+        using var buffer = new MemoryStream();
+        var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
+
+        var progress = new RebuildProgressMetrics(
+            Timestamp: new DateTimeOffset(2026, 04, 26, 12, 0, 0, TimeSpan.Zero),
+            PhaseName: "GPOS",
+            SubPhase: "emission",
+            EntriesProcessed: 5_000_000,
+            EstimatedTotal: 21_300_000_000,
+            RatePerSecond: 95_000.0,
+            GcHeapBytes: 1_500_000_000,
+            WorkingSetBytes: 8_000_000_000,
+            Elapsed: TimeSpan.FromMinutes(45));
+        jsonl.OnRebuildProgress(in progress);
+        jsonl.Flush();
+
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, leaveOpen: true);
+        using var doc = JsonDocument.Parse(reader.ReadLine()!);
+        var root = doc.RootElement;
+
+        Assert.Equal("rebuild_progress", root.GetProperty("phase").GetString());
+        Assert.Equal("GPOS", root.GetProperty("phase_name").GetString());
+        Assert.Equal("emission", root.GetProperty("sub_phase").GetString());
+        Assert.Equal(5_000_000, root.GetProperty("entries_processed").GetInt64());
+        Assert.Equal(21_300_000_000, root.GetProperty("estimated_total").GetInt64());
+        Assert.Equal(95_000.0, root.GetProperty("rate_per_sec").GetDouble());
+    }
+
+    [Fact]
+    public void JsonlMetricsListener_PeriodicTimer_FiresRegisteredProducers()
+    {
+        using var buffer = new MemoryStream();
+        using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true,
+            stateEmissionInterval: TimeSpan.FromMilliseconds(50));
+
+        int producerInvocations = 0;
+        jsonl.RegisterStateProducer(l =>
+        {
+            System.Threading.Interlocked.Increment(ref producerInvocations);
+            l.OnRssState(new RssState(DateTimeOffset.UtcNow, 1024, 512));
+        });
+
+        // Wait for the timer to fire several times.
+        System.Threading.Thread.Sleep(300);
+        jsonl.Flush();
+
+        Assert.True(producerInvocations >= 2,
+            $"expected at least 2 timer fires in 300ms; saw {producerInvocations}");
+
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, leaveOpen: true);
+        int rssRecords = 0;
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+            if (line.Contains("\"phase\":\"rss\"")) rssRecords++;
+        Assert.True(rssRecords >= 2, $"expected ≥ 2 rss state records; saw {rssRecords}");
+    }
+
+    [Fact]
+    public void QuadStore_ObservabilityListener_FansOutWithoutDoubleEmission()
+    {
+        // ADR-035 Decision 1: same instance registered as both legacy QueryMetricsListener
+        // and umbrella ObservabilityListener must NOT receive the event twice. Reference
+        // equality check in EmitQueryMetrics gates the second call.
+        var dir = Path.Combine(_testDir, "fanout");
+        Directory.CreateDirectory(dir);
+        using var store = new QuadStore(dir);
+        var listener = new CapturingQueryListenerWithUmbrella();
+        store.QueryMetricsListener = listener;
+        store.ObservabilityListener = listener;
+
+        store.AddCurrent("s", "p", "o");
+        SparqlEngine.Query(store, "SELECT ?s WHERE { ?s ?p ?o }");
+
+        // Exactly one capture, even though the same instance is wired to both slots.
+        Assert.Equal(1, listener.QueryCount);
+    }
+
+    private sealed class CapturingQueryListenerWithUmbrella : IQueryMetricsListener, IObservabilityListener
+    {
+        public int QueryCount;
+        public void OnQueryMetrics(in QueryMetrics metrics)
+            => System.Threading.Interlocked.Increment(ref QueryCount);
+    }
+
+    [Fact]
     public void JsonlMetricsListener_ErrorMessage_Serialized()
     {
         using var buffer = new MemoryStream();

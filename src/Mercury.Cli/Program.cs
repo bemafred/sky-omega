@@ -325,11 +325,15 @@ pool.EnsureActive("primary");
 
 // Attach the already-constructed listener to pool.Active so store events (query +
 // rebuild) use the same writer as the CLI's load-progress records. Shared lock,
-// shared buffer, no torn writes.
+// shared buffer, no torn writes. ADR-035: register against the umbrella too so any
+// future event types (rebuild progress, GC/RSS state, atom-store events, scope
+// correlation) flow through the same writer; the QuadStore's reference-equality
+// fan-out check prevents double emission for the legacy/umbrella overlap.
 if (jsonlListener is not null)
 {
     pool.Active.QueryMetricsListener = jsonlListener;
     pool.Active.RebuildMetricsListener = jsonlListener;
+    pool.Active.ObservabilityListener = jsonlListener;
 }
 
 // Print startup diagnostics when loading or rebuilding

@@ -240,6 +240,45 @@ public sealed class QuadStore : IDisposable
     public IRebuildMetricsListener? RebuildMetricsListener { get; set; }
 
     /// <summary>
+    /// Optional umbrella observer (ADR-035 Decision 1). Receives every event type Mercury
+    /// emits — query, rebuild, load progress, GC/RSS state, atom-store events, scope
+    /// correlation. Default null: zero overhead. Fan-out is reference-equality-checked
+    /// against the legacy listeners to avoid double emission when the same instance is
+    /// registered through multiple slots.
+    /// </summary>
+    public IObservabilityListener? ObservabilityListener { get; set; }
+
+    /// <summary>True iff at least one rebuild observer is registered (legacy or umbrella).</summary>
+    internal bool HasRebuildListener => RebuildMetricsListener is not null || ObservabilityListener is not null;
+
+    /// <summary>Fan out a query metrics event; reference-equality avoids double emission.</summary>
+    internal void EmitQueryMetrics(in QueryMetrics metrics)
+    {
+        QueryMetricsListener?.OnQueryMetrics(in metrics);
+        var obs = ObservabilityListener;
+        if (obs is not null && !ReferenceEquals(obs, QueryMetricsListener))
+            obs.OnQueryMetrics(in metrics);
+    }
+
+    /// <summary>Fan out a rebuild-phase event.</summary>
+    internal void EmitRebuildPhase(in RebuildPhaseMetrics phase)
+    {
+        RebuildMetricsListener?.OnRebuildPhase(in phase);
+        var obs = ObservabilityListener;
+        if (obs is not null && !ReferenceEquals(obs, RebuildMetricsListener))
+            obs.OnRebuildPhase(in phase);
+    }
+
+    /// <summary>Fan out a rebuild-complete event.</summary>
+    internal void EmitRebuildComplete(RebuildMetrics summary)
+    {
+        RebuildMetricsListener?.OnRebuildComplete(summary);
+        var obs = ObservabilityListener;
+        if (obs is not null && !ReferenceEquals(obs, RebuildMetricsListener))
+            obs.OnRebuildComplete(summary);
+    }
+
+    /// <summary>
     /// Internal accessor for the ADR-031 Piece 2 session-mutation flag. Tests assert
     /// that every public mutation flips it and every pure-query path leaves it false.
     /// </summary>
@@ -897,7 +936,7 @@ public sealed class QuadStore : IDisposable
         // Mark mutated so Dispose runs CheckpointInternal for the new statistics.
         _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(4) : null;
+        var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(4) : null;
         try
         {
             RebuildIndex(_gposIndex, "GPOS", StoreIndexState.BuildingGPOS,
@@ -934,7 +973,7 @@ public sealed class QuadStore : IDisposable
             trigramStopwatch.Stop();
             onProgress?.Invoke("Trigram", trigramCount);
 
-            if (RebuildMetricsListener is not null)
+            if (HasRebuildListener)
             {
                 var trigramPhase = new RebuildPhaseMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
@@ -942,7 +981,7 @@ public sealed class QuadStore : IDisposable
                     EntriesProcessed: trigramCount,
                     Elapsed: trigramStopwatch.Elapsed);
                 phases!.Add(trigramPhase);
-                RebuildMetricsListener.OnRebuildPhase(in trigramPhase);
+                EmitRebuildPhase(in trigramPhase);
             }
 
             // All done
@@ -955,9 +994,9 @@ public sealed class QuadStore : IDisposable
             totalStopwatch.Stop();
             _lock.ExitWriteLock();
 
-            if (RebuildMetricsListener is not null)
+            if (HasRebuildListener)
             {
-                RebuildMetricsListener.OnRebuildComplete(new RebuildMetrics(
+                EmitRebuildComplete(new RebuildMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
                     Profile: _schema.Profile,
                     TotalElapsed: totalStopwatch.Elapsed,
@@ -1020,7 +1059,7 @@ public sealed class QuadStore : IDisposable
                 EntriesProcessed: count,
                 Elapsed: phaseStopwatch.Elapsed);
             phases.Add(phase);
-            RebuildMetricsListener?.OnRebuildPhase(in phase);
+            EmitRebuildPhase(in phase);
         }
     }
 
@@ -1035,7 +1074,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         _sessionMutated = true;
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var phases = RebuildMetricsListener is not null ? new List<RebuildPhaseMetrics>(2) : null;
+        var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(2) : null;
         try
         {
             // GPOS rebuild via ADR-032 radix external sort: scan _gspoReference, remap
@@ -1105,7 +1144,7 @@ public sealed class QuadStore : IDisposable
                     EntriesProcessed: gposCount,
                     Elapsed: gposStopwatch.Elapsed);
                 phases.Add(gposPhase);
-                RebuildMetricsListener?.OnRebuildPhase(in gposPhase);
+                EmitRebuildPhase(in gposPhase);
             }
 
             // Trigram rebuild: a second GSPO scan indexing literal objects only.
@@ -1186,7 +1225,7 @@ public sealed class QuadStore : IDisposable
                     EntriesProcessed: trigramCount,
                     Elapsed: trigramStopwatch.Elapsed);
                 phases.Add(trigramPhase);
-                RebuildMetricsListener?.OnRebuildPhase(in trigramPhase);
+                EmitRebuildPhase(in trigramPhase);
             }
 
             _indexState = StoreIndexState.Ready;
@@ -1198,9 +1237,9 @@ public sealed class QuadStore : IDisposable
             totalStopwatch.Stop();
             _lock.ExitWriteLock();
 
-            if (RebuildMetricsListener is not null)
+            if (HasRebuildListener)
             {
-                RebuildMetricsListener.OnRebuildComplete(new RebuildMetrics(
+                EmitRebuildComplete(new RebuildMetrics(
                     Timestamp: DateTimeOffset.UtcNow,
                     Profile: _schema.Profile,
                     TotalElapsed: totalStopwatch.Elapsed,
