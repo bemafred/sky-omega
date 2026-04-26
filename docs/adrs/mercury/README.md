@@ -30,9 +30,9 @@
 | [ADR-025](ADR-025-repl-line-editor.md) | REPL Line Editor | Completed |
 | [ADR-026](ADR-026-bulk-load-path.md) | Bulk Load Path | Superseded |
 | [ADR-027](ADR-027-wikidata-scale-streaming-pipeline.md) | Wikidata-Scale Ingestion Pipeline | Completed |
-| [ADR-028](ADR-028-atomstore-rehash-on-grow.md) | AtomStore Rehash-on-Grow | Accepted |
-| [ADR-029](ADR-029-store-profiles.md) | Store Profiles — Cognitive, Graph, Reference, Minimal | Accepted |
-| [ADR-030](ADR-030-bulk-load-and-rebuild-performance.md) | Bulk Load and Rebuild Performance Architecture | Accepted |
-| [ADR-031](ADR-031-read-only-session-fast-path.md) | Read-Only Session Fast Path | Accepted |
-| [ADR-032](ADR-032-radix-external-sort.md) | Radix External Sort for Index Rebuild | Proposed |
-| [ADR-033](ADR-033-bulk-load-radix-external-sort.md) | Bulk-Load Radix External Sort | Accepted |
+| [ADR-028](ADR-028-atomstore-rehash-on-grow.md) | AtomStore Rehash-on-Grow | Completed |
+| [ADR-029](ADR-029-store-profiles.md) | Store Profiles — Cognitive, Graph, Reference, Minimal | Completed |
+| [ADR-030](ADR-030-bulk-load-and-rebuild-performance.md) | Bulk Load and Rebuild Performance Architecture | Completed (Phases 2-3 Superseded by ADR-032/033) |
+| [ADR-031](ADR-031-read-only-session-fast-path.md) | Read-Only Session Fast Path | Completed (Pieces 1+2; Piece 3 deferred to 031b) |
+| [ADR-032](ADR-032-radix-external-sort.md) | Radix External Sort for Index Rebuild | Completed |
+| [ADR-033](ADR-033-bulk-load-radix-external-sort.md) | Bulk-Load Radix External Sort | Completed |

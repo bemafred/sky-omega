@@ -1,6 +1,24 @@
 # Production Hardening Roadmap — Sky Omega 1.8.0
 
-**Status:** Drafted 2026-04-20. Sequences ADR-028, ADR-029, ADR-030, ADR-031 toward a 1.8.0 release.
+**Status:** Drafted 2026-04-20. Amended 2026-04-26 after Phase 6 (21.3 B Wikidata) validated end-to-end. Sequences ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, the Phase 7 performance rounds (`docs/limits/`), and the DrHook engine — all within 1.7.x — toward 1.8.0 as the cognitive-layers entry point.
+
+## Version-line model (amended 2026-04-26)
+
+The 2026-04-20 draft framed 1.8.0 as "Mercury production-hardening complete." That framing has shifted: **1.8.0 is now the boundary between substrate work and cognitive work**, not the boundary between production-hardening and everything-else.
+
+```
+1.7.x development
+  ├── Phases 1–6: Production hardening (ADR-028/029/030/031/032/033) ✅ complete 2026-04-26
+  ├── Phase 7:    Performance rounds (limits register — bz2 streaming, metrics, sorted atom store, …)
+  └── Phase 8:    DrHook engine (BCL-only replacement of netcoredbg + Microsoft.Diagnostics.NETCore.Client)
+
+1.8.0 release marker
+  └── Cognitive layers begin (Lucy / James / Mira / Sky)
+```
+
+DrHook is "the very last of 1.7, possibly" — possibly because the engineering may prove larger than expected, in which case the 1.8.0 boundary may move. The current working assumption is: substrate work (Mercury hardened + Phase 7 rounds + DrHook engine BCL-only) ends in 1.7; cognitive layers begin at 1.8.0.
+
+This roadmap remains canonically `production-hardening-1.8.md` because the document still tracks the work *toward* 1.8.0 — even though 1.8.0's meaning has shifted from "production-hardening release" to "substrate-complete, cognitive entry point."
 
 ## Progress (updated 2026-04-25)
 
@@ -15,8 +33,12 @@
 | 5.2 | Phase 5.2 dotnet-trace + iostat (architectural pivot) | 1.7.38 | ✅ Pivot complete 1.7.38 | `docs/validations/adr-030-phase52-trace-2026-04-21.md` — identified write amplification (~3× useful I/O) as the binding bottleneck, ruled out CPU and bandwidth. Drove the revert + the radix architecture in ADR-032/033. |
 | 5c | ADR-032 Phases 1-4 (radix external sort for rebuild) | 1.7.39–1.7.42 | ✅ Shipped + validated 1.7.42 | Phase 1: `RadixSort` primitive (LSD, 8-bit digits, signed-long bias). Phase 2: `ExternalSorter<T,TSorter>` (chunked spill + k-way merge). Phase 3: `docs/validations/adr-032-phase3-gpos-radix-2026-04-22.md` — GPOS rebuild 3× faster, peak 2463 MB/s. Phase 4: `docs/validations/adr-032-phase4-trigram-radix-2026-04-22.md` — **10.5× total rebuild speedup at 100 M**. |
 | 5d | ADR-033 (radix external sort for bulk-load) | 1.7.43 | ✅ Shipped + validated 1.7.43 | `docs/validations/adr-033-phase5-bulk-radix-2026-04-22.md` — 1 B end-to-end ~3h57m → **60m36s** (3.92× combined speedup). |
-| 5e | Phase 6 — 21.3 B Wikidata Reference end-to-end | 1.7.44 | 🟡 In progress | `aa35514` bumped Reference index BulkMode floor 256 GB → 1 TB. Launched 2026-04-22; expected ~65-72h total wall-clock. Validation doc lands on completion. |
-| 6 | Release 1.8.0 | 1.8.0 | ⏭ Pending | After Phase 6 lands and the public writeup completes. |
+| 5e | Phase 6 — 21.3 B Wikidata Reference end-to-end | 1.7.44 | ✅ Shipped 2026-04-25 | `aa35514` bumped Reference index BulkMode floor 256 GB → 1 TB. Launched 2026-04-22; sealed 2026-04-25 22:32 at 85 h end-to-end. |
+| 5f | Query-side validation against wiki-21b-ref | 1.7.44 | ✅ Validated 2026-04-26 | `docs/validations/21b-query-validation-2026-04-26.md` — both GSPO and GPOS indexes return correct results at 21.3 B; cold-cache `LIMIT 10` queries in tens of milliseconds. Capacity dimension of production hardening is empirical, not estimated. |
+| 6 | Production hardening milestone (close-out) | 1.7.x (no bump) | ⏭ Pending | ADR status transitions, WDBench latencies, STATISTICS update, milestone doc. Production hardening *milestone* — not a release. 1.8.0 is reserved for cognitive layers entry. |
+| 7 | Performance rounds (`docs/limits/`) | 1.7.x | ⏭ Pending | Enabling-dependency order: metrics infrastructure → bz2 streaming → measured-impact perf rounds. |
+| 8 | DrHook engine (BCL-only) | 1.7.x | ⏭ Pending | The very last of 1.7, possibly. |
+| — | Release 1.8.0 — cognitive layers begin | 1.8.0 | ⏭ Future | After Phase 8 lands. Entry to a different roadmap. |
 
 Phases 5c-5d (the radix architecture) took roughly two days of focused work (2026-04-21 → 2026-04-23) after the Phase 5.2 pivot exposed the architectural mistake in Phases 5a+5b. The discipline of **measuring before claiming, reverting when the evidence demands, and documenting limits as they surface** is what turned a wall-clock-neutral failure into a 10.5× rebuild speedup and a 3.92× combined speedup at 1 B.
 
@@ -194,29 +216,105 @@ Budget: 5-10 iterations post-5.1, each measured, each gradient-verified. ~20-40 
 
 **Why structural, not implicit.** The gradient discipline caught every bug class in Phases 1-4 by design: a 1 M run has a 6-order-of-magnitude lower cost of iteration than a 21.3 B run, and every failure mode we've hit in production is latent at some smaller scale if you look. Not gradient-testing pre-21.3B is equivalent to betting a ~24 h wall-clock run (plus cleanup + retry) on unverified code.
 
-### Phase 6 — Release
+### Phase 6 — Production hardening milestone (close-out)
 
-**Target version:** **1.8.0**
-**Objective:** Clean release marker: production hardening complete.
+**Target version:** 1.7.x (no version bump — this is a milestone, not a release)
+**Objective:** Close out the four production-hardening ADRs cleanly. Capture the substantive measurements (WDBench-style query latencies) that the Phase 6 validation deferred. Move the production-hardening arc from "live work" to "documented milestone" so Phase 7 starts with a clean substrate.
 
-**ADR-031 Piece 3 is explicitly deferred to 031b** based on the 2026-04-20 Dispose profile: with Piece 2 capturing the entire 14 min (CheckpointInternal, not msync), Piece 3's remaining open-side wins are in the low-seconds range and do not justify the live mmap escalation complexity in this timeline. ADR-031 closes at Pieces 1 and 2 for 1.8.0.
+**Why Phase 6 is no longer a release.** The 2026-04-20 draft expected Phase 6 to bump to 1.8.0. Under the amended version-line model (see top of doc), 1.8.0 is reserved for the cognitive-layers entry point, which arrives after Phase 8 (DrHook engine). Phase 6's ADR closures, milestone doc, and STATISTICS update happen on `main` as ordinary 1.7.x work, without a major-version bump.
 
-Required before release:
-- All four ADRs moved from Proposed → Accepted → Completed with dated status fields. ADR-031 Completed at Pieces 1 + 2 (Piece 3 deferred to 031b by ADR scope decision — not pending work).
-- Full W3C SPARQL + Turtle conformance suites green on all four profiles (Cognitive, Graph, Reference, Minimal — or justify Minimal deferral to post-1.8).
-- Wikidata Reference profile 21.3 B live at a documented endpoint (internal or external). Captured WDBench-style query latencies against it, comparable to QLever/Virtuoso published numbers.
+**ADR-030 status reconciliation.** ADR-030 Phases 2 (parallel rebuild, 1.7.36) and 3 (sort-insert, 1.7.37) shipped, then **reverted in 1.7.38** after the Phase 5.2 dotnet-trace + iostat exposed the binding bottleneck as write amplification, not CPU. The replacement architecture lives in **ADR-032** (radix external sort for rebuild) and **ADR-033** (radix external sort for bulk-load), shipped + validated 1.7.39–1.7.43. ADR-030 should be marked Completed at Phase 1 (measurement infrastructure) with Phases 2-3 explicitly marked Superseded by ADR-032/033, so a future reader doesn't think the original parallel-rebuild plan is still pending.
+
+**ADR-031 Piece 3 is explicitly deferred to 031b** based on the 2026-04-20 Dispose profile: with Piece 2 capturing the entire 14 min (CheckpointInternal, not msync), Piece 3's remaining open-side wins are in the low-seconds range and do not justify the live mmap escalation complexity in this timeline. ADR-031 closes at Pieces 1 and 2.
+
+**Required before Phase 7 starts:**
+- All four production-hardening ADRs moved Proposed → Accepted → Completed with dated status fields. ADR-031 Completed at Pieces 1 + 2 (Piece 3 deferred to 031b by ADR scope decision — not pending work). ADR-030 Completed at Phase 1; Phases 2-3 marked Superseded; Phase 4+ replaced by the ADR-032/033 architecture.
+- ADR-032 and ADR-033 moved Proposed → Completed (both already validated through 1 B; 21.3 B confirms the architecture at full scale).
+- Full W3C SPARQL + Turtle conformance suites green on all four profiles (Cognitive, Graph, Reference, Minimal — or justify Minimal deferral).
+- Wikidata Reference profile 21.3 B live at a documented endpoint (internal sufficient). **WDBench-style query latencies are NOT in Phase 6 scope** — they belong to Phase 7, where the optimization rounds that move them get measured. Running WDBench against an unoptimized 1.7.44 publishes numbers the next round will obsolete and produces an externally-uncharitable comparison to QLever/Virtuoso, whose published numbers reflect their own shipped optimization rounds. See Phase 7c for the WDBench thread.
 - `STATISTICS.md` updated with the final line counts and benchmark summary.
-- Release-notes document in `docs/releases/1.8.0.md` summarizing the hardening arc.
+- Milestone document in `docs/releases/production-hardening-2026.md` summarizing the hardening arc end-to-end. (Not `1.8.0.md` — 1.8.0 is reserved for the cognitive-layers release.)
 
-**Exit from 1.8.0 development:** the DrHook track and cognitive-layers track become the next focus. This roadmap does not plan those.
+**Phase 6 exit:** Phase 7 (performance rounds) can begin. The substrate is queryable at scale, measured, and the ADR record is closed.
+
+### Phase 7 — Performance rounds
+
+**Target versions:** 1.7.x (incremental bumps, one per measured round)
+**Objective:** Convert the seven characterized optimization rounds in `docs/limits/` from estimated impacts to measured wins. Each round: instrument, gradient-validate, ship.
+
+**Sequencing — enabling-dependency order, not estimated-impact order:**
+
+#### Phase 7a — Metrics infrastructure maturation (foundation)
+
+ADR-030 Phase 1 metrics shipped at 1.7.31 cover bulk-load, rebuild, and per-query timing. Phase 7a expands this to cover the eight observability gap categories from `docs/limits/metrics-coverage-review.md` — write amplification, page-cache pressure, B+Tree split cadence, atom-store hash drift, cold-cache I/O distribution, GC pause histograms, lock-acquire slowpath, and per-predicate cardinality during scans. **Ground rule for Phase 7: no perf round merges without the relevant metric in place to demonstrate the win.** Estimates are not measurements.
+
+Sub-deliverable: instrument both Cognitive and Reference profile paths from day one. Metrics surfaces that work for one and bolt onto the other create silent gaps.
+
+**Exit:** every Phase 7 round can produce a JSONL artifact showing before/after on the metric it claims to improve.
+
+#### Phase 7b — BZip2 streaming source decompression
+
+`docs/limits/streaming-source-decompression.md` (Phase 7 section, amended 2026-04-26): wire `Mercury.Compression` (BCL-only is preferred via P/Invoke to libbz2; SharpZipLib in Mercury.Cli only is the pragmatic shortcut). Establishes `latest-all.ttl.bz2` (114 GB compressed) as the canonical Phase 7 source artifact, with `--limit N` providing gradient runs at any scale from a single source.
+
+**Exit:** `mercury --bulk-load latest-all.ttl.bz2 --limit N` runs end-to-end without staging an uncompressed intermediate file. Gradient runs at 1 M / 10 M / 100 M / 1 B all sourced from the same `.bz2`.
+
+#### Phase 7c onward — Measured perf rounds, ranked by trace evidence
+
+After 7a (metrics) and 7b (cheap gradient runs from `.bz2` source), run a fresh end-to-end trace on the post-Phase-6 codebase at 1 B scale. The trace decomposes Phase 6's 85 h into measured contributions; the seven characterized rounds in `docs/limits/` get ordered by observed-impact, not by article-time projection.
+
+Candidate rounds, in their currently-estimated impact order (subject to re-ranking by 7a/7b trace):
+
+1. **Sorted atom store for Reference (ADR-034 candidate)** — `docs/limits/sorted-atom-store-for-reference.md`. 30-40% wall-clock projected.
+2. **Bit-packed atom IDs** — `docs/limits/bit-packed-atom-ids.md`. 20-30% rebuild + bulk projected.
+3. **Hardware-accelerated XxHash3** — `docs/limits/hash-function-quality.md`. 5-15% on hash hot path.
+4. **Prefetch + pipelined batch intern** — Cognitive-side; 20-30% on probe cost.
+5. **MPHF on sorted vocab (BBHash)** — Phase 2 of #1; query-side O(1) lookup.
+6. **B+Tree mmap remap** — `docs/limits/btree-mmap-remap.md`. Unblocks > 1 TB cases.
+7. **Reference read-only mmap** — `docs/limits/reference-readonly-mmap.md`. Query-time relaxed page handling for sealed stores.
+
+Each round's exit is a captured JSONL artifact comparing pre/post on the metric it targets. No round merges as "we believe it improves X" — only as "the metric moved from Y to Z, gradient-validated at 1 M / 10 M / 100 M."
+
+**WDBench thread.** WDBench is the recurring external comparison benchmark threaded through Phase 7c, capturing the system's externally-comparable behavior as the optimization rounds compose:
+
+- **Cold baseline at Phase 7c start** — after 7a (metrics) and 7b (bz2 streaming) land, before any perf round ships. One well-instrumented run against `wiki-21b-ref` produces the unoptimized-baseline distribution data (median, p95, p99, tail). This is the "where we are now, externally" number — published with explicit framing that it represents the substrate before Phase 7's measured wins.
+- **Rerun after each major perf round** — post-SortedAtomStore, post-prefetch, etc. Captures each round's external impact in the units the world cares about, on the same query set, against the same artifact. Each rerun is a JSONL artifact in `docs/validations/wdbench-<round>-<date>.md`.
+- **Final at Phase 7 close** — the consolidated "where we ended up" comparison against QLever/Virtuoso published numbers. This is the externally-defensible Phase 7 close-out claim — comparable, distribution-aware, sourced from a sealed artifact, runnable by anyone with the same hardware.
+
+The cadence puts external comparison where it belongs: at the end of optimization arcs, not at the start.
+
+**Exit from Phase 7:** all seven rounds shipped or explicitly deferred (with reason). The combined measured impact is captured in `docs/validations/phase7-rounds-summary.md`. WDBench cold baseline + per-round runs + final captured. The 21.3 B re-run (if undertaken) is a deliberate choice, not an obligation.
+
+**Both profiles in scope.** Every Phase 7 metric and every Phase 7 round answers "and what does this mean for Cognitive?" before it's considered done. The seven characterized rounds skew Reference; Phase 7 must not let Cognitive get under-served.
+
+### Phase 8 — DrHook engine (BCL-only)
+
+**Target versions:** 1.7.x (the very last of 1.7, possibly)
+**Objective:** Replace the netcoredbg + Microsoft.Diagnostics.NETCore.Client dependency in DrHook with a BCL-only implementation. Restores the substrate-independence ethos that the rest of Sky Omega holds — DrHook is currently the only substrate that depends on a non-BCL package, due to the historical POC trajectory documented in memory entry `project_drhook_engine_concept`.
+
+DrHook today provides MCP-exposed runtime inspection (EventPipe + DAP-via-netcoredbg). The DAP path is the dependency: netcoredbg is an external process, and `Microsoft.Diagnostics.NETCore.Client` wraps the EventPipe protocol. Both can be replaced — EventPipe is a documented protocol that BCL types can speak directly; DAP is overkill for the inspection surface DrHook actually exposes (process attach, stack walk, breakpoint, step, var inspect). A BCL-only implementation cuts the netcoredbg subprocess and the NuGet package, restoring the same ownership model Mercury and Minerva already have.
+
+Known limits going in: `project_drhook_eval_dead.md` — function evaluation deadlocks on macOS/ARM64 with netcoredbg. A BCL-only rewrite has the opportunity to either (a) avoid the same architectural constraint, or (b) explicitly accept the limit as fundamental rather than implementation-specific.
+
+**Exit:**
+- DrHook MCP server runs without netcoredbg or `Microsoft.Diagnostics.NETCore.Client`.
+- All 13 currently-exposed MCP tools functional on the BCL-only path (or the subset that can be made functional, with the rest explicitly retired).
+- The substrate-independence claim ("Sky Omega's substrates are BCL-only") becomes true across all three substrates, not just two.
+
+**The "possibly" in "very last of 1.7, possibly":** this work is unscoped at the time of this amendment. If it proves substantially larger than expected (multi-month), the 1.8.0 boundary may move — DrHook engine could become its own release line, with cognitive layers shifting to 1.9.0. The version-line model in this doc is the working assumption, not a commitment.
+
+### Release 1.8.0 — cognitive layers entry point
+
+After Phase 8 lands, the substrate work is complete: Mercury production-hardened + measured + queryable at scale; Minerva BCL-only inference substrate; DrHook BCL-only runtime inspection. **1.8.0 is the boundary** — at this point the work shifts from substrates to the cognitive layers built on top of them (Lucy / James / Mira / Sky).
+
+This roadmap does not plan the cognitive-layers track. A separate roadmap document covers that work when it begins.
 
 ## Version strategy
 
-**During development (phases 1–5):** stay on 1.7.n. Each substantive merge to `main` bumps the patch. This is already the project's pattern (see `Directory.Build.props` and recent commit history). Don't prematurely bump to 1.8; leave that as an earned milestone.
+**During Phases 1-8:** stay on 1.7.n. Each substantive merge to `main` bumps the patch. This is already the project's pattern (see `Directory.Build.props` and recent commit history). Don't prematurely bump to 1.8; leave that as an earned milestone.
 
-**Bump to 1.8.0** only when Phase 6's required exit criteria are met. 1.8.0 means "production-hardened; downstream tracks (DrHook, cognitive) are cleared to proceed."
+**Bump to 1.8.0** only when Phase 8 (DrHook engine) lands and the substrate work is complete. **1.8.0 means "Mercury hardened + Phase 7 perf rounds delivered + DrHook BCL-only — substrates ready, cognitive layers can begin."** Under the amended version-line model (top of doc), 1.8.0 is no longer the production-hardening release — that milestone closes within 1.7.x as Phase 6.
 
-**Branch strategy:** proposed all-on-`main` with frequent small commits, per the existing project convention. If a phase's work needs a longer-lived branch (likely ADR-030 Phase 2 due to parallel-correctness churn), use a topic branch named `hardening/adr-030-phase-2` and merge when green.
+**Branch strategy:** proposed all-on-`main` with frequent small commits, per the existing project convention. If a phase's work needs a longer-lived branch (Phase 8 DrHook engine is a likely candidate given its scope uncertainty), use a topic branch named `hardening/<phase>` and merge when green.
 
 ## Risks and mitigations
 
@@ -271,47 +369,102 @@ If Phase 3's metrics land but subsequent phases don't discipline themselves to u
 - After Phase 3, every perf claim in phases 4 and 5 requires a captured JSONL artifact showing the measurement. No handwaving.
 - Include metrics output in release notes for traceability.
 
-## Explicit non-goals for 1.8.0
+## Explicit non-goals for production hardening (Phase 6)
 
-Listed here so the "no" is as visible as the "yes":
+Listed here so the "no" is as visible as the "yes". These are non-goals for *production hardening close-out* — the 2026-04-20 list, with annotations on which items have moved:
 
-- **We are not shipping a full query planner overhaul.** Cost-based join ordering, column statistics, cardinality estimation — all deferred. Today's index-pick-and-scan planner is adequate for 1.8.
-- **We are not shipping the Graph profile unless a use case surfaces.** ADR-029 proposes it; it may collapse into Reference or Cognitive. The open question in ADR-029 stays open through 1.8; implement only Cognitive and Reference first.
-- **We are not shipping cross-process read-only sharing.** Multi-reader processes against one store is valuable but a distinct architectural decision (single-writer contract revisit). Out of scope.
-- **We are not shipping opt-in hints for session mode.** ADR-031 is deliberately inference-only for mutable profiles. No `OpenReadOnly` API surface.
-- **We are not shipping bit-packed atom IDs.** ADR-029 Decision 5 defers this. Revisit post-1.8.
-- **We are not refactoring the CLI surface.** `mercury`, `mercury-mcp`, etc. stay as they are. Only additive changes (`--limit`, `--profile`) in scope.
+- **We are not shipping a full query planner overhaul.** Cost-based join ordering, column statistics, cardinality estimation — all deferred. Today's index-pick-and-scan planner is adequate. *(Still out of scope through 1.7.x; revisit at 1.8.0+.)*
+- **We are not shipping the Graph profile unless a use case surfaces.** ADR-029 proposes it; it may collapse into Reference or Cognitive. *(Open question stays open.)*
+- **We are not shipping cross-process read-only sharing.** Multi-reader processes against one store is valuable but a distinct architectural decision (single-writer contract revisit). *(Now characterized in `docs/limits/reference-readonly-mmap.md`; promotes to Phase 7 if a workload surfaces it.)*
+- **We are not shipping opt-in hints for session mode.** ADR-031 is deliberately inference-only for mutable profiles. No `OpenReadOnly` API surface. *(Still the design.)*
+- **We are not shipping bit-packed atom IDs in Phase 6.** ADR-029 Decision 5 defers this. *(Promoted to a Phase 7 candidate round in `docs/limits/bit-packed-atom-ids.md`.)*
+- **We are not refactoring the CLI surface.** `mercury`, `mercury-mcp`, etc. stay as they are. Only additive changes (`--limit`, `--profile`, future `--metrics-out` extensions). *(Still the design.)*
 
-## Exit criteria for 1.8.0 — the one-page checklist
+**Phase 7 is the place where most of these "post-1.8" items resurface as scoped, measured rounds.** "Out of scope for production hardening" is not the same as "out of scope for 1.7.x." The limits register is the canonical pre-Engineering catalog; promotions to Phase 7 happen when a round is metrics-equipped to validate the win.
 
-Copying what matters from the six phases above into one reviewable list:
+## Exit criteria — three checklists, one per remaining phase
 
-- [ ] ADR-028 Completed. Rehash-on-grow tested under concurrency; 100 M load past prior 58 M ceiling green.
-- [ ] ADR-029 Completed. Reference profile loaded 21.3 B within 24 h and within 2.6 TB on disk. Decision 7 enforcement verified (session-API mutation rejected, bulk-append works). Bulk-append dedup policy answered.
-- [ ] ADR-030 Completed. Phase 1 measurement infrastructure shipped and used in subsequent claims. Parallel rebuild equivalence-tested. Full 21.3 B pipeline under 24 h.
-- [ ] ADR-031 Pieces 1 and 2 Completed. 1 B cognitive read-only query Dispose under 5 s. Piece 3 either Completed or explicitly deferred to 031b.
-- [ ] All W3C SPARQL + Turtle conformance tests green on Cognitive and Reference profiles.
-- [ ] `STATISTICS.md` updated.
-- [ ] `docs/releases/1.8.0.md` written, listing every commit tied to the four ADRs.
-- [ ] Version bumped to 1.8.0 in `Directory.Build.props`.
-- [ ] Release notes published.
+Under the amended version-line model, the original "one-page 1.8.0 checklist" splits into three: Phase 6 close-out (production hardening milestone), Phase 7 close-out (performance rounds), Phase 8 close-out (DrHook engine), and finally the 1.8.0 release.
+
+### Phase 6 — production hardening close-out (current)
+
+- [x] ADR-028 Completed. Rehash-on-grow tested under concurrency; 100 M load past prior 58 M ceiling green. *(Shipped 1.7.24, validated; status field needs final transition.)*
+- [x] ADR-029 functionally complete; Reference profile loaded 21.3 B (85 h, sealed 2026-04-25). Decision 7 enforcement verified. Bulk-append dedup policy answered. *(Status field needs final transition.)*
+- [x] ADR-030 Phase 1 measurement infrastructure shipped (1.7.31). *(Phases 2-3 reverted; status reconciliation needed in ADR doc — Phases 2-3 marked Superseded by ADR-032/033.)*
+- [x] ADR-031 Pieces 1 and 2 Completed. 1 B cognitive read-only query Dispose 14 min → 0.84 s. Piece 3 deferred to 031b by ADR scope decision. *(Status field needs final transition.)*
+- [x] ADR-032 + ADR-033 shipped + validated through 1 B and confirmed at 21.3 B. *(Status fields need final transition.)*
+- [x] Wikidata Reference profile 21.3 B artifact validated query-side (`docs/validations/21b-query-validation-2026-04-26.md`).
+- WDBench latencies — *moved to Phase 7.* Running WDBench against unoptimized 1.7.44 captures numbers Phase 7's rounds will obsolete, and the externally-comparable framing (vs QLever/Virtuoso) is fairer after Phase 7's wins compose. Phase 6 closes on artifact correctness (validated 2026-04-26); Phase 7c carries WDBench through the optimization arc.
+- [ ] All W3C SPARQL + Turtle conformance tests green on Cognitive and Reference profiles. *(Currently green at 4,205 + 25; verify post-Phase-6 build.)*
+- [ ] `STATISTICS.md` updated with final line counts and benchmark summary.
+- [ ] `docs/releases/production-hardening-2026.md` written — the milestone document for production hardening close-out (not a release in the version-bump sense; the version-bump release is 1.8.0 after Phase 8).
+
+### Phase 7 — performance rounds close-out
+
+- [ ] Phase 7a metrics infrastructure: eight observability gap categories from `docs/limits/metrics-coverage-review.md` covered for both Cognitive and Reference. JSONL artifact pattern proven for Phase 7 round validation.
+- [ ] Phase 7b BZip2 streaming: `mercury --bulk-load latest-all.ttl.bz2 --limit N` runs end-to-end without uncompressed staging. Gradient runs at 1 M / 10 M / 100 M / 1 B all sourced from the same `.bz2` artifact.
+- [ ] Phase 7c onward: each of the seven characterized rounds in `docs/limits/` either (a) shipped with a captured JSONL artifact showing measured pre/post, or (b) explicitly deferred with reason recorded in the limits register.
+- [ ] **WDBench cold baseline** captured at Phase 7c start (post-7a, post-7b, pre-rounds): median, p95, p99, tail distribution data against `wiki-21b-ref`.
+- [ ] **WDBench rerun** after each major perf round, captured as a per-round validation entry.
+- [ ] **WDBench final** at Phase 7 close: consolidated comparison to QLever/Virtuoso published numbers, externally-defensible, distribution-aware, sourced from a sealed artifact.
+- [ ] `docs/validations/phase7-rounds-summary.md` consolidates the measured impact across rounds *and* the WDBench arc (cold → per-round → final). The 21.3 B re-run, if undertaken, is its own deliberately-chosen validation, not an obligation.
+
+### Phase 8 — DrHook engine close-out
+
+- [ ] DrHook MCP server runs without netcoredbg subprocess and without `Microsoft.Diagnostics.NETCore.Client` package.
+- [ ] All 13 currently-exposed MCP tools functional on the BCL-only path, or the subset that can be made functional with the rest explicitly retired.
+- [ ] Substrate-independence claim true across all three substrates (Mercury + Minerva + DrHook all BCL-only).
+- [ ] Validation entry recording the BCL-only inspection path's behavior on macOS/ARM64 and Linux.
+
+### Release 1.8.0 — cognitive layers entry point
+
+- [ ] All three close-out checklists above green.
+- [ ] `Directory.Build.props` version bumped to 1.8.0.
+- [ ] `docs/releases/1.8.0.md` written. **Scope note:** 1.8.0 is the cognitive-layers entry release, not the production-hardening release. Release notes summarize the substrate completion arc (Phases 1-8) and frame what cognitive-layer work begins next.
+- [ ] Cognitive-layers roadmap document drafted (separate file; this roadmap closes here).
 
 ## References
 
-- [ADR-027 — Wikidata-Scale Ingestion Pipeline](../adrs/mercury/ADR-027-wikidata-scale-streaming-pipeline.md) — Completed 2026-04-19, the gradient that surfaced the four findings below
-- [ADR-028 — AtomStore Rehash-on-Grow](../adrs/mercury/ADR-028-atomstore-rehash-on-grow.md) — Proposed
-- [ADR-029 — Store Profiles](../adrs/mercury/ADR-029-store-profiles.md) — Proposed, includes Decision 7
-- [ADR-030 — Bulk Load and Rebuild Performance](../adrs/mercury/ADR-030-bulk-load-and-rebuild-performance.md) — Proposed
-- [ADR-031 — Read-Only Session Fast Path](../adrs/mercury/ADR-031-read-only-session-fast-path.md) — Proposed
+**ADRs (production hardening):**
+- [ADR-027 — Wikidata-Scale Ingestion Pipeline](../adrs/mercury/ADR-027-wikidata-scale-streaming-pipeline.md) — Completed 2026-04-19, the gradient that surfaced the four findings
+- [ADR-028 — AtomStore Rehash-on-Grow](../adrs/mercury/ADR-028-atomstore-rehash-on-grow.md) — status pending Phase 6 close
+- [ADR-029 — Store Profiles](../adrs/mercury/ADR-029-store-profiles.md) — status pending Phase 6 close
+- [ADR-030 — Bulk Load and Rebuild Performance](../adrs/mercury/ADR-030-bulk-load-and-rebuild-performance.md) — status pending Phase 6 close (Phases 2-3 superseded by ADR-032/033)
+- [ADR-031 — Read-Only Session Fast Path](../adrs/mercury/ADR-031-read-only-session-fast-path.md) — status pending Phase 6 close (Pieces 1+2 only)
+- [ADR-032 — Radix External Sort (rebuild)](../adrs/mercury/ADR-032-radix-external-sort.md) — status pending Phase 6 close
+- [ADR-033 — Radix External Sort (bulk-load)](../adrs/mercury/ADR-033-bulk-load-radix-external-sort.md) — status pending Phase 6 close
+
+**Validations (measurement record):**
 - [Validation 2026-04-17](../validations/bulk-load-gradient-2026-04-17.md) — NT gradient 1 M–100 M
 - [Validation 2026-04-19](../validations/full-pipeline-gradient-2026-04-19.md) — NT gradient through 1 B with rebuild
 - [Validation 2026-04-20](../validations/turtle-at-wikidata-scale-2026-04-20.md) — Turtle bulk-load at 100 M
+- [Validation 2026-04-26](../validations/21b-query-validation-2026-04-26.md) — Query-side validation of the 21.3 B Phase 6 artifact (closes the production-hardening empirical loop)
+
+**Phase 7 source:**
+- [Limits register](../limits/) — characterized but not-yet-engineered optimization opportunities. Phase 7 candidate rounds source from here.
+- [`docs/limits/streaming-source-decompression.md`](../limits/streaming-source-decompression.md) — Phase 7b source-format recommendation (`latest-all.ttl.bz2` canonical)
+- [`docs/limits/metrics-coverage-review.md`](../limits/metrics-coverage-review.md) — Phase 7a metrics scope (eight observability gap categories)
+
+**Phase 8 source:**
+- Memory entry `project_drhook_engine_concept` — DrHook BCL-only rewrite scope and motivation
+- Memory entry `project_drhook_eval_dead` — known limit (func-eval deadlock on macOS/ARM64 with netcoredbg) that the Phase 8 rewrite has the opportunity to resolve or formalize
+
+**Public framing:**
+- [Phase 6 article](../articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the milestone narrative
 
 ## After 1.8.0
 
-This roadmap ends at 1.8.0. The next two tracks are not planned here:
+This roadmap ends at 1.8.0. **Cognitive layers** become the next focus:
 
-- **DrHook track** — continue the BCL-only runtime-inspection work (see memory entry `project_drhook_engine_concept`). Replace netcoredbg + Microsoft.Diagnostics.NETCore.Client; restore substrate independence.
-- **Cognitive layers track** — Lucy (deep semantic memory), James (orchestration), Sky (agent surface). The three-substrate architecture validated on 2026-03-29 (see `project_adhoc_mvp_validated`) becomes the next production target.
+- **Lucy** — deep semantic memory layered on Mercury.
+- **James** — orchestration with pedagogical guidance.
+- **Mira** — surface/interaction layer.
+- **Sky** — agent surface integrating all three.
+
+The three-substrate architecture validated on 2026-03-29 (see memory `project_adhoc_mvp_validated`) becomes the production target.
+
+**DrHook is no longer in this section** — under the amended version-line model it lives in Phase 8 of 1.7.x. The "After 1.8.0" track is exclusively cognitive layers.
+
+A separate roadmap document covers the cognitive-layers track when it begins.
 
 Each gets its own roadmap when 1.8 ships.

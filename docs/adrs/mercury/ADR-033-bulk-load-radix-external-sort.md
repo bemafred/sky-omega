@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-22 (validated at 100M and 1B end-to-end; see [phase 5 validation](../../validations/adr-033-phase5-bulk-radix-2026-04-22.md))
+**Status:** Completed — 2026-04-26 (shipped 1.7.43, validated at 100M and 1B end-to-end, then confirmed at 21.3 B Wikidata in Phase 6: ~3 h 57 m → 60 m 36 s combined speedup at 1 B; 85 h end-to-end at 21.3 B from a single laptop). See [`adr-033-phase5-bulk-radix-2026-04-22.md`](../../validations/adr-033-phase5-bulk-radix-2026-04-22.md) and the [21.3 B query validation](../../validations/21b-query-validation-2026-04-26.md) confirming GSPO index correctness at full scale.
 
 ## Context
 

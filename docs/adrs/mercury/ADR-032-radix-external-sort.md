@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-04-21
+**Status:** Completed — 2026-04-26 (shipped 1.7.39–1.7.42 across Phases 1-4: RadixSort primitive, ExternalSorter, GPOS rebuild, trigram rebuild). 100 M Reference rebuild 511 s → 48.64 s (10.5× faster), peak 2,463 MB/s sustained sequential write. Validated end-to-end through 21.3 B Wikidata in Phase 6. See [`adr-032-phase3-gpos-radix-2026-04-22.md`](../../validations/adr-032-phase3-gpos-radix-2026-04-22.md), [`adr-032-phase4-trigram-radix-2026-04-22.md`](../../validations/adr-032-phase4-trigram-radix-2026-04-22.md), and the [21.3 B query validation](../../validations/21b-query-validation-2026-04-26.md) confirming GPOS index correctness at full scale.
 
 ## Context
 

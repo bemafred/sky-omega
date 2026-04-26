@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-20
+**Status:** Completed — 2026-04-26 (Cognitive + Reference profiles shipped 1.7.27–1.7.30; Reference validated end-to-end through 21.3 B Wikidata in Phase 6, ~2.5 TB on disk vs the projected 2.6 TB. Graph and Minimal profiles deferred until use cases surface, per the original ADR scope. See [`adr-029-reference-gradient-2026-04-20.md`](../../validations/adr-029-reference-gradient-2026-04-20.md) and [`21b-query-validation-2026-04-26.md`](../../validations/21b-query-validation-2026-04-26.md))
 
 ## Context
 

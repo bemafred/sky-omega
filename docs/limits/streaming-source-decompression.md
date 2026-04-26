@@ -2,8 +2,28 @@
 
 **Status:**        Latent
 **Surfaced:**      2026-04-25, during Phase 6 21.3B Wikidata bulk-load. The 3.1 TB uncompressed `latest-all.nt` source file was contrasted with the 160 GB compressed `.bz2` Wikimedia dump — 2.94 TB of avoidable disk overhead was made visible by the contrast with the working state of the run.
-**Last reviewed:** 2026-04-25
+**Last reviewed:** 2026-04-26
 **Promotes to:**   ADR when any of (a) a target deployment has constrained disk and the 2.94 TB decompressed-intermediate overhead becomes load-bearing, OR (b) a workflow ships compressed-only (no uncompressed form available — common for cloud-distributed datasets), OR (c) measured BZip2 decompression throughput in `Mercury.Compression` is shown to bottleneck the parse pipeline at Mercury's per-second triple target
+
+## Phase 7 source-format recommendation: `.ttl.bz2`
+
+**For all Phase 7 gradient runs and bulk-load work, the canonical source artifact is `latest-all.ttl.bz2`** (~114 GB, present locally at `~/Library/SkyOmega/datasets/wikidata/full/`). The `.nt` form is legacy and should be retired from gradient methodology.
+
+The recommendation rests on three measurements already on record, surfaced here because they were not previously registered as a workflow conclusion:
+
+| Format | Throughput (100M-1B) | Bytes/triple on disk | Source artifact size |
+|---|---:|---:|---:|
+| `latest-all.nt` | 331 K/sec (1B run, 1.7.22, 2026-04-19) | ~150 | 3.1 TB uncompressed |
+| `latest-all.ttl` | 292 K/sec (100M run, 1.7.23, 2026-04-20) | ~25 (prefix-abbreviated) | 912 GB uncompressed / **114 GB `.bz2`** |
+
+Wall-clock parse throughput is ~12% slower for Turtle (parser pays for prefix resolution and `;`/`,` continuation handling). **This is dominated by two larger effects in the opposite direction:**
+
+1. **Disk I/O per triple is ~6× lower** for Turtle because the source is far more compact (`wd:Q42` vs the full IRI). On any disk-bound or I/O-mixed workload, this advantage compounds.
+2. **Source artifact size is ~28× smaller compressed** (114 GB `.ttl.bz2` vs 3.1 TB uncompressed `.nt`). Combined with streaming decompression (mitigation 3 below), this collapses the disk-staging cost from "cannot fit on a 4 TB SSD" to "fits in 1.5% of a consumer SSD."
+
+The composability is sharp: **streaming `.bz2` decompression + Turtle compactness + `--limit` = gradient runs from a 114 GB single source artifact, no staging cost, any scale on demand.** That's the disk-preparation priority for Phase 7 resolved by one piece of infrastructure plus a workflow recommendation.
+
+Source: [`docs/validations/turtle-at-wikidata-scale-2026-04-20.md`](../validations/turtle-at-wikidata-scale-2026-04-20.md), [`docs/validations/parser-at-wikidata-scale-2026-04-17.md`](../validations/parser-at-wikidata-scale-2026-04-17.md).
 
 ## Description
 
@@ -61,7 +81,7 @@ For BZip2 via `Mercury.Compression`: the implementation's allocation behavior is
 
 Ordered by leverage and effort:
 
-1. **Document the workflow.** Update Mercury CLI documentation to explicitly recommend streaming-decompression usage: `mercury --bulk-load latest-all.nt.gz` and `mercury --bulk-load latest-all.ttl.bz2` (when `Mercury.Compression` is wired). Workflow change only — no code. Lowest-effort, highest-leverage change. Stops users from creating intermediate uncompressed files unnecessarily.
+1. **Document the workflow.** Update Mercury CLI documentation to recommend `latest-all.ttl.bz2` as the canonical source artifact for gradient runs and Phase 7 work, with `mercury --bulk-load latest-all.ttl.bz2 --limit N` as the standard invocation pattern (once `Mercury.Compression` is wired). The `.nt` and uncompressed `.ttl` forms are legacy and need not be staged. Workflow change only — no code. Lowest-effort, highest-leverage change. Stops users from creating intermediate uncompressed files unnecessarily and establishes a single source-of-truth artifact.
 2. **Measure BZip2 throughput via `Mercury.Compression`.** Microbenchmark: 1 GB compressed sample → measure end-to-end decompression bandwidth in the bulk-load pipeline context (with the parser as consumer). Confirms whether BZip2 is bottlenecking or has comfortable margin. Trivial to implement, definitive answer.
 3. **Wire BZip2 detection into `RdfFormatNegotiator.FromPathStrippingCompression`.** Currently throws `NotSupportedException` with a pointer to `Mercury.Compression`. Could conditionally register the package's decoder if loaded. Small but breaks BCL-only core invariant unless implemented as an opt-in plugin model. Architectural decision, not pure measurement.
 4. **Add Zstd or LZ4 support in `Mercury.Compression`.** Only justified if BZip2 measurements show it as binding *and* a significantly-faster alternative becomes a real workflow request. Currently speculative.
@@ -78,7 +98,9 @@ Promote to ADR when any of:
 
 ## Current state
 
-Latent at Phase 6 (21.3 B Wikidata, M5 Max with 7.3 TB SSD). The 3.1 TB intermediate fit comfortably (40% of capacity), so the workflow inefficiency was *visible but not load-bearing.* On smaller SSDs or with larger datasets it would become binding fast.
+Latent at Phase 6 (21.3 B Wikidata, M5 Max with 7.3 TB SSD). The 3.1 TB intermediate fit comfortably (40% of capacity), so the workflow inefficiency was *visible but not load-bearing.*
+
+**Phase 7 changes the picture.** Gradient runs across multiple scales, parallel Cognitive and Reference profile work, plus the existing 2.5 TB occupied by `wiki-21b-ref`, push the disk budget close to binding. The `.ttl.bz2`-as-canonical-source recommendation above resolves this without code changes; the streaming-decompression wiring (mitigation 3) closes it out architecturally. Together, these promote the entry from "characterized but not load-bearing" to "first-priority Phase 7 enabling infrastructure."
 
 ## References
 

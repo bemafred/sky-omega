@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-20 (amended 2026-04-20 with Dispose-profile findings)
+**Status:** Completed — 2026-04-26 at Pieces 1 + 2 (shipped 1.7.32, validated 1.7.33). 1 B Cognitive Dispose 14 min → 0.84 s (16.6× headline win, full magnitude given the original was misattributed to msync — actual was `CollectPredicateStatistics` in `CheckpointInternal`). See [`adr-031-dispose-gate-2026-04-21.md`](../../validations/adr-031-dispose-gate-2026-04-21.md). **Piece 3 (optimistic read-open with live mmap escalation) is deferred to ADR-031b** — the 2026-04-20 Dispose profile showed Piece 2 captured the entire 14 min, leaving Piece 3's remaining open-side wins in the low-seconds range, not justifying the complexity in the 1.8.0 timeline.
 
 ## Context
 

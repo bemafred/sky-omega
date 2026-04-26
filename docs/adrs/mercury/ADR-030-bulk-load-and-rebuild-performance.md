@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-20
+**Status:** Completed — 2026-04-26 with phase reconciliation. Phase 1 (measurement infrastructure) shipped 1.7.31 and is the foundation every subsequent perf claim measures against. **Phases 2 (parallel rebuild, 1.7.36) and 3 (sort-insert, 1.7.37) shipped, then reverted in 1.7.38** after the Phase 5.2 dotnet-trace + iostat work (`adr-030-phase52-trace-2026-04-21.md`) exposed the binding bottleneck as write amplification, not CPU. The replacement architecture lives in **ADR-032** (radix external sort for rebuild, shipped 1.7.39–1.7.42) and **ADR-033** (radix external sort for bulk-load, shipped 1.7.43), which together delivered the wall-clock wins this ADR originally targeted: 100 M rebuild 511 s → 48.64 s (10.5× faster), 1 B end-to-end ~3h57m → 60m36s (3.92× combined speedup), 21.3 B Phase 6 end-to-end at 85 h. Phases 2 and 3 are therefore **Superseded** by ADR-032/033; Phase 1 stands as Completed.
 
 ## Context
 
