@@ -476,6 +476,94 @@ public class MetricsListenerTests : IDisposable
     }
 
     [Fact]
+    public async Task RebuildProgress_Reference_EmitsPerTickWithSubPhases()
+    {
+        // ADR-035 Phase 7a.1: Reference rebuild emits in-progress records every N entries
+        // within each sub-phase. Lower the threshold to validate at small scale.
+        var dir = Path.Combine(_testDir, "rebuild_progress");
+        Directory.CreateDirectory(dir);
+
+        using var store = new QuadStore(dir, null, null,
+            new StorageOptions { Profile = StoreProfile.Reference });
+        var ttl = new System.Text.StringBuilder();
+        for (int i = 0; i < 300; i++)
+            ttl.Append("<http://ex/s").Append(i).Append("> <http://ex/p> \"literal text ")
+               .Append(i).Append("\" .\n");
+        using var nt = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(ttl.ToString()));
+        await RdfEngine.LoadStreamingAsync(store, nt, RdfFormat.NTriples);
+
+        var captured = new List<RebuildProgressMetrics>();
+        var listener = new CapturingProgressListener(captured);
+        store.ObservabilityListener = listener;
+        store.RebuildProgressTickThreshold = 100;
+        store.RebuildSecondaryIndexes();
+
+        Assert.NotEmpty(captured);
+        var phasesObserved = captured.Select(p => p.PhaseName).Distinct().ToHashSet();
+        var subPhasesObserved = captured.Select(p => p.SubPhase).Distinct().ToHashSet();
+        Assert.Contains("GPOS", phasesObserved);
+        Assert.Contains("Trigram", phasesObserved);
+        Assert.Contains("emission", subPhasesObserved);
+        Assert.Contains("drain", subPhasesObserved);
+
+        // Every record carries a non-zero entry count and a non-negative rate.
+        Assert.All(captured, p => Assert.True(p.EntriesProcessed > 0));
+        Assert.All(captured, p => Assert.True(p.RatePerSecond >= 0));
+    }
+
+    [Fact]
+    public async Task RebuildProgress_JsonlListener_RoundTripsSchemaAndSubPhase()
+    {
+        // Same setup as above but going through JsonlMetricsListener; confirms the
+        // umbrella → JSONL path emits schema_version + record_kind + sub_phase fields.
+        var dir = Path.Combine(_testDir, "rebuild_progress_jsonl");
+        Directory.CreateDirectory(dir);
+
+        using var store = new QuadStore(dir, null, null,
+            new StorageOptions { Profile = StoreProfile.Reference });
+        var ttl = new System.Text.StringBuilder();
+        for (int i = 0; i < 200; i++)
+            ttl.Append("<http://ex/s").Append(i).Append("> <http://ex/p> \"text ")
+               .Append(i).Append("\" .\n");
+        using var nt = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(ttl.ToString()));
+        await RdfEngine.LoadStreamingAsync(store, nt, RdfFormat.NTriples);
+
+        using var buffer = new MemoryStream();
+        using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
+        store.ObservabilityListener = jsonl;
+        store.RebuildProgressTickThreshold = 50;
+        store.RebuildSecondaryIndexes();
+        jsonl.Flush();
+
+        buffer.Position = 0;
+        using var reader = new StreamReader(buffer, leaveOpen: true);
+        int progressRecords = 0;
+        string? line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (!line.Contains("\"phase\":\"rebuild_progress\"")) continue;
+            using var doc = JsonDocument.Parse(line);
+            Assert.Equal("1", doc.RootElement.GetProperty("schema_version").GetString());
+            Assert.Equal("event", doc.RootElement.GetProperty("record_kind").GetString());
+            var subPhase = doc.RootElement.GetProperty("sub_phase").GetString();
+            Assert.True(subPhase == "emission" || subPhase == "drain");
+            progressRecords++;
+        }
+        Assert.True(progressRecords > 0, "expected at least one rebuild_progress JSONL record");
+    }
+
+    private sealed class CapturingProgressListener : IObservabilityListener
+    {
+        private readonly List<RebuildProgressMetrics> _captured;
+        private readonly object _gate = new();
+        public CapturingProgressListener(List<RebuildProgressMetrics> captured) => _captured = captured;
+        public void OnRebuildProgress(in RebuildProgressMetrics progress)
+        {
+            lock (_gate) _captured.Add(progress);
+        }
+    }
+
+    [Fact]
     public void JsonlMetricsListener_ErrorMessage_Serialized()
     {
         using var buffer = new MemoryStream();

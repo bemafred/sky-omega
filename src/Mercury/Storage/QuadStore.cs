@@ -279,6 +279,22 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
+    /// Fan out an in-progress rebuild record. Only ObservabilityListener carries this event;
+    /// the legacy IRebuildMetricsListener has no equivalent (it fires once per phase end).
+    /// </summary>
+    internal void EmitRebuildProgress(in RebuildProgressMetrics progress)
+        => ObservabilityListener?.OnRebuildProgress(in progress);
+
+    /// <summary>True iff the umbrella observer is registered (rebuild progress only fans there).</summary>
+    internal bool HasRebuildProgressListener => ObservabilityListener is not null;
+
+    /// <summary>
+    /// Entries between rebuild-progress emission ticks. Default 1M matches the LoadProgress
+    /// chunk-flush cadence; tests lower it to validate emission with smaller datasets.
+    /// </summary>
+    internal long RebuildProgressTickThreshold { get; set; } = 1_000_000;
+
+    /// <summary>
     /// Internal accessor for the ADR-031 Piece 2 session-mutation flag. Tests assert
     /// that every public mutation flips it and every pure-query path leaves it false.
     /// </summary>
@@ -1097,12 +1113,22 @@ public sealed class QuadStore : IDisposable
             long gposCount = 0;
             var gposStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var gposTempDir = Path.Combine(_baseDirectory, "rebuild-tmp", "gpos");
+            // ADR-035 Phase 7a.1: per-1M progress emission within each sub-phase. Sub-phase
+            // identification (emission vs drain) lets operators correlate JSONL records
+            // with disk-activity patterns. Ticking-rate calculation mirrors LoadProgress's
+            // sliding-window discipline: rate is over the most recent interval, not lifetime.
+            long progressTickThreshold = RebuildProgressTickThreshold;
+            bool emitProgress = HasRebuildProgressListener;
+            long gposEstimatedTotal = _gspoReference!.QuadCount;
             try
             {
                 using var sorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
                     tempDir: gposTempDir,
                     chunkSize: 16_000_000); // 512 MB scratch; 7 chunks at 100M scale
 
+                long gposScanned = 0;
+                long lastTickEntries = 0;
+                TimeSpan lastTickElapsed = TimeSpan.Zero;
                 var gspoEnum = _gspoReference!.Query(-1, -1, -1, -1);
                 while (gspoEnum.MoveNext())
                 {
@@ -1117,14 +1143,60 @@ public sealed class QuadStore : IDisposable
                         Tertiary = key.Primary,
                     };
                     sorter.Add(in gposKey);
+                    gposScanned++;
+
+                    if (emitProgress && gposScanned - lastTickEntries >= progressTickThreshold)
+                    {
+                        var elapsed = gposStopwatch.Elapsed;
+                        var dt = (elapsed - lastTickElapsed).TotalSeconds;
+                        var rate = dt > 0 ? (gposScanned - lastTickEntries) / dt : 0;
+                        EmitRebuildProgress(new RebuildProgressMetrics(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            PhaseName: "GPOS",
+                            SubPhase: "emission",
+                            EntriesProcessed: gposScanned,
+                            EstimatedTotal: gposEstimatedTotal,
+                            RatePerSecond: rate,
+                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                            WorkingSetBytes: Environment.WorkingSet,
+                            Elapsed: elapsed));
+                        lastTickEntries = gposScanned;
+                        lastTickElapsed = elapsed;
+                    }
                 }
                 sorter.Complete();
+
+                // Reset tick state for the drain sub-phase. Drain total = entries that
+                // entered the sorter during emission; the elapsed clock continues from
+                // the current point so rate calculations stay continuous.
+                lastTickEntries = 0;
+                lastTickElapsed = gposStopwatch.Elapsed;
+                long gposDrainTotal = gposScanned;
 
                 _gposReference.BeginAppendSorted();
                 while (sorter.TryDrainNext(out var sortedKey))
                 {
                     _gposReference.AppendSorted(sortedKey);
                     gposCount++;
+
+                    if (emitProgress && gposCount - lastTickEntries >= progressTickThreshold)
+                    {
+                        var elapsed = gposStopwatch.Elapsed;
+                        var dt = (elapsed - lastTickElapsed).TotalSeconds;
+                        var rate = dt > 0 ? (gposCount - lastTickEntries) / dt : 0;
+                        EmitRebuildProgress(new RebuildProgressMetrics(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            PhaseName: "GPOS",
+                            SubPhase: "drain",
+                            EntriesProcessed: gposCount,
+                            EstimatedTotal: gposDrainTotal,
+                            RatePerSecond: rate,
+                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                            WorkingSetBytes: Environment.WorkingSet,
+                            Elapsed: elapsed));
+                        lastTickEntries = gposCount;
+                        lastTickElapsed = elapsed;
+                    }
                 }
                 _gposReference.EndAppendSorted();
             }
@@ -1163,10 +1235,14 @@ public sealed class QuadStore : IDisposable
             long trigramCount = 0;          // atoms with at least one trigram
             var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var trigramTempDir = Path.Combine(_baseDirectory, "rebuild-tmp", "trigram");
+            long trigramScanTotal = _gspoReference.QuadCount;
             using (var sorter = new ExternalSorter<TrigramEntry, TrigramEntryChunkSorter>(
                 tempDir: trigramTempDir,
                 chunkSize: 16_000_000)) // 192 MB scratch per chunk for the 12-byte entries
             {
+                long quadsScanned = 0;
+                long lastTickEntries = 0;
+                TimeSpan lastTickElapsed = TimeSpan.Zero;
                 var trigramEnum = _gspoReference.Query(-1, -1, -1, -1);
                 while (trigramEnum.MoveNext())
                 {
@@ -1180,12 +1256,35 @@ public sealed class QuadStore : IDisposable
                             trigramCount++;
                         }
                     }
+                    quadsScanned++;
+
+                    if (emitProgress && quadsScanned - lastTickEntries >= progressTickThreshold)
+                    {
+                        var elapsed = trigramStopwatch.Elapsed;
+                        var dt = (elapsed - lastTickElapsed).TotalSeconds;
+                        var rate = dt > 0 ? (quadsScanned - lastTickEntries) / dt : 0;
+                        EmitRebuildProgress(new RebuildProgressMetrics(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            PhaseName: "Trigram",
+                            SubPhase: "emission",
+                            EntriesProcessed: quadsScanned,
+                            EstimatedTotal: trigramScanTotal,
+                            RatePerSecond: rate,
+                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                            WorkingSetBytes: Environment.WorkingSet,
+                            Elapsed: elapsed));
+                        lastTickEntries = quadsScanned;
+                        lastTickElapsed = elapsed;
+                    }
                 }
                 sorter.Complete();
 
                 // Drain sorted (trigram, atomId) pairs and batch-append per trigram group.
                 // Adjacent dedup handles both within-atom duplicates (same trigram in one
                 // literal) and cross-quad duplicates (same atom as object of multiple quads).
+                lastTickEntries = 0;
+                lastTickElapsed = trigramStopwatch.Elapsed;
+                long drainEntries = 0;
                 var atomBuffer = new List<long>(64);
                 uint currentTrigram = 0;
                 bool hasCurrent = false;
@@ -1205,6 +1304,29 @@ public sealed class QuadStore : IDisposable
                     else if (atomBuffer[^1] != entry.AtomId)
                     {
                         atomBuffer.Add(entry.AtomId);
+                    }
+                    drainEntries++;
+
+                    if (emitProgress && drainEntries - lastTickEntries >= progressTickThreshold)
+                    {
+                        var elapsed = trigramStopwatch.Elapsed;
+                        var dt = (elapsed - lastTickElapsed).TotalSeconds;
+                        var rate = dt > 0 ? (drainEntries - lastTickEntries) / dt : 0;
+                        // Drain total is unknown precisely (depends on trigrams-per-literal);
+                        // pass 0 as estimated total to signal "indeterminate" — the rate and
+                        // entries_processed are still load-bearing for operator visibility.
+                        EmitRebuildProgress(new RebuildProgressMetrics(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            PhaseName: "Trigram",
+                            SubPhase: "drain",
+                            EntriesProcessed: drainEntries,
+                            EstimatedTotal: 0,
+                            RatePerSecond: rate,
+                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                            WorkingSetBytes: Environment.WorkingSet,
+                            Elapsed: elapsed));
+                        lastTickEntries = drainEntries;
+                        lastTickElapsed = elapsed;
                     }
                 }
                 if (hasCurrent)
