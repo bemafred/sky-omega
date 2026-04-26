@@ -36,3 +36,4 @@
 | [ADR-031](ADR-031-read-only-session-fast-path.md) | Read-Only Session Fast Path | Completed (Pieces 1+2; Piece 3 deferred to 031b) |
 | [ADR-032](ADR-032-radix-external-sort.md) | Radix External Sort for Index Rebuild | Completed |
 | [ADR-033](ADR-033-bulk-load-radix-external-sort.md) | Bulk-Load Radix External Sort | Completed |
+| [ADR-035](ADR-035-phase7a-metrics-infrastructure.md) | Phase 7a Metrics Infrastructure | Accepted |
