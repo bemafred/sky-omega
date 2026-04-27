@@ -15,7 +15,7 @@ public class MoveToFrontInverseTests
     {
         var mtf = new MoveToFrontInverse();
         mtf.Reset();
-        var view = mtf.ListView;
+        Span<byte> view = stackalloc byte[256]; mtf.CopyListTo(view);
         for (int i = 0; i < 256; i++)
             Assert.Equal((byte)i, view[i]);
     }
@@ -27,7 +27,7 @@ public class MoveToFrontInverseTests
         mtf.Reset();
         Assert.Equal(0, mtf.Decode(0));
         // Decoding index 0 on identity list outputs 0 and the list stays identity.
-        var view = mtf.ListView;
+        Span<byte> view = stackalloc byte[256]; mtf.CopyListTo(view);
         for (int i = 0; i < 256; i++)
             Assert.Equal((byte)i, view[i]);
     }
@@ -40,7 +40,7 @@ public class MoveToFrontInverseTests
         var mtf = new MoveToFrontInverse();
         mtf.Reset();
         Assert.Equal(3, mtf.Decode(3));
-        var view = mtf.ListView;
+        Span<byte> view = stackalloc byte[256]; mtf.CopyListTo(view);
         Assert.Equal(3, view[0]);
         Assert.Equal(0, view[1]);
         Assert.Equal(1, view[2]);
@@ -66,7 +66,7 @@ public class MoveToFrontInverseTests
         Assert.Equal(1, mtf.Decode(1));
         Assert.Equal(3, mtf.Decode(3));
 
-        var view = mtf.ListView;
+        Span<byte> view = stackalloc byte[256]; mtf.CopyListTo(view);
         Assert.Equal(3, view[0]);
         Assert.Equal(1, view[1]);
         Assert.Equal(2, view[2]);
@@ -81,15 +81,16 @@ public class MoveToFrontInverseTests
         // in the block, in ascending byte order). Initialize with [0x41, 0x42, 0x5A].
         var mtf = new MoveToFrontInverse();
         mtf.Initialize(new byte[] { 0x41, 0x42, 0x5A }, 3);
-        var view = mtf.ListView;
-        Assert.Equal(0x41, view[0]);
-        Assert.Equal(0x42, view[1]);
-        Assert.Equal(0x5A, view[2]);
+        Span<byte> view1 = stackalloc byte[256]; mtf.CopyListTo(view1);
+        Assert.Equal(0x41, view1[0]);
+        Assert.Equal(0x42, view1[1]);
+        Assert.Equal(0x5A, view1[2]);
 
         Assert.Equal(0x42, mtf.Decode(1));
-        Assert.Equal(0x42, view[0]);
-        Assert.Equal(0x41, view[1]);
-        Assert.Equal(0x5A, view[2]);
+        Span<byte> view2 = stackalloc byte[256]; mtf.CopyListTo(view2);
+        Assert.Equal(0x42, view2[0]);
+        Assert.Equal(0x41, view2[1]);
+        Assert.Equal(0x5A, view2[2]);
     }
 
     [Fact]
@@ -106,7 +107,8 @@ public class MoveToFrontInverseTests
             mtf.Decode(idx);
         }
 
-        var view = mtf.ListView;
+        Span<byte> view = stackalloc byte[256];
+        mtf.CopyListTo(view);
         var seen = new bool[256];
         for (int i = 0; i < 256; i++)
         {

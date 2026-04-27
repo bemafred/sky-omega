@@ -22,13 +22,21 @@ namespace SkyOmega.Mercury.Compression;
 /// because RLE1 runs may straddle the chunk boundary the caller chooses to drain in.
 /// </para>
 /// </remarks>
-internal sealed class Rle1Inverse
+internal struct Rle1Inverse
 {
-    private int _prevByte = -1;
-    private int _runCount = 0;
+    private int _prevByte;
+    private int _runCount;
     /// <summary>Pending repeats from a finished run; emitted before consuming new input.</summary>
     private byte _pendingByte;
     private int _pendingRepeats;
+
+    public Rle1Inverse()
+    {
+        _prevByte = -1;
+        _runCount = 0;
+        _pendingByte = 0;
+        _pendingRepeats = 0;
+    }
 
     public void Reset()
     {

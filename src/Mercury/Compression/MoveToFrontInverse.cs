@@ -24,37 +24,41 @@ namespace SkyOmega.Mercury.Compression;
 /// via <see cref="Reset"/>; do not allocate per-symbol.
 /// </para>
 /// </remarks>
-internal sealed class MoveToFrontInverse
+internal struct MoveToFrontInverse
 {
     /// <summary>
-    /// 256-entry permutation list. Allocated once per stream instance and reused
-    /// across blocks via <see cref="Initialize"/> / <see cref="Reset"/>. One byte[]
-    /// per active stream is the correct allocation footprint — fits in 4 cache lines.
+    /// 256-entry inline buffer. <c>[InlineArray]</c> places the bytes directly inside
+    /// the struct — zero heap allocation, zero indirection, fits in 4 cache lines.
+    /// Span access via the implicit conversion gives pointer-equivalent codegen.
     /// </summary>
-    private readonly byte[] _list = new byte[256];
+    private MtfBuffer _list;
+
+    [InlineArray(256)]
+    private struct MtfBuffer
+    {
+        private byte _e0;
+    }
 
     /// <summary>
     /// Initialize the MTF list from the block's symbol map. <paramref name="alphabet"/>
-    /// holds the bytes present in the block in ascending byte order; the MTF list is
-    /// initialized to that alphabet (entries beyond <paramref name="length"/> are
-    /// unused and set to zero — correct programs never read them).
+    /// holds the bytes present in the block in ascending byte order; entries beyond
+    /// <paramref name="length"/> are zeroed (correct programs never read them).
     /// </summary>
     public void Initialize(ReadOnlySpan<byte> alphabet, int length)
     {
         if ((uint)length > 256)
             throw new ArgumentOutOfRangeException(nameof(length));
 
-        for (int i = 0; i < length; i++) _list[i] = alphabet[i];
-        for (int i = length; i < 256; i++) _list[i] = 0;
+        Span<byte> list = _list;
+        for (int i = 0; i < length; i++) list[i] = alphabet[i];
+        if (length < 256) list.Slice(length).Clear();
     }
 
-    /// <summary>
-    /// Reset to identity (list[i] = i for all i). Useful for tests; bzip2 blocks
-    /// always initialize from the symbol map so this is rarely called in production.
-    /// </summary>
+    /// <summary>Reset to identity (list[i] = i for all i).</summary>
     public void Reset()
     {
-        for (int i = 0; i < 256; i++) _list[i] = (byte)i;
+        Span<byte> list = _list;
+        for (int i = 0; i < 256; i++) list[i] = (byte)i;
     }
 
     /// <summary>
@@ -67,17 +71,22 @@ internal sealed class MoveToFrontInverse
         if ((uint)index >= 256)
             throw new ArgumentOutOfRangeException(nameof(index));
 
-        byte symbol = _list[index];
+        Span<byte> list = _list;
+        byte symbol = list[index];
 
-        // Shift entries [0, index) right by one; place symbol at 0. Buffer.BlockCopy
-        // handles overlapping forward moves correctly via memmove semantics.
+        // Forward-overlapping move of [0, index) into [1, index+1). Span<byte>.CopyTo
+        // handles the overlap correctly via memmove semantics.
         if (index > 0)
-            Buffer.BlockCopy(_list, 0, _list, 1, index);
-        _list[0] = symbol;
+            list.Slice(0, index).CopyTo(list.Slice(1, index));
+        list[0] = symbol;
 
         return symbol;
     }
 
-    /// <summary>Read-only view of the current list state — for tests and diagnostics.</summary>
-    public ReadOnlySpan<byte> ListView => _list;
+    /// <summary>Copy the current list into <paramref name="destination"/> (for tests/diagnostics).</summary>
+    public void CopyListTo(Span<byte> destination)
+    {
+        Span<byte> list = _list;
+        list.Slice(0, Math.Min(256, destination.Length)).CopyTo(destination);
+    }
 }
