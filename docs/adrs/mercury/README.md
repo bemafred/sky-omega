@@ -37,5 +37,5 @@
 | [ADR-032](ADR-032-radix-external-sort.md) | Radix External Sort for Index Rebuild | Completed |
 | [ADR-033](ADR-033-bulk-load-radix-external-sort.md) | Bulk-Load Radix External Sort | Completed |
 | [ADR-034](ADR-034-sorted-atom-store-for-reference.md) | SortedAtomStore for Reference Profile | Accepted |
-| [ADR-035](ADR-035-phase7a-metrics-infrastructure.md) | Phase 7a Metrics Infrastructure | Accepted |
+| [ADR-035](ADR-035-phase7a-metrics-infrastructure.md) | Phase 7a Metrics Infrastructure | Completed |
 | [ADR-036](ADR-036-bzip2-streaming-decompression.md) | BZip2 Streaming Decompression | Accepted |

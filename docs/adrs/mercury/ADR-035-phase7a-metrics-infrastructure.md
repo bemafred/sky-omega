@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-26
+**Status:** Completed — 2026-04-27 (1.7.45; 1 B Reference end-to-end validation in [`docs/validations/adr-035-phase7a-1b-2026-04-27.md`](../../validations/adr-035-phase7a-1b-2026-04-27.md) — 22,256-record JSONL artifact spans every Phase 7a metric channel)
 
 ## Context
 
