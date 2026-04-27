@@ -358,7 +358,16 @@ internal sealed class QueryPlanner
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ComputeVariableHash(in Term term, ReadOnlySpan<char> source)
-        => Fnv1a.Hash(source.Slice(term.Start, term.Length));
+    {
+        // Synthetic variables produced by SequencePath expansion (and similar internal
+        // rewrites) carry negative Term.Start values as a marker — there is no source-text
+        // slice to hash. Use the negative Start as a stable hash; collisions across
+        // different synthetic variable kinds are avoided by the +200 / +400 offsets the
+        // parser applies per kind.
+        if (term.Start < 0)
+            return term.Start;
+        return Fnv1a.Hash(source.Slice(term.Start, term.Length));
+    }
 
     // Default cardinality estimate for SERVICE clauses (remote endpoints)
     // Conservative estimate: SERVICE calls are expensive, assume moderate result size

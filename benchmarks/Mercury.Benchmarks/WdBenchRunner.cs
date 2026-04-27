@@ -113,6 +113,15 @@ public static class WdBenchRunner
                     completed++;
                     status = "completed";
                 }
+                else if (cts.IsCancellationRequested)
+                {
+                    // SparqlEngine catches OperationCanceledException internally and returns
+                    // a Success=false result with ErrorMessage="Query cancelled". The harness
+                    // classifies this as a timeout — the cancellation came from our token,
+                    // not a real query error.
+                    timedOut++;
+                    status = "timeout";
+                }
                 else
                 {
                     failed++;
