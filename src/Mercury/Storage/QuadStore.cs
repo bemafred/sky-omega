@@ -34,7 +34,11 @@ public sealed class QuadStore : IDisposable
     private readonly ReferenceQuadIndex? _gposReference;
     private readonly TrigramIndex _trigramIndex;
 
-    private readonly IAtomStore _atoms;
+    // Non-readonly: ADR-034 Phase 1B-5b allows replacement after a SortedAtomStore-backed
+    // bulk-load completes (placeholder empty -> real vocab). All other writes are pinned
+    // to construction-time state.
+    private IAtomStore _atoms;
+    private SortedAtomBulkBuilder? _sortedAtomBulkBuilder;
     // WAL is only constructed for profiles that provide versioning (Cognitive, Graph).
     // Reference has no WAL by design — bulk-load is the only write path, and its
     // durability is provided by FlushToDisk at load completion (ADR-029 / ADR-026).
@@ -158,7 +162,7 @@ public sealed class QuadStore : IDisposable
         var effectiveBulkMode = options.BulkMode && !options.ForceAtomHashCapacity;
         _atoms = _schema.AtomStore switch
         {
-            AtomStoreImplementation.Sorted => new SortedAtomStore(atomPath),
+            AtomStoreImplementation.Sorted => OpenSortedAtomStoreOrPlaceholder(atomPath),
             AtomStoreImplementation.Hash => new HashAtomStore(atomPath, _bufferManager, options.MaxAtomSize,
                 options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
                 options.AtomHashTableInitialCapacity, effectiveBulkMode),
@@ -168,18 +172,17 @@ public sealed class QuadStore : IDisposable
 
         _bulkLoadMode = options.BulkMode;
 
-        // ADR-034 Decision 7: SortedAtomStore-backed stores are read-only after build.
-        // Bulk-load attempts against an existing SortedAtomStore store fail at open time
-        // — the substrate cannot ingest new atoms via Intern, so the bulk-load contract
-        // is violated. The two-pass-build path (Phase 1B-5) lifts this restriction by
-        // bypassing the Intern surface entirely.
-        if (_atoms is SortedAtomStore && _bulkLoadMode)
+        // ADR-034 Decision 7: SortedAtomStore-backed stores accept exactly ONE bulk-load
+        // (the build that populates the vocab files). A second bulk-load against an
+        // already-populated Sorted store violates the single-bulk-load contract —
+        // recreate the store to replace contents.
+        if (_atoms is SortedAtomStore sas && _bulkLoadMode && sas.AtomCount > 0)
         {
             _atoms.Dispose();
             throw new ProfileCapabilityException(
-                "Bulk-load is not supported against a SortedAtomStore-backed store in this Mercury build. " +
-                "ADR-034 Phase 1B-5 will introduce the two-pass build path; until then, SortedAtomStore stores " +
-                "are read-only after their initial offline build via SortedAtomStoreBuilder.");
+                "ADR-034 Decision 7: SortedAtomStore-backed Reference stores are single-bulk-load. " +
+                "This store already has " + sas.AtomCount + " atoms; recreate the store to replace contents, " +
+                "or open without --bulk-load for query.");
         }
 
         // Create trigram index for full-text search (both profile families index it).
@@ -610,6 +613,19 @@ public sealed class QuadStore : IDisposable
                 // ADR-033: sorter is allocated lazily on first AddReferenceBulkTriple
                 // and persists across many BeginBatch/CommitBatch cycles. See _bulkSorter
                 // declaration for lifecycle.
+                //
+                // ADR-034 Phase 1B-5b: when the schema is Sorted-backed, allocate the
+                // SortedAtomBulkBuilder here. AddReferenceBulkTriple buffers atom strings
+                // into it; CommitBatch finalizes the vocabulary and re-opens the store's
+                // _atoms over the freshly-written files.
+                if (_schema.AtomStore == AtomStoreImplementation.Sorted && _bulkLoadMode)
+                {
+                    var sortedTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "sorted-vocab");
+                    Directory.CreateDirectory(sortedTempDir);
+                    _sortedAtomBulkBuilder = new SortedAtomBulkBuilder(
+                        Path.Combine(_baseDirectory, "atoms"),
+                        sortedTempDir);
+                }
                 return;
             }
 
@@ -700,6 +716,18 @@ public sealed class QuadStore : IDisposable
         // flag consistent makes the invariant "pure-query leaves flag false" hold
         // for every profile.
         _sessionMutated = true;
+
+        // ADR-034 Phase 1B-5b: SortedAtomStore-backed bulk path. SortedAtomStore can't
+        // synthesize atom IDs synchronously (the dense-sorted assignment is unknowable
+        // until the full vocabulary is sorted), so we buffer the four UTF-8 byte spans
+        // into the SortedAtomBulkBuilder. CommitBatch drains the buffer through the
+        // external merge sort, writes the vocab files, and replays the buffered triples
+        // into the GSPO sorter with their newly-resolved atom IDs.
+        if (_sortedAtomBulkBuilder is not null)
+        {
+            _sortedAtomBulkBuilder.AddTriple(graph, subject, predicate, @object);
+            return;
+        }
 
         var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var subjectId = _atoms.Intern(subject);
@@ -817,6 +845,50 @@ public sealed class QuadStore : IDisposable
             // No WAL → no tx-id machinery → no buffered replay.
             if (_referenceBulkActive)
             {
+                // ADR-034 Phase 1B-5b: SortedAtomStore-backed bulk completes in two stages:
+                // (1) finalize the vocabulary, write {atoms.atoms, atoms.offsets} files;
+                // (2) walk the buffered triples in input order and feed the resolved atom IDs
+                // into the GSPO sorter. The placeholder _atoms (empty SortedAtomStore from
+                // QuadStore.Open) is disposed and re-instantiated over the freshly-written
+                // vocab files so subsequent queries see the real atoms.
+                if (_sortedAtomBulkBuilder is not null)
+                {
+                    var bulkBuilder = _sortedAtomBulkBuilder;
+                    _sortedAtomBulkBuilder = null;
+                    var atomPath = Path.Combine(_baseDirectory, "atoms");
+
+                    // Release the placeholder mmap before the builder rewrites the files.
+                    _atoms.Dispose();
+
+                    bulkBuilder.Finalize();
+
+                    // Reopen over the fresh vocab files so GetAtomSpan works for the rest
+                    // of the session.
+                    _atoms = new SortedAtomStore(atomPath);
+
+                    // Replay the resolved triples into the GSPO sorter (same path the
+                    // Hash-backed Reference bulk uses; see _bulkSorter declaration).
+                    if (_bulkSorter is null)
+                    {
+                        var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp");
+                        _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
+                            tempDir: bulkTempDir,
+                            chunkSize: 16_000_000);
+                    }
+                    foreach (var (g, s, p, o) in bulkBuilder.EnumerateResolved())
+                    {
+                        var key = new ReferenceQuadIndex.ReferenceKey
+                        {
+                            Graph = g,
+                            Primary = s,
+                            Secondary = p,
+                            Tertiary = o,
+                        };
+                        _bulkSorter.Add(in key);
+                    }
+                    bulkBuilder.Dispose();
+                }
+
                 // ADR-033: when _bulkSorter is active the GSPO writes are deferred to
                 // FlushToDisk's drain. Skipping the per-CommitBatch index Flush() avoids
                 // ~10K msync-on-256GB-sparse-mmap calls over a 1B-triple bulk session
@@ -888,6 +960,15 @@ public sealed class QuadStore : IDisposable
             {
                 _bulkSorter.Dispose();
                 _bulkSorter = null;
+            }
+            // ADR-034 Phase 1B-5b: dispose any in-flight Sorted bulk builder. The
+            // {storeRoot}/bulk-tmp/sorted-vocab/ chunk files are released via the
+            // builder's Dispose; the placeholder atom files stay in place since they
+            // were never overwritten (Finalize wasn't called).
+            if (_sortedAtomBulkBuilder is not null)
+            {
+                _sortedAtomBulkBuilder.Dispose();
+                _sortedAtomBulkBuilder = null;
             }
             _referenceBulkActive = false;
             _lock.ExitWriteLock();
@@ -1423,6 +1504,25 @@ public sealed class QuadStore : IDisposable
     {
         if (_disposed)
             throw new ObjectDisposedException(nameof(QuadStore));
+    }
+
+    /// <summary>
+    /// ADR-034 Phase 1B-5b: open <see cref="SortedAtomStore"/> for the given atom path,
+    /// or create empty placeholder files if this is a fresh store. The placeholder
+    /// (<c>{base}.atoms</c> at 0 bytes, <c>{base}.offsets</c> with a single int64 sentinel
+    /// of 0) lets <see cref="SortedAtomStore"/> open with <c>AtomCount = 0</c> until the
+    /// first bulk-load populates real vocab.
+    /// </summary>
+    private static SortedAtomStore OpenSortedAtomStoreOrPlaceholder(string atomPath)
+    {
+        var dataPath = atomPath + ".atoms";
+        var offsetsPath = atomPath + ".offsets";
+        if (!File.Exists(dataPath) || !File.Exists(offsetsPath))
+        {
+            File.WriteAllBytes(dataPath, Array.Empty<byte>());
+            File.WriteAllBytes(offsetsPath, new byte[8]);  // single int64 sentinel = 0
+        }
+        return new SortedAtomStore(atomPath);
     }
 
     /// <summary>

@@ -81,20 +81,40 @@ public class AtomStoreProfileDispatchTests : IDisposable
     }
 
     [Fact]
-    public void SortedSchema_BulkLoadOpenThrows()
+    public void SortedSchema_SecondBulkLoadAfterPopulated_Throws()
     {
-        // ADR-034 Decision 7: SortedAtomStore-backed stores can't accept bulk-load in this
-        // Mercury build. The Phase 1B-5 two-pass build path will lift this restriction.
-        var dir = Path.Combine(_testDir, "sorted_bulk_throws");
+        // ADR-034 Decision 7: SortedAtomStore-backed stores accept exactly ONE bulk-load —
+        // the build that populates the vocab files. A second bulk-load against a populated
+        // Sorted store violates the single-bulk-load contract. Phase 1B-5b implementation:
+        // the gate fires only when AtomCount > 0.
+        var dir = Path.Combine(_testDir, "sorted_second_bulk_throws");
         Directory.CreateDirectory(dir);
         var atomPath = Path.Combine(dir, "atoms");
-        SortedAtomStoreBuilder.Build(atomPath, new[] { "x" });
+        // Pre-populate with non-empty vocab.
+        SortedAtomStoreBuilder.Build(atomPath, new[] { "x", "y", "z" });
         var schema = StoreSchema.ForProfile(StoreProfile.Reference)
             with { AtomStore = AtomStoreImplementation.Sorted };
         schema.WriteTo(dir);
 
         var bulkOpts = new StorageOptions { BulkMode = true };
         Assert.Throws<ProfileCapabilityException>(() => new QuadStore(dir, null, null, bulkOpts));
+    }
+
+    [Fact]
+    public void SortedSchema_FirstBulkLoadOnEmptyStore_Allowed()
+    {
+        // ADR-034 Phase 1B-5b: the FIRST bulk-load against a fresh Sorted store is the
+        // build that populates the vocab files. Open with BulkMode=true must succeed.
+        var dir = Path.Combine(_testDir, "sorted_first_bulk_ok");
+        Directory.CreateDirectory(dir);
+        var schema = StoreSchema.ForProfile(StoreProfile.Reference)
+            with { AtomStore = AtomStoreImplementation.Sorted };
+        schema.WriteTo(dir);
+
+        var bulkOpts = new StorageOptions { BulkMode = true, Profile = StoreProfile.Reference };
+        using var store = new QuadStore(dir, null, null, bulkOpts);
+        Assert.IsType<SortedAtomStore>(store.Atoms);
+        Assert.Equal(0, store.Atoms.AtomCount);
     }
 
     [Fact]
