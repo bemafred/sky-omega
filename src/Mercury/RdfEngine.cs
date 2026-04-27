@@ -273,16 +273,15 @@ public static class RdfEngine
 
     /// <summary>
     /// Wrap a stream with decompression based on detected compression type.
-    /// GZip is BCL (System.IO.Compression). BZip2 requires Mercury.Compression.
+    /// GZip is BCL (System.IO.Compression). BZip2 is BCL-only via the substrate
+    /// <see cref="SkyOmega.Mercury.Compression.BZip2DecompressorStream"/> (ADR-036).
     /// </summary>
     internal static Stream WrapWithDecompression(Stream stream, CompressionType compression)
     {
         return compression switch
         {
             CompressionType.GZip => new GZipStream(stream, CompressionMode.Decompress),
-            CompressionType.BZip2 => throw new NotSupportedException(
-                "BZip2 decompression requires Mercury.Compression. " +
-                "Decompress the file first, or use Mercury.Cli which includes BZip2 support."),
+            CompressionType.BZip2 => new SkyOmega.Mercury.Compression.BZip2DecompressorStream(stream, leaveOpen: false),
             _ => stream
         };
     }

@@ -21,7 +21,7 @@ internal enum CompressionType
 {
     None,
     GZip,   // .gz — BCL System.IO.Compression.GZipStream
-    BZip2   // .bz2 — requires external library (SharpZipLib)
+    BZip2   // .bz2 — Mercury.Compression.BZip2DecompressorStream (BCL-only, ADR-036)
 }
 
 /// <summary>

@@ -22,7 +22,7 @@ namespace SkyOmega.Mercury.Compression;
 /// </remarks>
 internal ref struct BZip2BitReader
 {
-    private readonly ReadOnlySpan<byte> _source;
+    private ReadOnlySpan<byte> _source;
     private int _byteIndex;
     private ulong _bitBuffer;
     private int _bitsInBuffer;
@@ -34,6 +34,39 @@ internal ref struct BZip2BitReader
         _bitBuffer = 0;
         _bitsInBuffer = 0;
     }
+
+    /// <summary>
+    /// Reconstruct from saved accumulator state plus a fresh source buffer. Used by the
+    /// streaming decompressor to persist bit-level position across <see cref="Stream.Read"/>
+    /// calls: bzip2 codes don't align to byte boundaries, so the accumulator can hold up
+    /// to 63 leftover bits between calls and must survive buffer slides.
+    /// </summary>
+    public BZip2BitReader(ReadOnlySpan<byte> source, ulong bitBuffer, int bitsInBuffer)
+    {
+        _source = source;
+        _byteIndex = 0;
+        _bitBuffer = bitBuffer;
+        _bitsInBuffer = bitsInBuffer;
+    }
+
+    /// <summary>
+    /// Replace the underlying source buffer while preserving the bit accumulator. Used by
+    /// the streaming decompressor to slide its compressed-input window: bytes consumed past
+    /// <see cref="ByteIndex"/> are dropped, the buffer is refilled from the underlying stream,
+    /// and Refill is called with the new buffer slice. The accumulator (which may hold up
+    /// to 64 bits read from the previous source) is intact.
+    /// </summary>
+    public void Refill(ReadOnlySpan<byte> newSource)
+    {
+        _source = newSource;
+        _byteIndex = 0;
+    }
+
+    /// <summary>Number of bytes consumed from the current source so far.</summary>
+    public int ByteIndex => _byteIndex;
+
+    /// <summary>Current bit accumulator state — for save/restore across stream reads.</summary>
+    public ulong BitBuffer => _bitBuffer;
 
     /// <summary>True when no more bytes are available and the accumulator is empty.</summary>
     public bool IsExhausted => _byteIndex >= _source.Length && _bitsInBuffer == 0;
