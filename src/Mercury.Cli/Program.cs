@@ -355,9 +355,15 @@ if (jsonlListener is not null)
     pool.Active.RebuildMetricsListener = jsonlListener;
     pool.Active.ObservabilityListener = jsonlListener;
 
-    // Category G state producers fire only when the timer is active.
+    // Category G + B state producers fire only when the timer is active. Category B
+    // (atom-store) reads the live AtomStore via the QuadStore's RegisterAtomStateProducers
+    // method; Category G samples process-level state (GC/LOH/RSS/disk-free) with the
+    // resolved store path used as the disk-free target.
     if (metricsStateIntervalSeconds > 0)
+    {
         ProcessStateProducers.RegisterAll(jsonlListener, diskPath: resolvedStorePath);
+        pool.Active.RegisterAtomStateProducers(jsonlListener);
+    }
 }
 
 // Print startup diagnostics when loading or rebuilding

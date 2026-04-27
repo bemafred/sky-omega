@@ -244,9 +244,32 @@ public sealed class QuadStore : IDisposable
     /// emits — query, rebuild, load progress, GC/RSS state, atom-store events, scope
     /// correlation. Default null: zero overhead. Fan-out is reference-equality-checked
     /// against the legacy listeners to avoid double emission when the same instance is
-    /// registered through multiple slots.
+    /// registered through multiple slots. The setter propagates to <see cref="AtomStore"/>
+    /// so atom-side discrete events (rehash, file growth) flow through the same observer
+    /// and per-Intern probe-distance recording activates.
     /// </summary>
-    public IObservabilityListener? ObservabilityListener { get; set; }
+    public IObservabilityListener? ObservabilityListener
+    {
+        get => _observabilityListener;
+        set
+        {
+            _observabilityListener = value;
+            _atoms.ObservabilityListener = value;
+        }
+    }
+    private IObservabilityListener? _observabilityListener;
+
+    /// <summary>
+    /// Register the three Category B atom-store state producers (intern rate, load factor,
+    /// probe-distance percentiles) on the given listener's periodic timer. ADR-035 Phase 7a.3.
+    /// Caller must also set <see cref="ObservabilityListener"/> for discrete events
+    /// (rehash, file growth) to flow.
+    /// </summary>
+    public void RegisterAtomStateProducers(Diagnostics.JsonlMetricsListener listener)
+    {
+        if (listener is null) throw new ArgumentNullException(nameof(listener));
+        AtomStoreProducers.RegisterAll(listener, _atoms);
+    }
 
     /// <summary>True iff at least one rebuild observer is registered (legacy or umbrella).</summary>
     internal bool HasRebuildListener => RebuildMetricsListener is not null || ObservabilityListener is not null;

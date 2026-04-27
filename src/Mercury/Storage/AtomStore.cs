@@ -8,6 +8,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Diagnostics;
 using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.Storage;
@@ -108,6 +110,12 @@ internal sealed unsafe class AtomStore : IDisposable
     // Statistics
     private long _totalBytes;
     private long _atomCount;
+
+    // ADR-035 Phase 7a.3 (Category B). Optional observer; lazily-allocated probe-distance
+    // histogram bounded by MaxProbeDistance. Zero hot-path overhead when no observer
+    // is attached — the null-check in InternUtf8 elides the increment.
+    private IObservabilityListener? _observabilityListener;
+    private LatencyHistogram? _probeDistanceHistogram;
 
     // UTF-8 encoder for efficient conversion
     private static readonly Encoding Utf8 = Encoding.UTF8;
@@ -339,7 +347,10 @@ internal sealed unsafe class AtomStore : IDisposable
             ref var entry = ref _hashTable[currentBucket];
 
             if (entry.AtomId == 0)
+            {
+                _probeDistanceHistogram?.Record(probe);
                 break;
+            }
 
             // Quick rejection: check hash and length before byte comparison
             if (entry.Hash == hash && entry.Length == utf8Value.Length)
@@ -347,6 +358,7 @@ internal sealed unsafe class AtomStore : IDisposable
                 var stored = GetAtomSpan(entry.AtomId);
                 if (stored.SequenceEqual(utf8Value))
                 {
+                    _probeDistanceHistogram?.Record(probe);
                     return entry.AtomId;
                 }
             }
@@ -495,6 +507,28 @@ internal sealed unsafe class AtomStore : IDisposable
     public long AtomCount => _atomCount;
 
     /// <summary>
+    /// ADR-035 Phase 7a.3: register an umbrella observer to emit atom-store discrete
+    /// events (rehash, file growth) and to enable per-Intern probe-distance recording.
+    /// First non-null assignment lazily allocates the probe histogram.
+    /// </summary>
+    internal IObservabilityListener? ObservabilityListener
+    {
+        get => _observabilityListener;
+        set
+        {
+            _observabilityListener = value;
+            if (value is not null && _probeDistanceHistogram is null)
+                _probeDistanceHistogram = new LatencyHistogram(highestTrackable: MaxProbeDistance);
+        }
+    }
+
+    /// <summary>Live probe-distance histogram (null when no observer ever registered).</summary>
+    internal LatencyHistogram? ProbeDistanceHistogram => _probeDistanceHistogram;
+
+    /// <summary>Current bucket count (mirror of internal _hashTableSize).</summary>
+    internal long BucketCount => _hashTableSize;
+
+    /// <summary>
     /// Compute probe offset using quadratic probing for first QuadraticProbeLimit,
     /// then linear probing for extended search.
     /// </summary>
@@ -634,6 +668,9 @@ internal sealed unsafe class AtomStore : IDisposable
         if (requiredSize <= _dataCapacity)
             return;
 
+        long emittedOldSize = 0;
+        long emittedNewSize = 0;
+
         lock (_resizeLock)
         {
             if (requiredSize <= _dataCapacity)
@@ -646,6 +683,7 @@ internal sealed unsafe class AtomStore : IDisposable
 #endif
             try
             {
+                emittedOldSize = _dataCapacity;
                 var newSize = Math.Max(_dataCapacity * 2, requiredSize + InitialDataSize);
 
                 // ADR-020 §4: extend file before creating mapping, so mapped
@@ -654,6 +692,7 @@ internal sealed unsafe class AtomStore : IDisposable
                 // 1. Extend the underlying file length (tracked capacity mirrors it)
                 _dataFile.SetLength(newSize);
                 _dataCapacity = newSize;
+                emittedNewSize = newSize;
 
                 // 2. Create new map and accessor over the extended file
                 var newMap = MemoryMappedFile.CreateFromFile(
@@ -691,6 +730,13 @@ internal sealed unsafe class AtomStore : IDisposable
             finally { }
 #endif
         }
+
+        if (emittedOldSize > 0 && _observabilityListener is { } listener)
+            listener.OnAtomFileGrowth(new AtomFileGrowthEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                FilePath: _dataFile.Name,
+                OldLengthBytes: emittedOldSize,
+                NewLengthBytes: emittedNewSize));
     }
 
     private void EnsureOffsetCapacity(long requiredCapacity)
@@ -768,10 +814,21 @@ internal sealed unsafe class AtomStore : IDisposable
         if (newSize <= _hashTableSize)
             return;
 
+        // ADR-035 Phase 7a.3: capture pre-rehash size + clock outside the lock for the
+        // post-lock event emission. Variables hold the values to emit; if no rehash
+        // actually happened (double-check inside lock returned early), they stay zero.
+        long emittedOldSize = 0;
+        long emittedNewSize = 0;
+        TimeSpan rehashElapsed = default;
+        Stopwatch? rehashStopwatch = null;
+
         lock (_resizeLock)
         {
             if (newSize <= _hashTableSize)
                 return;
+
+            emittedOldSize = _hashTableSize;
+            rehashStopwatch = _observabilityListener is not null ? Stopwatch.StartNew() : null;
 
 #if DEBUG
             Interlocked.Exchange(ref _resizeInProgress, 1);
@@ -901,6 +958,12 @@ internal sealed unsafe class AtomStore : IDisposable
                 try { File.Delete(oldPath); } catch { /* reconciled on next open */ }
 
                 _rehashCount++;
+                emittedNewSize = _hashTableSize;
+                if (rehashStopwatch is not null)
+                {
+                    rehashStopwatch.Stop();
+                    rehashElapsed = rehashStopwatch.Elapsed;
+                }
             }
 #if DEBUG
             finally
@@ -911,6 +974,14 @@ internal sealed unsafe class AtomStore : IDisposable
             finally { }
 #endif
         }
+
+        // Emit outside the lock so the listener's own gate can't deadlock with _resizeLock.
+        if (emittedOldSize > 0 && _observabilityListener is { } listener)
+            listener.OnAtomRehash(new AtomRehashEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                OldBucketCount: emittedOldSize,
+                NewBucketCount: emittedNewSize,
+                Duration: rehashElapsed));
     }
 
     /// <summary>
