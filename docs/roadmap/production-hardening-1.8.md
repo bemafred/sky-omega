@@ -254,7 +254,7 @@ Sub-deliverable: instrument both Cognitive and Reference profile paths from day 
 
 #### Phase 7b — BZip2 streaming source decompression
 
-`docs/limits/streaming-source-decompression.md` (Phase 7 section, amended 2026-04-26): wire `Mercury.Compression` (BCL-only is preferred via P/Invoke to libbz2; SharpZipLib in Mercury.Cli only is the pragmatic shortcut). Establishes `latest-all.ttl.bz2` (114 GB compressed) as the canonical Phase 7 source artifact, with `--limit N` providing gradient runs at any scale from a single source.
+[ADR-036](../adrs/mercury/ADR-036-bzip2-streaming-decompression.md) — substrate-level bzip2 decompression in pure C# / BCL-only inside `src/Mercury/Compression/`. SharpZipLib-in-CLI and P/Invoke-to-libbz2 alternatives were considered and rejected: both create substrate-debt and silently externalize a capability that must be intrinsic to Mercury. Establishes `latest-all.ttl.bz2` (114 GB compressed) as the canonical Phase 7 source artifact, with `--limit N` providing gradient runs at any scale from a single source. Implementation target: BWT-inverse hot path within 1.5× of `libbz2`, zero-GC steady state, optimization pass (SIMD where it applies) after correctness lands.
 
 **Exit:** `mercury --bulk-load latest-all.ttl.bz2 --limit N` runs end-to-end without staging an uncompressed intermediate file. Gradient runs at 1 M / 10 M / 100 M / 1 B all sourced from the same `.bz2`.
 
