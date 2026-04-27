@@ -20,7 +20,8 @@ public sealed record StoreSchema(
     bool HasGraph,
     bool HasTemporal,
     bool HasVersioning,
-    int KeyLayoutVersion)
+    int KeyLayoutVersion,
+    AtomStoreImplementation AtomStore = AtomStoreImplementation.Hash)
 {
     /// <summary>Canonical file name for the schema record in a store directory.</summary>
     public const string FileName = "store-schema.json";
@@ -91,6 +92,7 @@ public sealed record StoreSchema(
             writer.WriteBoolean("hasTemporal", HasTemporal);
             writer.WriteBoolean("hasVersioning", HasVersioning);
             writer.WriteNumber("keyLayoutVersion", KeyLayoutVersion);
+            writer.WriteString("atomStore", AtomStore.ToString());
             writer.WriteEndObject();
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
@@ -135,7 +137,20 @@ public sealed record StoreSchema(
                     $"store-schema.json has keyLayoutVersion {keyLayoutVersion}, but this Mercury build " +
                     $"only supports versions up to {CurrentKeyLayoutVersion}. Upgrade Mercury or reload the store.");
 
-            return new StoreSchema(profile, indexes, hasGraph, hasTemporal, hasVersioning, keyLayoutVersion);
+            // ADR-034: atomStore is optional for backward compat with stores written before
+            // the field was introduced. Missing field defaults to Hash; existing stores
+            // (wiki-21b-ref etc.) keep their HashAtomStore behavior unchanged.
+            var atomStore = AtomStoreImplementation.Hash;
+            if (root.TryGetProperty("atomStore", out var atomStoreProp) && atomStoreProp.ValueKind == JsonValueKind.String)
+            {
+                var asText = atomStoreProp.GetString();
+                if (!System.Enum.TryParse<AtomStoreImplementation>(asText, ignoreCase: false, out atomStore))
+                    throw new InvalidStoreSchemaException(
+                        $"store-schema.json has unknown atomStore \"{asText}\". This Mercury build knows: " +
+                        string.Join(", ", System.Enum.GetNames<AtomStoreImplementation>()) + ".");
+            }
+
+            return new StoreSchema(profile, indexes, hasGraph, hasTemporal, hasVersioning, keyLayoutVersion, atomStore);
         }
     }
 

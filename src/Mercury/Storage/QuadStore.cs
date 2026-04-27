@@ -153,14 +153,34 @@ public sealed class QuadStore : IDisposable
             _schema.WriteTo(baseDirectory);
         }
 
-        // Create shared atom store for all indexes.
+        // Create shared atom store for all indexes. ADR-034: dispatch on schema.AtomStore.
         // ForceAtomHashCapacity suppresses the bulk-mode floor for ADR-028 validation.
         var effectiveBulkMode = options.BulkMode && !options.ForceAtomHashCapacity;
-        _atoms = new HashAtomStore(atomPath, _bufferManager, options.MaxAtomSize,
-            options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
-            options.AtomHashTableInitialCapacity, effectiveBulkMode);
+        _atoms = _schema.AtomStore switch
+        {
+            AtomStoreImplementation.Sorted => new SortedAtomStore(atomPath),
+            AtomStoreImplementation.Hash => new HashAtomStore(atomPath, _bufferManager, options.MaxAtomSize,
+                options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
+                options.AtomHashTableInitialCapacity, effectiveBulkMode),
+            _ => throw new InvalidOperationException(
+                $"Unknown AtomStoreImplementation {_schema.AtomStore} — this build cannot construct an atom store for it.")
+        };
 
         _bulkLoadMode = options.BulkMode;
+
+        // ADR-034 Decision 7: SortedAtomStore-backed stores are read-only after build.
+        // Bulk-load attempts against an existing SortedAtomStore store fail at open time
+        // — the substrate cannot ingest new atoms via Intern, so the bulk-load contract
+        // is violated. The two-pass-build path (Phase 1B-5) lifts this restriction by
+        // bypassing the Intern surface entirely.
+        if (_atoms is SortedAtomStore && _bulkLoadMode)
+        {
+            _atoms.Dispose();
+            throw new ProfileCapabilityException(
+                "Bulk-load is not supported against a SortedAtomStore-backed store in this Mercury build. " +
+                "ADR-034 Phase 1B-5 will introduce the two-pass build path; until then, SortedAtomStore stores " +
+                "are read-only after their initial offline build via SortedAtomStoreBuilder.");
+        }
 
         // Create trigram index for full-text search (both profile families index it).
         var trigramPath = Path.Combine(baseDirectory, "trigram");
