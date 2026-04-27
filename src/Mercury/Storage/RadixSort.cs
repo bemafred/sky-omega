@@ -57,7 +57,13 @@ internal static class RadixSort
         // Secondary @ 16, Tertiary @ 24. Sort priority (high to low): Graph,
         // Primary, Secondary, Tertiary. LSD pass order processes lowest-priority
         // field first, highest last → Tertiary, Secondary, Primary, Graph.
-        Span<int> fieldBaseOffsets = stackalloc int[4] { 24, 16, 8, 0 };
+        // The array-initializer form `stackalloc int[N] { ... }` produces a heap
+        // allocation per call on .NET 10; explicit indexed init keeps it on the stack.
+        Span<int> fieldBaseOffsets = stackalloc int[4];
+        fieldBaseOffsets[0] = 24;
+        fieldBaseOffsets[1] = 16;
+        fieldBaseOffsets[2] = 8;
+        fieldBaseOffsets[3] = 0;
 
         Span<ReferenceQuadIndex.ReferenceKey> src = data;
         Span<ReferenceQuadIndex.ReferenceKey> dst = scratch;
@@ -157,7 +163,12 @@ internal static class RadixSort
         // Sort priority: Hash (high), AtomId (low). LSD order: AtomId 4..11 first,
         // then Hash 0..3. Only struct offset 11 (AtomId MSB) needs signed bias —
         // Hash MSB at offset 3 is unsigned, no bias.
-        Span<int> processOrder = stackalloc int[12] { 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3 };
+        // The array-initializer form `stackalloc int[N] { ... }` produces a heap
+        // allocation per call on .NET 10; explicit indexed init keeps it on the stack.
+        Span<int> processOrder = stackalloc int[12];
+        processOrder[0] = 4; processOrder[1] = 5; processOrder[2] = 6; processOrder[3] = 7;
+        processOrder[4] = 8; processOrder[5] = 9; processOrder[6] = 10; processOrder[7] = 11;
+        processOrder[8] = 0; processOrder[9] = 1; processOrder[10] = 2; processOrder[11] = 3;
 
         Span<TrigramEntry> src = data;
         Span<TrigramEntry> dst = scratch;
