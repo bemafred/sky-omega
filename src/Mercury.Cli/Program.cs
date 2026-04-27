@@ -28,6 +28,7 @@ bool rebuildIndexes = false;
 long? minFreeSpaceGB = null;
 long? loadLimit = null;
 string? metricsOutPath = null;
+double metricsStateIntervalSeconds = 0;
 bool noRepl = false;
 StoreProfile? requestedProfile = null;
 
@@ -105,6 +106,17 @@ for (int i = 0; i < args.Length; i++)
             if (i + 1 < args.Length)
                 metricsOutPath = args[++i];
             break;
+        case "--metrics-state-interval":
+            if (i + 1 < args.Length && double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedInterval) && parsedInterval >= 0)
+            {
+                metricsStateIntervalSeconds = parsedInterval;
+            }
+            else
+            {
+                Console.Error.WriteLine("Error: --metrics-state-interval requires a non-negative number of seconds (0 disables).");
+                return 1;
+            }
+            break;
         case "--no-repl":
             noRepl = true;
             break;
@@ -177,6 +189,7 @@ if (showHelp)
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
           --limit <N>                Cap triples added (--bulk-load/--load) or emitted (--convert) at N
           --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
+          --metrics-state-interval <seconds>  Periodic GC/RSS/LOH/disk-free state emission (default 0 = off)
           --no-repl                  Skip the REPL after --load/--bulk-load/--rebuild-indexes (for profilers, CI, or pipes that stay open)
 
         Examples:
@@ -210,8 +223,15 @@ if (attachTarget != null)
 // (Phase 5.1.b) will have multiple consumer threads emitting records concurrently;
 // two independent writers (as 1.7.31-1.7.34 had) produce interleaved/torn records
 // mid-byte, which destroys downstream analysis. One writer, one truth.
+// ADR-035 Phase 7a.2 (Category G): when --metrics-state-interval is set, the listener
+// runs a periodic timer that ticks the registered ProcessStateProducers — GC events,
+// LOH allocation deltas, RSS/working set, disk-free for the store path.
 JsonlMetricsListener? jsonlListener = metricsOutPath != null
-    ? new JsonlMetricsListener(metricsOutPath)
+    ? new JsonlMetricsListener(
+        metricsOutPath,
+        stateEmissionInterval: metricsStateIntervalSeconds > 0
+            ? TimeSpan.FromSeconds(metricsStateIntervalSeconds)
+            : null)
     : null;
 
 var metricsJsonOptions = new JsonSerializerOptions
@@ -334,6 +354,10 @@ if (jsonlListener is not null)
     pool.Active.QueryMetricsListener = jsonlListener;
     pool.Active.RebuildMetricsListener = jsonlListener;
     pool.Active.ObservabilityListener = jsonlListener;
+
+    // Category G state producers fire only when the timer is active.
+    if (metricsStateIntervalSeconds > 0)
+        ProcessStateProducers.RegisterAll(jsonlListener, diskPath: resolvedStorePath);
 }
 
 // Print startup diagnostics when loading or rebuilding
