@@ -1,0 +1,284 @@
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
+using System.Text;
+
+namespace SkyOmega.Mercury.Storage;
+
+/// <summary>
+/// Disk-spilling external-merge-sort builder for <see cref="SortedAtomStore"/>. Suitable
+/// for billion-atom vocabularies where the in-memory <see cref="SortedAtomStoreBuilder"/>
+/// would exceed RAM. ADR-034 Phase 1B-4.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Two-pass external sort over variable-length UTF-8 records:
+/// </para>
+/// <list type="number">
+///   <item>
+///     <b>Spill pass.</b> Read input, accumulate <c>(bytes, input-index)</c> records into a
+///     memory-bounded buffer. When the buffer hits <c>chunkSizeBytes</c>, sort it in-memory
+///     by UTF-8 byte order and spill to a chunk file as length-prefixed records.
+///   </item>
+///   <item>
+///     <b>Merge pass.</b> Open all chunk files, perform a k-way merge via
+///     <see cref="PriorityQueue{TElement, TPriority}"/>. Adjacent equal records (deduped
+///     across chunks) collapse into one atom; the first occurrence assigns a dense atom ID.
+///     Output streams to <c>{base}.atoms</c> + <c>{base}.offsets</c>.
+///   </item>
+/// </list>
+/// <para>
+/// Memory profile: <c>chunkSizeBytes</c> peak during the spill pass; in the merge pass,
+/// one record buffer per open chunk plus the priority-queue overhead — for 1000 chunks
+/// at 64 KB max record this is ~64 MB. Output is written sequentially with small buffers.
+/// </para>
+/// <para>
+/// Temp files live under <paramref name="tempDir"/> and are deleted when the build
+/// completes (success or failure). Default <paramref name="tempDir"/> is a randomly
+/// named subdirectory of the system temp.
+/// </para>
+/// </remarks>
+internal static class SortedAtomStoreExternalBuilder
+{
+    /// <summary>
+    /// Default chunk size: 256 MB. Holds ~2-5 M records for typical Wikidata atom lengths
+    /// (avg ~50 bytes), a few hundred chunk files for full Wikidata's 4 B atoms.
+    /// </summary>
+    public const long DefaultChunkSizeBytes = 256L * 1024 * 1024;
+
+    public static SortedAtomStoreBuilder.BuildResult BuildExternal(
+        string baseFilePath,
+        IEnumerable<byte[]> inputStrings,
+        string? tempDir = null,
+        long chunkSizeBytes = DefaultChunkSizeBytes)
+    {
+        if (baseFilePath is null) throw new ArgumentNullException(nameof(baseFilePath));
+        if (inputStrings is null) throw new ArgumentNullException(nameof(inputStrings));
+        if (chunkSizeBytes < 1024 * 1024)
+            throw new ArgumentOutOfRangeException(nameof(chunkSizeBytes), "chunkSizeBytes must be at least 1 MB");
+
+        var resolvedTempDir = tempDir ?? Path.Combine(Path.GetTempPath(), "sorted-atom-build-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(resolvedTempDir);
+
+        try
+        {
+            // Pass 1: collect records into memory-bounded chunks; sort and spill each chunk.
+            var chunkFiles = new List<string>();
+            var inputCount = SpillChunks(inputStrings, resolvedTempDir, chunkSizeBytes, chunkFiles);
+
+            // Pass 2: k-way merge, dedupe, write to .atoms + .offsets.
+            return MergeAndWrite(baseFilePath, chunkFiles, inputCount);
+        }
+        finally
+        {
+            if (Directory.Exists(resolvedTempDir))
+            {
+                try { Directory.Delete(resolvedTempDir, recursive: true); }
+                catch { /* best effort cleanup */ }
+            }
+        }
+    }
+
+    /// <summary>Convenience overload taking strings; encodes to UTF-8 once on input.</summary>
+    public static SortedAtomStoreBuilder.BuildResult BuildExternal(
+        string baseFilePath,
+        IEnumerable<string> inputStrings,
+        string? tempDir = null,
+        long chunkSizeBytes = DefaultChunkSizeBytes)
+    {
+        IEnumerable<byte[]> AsBytes()
+        {
+            foreach (var s in inputStrings)
+                yield return s is null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(s);
+        }
+        return BuildExternal(baseFilePath, AsBytes(), tempDir, chunkSizeBytes);
+    }
+
+    private static int SpillChunks(
+        IEnumerable<byte[]> input,
+        string tempDir,
+        long chunkSizeBytes,
+        List<string> chunkFiles)
+    {
+        var buffer = new List<(byte[] Bytes, int InputIdx)>();
+        long bufferBytes = 0;
+        int globalIdx = 0;
+
+        foreach (var s in input)
+        {
+            if (s is null || s.Length == 0)
+            {
+                globalIdx++;
+                continue;
+            }
+
+            buffer.Add((s, globalIdx));
+            bufferBytes += s.Length + 16;  // approx record overhead
+            globalIdx++;
+
+            if (bufferBytes >= chunkSizeBytes)
+            {
+                chunkFiles.Add(SpillOneChunk(tempDir, buffer, chunkFiles.Count));
+                buffer.Clear();
+                bufferBytes = 0;
+            }
+        }
+        if (buffer.Count > 0)
+            chunkFiles.Add(SpillOneChunk(tempDir, buffer, chunkFiles.Count));
+
+        return globalIdx;
+    }
+
+    private static string SpillOneChunk(string tempDir, List<(byte[] Bytes, int InputIdx)> buffer, int chunkIndex)
+    {
+        // Sort by UTF-8 byte order; ties broken by input index for stable output.
+        buffer.Sort((a, b) =>
+        {
+            int cmp = a.Bytes.AsSpan().SequenceCompareTo(b.Bytes);
+            if (cmp != 0) return cmp;
+            return a.InputIdx.CompareTo(b.InputIdx);
+        });
+
+        var path = Path.Combine(tempDir, $"chunk-{chunkIndex:D6}.bin");
+        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.SequentialScan);
+        Span<byte> header = stackalloc byte[8];
+        foreach (var (bytes, inputIdx) in buffer)
+        {
+            // Record format: int32 length + int32 input-idx + raw bytes.
+            BinaryPrimitives.WriteInt32LittleEndian(header.Slice(0, 4), bytes.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(header.Slice(4, 4), inputIdx);
+            fs.Write(header);
+            fs.Write(bytes);
+        }
+        return path;
+    }
+
+    private static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
+        string baseFilePath, List<string> chunkFiles, int inputCount)
+    {
+        var assigned = new long[inputCount];
+        long atomCount = 0;
+        long totalBytes = 0;
+        var dataPath = baseFilePath + ".atoms";
+        var offsetsPath = baseFilePath + ".offsets";
+
+        // Open one ChunkReader per chunk file. The priority queue holds the front
+        // record from each chunk; pop, emit/dedupe, advance the popped chunk's reader.
+        var readers = new List<ChunkReader>(chunkFiles.Count);
+        try
+        {
+            foreach (var path in chunkFiles)
+            {
+                var reader = new ChunkReader(path, readers.Count);
+                if (reader.MoveNext())
+                    readers.Add(reader);
+                else
+                    reader.Dispose();
+            }
+
+            // Priority queue keyed by (current bytes, then chunk index for stable ordering).
+            var pq = new PriorityQueue<int, ChunkPriorityKey>(readers.Count, ChunkPriorityKeyComparer.Instance);
+            for (int i = 0; i < readers.Count; i++)
+                pq.Enqueue(i, new ChunkPriorityKey(readers[i].Current.Bytes, i));
+
+            using var dataFs = new FileStream(dataPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
+            using var offsetsFs = new FileStream(offsetsPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
+            Span<byte> offsetBuf = stackalloc byte[8];
+
+            // offsets[0] = 0 (first atom starts at byte 0 of .atoms).
+            BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, 0);
+            offsetsFs.Write(offsetBuf);
+
+            byte[]? prevBytes = null;
+
+            while (pq.Count > 0)
+            {
+                int readerIdx = pq.Dequeue();
+                var rec = readers[readerIdx].Current;
+
+                bool isNew = prevBytes is null || !rec.Bytes.AsSpan().SequenceEqual(prevBytes);
+                if (isNew)
+                {
+                    atomCount++;
+                    dataFs.Write(rec.Bytes, 0, rec.Bytes.Length);
+                    totalBytes += rec.Bytes.Length;
+                    BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, totalBytes);
+                    offsetsFs.Write(offsetBuf);
+                    prevBytes = rec.Bytes;
+                }
+                assigned[rec.InputIdx] = atomCount;
+
+                if (readers[readerIdx].MoveNext())
+                    pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
+            }
+
+            dataFs.Flush(flushToDisk: true);
+            offsetsFs.Flush(flushToDisk: true);
+        }
+        finally
+        {
+            foreach (var r in readers) r.Dispose();
+        }
+
+        return new SortedAtomStoreBuilder.BuildResult(atomCount, totalBytes, assigned);
+    }
+
+    /// <summary>Streaming reader over a single sorted chunk file. Pull-based via MoveNext / Current.</summary>
+    private sealed class ChunkReader : IDisposable
+    {
+        private readonly FileStream _fs;
+        private readonly int _chunkIndex;
+        public (byte[] Bytes, int InputIdx) Current { get; private set; }
+        private bool _disposed;
+
+        public ChunkReader(string path, int chunkIndex)
+        {
+            _chunkIndex = chunkIndex;
+            _fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+            Current = default;
+        }
+
+        public bool MoveNext()
+        {
+            if (_disposed || _fs.Position >= _fs.Length) return false;
+
+            Span<byte> header = stackalloc byte[8];
+            int read = _fs.Read(header);
+            if (read < 8) return false;
+
+            int length = BinaryPrimitives.ReadInt32LittleEndian(header.Slice(0, 4));
+            int inputIdx = BinaryPrimitives.ReadInt32LittleEndian(header.Slice(4, 4));
+            var bytes = new byte[length];
+            int got = 0;
+            while (got < length)
+            {
+                int n = _fs.Read(bytes, got, length - got);
+                if (n == 0) throw new InvalidDataException($"Unexpected EOF in chunk {_chunkIndex}");
+                got += n;
+            }
+            Current = (bytes, inputIdx);
+            return true;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _fs.Dispose();
+        }
+    }
+
+    private readonly record struct ChunkPriorityKey(byte[] Bytes, int ChunkIndex);
+
+    private sealed class ChunkPriorityKeyComparer : IComparer<ChunkPriorityKey>
+    {
+        public static readonly ChunkPriorityKeyComparer Instance = new();
+        public int Compare(ChunkPriorityKey x, ChunkPriorityKey y)
+        {
+            int cmp = x.Bytes.AsSpan().SequenceCompareTo(y.Bytes);
+            if (cmp != 0) return cmp;
+            return x.ChunkIndex.CompareTo(y.ChunkIndex);
+        }
+    }
+}
