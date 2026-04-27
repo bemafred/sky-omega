@@ -104,7 +104,7 @@ public class AtomStoreMetricsTests : IDisposable
         var listener = new CapturingListener();
         store.ObservabilityListener = listener;
 
-        var producer = AtomStoreProducers.InternRate(store.Atoms);
+        var producer = AtomStoreProducers.InternRate((HashAtomStore)store.Atoms);
 
         using var buffer = new MemoryStream();
         using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
@@ -150,7 +150,7 @@ public class AtomStoreMetricsTests : IDisposable
 
         for (int i = 0; i < 50; i++) store.AddCurrent("s" + i, "p", "o" + i);
 
-        var producer = AtomStoreProducers.LoadFactor(store.Atoms);
+        var producer = AtomStoreProducers.LoadFactor((HashAtomStore)store.Atoms);
         using var buffer = new MemoryStream();
         using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
         producer(jsonl);
@@ -181,17 +181,17 @@ public class AtomStoreMetricsTests : IDisposable
         // Also do lookups that exercise the InternUtf8 path with non-trivial probe.
         for (int i = 0; i < 50; i++) store.AddCurrent("s" + i, "p", "o" + i);
 
-        Assert.NotNull(store.Atoms.ProbeDistanceHistogram);
-        Assert.True(store.Atoms.ProbeDistanceHistogram!.Count > 0);
+        Assert.NotNull(((HashAtomStore)store.Atoms).ProbeDistanceHistogram);
+        Assert.True(((HashAtomStore)store.Atoms).ProbeDistanceHistogram!.Count > 0);
 
-        var producer = AtomStoreProducers.ProbeDistance(store.Atoms);
+        var producer = AtomStoreProducers.ProbeDistance((HashAtomStore)store.Atoms);
         using var buffer = new MemoryStream();
         using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
         producer(jsonl);
         jsonl.Flush();
 
         // After producer ran, histogram should be reset.
-        Assert.Equal(0, store.Atoms.ProbeDistanceHistogram!.Count);
+        Assert.Equal(0, ((HashAtomStore)store.Atoms).ProbeDistanceHistogram!.Count);
 
         buffer.Position = 0;
         using var reader = new StreamReader(buffer, leaveOpen: true);

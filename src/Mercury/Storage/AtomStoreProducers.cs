@@ -10,24 +10,24 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="AtomStore"/> is internal; producers live alongside it in
+/// <see cref="HashAtomStore"/> is internal; producers live alongside it in
 /// <c>SkyOmega.Mercury.Storage</c>. The QuadStore exposes
 /// <c>RegisterAtomStateProducers(JsonlMetricsListener)</c> as the public-facing API; CLI
 /// consumers go through that, not these factories directly.
 /// </para>
 /// <para>
 /// Discrete events (<see cref="AtomRehashEvent"/>, <see cref="AtomFileGrowthEvent"/>) are
-/// emitted synchronously from inside <see cref="AtomStore"/>; this class supplies only
+/// emitted synchronously from inside <see cref="HashAtomStore"/>; this class supplies only
 /// the periodic state-class records (rate, load factor, probe-distance percentiles).
 /// </para>
 /// </remarks>
 internal static class AtomStoreProducers
 {
     /// <summary>
-    /// InternRate sampler: emits cumulative <see cref="AtomStore.AtomCount"/> plus the
+    /// InternRate sampler: emits cumulative <see cref="HashAtomStore.AtomCount"/> plus the
     /// per-second rate over the most recent interval.
     /// </summary>
-    public static JsonlMetricsListener.StateProducer InternRate(AtomStore store)
+    public static JsonlMetricsListener.StateProducer InternRate(HashAtomStore store)
     {
         if (store is null) throw new ArgumentNullException(nameof(store));
         long lastCount = store.AtomCount;
@@ -50,7 +50,7 @@ internal static class AtomStoreProducers
     /// <summary>
     /// LoadFactor sampler: emits current atom-count, bucket-count, and load-factor ratio.
     /// </summary>
-    public static JsonlMetricsListener.StateProducer LoadFactor(AtomStore store)
+    public static JsonlMetricsListener.StateProducer LoadFactor(HashAtomStore store)
     {
         if (store is null) throw new ArgumentNullException(nameof(store));
         return listener =>
@@ -78,7 +78,7 @@ internal static class AtomStoreProducers
     /// <see cref="LatencyHistogram.Record"/> calls; samples taken during the reset can
     /// be lost. Acceptable for state-class records — not exact accounting.
     /// </remarks>
-    public static JsonlMetricsListener.StateProducer ProbeDistance(AtomStore store)
+    public static JsonlMetricsListener.StateProducer ProbeDistance(HashAtomStore store)
     {
         if (store is null) throw new ArgumentNullException(nameof(store));
         return listener =>
@@ -107,7 +107,7 @@ internal static class AtomStoreProducers
     }
 
     /// <summary>Register all three Category B state producers on the listener.</summary>
-    public static void RegisterAll(JsonlMetricsListener listener, AtomStore store)
+    public static void RegisterAll(JsonlMetricsListener listener, HashAtomStore store)
     {
         if (listener is null) throw new ArgumentNullException(nameof(listener));
         if (store is null) throw new ArgumentNullException(nameof(store));

@@ -5,7 +5,7 @@ using SkyOmega.Mercury.Abstractions;
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
-/// Configuration options for storage components (AtomStore, TemporalQuadIndex, WriteAheadLog, QuadStore).
+/// Configuration options for storage components (IAtomStore, TemporalQuadIndex, WriteAheadLog, QuadStore).
 /// </summary>
 public sealed class StorageOptions
 {
@@ -33,7 +33,7 @@ public sealed class StorageOptions
     /// Maximum atom size in bytes. Default: 1MB.
     /// Prevents resource exhaustion from oversized values.
     /// </summary>
-    public long MaxAtomSize { get; init; } = AtomStore.DefaultMaxAtomSize;
+    public long MaxAtomSize { get; init; } = HashAtomStore.DefaultMaxAtomSize;
 
     /// <summary>
     /// Initial size for each TemporalQuadIndex file (4 indexes: GSPO, GPOS, GOSP, TGSP). Default: 1GB.
@@ -43,21 +43,21 @@ public sealed class StorageOptions
     public long IndexInitialSizeBytes { get; init; } = 1L << 30;
 
     /// <summary>
-    /// Initial size for AtomStore data file. Default: 1GB.
+    /// Initial size for IAtomStore data file. Default: 1GB.
     /// For testing, use smaller values to reduce disk footprint.
     /// File grows automatically when capacity is exceeded.
     /// </summary>
     public long AtomDataInitialSizeBytes { get; init; } = 1L << 30;
 
     /// <summary>
-    /// Initial capacity for AtomStore offset index (number of atoms). Default: 1M.
+    /// Initial capacity for IAtomStore offset index (number of atoms). Default: 1M.
     /// File size is this value × 8 bytes (64-bit offsets).
     /// For testing, use smaller values (e.g., 64K) to reduce disk footprint.
     /// </summary>
     public long AtomOffsetInitialCapacity { get; init; } = 1L << 20;
 
     /// <summary>
-    /// Initial bucket count for the AtomStore hash table. Default: 16M (preserves legacy behavior).
+    /// Initial bucket count for the IAtomStore hash table. Default: 16M (preserves legacy behavior).
     /// File size is this value × 32 bytes (sizeof HashBucket).
     /// Fixed at store creation — reopening an existing store always uses the recorded size.
     /// Bulk mode bumps this to 256M buckets (8 GB sparse file) so Wikidata-scale ingests

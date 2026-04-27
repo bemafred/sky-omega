@@ -201,7 +201,7 @@ public class ReferenceQuadIndexTests : IDisposable
             first.Flush();
         }
 
-        // Read session — own AtomStore reopened
+        // Read session — own IAtomStore reopened
         using (var reopened = new ReferenceQuadIndex(_testPath, sharedAtoms: null, initialSizeBytes: 1L << 20))
         {
             Assert.Equal(100, reopened.QuadCount);

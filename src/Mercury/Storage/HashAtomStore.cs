@@ -48,7 +48,7 @@ namespace SkyOmega.Mercury.Storage;
 /// Single-span retrieval is limited to 2GB by .NET Span&lt;T&gt; constraint.
 /// For larger blobs, implement chunked access pattern (see GetAtomSpan remarks).</para>
 /// </remarks>
-internal sealed unsafe class AtomStore : IDisposable
+internal sealed unsafe class HashAtomStore : IAtomStore
 {
     private const int PageSize = 4096; // 4KB pages
     private const long DefaultHashTableSize = 1L << 24; // 16M buckets for cognitive-scale stores
@@ -126,16 +126,16 @@ internal sealed unsafe class AtomStore : IDisposable
     // Maximum allowed atom size in bytes
     private readonly long _maxAtomSize;
 
-    public AtomStore(string baseFilePath)
+    public HashAtomStore(string baseFilePath)
         : this(baseFilePath, null, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
-    public AtomStore(string baseFilePath, IBufferManager? bufferManager)
+    public HashAtomStore(string baseFilePath, IBufferManager? bufferManager)
         : this(baseFilePath, bufferManager, DefaultMaxAtomSize, InitialDataSize, InitialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
-    public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize)
+    public HashAtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize)
         : this(baseFilePath, bufferManager, maxAtomSize, InitialDataSize, InitialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
-    public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
+    public HashAtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
                      long initialDataSize, long initialOffsetCapacity)
         : this(baseFilePath, bufferManager, maxAtomSize, initialDataSize, initialOffsetCapacity, DefaultHashTableSize, bulkMode: false) { }
 
@@ -149,7 +149,7 @@ internal sealed unsafe class AtomStore : IDisposable
     /// <param name="initialOffsetCapacity">Initial capacity for the offset index (number of atoms).</param>
     /// <param name="hashTableInitialCapacity">Initial bucket count for the hash table (fixed at creation).</param>
     /// <param name="bulkMode">When true, sizes the hash table for Wikidata-scale ingests using a sparse mmap.</param>
-    public AtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
+    public HashAtomStore(string baseFilePath, IBufferManager? bufferManager, long maxAtomSize,
                      long initialDataSize, long initialOffsetCapacity,
                      long hashTableInitialCapacity, bool bulkMode)
     {
@@ -511,7 +511,7 @@ internal sealed unsafe class AtomStore : IDisposable
     /// events (rehash, file growth) and to enable per-Intern probe-distance recording.
     /// First non-null assignment lazily allocates the probe histogram.
     /// </summary>
-    internal IObservabilityListener? ObservabilityListener
+    public IObservabilityListener? ObservabilityListener
     {
         get => _observabilityListener;
         set

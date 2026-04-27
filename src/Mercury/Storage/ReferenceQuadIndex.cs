@@ -39,7 +39,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmapFile;
     private readonly MemoryMappedViewAccessor _accessor;
-    private readonly AtomStore _atoms;
+    private readonly IAtomStore _atoms;
     private readonly bool _ownsAtomStore;
     private readonly PageCache _pageCache;
 
@@ -59,8 +59,8 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     /// </summary>
     private const long MagicNumber = 0x5245464552454E4EL; // "REFERENN"
 
-    /// <summary>Create a reference index with a shared AtomStore (owned by QuadStore).</summary>
-    internal ReferenceQuadIndex(string filePath, AtomStore? sharedAtoms,
+    /// <summary>Create a reference index with a shared IAtomStore (owned by QuadStore).</summary>
+    internal ReferenceQuadIndex(string filePath, IAtomStore? sharedAtoms,
         long initialSizeBytes = 1L << 30, bool bulkMode = false)
     {
         _deferMsync = bulkMode;
@@ -107,7 +107,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         }
         else
         {
-            _atoms = new AtomStore(filePath + ".atoms");
+            _atoms = new HashAtomStore(filePath + ".atoms");
             _ownsAtomStore = true;
         }
 
@@ -117,7 +117,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     }
 
     /// <summary>Internal access to the shared atom store (under QuadStore lock).</summary>
-    internal AtomStore Atoms => _atoms;
+    internal IAtomStore Atoms => _atoms;
 
     #region IQuadIndex
 

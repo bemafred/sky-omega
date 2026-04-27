@@ -307,7 +307,7 @@ else
     resolvedStorePath = storePath ?? (storeName != null ? MercuryPaths.Store(storeName) : MercuryPaths.Store("cli"));
     try
     {
-        // ADR-028 Stage 2 validation knob: when set, honor this exactly as the AtomStore
+        // ADR-028 Stage 2 validation knob: when set, honor this exactly as the IAtomStore
         // initial hash capacity (bypasses the bulk-mode 256M floor) so rehash-on-grow
         // is exercised during bulk load. Unset in normal operation.
         long? atomHashOverride = null;
@@ -356,7 +356,7 @@ if (jsonlListener is not null)
     pool.Active.ObservabilityListener = jsonlListener;
 
     // Category G + B state producers fire only when the timer is active. Category B
-    // (atom-store) reads the live AtomStore via the QuadStore's RegisterAtomStateProducers
+    // (atom-store) reads the live IAtomStore via the QuadStore's RegisterAtomStateProducers
     // method; Category G samples process-level state (GC/LOH/RSS/disk-free) with the
     // resolved store path used as the disk-free target.
     if (metricsStateIntervalSeconds > 0)

@@ -34,7 +34,7 @@ public sealed class QuadStore : IDisposable
     private readonly ReferenceQuadIndex? _gposReference;
     private readonly TrigramIndex _trigramIndex;
 
-    private readonly AtomStore _atoms;
+    private readonly IAtomStore _atoms;
     // WAL is only constructed for profiles that provide versioning (Cognitive, Graph).
     // Reference has no WAL by design — bulk-load is the only write path, and its
     // durability is provided by FlushToDisk at load completion (ADR-029 / ADR-026).
@@ -156,7 +156,7 @@ public sealed class QuadStore : IDisposable
         // Create shared atom store for all indexes.
         // ForceAtomHashCapacity suppresses the bulk-mode floor for ADR-028 validation.
         var effectiveBulkMode = options.BulkMode && !options.ForceAtomHashCapacity;
-        _atoms = new AtomStore(atomPath, _bufferManager, options.MaxAtomSize,
+        _atoms = new HashAtomStore(atomPath, _bufferManager, options.MaxAtomSize,
             options.AtomDataInitialSizeBytes, options.AtomOffsetInitialCapacity,
             options.AtomHashTableInitialCapacity, effectiveBulkMode);
 
@@ -244,7 +244,7 @@ public sealed class QuadStore : IDisposable
     /// emits — query, rebuild, load progress, GC/RSS state, atom-store events, scope
     /// correlation. Default null: zero overhead. Fan-out is reference-equality-checked
     /// against the legacy listeners to avoid double emission when the same instance is
-    /// registered through multiple slots. The setter propagates to <see cref="AtomStore"/>
+    /// registered through multiple slots. The setter propagates to <see cref="IAtomStore"/>
     /// so atom-side discrete events (rehash, file growth) flow through the same observer
     /// and per-Intern probe-distance recording activates.
     /// </summary>
@@ -268,7 +268,10 @@ public sealed class QuadStore : IDisposable
     public void RegisterAtomStateProducers(Diagnostics.JsonlMetricsListener listener)
     {
         if (listener is null) throw new ArgumentNullException(nameof(listener));
-        AtomStoreProducers.RegisterAll(listener, _atoms);
+        // Phase 7a.3 producers are HashAtomStore-specific (probe distance, bucket count).
+        // SortedAtomStore (ADR-034) will register its own producers via a different path.
+        if (_atoms is HashAtomStore hashStore)
+            AtomStoreProducers.RegisterAll(listener, hashStore);
     }
 
     /// <summary>True iff at least one rebuild observer is registered (legacy or umbrella).</summary>
@@ -371,10 +374,10 @@ public sealed class QuadStore : IDisposable
     /// Required by QueryPlanner for cardinality estimation.
     /// </summary>
     /// <remarks>
-    /// Internal: AtomStore requires external synchronization via this QuadStore's
+    /// Internal: IAtomStore requires external synchronization via this QuadStore's
     /// read/write locks. Direct access is only safe within Mercury internals.
     /// </remarks>
-    internal AtomStore Atoms => _atoms;
+    internal IAtomStore Atoms => _atoms;
 
     /// <summary>
     /// Returns true if disk space is below the configured minimum threshold.
@@ -442,7 +445,7 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
-            // 1. Intern atoms first (AtomStore is append-only, naturally durable)
+            // 1. Intern atoms first (IAtomStore is append-only, naturally durable)
             var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
             var subjectId = _atoms.Intern(subject);
             var predicateId = _atoms.Intern(predicate);
@@ -633,7 +636,7 @@ public sealed class QuadStore : IDisposable
         if (_activeBatchTxId < 0)
             throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
 
-        // 1. Intern atoms (AtomStore is append-only — orphans from rollback are harmless)
+        // 1. Intern atoms (IAtomStore is append-only — orphans from rollback are harmless)
         var graphId = graph.IsEmpty ? 0 : _atoms.Intern(graph);
         var subjectId = _atoms.Intern(subject);
         var predicateId = _atoms.Intern(predicate);
@@ -1884,7 +1887,7 @@ public sealed class QuadStore : IDisposable
     /// <summary>
     /// Resolve a SPARQL term (IRI, literal, or variable) to an atom ID for Reference-profile
     /// queries. Empty spans and ?-prefixed variables become -1 (wildcard); IRIs/literals are
-    /// looked up in the AtomStore (returning 0 if not present, which matches nothing).
+    /// looked up in the IAtomStore (returning 0 if not present, which matches nothing).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ResolveQueryTerm(ReadOnlySpan<char> term)
@@ -2169,7 +2172,7 @@ public struct TemporalResultEnumerator
     private readonly bool _isReference;
 
     private readonly TemporalIndexType _indexType;
-    private readonly AtomStore _atoms;
+    private readonly IAtomStore _atoms;
     private readonly HashSet<long>? _candidateObjectAtomIds;
 
     // Pooled buffer for zero-allocation string decoding
@@ -2180,7 +2183,7 @@ public struct TemporalResultEnumerator
     internal TemporalResultEnumerator(
         TemporalQuadIndex.TemporalQuadEnumerator baseEnumerator,
         TemporalIndexType indexType,
-        AtomStore atoms)
+        IAtomStore atoms)
     {
         _baseEnumerator = baseEnumerator;
         _referenceEnumerator = default;
@@ -2195,7 +2198,7 @@ public struct TemporalResultEnumerator
     internal TemporalResultEnumerator(
         TemporalQuadIndex.TemporalQuadEnumerator baseEnumerator,
         TemporalIndexType indexType,
-        AtomStore atoms,
+        IAtomStore atoms,
         HashSet<long>? candidateObjectAtomIds)
     {
         _baseEnumerator = baseEnumerator;
@@ -2217,7 +2220,7 @@ public struct TemporalResultEnumerator
     internal TemporalResultEnumerator(
         ReferenceQuadIndex.ReferenceQuadEnumerator referenceEnumerator,
         TemporalIndexType indexType,
-        AtomStore atoms,
+        IAtomStore atoms,
         HashSet<long>? candidateObjectAtomIds = null)
     {
         _baseEnumerator = default;
@@ -2460,11 +2463,11 @@ public readonly ref struct ResolvedTemporalQuad
 public ref struct NamedGraphEnumerator
 {
     private TemporalQuadIndex.TemporalQuadEnumerator _enumerator;
-    private readonly AtomStore _atoms;
+    private readonly IAtomStore _atoms;
     private long _lastGraphAtom;
     private string? _current;
 
-    internal NamedGraphEnumerator(TemporalQuadIndex index, AtomStore atoms)
+    internal NamedGraphEnumerator(TemporalQuadIndex index, IAtomStore atoms)
     {
         // Query all current quads across ALL graphs (default + named)
         _enumerator = index.QueryCurrentAllGraphs();

@@ -320,7 +320,7 @@ public class BufferManagerTests : IDisposable
         var tracker = new TrackingBufferManager();
         var atomPath = Path.Combine(_tempDir, "atoms");
 
-        using (var store = new AtomStore(atomPath, tracker))
+        using (var store = new HashAtomStore(atomPath, tracker))
         {
             // Intern some strings to trigger buffer usage
             var id1 = store.Intern("http://example.org/subject".AsSpan());
@@ -332,7 +332,7 @@ public class BufferManagerTests : IDisposable
             Assert.True(id3 > 0);
         }
 
-        // AtomStore uses AllocateSmart which may or may not rent depending on string size
+        // IAtomStore uses AllocateSmart which may or may not rent depending on string size
         // Just verify no leaks
         tracker.AssertAllReturned();
     }
@@ -509,7 +509,7 @@ public class BufferManagerTests : IDisposable
         var tracker = new TrackingBufferManager();
         var atomPath = Path.Combine(_tempDir, "atoms-stress");
 
-        using (var store = new AtomStore(atomPath, tracker))
+        using (var store = new HashAtomStore(atomPath, tracker))
         {
             // Intern many strings of varying sizes
             for (int i = 0; i < 500; i++)

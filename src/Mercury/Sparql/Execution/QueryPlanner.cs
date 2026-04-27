@@ -11,21 +11,21 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 /// using predicate cardinality statistics.
 /// </summary>
 /// <remarks>
-/// Internal constructor: AtomStore requires external synchronization via QuadStore's
+/// Internal constructor: IAtomStore requires external synchronization via QuadStore's
 /// read/write locks. QueryPlanner is created by QueryExecutor; the caller of
 /// QueryExecutor must hold appropriate locks (see ADR-020, ADR-021).
 /// </remarks>
 internal sealed class QueryPlanner
 {
     private readonly StatisticsStore _statistics;
-    private readonly AtomStore _atoms;
+    private readonly IAtomStore _atoms;
 
     // Default cardinality estimates when no statistics are available
     private const double DefaultFullScanCardinality = 10000.0;
     private const double DefaultSelectiveScanCardinality = 100.0;
     private const double DefaultPointLookupCardinality = 1.0;
 
-    internal QueryPlanner(StatisticsStore statistics, AtomStore atoms)
+    internal QueryPlanner(StatisticsStore statistics, IAtomStore atoms)
     {
         _statistics = statistics ?? throw new ArgumentNullException(nameof(statistics));
         _atoms = atoms ?? throw new ArgumentNullException(nameof(atoms));

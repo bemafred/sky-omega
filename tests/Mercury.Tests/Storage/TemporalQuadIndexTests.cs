@@ -329,7 +329,7 @@ public class TemporalQuadIndexTests : IDisposable
 
     #endregion
 
-    #region Shared AtomStore
+    #region Shared IAtomStore
 
     [Fact]
     public void Constructor_SharedAtomStore_UsesProvided()
@@ -337,7 +337,7 @@ public class TemporalQuadIndexTests : IDisposable
         var atomsPath = _testPath + ".shared.atoms";
         try
         {
-            using var sharedAtoms = new AtomStore(atomsPath);
+            using var sharedAtoms = new HashAtomStore(atomsPath);
             using var index = new TemporalQuadIndex(_testPath, sharedAtoms);
 
             Assert.Same(sharedAtoms, index.Atoms);

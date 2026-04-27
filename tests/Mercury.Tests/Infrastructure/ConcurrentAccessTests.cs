@@ -744,7 +744,7 @@ public class ConcurrentAccessTests : IDisposable
 
     #region QuadStore Concurrent Atom Interning
 
-    // Note: AtomStore expects external locking from QuadStore (see AtomStore.cs line 25-26).
+    // Note: IAtomStore expects external locking from QuadStore (see IAtomStore.cs line 25-26).
     // These tests verify concurrent atom interning through QuadStore's write operations.
 
     [Fact]

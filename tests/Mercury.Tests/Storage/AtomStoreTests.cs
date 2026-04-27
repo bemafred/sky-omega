@@ -9,13 +9,13 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Storage;
 
 /// <summary>
-/// Tests for AtomStore - string interning with memory-mapped storage.
+/// Tests for IAtomStore - string interning with memory-mapped storage.
 /// </summary>
 public class AtomStoreTests : IDisposable
 {
     private readonly string _testDir;
     private readonly string _testPath;
-    private AtomStore? _store;
+    private IAtomStore? _store;
 
     public AtomStoreTests()
     {
@@ -31,10 +31,10 @@ public class AtomStoreTests : IDisposable
         TempPath.SafeCleanup(_testDir);
     }
 
-    private AtomStore CreateStore()
+    private IAtomStore CreateStore()
     {
         _store?.Dispose();
-        _store = new AtomStore(_testPath);
+        _store = new HashAtomStore(_testPath);
         return _store;
     }
 
@@ -155,7 +155,7 @@ public class AtomStoreTests : IDisposable
     {
         // Use a small max size for test speed
         var maxSize = 1000L;
-        using var store = new AtomStore(_testPath + "_maxsize", null, maxSize);
+        using var store = new HashAtomStore(_testPath + "_maxsize", null, maxSize);
         var exactlyAtLimit = new string('x', (int)maxSize);
 
         var id = store.Intern(exactlyAtLimit);
@@ -168,7 +168,7 @@ public class AtomStoreTests : IDisposable
     public void Intern_OverMaxSize_ThrowsArgumentException()
     {
         var maxSize = 100L;
-        using var store = new AtomStore(_testPath + "_over", null, maxSize);
+        using var store = new HashAtomStore(_testPath + "_over", null, maxSize);
         var overLimit = new string('x', (int)maxSize + 1);
 
         var ex = Assert.Throws<ArgumentException>(() => store.Intern(overLimit));
@@ -179,7 +179,7 @@ public class AtomStoreTests : IDisposable
     public void InternUtf8_OverMaxSize_ThrowsArgumentException()
     {
         var maxSize = 100L;
-        using var store = new AtomStore(_testPath + "_utf8over", null, maxSize);
+        using var store = new HashAtomStore(_testPath + "_utf8over", null, maxSize);
         var overLimit = new byte[(int)maxSize + 1];
 
         var ex = Assert.Throws<ArgumentException>(() => store.InternUtf8(overLimit));
@@ -190,14 +190,14 @@ public class AtomStoreTests : IDisposable
     public void Constructor_NegativeMaxSize_ThrowsArgumentOutOfRangeException()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new AtomStore(_testPath + "_neg", null, -1));
+            new HashAtomStore(_testPath + "_neg", null, -1));
     }
 
     [Fact]
     public void Constructor_ZeroMaxSize_ThrowsArgumentOutOfRangeException()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            new AtomStore(_testPath + "_zero", null, 0));
+            new HashAtomStore(_testPath + "_zero", null, 0));
     }
 
     #endregion
@@ -366,7 +366,7 @@ public class AtomStoreTests : IDisposable
         long id1, id2;
 
         // First session: create atoms
-        using (var store1 = new AtomStore(_testPath))
+        using (var store1 = new HashAtomStore(_testPath))
         {
             id1 = store1.Intern("persistent1");
             id2 = store1.Intern("persistent2");
@@ -374,7 +374,7 @@ public class AtomStoreTests : IDisposable
         }
 
         // Second session: read atoms
-        using (var store2 = new AtomStore(_testPath))
+        using (var store2 = new HashAtomStore(_testPath))
         {
             Assert.Equal("persistent1", store2.GetAtomString(id1));
             Assert.Equal("persistent2", store2.GetAtomString(id2));
@@ -386,13 +386,13 @@ public class AtomStoreTests : IDisposable
     {
         long originalId;
 
-        using (var store1 = new AtomStore(_testPath))
+        using (var store1 = new HashAtomStore(_testPath))
         {
             originalId = store1.Intern("dedup_test");
             store1.Flush();
         }
 
-        using (var store2 = new AtomStore(_testPath))
+        using (var store2 = new HashAtomStore(_testPath))
         {
             var newId = store2.Intern("dedup_test");
             Assert.Equal(originalId, newId);
@@ -402,7 +402,7 @@ public class AtomStoreTests : IDisposable
     [Fact]
     public void Persistence_AtomCountSurvivesReopen()
     {
-        using (var store1 = new AtomStore(_testPath))
+        using (var store1 = new HashAtomStore(_testPath))
         {
             store1.Intern("one");
             store1.Intern("two");
@@ -410,7 +410,7 @@ public class AtomStoreTests : IDisposable
             store1.Flush();
         }
 
-        using (var store2 = new AtomStore(_testPath))
+        using (var store2 = new HashAtomStore(_testPath))
         {
             Assert.Equal(3, store2.AtomCount);
         }
@@ -615,11 +615,11 @@ public class AtomStoreTests : IDisposable
 
     // Small-cap constructor: starts with a tiny hash table so load factor crosses
     // 75% quickly and the rehash path is exercised in under a second.
-    private static AtomStore CreateStoreWithSmallHashTable(string path, long initialBuckets = 64)
-        => new AtomStore(
+    private static HashAtomStore CreateStoreWithSmallHashTable(string path, long initialBuckets = 64)
+        => new HashAtomStore(
             path,
             bufferManager: null,
-            maxAtomSize: AtomStore.DefaultMaxAtomSize,
+            maxAtomSize: HashAtomStore.DefaultMaxAtomSize,
             initialDataSize: 1L << 20,   // 1 MB — enough for a few thousand atoms in tests
             initialOffsetCapacity: 1024,
             hashTableInitialCapacity: initialBuckets,
@@ -674,7 +674,7 @@ public class AtomStoreTests : IDisposable
             store1.Flush();
         }
 
-        using (var store2 = new AtomStore(path))
+        using (var store2 = new HashAtomStore(path))
         {
             // Reopen derives hash table size from file length — must match post-rehash size.
             Assert.Equal(grownSize, store2.HashTableSize);
@@ -692,7 +692,7 @@ public class AtomStoreTests : IDisposable
     public void Rehash_OrphanedDotOld_DeletedOnReopen()
     {
         var path = _testPath + "_orphan_old";
-        using (var store = new AtomStore(path))
+        using (var store = new HashAtomStore(path))
         {
             store.Intern("alpha");
             store.Intern("beta");
@@ -703,7 +703,7 @@ public class AtomStoreTests : IDisposable
         File.WriteAllBytes(path + ".atomidx.old", new byte[] { 0xDE, 0xAD, 0xBE, 0xEF });
         Assert.True(File.Exists(path + ".atomidx.old"));
 
-        using (var reopened = new AtomStore(path))
+        using (var reopened = new HashAtomStore(path))
         {
             Assert.False(File.Exists(path + ".atomidx.old"), ".old orphan should be deleted on open");
             Assert.Equal("alpha", reopened.GetAtomString(reopened.GetAtomId("alpha")));
@@ -715,7 +715,7 @@ public class AtomStoreTests : IDisposable
     public void Rehash_OrphanedDotNew_DeletedOnReopen()
     {
         var path = _testPath + "_orphan_new";
-        using (var store = new AtomStore(path))
+        using (var store = new HashAtomStore(path))
         {
             store.Intern("alpha");
             store.Flush();
@@ -724,7 +724,7 @@ public class AtomStoreTests : IDisposable
         // Simulate aborted rehash before the step-1 rename: .new exists alongside canonical .atomidx.
         File.WriteAllBytes(path + ".atomidx.new", new byte[] { 0x00, 0x00, 0x00, 0x00 });
 
-        using (var reopened = new AtomStore(path))
+        using (var reopened = new HashAtomStore(path))
         {
             Assert.False(File.Exists(path + ".atomidx.new"), ".new orphan should be deleted on open");
             Assert.Equal("alpha", reopened.GetAtomString(reopened.GetAtomId("alpha")));
@@ -736,7 +736,7 @@ public class AtomStoreTests : IDisposable
     {
         var path = _testPath + "_mid_swap";
         long alphaId;
-        using (var store = new AtomStore(path))
+        using (var store = new HashAtomStore(path))
         {
             alphaId = store.Intern("alpha");
             store.Intern("beta");
@@ -750,7 +750,7 @@ public class AtomStoreTests : IDisposable
         File.WriteAllBytes(path + ".atomidx.new", new byte[] { 0xFF, 0xFF, 0xFF, 0xFF });
         Assert.False(File.Exists(path + ".atomidx"));
 
-        using (var reopened = new AtomStore(path))
+        using (var reopened = new HashAtomStore(path))
         {
             Assert.True(File.Exists(path + ".atomidx"), "reconcile should promote .old back to .atomidx");
             Assert.False(File.Exists(path + ".atomidx.old"));
@@ -765,7 +765,7 @@ public class AtomStoreTests : IDisposable
     {
         var path = _testPath + "_only_new";
         long alphaId;
-        using (var store = new AtomStore(path))
+        using (var store = new HashAtomStore(path))
         {
             alphaId = store.Intern("alpha");
             store.Flush();
@@ -775,7 +775,7 @@ public class AtomStoreTests : IDisposable
         File.Move(path + ".atomidx", path + ".atomidx.new");
         Assert.False(File.Exists(path + ".atomidx"));
 
-        using (var reopened = new AtomStore(path))
+        using (var reopened = new HashAtomStore(path))
         {
             Assert.True(File.Exists(path + ".atomidx"));
             Assert.False(File.Exists(path + ".atomidx.new"));

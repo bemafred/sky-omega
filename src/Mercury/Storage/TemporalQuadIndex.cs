@@ -25,7 +25,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     private readonly FileStream _fileStream;
     private readonly MemoryMappedFile _mmapFile;
     private readonly MemoryMappedViewAccessor _accessor;
-    private readonly AtomStore _atoms;
+    private readonly IAtomStore _atoms;
     private readonly bool _ownsAtomStore;
     private readonly PageCache _pageCache;
     private readonly KeyComparer _comparer;
@@ -62,10 +62,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// Create a temporal quad store with a shared atom store.
     /// </summary>
     /// <remarks>
-    /// Internal: AtomStore parameter requires external synchronization.
-    /// Use this constructor only when sharing an AtomStore across indexes.
+    /// Internal: IAtomStore parameter requires external synchronization.
+    /// Use this constructor only when sharing an IAtomStore across indexes.
     /// </remarks>
-    internal TemporalQuadIndex(string filePath, AtomStore? sharedAtoms, long initialSizeBytes = 1L << 30,
+    internal TemporalQuadIndex(string filePath, IAtomStore? sharedAtoms, long initialSizeBytes = 1L << 30,
         KeySortOrder sortOrder = KeySortOrder.EntityFirst, bool bulkMode = false)
     {
         _sortOrder = sortOrder;
@@ -126,7 +126,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         else
         {
             var atomFilePath = filePath + ".atoms";
-            _atoms = new AtomStore(atomFilePath);
+            _atoms = new HashAtomStore(atomFilePath);
             _ownsAtomStore = true;
         }
 
@@ -139,10 +139,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// Get the atom store (for shared access).
     /// </summary>
     /// <remarks>
-    /// Internal: AtomStore requires external synchronization via the owning
+    /// Internal: IAtomStore requires external synchronization via the owning
     /// QuadStore's read/write locks.
     /// </remarks>
-    internal AtomStore Atoms => _atoms;
+    internal IAtomStore Atoms => _atoms;
 
     /// <summary>
     /// The sort order used by this index instance.

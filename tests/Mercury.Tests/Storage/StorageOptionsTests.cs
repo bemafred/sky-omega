@@ -34,7 +34,7 @@ public class StorageOptionsTests : IDisposable
         var options = StorageOptions.Default;
 
         Assert.Equal(1L << 30, options.MinimumFreeDiskSpace); // 1GB
-        Assert.Equal(AtomStore.DefaultMaxAtomSize, options.MaxAtomSize);
+        Assert.Equal(HashAtomStore.DefaultMaxAtomSize, options.MaxAtomSize);
     }
 
     [Fact]
@@ -166,7 +166,7 @@ public class StorageOptionsTests : IDisposable
 
     #endregion
 
-    #region AtomStore with MaxAtomSize
+    #region IAtomStore with MaxAtomSize
 
     [Fact]
     public void AtomStore_AcceptsMaxAtomSize()
@@ -174,7 +174,7 @@ public class StorageOptionsTests : IDisposable
         long maxAtomSize = 512 << 10; // 512KB
 
         var atomPath = Path.Combine(_testPath, "atoms");
-        using var store = new AtomStore(atomPath, null, maxAtomSize);
+        using var store = new HashAtomStore(atomPath, null, maxAtomSize);
 
         // Should create successfully
         var id = store.Intern("test value");
@@ -187,7 +187,7 @@ public class StorageOptionsTests : IDisposable
         long maxAtomSize = 100; // Very small limit
 
         var atomPath = Path.Combine(_testPath, "atoms");
-        using var store = new AtomStore(atomPath, null, maxAtomSize);
+        using var store = new HashAtomStore(atomPath, null, maxAtomSize);
 
         // Small value should work
         var id = store.Intern("small");
