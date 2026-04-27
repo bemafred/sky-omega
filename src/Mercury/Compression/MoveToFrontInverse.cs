@@ -65,22 +65,29 @@ internal struct MoveToFrontInverse
     /// Output the byte at position <paramref name="index"/>, then move that entry
     /// to position 0 (shifting <c>0..index-1</c> right). Returns the output byte.
     /// </summary>
+    /// <remarks>
+    /// Hot path: inlined unsafe shift. For small <paramref name="index"/> (the common case
+    /// on bzip2-compressed input where MTF indices cluster near zero), a manual scalar
+    /// loop beats <see cref="Span{T}.CopyTo"/>'s method-call overhead. The fixed-size
+    /// 256-byte buffer is held inline via <see cref="MtfBuffer"/>'s <c>[InlineArray]</c>,
+    /// so the unsafe pointer cannot be invalidated by any allocation.
+    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public byte Decode(int index)
+    public unsafe byte Decode(int index)
     {
         if ((uint)index >= 256)
             throw new ArgumentOutOfRangeException(nameof(index));
 
-        Span<byte> list = _list;
-        byte symbol = list[index];
-
-        // Forward-overlapping move of [0, index) into [1, index+1). Span<byte>.CopyTo
-        // handles the overlap correctly via memmove semantics.
-        if (index > 0)
-            list.Slice(0, index).CopyTo(list.Slice(1, index));
-        list[0] = symbol;
-
-        return symbol;
+        fixed (byte* list = &System.Runtime.InteropServices.MemoryMarshal.GetReference<byte>(_list))
+        {
+            byte symbol = list[index];
+            // Forward-overlapping shift of [0, index) → [1, index+1). Tight scalar loop
+            // wins for small index; the JIT can vectorize for large index when profitable.
+            for (int i = index; i > 0; i--)
+                list[i] = list[i - 1];
+            list[0] = symbol;
+            return symbol;
+        }
     }
 
     /// <summary>Copy the current list into <paramref name="destination"/> (for tests/diagnostics).</summary>

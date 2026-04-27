@@ -36,12 +36,13 @@ internal sealed class BurrowsWheelerInverse
     public const int MaxBlockSize = 900_000;
 
     /// <summary>
-    /// Successor permutation in bzip2's canonical formulation. <c>T[j]</c> gives the row
-    /// index <c>i</c> in <c>L</c> whose character is the same instance as the j-th character
-    /// in the sorted F-column. The walk pattern is <c>i = T[i]; emit L[i]</c>, advancing
-    /// the original sequence one position per step.
+    /// Packed successor + emit-byte. <c>_packed[j]</c> encodes <c>(L[T[j]] &lt;&lt; 24) | T[j]</c>
+    /// — the byte to emit at this row plus the next row in the walk, in one 32-bit load.
+    /// Block length is bounded by 900,000 so 24 bits is sufficient for the row index;
+    /// the upper byte carries the character. Halves the load count per emitted byte vs
+    /// separate T[] and L[] reads, the dominant cost on cache-miss-bound walks.
     /// </summary>
-    private readonly int[] _t = new int[MaxBlockSize];
+    private readonly int[] _packed = new int[MaxBlockSize];
 
     /// <summary>
     /// Decode <paramref name="length"/> bytes of BWT output starting from <paramref name="origin"/>.
@@ -83,42 +84,59 @@ internal sealed class BurrowsWheelerInverse
     }
 
     /// <summary>
-    /// Build T using bzip2's canonical recurrence: <c>T[cumStart[L[i]]++] = i</c>. The
-    /// resulting permutation lets the walk emit L[T[i]] in original-text order.
+    /// Build the packed successor table. Two passes:
+    /// 1. <c>_packed[cumStart[L[i]]++] = i</c> places the source row index in each slot
+    ///    (T[j] = i). Encoding identical to bzip2's canonical T-permutation.
+    /// 2. Walk every slot j; replace <c>_packed[j]</c> with <c>(L[T[j]] &lt;&lt; 24) | T[j]</c>.
+    ///    After this pass, one load per emitted byte covers both "what to emit" and
+    ///    "where to go next" — eliminating the L[i] read from the walk hot path.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void BuildPermutation(ReadOnlySpan<byte> lastColumn, int length, Span<int> cumStart)
     {
-        fixed (int* tBase = _t)
+        fixed (int* pBase = _packed)
         fixed (byte* lBase = lastColumn)
         fixed (int* cumBase = cumStart)
         {
+            // Pass 1: T[j] = i where row j's F-column character is L[i].
             for (int i = 0; i < length; i++)
             {
                 int slot = cumBase[lBase[i]]++;
-                tBase[slot] = i;
+                pBase[slot] = i;
+            }
+            // Pass 2: pack (L[j] << 24) | T[j] so one load at row j gives both the
+            // character to emit at row j and the next row in the walk.
+            for (int j = 0; j < length; j++)
+            {
+                int t = pBase[j];
+                pBase[j] = ((int)lBase[j] << 24) | t;
             }
         }
     }
 
     /// <summary>
-    /// Walk: <c>i = T[origin]; emit L[i]; i = T[i]; emit L[i]; ...</c> The first <c>i = T[origin]</c>
-    /// advances from the origin row (which holds the original's last character in L) to the
-    /// row whose L is the original's first character. Each subsequent T-step advances one
-    /// position in the original sequence.
+    /// Walk via the packed successor table: each iteration is one 32-bit load + a
+    /// shift + a mask + one byte store. Pointer-chasing latency dominates on cold
+    /// blocks (the packed table is 3.6 MB at maximum block size, larger than typical
+    /// L2); on warm blocks the JIT can issue back-to-back loads for memory-level
+    /// parallelism within the dependency chain.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private unsafe void WalkAndEmit(int origin, int length, ReadOnlySpan<byte> lastColumn, Span<byte> output)
     {
-        fixed (int* tBase = _t)
-        fixed (byte* lBase = lastColumn)
+        fixed (int* pBase = _packed)
         fixed (byte* outBase = output)
         {
-            int i = tBase[origin];
+            // Initial step: i = T[origin]. _packed[origin] = (L[T[origin]] << 24) | T[origin],
+            // so i = _packed[origin] & 0xFFFFFF. The first emitted character is L[T[origin]],
+            // which is the high byte of _packed[origin].
+            int packed = pBase[origin];
+            int i = packed & 0xFFFFFF;
             for (int j = 0; j < length; j++)
             {
-                outBase[j] = lBase[i];
-                i = tBase[i];
+                int p = pBase[i];
+                outBase[j] = (byte)((uint)p >> 24);
+                i = p & 0xFFFFFF;
             }
         }
     }
