@@ -32,8 +32,8 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.44 — Phase 6 complete: 21.3 B Wikidata, ingested, sealed, queryable on a single laptop.** The full Wikidata graph (3.1 TB uncompressed N-Triples source, 21,260,051,924 triples, 85 h end-to-end on an M5 Max with 128 GB RAM, BCL-only .NET) loaded, rebuilt, and validated query-side as of 2026-04-26. Both primary (GSPO) and secondary (GPOS) indexes return correct results at full scale — `wdt:P31` (instance-of) bound queries return real Wikidata instances in tens of milliseconds cold-cache; `LIMIT 10` over the full graph returns the dump's own metadata in 17 ms. **The capacity dimension of production hardening is now an empirical, sound finding, not an estimate.** What remains is performance: Phase 7 work (bulk-load optimization, query-time read-only mmap, sorted atom store, streaming bz2 source decompression, metrics infrastructure) is documented in `docs/limits/` with explicit trigger conditions for each round. The 85 h is a baseline on consumer hardware before any of those rounds have shipped; conservative compounding of Rounds 1-4 projects a fully-tuned 21.3 B run somewhere around 15-25 h on the same laptop. **The architectural bets are validated. The optimization rounds are characterized. The substrate is queryable at scale.** 4,205 Mercury + 25 Solid tests green throughout.
-> See [docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) for the public framing, [docs/validations/21b-query-validation-2026-04-26.md](docs/validations/21b-query-validation-2026-04-26.md) for the closing query-side measurement, [CHANGELOG.md](CHANGELOG.md) and [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md) for the architectural arc, [docs/validations/](docs/validations/) for the measurement record, and [docs/limits/](docs/limits/) for the documented next rounds.
+> **v1.7.45 — Phase 6 complete: 21.3 B Wikidata, ingested, sealed, queryable on a single laptop. Phase 7 in flight.** The full Wikidata graph (3.1 TB uncompressed N-Triples source, 21,260,051,924 triples, 85 h end-to-end on an M5 Max with 128 GB RAM, BCL-only .NET) loaded, rebuilt, and validated query-side as of 2026-04-26. Both primary (GSPO) and secondary (GPOS) indexes return correct results at full scale — `wdt:P31` (instance-of) bound queries return real Wikidata instances in tens of milliseconds cold-cache; `LIMIT 10` over the full graph returns the dump's own metadata in 17 ms. **The capacity dimension of production hardening is empirical, sound finding, not an estimate.** Performance optimization rounds are now landing: ADR-035 Phase 7a metrics infrastructure (Completed) and ADR-036 Phase 7b BCL-only bz2 streaming (Completed) validated together at 1 B Reference on 2026-04-27 — bulk-load 55 m 22 s @ 300 K triples/sec direct from `latest-all.ttl.bz2`, full metrics emission across all four channels. ADR-034 Phase 7c SortedAtomStore for Reference is in flight (Phase 1B-5b shipped; gradient validation pending). The 85 h baseline projects toward 15–25 h on the same laptop after the round series ships. **The architectural bets are validated. The optimization rounds are landing. The substrate is queryable at scale.** 4,331 Mercury + 25 Solid tests green throughout.
+> See [docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) for the public framing, [docs/validations/21b-query-validation-2026-04-26.md](docs/validations/21b-query-validation-2026-04-26.md) for the closing Phase 6 query-side measurement, [docs/validations/adr-035-phase7a-1b-2026-04-27.md](docs/validations/adr-035-phase7a-1b-2026-04-27.md) for the first 7a + 7b validation, [CHANGELOG.md](CHANGELOG.md) and [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md) for the architectural arc, [docs/validations/](docs/validations/) for the measurement record, and [docs/limits/](docs/limits/) for the documented next rounds.
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
 
@@ -101,9 +101,9 @@ The broader Sky Omega vision is a **stand-alone cognitive agent** built on this 
 | 100% W3C SPARQL 1.1 conformance  | 618 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
 | 100% W3C conformance (all formats)| 2,063 passing tests  | `dotnet test --filter "W3C"`                 |
 | Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 4,151 Mercury tests passing      | Test suite            | `dotnet test`                                |
+| 4,331 Mercury tests passing      | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
-| Development velocity             | ~180K lines           | See [STATISTICS.md](STATISTICS.md)           |
+| Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
 ---
 
@@ -119,7 +119,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 77,615 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). |
+| **Mercury**            | Temporal RDF substrate — 82,506 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). |
 | **Mercury.Solid**      | W3C Solid Protocol server with WAC/ACP access control                                      |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |

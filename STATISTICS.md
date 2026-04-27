@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-04-26 (Phase 6 21.3 B Wikidata complete + query-side validated; production-hardening close-out underway)
+**Last updated:** 2026-04-27 (Phase 7a metrics + Phase 7b bz2 streaming Completed at 1 B Reference; Phase 7c ADR-034 SortedAtomStore Phase 1B-5b in flight)
 
 Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts.
 
@@ -12,72 +12,78 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **78,878** | Knowledge substrate |
-| ├─ Sparql | 44,966 | SPARQL parser, executor, protocol |
-| ├─ Storage | 9,456 | B+Tree indexes (temporal + reference), AtomStore rehash, RadixSort, ExternalSorter, AppendSorted, WAL, schema plumbing |
+| **Mercury (total)** | **82,506** | Knowledge substrate |
+| ├─ Sparql | 44,975 | SPARQL parser, executor, protocol |
+| ├─ Storage | 10,949 | B+Tree indexes (temporal + reference), atom stores (Hash + Sorted), RadixSort, ExternalSorter, AppendSorted, WAL, schema plumbing, bulk builders |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Turtle | 4,108 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
 | ├─ TriG | 2,836 | TriG parser and writer |
+| ├─ Diagnostics | 2,742 | Observability infrastructure; ADR-035 Phase 7a metrics (bulk/rebuild progress, atom-store events + samplers, process-level state) |
 | ├─ NQuads | 1,476 | N-Quads parser and writer |
+| ├─ Compression | 1,453 | ADR-036 Phase 7b — BCL-only bzip2 streaming decompressor (CRC32, BitReader, RLE1, MTF, Huffman, BWT inverse) |
 | ├─ NTriples | 1,341 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
-| └─ Rdf | 536 | Core RDF types |
-| **Mercury.Abstractions** | **721** | `StoreProfile`, `StoreSchema`, exceptions, shared types |
+| ├─ Rdf | 536 | Core RDF types |
+| └─ (top-level + obj) | 1,255 | `RdfEngine`, `SparqlEngine` facades + generated files |
+| **Mercury.Abstractions** | **974** | `StoreProfile`, `StoreSchema`, `IAtomStore`, `AtomStoreImplementation`, exceptions, shared types |
 | **Mercury.Runtime** | **3,329** | Buffers, cross-process gate, temp paths |
 | **Mercury.Solid (total)** | **4,385** | W3C Solid Protocol (WAC/ACP, N3 Patch, HTTP handlers) |
 | **Mercury Tool Libraries** | **1,327** | Sparql.Tool + Turtle.Tool |
-| **Mercury CLIs** | **1,083** | mercury, mercury-sparql, mercury-turtle, mercury-mcp |
+| **Mercury CLIs** | **1,626** | mercury, mercury-sparql, mercury-turtle, mercury-mcp |
 | **Mercury.Pruning** | **1,204** | Copy-and-switch pruning + PruneEngine |
 | **DrHook (total)** | **2,343** | Runtime observation substrate (EventPipe + DAP) |
-| **Minerva** | **—** | Thought substrate (planned) |
+| **Minerva.Core** | **33** | Thought substrate (planned, scaffolding only) |
 
 ADR-028 + ADR-029 additions since 2026-04-17: `Storage` grew by ~2 K lines (`ReferenceQuadIndex`, schema plumbing, profile-aware `QuadStore`); `Mercury.Abstractions` grew to 721 lines from the new profile types and shared interfaces. `TemporalQuadIndex` is the rename of the former `QuadIndex`; the rename was tracked as git-rename (98 % / 95 % similarity) so `git log --follow` stitches history intact.
 
 ADR-032 + ADR-033 additions (2026-04-21 → 2026-04-23, versions 1.7.38 → 1.7.44): `Storage` grew another ~1.2 K lines for `RadixSort` (LSD radix sort with 8-bit digits, signed-long bias, skip-trivial-passes optimization), `ExternalSorter<T, TSorter>` (chunked spill + k-way merge via binary heap), `TrigramEntry` (12-byte sort key for the trigram rebuild), `AppendSorted` (sort-insert fast path for `ReferenceQuadIndex`), and the bulk-load + rebuild integration points in `QuadStore`. Phases 5.1.b and 5.1.c (parallel rebuild via broadcast channel; sort-insert via comparator) were shipped, validated as wall-clock-neutral, then **reverted** when Phase 5.2 dotnet-trace + iostat showed they had traded compute for overhead. The reverts retired ~600 lines from `QuadStore` + the `BroadcastChannel.cs` file. The radix external-sort architecture replaced both, preserving the architectural goal (sequential I/O via sort-insert) without the implementation cost. Reference 100M rebuild dropped from 511 s baseline to **48.64 s** (10.5× faster) after ADR-032 Phase 4; 1B end-to-end (bulk + rebuild) dropped from ~3h57m baseline to **60m36s** (3.92× faster). 21.3B Reference end-to-end (Phase 6) **completed 2026-04-25 22:32 at 85 h end-to-end** — full Wikidata Reference profile bulk + rebuild on a single M5 Max laptop, BCL-only. Sealed artifact validated query-side 2026-04-26 (`docs/validations/21b-query-validation-2026-04-26.md`): both GSPO and GPOS indexes return correct results at 21.3 B, cold-cache `LIMIT 10` queries in tens of milliseconds. The capacity dimension of production hardening is empirical, not estimated.
 
+ADR-035 + ADR-036 additions (2026-04-26 → 2026-04-27, versions 1.7.44 → 1.7.45): `Diagnostics` (2,742 lines) grew with the four Phase 7a metric channels — `LoadProgress` (bulk-load progress per chunk-flush), `RebuildProgress` (per-index sub-phase identification), atom-store discrete events (`AtomStoreRehash`, `AtomStoreFileGrowth`) + state samplers (`AtomStoreState` — intern rate, load factor, probe distance), and `ProcessState` (GC, LOH, RSS, disk-free). `Compression` (1,453 lines) is wholly new: a BCL-only bzip2 streaming decompressor (`BZip2DecompressorStream`) implementing CRC32, BitReader, RLE1, MTF, Huffman, BWT inverse from the bzip2 spec. Validated end-to-end at 1 B Reference on 2026-04-27: bz2 source decompression at 33 MB/s steady-state with 4× headroom over the parser's ~8 MB/s consumption, full metrics emission across 22,256 JSONL records, bulk-load 55m22s @ 300 K triples/sec — first production-scale exercise of 7a + 7b together (`docs/validations/adr-035-phase7a-1b-2026-04-27.md`).
+
+ADR-034 SortedAtomStore (2026-04-27, version 1.7.45+, in flight): `Storage` gained an `IAtomStore` interface, the renamed `HashAtomStore`, and a new `SortedAtomStore` (mmap-backed `{base}.atoms` + `{base}.offsets` files, dense alphabetical IDs, binary-search lookup) backed by two builders — an in-memory `SortedAtomStoreBuilder` (validation/test surface) and an external `SortedAtomStoreExternalBuilder` (chunked spill + k-way merge for past-RAM vocabularies). `SortedAtomBulkBuilder` orchestrates the two-pass deferred-resolution flow during bulk-load: buffer atoms in input order, sort vocabulary at finalize, replay resolved (G,S,P,O) IDs into the GSPO external sorter. `QuadStore.Open` dispatches on `StoreSchema.AtomStore` (default `Hash` for backward compat); the Reference profile + Sorted schema combination opens with a placeholder over an empty vocab and routes `BeginBatch` / `AddCurrentBatched` / `CommitBatch` through the bulk builder. Phase 1A through Phase 1B-5b shipped; Phase 1B-5d (disk-backed AssignedIds for >100 M scale) and Phase 1B-6 (gradient validation 1 M / 10 M / 100 M against `HashAtomStore` baseline) remaining.
+
 ### Tests
 
 | Project | Lines | Test Cases | Notes |
 |---------|------:|----------:|-------|
-| Mercury.Tests | 55,310 | 4,205 | +54 since 2026-04-21 (15 RadixSort tests, 9 ExternalSorter tests, 3 AppendSorted tests reintroduced from reverted 1.7.37, plus parameterized expansions) |
-| Mercury.Solid.Tests | 455 | 25 | |
-| DrHook.Tests | 277 | 23 | |
+| Mercury.Tests | 57,873 | 4,331 | +126 since 2026-04-23 (Phase 7a metric channel tests, Phase 7b bzip2 substrate tests, ADR-034 SortedAtomStore + builders + bulk-load tests) |
+| Mercury.Solid.Tests | 407 | 25 | |
 | Minerva.Tests | — | — | |
 
 ### Benchmarks
 
 | Project | Lines | Methods |
 |---------|------:|--------:|
-| Mercury.Benchmarks | 3,034 | 76 |
+| Mercury.Benchmarks | 3,352 | 76 |
 | Minerva.Benchmarks | — | — |
 
 ### Examples
 
 | Project | Lines |
 |---------|------:|
-| Mercury.Examples | 851 |
+| Mercury.Examples | 779 |
 | drhook-target.cs | 155 |
-| drhook-verify.cs | 21 |
+| drhook-verify.cs | 38 |
 | Minerva.Examples | — |
 
 ### Documentation
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 34,884 |
-| CLAUDE.md | 271 |
+| All docs (*.md, *.ttl) | 36,668 |
+| CLAUDE.md | 291 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~93,812 |
-| Tests | ~55,310 |
-| Benchmarks | ~3,034 |
-| Examples | ~1,027 |
-| Documentation | ~34,884 |
-| **Grand total** | **~188,067** |
+| Source code | ~97,727 |
+| Tests | ~58,280 |
+| Benchmarks | ~3,352 |
+| Examples | ~972 |
+| Documentation | ~36,668 |
+| **Grand total** | **~196,999** |
 
 ## W3C Conformance
 
@@ -233,6 +239,7 @@ Write performance is fsync-dominated — measures SSD controller behavior, not C
 | 2026-04-22 | [ADR-033 Phase 5 bulk radix](docs/validations/adr-033-phase5-bulk-radix-2026-04-22.md) | Bulk-load + rebuild gradient 1M → 1B | 1B end-to-end ~3h57m → **60m36s** (**3.92× combined**); rebuild contributes 13.8× while bulk holds steady at 1B (defensive at this scale). Three independent confirmations of the Phase 5.2 hypothesis across three code paths |
 | 2026-04-25 | Phase 6 21.3B Wikidata Reference end-to-end | Full `latest-all.nt` bulk + rebuild on a single M5 Max laptop, BCL-only | **Completed** 2026-04-25 22:32 at **85 h end-to-end** wall-clock. 21,260,051,924 triples ingested + sealed; ~2.5 TB physical on disk, 4.1 TB logical mmap (sparse on APFS); past Blazegraph WDQS reference ceiling (~12-13B) by ~63 % |
 | 2026-04-26 | [21.3 B query-side validation](docs/validations/21b-query-validation-2026-04-26.md) | First measured queries against `wiki-21b-ref` | GSPO `LIMIT 10` 17 ms (6.5 ms parse + 10.6 ms exec); GPOS `wdt:P31` `LIMIT 10` 20 ms; both indexes correct at 21.3 B; cold-cache. **Capacity dimension of production hardening is empirical, sound finding** |
+| 2026-04-27 | [ADR-035 Phase 7a 1 B Reference](docs/validations/adr-035-phase7a-1b-2026-04-27.md) | First end-to-end test of Phase 7a metrics + Phase 7b bz2 streaming together at 1 B Reference | Bulk-load 55m22s @ 300 K triples/sec from `latest-all.ttl.bz2` (114 GB); GPOS rebuild 1m54s @ 8.66 M entries/sec; Trigram rebuild 11m44s @ 630 K entries/sec; bz2 decompression 33 MB/s with 4× headroom over parser; 22,256 JSONL records emitted across all four metric channels. **Phase 7a Completed.** |
 
 ## Maintenance Instructions
 
