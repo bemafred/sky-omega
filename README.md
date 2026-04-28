@@ -32,8 +32,30 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.45 — Phase 6 complete: 21.3 B Wikidata, ingested, sealed, queryable on a single laptop. Phase 7 in flight.** The full Wikidata graph (3.1 TB uncompressed N-Triples source, 21,260,051,924 triples, 85 h end-to-end on an M5 Max with 128 GB RAM, BCL-only .NET) loaded, rebuilt, and validated query-side as of 2026-04-26. Both primary (GSPO) and secondary (GPOS) indexes return correct results at full scale — `wdt:P31` (instance-of) bound queries return real Wikidata instances in tens of milliseconds cold-cache; `LIMIT 10` over the full graph returns the dump's own metadata in 17 ms. **The capacity dimension of production hardening is empirical, sound finding, not an estimate.** Performance optimization rounds are now landing: ADR-035 Phase 7a metrics infrastructure (Completed) and ADR-036 Phase 7b BCL-only bz2 streaming (Completed) validated together at 1 B Reference on 2026-04-27 — bulk-load 55 m 22 s @ 300 K triples/sec direct from `latest-all.ttl.bz2`, full metrics emission across all four channels. ADR-034 Phase 7c SortedAtomStore for Reference is in flight (Phase 1B-5b shipped; gradient validation pending). The 85 h baseline projects toward 15–25 h on the same laptop after the round series ships. **The architectural bets are validated. The optimization rounds are landing. The substrate is queryable at scale.** 4,331 Mercury + 25 Solid tests green throughout.
-> See [docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) for the public framing, [docs/validations/21b-query-validation-2026-04-26.md](docs/validations/21b-query-validation-2026-04-26.md) for the closing Phase 6 query-side measurement, [docs/validations/adr-035-phase7a-1b-2026-04-27.md](docs/validations/adr-035-phase7a-1b-2026-04-27.md) for the first 7a + 7b validation, [CHANGELOG.md](CHANGELOG.md) and [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md) for the architectural arc, [docs/validations/](docs/validations/) for the measurement record, and [docs/limits/](docs/limits/) for the documented next rounds.
+> **v1.7.45 — Phase 6 complete. Phase 7 in flight.**
+> 21.3 B Wikidata, ingested, sealed, queryable on a single laptop.
+>
+> **Phase 6 — capacity proven** *(2026-04-26)*
+> - 21,260,051,924 triples ingested from a 3.1 TB N-Triples source
+> - **85 h end-to-end** on an M5 Max, 128 GB RAM, BCL-only .NET
+> - Query-side validated: `wdt:P31` (instance-of) bound queries return real Wikidata instances in tens of milliseconds cold-cache; `LIMIT 10` over the full graph in **17 ms**
+> - Both primary (GSPO) and secondary (GPOS) indexes correct at full scale
+> - *The capacity dimension of production hardening is empirical, not estimated.*
+>
+> **Phase 7 — performance rounds landing** *(2026-04-27 →)*
+> - **ADR-035 Phase 7a** — metrics infrastructure — *Completed*
+> - **ADR-036 Phase 7b** — BCL-only bz2 streaming decompression — *Completed*
+> - Validated together at 1 B Reference: bulk-load **55 m 22 s @ 300 K triples/sec** direct from `latest-all.ttl.bz2`, full metrics emission across all four channels
+> - **ADR-034 Phase 7c** — SortedAtomStore for Reference — *in flight* (Phase 1B-5c shipped; gradient validation pending)
+>
+> **Trajectory**: 85 h baseline projects toward **15-25 h** on the same laptop after the round series ships. 4,331 Mercury + 25 Solid tests green throughout.
+>
+> **Read more**
+> - [21.3 Billion Triples on a Laptop, in .NET](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the Phase 6 article
+> - [What Compounds](docs/articles/2026-04-28-what-compounds.md) — Sky Omega's first four months, the recipe
+> - [21 B query-side validation](docs/validations/21b-query-validation-2026-04-26.md) — Phase 6 closing measurement
+> - [ADR-035 Phase 7a 1 B validation](docs/validations/adr-035-phase7a-1b-2026-04-27.md) — first 7a + 7b together
+> - [CHANGELOG.md](CHANGELOG.md) · [Roadmap](docs/roadmap/production-hardening-1.8.md) · [Validations](docs/validations/) · [Limits register](docs/limits/)
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
 
