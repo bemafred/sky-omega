@@ -52,6 +52,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [Streaming source decompression](streaming-source-decompression.md) | Latent | Disk-constrained deployment ingesting Wikidata-class datasets, OR compressed-only workflow (cloud blob), OR measured BZip2 < 30 MB/sec, OR parse pipeline acceleration shifts bottleneck to source-read |
 | [Rebuild progress observability](rebuild-progress-observability.md) | Latent | Rebuild silent phase exceeds ~1 hour, OR automation/CI needs stuck-vs-progressing detection, OR a future architectural change introduces another silent phase |
 | [Metrics coverage review](metrics-coverage-review.md) | Latent (review) | Catalog of 8 categories of observability gaps. Individual categories split out into their own entries when triggered (rebuild progress already split). |
+| [Per-index subdirectory layout](per-index-subdirectory-layout.md) | Latent | Two-SSD utilization (WAL + data split, or per-index placement), OR backup/replication wanting per-index granularity, OR profile-specific layout asymmetries |
 
 ## Adding a new entry
 
