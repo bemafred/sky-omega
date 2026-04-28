@@ -7,11 +7,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## What's Next
 
-**Sky Omega 1.8.0** — production hardening release per [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md). Two of six phases shipped (ADR-028 rehash-on-grow, ADR-029 store profiles). Next: ADR-030 measurement infrastructure, then parallel rebuild + sort-insert, then the full 21.3 B Wikidata Reference-profile run.
+**Sky Omega 1.7.x** — Phase 7 performance rounds in flight. Phase 6 (21.3 B Wikidata Reference-profile end-to-end) **complete** as of 2026-04-26. Phase 7a metrics infrastructure (ADR-035) and Phase 7b BCL-only bz2 streaming (ADR-036) shipped as Completed; validated together at 1 B Reference on 2026-04-27. Phase 7c SortedAtomStore for Reference (ADR-034) in flight — Phase 1A through 1B-5c shipped; gradient validation pending.
+
+**Sky Omega 1.8.0** — production hardening release per [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md). All six phases of the original roadmap shipped (ADR-028 rehash, ADR-029 profiles, ADR-030 measurement + Decision 5, ADR-031 Dispose gate, ADR-032 radix external sort, ADR-033 bulk-load radix). 1.8.0 will roll up the Phase 7 round series once Round 2 (atom-ID bit packing, hash-function quality) lands.
 
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.45] - 2026-04-27
+
+### Added
+- **ADR-036 Phase 7b: BCL-only bzip2 streaming decompression.** `BZip2DecompressorStream` lands as a wholly new `src/Mercury/Compression/` subdirectory (1,453 lines). Implements CRC32, BitReader, RLE1, MTF, Huffman, and BWT inverse from the bzip2 spec — no third-party dependency. Validated end-to-end at 1 B Reference on 2026-04-27 (`docs/validations/adr-035-phase7a-1b-2026-04-27.md`): bz2 decompression at **33 MB/s steady-state** with 4× headroom over the parser's ~8 MB/s consumption. The CLI `--bulk-load` path now accepts `.ttl.bz2` directly — no upstream decompression step needed. Decompression is the streaming-source-decompression item in `docs/limits/streaming-source-decompression.md` graduating from Latent to Completed. Phase 7b Completed. (a062d86, ff46eed, 873034f, 9a9458e, 7bba720, 8e0c688)
+- **ADR-034 Phase 1A through 1B-5c: SortedAtomStore for Reference.** Substrate work for QLever-style alphabetical-vocabulary atom store. Phase 1A extracts the `IAtomStore` interface and renames the existing implementation to `HashAtomStore` (`46adbf7`). Phase 1B-1+1B-2 ships the `SortedAtomStore` read-side (mmap-backed `{base}.atoms` + `{base}.offsets`, dense alphabetical IDs, binary-search lookup) plus the in-memory `SortedAtomStoreBuilder` (`2dbbcdd`). Phase 1B-3 wires profile dispatch in `QuadStore.Open` on the new `StoreSchema.AtomStore` field plus the Decision 7 single-bulk-load enforcement gate (`d217103`). Phase 1B-4 adds `SortedAtomStoreExternalBuilder` — chunked spill + k-way merge for past-RAM vocabularies (`6e20bf2`). Phase 1B-5a introduces `SortedAtomBulkBuilder` — the two-pass deferred-resolution orchestrator that buffers atoms during ingest, sorts at finalize, replays resolved (G,S,P,O) IDs into the GSPO external sorter (`1acd0ca`). Phase 1B-5b wires `SortedAtomBulkBuilder` into `QuadStore`'s `BeginBatch`/`AddCurrentBatched`/`CommitBatch` surface; CommitBatch finalizes the builder, disposes the placeholder atom store, reopens over fresh vocab files (`297a788`). Phase 1B-5c surfaces the CLI plumbing — `StorageOptions.AtomStore`, `mercury --atom-store <Hash|Sorted>` (`485acfa`). Phase 1B-5d (disk-backed AssignedIds for >100 M scale) and Phase 1B-6 (gradient validation 1 M / 10 M / 100 M against `HashAtomStore` baseline) remain.
+- **ADR-035 Phase 7a Completed.** Closes the production-hardening Phase 7a metrics infrastructure ADR after the 1 B Reference end-to-end validation: 22,256 JSONL records emitted across all four metric channels (`LoadProgress`, `RebuildProgress`, atom-store events + state samplers, `ProcessState`) with correct schema and timing. (`3fa6409`)
+- **WDBench cold-baseline harness** (`benchmarks/Mercury.Benchmarks/WdBenchRunner.cs`). Per-query timeout + cancellation discipline, captures elapsed time + result-row count, emits per-query and per-category JSONL summary records compatible with the existing metrics pipeline. Default 5-min timeout, configurable. (`9485d7d`)
+- **`tools/fetch-wdbench.sh`** downloads the WDBench query suite from MillenniumDB (Buil-Aranda, Hernández, Hogan et al.) and splits per-query files. 2,658 queries across five categories. (`32df56d`)
+
+### Fixed
+- **SPARQL property-path planner crash on synthetic SequencePath terms.** `QueryPlanner.ComputeVariableHash` called `Fnv1a.Hash(source.Slice(term.Start, term.Length))` on every `Term` it received. SequencePath expansion synthesizes intermediate variables with `Term.Start = -(seqIndex + 200)` as a marker — there is no source-text slice to hash for those. Result: `ArgumentOutOfRangeException` 95% of the time on the WDBench `c2rpqs` category. Fix: detect `term.Start < 0` and use the negative Start as a stable hash; collisions across synthetic kinds are avoided by the +200/+400 offsets the parser already applies. Two-line fix; regression test `PropertyPathRegressionTests.SequenceWithZeroOrMore_DoesNotThrow` covers it. (`0c2f88b`)
+- **`WdBenchRunner` misclassified harness-cancelled queries as failures.** When `cts.IsCancellationRequested`, the runner now emits `status: "timeout"` rather than `status: "failed"`. Aligns the metrics record with the operational truth: a 60-second cap is the timeout policy, not a query bug. (`0c2f88b`)
+- **`RadixSort.SortInPlace` allocated 72 bytes per call from `stackalloc int[N] { ... }` initializer-list syntax.** ADR-032 contracts that the sort itself never allocates; rebuild paths sort millions of ~16 M-entry chunks, so 72 bytes × millions = GB-scale GC pressure that would have invalidated the ADR-032 latency story. Root cause: .NET 10 codegen for `stackalloc int[N] { initializer-list }` emits a per-call heap allocation regardless of N. Replaced with `stackalloc int[N];` + explicit indexed assignment at both ReferenceKey and TrigramEntry overload sites; allocation drops from 72 → 0 bytes/call across N ∈ {2, 10, 100, 1000}. Two zero-allocation regression tests now hold; full Mercury.Tests suite green at 4,331 passing. (`56f46be`)
+
+### Documented
+- **CHANGELOG backfill — 1.7.31 through 1.7.44 entries** for the production-hardening Phase 1-5 work, ADR-031 Dispose gate, ADR-032 radix external sort, ADR-033 bulk-load radix, and Phase 6 close-out (this commit).
+- **README banner restructured** from a single dense paragraph to a scannable Phase 6 / Phase 7 hierarchy with bullet structure and a "Read more" link list. (`ae27226`)
+- **STATISTICS.md and README.md refreshed to 1.7.45.** Mercury source 78,878 → 82,506 lines; Storage 9,456 → 10,949 (ADR-034 SortedAtomStore additions); Mercury.Abstractions 721 → 974 (`IAtomStore`, `AtomStoreImplementation`); +2,742 line `Diagnostics` row (Phase 7a metrics); +1,453 line `Compression` row (Phase 7b bz2). Tests 4,205 → 4,331. Removed `DrHook.Tests` row (project deleted 2026-04-06). Grand total 188,067 → 196,999. (`029c936`)
+- **Article: "What Compounds — Notes on Sky Omega's First Four Months."** Peer to the 21.3 B Wikidata article. Where that one was the artifact, this one is the recipe — eight practices that produced substrate-grade output in four months of mostly-spare-time work. (`781a780`)
+- **`docs/limits/per-index-subdirectory-layout.md`** entry: Mercury's flat store layout makes per-file symlinks fragile under file-replace patterns. Subdirectory-per-index (`gspo/data.tdb` instead of `gspo.tdb`) makes symlinks robust at the directory boundary. Latent until per-volume bandwidth becomes binding (WAL/data split, per-index placement, backup granularity). (`ec930c8`)
+
+## [1.7.44] - 2026-04-22
+
+### Added
+- **ADR-035 Phase 7a: production-grade observability infrastructure.** Four metric channels under `src/Mercury/Diagnostics/` (~2,742 lines total). **Phase 7a.0** establishes the `IObservabilityListener` interface and `JsonlMetricsListener` writer wired through `QuadStore` (`1436239`). **Phase 7a.1 (Category A — rebuild progress)** emits `RebuildProgress` per-sub-phase records during `RebuildSecondaryIndexes`, with named sub-phases (`gpos.scan`, `gpos.sort`, `gpos.write`, `trigram.*`) so the silent middle hours of a 21 B rebuild become observable (`9395920`). **Phase 7a.2 (Category G — process-level state)** adds the `ProcessStateProducers` periodic sampler (GC heap, LOH, RSS, free disk space at the store path) on a configurable interval, default 0 (off) (`3ead8ed`). **Phase 7a.3 (Category B — atom-store metrics)** registers atom-store discrete events (`AtomStoreRehash`, `AtomStoreFileGrowth`) and state samplers (`AtomStoreState` — intern rate over interval, current load factor, mean probe distance) directly through `IAtomStore` so both `HashAtomStore` and the future `SortedAtomStore` can emit the same shape (`4ce1712`). The CLI `--metrics-out <file>` and `--metrics-state-interval <seconds>` flags expose all four channels uniformly. End-to-end validated at 1 B Reference: 22,256 JSONL records, schema-conformant across all channels, no observable runtime overhead.
+- **ReferenceQuadIndex: BulkMode mmap floor 256 GB → 1 TB.** The 21.3 B Wikidata projection puts a single GPOS B+Tree at ~600-800 GB; the existing 256 GB initial mmap floor would have triggered ~3 grow-and-remap cycles during the bulk drain, each adding latency and disrupting steady-state I/O. Bumping the floor to 1 TB lets the 21.3 B run sail through without a remap. Cognitive profile and smaller Reference loads unaffected — the 1 TB is a mmap reservation in sparse files; physical disk usage is bounded by actual writes. (`aa35514`)
+
+### Validated
+- **Phase 6 — 21.3 B Wikidata Reference profile, end-to-end on a single laptop.** Completed 2026-04-25 22:32 at **85 h 35 m wall-clock**. 21,260,051,924 triples ingested + 17,029,283,265 GPOS entries + 7,457,242,193 trigram entries built. Bulk-load 73.93 h @ 80,091 triples/sec average; rebuild 11.65 h. Hardware: M5 Max, 18 cores, 128 GB unified memory, internal NVMe — no RAID, no add-in cards, consumer laptop. Software: .NET 10, Mercury 1.7.44, BCL-only core. Storage: ~2.5 TB physical / 4.1 TB logical mmap (sparse on APFS). Past Blazegraph WDQS reference ceiling (~12-13 B) by ~63%. Sealed-artifact query-side validation followed 2026-04-26 (`docs/validations/21b-query-validation-2026-04-26.md`): both GSPO and GPOS indexes correct at 21.3 B; cold-cache `LIMIT 10` queries in tens of milliseconds; `wdt:P31` instance-of bound queries return real Wikidata instances. **The capacity dimension of production hardening is empirical, not estimated.** Article: `docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md`. Production-hardening Phase 6 milestone closed (`3628a86`).
+
+### Documented
+- **`docs/limits/` register established.** New documentation category for items past Emergence + Epistemics but pre-Engineering — surface latent issues by design rather than burying them in ADR Consequences sections that go invisible after the ADR is marked Completed. Initial seed entries: `predicate-statistics-memory.md`, `hash-function-quality.md`, `bit-packed-atom-ids.md`, `bulk-load-memory-pressure.md`, `streaming-source-decompression.md`, `rebuild-progress-observability.md`, `metrics-coverage-review.md`, `btree-mmap-remap.md`, `reference-readonly-mmap.md`, `sorted-atom-store-for-reference.md`. (`c11937a`, `f5babfd`, `09d39cc`, `b63ca7b`)
+- **`docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md`** — public framing of Phase 6, 169 lines, anchored on reproducible numbers. (`6ee6d3b`)
+
+## [1.7.43] - 2026-04-22
+
+### Added
+- **ADR-033: bulk-load radix external sort.** Replaces the inline-secondary-write Reference bulk path with a radix-external-sort architecture analogous to ADR-032's rebuild path: the bulk loader buffers `(G, S, P, O)` records into chunked `ReferenceKey` arrays, spills via `RadixSort.SortInPlace` + `ExternalSorter<ReferenceKey, ReferenceKeySorter>` to `Path.GetTempPath()`, then drains the merged stream sequentially into `_gspoReference` via `AppendSorted`. Eliminates the page-cache thrash that the original GSPO+GPOS-inline path suffered from past 100 M triples (the ADR-029 gradient documented this collapse from 210 K → 31 K triples/sec). 1 B end-to-end validated: bulk + rebuild **~3h 57m baseline → 60m 36s** (3.92× combined). Three independent confirmations of the Phase 5.2 hypothesis across three code paths (GPOS rebuild, trigram rebuild, bulk load). `docs/validations/adr-033-phase5-bulk-radix-2026-04-22.md`. (`51c3776`)
+
+## [1.7.42] - 2026-04-22
+
+### Added
+- **ADR-032 Phase 4: trigram rebuild via radix external sort.** Same shape as Phase 3 GPOS rebuild but with `TrigramEntry` (12-byte sort key: 4-byte uint Hash + 8-byte signed long AtomId) instead of `ReferenceKey`. The trigram portion of `RebuildSecondaryIndexes` previously did per-bucket allocations and write-amplified random posting-list writes; now it scans atoms once, emits `(Hash, AtomId)` records into a chunked sorter, then drains the merged stream into the trigram index in sequential order. Wall-clock 100 M Reference rebuild **457 s → 48.64 s** (9.4× faster); trigram portion 17× faster. Both indexes (GPOS via Phase 3, trigram via Phase 4) now hit NVMe sequential bandwidth — peak iostat 2,463 MB/s (7.5× the baseline 327 MB/s). Total rebuild speedup vs 1.7.38 baseline: **10.5×**. `docs/validations/adr-032-phase4-trigram-radix-2026-04-22.md`. (`49093df`)
+
+## [1.7.41] - 2026-04-22
+
+### Added
+- **ADR-032 Phase 3: GPOS rebuild via radix external sort.** Replaces the comparator-based sort-insert (reverted in 1.7.38) with the new `RadixSort` + `ExternalSorter` chain. GPOS rebuild now scans `_gspoReference`, emits `ReferenceKey` records permuted to GPOS order, sorts via radix into chunks, k-way-merges the chunks, and drains into `_gposReference` via `AppendSorted` — all sequential I/O on the rebuild side. Wall-clock 100 M Reference rebuild **511 s → 457 s**; GPOS portion alone ~3× faster (76 s → 24 s). Peak iostat 2,463 MB/s (vs 327 MB/s baseline). Trigram portion still on the old path at this version; Phase 4 fixes that. `docs/validations/adr-032-phase3-gpos-radix-2026-04-22.md`. (`ff3af49`)
+
+## [1.7.40] - 2026-04-21
+
+### Added
+- **ADR-032 Phase 2: `ExternalSorter<T, TSorter>` — chunked spill + k-way merge.** Generic external-sort primitive backing both rebuild and bulk-load radix paths. Buffers up to a per-chunk byte budget in memory (default 256 MB), sorts the chunk in place via `RadixSort.SortInPlace`, spills to a numbered temp file, repeats; on `Drain`, opens all chunks and merges via a `PriorityQueue<TElement, TPriority>` k-way merge. Caller-owned scratch buffer; zero allocations inside the merge loop. Used by Phase 3 (GPOS rebuild), Phase 4 (trigram rebuild), and ADR-033 (bulk-load) without modification. (`9c9fee2`)
+
+## [1.7.39] - 2026-04-21
+
+### Added
+- **ADR-032 Phase 1: `RadixSort` primitive for `ReferenceKey` and `TrigramEntry`.** LSD radix sort with 8-bit digits, signed-long bias (XOR 0x80 on MSB bytes for sign-correct ordering), and skip-trivial-passes optimization (a single bucket holding all entries means the byte is constant — distribute pass becomes a no-op). Caller-owned scratch span, same length as data. 256-bucket histogram + prefix-sum offsets via `stackalloc uint[256]`. Two specialized internal entry points: `SortInPlace(Span<ReferenceKey>, Span<ReferenceKey> scratch)` and `SortInPlace(Span<TrigramEntry>, Span<TrigramEntry> scratch)`. New `TrigramEntry` struct under `Storage/` with explicit Pack=1 layout. (`5fd32e2`, `5fd32e2`)
+
+## [1.7.38] - 2026-04-21
+
+### Reverted
+- **ADR-030 Phase 2 (parallel rebuild via broadcast channel) and Phase 3 (sort-insert via Array.Sort comparator).** Both shipped at wall-clock-neutral against the sequential baseline at Reference 100 M (524 s parallel vs 512 s sequential; sort-insert similarly neutral). Phase 5.2 dotnet-trace + iostat investigation (`docs/validations/adr-030-phase52-trace-2026-04-21.md`) revealed that wall-clock equality was hiding a structural cost shift: 1.7.37 had 453 s `GC.RunFinalizers` + 552 s `Monitor.Enter_Slowpath` that 1.7.34 did not. The architectural goal — sequential I/O via sort-insert — was right; the implementations (broadcast channel; comparator-sort + 3.2 GB monolithic buffer) traded compute for overhead. Reverts retired ~600 lines from `QuadStore` plus the `BroadcastChannel.cs` file. ADR-032 (radix external sort) replaced both, preserving the architectural goal without the implementation cost. (`5cf5d90`, `fb5f02f`, `625bd68`)
+
+## [1.7.37] - 2026-04-21
+
+### Added
+- **ADR-030 Phase 3: sort-insert fast path for Reference GPOS rebuild.** GPOS rebuild scans `_gspoReference`, materializes a permuted `ReferenceKey[]`, calls `Array.Sort` with a comparator, then `AppendSorted` drains in sequential order. Wall-clock 100 M neutral against sequential baseline; Phase 5.2 trace later identified the comparator-sort + 3.2 GB monolithic buffer as the hidden cost driver. **Reverted** in 1.7.38; concept right (sort-insert), implementation wrong (comparator-sort). The radix external-sort path in ADR-032 Phase 3 is the production version. `docs/validations/adr-030-phase3-sort-insert-2026-04-21.md`. (`e29cc03`)
+
+## [1.7.36] - 2026-04-21
+
+### Added
+- **ADR-030 Phase 2: parallel rebuild via broadcast channel.** GPOS and trigram rebuild run concurrently against a shared `_gspoReference` scan, broadcasting each `ReferenceKey` to both consumers via a custom `BroadcastChannel<T>` with single-producer / multiple-consumer semantics, bounded queue, and back-pressure. Wall-clock 100 M Reference rebuild neutral against sequential baseline (524 s vs 512 s). Phase 5.2 trace later showed Monitor.Enter_Slowpath dominating (~552 s) — the bounded-queue lock was the bottleneck, not the rebuild work itself. **Reverted** in 1.7.38. ADR-032 sequential-radix replaces this approach. `docs/validations/adr-030-phase2-parallel-rebuild-2026-04-21.md`. (`f320251`)
+
+## [1.7.35] - 2026-04-21
+
+### Fixed
+- **Metrics single-writer contract pinned by concurrency test.** `JsonlMetricsListener` previously held its `StreamWriter` without coordination — under a mix of `LoadProgress` (per-chunk) and `RebuildProgress` (per-sub-phase) emissions, two threads writing simultaneously could interleave bytes and produce malformed JSONL. Fix wraps writes in a single `lock` per listener instance and adds a regression test that fires N concurrent emitters and asserts every line round-trips through `JsonDocument.Parse`. (`c9f5c41`)
+
+## [1.7.34] - 2026-04-21
+
+### Changed
+- **ADR-030 Decision 5: Reference bulk-load refactored to GSPO-only inline + rebuild.** The 2026-04-20 Reference gradient (`docs/validations/adr-029-reference-gradient-2026-04-20.md`) measured Reference bulk rate collapsing from 210 K triples/sec at 1 M to 31 K/sec at 100 M — caused by `AddCurrentBatched` writing to two B+Trees in different sort orders per triple (GSPO and GPOS), thrashing the page cache once the working set passed RAM. Decision 5 amends ADR-030 to make the bulk/rebuild split profile-invariant: any profile with ≥2 indexes must split primary-inline from secondaries-via-rebuild. Reference now writes only `_gspoReference` during bulk; `RebuildSecondaryIndexes` populates `_gposReference` and trigram from a GSPO scan. CLI pipeline (`bulk-load → rebuild-indexes`) unchanged from the user's perspective. Reference 100 M end-to-end **4.7× faster wall-clock**, **20× faster bulk** alone (`docs/validations/adr-030-decision5-reference-refactor-2026-04-21.md`). (`be91cb2`, `ebde103`)
+
+## [1.7.33] - 2026-04-21
+
+### Fixed
+- **`JsonlMetricsListener.AutoFlush=true`.** Without `AutoFlush`, JSONL records sat in the `StreamWriter` buffer until close; if the process crashed mid-run (or was killed by an out-of-memory signal during a heavy bulk-load), the most recent ~minutes of metrics were lost. `AutoFlush=true` makes every emit hit the OS buffer immediately — durable enough for diagnostic purposes, with negligible throughput impact at the chunk-flush emission cadence. (`bb54404`)
+
+## [1.7.32] - 2026-04-21
+
+### Fixed
+- **ADR-031 Pieces 1+2: Dispose runtime collapsed from 14 minutes to 0.84 s on read-only sessions.** Phase 5.2 dispose profile (`docs/validations/dispose-profile-2026-04-20.md`) attributed the 14-minute Dispose at 1 B Cognitive to `CollectPredicateStatistics` running unconditionally inside `CheckpointInternal`. The work is meaningful only when statistics-relevant state has actually changed since the last checkpoint — a read-only session has nothing to collect. Piece 1 introduces a `_mutationsSinceCheckpoint` counter incremented by every mutation path (`Add`, `Delete`, batched variants, `Clear`, etc.). Piece 2 makes `CheckpointInternal` skip `CollectPredicateStatistics` when the counter is zero, which is the read-only-session case. 1 B Cognitive Dispose **14 min → 0.84 s** validated (`docs/validations/adr-031-dispose-gate-2026-04-21.md`). Cognitive write sessions still pay the full statistics cost. (`a918b80`, `3fda0d5`)
+
+## [1.7.31] - 2026-04-21
+
+### Added
+- **ADR-030 Phase 1: measurement infrastructure for the Reference rebuild path.** Adds `JsonlMetricsListener` (the prototype that ADR-035 Phase 7a later subsumes) wired through the rebuild loop to emit per-sub-phase progress events. Also adds the validation harness pattern of separate JSONL files for separate runs (`docs/validations/<date>-<scope>.jsonl`). The infrastructure decision was an explicit gate on the parallel-rebuild and sort-insert work that follows: no Phase 2/3 shipping without the ability to measure what they cost. (`9052c37`)
+
+---
+
+
 
 ## [1.7.30] - 2026-04-20
 
