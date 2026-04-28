@@ -68,7 +68,8 @@ git clone --recurse-submodules <repo-url> && cd sky-omega
 dotnet build SkyOmega.sln
 dotnet test
 ./tools/install-tools.sh      # macOS/Linux
-mercury -m                     # Start an in-memory session
+mercury -m                    # Start an in-memory session — REPL + SPARQL HTTP endpoint at http://localhost:3031/sparql
+mercury <store> --bulk-load data.ttl.bz2  # Bulk-load Turtle (or .nt, .nq, .trig, .rdf, .jsonld; .bz2 / plain)
 ```
 
 > **Already cloned without submodules?** Run `./tools/update-submodules.sh` to fetch
@@ -116,13 +117,55 @@ The broader Sky Omega vision is a **stand-alone cognitive agent** built on this 
 
 ---
 
+## 🌐 Standards Coverage
+
+Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is implemented in BCL-only C#, validated against the W3C conformance test suite, and exposed via CLI, HTTP endpoint, and embeddable .NET API.
+
+### RDF formats (parse + write, streaming, zero-GC)
+
+| Format | W3C Conformance | Use |
+|---|---|---|
+| **Turtle 1.2** | 309/309 (100%) | Human-friendly, prefix support, the de-facto interchange format |
+| **TriG 1.2** | 352/352 (100%) | Turtle with named graphs |
+| **N-Triples 1.2** | 70/70 (100%) | Line-oriented, the Wikidata dump format |
+| **N-Quads 1.2** | 87/87 (100%) | N-Triples with named graphs |
+| **RDF/XML 1.1** | 166/166 (100%) | Legacy interop, still required by many vocabularies |
+| **JSON-LD 1.1** | 461/467 (99%, 6 intentional skips) | JSON-native RDF for web/API surfaces |
+
+### SPARQL 1.1
+
+| Spec | W3C Conformance |
+|---|---|
+| **SPARQL 1.1 Query** (SELECT, ASK, CONSTRUCT, DESCRIBE, all aggregates, property paths, federated SERVICE) | 421/421 (100%) |
+| **SPARQL 1.1 Update** (INSERT, DELETE, LOAD, CLEAR, CREATE, DROP, COPY, MOVE, ADD) | 94/94 (100%) |
+| **SPARQL 1.1 Syntax** | 103/103 (100%) |
+| **SPARQL 1.1 Federated Query** (SERVICE clause, remote endpoints) | included in Query 421 |
+
+### Protocols & surfaces
+
+- **SPARQL Protocol over HTTP** — `mercury` CLI ships with a built-in HTTP endpoint at `http://localhost:3031/sparql`. Standard query/update content negotiation, JSON/XML/CSV/TSV result serialization. Use `SERVICE <http://localhost:3030/sparql>` to federate across local Mercury instances.
+- **W3C Solid Protocol server** (`Mercury.Solid`) — WAC + ACP access control, N3 Patch updates, full HTTP handlers.
+- **Model Context Protocol (MCP)** — `mercury-mcp` exposes Mercury as a Claude semantic-memory tool with persistent store survival across sessions.
+
+### Bitemporal extensions (beyond W3C)
+
+- **Valid-time + transaction-time** stored as implicit dimensions on every triple
+- `AS OF`, `BETWEEN`, `EVOLUTION` query forms for time-travel
+- Versioning, soft-delete, audit trails — all queryable through standard SPARQL with temporal extensions
+
+---
+
 ## Verifiable Facts
 
 | Claim                            | Evidence              | Command to Verify                            |
 |----------------------------------|-----------------------|----------------------------------------------|
-| 100% W3C SPARQL 1.1 conformance  | 618 passing tests     | `dotnet test --filter "FullyQualifiedName~W3C.Sparql"` |
-| 100% W3C conformance (all formats)| 2,063 passing tests  | `dotnet test --filter "W3C"`                 |
-| Zero external dependencies       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
+| 100% W3C SPARQL 1.1 Query        | 421 passing tests     | `dotnet test --filter "W3C.Sparql.Query"`    |
+| 100% W3C SPARQL 1.1 Update       | 94 passing tests      | `dotnet test --filter "W3C.Sparql.Update"`   |
+| 100% W3C SPARQL 1.1 Syntax       | 103 passing tests     | `dotnet test --filter "W3C.Sparql.Syntax"`   |
+| 100% W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML | 984 passing tests | `dotnet test --filter "W3C"` |
+| 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --filter "W3C.JsonLd"` |
+| SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
+| Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
 | 4,331 Mercury tests passing      | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
@@ -141,8 +184,8 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 82,506 lines, 100% W3C conformant SPARQL 1.1 engine, zero-GC. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). |
-| **Mercury.Solid**      | W3C Solid Protocol server with WAC/ACP access control                                      |
+| **Mercury**            | Temporal RDF substrate — 82,506 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
 | **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
