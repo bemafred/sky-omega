@@ -562,6 +562,7 @@ internal ref struct TriplePatternScan
                 // For simple paths, use the enumerator
                 while (_enumerator.MoveNext())
                 {
+                    QueryCancellation.ThrowIfCancellationRequested();
                     var triple = _enumerator.Current;
                     var targetNode = triple.Object.ToString();
 
@@ -849,6 +850,7 @@ internal ref struct TriplePatternScan
 
                 while (enumerator.MoveNext())
                 {
+                    QueryCancellation.ThrowIfCancellationRequested();
                     var triple = enumerator.Current;
                     nextNodes.Add(triple.Object.ToString());
                 }
@@ -926,6 +928,7 @@ internal ref struct TriplePatternScan
 
                 while (enumerator.MoveNext())
                 {
+                    QueryCancellation.ThrowIfCancellationRequested();
                     var triple = enumerator.Current;
                     nextNodes.Add(triple.Subject.ToString());
                 }
@@ -980,6 +983,7 @@ internal ref struct TriplePatternScan
 
         while (enumerator.MoveNext())
         {
+            QueryCancellation.ThrowIfCancellationRequested();
             var triple = enumerator.Current;
             var subjectStr = triple.Subject.ToString();
             var objectStr = triple.Object.ToString();
@@ -1035,6 +1039,7 @@ internal ref struct TriplePatternScan
 
                 while (discoveryEnumerator.MoveNext())
                 {
+                    QueryCancellation.ThrowIfCancellationRequested();
                     var triple = discoveryEnumerator.Current;
                     var subjectStr = triple.Subject.ToString();
                     var objectStr = triple.Object.ToString();
@@ -1060,6 +1065,7 @@ internal ref struct TriplePatternScan
 
                     while (allTriplesEnumerator.MoveNext())
                     {
+                        QueryCancellation.ThrowIfCancellationRequested();
                         var triple = allTriplesEnumerator.Current;
                         _allNodes.Add(triple.Subject.ToString());
                         _allNodes.Add(triple.Object.ToString());

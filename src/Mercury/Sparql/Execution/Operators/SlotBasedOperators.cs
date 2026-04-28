@@ -151,6 +151,7 @@ internal ref struct SlotTriplePatternScan
 
         while (_enumerator.MoveNext())
         {
+            QueryCancellation.ThrowIfCancellationRequested();
             var triple = _enumerator.Current;
 
             // Preserve initial bindings, only clear added bindings
@@ -205,6 +206,7 @@ internal ref struct SlotTriplePatternScan
             QueryCancellation.ThrowIfCancellationRequested();
             while (_enumerator.MoveNext())
             {
+                QueryCancellation.ThrowIfCancellationRequested();
                 var triple = _enumerator.Current;
                 var targetNode = triple.Object.ToString();
 
@@ -573,6 +575,7 @@ internal ref struct SlotMultiPatternScan
     {
         while (enumerator.MoveNext())
         {
+            QueryCancellation.ThrowIfCancellationRequested();
             var triple = enumerator.Current;
             int savedCount = bindings.Count;
 
