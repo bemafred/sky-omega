@@ -54,6 +54,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 | [Metrics coverage review](metrics-coverage-review.md) | Latent (review) | Catalog of 8 categories of observability gaps. Individual categories split out into their own entries when triggered (rebuild progress already split). |
 | [Per-index subdirectory layout](per-index-subdirectory-layout.md) | Latent | Two-SSD utilization (WAL + data split, or per-index placement), OR backup/replication wanting per-index granularity, OR profile-specific layout asymmetries |
 | [Cancellable executor paths](cancellable-executor-paths.md) | **Triggered** | Already triggered. Observed twice during the 2026-04-27/28 WDBench cold baseline (paths event loss + c2rpqs 4.86 h hang on a 60 s cancellation cap). ADR draft recommended within 1-3 days. |
+| [Property-path grammar gaps](property-path-grammar-gaps.md) | **Triggered** | Already triggered. Parse-only sweep over WDBench paths + c2rpqs found 12 of 1,199 queries (1.0%) failing parse on three shapes: `^(P)*`, `^((A\|B))+`, `(^A/B)`. ADR for grammar completeness recommended; option B (split `ParsePathPrimary` / `ParsePathExpr`) preferred for long-term extensibility. |
 
 ## Adding a new entry
 
