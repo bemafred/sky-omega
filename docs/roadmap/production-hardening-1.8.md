@@ -1,6 +1,6 @@
 # Production Hardening Roadmap — Sky Omega 1.8.0
 
-**Status:** Drafted 2026-04-20. Amended 2026-04-26 after Phase 6 (21.3 B Wikidata) validated end-to-end. Sequences ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, the Phase 7 performance rounds (`docs/limits/`), and the DrHook engine — all within 1.7.x — toward 1.8.0 as the cognitive-layers entry point.
+**Status:** Drafted 2026-04-20. Amended 2026-04-26 after Phase 6 (21.3 B Wikidata) validated end-to-end. Amended 2026-04-29 after Phase 7b (ADR-036 bzip2 substrate) shipped in 1.7.45 and the WDBench cold baseline against `wiki-21b-ref` surfaced two distinct executor/parser issues (one fixed in `527016f`, one characterized in `744edf7`). Sequences ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, ADR-036, the Phase 7 performance rounds (`docs/limits/`), and the DrHook engine — all within 1.7.x — toward 1.8.0 as the cognitive-layers entry point.
 
 ## Version-line model (amended 2026-04-26)
 
@@ -20,7 +20,7 @@ DrHook is "the very last of 1.7, possibly" — possibly because the engineering 
 
 This roadmap remains canonically `production-hardening-1.8.md` because the document still tracks the work *toward* 1.8.0 — even though 1.8.0's meaning has shifted from "production-hardening release" to "substrate-complete, cognitive entry point."
 
-## Progress (updated 2026-04-25)
+## Progress (updated 2026-04-29)
 
 | # | Phase | Target versions | Status | Evidence |
 |---|---|---|---|---|
@@ -35,8 +35,11 @@ This roadmap remains canonically `production-hardening-1.8.md` because the docum
 | 5d | ADR-033 (radix external sort for bulk-load) | 1.7.43 | ✅ Shipped + validated 1.7.43 | `docs/validations/adr-033-phase5-bulk-radix-2026-04-22.md` — 1 B end-to-end ~3h57m → **60m36s** (3.92× combined speedup). |
 | 5e | Phase 6 — 21.3 B Wikidata Reference end-to-end | 1.7.44 | ✅ Shipped 2026-04-25 | `aa35514` bumped Reference index BulkMode floor 256 GB → 1 TB. Launched 2026-04-22; sealed 2026-04-25 22:32 at 85 h end-to-end. |
 | 5f | Query-side validation against wiki-21b-ref | 1.7.44 | ✅ Validated 2026-04-26 | `docs/validations/21b-query-validation-2026-04-26.md` — both GSPO and GPOS indexes return correct results at 21.3 B; cold-cache `LIMIT 10` queries in tens of milliseconds. Capacity dimension of production hardening is empirical, not estimated. |
-| 6 | Production hardening milestone (close-out) | 1.7.x (no bump) | ⏭ Pending | ADR status transitions, WDBench latencies, STATISTICS update, milestone doc. Production hardening *milestone* — not a release. 1.8.0 is reserved for cognitive layers entry. |
-| 7 | Performance rounds (`docs/limits/`) | 1.7.x | ⏭ Pending | Enabling-dependency order: metrics infrastructure → bz2 streaming → measured-impact perf rounds. |
+| 6 | Production hardening milestone (close-out) | 1.7.x (no bump) | ⏭ Pending | ADR status transitions, STATISTICS update, milestone doc. WDBench latencies *moved to Phase 7c* (see line below). Production hardening *milestone* — not a release. 1.8.0 is reserved for cognitive layers entry. |
+| 7a | Phase 7a — metrics infrastructure maturation | 1.7.x | ⏭ Pending | Eight observability gap categories from `docs/limits/metrics-coverage-review.md`. Required before any Phase 7c round merges (no perf round without the metric to demonstrate the win). |
+| 7b | Phase 7b — bzip2 streaming source decompression (ADR-036) | 1.7.45 | ✅ Substrate complete 2026-04-26 | `7bba720` ADR-036 Phase 7b — bzip2 substrate complete. `8e0c688` packed BWT + tight MTF shift. End-to-end `--bulk-load latest-all.ttl.bz2 --limit N` runs without uncompressed staging; full gradient validation at 1 M / 10 M / 100 M / 1 B is still pending (Phase 7c sequencing input). |
+| 7c-baseline | WDBench cold baseline against `wiki-21b-ref` | 1.7.45 | ⚠️ Re-running 2026-04-29 | `docs/validations/wdbench-cold-baseline-21b-2026-04-27.jsonl` is the original (corrupted) run. Surfaced two distinct issues: executor cancellation gap (`docs/limits/cancellable-executor-paths.md`) — fixed in `527016f`; property-path parser grammar gaps (`docs/limits/property-path-grammar-gaps.md`) — 12 / 1,199 queries on 3 documented shapes, characterized in `744edf7`. Clean rerun in flight at `wdbench-paths-21b-2026-04-29.jsonl` + `wdbench-c2rpqs-21b-2026-04-29.jsonl`. |
+| 7c-rounds | Phase 7c — measured perf rounds (limits register) | 1.7.x | ⏭ Pending | Sequence determined by post-Phase-6 trace at 1 B + WDBench cold-baseline distribution. Each round ships with captured JSONL pre/post artifact. |
 | 8 | DrHook engine (BCL-only) | 1.7.x | ⏭ Pending | The very last of 1.7, possibly. |
 | — | Release 1.8.0 — cognitive layers begin | 1.8.0 | ⏭ Future | After Phase 8 lands. Entry to a different roadmap. |
 
@@ -282,6 +285,13 @@ Each round's exit is a captured JSONL artifact comparing pre/post on the metric 
 
 The cadence puts external comparison where it belongs: at the end of optimization arcs, not at the start.
 
+**Early-baseline observation (added 2026-04-29).** The first WDBench cold baseline ran 2026-04-27 against `wiki-21b-ref`, slightly ahead of the planned "after 7a + 7b" sequencing — Phase 7a metrics infrastructure is only partially shipped (ADR-030 Phase 1 metrics from 1.7.31 cover the bulk/rebuild/per-query path, but the eight observability gap categories from `docs/limits/metrics-coverage-review.md` are not yet fully wired). The early run was epistemically productive: it surfaced two issues that affect every subsequent Phase 7 round, both characterized within 48 hours.
+
+1. **Executor cancellation gap.** Property-path inner loops did not honor the `CancellationToken`. One `c2rpqs` query consumed 4 h 51 m of wall-clock under a 60 s timeout cap, and ~547 of 660 `paths` events were silently lost when the harness blocked waiting for an executor that never unwound. Without this fix, *no* timed benchmark on this substrate measures what it claims to measure. Captured in `docs/limits/cancellable-executor-paths.md`; fixed in commit `527016f`.
+2. **Property-path parser grammar gaps.** Three combinations (`^(P)*`, `^((A|B))+`, `(^A/B)`) the W3C SPARQL 1.1 conformance suite does not exercise are reachable through real-world WDBench shapes. 12 / 1,199 queries (1.0 %) parse-fail cleanly; the remaining 99 % parse and execute. Characterized via a parse-only sweep in `docs/limits/property-path-grammar-gaps.md`; commit `744edf7`.
+
+Both were *latent under W3C conformance* and *surfaced under WDBench*, which is itself an artifact of why the external benchmark thread is in this roadmap. The clean disclosure-marked baseline rerun is in flight 2026-04-29 (output split per category: `wdbench-paths-21b-2026-04-29.jsonl` + `wdbench-c2rpqs-21b-2026-04-29.jsonl`). The 2026-04-27 file remains as the pre-cancellation-fix reference, not deleted.
+
 **Exit from Phase 7:** all seven rounds shipped or explicitly deferred (with reason). The combined measured impact is captured in `docs/validations/phase7-rounds-summary.md`. WDBench cold baseline + per-round runs + final captured. The 21.3 B re-run (if undertaken) is a deliberate choice, not an obligation.
 
 **Both profiles in scope.** Every Phase 7 metric and every Phase 7 round answers "and what does this mean for Cognitive?" before it's considered done. The seven characterized rounds skew Reference; Phase 7 must not let Cognitive get under-served.
@@ -404,7 +414,7 @@ Under the amended version-line model, the original "one-page 1.8.0 checklist" sp
 - [ ] Phase 7a metrics infrastructure: eight observability gap categories from `docs/limits/metrics-coverage-review.md` covered for both Cognitive and Reference. JSONL artifact pattern proven for Phase 7 round validation.
 - [ ] Phase 7b BZip2 streaming: `mercury --bulk-load latest-all.ttl.bz2 --limit N` runs end-to-end without uncompressed staging. Gradient runs at 1 M / 10 M / 100 M / 1 B all sourced from the same `.bz2` artifact.
 - [ ] Phase 7c onward: each of the seven characterized rounds in `docs/limits/` either (a) shipped with a captured JSONL artifact showing measured pre/post, or (b) explicitly deferred with reason recorded in the limits register.
-- [ ] **WDBench cold baseline** captured at Phase 7c start (post-7a, post-7b, pre-rounds): median, p95, p99, tail distribution data against `wiki-21b-ref`.
+- [ ] **WDBench cold baseline** captured at Phase 7c start (post-7a, post-7b, pre-rounds): median, p95, p99, tail distribution data against `wiki-21b-ref`. *(In flight 2026-04-29 — the 2026-04-27 first attempt surfaced two bugs that have been fixed/characterized; clean rerun produces the disclosure-marked artifact.)*
 - [ ] **WDBench rerun** after each major perf round, captured as a per-round validation entry.
 - [ ] **WDBench final** at Phase 7 close: consolidated comparison to QLever/Virtuoso published numbers, externally-defensible, distribution-aware, sourced from a sealed artifact.
 - [ ] `docs/validations/phase7-rounds-summary.md` consolidates the measured impact across rounds *and* the WDBench arc (cold → per-round → final). The 21.3 B re-run, if undertaken, is its own deliberately-chosen validation, not an obligation.

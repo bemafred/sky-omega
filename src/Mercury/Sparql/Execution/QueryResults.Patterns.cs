@@ -736,6 +736,7 @@ internal ref partial struct QueryResults
         {
             while (enumerator.MoveNext())
             {
+                QueryCancellation.ThrowIfCancellationRequested();
                 var triple = enumerator.Current;
                 results.Add(new MaterializedTriple
                 {
@@ -906,6 +907,7 @@ internal ref partial struct QueryResults
         {
             while (enumerator.MoveNext())
             {
+                QueryCancellation.ThrowIfCancellationRequested();
                 var triple = enumerator.Current;
                 results.Add(new MaterializedTriple
                 {

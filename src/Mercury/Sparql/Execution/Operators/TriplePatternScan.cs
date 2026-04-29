@@ -1466,6 +1466,7 @@ internal ref struct TriplePatternScan
             // Collect all results as intermediates
             while (enumerator.MoveNext())
             {
+                QueryCancellation.ThrowIfCancellationRequested();
                 var triple = enumerator.Current;
                 // For inverse, collect Subject; for direct, collect Object
                 var intermediate = isInverse ? triple.Subject : triple.Object;

@@ -1094,6 +1094,7 @@ internal ref struct MultiPatternScan
 
         while (enumerator.MoveNext())
         {
+            QueryCancellation.ThrowIfCancellationRequested();
             var triple = enumerator.Current;
 
             // Try to bind variables, checking consistency with existing bindings
