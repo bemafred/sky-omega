@@ -27,6 +27,20 @@ A single Mercury store is owned by a single agent at a time. There is no shared 
 - Things trivially re-derived from the codebase (read the code instead)
 - Unvalidated speculation presented as fact (mark it, or don't store it)
 
+### Workload Profiles (the two faces of Mercury)
+
+Mercury has two storage profiles per ADR-029 and two workloads per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). The semantic-memory use case is **Cognitive**.
+
+| | Cognitive (semantic memory) | Reference (sealed knowledge graph) |
+|---|---|---|
+| **Use case** | Per-agent, per-team, per-organization knowledge accumulation | Canonical snapshots — Wikidata, DBpedia, FHIR ontologies |
+| **Write pattern** | Per-session-graph mutation | Single bulk-load, then sealed |
+| **Bitemporal** | Yes — valid-time + transaction-time on every triple | No — sealed snapshots have no time dimension |
+| **Time-travel queries** | `AS OF`, `DURING`, `ALL VERSIONS` | N/A |
+| **Performance dimensions** | Per-query latency, Dispose/Open speed | Bulk-ingest throughput, cold-cache query latency |
+
+This document describes the **Cognitive** discipline. When `mercury-mcp` is attached to an AI agent's MCP surface, the underlying store is typically Cognitive. References to Reference profile in this document are by-name only; for Reference workload concerns see ADR-008 and `docs/limits/cognitive-profile-validation-drought.md` for the inverse (Cognitive measurement gap).
+
 ---
 
 ## Session Discipline

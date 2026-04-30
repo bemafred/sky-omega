@@ -35,12 +35,13 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > **v1.7.47 — Phase 6 complete. Phase 7 in flight. Substrate hardened.**
 > 21.3 B Wikidata, ingested, sealed, queryable on a single laptop. Disclosure-marked WDBench cold baseline against the hardened substrate.
 >
-> **Phase 6 — capacity proven** *(2026-04-26)*
+> **Phase 6 — capacity proven** *(2026-04-26, Reference profile)*
 > - 21,260,051,924 triples ingested from a 3.1 TB N-Triples source
 > - **85 h end-to-end** on an M5 Max, 128 GB RAM, BCL-only .NET
 > - Query-side validated: `wdt:P31` (instance-of) bound queries return real Wikidata instances in tens of milliseconds cold-cache; `LIMIT 10` over the full graph in **17 ms**
 > - Both primary (GSPO) and secondary (GPOS) indexes correct at full scale
 > - *The capacity dimension of production hardening is empirical, not estimated.*
+> - *Phase 6/7 numbers are Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). Cognitive-profile validation gradient pending — see [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).*
 >
 > **Phase 7 — performance rounds landing** *(2026-04-27 →)*
 > - **ADR-035 Phase 7a** — metrics infrastructure — *Completed*
@@ -112,7 +113,9 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 
 ## 💠 Project Purpose
 
-**Mercury** is a complete SPARQL 1.1 engine with zero external dependencies, zero-GC performance, and 100% W3C conformance across all core specifications. It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
+**Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core), zero-GC hot paths, and 100% W3C conformance across all core specifications. It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
+
+> *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 21-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), DrHook (depends on `Microsoft.Diagnostics.NETCore.Client` until ADR-006/drhook engine ships) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
 
 The broader Sky Omega vision is a **stand-alone cognitive agent** built on this foundation, combining:
 
@@ -153,11 +156,12 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 - **W3C Solid Protocol server** (`Mercury.Solid`) — WAC + ACP access control, N3 Patch updates, full HTTP handlers.
 - **Model Context Protocol (MCP)** — `mercury-mcp` exposes Mercury as a Claude semantic-memory tool with persistent store survival across sessions.
 
-### Bitemporal extensions (beyond W3C)
+### Bitemporal extensions (beyond W3C, **Cognitive profile only**)
 
 - **Valid-time + transaction-time** stored as implicit dimensions on every triple
-- `AS OF`, `BETWEEN`, `EVOLUTION` query forms for time-travel
+- `AS OF`, `DURING`, `ALL VERSIONS` query forms for time-travel
 - Versioning, soft-delete, audit trails — all queryable through standard SPARQL with temporal extensions
+- *Reference profile drops temporal columns by design — sealed canonical snapshots have no time dimension. See [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md) for the workload-profile distinction.*
 
 ---
 
