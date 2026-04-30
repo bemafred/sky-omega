@@ -618,13 +618,22 @@ public sealed class QuadStore : IDisposable
                 // SortedAtomBulkBuilder here. AddReferenceBulkTriple buffers atom strings
                 // into it; CommitBatch finalizes the vocabulary and re-opens the store's
                 // _atoms over the freshly-written files.
+                //
+                // ADR-034 Phase 1B-5d: use disk-backed AssignedIds resolution. The
+                // alternative (in-memory long[] of every input occurrence) costs 32 GB
+                // at 1 B triples and 681 GB at 21.3 B Wikidata — incompatible with a
+                // single-host bulk load. The disk-backed path streams resolution records
+                // through ExternalSorter<ResolveRecord> with a 256 MB bounded chunk buffer
+                // independent of input scale. At small scales (<100 M) the disk overhead
+                // is ~10-50 ms — negligible against the 1 B+ requirement.
                 if (_schema.AtomStore == AtomStoreImplementation.Sorted && _bulkLoadMode)
                 {
                     var sortedTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "sorted-vocab");
                     Directory.CreateDirectory(sortedTempDir);
                     _sortedAtomBulkBuilder = new SortedAtomBulkBuilder(
                         Path.Combine(_baseDirectory, "atoms"),
-                        sortedTempDir);
+                        sortedTempDir,
+                        useDiskBackedAssigned: true);
                 }
                 return;
             }
@@ -868,9 +877,17 @@ public sealed class QuadStore : IDisposable
 
                     // Replay the resolved triples into the GSPO sorter (same path the
                     // Hash-backed Reference bulk uses; see _bulkSorter declaration).
+                    //
+                    // ADR-034 Phase 1B-5d: scope the GSPO sorter's tempDir to a dedicated
+                    // subdirectory ("bulk-tmp/gspo"). The previous shape ("bulk-tmp")
+                    // collided with the SortedAtomBulkBuilder's resolver chunks at
+                    // "bulk-tmp/sorted-vocab/assigned-ids-resolver/", because
+                    // ExternalSorter's constructor wipes its tempDir recursively — which
+                    // would delete the resolver's chunks before EnumerateResolved drains
+                    // them just below.
                     if (_bulkSorter is null)
                     {
-                        var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp");
+                        var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "gspo");
                         _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
                             tempDir: bulkTempDir,
                             chunkSize: 16_000_000);
