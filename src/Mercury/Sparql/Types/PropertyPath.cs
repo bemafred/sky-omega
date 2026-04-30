@@ -14,6 +14,8 @@ internal struct PropertyPath
     public int LeftLength;     // For sequence/alternative: length of left operand; for NegatedSet: length of content
     public int RightStart;     // For sequence/alternative: offset of right operand
     public int RightLength;
+    public bool IsInverseGroup; // For Grouped{ZeroOrMore,OneOrMore,ZeroOrOne}: true when the group came from
+                                // ^iri{*,+,?} or ^(X){*,+,?} — the runtime walks each step in inverse direction.
 
     public static PropertyPath Simple(Term iri) =>
         new() { Type = PathType.None, Iri = iri };

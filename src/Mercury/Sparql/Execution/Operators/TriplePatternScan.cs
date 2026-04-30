@@ -77,6 +77,25 @@ internal ref struct TriplePatternScan
     // State for grouped sequence path traversal ((p1/p2/p3)*)
     private Queue<string>? _groupedResults; // Results from executing grouped sequence
 
+    // Whether the BFS started from the bound OBJECT position (Case 2: ?x path <obj>) rather than
+    // the bound SUBJECT (Case 3: <subj> path ?x). When true:
+    //   * The walker's effective direction is FLIPPED relative to the path's natural direction —
+    //     `?x P+ <obj>` must walk backward from <obj> to find ancestors, not forward.
+    //   * MoveNextTransitive emits bindings with Subject=targetNode and Object=_startNode (the
+    //     bound object value), the inverse of the Case 3 binding shape.
+    // Without this flag the binding succeeds only on the reflexive case (when the walker happens
+    // to return _startNode itself), and all non-reflexive ancestors are silently filtered out.
+    private bool _startedFromObject;
+
+    // Per-step deduplication set for the property-path content walker.
+    // Allocated lazily on first use and cleared between calls — avoids per-match
+    // string ToString() when a target node has already been emitted in the current step.
+    private HashSet<string>? _walkerStepSeen;
+    // Sequence frontier sets — alternate between current/next as we walk legs.
+    // Allocated lazily and reused; .Clear() between uses keeps them allocation-stable.
+    private HashSet<string>? _walkerCurrent;
+    private HashSet<string>? _walkerNext;
+
     // Prefix mappings for expansion
     private readonly PrefixMapping[]? _prefixes;
     // Expanded IRIs stored as strings to ensure span lifetime safety
@@ -548,9 +567,16 @@ internal ref struct TriplePatternScan
                         _frontier!.Enqueue(targetNode);
 
                         bindings.TruncateTo(_initialBindingsCount);
-                        // Bind subject to original start node, object to the discovered target
-                        if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
-                            TryBindVariable(_pattern.Object, targetNode.AsSpan(), ref bindings))
+                        // Binding direction depends on whether the BFS started from the subject
+                        // (Case 3) or the object (Case 2):
+                        //   Case 3: bind ?subject := _startNode (matches the literal subject),
+                        //           bind ?object  := targetNode (the variable receives the walked node)
+                        //   Case 2: bind ?subject := targetNode (the variable receives the walked node),
+                        //           bind ?object  := _startNode (matches the literal object)
+                        var subjectBind = _startedFromObject ? targetNode.AsSpan() : _startNode.AsSpan();
+                        var objectBind  = _startedFromObject ? _startNode.AsSpan() : targetNode.AsSpan();
+                        if (TryBindVariable(_pattern.Subject, subjectBind, ref bindings) &&
+                            TryBindVariable(_pattern.Object, objectBind, ref bindings))
                         {
                             return true;
                         }
@@ -559,12 +585,18 @@ internal ref struct TriplePatternScan
             }
             else
             {
-                // For simple paths, use the enumerator
+                // For simple paths, use the enumerator. The "discovered node" comes from the
+                // OPPOSITE end of the queried triple relative to the BFS start position:
+                //   Case 3 (started from subject): we queried `_startNode predicate ?`, so the
+                //                                  walked node is triple.Object.
+                //   Case 2 (started from object):  we queried `? predicate _startNode`, so the
+                //                                  walked node is triple.Subject.
                 while (_enumerator.MoveNext())
                 {
                     QueryCancellation.ThrowIfCancellationRequested();
                     var triple = _enumerator.Current;
-                    var targetNode = triple.Object.ToString();
+                    var walked = _startedFromObject ? triple.Subject : triple.Object;
+                    var targetNode = walked.ToString();
 
                     if (!_visited!.Contains(targetNode))
                     {
@@ -572,9 +604,11 @@ internal ref struct TriplePatternScan
                         _frontier!.Enqueue(targetNode);
 
                         bindings.TruncateTo(_initialBindingsCount);
-                        // Bind subject to original start node, object to the discovered target
-                        if (TryBindVariable(_pattern.Subject, _startNode.AsSpan(), ref bindings) &&
-                            TryBindVariable(_pattern.Object, triple.Object, ref bindings))
+                        // Same Case 2 / Case 3 binding split as the grouped branch above.
+                        var subjectBind = _startedFromObject ? walked : _startNode.AsSpan();
+                        var objectBind  = _startedFromObject ? _startNode.AsSpan() : walked;
+                        if (TryBindVariable(_pattern.Subject, subjectBind, ref bindings) &&
+                            TryBindVariable(_pattern.Object, objectBind, ref bindings))
                         {
                             return true;
                         }
@@ -590,7 +624,7 @@ internal ref struct TriplePatternScan
 
                 if (isGrouped)
                 {
-                    _groupedResults = new Queue<string>(ExecuteGroupedSequence(_currentNode));
+                    _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(_currentNode));
                 }
                 else
                 {
@@ -598,10 +632,14 @@ internal ref struct TriplePatternScan
                         ? ResolveTermForQuery(_pattern.Path.Iri)
                         : ResolveTermForQuery(_pattern.Predicate);
 
-                    _enumerator = ExecuteTemporalQuery(
-                        _currentNode.AsSpan(),
-                        predicate,
-                        ReadOnlySpan<char>.Empty);
+                    // BFS expansion direction matches the BFS start orientation: forward when the
+                    // walk started from a bound subject (Case 3), inverse when it started from a
+                    // bound object (Case 2). Without this flip, the BFS frontier expansion in
+                    // Case 2 silently switches direction mid-walk and produces no further results.
+                    if (_startedFromObject)
+                        _enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, _currentNode.AsSpan());
+                    else
+                        _enumerator = ExecuteTemporalQuery(_currentNode.AsSpan(), predicate, ReadOnlySpan<char>.Empty);
                 }
                 continue;
             }
@@ -617,7 +655,7 @@ internal ref struct TriplePatternScan
 
                 if (isGrouped)
                 {
-                    _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+                    _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(_startNode));
                 }
                 else
                 {
@@ -625,10 +663,10 @@ internal ref struct TriplePatternScan
                         ? ResolveTermForQuery(_pattern.Path.Iri)
                         : ResolveTermForQuery(_pattern.Predicate);
 
-                    _enumerator = ExecuteTemporalQuery(
-                        _startNode.AsSpan(),
-                        predicate,
-                        ReadOnlySpan<char>.Empty);
+                    if (_startedFromObject)
+                        _enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, _startNode.AsSpan());
+                    else
+                        _enumerator = ExecuteTemporalQuery(_startNode.AsSpan(), predicate, ReadOnlySpan<char>.Empty);
                 }
                 continue;
             }
@@ -752,7 +790,7 @@ internal ref struct TriplePatternScan
             var startNodeSpan = subject.IsEmpty ? obj : subject;
             var expandedStart = ExpandPrefixedName(startNodeSpan);
             _startNode = expandedStart.ToString();
-            var sequenceResults = ExecuteGroupedSequence(_startNode);
+            var sequenceResults = ExecuteGroupedSequenceDirected(_startNode);
             // Deduplicate and exclude reflexive (we'll emit it separately)
             // Note: Copy _startNode to local to avoid capturing 'this' in lambda
             var startNode = _startNode;
@@ -766,7 +804,7 @@ internal ref struct TriplePatternScan
             var startNodeSpan = subject.IsEmpty ? obj : subject;
             var expandedStart = ExpandPrefixedName(startNodeSpan);
             var startNode = expandedStart.ToString();
-            _groupedResults = new Queue<string>(ExecuteInverseGroupedSequence(startNode));
+            _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(startNode));
         }
         else
         {
@@ -797,204 +835,482 @@ internal ref struct TriplePatternScan
     /// For example, for (p1/p2/p3)*, this executes the full sequence p1→p2→p3
     /// and returns all nodes reachable at the end of the sequence.
     /// </summary>
-    private List<string> ExecuteGroupedSequence(string startNode)
+    /// <summary>
+    /// Walks the grouped sequence in the direction implied by the path AST.
+    /// For Grouped{ZeroOrMore,OneOrMore,ZeroOrOne} with <see cref="PropertyPath.IsInverseGroup"/> set
+    /// (e.g., from parsing ^(P)*, ^(A|B)+, ^iri?), each step traverses the inner content backward.
+    /// Otherwise, walks forward via <see cref="ExecuteGroupedSequence"/>.
+    /// </summary>
+    private List<string> ExecuteGroupedSequenceDirected(string startNode)
     {
-        var results = new List<string>();
-
-        // Get the inner content of the grouped path
-        var innerContent = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-
-        // Parse the sequence into individual predicates
-        var predicates = new List<ReadOnlyMemory<char>>();
-        var contentStr = innerContent.ToString();
-        var start = 0;
-        var depth = 0;
-
-        for (int i = 0; i < contentStr.Length; i++)
-        {
-            var ch = contentStr[i];
-            if (ch == '<') depth++;
-            else if (ch == '>') depth--;
-            else if (ch == '/' && depth == 0)
-            {
-                if (i > start)
-                {
-                    predicates.Add(contentStr.AsMemory(start, i - start));
-                }
-                start = i + 1;
-            }
-        }
-        // Add the last predicate
-        if (start < contentStr.Length)
-        {
-            predicates.Add(contentStr.AsMemory(start, contentStr.Length - start));
-        }
-
-        if (predicates.Count == 0)
-            return results;
-
-        // Execute the sequence: start with the start node, execute each predicate in turn
-        var currentNodes = new List<string> { startNode };
-
-        foreach (var predicateMem in predicates)
-        {
-            var nextNodes = new List<string>();
-            var predicate = ExpandPrefixedName(predicateMem.Span);
-
-            foreach (var node in currentNodes)
-            {
-                var enumerator = ExecuteTemporalQuery(
-                    node.AsSpan(),
-                    predicate,
-                    ReadOnlySpan<char>.Empty);
-
-                while (enumerator.MoveNext())
-                {
-                    QueryCancellation.ThrowIfCancellationRequested();
-                    var triple = enumerator.Current;
-                    nextNodes.Add(triple.Object.ToString());
-                }
-                enumerator.Dispose();
-            }
-
-            currentNodes = nextNodes;
-            if (currentNodes.Count == 0)
-                break;
-        }
-
-        results.AddRange(currentNodes);
+        // Route through the unified walker: handles paren-wrapped content, alternatives,
+        // sequences, per-predicate '^', and IsInverseGroup uniformly. Returns a List<string>
+        // to preserve the existing call-site contract (Queue construction in callers); the
+        // walker fills a temporary queue, which we drain into a list once.
+        var pooled = RentTempQueue();
+        WalkGroupedContentInto(startNode, pooled);
+        var results = new List<string>(pooled.Count);
+        while (pooled.Count > 0) results.Add(pooled.Dequeue());
+        ReturnTempQueue(pooled);
         return results;
     }
 
+    // Legacy methods ExecuteGroupedSequence + ExecuteInverseGroupedSequence have been retired —
+    // replaced by the unified WalkGroupedContentInto walker (below) which handles forward, inverse,
+    // alternative, sequence, and paren-wrapped content uniformly under zero-GC discipline.
+
     /// <summary>
-    /// Executes an inverse grouped sequence path from a given start node.
-    /// For example, for ^(p1/p2), this executes the sequence in reverse with inverse predicates: ^p2→^p1.
-    /// This finds nodes that lead TO the start node via the original sequence.
+    /// Walk one application of the grouped path content from <paramref name="startNode"/> and emit
+    /// reached nodes into <paramref name="output"/>. A single walker handles forward and inverse
+    /// via the <see cref="PropertyPath.IsInverseGroup"/> flag and per-predicate <c>^</c> markers.
     /// </summary>
-    private List<string> ExecuteInverseGroupedSequence(string startNode)
+    /// <remarks>
+    /// Content shapes handled:
+    ///   <c>P</c>           — single forward predicate
+    ///   <c>^P</c>          — single inverse predicate
+    ///   <c>P1/P2/...</c>   — sequence of predicates (each may be <c>^</c>-prefixed)
+    ///   <c>P1|P2|...</c>   — top-level alternative (each branch may itself be a sub-expression)
+    ///   <c>(X)</c>         — parenthesised sub-expression (recursively walked)
+    /// Operator depth is tracked across both <c>&lt;&gt;</c> (IRI brackets) and <c>()</c>
+    /// (group nesting) so nested groups don't trigger spurious splits.
+    ///
+    /// Zero-GC discipline:
+    ///   * No <c>contentStr.ToString()</c>; all parsing operates on spans into <c>_source</c>.
+    ///   * Predicate / branch range tables live in <c>stackalloc int[]</c> on the walker stack.
+    ///   * Frontier sets reuse <c>_walkerCurrent</c> / <c>_walkerNext</c> fields between calls.
+    ///   * <c>HashSet&lt;string&gt;.GetAlternateLookup&lt;ReadOnlySpan&lt;char&gt;&gt;()</c> avoids
+    ///     <c>ToString()</c> per match — strings are materialised only when a node is genuinely
+    ///     new in this step's frontier.
+    /// </remarks>
+    private void WalkGroupedContentInto(string startNode, Queue<string> output)
     {
-        var results = new List<string>();
-
-        // Get the inner content of the grouped path
-        var innerContent = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-
-        // Parse the sequence into individual predicates
-        var predicates = new List<ReadOnlyMemory<char>>();
-        var contentStr = innerContent.ToString();
-        var start = 0;
-        var depth = 0;
-
-        for (int i = 0; i < contentStr.Length; i++)
-        {
-            var ch = contentStr[i];
-            if (ch == '<') depth++;
-            else if (ch == '>') depth--;
-            else if (ch == '/' && depth == 0)
-            {
-                if (i > start)
-                {
-                    predicates.Add(contentStr.AsMemory(start, i - start));
-                }
-                start = i + 1;
-            }
-        }
-        // Add the last predicate
-        if (start < contentStr.Length)
-        {
-            predicates.Add(contentStr.AsMemory(start, contentStr.Length - start));
-        }
-
-        if (predicates.Count == 0)
-            return results;
-
-        // REVERSE the predicate order for inverse execution
-        predicates.Reverse();
-
-        // Execute the sequence: start with the start node, execute each predicate in INVERSE direction
-        var currentNodes = new List<string> { startNode };
-
-        foreach (var predicateMem in predicates)
-        {
-            var nextNodes = new List<string>();
-            var predicate = ExpandPrefixedName(predicateMem.Span);
-
-            foreach (var node in currentNodes)
-            {
-                // INVERSE: query with node as OBJECT to find subjects
-                var enumerator = ExecuteTemporalQuery(
-                    ReadOnlySpan<char>.Empty,
-                    predicate,
-                    node.AsSpan());
-
-                while (enumerator.MoveNext())
-                {
-                    QueryCancellation.ThrowIfCancellationRequested();
-                    var triple = enumerator.Current;
-                    nextNodes.Add(triple.Subject.ToString());
-                }
-                enumerator.Dispose();
-            }
-
-            currentNodes = nextNodes;
-            if (currentNodes.Count == 0)
-                break;
-        }
-
-        results.AddRange(currentNodes);
-        return results;
+        var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+        // Inverse direction applies when:
+        //   * the path is the non-quantified InverseGroup (^(X)) — historically routed through
+        //     ExecuteInverseGroupedSequence, now unified here; or
+        //   * the parser flagged a quantified group as inverse (e.g., from ^(P)*, ^((A|B))+); or
+        //   * the BFS started from the bound OBJECT position (Case 2) — semantically requires
+        //     walking the path's reverse direction from the start node to find subjects that
+        //     reach the bound object via the original (un-flipped) path.
+        bool inverse = _pattern.Path.Type == PathType.InverseGroup || _pattern.Path.IsInverseGroup;
+        if (_startedFromObject) inverse = !inverse;
+        WalkPathContentInto(startNode, content, inverse, output);
     }
 
     /// <summary>
-    /// Discovers all starting nodes that have the first predicate of a grouped sequence.
-    /// Returns (subjects, allNodes) where subjects can start the sequence and allNodes
-    /// includes all nodes seen (for reflexive bindings in zero-or-more).
+    /// Recursive worker for <see cref="WalkGroupedContentInto"/>. Strips outer balanced parens,
+    /// detects the top-level operator, and dispatches to sequence/alternative/single-predicate handling.
     /// </summary>
+    private void WalkPathContentInto(string startNode, ReadOnlySpan<char> content, bool inverseDir, Queue<string> output)
+    {
+        content = TrimOuterParens(content.Trim());
+
+        Span<int> ranges = stackalloc int[32]; // up to 16 segments (start + length each) — comfortable for real queries
+        char topOp = ScanTopLevelPathOperator(content, ranges, out int rangeCount);
+
+        if (topOp == '|')
+        {
+            // Top-level alternative: union over branches from startNode.
+            // (Inverse marker on the outer group flips direction for each branch.)
+            EnsureWalkerStepSeen();
+            _walkerStepSeen!.Clear();
+            for (int i = 0; i < rangeCount; i++)
+            {
+                var branch = content.Slice(ranges[i * 2], ranges[i * 2 + 1]);
+                WalkOneBranchInto(startNode, branch, inverseDir, output, _walkerStepSeen);
+            }
+        }
+        else if (topOp == '/')
+        {
+            // Top-level sequence: chain through each leg.
+            // For inverse direction, walk legs in REVERSE order with each leg also inverse-flipped.
+            WalkSequenceInto(startNode, content, ranges, rangeCount, inverseDir, output);
+        }
+        else
+        {
+            // Single predicate, possibly with leading '^'.
+            EnsureWalkerStepSeen();
+            _walkerStepSeen!.Clear();
+            WalkOneBranchInto(startNode, content, inverseDir, output, _walkerStepSeen);
+        }
+    }
+
+    /// <summary>
+    /// Walk a single branch (which may itself be a sub-expression) from a start node, emitting
+    /// each unique target into <paramref name="output"/>. Uses <see cref="HashSet{T}.AlternateLookup{TAlt}"/>
+    /// to dedupe by span before allocating a string.
+    /// </summary>
+    private void WalkOneBranchInto(string startNode, ReadOnlySpan<char> branch, bool inverseDir,
+        Queue<string> output, HashSet<string> stepSeen)
+    {
+        branch = TrimOuterParens(branch.Trim());
+
+        // If the branch is itself a composite (sequence or alternative), recurse.
+        Span<int> innerRanges = stackalloc int[32];
+        char innerOp = ScanTopLevelPathOperator(branch, innerRanges, out int innerCount);
+        if (innerOp == '/' || innerOp == '|')
+        {
+            // Recurse into a fresh per-recursion frontier — but we still need to dedupe
+            // emissions into the caller's stepSeen set. Use a temporary intermediate queue.
+            var pooled = RentTempQueue();
+            WalkPathContentInto(startNode, branch, inverseDir, pooled);
+            while (pooled.Count > 0)
+            {
+                var node = pooled.Dequeue();
+                if (stepSeen.Add(node))
+                    output.Enqueue(node);
+            }
+            ReturnTempQueue(pooled);
+            return;
+        }
+
+        // Atomic predicate: optional leading '^', then the IRI/prefixed name.
+        bool branchIsInverse = branch.Length > 0 && branch[0] == '^';
+        var predicateSpan = branchIsInverse ? branch.Slice(1).TrimStart() : branch;
+        var predicate = ExpandPrefixedName(predicateSpan);
+
+        // Effective direction: outer inverse XOR per-branch inverse marker.
+        bool effectiveInverse = inverseDir ^ branchIsInverse;
+
+        // Query in the effective direction. For inverse traversal from startNode, query with
+        // startNode as object position and accumulate subjects.
+        TemporalResultEnumerator enumerator;
+        if (effectiveInverse)
+            enumerator = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, predicate, startNode.AsSpan());
+        else
+            enumerator = ExecuteTemporalQuery(startNode.AsSpan(), predicate, ReadOnlySpan<char>.Empty);
+
+        try
+        {
+            var seenLookup = stepSeen.GetAlternateLookup<ReadOnlySpan<char>>();
+            while (enumerator.MoveNext())
+            {
+                QueryCancellation.ThrowIfCancellationRequested();
+                var triple = enumerator.Current;
+                var target = effectiveInverse ? triple.Subject : triple.Object;
+
+                // Dedupe by span first; only ToString() if genuinely new.
+                if (!seenLookup.Contains(target))
+                {
+                    var s = target.ToString();
+                    stepSeen.Add(s);
+                    output.Enqueue(s);
+                }
+            }
+        }
+        finally
+        {
+            enumerator.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Walk a sequence (legs separated by top-level <c>/</c>). Each leg may be inverse-prefixed
+    /// or a sub-group. The outer <paramref name="inverseDir"/> flag reverses leg order and
+    /// inverts each leg's direction (semantics of inverse-of-sequence).
+    /// </summary>
+    private void WalkSequenceInto(string startNode, ReadOnlySpan<char> content, scoped ReadOnlySpan<int> ranges,
+        int rangeCount, bool inverseDir, Queue<string> output)
+    {
+        EnsureFrontierSets();
+        var current = _walkerCurrent!;
+        var next = _walkerNext!;
+        current.Clear();
+        next.Clear();
+        current.Add(startNode);
+
+        // Iterate legs in source order for forward, reverse order for inverse-of-sequence.
+        // For each leg, take all current frontier nodes through the leg (forward or inverse-flipped).
+        for (int idx = 0; idx < rangeCount; idx++)
+        {
+            int legIndex = inverseDir ? (rangeCount - 1 - idx) : idx;
+            var leg = content.Slice(ranges[legIndex * 2], ranges[legIndex * 2 + 1]);
+
+            EnsureWalkerStepSeen();
+            _walkerStepSeen!.Clear();
+            foreach (var node in current)
+            {
+                // Walk this leg from `node` into a temp queue, then merge into `next`.
+                var pooled = RentTempQueue();
+                WalkOneBranchInto(node, leg, inverseDir, pooled, _walkerStepSeen);
+                while (pooled.Count > 0)
+                    next.Add(pooled.Dequeue());
+                ReturnTempQueue(pooled);
+            }
+
+            // Swap roles for next iteration.
+            (current, next) = (next, current);
+            next.Clear();
+
+            if (current.Count == 0)
+                break;
+        }
+
+        // Emit the final frontier into the output queue.
+        foreach (var node in current)
+            output.Enqueue(node);
+    }
+
+    /// <summary>
+    /// Strip a single layer of outer balanced parentheses if they wrap the entire expression
+    /// (e.g., <c>(^A/B)</c> → <c>^A/B</c>). Leaves nested patterns like <c>A/(B|C)</c> alone.
+    /// </summary>
+    private static ReadOnlySpan<char> TrimOuterParens(ReadOnlySpan<char> s)
+    {
+        while (s.Length >= 2 && s[0] == '(' && s[^1] == ')')
+        {
+            int depth = 0;
+            bool wraps = true;
+            for (int i = 0; i < s.Length; i++)
+            {
+                var c = s[i];
+                if (c == '(') depth++;
+                else if (c == ')')
+                {
+                    depth--;
+                    if (depth == 0 && i != s.Length - 1) { wraps = false; break; }
+                }
+            }
+            if (!wraps || depth != 0) break;
+            s = s.Slice(1, s.Length - 2).Trim();
+        }
+        return s;
+    }
+
+    /// <summary>
+    /// Scan for top-level <c>/</c> (sequence) or <c>|</c> (alternative) splits in <paramref name="content"/>,
+    /// honoring depth across both IRI brackets <c>&lt;&gt;</c> and group parens <c>()</c>.
+    /// Per SPARQL precedence, <c>|</c> binds looser than <c>/</c> — so if any top-level <c>|</c> exists,
+    /// it determines the split shape and <c>/</c> within branches is recurse-resolved.
+    /// </summary>
+    /// <returns><c>'|'</c> if alternative split; <c>'/'</c> if sequence split; <c>'\0'</c> if neither (single predicate).</returns>
+    private static char ScanTopLevelPathOperator(ReadOnlySpan<char> content, Span<int> ranges, out int rangeCount)
+    {
+        // First pass: detect top-level '|'. If any, split on '|' (alternative).
+        // Otherwise: detect top-level '/'. If any, split on '/' (sequence).
+        // Otherwise: single predicate.
+        char op = ScanTopLevelOp(content, '|');
+        if (op == '|')
+        {
+            rangeCount = SplitTopLevel(content, '|', ranges);
+            return '|';
+        }
+        op = ScanTopLevelOp(content, '/');
+        if (op == '/')
+        {
+            rangeCount = SplitTopLevel(content, '/', ranges);
+            return '/';
+        }
+        rangeCount = 0;
+        return '\0';
+    }
+
+    private static char ScanTopLevelOp(ReadOnlySpan<char> content, char target)
+    {
+        int iriDepth = 0, parenDepth = 0;
+        for (int i = 0; i < content.Length; i++)
+        {
+            var c = content[i];
+            if (c == '<') iriDepth++;
+            else if (c == '>') iriDepth--;
+            else if (iriDepth == 0)
+            {
+                if (c == '(') parenDepth++;
+                else if (c == ')') parenDepth--;
+                else if (parenDepth == 0 && c == target) return target;
+            }
+        }
+        return '\0';
+    }
+
+    private static int SplitTopLevel(ReadOnlySpan<char> content, char sep, Span<int> ranges)
+    {
+        int count = 0, segmentStart = 0;
+        int iriDepth = 0, parenDepth = 0;
+        for (int i = 0; i < content.Length; i++)
+        {
+            var c = content[i];
+            if (c == '<') iriDepth++;
+            else if (c == '>') iriDepth--;
+            else if (iriDepth == 0)
+            {
+                if (c == '(') parenDepth++;
+                else if (c == ')') parenDepth--;
+                else if (parenDepth == 0 && c == sep)
+                {
+                    if (count * 2 + 1 >= ranges.Length) break; // overflow guard
+                    ranges[count * 2] = segmentStart;
+                    ranges[count * 2 + 1] = i - segmentStart;
+                    count++;
+                    segmentStart = i + 1;
+                }
+            }
+        }
+        // Final segment
+        if (count * 2 + 1 < ranges.Length && segmentStart < content.Length)
+        {
+            ranges[count * 2] = segmentStart;
+            ranges[count * 2 + 1] = content.Length - segmentStart;
+            count++;
+        }
+        return count;
+    }
+
+    private void EnsureWalkerStepSeen()
+    {
+        _walkerStepSeen ??= new HashSet<string>();
+    }
+
+    private void EnsureFrontierSets()
+    {
+        _walkerCurrent ??= new HashSet<string>();
+        _walkerNext ??= new HashSet<string>();
+    }
+
+    // Tiny pool of one Queue<string> for nested recursion. Most queries don't recurse deeply,
+    // and the queue is reused across the BFS frontier walks rather than re-allocated.
+    private Queue<string>? _walkerTempQueue;
+    private bool _walkerTempQueueInUse;
+    private Queue<string> RentTempQueue()
+    {
+        if (_walkerTempQueue is not null && !_walkerTempQueueInUse)
+        {
+            _walkerTempQueueInUse = true;
+            _walkerTempQueue.Clear();
+            return _walkerTempQueue;
+        }
+        // Recursion deeper than one level — fall back to a fresh queue.
+        // Real WDBench property-path content depths max out at ~3, so this is cold.
+        return new Queue<string>();
+    }
+
+    private void ReturnTempQueue(Queue<string> q)
+    {
+        if (_walkerTempQueue is null)
+        {
+            _walkerTempQueue = q;
+            _walkerTempQueueInUse = false;
+            return;
+        }
+        if (ReferenceEquals(q, _walkerTempQueue))
+        {
+            _walkerTempQueueInUse = false;
+        }
+        // Else: a fresh queue used by a deeper recursion frame; let GC reclaim.
+    }
+
+    /// <summary>
+    /// Discovers all starting nodes that can begin one application of the grouped path content.
+    /// Walks the content's first leg (or every branch, for top-level alternatives) and queries
+    /// the underlying predicate, accumulating subjects (forward) or objects (inverse) as candidate
+    /// starting nodes. Reflexive emissions for zero-or-more enrich <c>allNodes</c> with the full
+    /// node set discovered while scanning.
+    /// </summary>
+    /// <remarks>
+    /// Replaces the prior implementation which split the content on <c>/</c> with only IRI-bracket
+    /// depth tracking — that produced bogus first-predicate slices for paren-wrapped or alternative
+    /// content. The walker-aware version honors paren depth, top-level alternatives, and per-leg
+    /// <c>^</c> prefixes uniformly with <see cref="WalkPathContentInto"/>.
+    /// </remarks>
     private (HashSet<string> subjects, HashSet<string> allNodes) DiscoverGroupedSequenceStartNodes()
     {
         var subjects = new HashSet<string>();
         var allNodes = new HashSet<string>();
 
-        // Get the inner content and find the first predicate
-        var innerContent = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
-        var contentStr = innerContent.ToString();
+        var content = _source.Slice(_pattern.Path.LeftStart, _pattern.Path.LeftLength);
+        bool outerInverse = _pattern.Path.IsInverseGroup || _pattern.Path.Type == PathType.InverseGroup;
+        DiscoverContentStartNodes(content, outerInverse, subjects, allNodes);
 
-        // Find the first predicate (up to the first / at depth 0)
-        var depth = 0;
-        var firstPredicateEnd = contentStr.Length;
-        for (int i = 0; i < contentStr.Length; i++)
+        // For zero-or-more, reflexive bindings include ALL nodes in the graph (per SPARQL 1.1
+        // semantics), not just those reached via the predicate. Query unrestricted triples
+        // and accumulate. Skipped for one-or-more / zero-or-one — those don't have a reflexive
+        // emission contract for unconnected nodes.
+        if (_isGroupedZeroOrMore)
         {
-            var ch = contentStr[i];
-            if (ch == '<') depth++;
-            else if (ch == '>') depth--;
-            else if (ch == '/' && depth == 0)
+            var allTriplesEnumerator = ExecuteTemporalQuery(
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty,
+                ReadOnlySpan<char>.Empty);
+            try
             {
-                firstPredicateEnd = i;
-                break;
+                var lookup = allNodes.GetAlternateLookup<ReadOnlySpan<char>>();
+                while (allTriplesEnumerator.MoveNext())
+                {
+                    QueryCancellation.ThrowIfCancellationRequested();
+                    var t = allTriplesEnumerator.Current;
+                    if (!lookup.Contains(t.Subject)) allNodes.Add(t.Subject.ToString());
+                    if (!lookup.Contains(t.Object)) allNodes.Add(t.Object.ToString());
+                }
+            }
+            finally
+            {
+                allTriplesEnumerator.Dispose();
             }
         }
 
-        var firstPredicate = ExpandPrefixedName(contentStr.AsSpan(0, firstPredicateEnd));
+        return (subjects, allNodes);
+    }
 
-        // Query all triples with the first predicate
+    /// <summary>
+    /// Recursively descend into <paramref name="content"/> to find candidate starting nodes:
+    /// for an alternative, every branch contributes; for a sequence, only the first leg in walk
+    /// order; for an atomic predicate, query the predicate and accumulate subjects (or objects,
+    /// when the effective direction is inverse).
+    /// </summary>
+    private void DiscoverContentStartNodes(ReadOnlySpan<char> content, bool outerInverse,
+        HashSet<string> subjects, HashSet<string> allNodes)
+    {
+        content = TrimOuterParens(content.Trim());
+
+        Span<int> ranges = stackalloc int[32];
+        char topOp = ScanTopLevelPathOperator(content, ranges, out int rangeCount);
+
+        if (topOp == '|')
+        {
+            for (int i = 0; i < rangeCount; i++)
+                DiscoverContentStartNodes(content.Slice(ranges[i * 2], ranges[i * 2 + 1]),
+                    outerInverse, subjects, allNodes);
+            return;
+        }
+
+        if (topOp == '/')
+        {
+            // For inverse-of-sequence, the leg walked first is the LAST in source order.
+            int firstLegIdx = outerInverse ? (rangeCount - 1) : 0;
+            DiscoverContentStartNodes(
+                content.Slice(ranges[firstLegIdx * 2], ranges[firstLegIdx * 2 + 1]),
+                outerInverse, subjects, allNodes);
+            return;
+        }
+
+        // Atomic: optional '^' prefix then a predicate.
+        bool legIsInverse = content.Length > 0 && content[0] == '^';
+        var predSpan = legIsInverse ? content.Slice(1).TrimStart() : content;
+        var predicate = ExpandPrefixedName(predSpan);
+        bool effectiveInverse = outerInverse ^ legIsInverse;
+
         var enumerator = ExecuteTemporalQuery(
             ReadOnlySpan<char>.Empty,
-            firstPredicate,
+            predicate,
             ReadOnlySpan<char>.Empty);
-
-        while (enumerator.MoveNext())
+        try
         {
-            QueryCancellation.ThrowIfCancellationRequested();
-            var triple = enumerator.Current;
-            var subjectStr = triple.Subject.ToString();
-            var objectStr = triple.Object.ToString();
-
-            allNodes.Add(subjectStr);
-            allNodes.Add(objectStr);
-            subjects.Add(subjectStr);
+            var subjLookup = subjects.GetAlternateLookup<ReadOnlySpan<char>>();
+            var nodeLookup = allNodes.GetAlternateLookup<ReadOnlySpan<char>>();
+            while (enumerator.MoveNext())
+            {
+                QueryCancellation.ThrowIfCancellationRequested();
+                var t = enumerator.Current;
+                var startCandidate = effectiveInverse ? t.Object : t.Subject;
+                if (!subjLookup.Contains(startCandidate)) subjects.Add(startCandidate.ToString());
+                if (!nodeLookup.Contains(t.Subject)) allNodes.Add(t.Subject.ToString());
+                if (!nodeLookup.Contains(t.Object)) allNodes.Add(t.Object.ToString());
+            }
         }
-        enumerator.Dispose();
-
-        return (subjects, allNodes);
+        finally
+        {
+            enumerator.Dispose();
+        }
     }
 
     private void InitializeTransitive()
@@ -1100,7 +1416,7 @@ internal ref struct TriplePatternScan
                 if (isGrouped)
                 {
                     // For grouped paths, execute the sequence and queue results
-                    _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+                    _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(_startNode));
                 }
                 else
                 {
@@ -1123,20 +1439,25 @@ internal ref struct TriplePatternScan
         {
             _startNode = obj.ToString();
             _emittedReflexive = false;
+            _startedFromObject = true;
 
             _visited.Add(_startNode);
             _currentNode = _startNode;
 
             if (isGrouped)
             {
-                _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+                _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(_startNode));
             }
             else
             {
+                // Object-bound transitive walk: query INVERSE direction from the bound object
+                // to find subjects whose forward path reaches the object.
+                // For `?x P+ <obj>`, this is "ancestors of obj" — `<obj>` as object position,
+                // accumulating subjects via triple.Subject in MoveNextTransitive.
                 _enumerator = ExecuteTemporalQuery(
-                    _startNode.AsSpan(),
+                    ReadOnlySpan<char>.Empty,
                     predicate,
-                    ReadOnlySpan<char>.Empty);
+                    _startNode.AsSpan());
             }
         }
         // Case 3: Subject is bound (normal case)
@@ -1150,7 +1471,7 @@ internal ref struct TriplePatternScan
 
             if (isGrouped)
             {
-                _groupedResults = new Queue<string>(ExecuteGroupedSequence(_startNode));
+                _groupedResults = new Queue<string>(ExecuteGroupedSequenceDirected(_startNode));
             }
             else
             {

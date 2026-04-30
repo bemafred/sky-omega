@@ -1274,38 +1274,62 @@ internal ref partial struct SparqlParser
             int contentStart = groupStart + 1; // After '('
             int contentLength = groupEnd - 1 - contentStart; // Before ')'
 
-            if (ch == '*')
+            // Trailing quantifier on a parenthesised path. Three discriminations:
+            //
+            // 1. Inner is a single base term (None) → collapse to lightweight {ZeroOrMore,OneOrMore,ZeroOrOne}(term).
+            //    The standard `(P){q}` case.
+            // 2. Inner is itself a quantifier on a simple iri (ZeroOrMore/OneOrMore/ZeroOrOne) → collapse
+            //    via SPARQL algebraic identity. Result table:
+            //
+            //         outer ↓ \ inner →    P*    P+    P?
+            //         (X)*                 P*    P*    P*       — outer * subsumes any inner
+            //         (X)+                 P*    P+    P*       — + over * absorbs to *; + over ? becomes *
+            //         (X)?                 P*    P*    P?       — ? over * or + becomes *; ? over ? stays ?
+            //
+            //    Justification: (P+)? = id ∪ P+ = P*, (P?)+ = id ∪ P ∪ P² ∪ ... = P*.
+            //    Without this collapse, the runtime walker would need to reparse quantified content
+            //    inside Grouped* — a hot path it doesn't handle and shouldn't need to. Closes
+            //    W3C pp37 regression: (:P)*)* → :P* per transitive-closure idempotence.
+            // 3. Inner is structural (Sequence, Alternative, Inverse, InverseGroup, NegatedSet) →
+            //    preserve as Grouped{ZeroOrMore,OneOrMore,ZeroOrOne} with a content span; the
+            //    walker re-parses the content on demand. This is what enables `((A|B))+` to keep
+            //    its alternative semantics rather than collapsing to `A+`.
+            if (ch == '*' || ch == '+' || (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_'))
             {
+                char outer = ch;
                 Advance();
-                // For grouped sequence like (p1/p2/p3)*, we store the group content
-                // and mark it as ZeroOrMore with Sequence type inner path
-                if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
+
+                if (innerPath.Type == PathType.None)
                 {
-                    return CheckGroupedPathContinuation(innerTerm, PropertyPath.GroupedZeroOrMore(contentStart, contentLength), groupStart);
-                }
-                return CheckGroupedPathContinuation(innerTerm, PropertyPath.ZeroOrMore(innerTerm), groupStart);
-            }
-            if (ch == '+')
-            {
-                Advance();
-                if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
-                {
-                    return CheckGroupedPathContinuation(innerTerm, PropertyPath.GroupedOneOrMore(contentStart, contentLength), groupStart);
-                }
-                return CheckGroupedPathContinuation(innerTerm, PropertyPath.OneOrMore(innerTerm), groupStart);
-            }
-            if (ch == '?')
-            {
-                var next = PeekAt(1);
-                if (!IsLetter(next) && next != '_')
-                {
-                    Advance();
-                    if (innerPath.Type == PathType.Sequence || innerPath.Type == PathType.None)
+                    PropertyPath simple = outer switch
                     {
-                        return CheckGroupedPathContinuation(innerTerm, PropertyPath.GroupedZeroOrOne(contentStart, contentLength), groupStart);
-                    }
-                    return CheckGroupedPathContinuation(innerTerm, PropertyPath.ZeroOrOne(innerTerm), groupStart);
+                        '*' => PropertyPath.ZeroOrMore(innerTerm),
+                        '+' => PropertyPath.OneOrMore(innerTerm),
+                        _   => PropertyPath.ZeroOrOne(innerTerm),
+                    };
+                    return CheckGroupedPathContinuation(innerTerm, simple, groupStart);
                 }
+
+                if (innerPath.Type is PathType.ZeroOrMore or PathType.OneOrMore or PathType.ZeroOrOne)
+                {
+                    PathType reduced = ComposeQuantifiers(outer, innerPath.Type);
+                    PropertyPath collapsed = reduced switch
+                    {
+                        PathType.ZeroOrMore => PropertyPath.ZeroOrMore(innerTerm),
+                        PathType.OneOrMore  => PropertyPath.OneOrMore(innerTerm),
+                        _                   => PropertyPath.ZeroOrOne(innerTerm),
+                    };
+                    return CheckGroupedPathContinuation(innerTerm, collapsed, groupStart);
+                }
+
+                // Structural inner: preserve as Grouped*, content span re-parsed by walker.
+                PropertyPath grouped = outer switch
+                {
+                    '*' => PropertyPath.GroupedZeroOrMore(contentStart, contentLength),
+                    '+' => PropertyPath.GroupedOneOrMore(contentStart, contentLength),
+                    _   => PropertyPath.GroupedZeroOrOne(contentStart, contentLength),
+                };
+                return CheckGroupedPathContinuation(innerTerm, grouped, groupStart);
             }
 
             // No quantifier - check for path continuation (/ or |)
@@ -1314,10 +1338,17 @@ internal ref partial struct SparqlParser
         }
 
         // Check for inverse path: ^predicate or ^(path)
+        // The composition logic (trailing quantifier, sequence, alternative) lives in
+        // ApplyPathExprModifiers below — every primary returns through that single stage,
+        // so combinations like ^iri/iri, ^iri*, ^(X)+, (^A/B), and ^((A|B))+ all parse.
         if (ch == '^')
         {
+            int inverseStart = _position;  // position of '^' — used as primary span start for trailing modifiers
             Advance(); // Skip '^'
             SkipWhitespace();
+
+            Term invInnerTerm;
+            PropertyPath invPrimary;
 
             // Check for inverse of grouped path: ^(p1/p2)
             if (Peek() == '(')
@@ -1338,11 +1369,16 @@ internal ref partial struct SparqlParser
                 int contentStart = groupStart + 1;
                 int contentLength = _position - 1 - contentStart;
 
-                return (innerTerm, PropertyPath.InverseGroup(contentStart, contentLength));
+                invInnerTerm = innerTerm;
+                invPrimary = PropertyPath.InverseGroup(contentStart, contentLength);
+            }
+            else
+            {
+                invInnerTerm = ParseTerm();
+                invPrimary = PropertyPath.Inverse(invInnerTerm);
             }
 
-            var iri = ParseTerm();
-            return (iri, PropertyPath.Inverse(iri));
+            return ApplyPathExprModifiers(invInnerTerm, invPrimary, inverseStart, primaryIsInverse: true);
         }
 
         // Check for negated property set: !(iri1|^iri2|...) or !iri or !^iri
@@ -1644,6 +1680,127 @@ internal ref partial struct SparqlParser
         }
 
         return (innerTerm, groupPath);
+    }
+
+    /// <summary>
+    /// Apply trailing modifiers (quantifier and/or sequence/alternative composition) to a parsed primary.
+    /// Called after parsing an inverse primary (^iri or ^(X)) so that combinations like
+    ///   ^iri/iri2,  ^iri*,  ^(X)+,  (^A/B),  ^((A|B))+
+    /// reach the same composition stage as base-term and group primaries.
+    /// </summary>
+    /// <param name="term">The inner Term carried through as the predicate (used in Sequence/Alternative AST).</param>
+    /// <param name="primary">The PropertyPath produced for the primary (Inverse or InverseGroup).</param>
+    /// <param name="primaryStart">Source position where the primary started (typically the position of '^').</param>
+    /// <param name="primaryIsInverse">True when the primary came from ^iri or ^(X). Drives the trailing-quantifier rewrite.</param>
+    /// <summary>
+    /// SPARQL transitive-closure quantifier composition. Given an outer quantifier character
+    /// (<c>*</c>, <c>+</c>, <c>?</c>) and an inner quantifier <see cref="PathType"/> (must be one
+    /// of ZeroOrMore/OneOrMore/ZeroOrOne), returns the algebraically-reduced result PathType.
+    /// Used to collapse <c>((P)q1)q2</c> shapes at parse time so the runtime never sees nested
+    /// quantifiers in property-path content.
+    /// </summary>
+    /// <remarks>
+    /// Reduction table (proof sketch in the call site comment):
+    ///   any * X = *        (outer * subsumes inner under transitive closure)
+    ///   * + ? = + ? = *    (combining + and ? in either order produces id ∪ P+ = P*)
+    ///   + + = +
+    ///   ? ? = ?
+    /// </remarks>
+    private static PathType ComposeQuantifiers(char outer, PathType inner)
+    {
+        // Either contains '*' → result is ZeroOrMore (the strongest, reflexive transitive closure).
+        if (outer == '*' || inner == PathType.ZeroOrMore)
+            return PathType.ZeroOrMore;
+
+        // Mixed + and ? in either order → ZeroOrMore (id ∪ P+ = P*).
+        bool plusAndQuestion =
+            (outer == '+' && inner == PathType.ZeroOrOne) ||
+            (outer == '?' && inner == PathType.OneOrMore);
+        if (plusAndQuestion)
+            return PathType.ZeroOrMore;
+
+        // Both '+' → OneOrMore. (At this point outer is + and inner is + because we've ruled
+        // out * and the +/? mix above.)
+        if (outer == '+' && inner == PathType.OneOrMore)
+            return PathType.OneOrMore;
+
+        // Both '?' → ZeroOrOne (the only remaining case: outer is ? and inner is ?).
+        return PathType.ZeroOrOne;
+    }
+
+    private (Term predicate, PropertyPath path) ApplyPathExprModifiers(
+        Term term, PropertyPath primary, int primaryStart, bool primaryIsInverse)
+    {
+        SkipWhitespace();
+        var ch = Peek();
+
+        // Trailing quantifier: *, +, ?
+        bool hasQuantifier = false;
+        char q = '\0';
+        if (ch == '*' || ch == '+')
+        {
+            hasQuantifier = true;
+            q = ch;
+        }
+        else if (ch == '?')
+        {
+            // Distinguish from variable — '?' followed by letter/underscore is a variable
+            var next = PeekAt(1);
+            if (!IsLetter(next) && next != '_')
+            {
+                hasQuantifier = true;
+                q = '?';
+            }
+        }
+
+        if (hasQuantifier)
+        {
+            Advance(); // Consume the quantifier
+
+            // For inverse primaries (^iri or ^(X)), wrap into a Grouped* type carrying
+            // the IsInverseGroup flag — the runtime walks each inner step in inverse direction.
+            if (primaryIsInverse)
+            {
+                int contentStart, contentLength;
+                if (primary.Type == PathType.InverseGroup)
+                {
+                    // ^(X){q} — primary already has the inner content range (without surrounding parens or '^')
+                    contentStart = primary.LeftStart;
+                    contentLength = primary.LeftLength;
+                }
+                else
+                {
+                    // ^iri{q} (PathType.Inverse) — content is the iri term itself
+                    contentStart = term.Start;
+                    contentLength = term.Length;
+                }
+
+                primary = q switch
+                {
+                    '*' => PropertyPath.GroupedZeroOrMore(contentStart, contentLength),
+                    '+' => PropertyPath.GroupedOneOrMore(contentStart, contentLength),
+                    '?' => PropertyPath.GroupedZeroOrOne(contentStart, contentLength),
+                    _ => primary
+                };
+                primary.IsInverseGroup = true;
+            }
+            else
+            {
+                // Non-inverse base term + quantifier (preserve existing semantic).
+                primary = q switch
+                {
+                    '*' => PropertyPath.ZeroOrMore(term),
+                    '+' => PropertyPath.OneOrMore(term),
+                    '?' => PropertyPath.ZeroOrOne(term),
+                    _ => primary
+                };
+            }
+        }
+
+        // After quantifier (if any), handle sequence/alternative composition.
+        // CheckGroupedPathContinuation reads from primaryStart for left-span computation,
+        // which correctly covers the inverse primary plus its trailing quantifier.
+        return CheckGroupedPathContinuation(term, primary, primaryStart);
     }
 
     /// <summary>
