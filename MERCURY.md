@@ -290,5 +290,9 @@ SELECT ?graph ?agent ?when ?comment WHERE {
 | `mercury_update` | SPARQL UPDATE (INSERT, DELETE, LOAD, CLEAR) |
 | `mercury_stats` | Store statistics (quad count, atoms, storage size) |
 | `mercury_graphs` | List all named graphs |
+| `mercury_store` | Filesystem path of the active store folder |
+| `mercury_version` | MCP server version |
+
+**Pruning is not exposed.** Per [ADR-006 — MCP Surface Discipline](docs/adrs/ADR-006-mcp-surface-discipline.md), destructive operations whose effects an AI shouldn't initiate autonomously are CLI-only. To prune a store, run `mercury prune` from the shell — your shell history is the audit trail. For Reference profile stores (sealed snapshots), pruning is rejected at plan time per [ADR-007 — Sealed Substrate Immutability](docs/adrs/ADR-007-sealed-substrate-immutability.md); to produce a filtered subset, bulk-load source data into a new Reference store with `--exclude-graphs / --exclude-predicates`.
 
 The MCP tools are configured via `.mcp.json` (dev-time) or `mercury-mcp` global tool (production). See [CLAUDE.md](CLAUDE.md) for setup.

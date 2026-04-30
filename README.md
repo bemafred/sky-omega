@@ -32,8 +32,8 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.45 — Phase 6 complete. Phase 7 in flight.**
-> 21.3 B Wikidata, ingested, sealed, queryable on a single laptop.
+> **v1.7.47 — Phase 6 complete. Phase 7 in flight. Substrate hardened.**
+> 21.3 B Wikidata, ingested, sealed, queryable on a single laptop. Disclosure-marked WDBench cold baseline against the hardened substrate.
 >
 > **Phase 6 — capacity proven** *(2026-04-26)*
 > - 21,260,051,924 triples ingested from a 3.1 TB N-Triples source
@@ -48,13 +48,19 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > - Validated together at 1 B Reference: bulk-load **55 m 22 s @ 300 K triples/sec** direct from `latest-all.ttl.bz2`, full metrics emission across all four channels
 > - **ADR-034 Phase 7c** — SortedAtomStore for Reference — *in flight* (Phase 1B-5c shipped; gradient validation pending)
 >
-> **Trajectory**: 85 h baseline projects toward **15-25 h** on the same laptop after the round series ships. 4,331 Mercury + 25 Solid tests green throughout.
+> **Phase 7c WDBench cold baseline — substrate hardened** *(2026-04-29 → 2026-04-30)*
+> - 1.7.46 + 1.7.47 closed three latent property-path defects (12 cancellation-token gaps, 12 grammar-gap combinations, 1 silent Case 2 binding bug) the W3C SPARQL 1.1 conformance suite did not exercise
+> - **1.7.47 WDBench cold baseline**: 1,199 queries against full Wikidata (21.3 B), **0 parser failures**, p50 = 45 ms, p95 = 29.85 s, every one of 655 timeouts closed between 60.000 s and 63.620 s — cancellation contract honored at scale
+> - **ADR-006** (MCP surface discipline) + **ADR-007** (sealed substrate immutability) shipped — operationalize the governed-automation thesis at concrete decision points
+>
+> **Trajectory**: 85 h baseline projects toward **15-25 h** on the same laptop after the round series ships. **4,335 Mercury + 25 Solid tests green** throughout.
 >
 > **Read more**
 > - [21.3 Billion Triples on a Laptop, in .NET](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the Phase 6 article
 > - [What Compounds](docs/articles/2026-04-28-what-compounds.md) — Sky Omega's first four months, the recipe
 > - [21 B query-side validation](docs/validations/21b-query-validation-2026-04-26.md) — Phase 6 closing measurement
 > - [ADR-035 Phase 7a 1 B validation](docs/validations/adr-035-phase7a-1b-2026-04-27.md) — first 7a + 7b together
+> - [ADR-006 MCP Surface Discipline](docs/adrs/ADR-006-mcp-surface-discipline.md) · [ADR-007 Sealed Substrate Immutability](docs/adrs/ADR-007-sealed-substrate-immutability.md) — governed-automation operationalized
 > - [CHANGELOG.md](CHANGELOG.md) · [Roadmap](docs/roadmap/production-hardening-1.8.md) · [Validations](docs/validations/) · [Limits register](docs/limits/)
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
@@ -166,7 +172,7 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 | 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --filter "W3C.JsonLd"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 4,331 Mercury tests passing      | Test suite            | `dotnet test`                                |
+| 4,335 Mercury tests passing      | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
@@ -184,7 +190,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 82,506 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury**            | Temporal RDF substrate — 82,887 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
 | **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |

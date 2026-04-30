@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-04-27 (Phase 7a metrics + Phase 7b bz2 streaming Completed at 1 B Reference; Phase 7c ADR-034 SortedAtomStore Phase 1B-5b in flight)
+**Last updated:** 2026-04-30 (1.7.47 — property-path hardening landed: parser refactor + zero-GC walker + Case 2 binding fix; ADR-006 MCP surface discipline + ADR-007 sealed substrate immutability shipped Proposed; WDBench cold baseline 1.7.47 sealed against `wiki-21b-ref` with 0 parser-fail and 100% cancellation-cap discipline at scale)
 
 Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts.
 
@@ -12,9 +12,9 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **82,506** | Knowledge substrate |
-| ├─ Sparql | 44,975 | SPARQL parser, executor, protocol |
-| ├─ Storage | 10,949 | B+Tree indexes (temporal + reference), atom stores (Hash + Sorted), RadixSort, ExternalSorter, AppendSorted, WAL, schema plumbing, bulk builders |
+| **Mercury (total)** | **82,887** | Knowledge substrate |
+| ├─ Sparql | 45,468 | SPARQL parser, executor, protocol (1.7.47: parser refactor + zero-GC property-path walker) |
+| ├─ Storage | 10,957 | B+Tree indexes (temporal + reference), atom stores (Hash + Sorted), RadixSort, ExternalSorter, AppendSorted, WAL, schema plumbing, bulk builders |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Turtle | 4,108 | Turtle parser and writer |
 | ├─ RdfXml | 3,032 | RDF/XML parser and writer |
@@ -25,13 +25,14 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 | ├─ NTriples | 1,341 | N-Triples parser and writer |
 | ├─ Owl | 566 | OWL/RDFS reasoner |
 | ├─ Rdf | 536 | Core RDF types |
-| └─ (top-level + obj) | 1,255 | `RdfEngine`, `SparqlEngine` facades + generated files |
+| └─ (top-level + obj) | 1,235 | `RdfEngine`, `SparqlEngine` facades + generated files |
 | **Mercury.Abstractions** | **974** | `StoreProfile`, `StoreSchema`, `IAtomStore`, `AtomStoreImplementation`, exceptions, shared types |
 | **Mercury.Runtime** | **3,329** | Buffers, cross-process gate, temp paths |
 | **Mercury.Solid (total)** | **4,385** | W3C Solid Protocol (WAC/ACP, N3 Patch, HTTP handlers) |
 | **Mercury Tool Libraries** | **1,327** | Sparql.Tool + Turtle.Tool |
 | **Mercury CLIs** | **1,626** | mercury, mercury-sparql, mercury-turtle, mercury-mcp |
-| **Mercury.Pruning** | **1,204** | Copy-and-switch pruning + PruneEngine |
+| **Mercury.Pruning** | **1,231** | Copy-and-switch pruning + PruneEngine; ADR-007 Reference profile rejection at plan time |
+| **Mercury.Mcp** | **460** | MCP server tools — query/stats/graphs/store/version/update; pruning intentionally NOT exposed (ADR-006) |
 | **DrHook (total)** | **2,343** | Runtime observation substrate (EventPipe + DAP) |
 | **Minerva.Core** | **33** | Thought substrate (planned, scaffolding only) |
 
@@ -43,11 +44,13 @@ ADR-035 + ADR-036 additions (2026-04-26 → 2026-04-27, versions 1.7.44 → 1.7.
 
 ADR-034 SortedAtomStore (2026-04-27, version 1.7.45+, in flight): `Storage` gained an `IAtomStore` interface, the renamed `HashAtomStore`, and a new `SortedAtomStore` (mmap-backed `{base}.atoms` + `{base}.offsets` files, dense alphabetical IDs, binary-search lookup) backed by two builders — an in-memory `SortedAtomStoreBuilder` (validation/test surface) and an external `SortedAtomStoreExternalBuilder` (chunked spill + k-way merge for past-RAM vocabularies). `SortedAtomBulkBuilder` orchestrates the two-pass deferred-resolution flow during bulk-load: buffer atoms in input order, sort vocabulary at finalize, replay resolved (G,S,P,O) IDs into the GSPO external sorter. `QuadStore.Open` dispatches on `StoreSchema.AtomStore` (default `Hash` for backward compat); the Reference profile + Sorted schema combination opens with a placeholder over an empty vocab and routes `BeginBatch` / `AddCurrentBatched` / `CommitBatch` through the bulk builder. Phase 1A through Phase 1B-5b shipped; Phase 1B-5d (disk-backed AssignedIds for >100 M scale) and Phase 1B-6 (gradient validation 1 M / 10 M / 100 M against `HashAtomStore` baseline) remaining.
 
+Property-path hardening (2026-04-29 → 2026-04-30, versions 1.7.46 → 1.7.47): the WDBench cold-baseline run on `wiki-21b-ref` surfaced and resolved three latent property-path defects across the SPARQL substrate. **1.7.46** patched 12 cancellation-token gaps across `Operators/TriplePatternScan.cs`, `Operators/SlotBasedOperators.cs`, `Operators/MultiPatternScan.cs`, and `QueryResults.Patterns.cs` — every property-path inner loop now samples `QueryCancellation.ThrowIfCancellationRequested()` per `MoveNext()`, bounding worst-case unbounded-hang to one B+Tree node walk plus a token check. **1.7.47** restructured the parser around a unified `ApplyPathExprModifiers` composition stage so inverse primaries (`^iri`, `^(X)`) reach the same trailing-modifier path as base-term primaries — closes 12 grammar gaps (`^(P){q}`, `^((A|B)){q}`, `(^A/B)`, nested variants) the W3C SPARQL 1.1 conformance suite did not exercise. The runtime walker (`WalkPathContentInto` in `TriplePatternScan.cs`) replaces three near-duplicate methods (`ExecuteGroupedSequence`, `ExecuteInverseGroupedSequence`, `DiscoverGroupedSequenceStartNodes`) with a single zero-GC implementation: span-only parsing into `_source`, `stackalloc int[32]` range tables, `HashSet<string>.GetAlternateLookup<ReadOnlySpan<char>>` for dedupe-without-allocation, reusable frontier sets. The Case 2 binding fix (`_startedFromObject` flag) closes a latent silent-failure mode where `?x path <obj>` queries returned 0 rows in <1 ms instead of the actual ancestor set; on `wiki-21b-ref` this turned 5 WDBench queries from silent zero-row completion into legitimate 39 K-row computations. `ComposeQuantifiers` algebraic collapse handles SPARQL transitive-closure idempotence (`((P)*)*` → `P*`), preserving W3C pp37 conformance. ADR-006 (MCP surface discipline) + ADR-007 (sealed substrate immutability) operationalize the governance principle the arc surfaced: pruning is no longer exposed via MCP, and the Reference profile rejects pruning at plan time with bulk-load re-creation guidance. WDBench 1.7.47 cold baseline against `wiki-21b-ref` (full Wikidata, 21.3 B triples): 1,199 queries, **0 parser failures**, p25=4ms, p50=45ms, p95=29.85s, p99=49.50s; every one of 655 timeouts closed between 60.000 s and 63.620 s — cancellation contract honored at scale (`docs/validations/wdbench-paths-21b-2026-04-29-1747.jsonl` + `wdbench-c2rpqs-21b-2026-04-29-1747.jsonl`).
+
 ### Tests
 
 | Project | Lines | Test Cases | Notes |
 |---------|------:|----------:|-------|
-| Mercury.Tests | 57,873 | 4,331 | +126 since 2026-04-23 (Phase 7a metric channel tests, Phase 7b bzip2 substrate tests, ADR-034 SortedAtomStore + builders + bulk-load tests) |
+| Mercury.Tests | 58,657 | 4,335 | +4 since 1.7.45: PropertyPathRegressionTests (`SequenceWithZeroOrMore_DoesNotThrow`, `TransitivePath_HonorsCancellationToken`, `PropertyPathShapes_ParseAndExecuteCorrectly` covering all three grammar shapes + Case 2) + PruneEngineTests `Execute_ReferenceProfile_IsRejectedWithGuidance` |
 | Mercury.Solid.Tests | 407 | 25 | |
 | Minerva.Tests | — | — | |
 
@@ -71,19 +74,19 @@ ADR-034 SortedAtomStore (2026-04-27, version 1.7.45+, in flight): `Storage` gain
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 36,668 |
+| All docs (*.md, *.ttl) | 37,924 |
 | CLAUDE.md | 291 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~97,727 |
-| Tests | ~58,280 |
+| Source code | ~98,265 |
+| Tests | ~59,064 |
 | Benchmarks | ~3,352 |
 | Examples | ~972 |
-| Documentation | ~36,668 |
-| **Grand total** | **~196,999** |
+| Documentation | ~37,924 |
+| **Grand total** | **~199,577** |
 
 ## W3C Conformance
 
@@ -240,6 +243,8 @@ Write performance is fsync-dominated — measures SSD controller behavior, not C
 | 2026-04-25 | Phase 6 21.3B Wikidata Reference end-to-end | Full `latest-all.nt` bulk + rebuild on a single M5 Max laptop, BCL-only | **Completed** 2026-04-25 22:32 at **85 h end-to-end** wall-clock. 21,260,051,924 triples ingested + sealed; ~2.5 TB physical on disk, 4.1 TB logical mmap (sparse on APFS); past Blazegraph WDQS reference ceiling (~12-13B) by ~63 % |
 | 2026-04-26 | [21.3 B query-side validation](docs/validations/21b-query-validation-2026-04-26.md) | First measured queries against `wiki-21b-ref` | GSPO `LIMIT 10` 17 ms (6.5 ms parse + 10.6 ms exec); GPOS `wdt:P31` `LIMIT 10` 20 ms; both indexes correct at 21.3 B; cold-cache. **Capacity dimension of production hardening is empirical, sound finding** |
 | 2026-04-27 | [ADR-035 Phase 7a 1 B Reference](docs/validations/adr-035-phase7a-1b-2026-04-27.md) | First end-to-end test of Phase 7a metrics + Phase 7b bz2 streaming together at 1 B Reference | Bulk-load 55m22s @ 300 K triples/sec from `latest-all.ttl.bz2` (114 GB); GPOS rebuild 1m54s @ 8.66 M entries/sec; Trigram rebuild 11m44s @ 630 K entries/sec; bz2 decompression 33 MB/s with 4× headroom over parser; 22,256 JSONL records emitted across all four metric channels. **Phase 7a Completed.** |
+| 2026-04-27 | [WDBench cold baseline (pre-fix)](docs/validations/wdbench-cold-baseline-21b-2026-04-27.jsonl) | First WDBench cold baseline against `wiki-21b-ref` | Surfaced two distinct issues: (a) executor cancellation gap — one c2rpqs query consumed 4h 51m wall-clock under a 60 s timeout cap, ~547 of 660 paths events silently lost (`docs/limits/cancellable-executor-paths.md`); (b) property-path parser grammar gaps — 12 of 1,199 queries (1.0 %) hitting three combinations the W3C SPARQL 1.1 conformance suite does not exercise (`docs/limits/property-path-grammar-gaps.md`). Both characterized in 48 hours; both fixed in 1.7.46/1.7.47 |
+| 2026-04-29 | WDBench 1.7.47 cold baseline | Hardened-substrate WDBench against `wiki-21b-ref` (full Wikidata, 21.3 B triples) | 1,199 queries (660 paths + 539 c2rpqs). 11h 30m total wall. **0 parser failures**, **655/655 timeouts honored 60 s cap** (max 63.62 s, min 60.00 s — contract honored at scale). p25=4ms, p50=45ms, p75=1.39s, p90=12.82s, p95=29.85s, p99=49.50s, max=59.82s. Disclosure-marked baseline for Phase 7c optimization rounds; running on full Wikidata is intentional (substrate-capability claim, not the truthy subset that QLever/Virtuoso WDBench numbers use — see [memos/2026-04-30-latent-assumptions-from-qlever-comparison.md](memos/2026-04-30-latent-assumptions-from-qlever-comparison.md)). Sealed: `docs/validations/wdbench-paths-21b-2026-04-29-1747.jsonl` + `docs/validations/wdbench-c2rpqs-21b-2026-04-29-1747.jsonl` |
 
 ## Maintenance Instructions
 
