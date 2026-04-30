@@ -1,6 +1,8 @@
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Channels;
@@ -62,6 +64,17 @@ public sealed class ParallelBZip2DecompressorStream : Stream
     private bool _producerDone;
     private int _workersAlive;
     private Exception? _firstError;
+
+    /// <summary>
+    /// Diagnostic: when not null, each worker appends (worker-id, ordinal, decode-elapsed-ticks)
+    /// for every block it processes. Used to test memory-bandwidth-contention hypothesis vs
+    /// orchestration-overhead hypothesis: if per-block decode time scales with worker count
+    /// (N=1: 30 ms, N=14: 150 ms), workers are competing for shared resource (memory bandwidth).
+    /// If per-block decode time stays constant but wall-clock doesn't drop, orchestration is
+    /// the bottleneck. Guarded by a static toggle to keep the production path zero-overhead.
+    /// </summary>
+    internal static ConcurrentBag<(int WorkerId, int Ordinal, long DecodeTicks)>? DiagPerBlockDecode;
+    internal static int _diagNextWorkerId;
 
     private Task? _producerTask;
     private Task[]? _workerTasks;
@@ -204,6 +217,8 @@ public sealed class ParallelBZip2DecompressorStream : Stream
 
     private async Task WorkerLoop()
     {
+        var diag = DiagPerBlockDecode;
+        int workerId = diag is null ? 0 : Interlocked.Increment(ref _diagNextWorkerId);
         try
         {
             // Each worker has its own decoder + scratch — preallocated, reused per block.
@@ -213,7 +228,10 @@ public sealed class ParallelBZip2DecompressorStream : Stream
             {
                 while (_inputChannel.Reader.TryRead(out var item))
                 {
+                    long startTicks = diag is null ? 0 : Stopwatch.GetTimestamp();
                     var result = DecodeBlock(blockReader, item);
+                    if (diag is not null)
+                        diag.Add((workerId, item.Ordinal, Stopwatch.GetTimestamp() - startTicks));
                     lock (_outputLock)
                     {
                         _pending.Enqueue(result, result.Ordinal);
