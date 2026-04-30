@@ -40,7 +40,7 @@ The following were confirmed during the Round 1 plan review:
 | # | Decision | Value |
 |---|---|---|
 | 1 | MPHF Phase 2 inclusion | **Out of Round 1.** Defers to evidence-first sub-round after Round 1.5 trace. |
-| 2 | Parallel bz2 worker count | **Conservative.** Default-conservative ratio (`ProcessorCount / 3`); ~6 workers on the M5 Max. Tunable per gradient point if 1 B trace shows producer-side blocking. |
+| 2 | Parallel bz2 worker count | **Aggressive — ~80% of capacity.** `Math.Max(1, (ProcessorCount * 4) / 5)` — 14 workers on the M5 Max (leaves 4 cores for the single-threaded parser, Mercury internals, OS). Revised 2026-04-30 from the original "conservative" call: parallel bz2 is the architectural enabler that makes two-pass-over-source viable (~6 min second source pass instead of ~55 min). Decompression isn't a side-show — it's the precondition for the design-space conversation. Underwork it and we lose that freedom. |
 | 3 | Plan persistence | **This document.** `docs/roadmap/phase-7c-round-1.md`, citable, durable. |
 | 4 | Substrate naming | **`wiki-21b-ref-rN` keyed to the round.** Round 1 produces `wiki-21b-ref-r1`; Round 2 produces `wiki-21b-ref-r2`; `wiki-21b-ref` symlinks to current. The retired Phase 6 substrate predates the convention and keeps its identity via `v1.7.47-wdbench-baseline` tag + recipe. |
 | 5 | Run cadence | **21.3 B over long weekend, background process.** Steps 1–4 (gradient + 1 B trace lap) run mid-week; step 5 (21.3 B headline) starts Friday-evening-class, runs unattended, status checks via JSONL tail + summary. |
