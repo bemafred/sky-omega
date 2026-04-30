@@ -2,6 +2,8 @@
 
 *Sky Omega’s Mercury substrate ingested the full Wikidata `latest-all.nt` dump — 21,316,531,403 triples — into a queryable RDF store on a single MacBook Pro, BCL-only .NET, no third-party runtime dependencies. Combined wall-clock: 85h 35m. This is the trajectory and the discipline that made it possible.*
 
+*All numbers in this article are **Reference profile** measurements per [ADR-008](../adrs/ADR-008-workload-profiles-and-validation-attribution.md) — Mercury's sealed-canonical-graph workload, comparable to QLever / Virtuoso / Blazegraph Wikidata ingest. The Cognitive profile (per-agent bitemporal memory) is a different workload and is not exercised here.*
+
 ---
 
 ## The numbers

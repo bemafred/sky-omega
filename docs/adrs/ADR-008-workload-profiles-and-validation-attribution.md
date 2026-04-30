@@ -1,6 +1,6 @@
 # ADR-008: Workload Profiles and Validation Attribution
 
-**Status:** Proposed — 2026-04-30
+**Status:** Completed — 2026-04-30
 
 **Context:** Sky Omega has two distinct workload profiles — Reference and Cognitive — that exercise the substrate fundamentally differently. ADR-029 (mercury) defines them as *storage* options. This ADR layers the *workload* framing on top: characterizes each profile as a workload, makes profile-tagging mandatory for every validation, and prevents the credibility-risking gap where validation runs measuring one profile are read as benchmarks of "Sky Omega" overall.
 
@@ -97,9 +97,15 @@ When publishing a number that is being compared to an external benchmark (QLever
 
 ## Status transitions
 
-- **Proposed** — 2026-04-30. Pending review.
-- **Accepted** — when the implementation plan above lands.
-- **Completed** — when (1) STATISTICS scale-validation table has profile attribution, (2) README banner is profile-tagged, (3) MERCURY.md Workload profile section ships, (4) the discipline is in AI.md as a standing practice.
+- **Proposed** — 2026-04-30. Drafted from the QLever-comparison memo.
+- **Accepted** — 2026-04-30. Plan validated; implementation in flight as part of the public-claims sweep close-out.
+- **Completed** — 2026-04-30. All four gating deliverables shipped:
+  1. **STATISTICS.md** scale-validation runs table now carries a `Profile` column with every row tagged (Reference / Cognitive / Both / Parser-only) and a cross-reference paragraph naming this ADR.
+  2. **README.md** banner scopes Phase 6/7 numbers as "Reference profile" with explicit ADR-008 link; bitemporal extensions section scoped "Cognitive profile only" with ADR-008 link.
+  3. **MERCURY.md** Workload Profiles section (Cognitive vs Reference table) added near the top with ADR-008 as the canonical pointer.
+  4. **AI.md** "Standing Practice: Sweep Public Claims for Latent Assumptions" section added with ADR-008 named as the new-validation-run trigger; the 2026-04-30 sweep is recorded as operationalized history.
+
+  Implementation step 3 (article attribution) also shipped: the Phase 6 article (`docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md`) and the discipline article (`docs/articles/2026-04-28-what-compounds.md`) each carry an opening-paragraph ADR-008 attribution.
 
 ## References
 

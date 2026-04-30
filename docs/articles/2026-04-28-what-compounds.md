@@ -2,6 +2,8 @@
 
 Sky Omega started Christmas Eve 2025. By April 2026 it had ingested 21.3 billion Wikidata triples into a queryable RDF store on a single laptop, BCL-only .NET (using only the .NET Base Class Library, no third-party runtime dependencies), 100% W3C SPARQL 1.1 conformance, ~98K lines of source across three substrates, mostly built in spare time. The numbers are real and reproducible. The practices that made them possible aren’t a secret. This is the working list.
 
+*The 21.3 B Wikidata figure is a **Reference profile** measurement per [ADR-008](../adrs/ADR-008-workload-profiles-and-validation-attribution.md). The discipline notes that follow apply across both Reference and Cognitive workloads — they are how the project sustains pace, not a property of either profile.*
+
 ## Why this matters
 
 The 21.3 B Wikidata milestone was the demonstration that the architectural bets work. The interesting question is the meta-one: how does a project sustain that pace, in spare hours, without accumulating the technical debt that would normally make every subsequent change slower than the last?
