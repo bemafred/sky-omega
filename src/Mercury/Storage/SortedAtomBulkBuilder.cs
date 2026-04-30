@@ -58,6 +58,7 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     private readonly string _baseAtomPath;
     private readonly string _tempDir;
     private readonly bool _ownsTempDir;
+    private readonly bool _useDiskBackedAssigned;
 
     // Flat input buffer: every atom occurrence in input order. Index 4*N+0 is the graph
     // of triple N, +1 subject, +2 predicate, +3 object. Empty entries (e.g., default
@@ -69,10 +70,11 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     private bool _finalized;
     private bool _disposed;
 
-    public SortedAtomBulkBuilder(string baseAtomPath, string? tempDir = null)
+    public SortedAtomBulkBuilder(string baseAtomPath, string? tempDir = null, bool useDiskBackedAssigned = false)
     {
         if (baseAtomPath is null) throw new ArgumentNullException(nameof(baseAtomPath));
         _baseAtomPath = baseAtomPath;
+        _useDiskBackedAssigned = useDiskBackedAssigned;
         if (tempDir is null)
         {
             _tempDir = Path.Combine(Path.GetTempPath(), "sorted-atom-bulk-" + Guid.NewGuid().ToString("N"));
@@ -142,7 +144,8 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
         ThrowIfDisposed();
         if (_finalized) return _buildResult!;
         _buildResult = SortedAtomStoreExternalBuilder.BuildExternal(
-            _baseAtomPath, _atomOccurrences, tempDir: _tempDir);
+            _baseAtomPath, _atomOccurrences, tempDir: _tempDir,
+            useDiskBackedAssigned: _useDiskBackedAssigned);
         _finalized = true;
         return _buildResult;
     }
@@ -159,11 +162,33 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
         if (!_finalized)
             throw new InvalidOperationException("EnumerateResolved called before Finalize.");
 
-        var ids = _buildResult!.AssignedIds;
-        for (long t = 0; t < _tripleCount; t++)
+        // Disk-backed path streams resolved IDs in InputIdx order (0, 1, 2, ...) from the
+        // ExternalSorter; in-memory path indexes the long[] directly. Both yield identical
+        // (G, S, P, O) tuples per triple in input order.
+        if (_buildResult!.AssignedIdsResolver is { } resolver)
         {
-            int baseIdx = checked((int)(t * 4));
-            yield return (ids[baseIdx], ids[baseIdx + 1], ids[baseIdx + 2], ids[baseIdx + 3]);
+            using var reader = resolver.GetReader();
+            for (long t = 0; t < _tripleCount; t++)
+            {
+                if (!reader.TryReadNext(out var g) ||
+                    !reader.TryReadNext(out var s) ||
+                    !reader.TryReadNext(out var p) ||
+                    !reader.TryReadNext(out var o))
+                {
+                    throw new InvalidOperationException(
+                        $"AssignedIdsResolver drained early at triple {t}/{_tripleCount}.");
+                }
+                yield return (g, s, p, o);
+            }
+        }
+        else
+        {
+            var ids = _buildResult!.AssignedIds;
+            for (long t = 0; t < _tripleCount; t++)
+            {
+                int baseIdx = checked((int)(t * 4));
+                yield return (ids[baseIdx], ids[baseIdx + 1], ids[baseIdx + 2], ids[baseIdx + 3]);
+            }
         }
     }
 
@@ -171,6 +196,10 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        // Disk-backed AssignedIds owns an ExternalSorter with its own tempDir under _tempDir;
+        // dispose it first so its tempDir is cleaned before _tempDir's recursive delete.
+        _buildResult?.AssignedIdsResolver?.Dispose();
 
         if (_ownsTempDir && Directory.Exists(_tempDir))
         {

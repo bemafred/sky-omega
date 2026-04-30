@@ -28,6 +28,12 @@ internal sealed class TrigramEntryChunkSorter : IChunkSorter<TrigramEntry>
         => RadixSort.SortInPlace(data, scratch);
 }
 
+internal sealed class ResolveRecordChunkSorter : IChunkSorter<ResolveRecord>
+{
+    public static void Sort(Span<ResolveRecord> data, Span<ResolveRecord> scratch)
+        => RadixSort.SortInPlace(data, scratch);
+}
+
 /// <summary>
 /// External merge-sort over chunks too large for a single in-memory sort
 /// (ADR-032 Phase 2). The producer streams entries via <see cref="Add"/>; once

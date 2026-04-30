@@ -47,32 +47,68 @@ internal static class SortedAtomStoreExternalBuilder
     /// </summary>
     public const long DefaultChunkSizeBytes = 256L * 1024 * 1024;
 
+    /// <summary>Default chunk size for the disk-backed AssignedIds resolver: 16 M records × 16 B = 256 MB.</summary>
+    public const int DefaultResolveSorterChunkSize = 16 * 1024 * 1024;
+
     public static SortedAtomStoreBuilder.BuildResult BuildExternal(
         string baseFilePath,
         IEnumerable<byte[]> inputStrings,
         string? tempDir = null,
-        long chunkSizeBytes = DefaultChunkSizeBytes)
+        long chunkSizeBytes = DefaultChunkSizeBytes,
+        bool useDiskBackedAssigned = false,
+        int resolveSorterChunkSize = DefaultResolveSorterChunkSize)
     {
         if (baseFilePath is null) throw new ArgumentNullException(nameof(baseFilePath));
         if (inputStrings is null) throw new ArgumentNullException(nameof(inputStrings));
         if (chunkSizeBytes < 1024 * 1024)
             throw new ArgumentOutOfRangeException(nameof(chunkSizeBytes), "chunkSizeBytes must be at least 1 MB");
+        if (useDiskBackedAssigned && resolveSorterChunkSize < 1024)
+            throw new ArgumentOutOfRangeException(nameof(resolveSorterChunkSize), "resolveSorterChunkSize must be at least 1024 records");
 
         var resolvedTempDir = tempDir ?? Path.Combine(Path.GetTempPath(), "sorted-atom-build-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(resolvedTempDir);
 
+        // The resolveSorter outlives this method when disk-backed: ownership transfers to
+        // DiskBackedAssignedIds in the BuildResult. On disk-backed paths we must NOT delete
+        // the resolver's tempDir here; ExternalSorter manages its own subdirectory.
+        ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter = null;
+        bool resolverOwnedByCaller = false;
+
         try
         {
+            if (useDiskBackedAssigned)
+            {
+                var resolverTempDir = Path.Combine(resolvedTempDir, "assigned-ids-resolver");
+                resolveSorter = new ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>(
+                    resolverTempDir, resolveSorterChunkSize);
+            }
+
             // Pass 1: collect records into memory-bounded chunks; sort and spill each chunk.
+            // For disk-backed builds, empty-graph sentinels are emitted directly to the
+            // resolveSorter as ResolveRecord(globalIdx, 0) so the resolver has dense coverage
+            // across every InputIdx slot.
             var chunkFiles = new List<string>();
-            var inputCount = SpillChunks(inputStrings, resolvedTempDir, chunkSizeBytes, chunkFiles);
+            var inputCount = SpillChunks(inputStrings, resolvedTempDir, chunkSizeBytes, chunkFiles, resolveSorter);
 
             // Pass 2: k-way merge, dedupe, write to .atoms + .offsets.
-            return MergeAndWrite(baseFilePath, chunkFiles, inputCount);
+            // For disk-backed builds, also emits ResolveRecord(InputIdx, atomId) per merged
+            // occurrence to the resolveSorter and finalizes it before returning.
+            var result = MergeAndWrite(baseFilePath, chunkFiles, inputCount, resolveSorter);
+            resolverOwnedByCaller = useDiskBackedAssigned;
+            return result;
+        }
+        catch
+        {
+            // Failure path: reclaim the resolveSorter so its tempDir gets cleaned up.
+            resolveSorter?.Dispose();
+            throw;
         }
         finally
         {
-            if (Directory.Exists(resolvedTempDir))
+            // Clean the bulk tempDir, but only if the resolveSorter doesn't live there.
+            // When useDiskBackedAssigned is true, the resolver's subdirectory is inside
+            // resolvedTempDir, and the resolver is alive past this method — leave both.
+            if (!resolverOwnedByCaller && Directory.Exists(resolvedTempDir))
             {
                 try { Directory.Delete(resolvedTempDir, recursive: true); }
                 catch { /* best effort cleanup */ }
@@ -85,21 +121,25 @@ internal static class SortedAtomStoreExternalBuilder
         string baseFilePath,
         IEnumerable<string> inputStrings,
         string? tempDir = null,
-        long chunkSizeBytes = DefaultChunkSizeBytes)
+        long chunkSizeBytes = DefaultChunkSizeBytes,
+        bool useDiskBackedAssigned = false,
+        int resolveSorterChunkSize = DefaultResolveSorterChunkSize)
     {
         IEnumerable<byte[]> AsBytes()
         {
             foreach (var s in inputStrings)
                 yield return s is null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(s);
         }
-        return BuildExternal(baseFilePath, AsBytes(), tempDir, chunkSizeBytes);
+        return BuildExternal(baseFilePath, AsBytes(), tempDir, chunkSizeBytes,
+            useDiskBackedAssigned, resolveSorterChunkSize);
     }
 
     private static int SpillChunks(
         IEnumerable<byte[]> input,
         string tempDir,
         long chunkSizeBytes,
-        List<string> chunkFiles)
+        List<string> chunkFiles,
+        ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter)
     {
         var buffer = new List<(byte[] Bytes, int InputIdx)>();
         long bufferBytes = 0;
@@ -109,6 +149,12 @@ internal static class SortedAtomStoreExternalBuilder
         {
             if (s is null || s.Length == 0)
             {
+                // Empty-slot sentinel. In-memory path leaves assigned[globalIdx] = 0
+                // (array default). Disk-backed path needs an explicit record so the
+                // resolver has dense coverage over every InputIdx.
+                if (resolveSorter is not null)
+                    resolveSorter.Add(new ResolveRecord(globalIdx, 0));
+
                 globalIdx++;
                 continue;
             }
@@ -155,9 +201,14 @@ internal static class SortedAtomStoreExternalBuilder
     }
 
     private static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
-        string baseFilePath, List<string> chunkFiles, int inputCount)
+        string baseFilePath, List<string> chunkFiles, int inputCount,
+        ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter)
     {
-        var assigned = new long[inputCount];
+        // Disk-backed: resolveSorter receives one record per non-empty input occurrence here,
+        // plus the empty-slot sentinels emitted by SpillChunks. Caller wraps into DiskBackedAssignedIds.
+        // In-memory: assigned[] is materialized as today.
+        bool useDiskBacked = resolveSorter is not null;
+        var assigned = useDiskBacked ? Array.Empty<long>() : new long[inputCount];
         long atomCount = 0;
         long totalBytes = 0;
         var dataPath = baseFilePath + ".atoms";
@@ -207,7 +258,11 @@ internal static class SortedAtomStoreExternalBuilder
                     offsetsFs.Write(offsetBuf);
                     prevBytes = rec.Bytes;
                 }
-                assigned[rec.InputIdx] = atomCount;
+
+                if (useDiskBacked)
+                    resolveSorter!.Add(new ResolveRecord(rec.InputIdx, atomCount));
+                else
+                    assigned[rec.InputIdx] = atomCount;
 
                 if (readers[readerIdx].MoveNext())
                     pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
@@ -219,6 +274,16 @@ internal static class SortedAtomStoreExternalBuilder
         finally
         {
             foreach (var r in readers) r.Dispose();
+        }
+
+        if (useDiskBacked)
+        {
+            // Finalize the resolver's spill so it's drainable. Caller wraps as DiskBackedAssignedIds.
+            resolveSorter!.Complete();
+            return new SortedAtomStoreBuilder.BuildResult(atomCount, totalBytes, assigned)
+            {
+                AssignedIdsResolver = new DiskBackedAssignedIds(resolveSorter, inputCount),
+            };
         }
 
         return new SortedAtomStoreBuilder.BuildResult(atomCount, totalBytes, assigned);

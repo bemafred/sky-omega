@@ -239,6 +239,97 @@ internal static class RadixSort
             src.CopyTo(data);
     }
 
+    /// <summary>
+    /// Sort <paramref name="data"/> by <see cref="ResolveRecord.InputIdx"/> (signed long).
+    /// On return <paramref name="data"/> contains the sorted entries; <paramref name="scratch"/>
+    /// holds undefined contents. ADR-034 Phase 1B-5d.
+    /// </summary>
+    /// <remarks>
+    /// ResolveRecord layout: [InputIdx @ 0..7 (long, signed)][AtomId @ 8..15 (long, payload)].
+    /// Sort key is InputIdx only; AtomId is carried alongside. LSD pass order processes byte 0
+    /// first (least-significant) through byte 7 (most-significant). Byte 7 is the signed MSB
+    /// and gets the standard XOR 0x80 bias.
+    /// </remarks>
+    internal static unsafe void SortInPlace(
+        Span<ResolveRecord> data,
+        Span<ResolveRecord> scratch)
+    {
+        if (data.Length != scratch.Length)
+            throw new ArgumentException("scratch must be the same length as data", nameof(scratch));
+        if (data.Length < 2) return;
+
+        Span<uint> histogram = stackalloc uint[256];
+        Span<uint> offsets = stackalloc uint[256];
+
+        Span<ResolveRecord> src = data;
+        Span<ResolveRecord> dst = scratch;
+        int distributes = 0;
+
+        // 8 passes, byte 0 (LSB) through byte 7 (signed MSB).
+        for (int absByteIdx = 0; absByteIdx < 8; absByteIdx++)
+        {
+            bool isSignedMsb = absByteIdx == 7;
+            int n = src.Length;
+
+            histogram.Clear();
+            fixed (ResolveRecord* srcPtr = src)
+            {
+                byte* srcBase = (byte*)srcPtr;
+                if (isSignedMsb)
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        byte b = (byte)(srcBase[i * 16 + absByteIdx] ^ 0x80);
+                        histogram[b]++;
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        histogram[srcBase[i * 16 + absByteIdx]]++;
+                    }
+                }
+            }
+
+            if (IsTrivialHistogram(histogram, (uint)n)) continue;
+
+            uint sum = 0;
+            for (int b = 0; b < 256; b++)
+            {
+                offsets[b] = sum;
+                sum += histogram[b];
+            }
+
+            fixed (ResolveRecord* srcPtr = src)
+            fixed (ResolveRecord* dstPtr = dst)
+            {
+                byte* srcBase = (byte*)srcPtr;
+                if (isSignedMsb)
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        byte b = (byte)(srcBase[i * 16 + absByteIdx] ^ 0x80);
+                        dstPtr[offsets[b]++] = srcPtr[i];
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        dstPtr[offsets[srcBase[i * 16 + absByteIdx]]++] = srcPtr[i];
+                    }
+                }
+            }
+
+            distributes++;
+            var tmp = src; src = dst; dst = tmp;
+        }
+
+        if ((distributes & 1) != 0)
+            src.CopyTo(data);
+    }
+
     private static bool IsTrivialHistogram(ReadOnlySpan<uint> histogram, uint total)
     {
         for (int b = 0; b < 256; b++)

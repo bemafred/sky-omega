@@ -98,8 +98,29 @@ internal static class SortedAtomStoreBuilder
         return Build(baseFilePath, asBytes);
     }
 
-    /// <summary>Result of a build: counts plus the per-input-index atom-ID assignment table.</summary>
-    public sealed record BuildResult(long AtomCount, long DataBytes, long[] AssignedIds);
+    /// <summary>
+    /// Result of a build: counts plus the per-input-index atom-ID assignment table.
+    /// </summary>
+    /// <remarks>
+    /// The in-memory <see cref="AssignedIds"/> array is the original (Phase 1B-5a) surface and
+    /// remains the path for inputs that fit in RAM. For disk-backed builds (ADR-034 Phase 1B-5d,
+    /// triggered by passing <c>useDiskBackedAssigned: true</c> to the external builder), the
+    /// <see cref="AssignedIdsResolver"/> init-property carries an <see cref="IAssignedIds"/>
+    /// streaming resolver instead. Exactly one of the two is populated per build:
+    /// <see cref="AssignedIds"/> is empty for disk-backed builds, and <see cref="AssignedIdsResolver"/>
+    /// is null for in-memory builds.
+    /// </remarks>
+    public sealed record BuildResult(long AtomCount, long DataBytes, long[] AssignedIds)
+    {
+        /// <summary>
+        /// Disk-backed atom-ID resolver, populated only by external builds with
+        /// <c>useDiskBackedAssigned: true</c>. When non-null, callers must use this in
+        /// preference to the empty <see cref="AssignedIds"/> array. The resolver is disposable
+        /// and is owned by the caller; typically <see cref="SortedAtomBulkBuilder"/> takes
+        /// ownership and disposes it on its own <see cref="IDisposable.Dispose"/>.
+        /// </summary>
+        internal IAssignedIds? AssignedIdsResolver { get; init; }
+    }
 
     private sealed class Utf8ByteComparer : IComparer<byte[]>, IEqualityComparer<byte[]>
     {
