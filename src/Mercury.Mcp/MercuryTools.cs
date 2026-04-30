@@ -168,61 +168,12 @@ public sealed class MercuryTools
         return $"mercury-mcp {version}";
     }
 
-    [McpServerTool(Name = "mercury_prune"), Description("Compact the Mercury store by removing soft-deleted data and optionally filtering graphs or predicates")]
-    public string Prune(
-        [Description("Preview without writing (default: false)")] bool dryRun = false,
-        [Description("History mode: 'flatten' (default), 'preserve', or 'all'")] string historyMode = "flatten",
-        [Description("Comma-separated graph IRIs to exclude")] string? excludeGraphs = null,
-        [Description("Comma-separated predicate IRIs to exclude")] string? excludePredicates = null)
-    {
-        try
-        {
-            var mode = historyMode.ToLowerInvariant() switch
-            {
-                "preserve" => HistoryMode.PreserveVersions,
-                "all" => HistoryMode.PreserveAll,
-                _ => HistoryMode.FlattenToCurrent
-            };
-
-            string[]? graphIris = null;
-            if (!string.IsNullOrWhiteSpace(excludeGraphs))
-            {
-                graphIris = excludeGraphs.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (graphIris.Length == 0) graphIris = null;
-            }
-
-            string[]? predIris = null;
-            if (!string.IsNullOrWhiteSpace(excludePredicates))
-            {
-                predIris = excludePredicates.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                if (predIris.Length == 0) predIris = null;
-            }
-
-            var options = new PruneOptions
-            {
-                DryRun = dryRun,
-                HistoryMode = mode,
-                ExcludeGraphs = graphIris,
-                ExcludePredicates = predIris
-            };
-
-            var result = PruneEngine.Execute(_pool, options);
-
-            if (!result.Success)
-                return $"Prune failed: {result.ErrorMessage}";
-
-            var sb = new StringBuilder();
-            sb.AppendLine(dryRun ? "Prune dry-run complete:" : "Prune complete:");
-            sb.AppendLine($"  Quads scanned: {result.QuadsScanned:N0}");
-            sb.AppendLine($"  Quads written: {result.QuadsWritten:N0}");
-            if (!dryRun)
-                sb.AppendLine($"  Space saved: {ByteFormatter.FormatCompact(result.BytesSaved)}");
-            sb.AppendLine($"  Duration: {result.Duration.TotalMilliseconds:N0}ms");
-            return sb.ToString().Trim();
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
+    // Pruning is intentionally NOT exposed through MCP. Per ADR-006 (MCP Surface Discipline),
+    // destructive operations whose effects an AI shouldn't initiate autonomously are CLI-only.
+    // To prune a Mercury store, run the `mercury prune` CLI directly — the human's shell history
+    // is the audit trail for the operation.
+    //
+    // For Reference profile stores, see also ADR-007 (Sealed Substrate Immutability):
+    // pruning a Reference store is rejected at plan time; the alternative is to bulk-load
+    // the source data with the desired filters into a new Reference store.
 }

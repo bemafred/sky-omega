@@ -149,4 +149,43 @@ public class PruneEngineTests : IDisposable
 
         Assert.True(result.Duration > TimeSpan.Zero);
     }
+
+    /// <summary>
+    /// ADR-007: Reference profile stores are sealed substrates. Pruning is rejected at
+    /// plan time by <see cref="PruneEngine"/> with guidance pointing to the bulk-load
+    /// re-creation alternative. The original sealed snapshot remains queryable and
+    /// untouched by the rejected call.
+    /// </summary>
+    [Fact]
+    public void Execute_ReferenceProfile_IsRejectedWithGuidance()
+    {
+        // Build a pool whose storage options designate Reference profile, then bulk-load
+        // a tiny set of triples through it. The pool's "primary" store comes up sealed.
+        var poolOptions = new QuadStorePoolOptions
+        {
+            StorageOptions = new StorageOptions
+            {
+                Profile = StoreProfile.Reference,
+                BulkMode = true
+            }
+        };
+        _pool = QuadStorePool.CreateTemp("prune-engine-reference-rejection", poolOptions);
+        _pool.EnsureActive("primary");
+        var primary = _pool.GetOrCreate("primary");
+        primary.BeginBatch();
+        primary.AddCurrentBatched("<http://ex/s>", "<http://ex/p>", "<http://ex/o>");
+        primary.CommitBatch();
+
+        var result = PruneEngine.Execute(_pool);
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+        // Guidance must mention ADR-007 (the architectural decision) AND the re-creation alternative
+        // (so a developer hitting the rejection has a one-line path forward).
+        Assert.Contains("ADR-007", result.ErrorMessage);
+        Assert.Contains("--bulk-load", result.ErrorMessage);
+        // QuadsScanned/Written stay zero — the rejection happens before transfer begins.
+        Assert.Equal(0, result.QuadsScanned);
+        Assert.Equal(0, result.QuadsWritten);
+    }
 }

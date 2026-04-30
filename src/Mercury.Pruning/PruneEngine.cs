@@ -30,6 +30,33 @@ public static class PruneEngine
 
         try
         {
+            // ADR-007 (Sealed Substrate Immutability): pruning a Reference profile store is
+            // a category error. The Reference profile is sealed; the canonical-snapshot
+            // contract is preserved by re-creation, not in-place modification (even via the
+            // dual-instance copy-and-switch). Reject at plan time with guidance to the
+            // re-creation alternative.
+            //
+            // ADR-034 Decision 7 also makes this structurally impossible: the SortedAtomStore-
+            // backed Reference secondary store is single-bulk-load, so a second prune would
+            // hit a hard wall regardless. Rejecting at the facade is cleaner than letting
+            // the user get partway through and fail at the storage layer.
+            var primaryStore = pool["primary"];
+            if (primaryStore.Schema.Profile == StoreProfile.Reference)
+            {
+                return new PruneResult
+                {
+                    Success = false,
+                    ErrorMessage =
+                        "Reference profile stores are sealed — pruning is not supported (see ADR-007). " +
+                        "To produce a filtered subset, bulk-load the source data into a new Reference " +
+                        "store with the desired filters: " +
+                        "`mercury --create-store <name> --profile Reference --bulk-load <source> [--exclude-graphs ...] [--exclude-predicates ...]`. " +
+                        "The original sealed snapshot remains queryable until you explicitly remove it.",
+                    Duration = sw.Elapsed,
+                    DryRun = options.DryRun
+                };
+            }
+
             // Build filter from options
             var filters = new List<IPruningFilter>();
 
