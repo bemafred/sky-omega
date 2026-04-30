@@ -4,9 +4,9 @@
 
 **Inputs:**
 - WDBench cold baseline 1.7.47 sealed against `wiki-21b-ref` ([reproduction recipe](../validations/wdbench-2026-04-29-reproduction.md), tag `v1.7.47-wdbench-baseline`)
-- ADR-034 SortedAtomStore Accepted, Phases 1A–1B-5b shipped
+- ADR-034 SortedAtomStore Accepted, Phase 1B-5d disk-backed AssignedIds Completed (commit `d832702`)
 - ADR-035 Phase 7a metrics infrastructure Completed (1B baseline at [`adr-035-phase7a-1b-2026-04-27.md`](../validations/adr-035-phase7a-1b-2026-04-27.md))
-- ADR-036 BZip2 streaming substrate Completed (Phase 1 single-threaded)
+- ADR-036 BZip2 streaming substrate: Phase 1 single-threaded Completed (1.7.45); Phase 2 block-parallel Completed (commit `a11f873`); throughput measured (commits `b39f186`, `0c3b1ae`) — 2.62× ceiling, scanner-bound
 - `wiki-21b-ref` retired from disk; SSD headroom recovered for Round 1's transient peak
 
 **Output:** `wiki-21b-ref-r1` — sealed Reference store on SortedAtomStore + parallel-bz2-streamed source. Successor to the retired v1.
@@ -40,22 +40,24 @@ The following were confirmed during the Round 1 plan review:
 | # | Decision | Value |
 |---|---|---|
 | 1 | MPHF Phase 2 inclusion | **Out of Round 1.** Defers to evidence-first sub-round after Round 1.5 trace. |
-| 2 | Parallel bz2 worker count | **Aggressive — ~80% of capacity.** `Math.Max(1, (ProcessorCount * 4) / 5)` — 14 workers on the M5 Max (leaves 4 cores for the single-threaded parser, Mercury internals, OS). Revised 2026-04-30 from the original "conservative" call: parallel bz2 is the architectural enabler that makes two-pass-over-source viable (~6 min second source pass instead of ~55 min). Decompression isn't a side-show — it's the precondition for the design-space conversation. Underwork it and we lose that freedom. |
+| 2 | Parallel bz2 worker count | **Re-revised 2026-04-30 after measurement: 4 workers when used.** Initial call "conservative ~6"; revised to "aggressive ~14 (80%)" under unmeasured ~9× projection; re-revised to **4** after measurement (commits `b39f186`, `0c3b1ae`) showed scanner-bound 2.62× ceiling — workers beyond 4 idle. Parallel bz2 reframed as **convert-path optimization** (~57% wall-clock reduction), **not** bulk-load enabler. Bulk-load uses single-threaded bz2 (parser-bound at 17.5 MB/s, single-threaded bz2 at 30 MB/s already exceeds). See ADR-036 Phase 2 §"Workload-separated verdict". |
 | 3 | Plan persistence | **This document.** `docs/roadmap/phase-7c-round-1.md`, citable, durable. |
 | 4 | Substrate naming | **`wiki-21b-ref-rN` keyed to the round.** Round 1 produces `wiki-21b-ref-r1`; Round 2 produces `wiki-21b-ref-r2`; `wiki-21b-ref` symlinks to current. The retired Phase 6 substrate predates the convention and keeps its identity via `v1.7.47-wdbench-baseline` tag + recipe. |
 | 5 | Run cadence | **21.3 B over long weekend, background process.** Steps 1–4 (gradient + 1 B trace lap) run mid-week; step 5 (21.3 B headline) starts Friday-evening-class, runs unattended, status checks via JSONL tail + summary. |
 
 ## Sequence
 
-| # | Step | Substrate | Wall-clock | Artifact |
-|---|---|---|---:|---|
-| 1 | ADR-034 Phase 1B-5d disk-backed AssignedIds | code | hours | impl + unit tests |
-| 2 | ADR-036 Phase 2 `ParallelBZip2DecompressorStream` | code | hours | impl + unit tests against bzip2 reference suite |
-| 3 | Gradient 1 M / 10 M / 100 M Reference (SortedAtomStore + parallel bz2) | three small stores | hours each | correctness equivalence vs HashAtomStore + perf JSONL per scale |
-| 4 | 1 B Reference end-to-end (gradient close-out + trace lap) | `wiki-1b-ref-r1-trace` | ~30–40 min projected | `adr-034-1b-2026-XX-XX.md` + JSONL + dotnet-trace `.nettrace` |
-| 5 | 21.3 B Reference end-to-end (headline run) | `wiki-21b-ref-r1` | ~50–60 h projected (1.4× from 85 h, conservative) | `adr-034-21b-2026-XX-XX.md` + JSONL only (no trace) |
-| 6 | Substrate r1 reproduction recipe + tag | git | minutes | `wdbench-2026-XX-XX-r1-reproduction.md` + `v1.7.4X-round1-baseline` |
-| 7 | ADR transitions | docs | minutes | ADR-034 Accepted → Completed; ADR-036 Phase 2 Completed; bz2 limit Latent → Resolved |
+| # | Step | Substrate | Wall-clock | Artifact | Status |
+|---|---|---|---:|---|---|
+| 1 | ADR-034 Phase 1B-5d disk-backed AssignedIds | code | hours | impl + unit tests | ✅ commit `d832702` |
+| 2 | ADR-036 Phase 2 `ParallelBZip2DecompressorStream` | code | hours | impl + unit tests + measurement | ✅ commits `a11f873`, `b39f186`, `0c3b1ae` |
+| 3 | Gradient 1 M / 10 M / 100 M Reference (SortedAtomStore + **single-threaded bz2** in production path) | three small stores | hours each | correctness equivalence vs HashAtomStore + perf JSONL per scale | ⏭ next |
+| 4 | 1 B Reference end-to-end (gradient close-out + trace lap) | `wiki-1b-ref-r1-trace` | ~30–40 min projected | `adr-034-1b-2026-XX-XX.md` + JSONL + dotnet-trace `.nettrace` | ⏭ |
+| 5 | 21.3 B Reference end-to-end (headline run) | `wiki-21b-ref-r1` | ~50–60 h projected (1.4× from 85 h, conservative) | `adr-034-21b-2026-XX-XX.md` + JSONL only (no trace) | ⏭ |
+| 6 | Substrate r1 reproduction recipe + tag | git | minutes | `wdbench-2026-XX-XX-r1-reproduction.md` + `v1.7.4X-round1-baseline` | ⏭ |
+| 7 | ADR transitions | docs | minutes | ADR-034 Accepted → Completed; ADR-036 Phase 2 Completed (✅ done already); bz2 limit Latent → Resolved | partial — ADR-036 Phase 2 done |
+
+**Note on Step 3 production-path bz2:** the gradient + 1 B + 21.3 B runs use single-threaded `BZip2DecompressorStream`. Per ADR-036 Phase 2 measurement, parallel bz2 doesn't help bulk-load (parser-bound at 17.5 MB/s; single-threaded already produces 30 MB/s). Parallel bz2 stays available as a capability for convert workloads. The original framing — *"parallel bz2 enables cheap two-pass-over-source"* — was based on an unmeasured projection that didn't survive measurement; the architectural conversation about two-pass-vs-single-pass is now a parser-walks-twice (~36 h at 21.3 B) vs intermediate-disk (~5 TB) trade-off, not a bz2-throughput trade-off.
 
 ## Validation gates
 

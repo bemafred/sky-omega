@@ -1,9 +1,20 @@
 # Limit: BZip2 source decompression is single-threaded
 
-**Status:**        Latent
+**Status:**        Resolved (with measurement caveats — see below)
 **Surfaced:**      2026-04-30, via the QLever-comparison conversation captured in `memos/2026-04-30-latent-assumptions-from-qlever-comparison.md`. The discussion of pipeline-shape trade-offs (Shape A two-pass over compressed input vs Shape B one-pass with staged intermediates) implicitly assumed parallel decompression; the assumption did not hold. The 2026-04-27 ADR-035 Phase 7a 1B Reference validation measured the actual throughput.
 **Last reviewed:** 2026-04-30
-**Promotes to:**   ADR for parallel BZip2 decompression once (a) a measured pipeline trace identifies decompression as the binding constraint at Phase 7c gradient runs, OR (b) a deployment surfaces where multi-core is available but I/O is not the bottleneck (cloud nodes, etc.).
+**Resolved by:**   [ADR-036 Phase 2](../adrs/mercury/ADR-036-bzip2-streaming-decompression.md) — `ParallelBZip2DecompressorStream` shipped 2026-04-30 (commit `a11f873`); throughput measured (commits `b39f186`, `0c3b1ae`).
+
+## Resolution outcome (with caveats)
+
+The original projection (~9× speedup, 33 MB/s → ~300 MB/s on M5 Max) was not validated. **Measured ceiling: 2.62× — scanner-bound, not memory-bandwidth-bound.** The producer-side `BZip2BlockBoundaryScanner` walks the compressed bitstream bit-by-bit at ~90 blocks/sec; workers can consume at ~466 blocks/sec, so beyond 4 workers everyone idles.
+
+**Workload-separated verdict** (per ADR-036 Phase 2 §"Workload-separated verdict"):
+
+- **Convert path** (Turtle → NT, parser+writer ceiling ~35 MB/s): parallel(4) bz2 cuts ~57% of wall-clock vs single-threaded. Parallel bz2 IS load-bearing for convert.
+- **Bulk-load path** (parser + atom intern + spill, consumer-side ~17.5 MB/s): single-threaded bz2 at 30 MB/s already exceeds consumption rate. Parallel bz2 is NOT load-bearing for bulk-load.
+
+The original "Promotes to: ADR for parallel BZip2..." trigger conditions are obsolete; the ADR shipped as Phase 2 of ADR-036, but its production-path utility is convert-only. A successor entry — *scanner optimization* (vectorized byte-aligned magic search + bit-aligned verification, projected 2-3× scanner throughput → parallel-bz2 ceiling 5-7×) — is **deferred** since on the bulk-load production path the parallel decoder isn't load-bearing. If a convert-heavy production workload becomes binding, scanner optimization promotes back.
 
 ## Description
 

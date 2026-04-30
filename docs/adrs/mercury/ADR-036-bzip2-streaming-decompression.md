@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-27
+**Status:** Accepted — 2026-04-27. Phase 1 (single-threaded decompressor) Completed 2026-04-27 (validated end-to-end at 1 B Reference, [adr-035-phase7a-1b-2026-04-27.md](../../validations/adr-035-phase7a-1b-2026-04-27.md)). Phase 2 (block-parallel decompressor) Completed 2026-04-30 (commit `a11f873`); measured 2.62× speedup ceiling on 50 MB / 58-block fixture, scanner-bound (commits `b39f186`, `0c3b1ae`).
 
 ## Context
 
@@ -177,6 +177,75 @@ Only `BZip2DecompressorStream` is `public`. All algorithm components — bit rea
 **Phase 6 — Documentation**
 - `docs/architecture/technical/compression.md` documenting the algorithm, the API contract, the CRC variant, and the test-fixture regeneration procedure.
 - `docs/limits/streaming-source-decompression.md` updated to link this ADR as the resolution.
+
+## Phase 2 — Block-parallel decompression (added 2026-04-30)
+
+### Motivation
+
+The single-threaded decompressor (Phase 1) was originally framed as the architectural enabler for "two-pass-over-source" pipeline shapes — re-decompressing the source on a second pass would be cheap if decompression were fast enough. The limits-register entry `bz2-decompression-single-threaded.md` projected a ~9× ceiling for parallel decompression (33 MB/s single-threaded → ~300 MB/s parallel-block decode on M5 Max).
+
+### Decisions
+
+**1. Pipeline shape.** A producer thread runs `BZip2BlockBoundaryScanner` to find bit-aligned block boundaries; N worker threads each own a `BZip2BlockReader` and decode independent blocks pulled from a bounded `Channel<WorkItem>`. Results land in a lock-protected `PriorityQueue<BlockResult, int>` keyed by ordinal; the consumer drains in ordinal order, accumulates per-block CRC into the stream-combined CRC, and verifies against the trailer at end-of-stream.
+
+**2. Worker-count default.** `Math.Max(1, (Environment.ProcessorCount * 4) / 5)` — ~14 on M5 Max. Originally chosen as ~80% of cores under the projected ~9× ceiling. Measurements (see below) revised the *useful* ceiling to ~4 workers; the default is preserved for forward-compatibility but workloads that care should pin to 4.
+
+**3. Single-stream input only.** Concatenated bzip2 streams (handled transparently by the single-threaded decompressor) are out of scope for the parallel path. Wikidata's `latest-all.ttl.bz2` is single-stream; this is sufficient for production.
+
+### Measured throughput (Epistemics gate, 2026-04-30)
+
+Three measurements decomposed the convert-path stages on a 50 MB / 6.6 MB-compressed / ~58-block fixture (`/tmp/multiblock-large.txt.bz2`, generated locally, not committed):
+
+**Direct decompression** (`LargeFixtureMeasurement`, commit `b39f186`):
+
+| Configuration | wall (ms) | output MB/s | speedup |
+|---|---:|---:|---:|
+| single-threaded | 1685.5 | 29.7 | 1.00× |
+| parallel (1 workers) | 1713.1 | 29.2 | 0.98× |
+| parallel (2 workers) | 914.9 | 54.7 | 1.84× |
+| parallel (4 workers) | 642.6 | 77.8 | **2.62×** |
+| parallel (8 workers) | 641.4 | 77.9 | 2.63× |
+| parallel (14 workers) | 644.0 | 77.6 | 2.62× |
+
+**Contention trace** (`ParallelBZip2ContentionTrace`, commit `b39f186`) refuted the memory-bandwidth-contention hypothesis. Per-block decode time stayed flat (29.25 ms at N=1, 31.31 ms at N=14, 1.07× — within noise). Workers idled 80% of wall-clock at N=14: parallel-efficiency dropped from 99.4% to 20.3%. The bottleneck is the **producer**: `BZip2BlockBoundaryScanner` walks the compressed bitstream bit-by-bit looking for 48-bit magic sequences and feeds at ~90 blocks/sec — workers can consume at ~466 blocks/sec, so beyond 4 workers everyone idles.
+
+**Convert-path attribution** (`ConvertPathThroughputMeasurement`, commit `0c3b1ae`) decomposed Turtle → N-Triples by isolating each stage:
+
+| Configuration | wall (s) | source MB/s | triples/sec |
+|---|---:|---:|---:|
+| single-threaded bz2 → parser → NT | 3.22 | 15.5 | 207K |
+| parallel (4) bz2 → parser → NT | 1.53 | 32.8 | 438K |
+| pre-decompressed → parser → NT | 1.41 | 35.5 | 474K |
+
+Pre-decompressed sets the parser+writer ceiling at 35.5 MB/s. Parallel-(4) bz2 reaches 32.8 MB/s (within 7% of ceiling — bz2 no longer the bottleneck). Single-threaded bz2 reaches 15.5 MB/s (44% of ceiling — bz2 IS the bottleneck, costing ~57% of convert wall-clock).
+
+### Workload-separated verdict
+
+The parallel decoder's value is workload-dependent — same component, opposite verdict per workload:
+
+| Workload | Downstream rate | Single-threaded sufficient? | Parallel verdict |
+|---|---:|:---:|---|
+| Convert (Turtle → NT) | ~35 MB/s | No (30 MB/s output is cap) | **Useful — cuts ~57% of wall-clock** |
+| Bulk-load (parser + atom intern + spill) | ~17.5 MB/s | Yes (30 MB/s exceeds) | Irrelevant — single-threaded sufficient |
+
+The earlier framing — *"parallel bz2 is the architectural enabler that makes two-pass-over-source viable"* — was based on the unmeasured ~9× projection. The measured 2.62× ceiling, combined with the parser-bound 17.5 MB/s on the bulk-load path, removes parallel bz2 from the bulk-load architectural conversation. Two-pass-over-source vs single-pass-with-resolve-sorter is now a parser-walks-twice (~36 hours at 21.3 B) vs intermediate-disk (~5 TB chunk-spill) trade-off, not a bz2-throughput trade-off.
+
+### Why the projection was off — and the lesson
+
+The 9× projection assumed CPU-bound parallelism on the BWT inverse hot path. The actual bottleneck is the *producer-side* boundary scanner, which is single-threaded by design. Per-worker decode rate is constant; adding workers beyond ~4 just creates idle workers. The lesson generalizes: in any worker-pool architecture, instrument the producer's feed rate vs worker capacity. If feed rate is the lower number, more workers don't help.
+
+This finding is recorded in `docs/limits/bz2-decompression-single-threaded.md` (status: Resolved by ADR-036 Phase 2 with measurement caveat) and is the seed observation for a sister entry on scanner optimization (vectorized magic search) — *deferred*, since on the bulk-load production path the parallel decoder isn't load-bearing.
+
+### Production-path recommendation
+
+- **Bulk-load** (`mercury --bulk-load latest-all.ttl.bz2`): use `BZip2DecompressorStream` (Phase 1, single-threaded). Sufficient for the parser-bound 17.5 MB/s consumption rate.
+- **Convert** (`mercury convert in.ttl.bz2 out.nt`): use `ParallelBZip2DecompressorStream` (Phase 2, parallel) with `workerCount: 4`. Cuts convert wall-clock by ~57% on M5 Max class hardware.
+
+### Phase 2 status transitions
+
+- **Proposed** — 2026-04-30. Implementation commit `a11f873`.
+- **Accepted** — 2026-04-30. Correctness validated (14 tests, multi-block, up to 14 workers, random reads, CRC corruption detection).
+- **Completed** — 2026-04-30. Throughput measured (commits `b39f186`, `0c3b1ae`); workload-separated verdict documented; production-path recommendations recorded in this ADR.
 
 ## Open questions
 
