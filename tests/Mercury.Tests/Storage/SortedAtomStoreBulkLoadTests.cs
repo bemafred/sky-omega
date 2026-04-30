@@ -107,6 +107,70 @@ public class SortedAtomStoreBulkLoadTests : IDisposable
     }
 
     [Fact]
+    public void MultipleBatches_AccumulateAtomsAcrossSession()
+    {
+        // Regression test for the production-path bug discovered during the Phase 7c
+        // Round 1 step 3 gradient: at 1M Wikidata triples, the parser fires
+        // BeginBatch/CommitBatch every 100K triples (chunk-flush boundary). The original
+        // SortedAtomBulkBuilder lifecycle finalized the vocabulary on every CommitBatch,
+        // overwriting atoms.atoms each time — so only the LAST chunk's atoms survived.
+        // The Hash-backed Reference path doesn't have this problem because Intern() is
+        // incremental.
+        //
+        // Fix: SortedAtomBulkBuilder is now session-scoped. It accumulates atoms across
+        // every BeginBatch/CommitBatch and is finalized once at FlushToDisk. This test
+        // exercises that lifecycle with three distinct batches, each contributing
+        // distinct atoms, and verifies all atoms appear in the final store.
+        var dir = Path.Combine(_testDir, "multi_batch");
+        Directory.CreateDirectory(dir);
+        var schema = StoreSchema.ForProfile(StoreProfile.Reference)
+            with { AtomStore = AtomStoreImplementation.Sorted };
+        schema.WriteTo(dir);
+
+        var bulkOpts = new StorageOptions { BulkMode = true, Profile = StoreProfile.Reference };
+        using (var store = new QuadStore(dir, null, null, bulkOpts))
+        {
+            // Batch 1: alice, bob, knows
+            store.BeginBatch();
+            store.AddCurrentBatched("<http://ex/alice>", "<http://ex/knows>", "<http://ex/bob>");
+            store.CommitBatch();
+
+            // Batch 2: carol, dave, likes — distinct atoms, different batch
+            store.BeginBatch();
+            store.AddCurrentBatched("<http://ex/carol>", "<http://ex/likes>", "<http://ex/dave>");
+            store.CommitBatch();
+
+            // Batch 3: eve, frank, follows — yet more distinct atoms
+            store.BeginBatch();
+            store.AddCurrentBatched("<http://ex/eve>", "<http://ex/follows>", "<http://ex/frank>");
+            store.CommitBatch();
+
+            // Session-end: this finalizes the bulk-builder and writes atoms.atoms.
+            store.FlushToDisk();
+
+            // 9 distinct atoms must be present (alice, bob, carol, dave, eve, frank,
+            // knows, likes, follows). The pre-fix code would only show 3 — atoms from
+            // the last batch.
+            Assert.Equal(9, store.Atoms.AtomCount);
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/alice>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/bob>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/carol>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/dave>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/eve>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/frank>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/knows>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/likes>"));
+            Assert.NotEqual(0, store.Atoms.GetAtomId("<http://ex/follows>"));
+        }
+
+        // Reopen for query — vocab persists, all 9 atoms retrievable.
+        using (var store = new QuadStore(dir))
+        {
+            Assert.Equal(9, store.Atoms.AtomCount);
+        }
+    }
+
+    [Fact]
     public void RollbackBatch_LeavesPlaceholderIntact()
     {
         var dir = Path.Combine(_testDir, "rollback");

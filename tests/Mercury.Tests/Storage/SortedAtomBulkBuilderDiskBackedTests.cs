@@ -194,6 +194,77 @@ public class SortedAtomBulkBuilderDiskBackedTests : IDisposable
     }
 
     [Fact]
+    public void DiskBacked_MultiChunkOccurrenceSpill_EquivalentToInMemory()
+    {
+        // Forces the OCCURRENCE-chunk spill path to multi-chunk by setting a tiny
+        // chunkSizeBytes for BuildExternal. The default test (5000 triples, 256 MB
+        // chunks) only ever produces a single chunk — multi-chunk merge of atom
+        // occurrences was never exercised. Wikidata-1M loads multi-chunk and produces
+        // different (incorrect) output vs in-memory; this test isolates that scenario.
+        var memBase = Path.Combine(_testDir, "mc_mem");
+        var diskBase = Path.Combine(_testDir, "mc_disk");
+
+        // Wikidata-shaped atoms: mix of "..."-literals and <http://...>-IRIs. Literals
+        // sort BEFORE IRIs (byte 0x22 < 0x3C). This is the same content shape that
+        // appears in real Wikidata triples and that the existing 5000-triple test
+        // (synthetic IRIs only) doesn't exercise.
+        var triples = new List<(string g, string s, string p, string o)>(20000);
+        var rng = new Random(11);
+        for (int i = 0; i < 20000; i++)
+        {
+            triples.Add((
+                "",
+                $"<http://www.wikidata.org/entity/Q{rng.Next(0, 100_000_000)}>",
+                $"<http://www.wikidata.org/prop/direct/P{i % 50}>",
+                i % 3 == 0
+                    ? $"\"{rng.Next(0, 1_000_000)}\""
+                    : $"<http://www.wikidata.org/entity/Q{rng.Next(0, 100_000_000)}>"));
+        }
+
+        // Convert to byte[] for direct BuildExternal API (which lets us pass small chunkSizeBytes).
+        var occurrences = new List<byte[]>(triples.Count * 4);
+        foreach (var t in triples)
+        {
+            occurrences.Add(t.g.Length == 0 ? Array.Empty<byte>() : System.Text.Encoding.UTF8.GetBytes(t.g));
+            occurrences.Add(System.Text.Encoding.UTF8.GetBytes(t.s));
+            occurrences.Add(System.Text.Encoding.UTF8.GetBytes(t.p));
+            occurrences.Add(System.Text.Encoding.UTF8.GetBytes(t.o));
+        }
+
+        // In-memory path (single-chunk effectively).
+        var memResult = SortedAtomStoreBuilder.Build(memBase, occurrences);
+        var memAssigned = memResult.AssignedIds;
+
+        // Disk-backed path, forced multi-chunk on occurrences (chunkSizeBytes = 64 KB).
+        var diskResult = SortedAtomStoreExternalBuilder.BuildExternal(
+            diskBase, occurrences,
+            chunkSizeBytes: 1 * 1024 * 1024,  // 1 MB → multi-chunk merge required
+            useDiskBackedAssigned: true,
+            resolveSorterChunkSize: 1024);    // tiny → multi-chunk resolveSorter too
+
+        try
+        {
+            Assert.Equal(memResult.AtomCount, diskResult.AtomCount);
+
+            // Stream the disk-backed assigned IDs and compare element-by-element with
+            // the in-memory long[]. This is the test that would have caught the
+            // Wikidata-1M correctness bug.
+            using var reader = diskResult.AssignedIdsResolver!.GetReader();
+            for (long inputIdx = 0; inputIdx < memAssigned.LongLength; inputIdx++)
+            {
+                Assert.True(reader.TryReadNext(out var diskAtomId),
+                    $"underread at inputIdx={inputIdx}");
+                Assert.Equal(memAssigned[inputIdx], diskAtomId);
+            }
+            Assert.False(reader.TryReadNext(out _), "resolver should be drained");
+        }
+        finally
+        {
+            diskResult.AssignedIdsResolver?.Dispose();
+        }
+    }
+
+    [Fact]
     public void DiskBacked_ExternalBuilder_TinyChunkSize_KWayMerge()
     {
         // Drives the resolveSorter's k-way merge by forcing a tiny chunk size.

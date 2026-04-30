@@ -626,8 +626,14 @@ public sealed class QuadStore : IDisposable
                 // through ExternalSorter<ResolveRecord> with a 256 MB bounded chunk buffer
                 // independent of input scale. At small scales (<100 M) the disk overhead
                 // is ~10-50 ms — negligible against the 1 B+ requirement.
-                if (_schema.AtomStore == AtomStoreImplementation.Sorted && _bulkLoadMode)
+                if (_schema.AtomStore == AtomStoreImplementation.Sorted && _bulkLoadMode
+                    && _sortedAtomBulkBuilder is null)
                 {
+                    // Session-scoped: allocated on the FIRST BeginBatch and persists across
+                    // every subsequent BeginBatch/CommitBatch cycle within the bulk-load
+                    // session. Finalized in FlushToDisk via FinalizeSortedAtomBulkIfPresent.
+                    // Re-creating per-batch would overwrite atoms.atoms at every chunk-flush
+                    // and lose every chunk's vocabulary except the last.
                     var sortedTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "sorted-vocab");
                     Directory.CreateDirectory(sortedTempDir);
                     _sortedAtomBulkBuilder = new SortedAtomBulkBuilder(
@@ -854,64 +860,25 @@ public sealed class QuadStore : IDisposable
             // No WAL → no tx-id machinery → no buffered replay.
             if (_referenceBulkActive)
             {
-                // ADR-034 Phase 1B-5b: SortedAtomStore-backed bulk completes in two stages:
-                // (1) finalize the vocabulary, write {atoms.atoms, atoms.offsets} files;
-                // (2) walk the buffered triples in input order and feed the resolved atom IDs
-                // into the GSPO sorter. The placeholder _atoms (empty SortedAtomStore from
-                // QuadStore.Open) is disposed and re-instantiated over the freshly-written
-                // vocab files so subsequent queries see the real atoms.
-                if (_sortedAtomBulkBuilder is not null)
-                {
-                    var bulkBuilder = _sortedAtomBulkBuilder;
-                    _sortedAtomBulkBuilder = null;
-                    var atomPath = Path.Combine(_baseDirectory, "atoms");
-
-                    // Release the placeholder mmap before the builder rewrites the files.
-                    _atoms.Dispose();
-
-                    bulkBuilder.Finalize();
-
-                    // Reopen over the fresh vocab files so GetAtomSpan works for the rest
-                    // of the session.
-                    _atoms = new SortedAtomStore(atomPath);
-
-                    // Replay the resolved triples into the GSPO sorter (same path the
-                    // Hash-backed Reference bulk uses; see _bulkSorter declaration).
-                    //
-                    // ADR-034 Phase 1B-5d: scope the GSPO sorter's tempDir to a dedicated
-                    // subdirectory ("bulk-tmp/gspo"). The previous shape ("bulk-tmp")
-                    // collided with the SortedAtomBulkBuilder's resolver chunks at
-                    // "bulk-tmp/sorted-vocab/assigned-ids-resolver/", because
-                    // ExternalSorter's constructor wipes its tempDir recursively — which
-                    // would delete the resolver's chunks before EnumerateResolved drains
-                    // them just below.
-                    if (_bulkSorter is null)
-                    {
-                        var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "gspo");
-                        _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
-                            tempDir: bulkTempDir,
-                            chunkSize: 16_000_000);
-                    }
-                    foreach (var (g, s, p, o) in bulkBuilder.EnumerateResolved())
-                    {
-                        var key = new ReferenceQuadIndex.ReferenceKey
-                        {
-                            Graph = g,
-                            Primary = s,
-                            Secondary = p,
-                            Tertiary = o,
-                        };
-                        _bulkSorter.Add(in key);
-                    }
-                    bulkBuilder.Dispose();
-                }
+                // ADR-034 Phase 1B-5b: SortedAtomStore-backed bulk-load is a SESSION-scoped
+                // operation. The SortedAtomBulkBuilder accumulates atom occurrences across
+                // every BeginBatch/CommitBatch cycle within a single bulk-load session and
+                // is finalized exactly once at FlushToDisk. Per-batch finalize would
+                // overwrite the atoms files at every chunk-flush — losing all but the last
+                // chunk's vocabulary. The Hash-backed Reference path doesn't have this
+                // problem because Intern() is incremental.
+                //
+                // Therefore: CommitBatch on a Sorted-backed Reference bulk leaves the
+                // bulk-builder alone. The work that used to happen here — Finalize, atoms
+                // re-open, EnumerateResolved replay into _bulkSorter — moves into
+                // FlushToDisk's DrainBulkSorter path (FinalizeSortedAtomBulk).
 
                 // ADR-033: when _bulkSorter is active the GSPO writes are deferred to
                 // FlushToDisk's drain. Skipping the per-CommitBatch index Flush() avoids
                 // ~10K msync-on-256GB-sparse-mmap calls over a 1B-triple bulk session
                 // (the parser flushes every 100K triples). The session-end FlushToDisk
                 // is the single durability boundary in that mode.
-                if (_bulkSorter is null)
+                if (_bulkSorter is null && _sortedAtomBulkBuilder is null)
                 {
                     _gspoReference!.Flush();
                     _gposReference!.Flush();
@@ -1016,6 +983,12 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void FlushToDisk()
     {
+        // ADR-034 Phase 1B-5b session boundary: if a SortedAtomBulkBuilder accumulated
+        // across the bulk-load session, finalize its vocabulary, replay buffered triples
+        // into the GSPO sorter, and dispose. Per-CommitBatch finalize would have
+        // overwritten the atoms files chunk-by-chunk — see CommitBatch comment.
+        FinalizeSortedAtomBulkIfPresent();
+
         // ADR-033: drain the bulk-load external sorter (if any) before flushing GSPO.
         // The sorter has been accumulating across BeginBatch/CommitBatch cycles since
         // the first AddReferenceBulkTriple call; this is the explicit "bulk-load
@@ -1029,6 +1002,64 @@ public sealed class QuadStore : IDisposable
         _tgspIndex?.Flush();
         _gspoReference?.Flush();
         _gposReference?.Flush();
+    }
+
+    private void FinalizeSortedAtomBulkIfPresent()
+    {
+        if (_sortedAtomBulkBuilder is null) return;
+
+        _lock.EnterWriteLock();
+        try
+        {
+            if (_sortedAtomBulkBuilder is null) return; // re-check under lock
+
+            var bulkBuilder = _sortedAtomBulkBuilder;
+            _sortedAtomBulkBuilder = null;
+            var atomPath = Path.Combine(_baseDirectory, "atoms");
+
+            // Release the placeholder mmap before the builder rewrites the files.
+            _atoms.Dispose();
+
+            bulkBuilder.Finalize();
+
+            // Reopen over the fresh vocab files so GetAtomSpan works for the rest
+            // of the session.
+            _atoms = new SortedAtomStore(atomPath);
+
+            // Replay the resolved triples into the GSPO sorter (same path the
+            // Hash-backed Reference bulk uses; see _bulkSorter declaration).
+            //
+            // ADR-034 Phase 1B-5d: scope the GSPO sorter's tempDir to a dedicated
+            // subdirectory ("bulk-tmp/gspo"). The previous shape ("bulk-tmp")
+            // collided with the SortedAtomBulkBuilder's resolver chunks at
+            // "bulk-tmp/sorted-vocab/assigned-ids-resolver/", because
+            // ExternalSorter's constructor wipes its tempDir recursively — which
+            // would delete the resolver's chunks before EnumerateResolved drains
+            // them just below.
+            if (_bulkSorter is null)
+            {
+                var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "gspo");
+                _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
+                    tempDir: bulkTempDir,
+                    chunkSize: 16_000_000);
+            }
+            foreach (var (g, s, p, o) in bulkBuilder.EnumerateResolved())
+            {
+                var key = new ReferenceQuadIndex.ReferenceKey
+                {
+                    Graph = g,
+                    Primary = s,
+                    Secondary = p,
+                    Tertiary = o,
+                };
+                _bulkSorter.Add(in key);
+            }
+            bulkBuilder.Dispose();
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
     }
 
     private void DrainBulkSorter()
