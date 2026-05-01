@@ -53,7 +53,7 @@ The following were confirmed during the Round 1 plan review:
 | 2 | ADR-036 Phase 2 `ParallelBZip2DecompressorStream` | code | hours | impl + unit tests + measurement | ✅ commits `a11f873`, `b39f186`, `0c3b1ae` |
 | 3 | Gradient 1 M / 10 M / 100 M Reference (SortedAtomStore + **single-threaded bz2** in production path) | three small stores | hours each | correctness equivalence vs HashAtomStore + perf JSONL per scale | ⏭ next |
 | 4 | 1 B Reference end-to-end (gradient close-out + trace lap) | `wiki-1b-ref-r1-trace` | ~30–40 min projected | `adr-034-1b-2026-XX-XX.md` + JSONL + dotnet-trace `.nettrace` | ⏭ |
-| 5 | 21.3 B Reference end-to-end (headline run) | `wiki-21b-ref-r1` | ~50–60 h projected (1.4× from 85 h, conservative) | `adr-034-21b-2026-XX-XX.md` + JSONL only (no trace) | ⏭ |
+| 5 | 21.3 B Reference end-to-end (headline run) | `wiki-21b-ref-r1` | started 2026-05-01 08:54:49 CEST · projected ~30-35h (revised from 50-60h after 1B extrapolation: 13h parser + 9h FlushToDisk + ~12h rebuild). Tag `v1.7.47-round1-baseline` (commit `09377bd`) | `adr-034-21b-2026-XX-XX.md` + `/tmp/round1-gradient/21b-headline.jsonl` (in flight) | 🔄 in flight |
 | 6 | Substrate r1 reproduction recipe + tag | git | minutes | `wdbench-2026-XX-XX-r1-reproduction.md` + `v1.7.4X-round1-baseline` | ⏭ |
 | 7 | ADR transitions | docs | minutes | ADR-034 Accepted → Completed; ADR-036 Phase 2 Completed (✅ done already); bz2 limit Latent → Resolved | partial — ADR-036 Phase 2 done |
 
