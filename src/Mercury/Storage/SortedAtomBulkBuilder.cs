@@ -59,10 +59,10 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     // ADR-034 Phase 1B-5e streaming-input state. The buffer accumulates atom occurrences
     // until it crosses the chunk threshold, then sorts + spills to a chunk file. Memory
     // is bounded by chunkBufferBytes regardless of input scale.
-    private readonly List<(byte[] Bytes, int InputIdx)> _spillBuffer = new();
+    private readonly List<(byte[] Bytes, long InputIdx)> _spillBuffer = new();
     private long _spillBufferBytes;
     private readonly List<string> _chunkFiles = new();
-    private int _globalIdx;  // monotonic input-occurrence index across all atoms
+    private long _globalIdx;  // monotonic input-occurrence index across all atoms; widened from int to long for >500M-triple bulk loads (1B triples × 4 atoms = 4B occurrences exceeds int32)
     private long _tripleCount;
 
     // Disk-backed AssignedIds resolver (Phase 1B-5d). Allocated lazily in EnsureSpillerInitialized

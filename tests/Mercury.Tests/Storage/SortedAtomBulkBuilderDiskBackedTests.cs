@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
@@ -191,6 +192,61 @@ public class SortedAtomBulkBuilderDiskBackedTests : IDisposable
             Assert.Equal(triples[i].p, store.GetAtomString(resolved[i].PredicateId));
             Assert.Equal(triples[i].o, store.GetAtomString(resolved[i].ObjectId));
         }
+    }
+
+    [Fact]
+    public void DiskBacked_ChunkFile_RoundTripsInt64InputIdx()
+    {
+        // Regression for the int32-overflow bug discovered in Step 4 of Phase 7c
+        // Round 1 (1B Reference + Sorted bulk-load). The pre-fix `int globalIdx` wrapped
+        // at 2.1B occurrences. At 1B triples × 4 atoms = 4B occurrences, input indices
+        // wrapped to negative, breaking the dense-coverage invariant and producing an
+        // empty GSPO index.
+        //
+        // Verifies the chunk file format correctly round-trips int64 InputIdx values
+        // past the int32 boundary. Going through the full bulk-builder at 4B+ occurrences
+        // would take hours; this isolates the file-format byte-layout and arithmetic.
+        const long PastInt32Boundary = 2_500_000_000L;
+        var chunkDir = Path.Combine(_testDir, "int64_chunk");
+        Directory.CreateDirectory(chunkDir);
+
+        var buffer = new List<(byte[] Bytes, long InputIdx)>
+        {
+            (Encoding.UTF8.GetBytes("alpha"), PastInt32Boundary + 100L),
+            (Encoding.UTF8.GetBytes("beta"),  PastInt32Boundary + 200L),
+            (Encoding.UTF8.GetBytes("gamma"), 4_000_000_000L),  // well past int32 max
+        };
+        buffer.Sort((a, b) => a.Bytes.AsSpan().SequenceCompareTo(b.Bytes));
+
+        var path = SortedAtomStoreExternalBuilder.SpillOneChunk(chunkDir, buffer, chunkIndex: 0);
+
+        // Read the chunk file back manually and verify the 12-byte header format:
+        // int32 length (4 bytes) + int64 InputIdx (8 bytes) + raw bytes.
+        var bytes = File.ReadAllBytes(path);
+        int pos = 0;
+        var seenIdxs = new List<long>();
+        while (pos < bytes.Length)
+        {
+            int length = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(
+                bytes.AsSpan(pos, 4));
+            long inputIdx = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(
+                bytes.AsSpan(pos + 4, 8));
+            seenIdxs.Add(inputIdx);
+            pos += 12 + length;
+        }
+
+        // Expected order: alpha (PastInt32Boundary + 100), beta (PastInt32Boundary + 200),
+        // gamma (4_000_000_000) — the buffer was sorted by bytes alphabetically.
+        Assert.Equal(3, seenIdxs.Count);
+        Assert.Contains(PastInt32Boundary + 100L, seenIdxs);
+        Assert.Contains(PastInt32Boundary + 200L, seenIdxs);
+        Assert.Contains(4_000_000_000L, seenIdxs);
+
+        // Verify pre-fix int32 truncation would have been wrong: e.g., 4_000_000_000
+        // truncated to int32 wraps to ~-294967296. Confirms we're past the boundary
+        // and the file format is genuinely round-tripping int64.
+        Assert.True(4_000_000_000L > int.MaxValue);
+        Assert.True(PastInt32Boundary + 100L > int.MaxValue);
     }
 
     [Fact]

@@ -134,16 +134,16 @@ internal static class SortedAtomStoreExternalBuilder
             useDiskBackedAssigned, resolveSorterChunkSize);
     }
 
-    private static int SpillChunks(
+    private static long SpillChunks(
         IEnumerable<byte[]> input,
         string tempDir,
         long chunkSizeBytes,
         List<string> chunkFiles,
         ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter)
     {
-        var buffer = new List<(byte[] Bytes, int InputIdx)>();
+        var buffer = new List<(byte[] Bytes, long InputIdx)>();
         long bufferBytes = 0;
-        int globalIdx = 0;
+        long globalIdx = 0;  // widened from int — 1B triples × 4 atoms = 4B occurrences exceeds int32
 
         foreach (var s in input)
         {
@@ -182,7 +182,7 @@ internal static class SortedAtomStoreExternalBuilder
     /// <see cref="SortedAtomBulkBuilder"/> can spill incrementally during <c>AddTriple</c>
     /// (ADR-034 Phase 1B-5e streaming-input fix).
     /// </summary>
-    internal static string SpillOneChunk(string tempDir, List<(byte[] Bytes, int InputIdx)> buffer, int chunkIndex)
+    internal static string SpillOneChunk(string tempDir, List<(byte[] Bytes, long InputIdx)> buffer, int chunkIndex)
     {
         // Sort by UTF-8 byte order; ties broken by input index for stable output.
         buffer.Sort((a, b) =>
@@ -194,12 +194,14 @@ internal static class SortedAtomStoreExternalBuilder
 
         var path = Path.Combine(tempDir, $"chunk-{chunkIndex:D6}.bin");
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.SequentialScan);
-        Span<byte> header = stackalloc byte[8];
+        // Record format: int32 length + int64 input-idx + raw bytes. (12-byte header.)
+        // InputIdx widened from int32 to int64 to support >500M-triple bulk loads
+        // (1B triples × 4 atoms = 4B occurrences exceeds int32 max).
+        Span<byte> header = stackalloc byte[12];
         foreach (var (bytes, inputIdx) in buffer)
         {
-            // Record format: int32 length + int32 input-idx + raw bytes.
             BinaryPrimitives.WriteInt32LittleEndian(header.Slice(0, 4), bytes.Length);
-            BinaryPrimitives.WriteInt32LittleEndian(header.Slice(4, 4), inputIdx);
+            BinaryPrimitives.WriteInt64LittleEndian(header.Slice(4, 8), inputIdx);
             fs.Write(header);
             fs.Write(bytes);
         }
@@ -213,14 +215,17 @@ internal static class SortedAtomStoreExternalBuilder
     /// chunks accumulated during streaming <c>AddTriple</c> (ADR-034 Phase 1B-5e).
     /// </summary>
     internal static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
-        string baseFilePath, List<string> chunkFiles, int inputCount,
+        string baseFilePath, List<string> chunkFiles, long inputCount,
         ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter)
     {
         // Disk-backed: resolveSorter receives one record per non-empty input occurrence here,
         // plus the empty-slot sentinels emitted by SpillChunks. Caller wraps into DiskBackedAssignedIds.
-        // In-memory: assigned[] is materialized as today.
+        // In-memory: assigned[] is materialized as today (bounded by int32 array max).
         bool useDiskBacked = resolveSorter is not null;
-        var assigned = useDiskBacked ? Array.Empty<long>() : new long[inputCount];
+        if (!useDiskBacked && inputCount > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(inputCount),
+                $"inputCount {inputCount} exceeds int32 max for in-memory AssignedIds; pass useDiskBackedAssigned: true.");
+        var assigned = useDiskBacked ? Array.Empty<long>() : new long[(int)inputCount];
         long atomCount = 0;
         long totalBytes = 0;
         var dataPath = baseFilePath + ".atoms";
@@ -274,7 +279,7 @@ internal static class SortedAtomStoreExternalBuilder
                 if (useDiskBacked)
                     resolveSorter!.Add(new ResolveRecord(rec.InputIdx, atomCount));
                 else
-                    assigned[rec.InputIdx] = atomCount;
+                    assigned[checked((int)rec.InputIdx)] = atomCount;
 
                 if (readers[readerIdx].MoveNext())
                     pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
@@ -306,7 +311,7 @@ internal static class SortedAtomStoreExternalBuilder
     {
         private readonly FileStream _fs;
         private readonly int _chunkIndex;
-        public (byte[] Bytes, int InputIdx) Current { get; private set; }
+        public (byte[] Bytes, long InputIdx) Current { get; private set; }
         private bool _disposed;
 
         public ChunkReader(string path, int chunkIndex)
@@ -320,12 +325,13 @@ internal static class SortedAtomStoreExternalBuilder
         {
             if (_disposed || _fs.Position >= _fs.Length) return false;
 
-            Span<byte> header = stackalloc byte[8];
+            // Record format: int32 length + int64 input-idx + raw bytes (12-byte header).
+            Span<byte> header = stackalloc byte[12];
             int read = _fs.Read(header);
-            if (read < 8) return false;
+            if (read < 12) return false;
 
             int length = BinaryPrimitives.ReadInt32LittleEndian(header.Slice(0, 4));
-            int inputIdx = BinaryPrimitives.ReadInt32LittleEndian(header.Slice(4, 4));
+            long inputIdx = BinaryPrimitives.ReadInt64LittleEndian(header.Slice(4, 8));
             var bytes = new byte[length];
             int got = 0;
             while (got < length)
