@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-04-26
+**Status:** Accepted — 2026-04-26 · Phase 1 Completed 2026-05-01 (commits `d832702` Phase 1B-5d, `7660bb4` production wiring, `3b49ce2` session-scoped lifecycle, `ba90595` Phase 1B-5e streaming input, `bd2f9c1` int64 InputIdx widening, `870d31b` Round 2 prefix compression). Validated end-to-end at 1B Wikidata Reference (1:00:36 wall-clock; 213M atoms; 991M triples stored). Phase 2 (BBHash MPHF) and bit-packed atom IDs both remain deferred per evidence-first ([1B trace memo](../../../memos/2026-05-01-1b-flushtodisk-trace-analysis.md)): GSPO write is 0.45% of FlushToDisk; resolver drain is 0.92%. The architectural cost is dominated by sequential file I/O, not algorithm.
 
 ## Context
 

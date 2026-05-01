@@ -1,8 +1,20 @@
 # Limit: Bit-packed atom IDs (48-bit packing)
 
-**Status:**        Latent
+**Status:**        Latent (re-affirmed 2026-05-01)
 **Surfaced:**      2026-04-19, via [ADR-029 Decision 5](../adrs/mercury/ADR-029-store-profiles.md) ("Offset and ID widths stay at 64-bit signed (`long`) for now")
-**Last reviewed:** 2026-04-20
+**Last reviewed:** 2026-05-01
+
+## 2026-05-01 deferral decision (Phase 7c Round 2 review)
+
+After ADR-034 Round 2 prefix compression shipped (commit `870d31b`, atoms.atoms 53% reduction at 1M Wikidata), bit-packing was considered as the second Round 2 deliverable. **Decision: continue to defer.**
+
+Reasoning:
+- The 1B FlushToDisk trace ([memo](../../memos/2026-05-01-1b-flushtodisk-trace-analysis.md)) shows the GSPO B+Tree write is **0.45% inclusive of FlushToDisk** (~6 sec on a 24-min phase). Bit-packing's effect on this hot path is bounded by 1% wall-clock improvement.
+- The original deferral logic still holds — the M5 Max 8 TB target leaves ~5.4 TB headroom on a single 21.3 B Reference mirror; storage isn't binding.
+- 32-bit packing has 6.7% headroom past Wikidata's ~4 B atom count (2^32 = 4.29 B). 48-bit packing has comfortable headroom but awkward serialization.
+- Implementation cost is substantial: touches `ReferenceQuadIndex` B+Tree page layout, `ExternalSorter<ReferenceKey>`, `RadixSort.SortInPlace(ReferenceKey)`, `ReferenceKeyChunkSorter`, all GSPO/GPOS read+write paths, plus QuadStore consumers. ~10+ files, B+Tree page format change, schema versioning required for migration.
+
+Round 2 closes with prefix compression as the sole deliverable. The architectural premise of ADR-034 (deferred resolution paid for by downstream wins) is partially honored — prefix compression delivers ~75 GB memory savings at 21.3 B Wikidata. Bit-packing's additional ~340-680 GB storage savings remain on the table when one of the original triggers binds.
 **Promotes to:**   ADR when storage becomes binding even after Reference profile lands — i.e., when a 21.3 B Reference store at projected 2.6 TB still doesn't fit on the target hardware, OR when a credible deployment scenario emerges where ~680 GB additional storage savings would be load-bearing.
 
 ## Description

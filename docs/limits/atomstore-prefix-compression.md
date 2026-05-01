@@ -1,9 +1,17 @@
 # Limit: AtomStore does not eagerly prefix-compress
 
-**Status:**        Latent
-**Surfaced:**      2026-04-30, via the QLever-comparison conversation captured in `memos/2026-04-30-latent-assumptions-from-qlever-comparison.md`. Vocabulary-phase memory comparison against QLever is not currently apples-to-apples — QLever achieves ~45% vocabulary memory reduction via greedy common-prefix detection at vocabulary build time, an optimization Mercury's AtomStore does not implement.
-**Last reviewed:** 2026-04-30
-**Promotes to:**   ADR for prefix-compressed atom storage once (a) ADR-034 SortedAtomStore lands and validates (sorted vocabulary creates natural prefix locality, dramatically lowering implementation cost), AND (b) measured RAM pressure from the atom store becomes binding on a target workload, OR (c) a vocabulary-phase comparison vs QLever is being prepared for external publication.
+**Status:**        Resolved (shipped 2026-05-01 in ADR-034 Round 2)
+**Surfaced:**      2026-04-30, via the QLever-comparison conversation captured in `memos/2026-04-30-latent-assumptions-from-qlever-comparison.md`.
+**Resolved:**      2026-05-01, commit `870d31b`. Implementation: delta-encode each atom against its predecessor in sort order; anchor every 64th atom for bounded reconstruction (≤63 byte-copies per `GetAtomSpan` on a compressed atom). Anchors return zero-copy spans over the mmap'd file; compressed atoms reconstruct into a thread-local buffer. Measured 53% atoms.atoms size reduction at 1M Wikidata (14.86 MB → 6.97 MB). Projected ~75 GB memory recovery at full 21.3B Wikidata.
+**Last reviewed:** 2026-05-01
+
+## Resolution outcome
+
+The implementation followed the cheapest of the candidate mitigations: delta-encode in `SortedAtomStoreExternalBuilder.MergeAndWrite` with an anchor every 64 atoms. No prefix dictionary, no trie, no frequency-weighted clustering — just (prefix_len, suffix_bytes) per entry, 1-byte header.
+
+Measured against QLever's published 45% vocabulary reduction: Mercury achieves ~53% on the same Wikidata-shape data. The delta is likely from anchor-interval choice — QLever anchors more aggressively (or differently) for tighter random-access; Mercury's 64-anchor balances size vs reconstruction cost.
+
+The format change is breaking (atoms.atoms file format header change) — existing SortedAtomStore on-disk artifacts must be rebuilt. Per ADR-007 sealed-substrate-immutability, Reference stores are re-rendered from source; this aligns with the substrate's design.
 
 ## Description
 
