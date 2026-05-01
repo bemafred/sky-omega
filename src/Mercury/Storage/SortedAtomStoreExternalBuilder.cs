@@ -310,6 +310,7 @@ internal static class SortedAtomStoreExternalBuilder
     private sealed class ChunkReader : IDisposable
     {
         private readonly FileStream _fs;
+        private readonly long _fileLength;  // cached at construction; chunk file is read-only and not appended to
         private readonly int _chunkIndex;
         public (byte[] Bytes, long InputIdx) Current { get; private set; }
         private bool _disposed;
@@ -318,12 +319,18 @@ internal static class SortedAtomStoreExternalBuilder
         {
             _chunkIndex = chunkIndex;
             _fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+            // Caching length once eliminates an fstat syscall per MoveNext call. At 1B
+            // Reference scale, MergeAndWrite invokes MoveNext ~4B times across all chunks;
+            // the 1B FlushToDisk trace (commit 8ca5388) showed `FileStream.get_Length()`
+            // consuming 12.36% of CPU samples in the post-load phase. Saves ~3 min on
+            // the 24-min FlushToDisk drain.
+            _fileLength = _fs.Length;
             Current = default;
         }
 
         public bool MoveNext()
         {
-            if (_disposed || _fs.Position >= _fs.Length) return false;
+            if (_disposed || _fs.Position >= _fileLength) return false;
 
             // Record format: int32 length + int64 input-idx + raw bytes (12-byte header).
             Span<byte> header = stackalloc byte[12];
