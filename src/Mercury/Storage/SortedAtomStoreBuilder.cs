@@ -73,13 +73,34 @@ internal static class SortedAtomStoreBuilder
             BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, 0);
             offsetsFs.Write(offsetBuf);
 
+            // ADR-034 Round 2 prefix compression: anchor every Nth atom; all others
+            // are delta-encoded against their predecessor. Same format the external
+            // builder writes — the in-memory and external paths produce byte-identical
+            // .atoms files, so SortedAtomStore reads both transparently.
+            byte[]? prevBytes = null;
+            long atomIdx = 0;          // 1-based atomCount counter, matches external builder
+            long fileBytes = 0;        // running file-position accumulator for offsets
+            long contentBytes = 0;     // atom-content bytes only (excludes prefix_len headers); BuildResult.DataBytes
             foreach (var s in sorted)
             {
-                dataFs.Write(s, 0, s.Length);
-                totalBytes += s.Length;
-                BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, totalBytes);
+                atomIdx++;
+                bool isAnchor = ((atomIdx - 1) % SortedAtomStoreExternalBuilder.PrefixCompressionAnchorInterval) == 0;
+                int prefixLen = 0;
+                if (!isAnchor && prevBytes is not null)
+                {
+                    prefixLen = SortedAtomStoreExternalBuilder.ComputeLongestCommonPrefix(prevBytes, s, maxLen: 255);
+                }
+                int suffixLen = s.Length - prefixLen;
+                dataFs.WriteByte((byte)prefixLen);
+                if (suffixLen > 0)
+                    dataFs.Write(s, prefixLen, suffixLen);
+                fileBytes += 1 + suffixLen;
+                contentBytes += s.Length;
+                BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, fileBytes);
                 offsetsFs.Write(offsetBuf);
+                prevBytes = s;
             }
+            totalBytes = contentBytes;
 
             dataFs.Flush(flushToDisk: true);
             offsetsFs.Flush(flushToDisk: true);

@@ -50,6 +50,15 @@ internal static class SortedAtomStoreExternalBuilder
     /// <summary>Default chunk size for the disk-backed AssignedIds resolver: 16 M records × 16 B = 256 MB.</summary>
     public const int DefaultResolveSorterChunkSize = 16 * 1024 * 1024;
 
+    /// <summary>
+    /// ADR-034 Round 2 prefix compression: anchor every N atoms to bound reconstruction cost.
+    /// Atoms whose 1-based ID modulo this interval equals 1 are stored full-text (prefix_len=0);
+    /// all others are delta-encoded against their predecessor in sort order. 64 keeps anchor
+    /// overhead small (~1.6% of atoms are full) while bounding worst-case reconstruction
+    /// to 63 byte-copies per <c>GetAtomSpan</c> call on a compressed atom.
+    /// </summary>
+    public const int PrefixCompressionAnchorInterval = 64;
+
     public static SortedAtomStoreBuilder.BuildResult BuildExternal(
         string baseFilePath,
         IEnumerable<byte[]> inputStrings,
@@ -227,7 +236,8 @@ internal static class SortedAtomStoreExternalBuilder
                 $"inputCount {inputCount} exceeds int32 max for in-memory AssignedIds; pass useDiskBackedAssigned: true.");
         var assigned = useDiskBacked ? Array.Empty<long>() : new long[(int)inputCount];
         long atomCount = 0;
-        long totalBytes = 0;
+        long fileBytes = 0;       // running file-position accumulator for offsets file (includes prefix_len headers)
+        long contentBytes = 0;    // atom-content bytes only (no headers); reported as BuildResult.DataBytes
         var dataPath = baseFilePath + ".atoms";
         var offsetsPath = baseFilePath + ".offsets";
 
@@ -269,9 +279,23 @@ internal static class SortedAtomStoreExternalBuilder
                 if (isNew)
                 {
                     atomCount++;
-                    dataFs.Write(rec.Bytes, 0, rec.Bytes.Length);
-                    totalBytes += rec.Bytes.Length;
-                    BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, totalBytes);
+                    // ADR-034 Round 2 prefix compression: anchor every Nth atom (full bytes,
+                    // prefix_len=0); all others are delta-encoded against their predecessor
+                    // in sort order. Anchor on the FIRST atom (atomCount==1) and every
+                    // PrefixCompressionAnchorInterval thereafter.
+                    bool isAnchor = ((atomCount - 1) % PrefixCompressionAnchorInterval) == 0;
+                    int prefixLen = 0;
+                    if (!isAnchor && prevBytes is not null)
+                    {
+                        prefixLen = ComputeLongestCommonPrefix(prevBytes, rec.Bytes, maxLen: 255);
+                    }
+                    int suffixLen = rec.Bytes.Length - prefixLen;
+                    dataFs.WriteByte((byte)prefixLen);
+                    if (suffixLen > 0)
+                        dataFs.Write(rec.Bytes, prefixLen, suffixLen);
+                    fileBytes += 1 + suffixLen;
+                    contentBytes += rec.Bytes.Length;
+                    BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, fileBytes);
                     offsetsFs.Write(offsetBuf);
                     prevBytes = rec.Bytes;
                 }
@@ -297,13 +321,13 @@ internal static class SortedAtomStoreExternalBuilder
         {
             // Finalize the resolver's spill so it's drainable. Caller wraps as DiskBackedAssignedIds.
             resolveSorter!.Complete();
-            return new SortedAtomStoreBuilder.BuildResult(atomCount, totalBytes, assigned)
+            return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned)
             {
                 AssignedIdsResolver = new DiskBackedAssignedIds(resolveSorter, inputCount),
             };
         }
 
-        return new SortedAtomStoreBuilder.BuildResult(atomCount, totalBytes, assigned);
+        return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned);
     }
 
     /// <summary>Streaming reader over a single sorted chunk file. Pull-based via MoveNext / Current.</summary>
@@ -357,6 +381,19 @@ internal static class SortedAtomStoreExternalBuilder
             _disposed = true;
             _fs.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Compute the longest common prefix length between two byte arrays, capped at
+    /// <paramref name="maxLen"/>. Used by ADR-034 Round 2 prefix compression to
+    /// delta-encode each atom against its predecessor in sort order.
+    /// </summary>
+    internal static int ComputeLongestCommonPrefix(byte[] a, byte[] b, int maxLen)
+    {
+        int upper = Math.Min(Math.Min(a.Length, b.Length), maxLen);
+        int i = 0;
+        while (i < upper && a[i] == b[i]) i++;
+        return i;
     }
 
     private readonly record struct ChunkPriorityKey(byte[] Bytes, int ChunkIndex);

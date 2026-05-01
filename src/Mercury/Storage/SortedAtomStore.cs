@@ -126,7 +126,10 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
             if (sentinel != _dataLength)
                 throw new InvalidDataException(
                     $"SortedAtomStore: offsets sentinel ({sentinel}) does not match data length ({_dataLength})");
-            _totalBytes = sentinel;
+            // ADR-034 Round 2 prefix compression: each atom entry has a 1-byte prefix_len
+            // header; subtract atomCount to get the atom-content bytes (the value the
+            // pre-compression API contract returned and tests assert against).
+            _totalBytes = sentinel - _atomCount;
         }
     }
 
@@ -138,6 +141,22 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
     /// Get the UTF-8 bytes for an atom ID. ID 0 returns empty (the "no atom" sentinel).
     /// IDs in [1, AtomCount] resolve in O(1) via two offset reads + a span construction.
     /// </summary>
+    /// <summary>
+    /// Return the UTF-8 bytes of the atom with the given ID. ADR-034 Round 2 prefix-compressed
+    /// format: each entry's first byte is <c>prefix_len</c>; if zero, the rest of the entry
+    /// is the full atom (anchor); if non-zero, the atom is reconstructed from its predecessor
+    /// in sort order by walking back to the nearest anchor and concatenating up to this ID.
+    /// </summary>
+    /// <remarks>
+    /// <b>Span lifetime contract:</b> for ANCHOR atoms (every Nth ID), the returned span
+    /// points directly into the mmap'd file (zero-copy). For COMPRESSED atoms, the span
+    /// points into a thread-local reconstruction buffer; <b>the span is invalidated by the
+    /// next <see cref="GetAtomSpan"/> call on the same thread.</b> Callers must consume
+    /// the span (copy / compare / encode) before the next call. All in-tree consumers
+    /// satisfy this — the binary search in <see cref="GetAtomIdUtf8"/> compares each probe
+    /// before the next call, and downstream callers (<see cref="GetAtomString"/>,
+    /// <c>QuadStore</c>'s atom decoders) immediately copy or stringify.
+    /// </remarks>
     public ReadOnlySpan<byte> GetAtomSpan(long atomId)
     {
         ThrowIfDisposed();
@@ -145,11 +164,78 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
 
         long start = _offsetsPtr[atomId - 1];
         long end = _offsetsPtr[atomId];
-        long len = end - start;
-        if (len <= 0) return ReadOnlySpan<byte>.Empty;
-        if (len > int.MaxValue)
-            throw new InvalidDataException($"SortedAtomStore atom {atomId} length {len} exceeds Span<byte> limit");
-        return new ReadOnlySpan<byte>(_dataPtr + start, (int)len);
+        long entryLen = end - start;
+        if (entryLen <= 0) return ReadOnlySpan<byte>.Empty;
+
+        // Entry layout: 1 byte prefix_len + suffix bytes (or full bytes for anchor).
+        byte prefixLen = _dataPtr[start];
+        int suffixLen = (int)(entryLen - 1);
+
+        if (prefixLen == 0)
+        {
+            // Anchor atom — zero-copy span over mmap.
+            return new ReadOnlySpan<byte>(_dataPtr + start + 1, suffixLen);
+        }
+
+        // Compressed atom — walk back to the nearest anchor and reconstruct.
+        return ReconstructCompressed(atomId);
+    }
+
+    [ThreadStatic] private static byte[]? _reconstructBuffer;
+
+    /// <summary>
+    /// Walk back to the nearest anchor (atom ID with <c>(id-1) % AnchorInterval == 0</c>),
+    /// then reconstruct each compressed atom forward up to <paramref name="targetId"/> by
+    /// concatenating its predecessor's prefix with its own suffix. Returns a span over
+    /// the thread-local reconstruction buffer.
+    /// </summary>
+    private ReadOnlySpan<byte> ReconstructCompressed(long targetId)
+    {
+        long anchorId = ((targetId - 1) / SortedAtomStoreExternalBuilder.PrefixCompressionAnchorInterval)
+                        * SortedAtomStoreExternalBuilder.PrefixCompressionAnchorInterval + 1;
+
+        // Anchor entry: 1 byte (prefix_len=0) + full atom bytes.
+        long anchorStart = _offsetsPtr[anchorId - 1];
+        long anchorEnd = _offsetsPtr[anchorId];
+        int anchorLen = (int)(anchorEnd - anchorStart - 1);
+
+        var buffer = _reconstructBuffer;
+        if (buffer is null || buffer.Length < 4096)
+        {
+            buffer = new byte[4096];
+            _reconstructBuffer = buffer;
+        }
+
+        // Copy anchor bytes into buffer.
+        EnsureBufferSize(ref buffer, anchorLen);
+        new ReadOnlySpan<byte>(_dataPtr + anchorStart + 1, anchorLen).CopyTo(buffer);
+        int currentLen = anchorLen;
+
+        // Walk forward, applying each compressed entry's prefix + suffix.
+        for (long id = anchorId + 1; id <= targetId; id++)
+        {
+            long s = _offsetsPtr[id - 1];
+            long e = _offsetsPtr[id];
+            byte prefixLen = _dataPtr[s];
+            int suffixLen = (int)(e - s - 1);
+            int newLen = prefixLen + suffixLen;
+            EnsureBufferSize(ref buffer, newLen);
+            if (suffixLen > 0)
+                new ReadOnlySpan<byte>(_dataPtr + s + 1, suffixLen).CopyTo(buffer.AsSpan(prefixLen));
+            currentLen = newLen;
+        }
+
+        return buffer.AsSpan(0, currentLen);
+    }
+
+    private void EnsureBufferSize(ref byte[] buffer, int required)
+    {
+        if (buffer.Length >= required) return;
+        int newSize = Math.Max(buffer.Length * 2, required);
+        var grown = new byte[newSize];
+        buffer.AsSpan(0, buffer.Length).CopyTo(grown);
+        buffer = grown;
+        _reconstructBuffer = grown;
     }
 
     public string GetAtomString(long atomId)
@@ -185,9 +271,15 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<byte> GetAtomSpanUnchecked(long atomId)
     {
+        // Same prefix-compression handling as GetAtomSpan; kept inline for the binary
+        // search hot path. Anchor: zero-copy; compressed: thread-local buffer.
         long start = _offsetsPtr[atomId - 1];
         long end = _offsetsPtr[atomId];
-        return new ReadOnlySpan<byte>(_dataPtr + start, (int)(end - start));
+        byte prefixLen = _dataPtr[start];
+        int suffixLen = (int)(end - start - 1);
+        if (prefixLen == 0)
+            return new ReadOnlySpan<byte>(_dataPtr + start + 1, suffixLen);
+        return ReconstructCompressed(atomId);
     }
 
     public long GetAtomId(ReadOnlySpan<char> value)

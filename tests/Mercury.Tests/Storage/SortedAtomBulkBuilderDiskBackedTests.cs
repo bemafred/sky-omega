@@ -195,6 +195,80 @@ public class SortedAtomBulkBuilderDiskBackedTests : IDisposable
     }
 
     [Fact]
+    public void PrefixCompression_ShrinksAtomsFileForSharedPrefixes()
+    {
+        // ADR-034 Round 2: verify prefix compression actually reduces on-disk size for
+        // Wikidata-shaped atoms (long shared URI prefixes) and that round-trip lookup
+        // returns the original strings.
+        var basePath = Path.Combine(_testDir, "prefix_compression");
+
+        // 200 atoms with a long shared prefix — Wikidata-class redundancy.
+        const string Prefix = "<http://www.wikidata.org/entity/Q";
+        var inputs = new List<byte[]>();
+        for (int i = 0; i < 200; i++)
+            inputs.Add(System.Text.Encoding.UTF8.GetBytes($"{Prefix}{i:D8}>"));
+
+        // Sort by bytes (the builder expects sorted input semantically; use the
+        // public BuildExternal which sorts internally).
+        var result = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs);
+        Assert.Equal(200, result.AtomCount);
+
+        // Compute uncompressed size: sum of atom lengths.
+        long uncompressedSize = inputs.Sum(b => (long)b.Length);
+
+        // Read the actual on-disk size of atoms.atoms.
+        long onDiskSize = new System.IO.FileInfo(basePath + ".atoms").Length;
+
+        // With shared 33-byte prefix on most atoms (anchors take full bytes every 64th):
+        // anchors: 4 atoms × ~42 bytes each ≈ 168 bytes
+        // compressed: 196 atoms × (1 + ~9 bytes suffix) ≈ 1960 bytes
+        // total ≈ 2128 bytes; uncompressed would be 200 × 42 = 8400 bytes
+        // → compression ratio ~25%. Assert at least 50% reduction.
+        Assert.True(onDiskSize < uncompressedSize / 2,
+            $"prefix compression did not shrink: on-disk={onDiskSize}, uncompressed={uncompressedSize}");
+
+        // Round-trip: every atom's reconstruction must match the input.
+        using var store = new SortedAtomStore(basePath);
+        Assert.Equal(200, store.AtomCount);
+        // Atoms are sorted by bytes; the input was already roughly sorted by Q-number.
+        // Verify that GetAtomString on each ID returns the bytes that match by content
+        // (not by ID — IDs are dense alphabetical).
+        for (int i = 0; i < 200; i++)
+        {
+            var inputStr = System.Text.Encoding.UTF8.GetString(inputs[i]);
+            long id = store.GetAtomId(inputStr);
+            Assert.True(id >= 1 && id <= 200, $"atom not found: {inputStr}");
+            Assert.Equal(inputStr, store.GetAtomString(id));
+        }
+    }
+
+    [Fact]
+    public void PrefixCompression_AnchorRecoversFullAtomAcrossInterval()
+    {
+        // The anchor interval is 64. Verify that atom 64 (just before next anchor) and
+        // atom 65 (the next anchor) both round-trip correctly. Walking from atom 1
+        // (anchor) to atom 64 reconstructs through 63 forward steps; atom 65 is
+        // independent (full anchor).
+        var basePath = Path.Combine(_testDir, "anchor_walk");
+        var inputs = new List<byte[]>();
+        for (int i = 0; i < 130; i++)
+            inputs.Add(System.Text.Encoding.UTF8.GetBytes($"http://example.org/atom-{i:D5}"));
+
+        var result = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs);
+        Assert.Equal(130, result.AtomCount);
+
+        using var store = new SortedAtomStore(basePath);
+        // Verify atoms across multiple anchor intervals reconstruct correctly.
+        for (int i = 0; i < 130; i++)
+        {
+            var inputStr = System.Text.Encoding.UTF8.GetString(inputs[i]);
+            long id = store.GetAtomId(inputStr);
+            Assert.True(id >= 1, $"atom missing: {inputStr}");
+            Assert.Equal(inputStr, store.GetAtomString(id));
+        }
+    }
+
+    [Fact]
     public void DiskBacked_ChunkFile_RoundTripsInt64InputIdx()
     {
         // Regression for the int32-overflow bug discovered in Step 4 of Phase 7c
