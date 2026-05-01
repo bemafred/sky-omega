@@ -176,7 +176,13 @@ internal static class SortedAtomStoreExternalBuilder
         return globalIdx;
     }
 
-    private static string SpillOneChunk(string tempDir, List<(byte[] Bytes, int InputIdx)> buffer, int chunkIndex)
+    /// <summary>
+    /// Spill one in-memory buffer of <c>(bytes, inputIdx)</c> records as a sorted chunk
+    /// file under <paramref name="tempDir"/>. Returns the path. Made <c>internal</c> so
+    /// <see cref="SortedAtomBulkBuilder"/> can spill incrementally during <c>AddTriple</c>
+    /// (ADR-034 Phase 1B-5e streaming-input fix).
+    /// </summary>
+    internal static string SpillOneChunk(string tempDir, List<(byte[] Bytes, int InputIdx)> buffer, int chunkIndex)
     {
         // Sort by UTF-8 byte order; ties broken by input index for stable output.
         buffer.Sort((a, b) =>
@@ -200,7 +206,13 @@ internal static class SortedAtomStoreExternalBuilder
         return path;
     }
 
-    private static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
+    /// <summary>
+    /// Pass-2 merge over already-spilled chunk files. K-way merge with dedup; assigns
+    /// dense atom IDs in alphabetical sort order; writes <c>{base}.atoms</c> + <c>{base}.offsets</c>.
+    /// Made <c>internal</c> so <see cref="SortedAtomBulkBuilder"/> can call it directly with
+    /// chunks accumulated during streaming <c>AddTriple</c> (ADR-034 Phase 1B-5e).
+    /// </summary>
+    internal static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
         string baseFilePath, List<string> chunkFiles, int inputCount,
         ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter)
     {
