@@ -124,6 +124,45 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
     }
 
     [Fact]
+    public void External_ManyChunks_ExceedsPoolCapacity_StillCorrect()
+    {
+        // ADR-034 Round 2 follow-up: at 21.3B Wikidata scale the merge processes ~13K
+        // chunk files; without a bounded file-stream pool, macOS ulimit (256-1024) is
+        // exceeded and FlushToDisk crashes. The fix wires BoundedFileStreamPool into
+        // ChunkReader. This test forces >MergeFileStreamPoolSize (64) chunks at small
+        // chunkSizeBytes so the merge's LRU eviction path is exercised end-to-end.
+        var basePath = Path.Combine(_testDir, "ext_many_chunks");
+        var inMemPath = Path.Combine(_testDir, "in_mem_many");
+
+        // ~80 chunks at 1 MB each. 1.5M strings × ~50 bytes = ~75 MB of raw input;
+        // with 16-byte per-record overhead the spill buffer ticks over at 1 MB roughly
+        // every ~16K records.
+        var inputs = new string[1_500_000];
+        for (int i = 0; i < inputs.Length; i++)
+            inputs[i] = $"http://wikidata.org/entity/Q{i:D9}";
+
+        var ext = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs,
+            tempDir: Path.Combine(_testDir, "tmp_many_chunks"),
+            chunkSizeBytes: 1L * 1024 * 1024);
+
+        Assert.Equal(inputs.Length, ext.AtomCount);
+
+        using var extStore = new SortedAtomStore(basePath);
+        // Spot-check first, last, and 100 random inputs — round-trips through the
+        // pool/eviction logic for each lookup.
+        Assert.Equal(inputs[0], extStore.GetAtomString(extStore.GetAtomId(inputs[0])));
+        Assert.Equal(inputs[^1], extStore.GetAtomString(extStore.GetAtomId(inputs[^1])));
+        var rng = new Random(13);
+        for (int trial = 0; trial < 100; trial++)
+        {
+            int i = rng.Next(0, inputs.Length);
+            long id = extStore.GetAtomId(inputs[i]);
+            Assert.True(id > 0);
+            Assert.Equal(inputs[i], extStore.GetAtomString(id));
+        }
+    }
+
+    [Fact]
     public void External_LargeAlphabet_RoundTrip()
     {
         // 50 K distinct strings, multiple chunks — exercises the priority-queue merge

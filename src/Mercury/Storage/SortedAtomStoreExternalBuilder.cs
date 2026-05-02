@@ -59,6 +59,16 @@ internal static class SortedAtomStoreExternalBuilder
     /// </summary>
     public const int PrefixCompressionAnchorInterval = 64;
 
+    /// <summary>
+    /// Maximum number of chunk-file streams the merge keeps open at once. Bounds the
+    /// merge's file-descriptor footprint regardless of chunk count. At 21.3B Wikidata
+    /// scale the merge processes ~13K chunks; macOS default ulimit (256-1024) is exceeded
+    /// without bounding. 64 leaves comfortable headroom for output streams + resolver
+    /// while keeping cache hit rate high (consecutive priority-queue pops often hit the
+    /// same chunk for similar-prefix atoms).
+    /// </summary>
+    public const int MergeFileStreamPoolSize = 64;
+
     public static SortedAtomStoreBuilder.BuildResult BuildExternal(
         string baseFilePath,
         IEnumerable<byte[]> inputStrings,
@@ -243,16 +253,19 @@ internal static class SortedAtomStoreExternalBuilder
 
         // Open one ChunkReader per chunk file. The priority queue holds the front
         // record from each chunk; pop, emit/dedupe, advance the popped chunk's reader.
+        // ChunkReaders share a bounded LRU pool of FileStream handles so total open-FD
+        // count stays under the OS ulimit even with 10K+ chunks (21.3B Wikidata scale).
+        using var streamPool = new BoundedFileStreamPool(MergeFileStreamPoolSize);
         var readers = new List<ChunkReader>(chunkFiles.Count);
         try
         {
             foreach (var path in chunkFiles)
             {
-                var reader = new ChunkReader(path, readers.Count);
+                var reader = new ChunkReader(path, readers.Count, streamPool);
                 if (reader.MoveNext())
                     readers.Add(reader);
                 else
-                    reader.Dispose();
+                    streamPool.Drop(path);
             }
 
             // Priority queue keyed by (current bytes, then chunk index for stable ordering).
@@ -330,35 +343,46 @@ internal static class SortedAtomStoreExternalBuilder
         return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned);
     }
 
-    /// <summary>Streaming reader over a single sorted chunk file. Pull-based via MoveNext / Current.</summary>
+    /// <summary>
+    /// Streaming reader over a single sorted chunk file. Pull-based via MoveNext / Current.
+    /// Holds <c>(path, offset)</c> state and acquires its <see cref="FileStream"/> from a
+    /// shared <see cref="BoundedFileStreamPool"/> on each read — does NOT own the stream.
+    /// This bounds total open-FD count for the merge regardless of chunk count.
+    /// </summary>
     private sealed class ChunkReader : IDisposable
     {
-        private readonly FileStream _fs;
-        private readonly long _fileLength;  // cached at construction; chunk file is read-only and not appended to
+        private readonly string _path;
+        private readonly long _fileLength;  // cached via FileInfo at construction; chunk files are read-only
         private readonly int _chunkIndex;
+        private readonly BoundedFileStreamPool _pool;
+        private long _offset;  // saved file position; restored on cache miss
         public (byte[] Bytes, long InputIdx) Current { get; private set; }
         private bool _disposed;
 
-        public ChunkReader(string path, int chunkIndex)
+        public ChunkReader(string path, int chunkIndex, BoundedFileStreamPool pool)
         {
+            _path = path;
             _chunkIndex = chunkIndex;
-            _fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
-            // Caching length once eliminates an fstat syscall per MoveNext call. At 1B
-            // Reference scale, MergeAndWrite invokes MoveNext ~4B times across all chunks;
-            // the 1B FlushToDisk trace (commit 8ca5388) showed `FileStream.get_Length()`
-            // consuming 12.36% of CPU samples in the post-load phase. Saves ~3 min on
-            // the 24-min FlushToDisk drain.
-            _fileLength = _fs.Length;
+            _pool = pool;
+            // FileInfo.Length is one fstat at construction; avoids holding an open FD just
+            // to read length. The 1B FlushToDisk trace (commit 8ca5388) showed FileStream
+            // get_Length() at 12.36% of CPU when called per-MoveNext — caching once is
+            // load-bearing for performance even with the pool.
+            _fileLength = new FileInfo(path).Length;
+            _offset = 0;
             Current = default;
         }
 
         public bool MoveNext()
         {
-            if (_disposed || _fs.Position >= _fileLength) return false;
+            if (_disposed || _offset >= _fileLength) return false;
+
+            var fs = _pool.Get(_path);
+            if (fs.Position != _offset) fs.Position = _offset;
 
             // Record format: int32 length + int64 input-idx + raw bytes (12-byte header).
             Span<byte> header = stackalloc byte[12];
-            int read = _fs.Read(header);
+            int read = fs.Read(header);
             if (read < 12) return false;
 
             int length = BinaryPrimitives.ReadInt32LittleEndian(header.Slice(0, 4));
@@ -367,10 +391,11 @@ internal static class SortedAtomStoreExternalBuilder
             int got = 0;
             while (got < length)
             {
-                int n = _fs.Read(bytes, got, length - got);
+                int n = fs.Read(bytes, got, length - got);
                 if (n == 0) throw new InvalidDataException($"Unexpected EOF in chunk {_chunkIndex}");
                 got += n;
             }
+            _offset = fs.Position;
             Current = (bytes, inputIdx);
             return true;
         }
@@ -379,7 +404,10 @@ internal static class SortedAtomStoreExternalBuilder
         {
             if (_disposed) return;
             _disposed = true;
-            _fs.Dispose();
+            // Stream is owned by the pool; do not dispose here. The pool's Dispose
+            // (or LRU eviction) closes it. Drop our path from the pool so FDs free
+            // promptly when this reader is exhausted.
+            _pool.Drop(_path);
         }
     }
 
