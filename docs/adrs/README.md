@@ -14,8 +14,8 @@ Foundational decisions affecting the entire repository:
 | [ADR-003](ADR-003-mercury-encapsulation-and-api-surface.md) | Mercury Encapsulation and API Surface | Completed |
 | [ADR-004](ADR-004-drhook-runtime-observation-substrate.md) | DrHook: Runtime Observation Substrate | Proposed |
 | [ADR-005](ADR-005-cognitive-component-libraries.md) | Cognitive Component Libraries — Lucy, James, Sky, Minerva | Proposed |
-| [ADR-006](ADR-006-mcp-surface-discipline.md) | MCP Surface Discipline — Destructive Operations Excluded | Proposed |
-| [ADR-007](ADR-007-sealed-substrate-immutability.md) | Sealed Substrate Immutability — Re-create, Don't Modify | Proposed |
+| [ADR-006](ADR-006-mcp-surface-discipline.md) | MCP Surface Discipline — Destructive Operations Excluded | Completed |
+| [ADR-007](ADR-007-sealed-substrate-immutability.md) | Sealed Substrate Immutability — Re-create, Don't Modify | Completed |
 | [ADR-008](ADR-008-workload-profiles-and-validation-attribution.md) | Workload Profiles and Validation Attribution | Completed |
 
 ## Substrate-Specific ADRs

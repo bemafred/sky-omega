@@ -1,6 +1,6 @@
 # ADR-006: MCP Surface Discipline — Destructive Operations Excluded
 
-**Status:** Proposed — 2026-04-30
+**Status:** Completed — 2026-05-02
 
 **Context:** Sky Omega exposes MCP servers for `mercury-mcp`, `drhook-mcp`, and (future) `minerva-mcp`. The MCP surface is what an AI agent actually sees and can invoke during a session. Surfacing reflects governance: every tool exposed is a tool an AI can call autonomously, often without an explicit human "are you sure?" prompt.
 

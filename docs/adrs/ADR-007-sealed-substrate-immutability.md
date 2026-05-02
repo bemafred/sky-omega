@@ -1,6 +1,6 @@
 # ADR-007: Sealed Substrate Immutability — Re-create, Don't Modify
 
-**Status:** Proposed — 2026-04-30
+**Status:** Completed — 2026-05-02
 
 **Context:** Sky Omega has substrates that are sealed by design — write-once, then immutable for the duration of their lifecycle. The Reference profile (Mercury, ADR-029) is the first concrete instance. Future Minerva will likely seal model weights once loaded. DrHook's attached-process inspection has sealed-snapshot semantics during the inspection window. Each substrate's seal carries different mechanics, but the architectural principle is the same.
 
