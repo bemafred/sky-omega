@@ -67,7 +67,47 @@ internal static class SortedAtomStoreExternalBuilder
     /// while keeping cache hit rate high (consecutive priority-queue pops often hit the
     /// same chunk for similar-prefix atoms).
     /// </summary>
-    public const int MergeFileStreamPoolSize = 64;
+    /// <summary>
+    /// Hard cap on simultaneously-open chunk-file streams during merge. Chosen below
+    /// macOS <c>kern.maxfilesperproc</c> (245,760) with multi-× safety, well below
+    /// typical ulimit -n (1M+). Covers the 21.3 B Wikidata case (~13K chunks) with
+    /// 2.5× headroom. Above this cap LRU eviction kicks in; pool stats emitted at
+    /// end of merge let us see whether eviction was meaningful.
+    /// </summary>
+    public const int MergeFileStreamPoolHardCap = 32 * 1024;
+
+    /// <summary>
+    /// Per-stream buffer size for merge ChunkReaders. 8 KB is small but adequate —
+    /// the merge reads each chunk sequentially, OS-level readahead provides bulk
+    /// throughput. Smaller buffer keeps total pool memory bounded: at the hard
+    /// cap (32K open streams) total buffer memory is 32K × 8 KB = 256 MB.
+    /// </summary>
+    public const int MergeFileStreamBufferSize = 8 * 1024;
+
+    /// <summary>
+    /// Effective pool size for the next merge. Default is <paramref name="chunkCount"/>
+    /// (every chunk held open — zero evictions, 100% hit rate) clamped to
+    /// <see cref="MergeFileStreamPoolHardCap"/>. Override via <c>MERCURY_MERGE_POOL_SIZE</c>
+    /// env var; the override is also clamped to the hard cap. The 1B trace
+    /// (commit e8fa14f follow-up) showed pool=64 at 720 chunks gave 97.46% hit rate
+    /// with ~15 min of miss overhead — small relative to wall-clock at 1B but
+    /// extrapolates non-linearly worse at 21.3 B's 13K chunks. Holding every chunk
+    /// open is cheap (8 KB buffer × chunk count) and eliminates merge-pool misses
+    /// as a wall-clock factor.
+    /// </summary>
+    internal static int ResolveMergeFileStreamPoolSize(int chunkCount)
+    {
+        int requested;
+        var v = Environment.GetEnvironmentVariable("MERCURY_MERGE_POOL_SIZE");
+        if (!string.IsNullOrEmpty(v) && int.TryParse(v, out var size) && size >= 1)
+            requested = size;
+        else
+            requested = chunkCount;
+
+        // Clamp: floor 1 (BoundedFileStreamPool requires maxOpen >= 1, even when
+        // chunkCount == 0); ceiling = hard cap.
+        return Math.Max(1, Math.Min(requested, MergeFileStreamPoolHardCap));
+    }
 
     public static SortedAtomStoreBuilder.BuildResult BuildExternal(
         string baseFilePath,
@@ -253,9 +293,12 @@ internal static class SortedAtomStoreExternalBuilder
 
         // Open one ChunkReader per chunk file. The priority queue holds the front
         // record from each chunk; pop, emit/dedupe, advance the popped chunk's reader.
-        // ChunkReaders share a bounded LRU pool of FileStream handles so total open-FD
-        // count stays under the OS ulimit even with 10K+ chunks (21.3B Wikidata scale).
-        using var streamPool = new BoundedFileStreamPool(MergeFileStreamPoolSize);
+        // ChunkReaders share a bounded LRU pool of FileStream handles. Default pool
+        // size is the chunk count (zero evictions); the hard cap engages eviction
+        // only above MergeFileStreamPoolHardCap (32K). Per-stream buffer is small
+        // (8 KB) — the merge reads sequentially, OS readahead is the workhorse.
+        var poolSize = ResolveMergeFileStreamPoolSize(chunkFiles.Count);
+        using var streamPool = new BoundedFileStreamPool(poolSize, MergeFileStreamBufferSize);
         var readers = new List<ChunkReader>(chunkFiles.Count);
         try
         {
@@ -329,6 +372,16 @@ internal static class SortedAtomStoreExternalBuilder
         {
             foreach (var r in readers) r.Dispose();
         }
+
+        // Emit pool stats so the merge phase's cache behavior is measurable.
+        // Single line to stdout — captured by --metrics-out via the run's stdout log.
+        // The hit-rate informs whether the configured pool size is right for chunk count.
+        long totalGets = streamPool.Hits + streamPool.Misses;
+        double hitRate = totalGets > 0 ? (double)streamPool.Hits / totalGets : 0.0;
+        Console.WriteLine(
+            $"[merge-pool] chunks={chunkFiles.Count} pool_size={streamPool.MaxOpen} " +
+            $"peak_open={streamPool.PeakOpenCount} hits={streamPool.Hits} misses={streamPool.Misses} " +
+            $"hit_rate={hitRate:P4} total_gets={totalGets}");
 
         if (useDiskBacked)
         {

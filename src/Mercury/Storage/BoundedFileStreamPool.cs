@@ -41,6 +41,7 @@ internal sealed class BoundedFileStreamPool : IDisposable
     private readonly Dictionary<string, LinkedListNode<PoolEntry>> _byPath = new();
     private long _hits;
     private long _misses;
+    private int _peakOpenCount;
     private bool _disposed;
 
     public BoundedFileStreamPool(int maxOpen, int bufferSize = 64 * 1024)
@@ -58,6 +59,9 @@ internal sealed class BoundedFileStreamPool : IDisposable
 
     /// <summary>Current number of open streams in the pool (≤ MaxOpen).</summary>
     public int OpenCount => _lru.Count;
+
+    /// <summary>Maximum <see cref="OpenCount"/> observed during the pool's lifetime. Diagnostic.</summary>
+    public int PeakOpenCount => _peakOpenCount;
 
     /// <summary>Configured maximum simultaneously-open streams.</summary>
     public int MaxOpen => _maxOpen;
@@ -95,6 +99,7 @@ internal sealed class BoundedFileStreamPool : IDisposable
         var newNode = new LinkedListNode<PoolEntry>(entry);
         _lru.AddFirst(newNode);
         _byPath[path] = newNode;
+        if (_lru.Count > _peakOpenCount) _peakOpenCount = _lru.Count;
         _misses++;
         return fs;
     }
