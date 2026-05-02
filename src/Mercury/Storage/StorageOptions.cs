@@ -83,14 +83,6 @@ public sealed class StorageOptions
     public StoreProfile Profile { get; init; } = StoreProfile.Cognitive;
 
     /// <summary>
-    /// Atom-store implementation for this store. Honored only at store creation and persisted
-    /// to <c>store-schema.json</c>; on subsequent opens, the persisted value wins. Default:
-    /// <see cref="AtomStoreImplementation.Hash"/> (ADR-034 — additive field, backward-compatible
-    /// with stores written before SortedAtomStore existed).
-    /// </summary>
-    public AtomStoreImplementation AtomStore { get; init; } = AtomStoreImplementation.Hash;
-
-    /// <summary>
     /// When true, <see cref="AtomHashTableInitialCapacity"/> is honored exactly even in
     /// bulk mode — bypasses the 256M-bucket floor that <see cref="BulkMode"/> normally
     /// applies. Used by ADR-028 Stage 2 validation to exercise rehash-on-grow under

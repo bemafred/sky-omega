@@ -68,7 +68,7 @@ public class QuadStoreProfileDispatchTests : IDisposable
         // For Reference these bypass the WAL and write directly to the two indexes.
         var dir = NewStoreDir("ref_batch_ok");
         Directory.CreateDirectory(dir);
-        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
 
         store.BeginBatch();
         try
@@ -82,6 +82,10 @@ public class QuadStoreProfileDispatchTests : IDisposable
             store.RollbackBatch();
             throw;
         }
+        // ADR-034 Sorted-backed Reference: CommitBatch accumulates into the bulk
+        // builder + GSPO sorter; FlushToDisk finalizes the vocabulary and drains
+        // the sorter into the index. Reads only see committed data after flush.
+        store.FlushToDisk();
 
         Assert.Equal(2, store.GetStatistics().QuadCount);
     }
@@ -91,21 +95,23 @@ public class QuadStoreProfileDispatchTests : IDisposable
     {
         var dir = NewStoreDir("ref_rollback");
         Directory.CreateDirectory(dir);
-        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
 
         store.BeginBatch();
         store.AddCurrentBatched("alice", "knows", "bob");
-        // Reference has no WAL to roll back — the triple is already in the indexes.
-        // RollbackBatch just releases the write lock so the caller can Dispose or retry.
+        // ADR-034 Sorted-backed Reference: RollbackBatch disposes the in-flight
+        // sorter + bulk builder, discarding accumulated chunks. The first triple
+        // is gone; only post-rollback work survives.
         store.RollbackBatch();
 
         // After rollback the lock is free, so another BeginBatch should succeed.
         store.BeginBatch();
         store.AddCurrentBatched("alice", "knows", "dave");
         store.CommitBatch();
+        store.FlushToDisk();
 
-        // Both the pre-rollback triple and the post-rollback one are durably present.
-        Assert.Equal(2, store.GetStatistics().QuadCount);
+        // Only the post-rollback triple is present; the pre-rollback one was discarded.
+        Assert.Equal(1, store.GetStatistics().QuadCount);
     }
 
     [Fact]

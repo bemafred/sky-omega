@@ -11,13 +11,13 @@ using Xunit;
 namespace SkyOmega.Mercury.Tests.Storage;
 
 /// <summary>
-/// ADR-034 Phase 1B-5c: the CLI plumbing path. <c>mercury --bulk-load --profile Reference
-/// --atom-store Sorted</c> constructs a <see cref="StorageOptions"/> with
-/// <see cref="StorageOptions.AtomStore"/> = <see cref="AtomStoreImplementation.Sorted"/>,
-/// hands it to <see cref="QuadStore"/>, which writes the schema with the requested
-/// AtomStore field and routes the bulk-load through <see cref="SortedAtomBulkBuilder"/>.
-/// These tests exercise that path via <see cref="RdfEngine.LoadStreamingAsync"/> — the
-/// same call the CLI makes after argument parsing.
+/// ADR-034 profile-derived AtomStore dispatch. <c>mercury --bulk-load --profile Reference</c>
+/// constructs <see cref="StorageOptions"/> with <see cref="StoreProfile.Reference"/>;
+/// <see cref="StoreSchema.ForProfile"/> derives <see cref="AtomStoreImplementation.Sorted"/>
+/// from the profile and persists it; <see cref="QuadStore"/> dispatches construction to
+/// <see cref="SortedAtomStore"/>. There is no separate <c>--atom-store</c> override —
+/// profile is the single source of truth, since Reference+Hash and Cognitive+Sorted are
+/// both invalid combinations.
 /// </summary>
 public class SortedAtomStoreCliPlumbingTests : IDisposable
 {
@@ -36,10 +36,9 @@ public class SortedAtomStoreCliPlumbingTests : IDisposable
         new MemoryStream(Encoding.UTF8.GetBytes(text));
 
     [Fact]
-    public async Task FreshStore_ReferenceSorted_BulkLoadEndToEnd()
+    public async Task FreshStore_ReferenceProfile_BulkLoadDispatchesToSorted()
     {
         var dir = Path.Combine(_testDir, "fresh");
-        // No schema file pre-written — QuadStore must synthesize it from StorageOptions.
 
         const string nt = """
         <http://ex.org/alice> <http://ex.org/knows> <http://ex.org/bob> .
@@ -51,48 +50,52 @@ public class SortedAtomStoreCliPlumbingTests : IDisposable
         var bulkOpts = new StorageOptions
         {
             Profile = StoreProfile.Reference,
-            AtomStore = AtomStoreImplementation.Sorted,
             BulkMode = true,
         };
 
         long count;
         using (var store = new QuadStore(dir, null, null, bulkOpts))
         {
-            // Schema is synthesized from StorageOptions on first open.
+            // Profile=Reference must derive AtomStore=Sorted via StoreSchema.ForProfile.
             Assert.Equal(StoreProfile.Reference, store.Schema.Profile);
             Assert.Equal(AtomStoreImplementation.Sorted, store.Schema.AtomStore);
 
             count = await RdfEngine.LoadStreamingAsync(store, StreamFrom(nt), RdfFormat.NTriples);
-            // LoadStreamingAsync calls FlushToDisk internally when IsBulkLoadMode is true,
-            // so vocab is built and the placeholder atom store has been replaced.
             Assert.IsType<SortedAtomStore>(store.Atoms);
         }
 
         Assert.Equal(4, count);
 
-        // Schema must persist on disk with AtomStore=Sorted so subsequent opens dispatch
-        // to SortedAtomStore even without re-passing StorageOptions.
         var persisted = StoreSchema.ReadFrom(dir);
         Assert.NotNull(persisted);
         Assert.Equal(AtomStoreImplementation.Sorted, persisted!.AtomStore);
 
-        // Reopen without StorageOptions: the persisted schema is the source of truth.
         using (var store = new QuadStore(dir))
         {
             Assert.IsType<SortedAtomStore>(store.Atoms);
-            // 4 distinct IRIs (alice, bob, carol, knows, age) + 1 literal ("42") = 6 atoms,
-            // wait — alice/bob/carol are 3, knows is 1, age is 1, "42" is 1 → 6. Recount:
-            // <http://ex.org/alice>, <http://ex.org/bob>, <http://ex.org/carol>,
-            // <http://ex.org/knows>, <http://ex.org/age>, "42" → 6 atoms.
+            // 6 atoms: alice, bob, carol, knows, age, "42"
             Assert.Equal(6, store.Atoms.AtomCount);
         }
     }
 
     [Fact]
-    public void FreshStore_DefaultAtomStore_OpensAsHash()
+    public void FreshStore_CognitiveProfile_DispatchesToHash()
     {
-        // Backward compat: omitting AtomStore (or default Hash) on a fresh store yields
-        // a HashAtomStore-backed Cognitive store, exactly as before ADR-034 existed.
+        var dir = Path.Combine(_testDir, "cognitive");
+
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Cognitive });
+        Assert.IsType<HashAtomStore>(store.Atoms);
+
+        var persisted = StoreSchema.ReadFrom(dir);
+        Assert.NotNull(persisted);
+        Assert.Equal(AtomStoreImplementation.Hash, persisted!.AtomStore);
+    }
+
+    [Fact]
+    public void FreshStore_DefaultOptions_DispatchesToHash()
+    {
+        // Default profile is Cognitive, which derives Hash. No way to construct an
+        // illegal Cognitive+Sorted combination from outside.
         var dir = Path.Combine(_testDir, "default");
 
         using var store = new QuadStore(dir, null, null, new StorageOptions());
@@ -104,24 +107,8 @@ public class SortedAtomStoreCliPlumbingTests : IDisposable
     }
 
     [Fact]
-    public void FreshStore_ExplicitHash_PersistsHashInSchema()
+    public async Task FreshStore_ReferenceProfile_QueriesAfterReopen()
     {
-        var dir = Path.Combine(_testDir, "explicit_hash");
-        var opts = new StorageOptions { AtomStore = AtomStoreImplementation.Hash };
-
-        using var store = new QuadStore(dir, null, null, opts);
-        Assert.IsType<HashAtomStore>(store.Atoms);
-
-        var persisted = StoreSchema.ReadFrom(dir);
-        Assert.NotNull(persisted);
-        Assert.Equal(AtomStoreImplementation.Hash, persisted!.AtomStore);
-    }
-
-    [Fact]
-    public async Task FreshStore_ReferenceSorted_QueriesAfterReopen()
-    {
-        // Prove the data is actually queryable end-to-end through the IAtomStore interface
-        // after a Sorted-backed bulk load, not just the atom-count check.
         var dir = Path.Combine(_testDir, "queryable");
 
         const string nt = """
@@ -133,7 +120,6 @@ public class SortedAtomStoreCliPlumbingTests : IDisposable
         using (var store = new QuadStore(dir, null, null, new StorageOptions
         {
             Profile = StoreProfile.Reference,
-            AtomStore = AtomStoreImplementation.Sorted,
             BulkMode = true,
         }))
         {
@@ -144,7 +130,6 @@ public class SortedAtomStoreCliPlumbingTests : IDisposable
         {
             Assert.IsType<SortedAtomStore>(store.Atoms);
             // Sorted byte order: <http://ex.org/o1>, /o2, /o3, /p, /s1, /s2, /s3.
-            // Atom IDs assigned 1..7 in that order.
             Assert.Equal(1, store.Atoms.GetAtomId("<http://ex.org/o1>"));
             Assert.Equal(4, store.Atoms.GetAtomId("<http://ex.org/p>"));
             Assert.Equal(5, store.Atoms.GetAtomId("<http://ex.org/s1>"));

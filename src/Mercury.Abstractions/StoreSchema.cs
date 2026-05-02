@@ -42,7 +42,8 @@ public sealed record StoreSchema(
             HasGraph: true,
             HasTemporal: true,
             HasVersioning: true,
-            KeyLayoutVersion: CurrentKeyLayoutVersion),
+            KeyLayoutVersion: CurrentKeyLayoutVersion,
+            AtomStore: AtomStoreImplementation.Hash),
 
         StoreProfile.Graph => new StoreSchema(
             Profile: StoreProfile.Graph,
@@ -50,7 +51,8 @@ public sealed record StoreSchema(
             HasGraph: true,
             HasTemporal: false,
             HasVersioning: true,
-            KeyLayoutVersion: CurrentKeyLayoutVersion),
+            KeyLayoutVersion: CurrentKeyLayoutVersion,
+            AtomStore: AtomStoreImplementation.Hash),
 
         StoreProfile.Reference => new StoreSchema(
             Profile: StoreProfile.Reference,
@@ -58,7 +60,8 @@ public sealed record StoreSchema(
             HasGraph: true,
             HasTemporal: false,
             HasVersioning: false,
-            KeyLayoutVersion: CurrentKeyLayoutVersion),
+            KeyLayoutVersion: CurrentKeyLayoutVersion,
+            AtomStore: AtomStoreImplementation.Sorted),
 
         StoreProfile.Minimal => new StoreSchema(
             Profile: StoreProfile.Minimal,
@@ -66,7 +69,8 @@ public sealed record StoreSchema(
             HasGraph: false,
             HasTemporal: false,
             HasVersioning: false,
-            KeyLayoutVersion: CurrentKeyLayoutVersion),
+            KeyLayoutVersion: CurrentKeyLayoutVersion,
+            AtomStore: AtomStoreImplementation.Hash),
 
         _ => throw new System.ArgumentOutOfRangeException(nameof(profile), profile, "Unknown StoreProfile")
     };

@@ -32,7 +32,7 @@ public class SparqlAgainstReferenceProfileTests : IDisposable
 
     private static async Task<QuadStore> BulkLoadNTriplesAsync(string storeDir, string nt)
     {
-        var store = new QuadStore(storeDir, null, null, new StorageOptions { Profile = StoreProfile.Reference });
+        var store = new QuadStore(storeDir, null, null, new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(nt));
         await RdfEngine.LoadStreamingAsync(store, stream, RdfFormat.NTriples).ConfigureAwait(false);
         // ADR-030 Decision 5: Reference bulk-load writes only GSPO. Rebuild populates

@@ -45,7 +45,7 @@ public class ReferenceBulkLoadE2ETests : IDisposable
         """;
 
         using (var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference }))
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true }))
         {
             Assert.Equal(StoreProfile.Reference, store.Schema.Profile);
 
@@ -68,7 +68,7 @@ public class ReferenceBulkLoadE2ETests : IDisposable
         """;
 
         using var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference });
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
 
         var count = await RdfEngine.LoadStreamingAsync(store, StreamFrom(nq), RdfFormat.NQuads);
         Assert.Equal(3, count);
@@ -90,7 +90,7 @@ public class ReferenceBulkLoadE2ETests : IDisposable
         """;
 
         using var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference });
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
 
         await RdfEngine.LoadStreamingAsync(store, StreamFrom(nt), RdfFormat.NTriples);
         Assert.Equal(1, store.GetStatistics().QuadCount);
@@ -110,7 +110,7 @@ public class ReferenceBulkLoadE2ETests : IDisposable
         """;
 
         using (var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference }))
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true }))
         {
             await RdfEngine.LoadStreamingAsync(store, StreamFrom(nt), RdfFormat.NTriples);
             Assert.Equal(3, store.GetStatistics().QuadCount);

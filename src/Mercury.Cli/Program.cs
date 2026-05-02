@@ -31,7 +31,6 @@ string? metricsOutPath = null;
 double metricsStateIntervalSeconds = 0;
 bool noRepl = false;
 StoreProfile? requestedProfile = null;
-AtomStoreImplementation? requestedAtomStore = null;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -132,17 +131,6 @@ for (int i = 0; i < args.Length; i++)
                 return 1;
             }
             break;
-        case "--atom-store":
-            if (i + 1 < args.Length && System.Enum.TryParse<AtomStoreImplementation>(args[++i], ignoreCase: true, out var parsedAtomStore))
-            {
-                requestedAtomStore = parsedAtomStore;
-            }
-            else
-            {
-                Console.Error.WriteLine($"Error: --atom-store requires one of: {string.Join(", ", System.Enum.GetNames<AtomStoreImplementation>())}.");
-                return 1;
-            }
-            break;
         default:
             if (args[i].StartsWith('-'))
             {
@@ -198,8 +186,7 @@ if (showHelp)
           --bulk-load <file>         Bulk load (GSPO only, no fsync), then enter REPL
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
-          --profile <Cognitive|Reference>     Storage profile at store creation (default: Cognitive)
-          --atom-store <Hash|Sorted> Atom-store implementation at store creation (default: Hash; Sorted is Reference-only, ADR-034)
+          --profile <Cognitive|Reference>     Storage profile at store creation (default: Cognitive). Atom-store implementation is derived from profile (Reference→Sorted, others→Hash) — no separate flag.
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
           --limit <N>                Cap triples added (--bulk-load/--load) or emitted (--convert) at N
           --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
@@ -339,10 +326,10 @@ else
             AtomHashTableInitialCapacity = atomHashOverride ?? new StorageOptions().AtomHashTableInitialCapacity,
             ForceAtomHashCapacity = atomHashOverride.HasValue,
             // --profile only takes effect at store creation; existing stores honor their
-            // persisted store-schema.json regardless of what the caller passed. Same applies
-            // to --atom-store (ADR-034 — additive field, default Hash for backward compat).
+            // persisted store-schema.json regardless of what the caller passed. AtomStore
+            // is derived from the profile (StoreSchema.ForProfile) — Reference→Sorted,
+            // others→Hash — and is not separately overridable.
             Profile = requestedProfile ?? StoreProfile.Cognitive,
-            AtomStore = requestedAtomStore ?? AtomStoreImplementation.Hash,
         };
         pool = new QuadStorePool(resolvedStorePath, new QuadStorePoolOptions { StorageOptions = storeOpts });
     }

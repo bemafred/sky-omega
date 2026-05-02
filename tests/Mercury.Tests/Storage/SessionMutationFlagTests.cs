@@ -115,7 +115,7 @@ public class SessionMutationFlagTests : IDisposable
     public void Reference_BulkLoad_SetsFlag()
     {
         using var store = new QuadStore(Dir("ref_bulk"), null, null,
-            new StorageOptions { Profile = StoreProfile.Reference });
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
         Assert.False(store.SessionMutated);
         store.BeginBatch();
         store.AddCurrentBatched("s", "p", "o");
@@ -167,7 +167,7 @@ public class SessionMutationFlagTests : IDisposable
 
         // Create + bulk-load a Reference store (flag goes true during load).
         using (var seed = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference }))
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true }))
         {
             seed.BeginBatch();
             seed.AddCurrentBatched("alice", "knows", "bob");

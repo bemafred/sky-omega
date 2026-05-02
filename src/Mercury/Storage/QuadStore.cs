@@ -153,7 +153,7 @@ public sealed class QuadStore : IDisposable
         }
         else
         {
-            _schema = StoreSchema.ForProfile(options.Profile) with { AtomStore = options.AtomStore };
+            _schema = StoreSchema.ForProfile(options.Profile);
             _schema.WriteTo(baseDirectory);
         }
 

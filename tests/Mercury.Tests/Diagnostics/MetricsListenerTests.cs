@@ -149,7 +149,7 @@ public class MetricsListenerTests : IDisposable
         Directory.CreateDirectory(dir);
 
         using var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference });
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
         using var nt = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
             "<http://ex/a> <http://ex/p> \"literal\" .\n"));
         await RdfEngine.LoadStreamingAsync(store, nt, RdfFormat.NTriples);
@@ -484,7 +484,7 @@ public class MetricsListenerTests : IDisposable
         Directory.CreateDirectory(dir);
 
         using var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference });
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
         var ttl = new System.Text.StringBuilder();
         for (int i = 0; i < 300; i++)
             ttl.Append("<http://ex/s").Append(i).Append("> <http://ex/p> \"literal text ")
@@ -520,7 +520,7 @@ public class MetricsListenerTests : IDisposable
         Directory.CreateDirectory(dir);
 
         using var store = new QuadStore(dir, null, null,
-            new StorageOptions { Profile = StoreProfile.Reference });
+            new StorageOptions { Profile = StoreProfile.Reference, BulkMode = true });
         var ttl = new System.Text.StringBuilder();
         for (int i = 0; i < 200; i++)
             ttl.Append("<http://ex/s").Append(i).Append("> <http://ex/p> \"text ")
