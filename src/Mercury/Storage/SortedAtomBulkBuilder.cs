@@ -46,8 +46,14 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 internal sealed class SortedAtomBulkBuilder : IDisposable
 {
-    /// <summary>Default in-memory chunk buffer threshold. 256 MB matches the existing default in <see cref="SortedAtomStoreExternalBuilder"/>.</summary>
-    public const long DefaultChunkBufferBytes = 256L * 1024 * 1024;
+    /// <summary>
+    /// Default in-memory chunk buffer threshold. Single source of truth — references
+    /// <see cref="SortedAtomStoreExternalBuilder.DefaultChunkSizeBytes"/> so the
+    /// production bulk-load path (this class) and the one-shot external builder
+    /// share one chunk-size policy. A duplicate constant here previously masked a
+    /// 1 GB tuning change to the canonical default at the production path.
+    /// </summary>
+    public const long DefaultChunkBufferBytes = SortedAtomStoreExternalBuilder.DefaultChunkSizeBytes;
 
     private readonly string _baseAtomPath;
     private readonly string _tempDir;
