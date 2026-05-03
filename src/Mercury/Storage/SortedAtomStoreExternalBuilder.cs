@@ -42,10 +42,19 @@ namespace SkyOmega.Mercury.Storage;
 internal static class SortedAtomStoreExternalBuilder
 {
     /// <summary>
-    /// Default chunk size: 256 MB. Holds ~2-5 M records for typical Wikidata atom lengths
-    /// (avg ~50 bytes), a few hundred chunk files for full Wikidata's 4 B atoms.
+    /// Default chunk size: 1 GB. At 21.3 B Wikidata scale (~4 TB total atom-occurrence
+    /// volume) this produces ~4,000 chunks — comfortable under any default OS FD limit
+    /// (macOS launchd default ~10,240, Linux default 1,024-65,535) without operators
+    /// raising ulimit. Earlier 256 MB default produced ~17,000 chunks at 21.3 B and
+    /// hit the macOS per-process FD ceiling during k-way merge.
+    /// <para>
+    /// Larger chunks also benefit the merge phase's I/O pattern: longer sequential
+    /// runs per chunk before the priority queue cycles, more effective OS readahead,
+    /// less filesystem-metadata churn. Trade-off: peak in-memory sort buffer rises
+    /// from 256 MB to 1 GB, trivial on hosts that can hold the full vocabulary.
+    /// </para>
     /// </summary>
-    public const long DefaultChunkSizeBytes = 256L * 1024 * 1024;
+    public const long DefaultChunkSizeBytes = 1024L * 1024 * 1024;
 
     /// <summary>Default chunk size for the disk-backed AssignedIds resolver: 16 M records × 16 B = 256 MB.</summary>
     public const int DefaultResolveSorterChunkSize = 16 * 1024 * 1024;
