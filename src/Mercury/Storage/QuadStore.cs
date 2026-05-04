@@ -639,7 +639,28 @@ public sealed class QuadStore : IDisposable
                     _sortedAtomBulkBuilder = new SortedAtomBulkBuilder(
                         Path.Combine(_baseDirectory, "atoms"),
                         sortedTempDir,
-                        useDiskBackedAssigned: true);
+                        useDiskBackedAssigned: true,
+                        listener: ObservabilityListener);
+
+                    // Emit run-configuration event at the start of the bulk-load. The
+                    // earliest deterministic point with full configuration visible — catches
+                    // dispatch bugs (Hash-vs-Sorted, chunk-size in effect, pool cap) in the
+                    // second the run begins, not at the end. ADR-035 / cognitive-orchestrator
+                    // observability discipline.
+                    ObservabilityListener?.OnRunConfiguration(new Abstractions.RunConfigurationEvent(
+                        Timestamp: DateTimeOffset.UtcNow,
+                        Profile: _schema.Profile.ToString(),
+                        AtomStoreImplementation: _schema.AtomStore.ToString(),
+                        ChunkBufferBytes: SortedAtomBulkBuilder.DefaultChunkBufferBytes,
+                        ResolveSorterChunkSize: SortedAtomStoreExternalBuilder.DefaultResolveSorterChunkSize,
+                        DiskBackedAssignedIds: true,
+                        MergeFileStreamPoolHardCap: SortedAtomStoreExternalBuilder.MergeFileStreamPoolHardCap,
+                        MergeFileStreamBufferSize: SortedAtomStoreExternalBuilder.MergeFileStreamBufferSize,
+                        UserPoolSizeOverride: long.TryParse(
+                            Environment.GetEnvironmentVariable("MERCURY_MERGE_POOL_SIZE"), out var ovr) ? ovr : null,
+                        StorePath: _baseDirectory,
+                        SourceFilePath: null,
+                        Limit: null));
                 }
                 return;
             }

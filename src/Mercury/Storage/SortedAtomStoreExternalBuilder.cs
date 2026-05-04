@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using SkyOmega.Mercury.Abstractions;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -233,47 +234,66 @@ internal static class SortedAtomStoreExternalBuilder
 
             if (bufferBytes >= chunkSizeBytes)
             {
-                chunkFiles.Add(SpillOneChunk(tempDir, buffer, chunkFiles.Count));
+                chunkFiles.Add(SpillOneChunk(tempDir, buffer, chunkFiles.Count).Path);
                 buffer.Clear();
                 bufferBytes = 0;
             }
         }
         if (buffer.Count > 0)
-            chunkFiles.Add(SpillOneChunk(tempDir, buffer, chunkFiles.Count));
+            chunkFiles.Add(SpillOneChunk(tempDir, buffer, chunkFiles.Count).Path);
 
         return globalIdx;
     }
 
     /// <summary>
-    /// Spill one in-memory buffer of <c>(bytes, inputIdx)</c> records as a sorted chunk
-    /// file under <paramref name="tempDir"/>. Returns the path. Made <c>internal</c> so
-    /// <see cref="SortedAtomBulkBuilder"/> can spill incrementally during <c>AddTriple</c>
-    /// (ADR-034 Phase 1B-5e streaming-input fix).
+    /// Result of spilling one chunk — path plus timing instrumentation. Sort vs write
+    /// split lets observers measure the parser-blocking spill cost (sibling limit:
+    /// <c>spill-blocks-parser.md</c>) directly rather than estimating it.
     /// </summary>
-    internal static string SpillOneChunk(string tempDir, List<(byte[] Bytes, long InputIdx)> buffer, int chunkIndex)
+    internal readonly record struct SpillResult(
+        string Path,
+        long BytesWritten,
+        TimeSpan SortDuration,
+        TimeSpan WriteDuration);
+
+    /// <summary>
+    /// Spill one in-memory buffer of <c>(bytes, inputIdx)</c> records as a sorted chunk
+    /// file under <paramref name="tempDir"/>. Returns the path + timings. Made
+    /// <c>internal</c> so <see cref="SortedAtomBulkBuilder"/> can spill incrementally
+    /// during <c>AddTriple</c> (ADR-034 Phase 1B-5e streaming-input fix).
+    /// </summary>
+    internal static SpillResult SpillOneChunk(string tempDir, List<(byte[] Bytes, long InputIdx)> buffer, int chunkIndex)
     {
         // Sort by UTF-8 byte order; ties broken by input index for stable output.
+        var sortStart = System.Diagnostics.Stopwatch.GetTimestamp();
         buffer.Sort((a, b) =>
         {
             int cmp = a.Bytes.AsSpan().SequenceCompareTo(b.Bytes);
             if (cmp != 0) return cmp;
             return a.InputIdx.CompareTo(b.InputIdx);
         });
+        var sortDuration = System.Diagnostics.Stopwatch.GetElapsedTime(sortStart);
 
         var path = Path.Combine(tempDir, $"chunk-{chunkIndex:D6}.bin");
-        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.SequentialScan);
-        // Record format: int32 length + int64 input-idx + raw bytes. (12-byte header.)
-        // InputIdx widened from int32 to int64 to support >500M-triple bulk loads
-        // (1B triples × 4 atoms = 4B occurrences exceeds int32 max).
-        Span<byte> header = stackalloc byte[12];
-        foreach (var (bytes, inputIdx) in buffer)
+        long bytesWritten = 0;
+        var writeStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.SequentialScan))
         {
-            BinaryPrimitives.WriteInt32LittleEndian(header.Slice(0, 4), bytes.Length);
-            BinaryPrimitives.WriteInt64LittleEndian(header.Slice(4, 8), inputIdx);
-            fs.Write(header);
-            fs.Write(bytes);
+            // Record format: int32 length + int64 input-idx + raw bytes. (12-byte header.)
+            // InputIdx widened from int32 to int64 to support >500M-triple bulk loads
+            // (1B triples × 4 atoms = 4B occurrences exceeds int32 max).
+            Span<byte> header = stackalloc byte[12];
+            foreach (var (bytes, inputIdx) in buffer)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(header.Slice(0, 4), bytes.Length);
+                BinaryPrimitives.WriteInt64LittleEndian(header.Slice(4, 8), inputIdx);
+                fs.Write(header);
+                fs.Write(bytes);
+                bytesWritten += 12 + bytes.Length;
+            }
         }
-        return path;
+        var writeDuration = System.Diagnostics.Stopwatch.GetElapsedTime(writeStart);
+        return new SpillResult(path, bytesWritten, sortDuration, writeDuration);
     }
 
     /// <summary>
@@ -282,9 +302,18 @@ internal static class SortedAtomStoreExternalBuilder
     /// Made <c>internal</c> so <see cref="SortedAtomBulkBuilder"/> can call it directly with
     /// chunks accumulated during streaming <c>AddTriple</c> (ADR-034 Phase 1B-5e).
     /// </summary>
+    /// <summary>
+    /// Periodic merge-progress emission interval. Every N records processed, the merge
+    /// emits a <see cref="MergeProgressEvent"/> via the listener (if attached). 100 M
+    /// records is small enough to give meaningful granularity at 21.3 B-scale runs and
+    /// large enough to keep the per-record dispatch overhead negligible.
+    /// </summary>
+    public const long MergeProgressEmissionInterval = 100_000_000L;
+
     internal static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
         string baseFilePath, List<string> chunkFiles, long inputCount,
-        ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter)
+        ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>? resolveSorter,
+        Abstractions.IObservabilityListener? listener = null)
     {
         // Disk-backed: resolveSorter receives one record per non-empty input occurrence here,
         // plus the empty-slot sentinels emitted by SpillChunks. Caller wraps into DiskBackedAssignedIds.
@@ -297,6 +326,9 @@ internal static class SortedAtomStoreExternalBuilder
         long atomCount = 0;
         long fileBytes = 0;       // running file-position accumulator for offsets file (includes prefix_len headers)
         long contentBytes = 0;    // atom-content bytes only (no headers); reported as BuildResult.DataBytes
+        long recordsProcessed = 0;       // every record dequeued from the priority queue
+        long resolverRecordsSpilled = 0; // every record handed to the resolveSorter
+        long mergeStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         var dataPath = baseFilePath + ".atoms";
         var offsetsPath = baseFilePath + ".offsets";
 
@@ -366,12 +398,29 @@ internal static class SortedAtomStoreExternalBuilder
                 }
 
                 if (useDiskBacked)
+                {
                     resolveSorter!.Add(new ResolveRecord(rec.InputIdx, atomCount));
+                    resolverRecordsSpilled++;
+                }
                 else
                     assigned[checked((int)rec.InputIdx)] = atomCount;
 
                 if (readers[readerIdx].MoveNext())
                     pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
+
+                recordsProcessed++;
+                if (listener is not null && recordsProcessed % MergeProgressEmissionInterval == 0)
+                {
+                    listener.OnMergeProgress(new MergeProgressEvent(
+                        Timestamp: DateTimeOffset.UtcNow,
+                        RecordsProcessed: recordsProcessed,
+                        AtomsEmitted: atomCount,
+                        ResolverRecordsSpilled: resolverRecordsSpilled,
+                        CurrentPoolOpenCount: streamPool.OpenCount,
+                        CurrentPoolHits: streamPool.Hits,
+                        CurrentPoolMisses: streamPool.Misses,
+                        DataBytesWritten: fileBytes));
+                }
             }
 
             dataFs.Flush(flushToDisk: true);
@@ -382,15 +431,22 @@ internal static class SortedAtomStoreExternalBuilder
             foreach (var r in readers) r.Dispose();
         }
 
-        // Emit pool stats so the merge phase's cache behavior is measurable.
-        // Single line to stdout — captured by --metrics-out via the run's stdout log.
-        // The hit-rate informs whether the configured pool size is right for chunk count.
+        // Emit final merge-completed event with full pool stats. Replaces the
+        // earlier ad-hoc Console.WriteLine [merge-pool] line with structured
+        // emission to the JSONL listener — single source of truth for run data.
         long totalGets = streamPool.Hits + streamPool.Misses;
-        double hitRate = totalGets > 0 ? (double)streamPool.Hits / totalGets : 0.0;
-        Console.WriteLine(
-            $"[merge-pool] chunks={chunkFiles.Count} pool_size={streamPool.MaxOpen} " +
-            $"peak_open={streamPool.PeakOpenCount} hits={streamPool.Hits} misses={streamPool.Misses} " +
-            $"hit_rate={hitRate:P4} total_gets={totalGets}");
+        var mergeDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mergeStartTicks);
+        listener?.OnMergeCompleted(new MergeCompletedEvent(
+            Timestamp: DateTimeOffset.UtcNow,
+            ChunkCount: chunkFiles.Count,
+            PoolMaxOpen: streamPool.MaxOpen,
+            PoolPeakOpen: streamPool.PeakOpenCount,
+            PoolHits: streamPool.Hits,
+            PoolMisses: streamPool.Misses,
+            TotalGets: totalGets,
+            AtomsEmitted: atomCount,
+            DataBytes: contentBytes,
+            Duration: mergeDuration));
 
         if (useDiskBacked)
         {

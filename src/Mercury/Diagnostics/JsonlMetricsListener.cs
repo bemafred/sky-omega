@@ -308,6 +308,107 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnRunConfiguration(in RunConfigurationEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "run_configuration", "event", ev.Timestamp);
+            json.WriteString("profile", ev.Profile);
+            json.WriteString("atom_store_implementation", ev.AtomStoreImplementation);
+            json.WriteNumber("chunk_buffer_bytes", ev.ChunkBufferBytes);
+            json.WriteNumber("resolve_sorter_chunk_size", ev.ResolveSorterChunkSize);
+            json.WriteBoolean("disk_backed_assigned_ids", ev.DiskBackedAssignedIds);
+            json.WriteNumber("merge_pool_hard_cap", ev.MergeFileStreamPoolHardCap);
+            json.WriteNumber("merge_pool_buffer_size", ev.MergeFileStreamBufferSize);
+            if (ev.UserPoolSizeOverride.HasValue)
+                json.WriteNumber("merge_pool_user_override", ev.UserPoolSizeOverride.Value);
+            json.WriteString("store_path", ev.StorePath);
+            if (ev.SourceFilePath is not null)
+                json.WriteString("source_file", ev.SourceFilePath);
+            if (ev.Limit.HasValue)
+                json.WriteNumber("limit", ev.Limit.Value);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnMergePoolState(in MergePoolState state)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "merge_pool", "state", state.Timestamp);
+            json.WriteNumber("open_count", state.OpenCount);
+            json.WriteNumber("peak_open_count", state.PeakOpenCount);
+            json.WriteNumber("max_open", state.MaxOpen);
+            json.WriteNumber("hits", state.Hits);
+            json.WriteNumber("misses", state.Misses);
+            long totalGets = state.Hits + state.Misses;
+            double hitRate = totalGets > 0 ? (double)state.Hits / totalGets : 0.0;
+            json.WriteNumber("hit_rate", hitRate);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnSpill(in SpillEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "spill", "event", ev.Timestamp);
+            json.WriteNumber("chunk_index", ev.ChunkIndex);
+            json.WriteNumber("record_count", ev.RecordCount);
+            json.WriteNumber("bytes_written", ev.BytesWritten);
+            json.WriteNumber("sort_ms", ev.SortDuration.TotalMilliseconds);
+            json.WriteNumber("write_ms", ev.WriteDuration.TotalMilliseconds);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnMergeProgress(in MergeProgressEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "merge_progress", "state", ev.Timestamp);
+            json.WriteNumber("records_processed", ev.RecordsProcessed);
+            json.WriteNumber("atoms_emitted", ev.AtomsEmitted);
+            json.WriteNumber("resolver_records_spilled", ev.ResolverRecordsSpilled);
+            json.WriteNumber("pool_open_count", ev.CurrentPoolOpenCount);
+            json.WriteNumber("pool_hits", ev.CurrentPoolHits);
+            json.WriteNumber("pool_misses", ev.CurrentPoolMisses);
+            json.WriteNumber("data_bytes_written", ev.DataBytesWritten);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnMergeCompleted(in MergeCompletedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "merge_completed", "event", ev.Timestamp);
+            json.WriteNumber("chunk_count", ev.ChunkCount);
+            json.WriteNumber("pool_max_open", ev.PoolMaxOpen);
+            json.WriteNumber("pool_peak_open", ev.PoolPeakOpen);
+            json.WriteNumber("pool_hits", ev.PoolHits);
+            json.WriteNumber("pool_misses", ev.PoolMisses);
+            json.WriteNumber("total_gets", ev.TotalGets);
+            long totalGets = ev.TotalGets > 0 ? ev.TotalGets : ev.PoolHits + ev.PoolMisses;
+            double hitRate = totalGets > 0 ? (double)ev.PoolHits / totalGets : 0.0;
+            json.WriteNumber("hit_rate", hitRate);
+            json.WriteNumber("atoms_emitted", ev.AtomsEmitted);
+            json.WriteNumber("data_bytes", ev.DataBytes);
+            json.WriteNumber("duration_ms", ev.Duration.TotalMilliseconds);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp)
     {
         using var buffer = new MemoryStream();

@@ -54,6 +54,30 @@ public interface IObservabilityListener
 
     void OnAtomFileGrowth(in AtomFileGrowthEvent ev) { }
 
+    /// <summary>
+    /// Run configuration banner emitted once at the start of a bulk-load (or comparable
+    /// long-running operation). Discloses every load-bearing tuning + dispatch decision.
+    /// </summary>
+    void OnRunConfiguration(in RunConfigurationEvent ev) { }
+
+    /// <summary>Live <see cref="BoundedFileStreamPool"/> state during merge.</summary>
+    void OnMergePoolState(in MergePoolState state) { }
+
+    /// <summary>
+    /// Per-chunk spill in <c>SortedAtomBulkBuilder.AddOneAtomOccurrence</c>. Measures
+    /// parser-blocking cost (sort + write duration per spill).
+    /// </summary>
+    void OnSpill(in SpillEvent ev) { }
+
+    /// <summary>
+    /// Periodic mid-merge progress emission from <c>MergeAndWrite</c>. Closes the
+    /// merge-phase opacity gap surfaced by the cycle 6 21.3 B run.
+    /// </summary>
+    void OnMergeProgress(in MergeProgressEvent ev) { }
+
+    /// <summary>One-shot end-of-merge summary with full pool stats and totals.</summary>
+    void OnMergeCompleted(in MergeCompletedEvent ev) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 

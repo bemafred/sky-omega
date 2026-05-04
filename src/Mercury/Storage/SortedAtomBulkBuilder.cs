@@ -82,12 +82,16 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     private bool _finalized;
     private bool _disposed;
 
+    /// <summary>Observability listener for spill events and merge progress. Null = no emission.</summary>
+    private readonly Abstractions.IObservabilityListener? _listener;
+
     public SortedAtomBulkBuilder(
         string baseAtomPath,
         string? tempDir = null,
         bool useDiskBackedAssigned = false,
         long chunkBufferBytes = DefaultChunkBufferBytes,
-        int resolveSorterChunkSize = SortedAtomStoreExternalBuilder.DefaultResolveSorterChunkSize)
+        int resolveSorterChunkSize = SortedAtomStoreExternalBuilder.DefaultResolveSorterChunkSize,
+        Abstractions.IObservabilityListener? listener = null)
     {
         if (baseAtomPath is null) throw new ArgumentNullException(nameof(baseAtomPath));
         if (chunkBufferBytes < 1024 * 1024)
@@ -96,6 +100,7 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
         _useDiskBackedAssigned = useDiskBackedAssigned;
         _chunkBufferBytes = chunkBufferBytes;
         _resolveSorterChunkSize = resolveSorterChunkSize;
+        _listener = listener;
         if (tempDir is null)
         {
             _tempDir = Path.Combine(Path.GetTempPath(), "sorted-atom-bulk-" + Guid.NewGuid().ToString("N"));
@@ -174,9 +179,22 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     private void FlushSpillBuffer()
     {
         if (_spillBuffer.Count == 0) return;
-        _chunkFiles.Add(SortedAtomStoreExternalBuilder.SpillOneChunk(_occurrenceTempDir, _spillBuffer, _chunkFiles.Count));
+        int chunkIndex = _chunkFiles.Count;
+        int recordCount = _spillBuffer.Count;
+        var result = SortedAtomStoreExternalBuilder.SpillOneChunk(_occurrenceTempDir, _spillBuffer, chunkIndex);
+        _chunkFiles.Add(result.Path);
         _spillBuffer.Clear();
         _spillBufferBytes = 0;
+        if (_listener is not null)
+        {
+            _listener.OnSpill(new Abstractions.SpillEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                ChunkIndex: chunkIndex,
+                RecordCount: recordCount,
+                BytesWritten: result.BytesWritten,
+                SortDuration: result.SortDuration,
+                WriteDuration: result.WriteDuration));
+        }
     }
 
     private void EnsureSpillerInitialized()
@@ -222,7 +240,7 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
         // records for each non-empty atom occurrence. The empty-slot sentinels were
         // already emitted by AddOneAtomOccurrence.
         _buildResult = SortedAtomStoreExternalBuilder.MergeAndWrite(
-            _baseAtomPath, _chunkFiles, _globalIdx, _resolveSorter);
+            _baseAtomPath, _chunkFiles, _globalIdx, _resolveSorter, _listener);
 
         // Wrap in DiskBackedAssignedIds if disk-backed. MergeAndWrite already calls
         // Complete() and wraps in BuildResult.AssignedIdsResolver when resolveSorter

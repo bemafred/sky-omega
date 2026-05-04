@@ -375,12 +375,16 @@ if (loadFile != null || bulkLoadFile != null || rebuildIndexes)
     var freeSpace = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
     Console.WriteLine($"Store:           {resolvedStorePath}");
     Console.WriteLine($"Profile:         {pool.Active.Schema.Profile}");
+    Console.WriteLine($"AtomStore:       {pool.Active.Schema.AtomStore}");
     Console.WriteLine($"Index state:     {pool.Active.IndexState}");
     if (isBulkLoad)
         Console.WriteLine($"Mode:            bulk (GSPO only, no fsync)");
     if (freeSpace >= 0)
         Console.WriteLine($"Free disk space: {freeSpace / (1024.0 * 1024 * 1024):F1} GB");
     Console.WriteLine($"Min free space:  {minFreeSpace / (1024.0 * 1024 * 1024):F0} GB");
+    var poolOverride = Environment.GetEnvironmentVariable("MERCURY_MERGE_POOL_SIZE");
+    if (!string.IsNullOrEmpty(poolOverride))
+        Console.WriteLine($"Pool override:   MERCURY_MERGE_POOL_SIZE={poolOverride}");
     if (loadLimit.HasValue)
         Console.WriteLine($"Limit:           {loadLimit.Value:N0} triples");
     Console.WriteLine();

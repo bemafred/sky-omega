@@ -292,7 +292,7 @@ public class SortedAtomBulkBuilderDiskBackedTests : IDisposable
         };
         buffer.Sort((a, b) => a.Bytes.AsSpan().SequenceCompareTo(b.Bytes));
 
-        var path = SortedAtomStoreExternalBuilder.SpillOneChunk(chunkDir, buffer, chunkIndex: 0);
+        var path = SortedAtomStoreExternalBuilder.SpillOneChunk(chunkDir, buffer, chunkIndex: 0).Path;
 
         // Read the chunk file back manually and verify the 12-byte header format:
         // int32 length (4 bytes) + int64 InputIdx (8 bytes) + raw bytes.
