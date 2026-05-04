@@ -265,6 +265,12 @@ internal static class SortedAtomStoreExternalBuilder
     internal static SpillResult SpillOneChunk(string tempDir, List<(byte[] Bytes, long InputIdx)> buffer, int chunkIndex)
     {
         // Sort by UTF-8 byte order; ties broken by input index for stable output.
+        // Uses Comparison<T> delegate; per-comparison cost is dominated by
+        // SequenceCompareTo body (~9-10 ns of ~12.5 ns total), so delegate-
+        // dispatch overhead (~2-3 ns) is a small fraction. A struct IComparer<T>
+        // experiment via Span<T>.Sort was measured 4-6% SLOWER on this workload —
+        // Span<T>.Sort's codegen differs from List<T>.Sort and overshadows the
+        // dispatch saving. Keeping Comparison<T>.
         var sortStart = System.Diagnostics.Stopwatch.GetTimestamp();
         buffer.Sort((a, b) =>
         {
