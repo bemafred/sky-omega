@@ -94,18 +94,34 @@ This is the canonical map for **Reference profile bulk-load** (Sorted-backed ato
 
 ## Stage-by-stage cost map
 
-Time at 21.3B is the current best estimate; the gradient runs (cycle 7 onward) refine these.
+Estimates → measurements: cycle 8 (2026-05-04, first instrumented 21.3B run) refined the projections.
 
-| # | Stage | Mechanism | Estimated time @ 21.3B | Bottleneck |
+| # | Stage | Mechanism | Time @ 21.3B (cycle 8) | Bottleneck |
 |---|---|---|---|---|
 | 1 | Decompress | BZip2 stream (single-threaded) | overlapped with parse | parser-bound; bz2 produces faster than parser consumes |
-| 2 | Parse | `TurtleStreamParser` | ~13 h | parser CPU |
+| 2 | Parse | `TurtleStreamParser` | **14 h 15 m measured** (avg 415 K triples/sec) | parser CPU |
 | 3 | Intern + buffer | atom bytes into `_spillBuffer` | overlapped with parse | parser CPU |
-| 4 | **Spill (sort + write)** | per-chunk introsort + sequential write | **~17 min × ~200 spills, blocking parser** | **sort CPU** (~30% wall-clock at small scales, smaller fraction at 21.3B) |
-| 5 | Merge atoms | k-way merge + prefix compress | ~6 h | priority queue + I/O (mostly cached) |
+| 4 | **Spill (sort + write)** | per-chunk introsort + sequential write | **3,923 spills × ~5 sec sort + 0.4 sec write each, blocking parser** | **sort CPU** (12-16:1 sort:write ratio measured cross-scale) |
+| 5 | Merge atoms | k-way merge + prefix compress | **~10 h measured at 21.3B (cache-pressure-bound)** | **OS page cache** (see "Three regimes" below) |
 | 6 | Resolver drain | `EnumerateResolved` 3-at-a-time | ~1 h | sequential read |
-| 7 | GSPO bulk sort | `ExternalSorter` on 24-byte records | ~3 h | external sort I/O |
+| 7 | GSPO bulk sort | `ExternalSorter` on 32-byte records | ~3 h | external sort I/O |
 | 8 | Rebuild | iterate GSPO, project to GPOS + trigram | ~6 h | tree traversal + writes |
+
+### Stage 5 has three measured throughput regimes
+
+Cycle 8 surfaced a structural pattern not visible at 1B scale. K-way merge over chunk files exhibits three distinct throughput regimes when total intermediate volume exceeds OS page-cache capacity:
+
+| Regime | Scope | Measured rate (21.3B) | Cause |
+|---|---|---|---|
+| **Warmup** | first ~5% of records | ~0.3 M/s | page cache filling from cold |
+| **Steady-state** | middle ~80% | **~1.0-1.5 M/s** | cache-pressure-bound; chunks evicting LRU as new pages fault in |
+| **Long-tail-cold-cache** | final ~10% | ~0.2-0.5 M/s | rare atoms scattered across small subset of chunks; cache amortization breaks down |
+
+For comparison: the 1B run merged at **~6 M/s sustained** because 184 GB of intermediate fit fully in 128 GB RAM. The 4-6× slowdown crossing the cache-fit boundary is structural, not load-dependent. Pattern captured as `urn:sky-omega:pattern:merge-three-regimes` in Mercury.
+
+### Auto-pool validated at 21.3B
+
+`BoundedFileStreamPool` sized to chunk count (3,923 at 21.3B) capped at 32K. Cycle 8 telemetry: every `merge_progress` event shows `pool_open=3923, misses=3923` — exactly one miss per chunk on initial open, **zero evictions thereafter**. Hit rate effectively 100% across the entire merge. The auto-pool design (commit `97d6ad6`) is structurally correct at scale; FD pressure is no longer the binding constraint. **The new binding constraint at 21.3B is OS page cache, not pool capacity.**
 
 ## Disk artifacts and lifetime
 

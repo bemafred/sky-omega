@@ -1,19 +1,30 @@
 # Limit: Single-threaded spill blocks parser during sort + write
 
-**Status:**        Latent (Monitoring — cycle 6 21.3 B run is the evidence)
+**Status:**        Latent (Monitoring — projection-justified before cycle 7; **measurement-justified after cycle 8**)
 **Surfaced:**      2026-05-03, during the cycle 6 verification of 1 GB chunk sizing. Recent-rate dropped to ~21K /sec during sort bursts vs ~450K /sec sustained — visible parser pause during in-memory sort + chunk write.
-**Last reviewed:** 2026-05-03
+**Last reviewed:** 2026-05-05 (cycle 8 instrumentation produced cross-scale measurements)
 
 ## Description
 
 `SortedAtomBulkBuilder` runs the parser, atom-buffer accumulation, in-memory sort, and chunk-file write **on a single thread**. When the spill buffer reaches `chunkBufferBytes` (now 1 GB), the parser is paused while:
 
-1. **Sort:** `List<T>.Sort(Comparison<T>)` over ~16 M records (BCL introsort with delegate-based comparer). Estimated 5-6 sec at 1 GB chunk size.
-2. **Write:** sequential dump of sorted records to `chunk-NNNNNN.bin`. ~5 sec at typical SSD throughput.
+1. **Sort:** `List<T>.Sort(Comparison<T>)` over ~17 M records (BCL introsort with delegate-based comparer). **Measured ~5 sec at 1 GB chunk size** (cycle 7 instrumentation).
+2. **Write:** sequential dump of sorted records to `chunk-NNNNNN.bin`. **Measured ~0.4 sec** (cycle 7 instrumentation — far less than initial estimate).
 
-Total per-spill parser pause: **~10-11 seconds**. While this happens, no triples are parsed, no atoms are interned, no chunk progress accrues toward the next billion.
+Total per-spill parser pause: **~5.4 seconds, dominated by sort.** **Measured sort:write ratio: 12-16:1 across all scales (10M, 100M, 1B, 21.3B).** While this happens, no triples are parsed, no atoms are interned, no chunk progress accrues toward the next billion.
 
-Cycle 5 (256 MB chunks) had ~4× more spills but each pause was ~4× shorter; total parser-blocked time was approximately equal. Cycle 6 (1 GB chunks) redistributes the same total pause into fewer-but-longer bursts. The throughput average (~424K /sec measured early) suggests an ~8% reduction vs cycle-1 baseline (459K /sec) — likely attributable to this serialization, though full-run wall-clock metrics will confirm.
+### Cross-scale sort:write measurements (cycle 7+8 instrumentation)
+
+| Scale | Sample | Records | Sort | Write | Ratio |
+|---|---|---|---|---|---|
+| 10 M smoke | chunk 0 | 17.5 M | 5.26 s | 0.43 s | **12.2 : 1** |
+| 100 M | mean of 18 chunks | ~17 M each | 4.8 s | 0.30 s | **15.8 : 1** |
+| 1 B | mean of 180 chunks | ~17 M each | ~5.0 s | ~0.35 s | ~14 : 1 |
+| 21.3 B (cycle 8) | sample of late chunks | ~16 M each | 4.5 s | 0.35 s | ~13 : 1 |
+
+The ratio is structural to the workload — `SequenceCompareTo` on byte arrays is the dominant cost; `FileStream.Write` on a sequential 1 GB block runs near SSD bandwidth limits. **Optimizing write throughput offers <10% wins; reducing sort cost or hiding it via pipelined-spill offers 12-16× larger wins.**
+
+Cycle 5 (256 MB chunks) had ~4× more spills but each pause was ~4× shorter; total parser-blocked time was approximately equal. Cycle 6 (1 GB chunks) redistributes the same total pause into fewer-but-longer bursts. **Measured at 21.3 B (cycle 8): 3,923 spills × ~5 sec = ~5.5 h total parser-blocked time on sort, against a 14 h 15 m parser wall-clock. ~38% of parser time is sort-blocked.** Pipelined spill (worker thread + double buffer) would recover most of this.
 
 ## Why this is a register entry
 
@@ -27,7 +38,7 @@ This sits exactly in the limits-register charter: characterized cost, named alte
 
 This limit moves toward an ADR / Round 2 work when one of:
 
-1. **Cycle 6 wall-clock confirms ≥5% cost from sort-pauses.** Compare 21.3 B end-to-end against the cycle-1 trajectory (446K /sec sustained × ~13.2 h projected parser). If the actual is >5% slower attributable to spill, mitigation becomes binding.
+1. ~~**Cycle 6 wall-clock confirms ≥5% cost from sort-pauses.**~~ **MET 2026-05-05 by cycle 8 measurement: 3,923 spills × ~5 sec = ~5.5 h sort-blocked time, 38% of 14h15m parser wall-clock.** The 5% threshold is far exceeded; mitigation is now evidence-justified, not projection-justified.
 2. **Future scale moves chunk size higher.** A 100 B+ dataset or richer per-record processing pushes chunk size to 4 GB+; per-spill pause approaches 30+ sec, a substantial fraction of total wall-clock.
 3. **Round 2 prefix-compression of intermediate chunks lands.** Prefix compression on the chunk format (sibling limits-register entry: `external-merge-intermediate-disk-pressure.md`) makes per-record sort cheaper but doesn't help if the pause is dominated by sort *coordination* rather than per-record cost.
 4. **External benchmark comparison surfaces the gap.** When publishing wall-clock numbers vs systems with pipelined ingest (QLever, Blazegraph), the asymmetry becomes a comparison footnote.
