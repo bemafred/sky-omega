@@ -88,6 +88,12 @@ internal sealed unsafe class ExternalSorter<T, TSorter> : IDisposable
     private ChunkReader[]? _readers;
     private HeapEntry[]? _heap;
     private int _heapSize;
+    // Bounded LRU pool of chunk-file handles. Sized to chunk count (no eviction)
+    // up to the hard cap. Without this, the merge opens every chunk via FileStream
+    // simultaneously and hits the macOS launchd default ~10K FD soft limit at
+    // 21.3 B Wikidata scale (cycle 8 trigram drain crashed at chunk-010131).
+    // Same architectural fix as SortedAtomStoreExternalBuilder.MergeAndWrite.
+    private BoundedFileStreamPool? _streamPool;
 
     public ExternalSorter(string tempDir, int chunkSize, int readBufferEntries = 8192)
     {
@@ -172,12 +178,19 @@ internal sealed unsafe class ExternalSorter<T, TSorter> : IDisposable
 
     private void InitMerge()
     {
+        // Pool sized to chunk count (zero evictions) up to hard cap; per-stream
+        // buffer is small (8 KB) since OS readahead does the bulk-read work.
+        var poolSize = Math.Max(1, Math.Min(_chunkPaths.Count,
+            SortedAtomStoreExternalBuilder.MergeFileStreamPoolHardCap));
+        _streamPool = new BoundedFileStreamPool(poolSize,
+            SortedAtomStoreExternalBuilder.MergeFileStreamBufferSize);
+
         _readers = new ChunkReader[_chunkPaths.Count];
         _heap = new HeapEntry[Math.Max(1, _chunkPaths.Count)];
 
         for (int i = 0; i < _chunkPaths.Count; i++)
         {
-            _readers[i] = new ChunkReader(_chunkPaths[i], _readBufferEntries);
+            _readers[i] = new ChunkReader(_chunkPaths[i], _readBufferEntries, _streamPool);
             if (_readers[i].TryReadNext(out var first))
             {
                 _heap[_heapSize] = new HeapEntry { Key = first, ReaderIdx = i };
@@ -238,6 +251,10 @@ internal sealed unsafe class ExternalSorter<T, TSorter> : IDisposable
             _readers = null;
         }
 
+        // Pool is owned by the sorter; dispose closes all open chunk streams.
+        _streamPool?.Dispose();
+        _streamPool = null;
+
         try
         {
             if (Directory.Exists(_tempDir))
@@ -258,14 +275,21 @@ internal sealed unsafe class ExternalSorter<T, TSorter> : IDisposable
 
     private sealed class ChunkReader : IDisposable
     {
-        private readonly FileStream _stream;
+        private readonly string _path;
+        private readonly BoundedFileStreamPool _pool;
+        private readonly long _fileLength;
+        private long _offset;
         private readonly T[] _buffer;
         private int _bufferPos;
         private int _bufferCount;
+        private bool _disposed;
 
-        public ChunkReader(string path, int bufferEntries)
+        public ChunkReader(string path, int bufferEntries, BoundedFileStreamPool pool)
         {
-            _stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None, bufferSize: 64 * 1024, FileOptions.SequentialScan);
+            _path = path;
+            _pool = pool;
+            _fileLength = new FileInfo(path).Length;
+            _offset = 0;
             _buffer = new T[bufferEntries];
         }
 
@@ -282,20 +306,38 @@ internal sealed unsafe class ExternalSorter<T, TSorter> : IDisposable
 
         private bool RefillBuffer()
         {
+            if (_offset >= _fileLength)
+            {
+                _bufferCount = 0;
+                _bufferPos = 0;
+                return false;
+            }
+            var stream = _pool.Get(_path);
+            if (stream.Position != _offset) stream.Position = _offset;
+
             var byteSpan = MemoryMarshal.AsBytes(_buffer.AsSpan());
             int totalBytes = 0;
             while (totalBytes < byteSpan.Length)
             {
-                int n = _stream.Read(byteSpan.Slice(totalBytes));
+                int n = stream.Read(byteSpan.Slice(totalBytes));
                 if (n == 0) break;
                 totalBytes += n;
             }
+            _offset = stream.Position;
             int entrySize = Unsafe.SizeOf<T>();
             _bufferCount = totalBytes / entrySize;
             _bufferPos = 0;
             return _bufferCount > 0;
         }
 
-        public void Dispose() => _stream.Dispose();
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            // Stream is owned by the pool. Drop our path so its FD frees promptly
+            // even before the pool is disposed (e.g., when this reader is exhausted
+            // mid-merge). Pool.Dispose ultimately closes any remaining streams.
+            _pool.Drop(_path);
+        }
     }
 }
