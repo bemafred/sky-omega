@@ -78,13 +78,23 @@ internal static class SortedAtomStoreExternalBuilder
     /// same chunk for similar-prefix atoms).
     /// </summary>
     /// <summary>
-    /// Hard cap on simultaneously-open chunk-file streams during merge. Chosen below
-    /// macOS <c>kern.maxfilesperproc</c> (245,760) with multi-× safety, well below
-    /// typical ulimit -n (1M+). Covers the 21.3 B Wikidata case (~13K chunks) with
-    /// 2.5× headroom. Above this cap LRU eviction kicks in; pool stats emitted at
-    /// end of merge let us see whether eviction was meaningful.
+    /// Hard cap on simultaneously-open chunk-file streams during merge. Sized below
+    /// the **effective per-process FD soft limit** that macOS launchd applies to
+    /// child processes — empirically ~10,240 (cycle 1, 4, and cycle 8 trigram drain
+    /// all crashed at chunk-010131 with EMFILE). The 32K theoretical cap based on
+    /// <c>kern.maxfilesperproc</c> (245,760) is fictional in practice — launchd's
+    /// soft limit is what actually applies, regardless of <c>ulimit -n</c> in the
+    /// invoking shell.
+    /// <para>
+    /// 8 K leaves comfortable headroom: ~200 stdlib FDs + 2 output streams + a few
+    /// resolver/atom store FDs + 8 K pool ≈ 8.3 K total, well under the 10K limit.
+    /// At chunk counts > 8 K, LRU eviction kicks in (cost: misses) but the merge
+    /// completes rather than aborting. At chunk counts ≤ 8 K (e.g., the cycle 8
+    /// atom-merge's 3,923 chunks) the pool holds every chunk simultaneously with
+    /// zero evictions.
+    /// </para>
     /// </summary>
-    public const int MergeFileStreamPoolHardCap = 32 * 1024;
+    public const int MergeFileStreamPoolHardCap = 8 * 1024;
 
     /// <summary>
     /// Per-stream buffer size for merge ChunkReaders. 8 KB is small but adequate —
