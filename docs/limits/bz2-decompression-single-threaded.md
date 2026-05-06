@@ -16,6 +16,26 @@ The original projection (~9× speedup, 33 MB/s → ~300 MB/s on M5 Max) was not 
 
 The original "Promotes to: ADR for parallel BZip2..." trigger conditions are obsolete; the ADR shipped as Phase 2 of ADR-036, but its production-path utility is convert-only. A successor entry — *scanner optimization* (vectorized byte-aligned magic search + bit-aligned verification, projected 2-3× scanner throughput → parallel-bz2 ceiling 5-7×) — is **deferred** since on the bulk-load production path the parallel decoder isn't load-bearing. If a convert-heavy production workload becomes binding, scanner optimization promotes back.
 
+## 2026-05-06 wiring experiment — parallel bz2 on bulk-load *regresses* (not improves)
+
+After ADR-037 pipelined-spill landed (1.7.50), parser consumption rose to ~31 MB/s at 100 M — close to the 33 MB/s single-threaded bz2 ceiling. The hypothesis was that wiring `ParallelBZip2DecompressorStream` (workerCount=4) into `LoadFileAsync`'s bulk-load path would restore producer-side headroom. Measurement falsified the hypothesis. A/B at 100 M Wikidata Reference + Sorted, both runs on 1.7.50 (only difference: bulk-load decompressor):
+
+| Metric | Single-threaded bz2 | Parallel(4) bz2 wired | Delta |
+|---|---:|---:|---:|
+| End-to-end wall-clock | 212 s | 235 s | **+11% slower** |
+| `parser_blocked_on_spill_ms` | 0.44 | 10,976 | 25,000× worse |
+| `parser_blocked_fraction` | 0.0003% | 6.4% | reintroduces blocking |
+| `merge_completed.duration_ms` | 31,057 | 47,864 | +54% worse |
+| RSS peak | ~8 GB | ~59 GB | 7.5× more memory |
+
+The wiring was reverted before shipping. The substrate keeps `ParallelBZip2DecompressorStream` for the convert path (where the original 57 % wall-clock reduction was measured); bulk-load remains on single-threaded.
+
+**Likely root cause (hypothesis, unverified):** under pipelined spill, the parser thread runs in parallel with the spill worker thread. Adding 4 more bz2 worker threads creates 6+ active threads competing for CPU + memory bandwidth on a single-NVMe + single-DDR-channel host. The decoded-block buffering inside `ParallelBZip2DecompressorStream` (output queue not bounded the same way input is) appears to allow producers to outrun the parser, blowing RSS to ~60 GB. The merge phase regression (+54 %) suggests the merge's mmap working set is being evicted by this competition.
+
+**Updated workload verdict:** parallel bz2 is *anti-load-bearing* on the bulk-load path with pipelined spill in place. The single-threaded BZip2 + ADR-037 combination is the correct production configuration for now. If a future architecture eliminates the memory competition (e.g., separate decompressor process, NUMA-pinned thread affinity, or output-buffer back-pressure), the wiring can be re-attempted; until then, leave it untouched.
+
+**JSONL artefact:** `/tmp/round2-parallelbz2-gradient/100m.jsonl` (regenerable).
+
 ## Description
 
 Mercury 1.7.45's `BZip2DecompressorStream` (ADR-036, `src/Mercury/Compression/`) is a BCL-only single-threaded streaming bzip2 decoder. It is correct and zero-GC; the limit is not the implementation, it is the architecture: bzip2 is decoded as a single sequential stream of blocks, each ~900 KB compressed, decoded in order on one thread.
