@@ -15,6 +15,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.48] - 2026-05-06
+
+**Headline:** First successful 21.3 B Reference + Sorted bulk-load **and** rebuild — substrate `wiki-21b-ref-r1` complete and verifiably queryable. ADR-034 Phase 1 closed at full Wikidata scale. Total wall-clock 46 h with intervention; ~32 h projected on a clean run with all fixes in place — **2.0× faster than Phase 6 baseline (85 h v1, retired)**.
+
+### Added
+
+- **`BoundedFileStreamPool`** (`src/Mercury/Storage/BoundedFileStreamPool.cs`) — bounded LRU cache of FileStream handles for the k-way merge phase. Replaces the prior architecture of "one FileStream per chunk reader, all open simultaneously" which hit the macOS launchd-applied ~10,240 FD soft limit at 21.3 B Wikidata scale (cycles 1, 4 crashed at chunk-010131 with EMFILE). Pool sized auto to `chunkCount` capped at `MergeFileStreamPoolHardCap` (8 K — chosen below macOS ~10 K effective limit, plenty of headroom for stdlib FDs). Below cap → 100% hit rate, zero evictions. Above cap → LRU eviction at the cap, completes cleanly with miss overhead. Wired into both merge paths: `SortedAtomStoreExternalBuilder.MergeAndWrite` (`b2d4e97`, `97d6ad6`) and `ExternalSorter<T>.Merge` (`dddfda3`). Cap lowered 32K → 8K in `880bfe1` after cycle 8 trigram drain crashed with the higher cap.
+- **Profile-derived AtomStore dispatch** (`e8fa14f`). `StoreSchema.ForProfile(Reference)` now returns schema with `AtomStore = Sorted`; the prior code defaulted to Hash via the record-ctor default and required `--atom-store Sorted` flag to override. Cycles 1-3 silently used HashAtomStore for `--profile Reference` because the launch command dropped that flag. The `--atom-store` CLI flag is REMOVED entirely; profile is the single source of truth. Illegal combinations (Reference+Hash, Cognitive+Sorted) are unrepresentable.
+- **Auto-pool-size the merge pool** (`97d6ad6`). Pool sized to `chunkFiles.Count` (zero evictions when chunks fit). Replaces fixed 64-stream cap which would have caused ~5h of miss overhead at 21.3B's 720-13K chunks. Cycle 8 atom-merge with 3,923 chunks: pool=3,923, peak_open=3,923, hits=63,949,590,286, misses=3,923 (one per chunk on initial open), **hit_rate=1.000000**.
+- **Default chunk size 256 MB → 1 GB** (`4b7663c`). At 21.3 B: 17 K chunks → 4 K chunks. Single source of truth via `SortedAtomBulkBuilder.DefaultChunkBufferBytes = SortedAtomStoreExternalBuilder.DefaultChunkSizeBytes` constant reference (`07102cb`). The first attempt (`4b7663c`) only changed one of two duplicate constants — caught when cycle 5 chunk-rate matched cycle 4 exactly, fix in `07102cb` unifies them.
+- **Bulk-load merge instrumentation infrastructure** (`c79e590`). Five new event types in `SkyOmega.Mercury.Abstractions`:
+  - `RunConfigurationEvent` — one-shot at start of bulk-load. Discloses every load-bearing tuning + dispatch decision (profile, atomstore impl, chunk size, pool cap, resolver chunk size, disk-backed assigned ids, user pool override). Catches dispatch bugs in the second the run begins, not at the end.
+  - `MergePoolState` — periodic state. Defined for future use by a periodic state producer.
+  - `SpillEvent` — per-chunk spill in `SortedAtomBulkBuilder`. Carries chunk index, record count, bytes written, sort duration, write duration. Directly measures the parser-blocking spill cost rather than projecting it.
+  - `MergeProgressEvent` — periodic mid-merge progress. Emitted every `MergeProgressEmissionInterval` (100 M) records during `MergeAndWrite`. Carries records_processed, atoms_emitted, resolver_records, pool stats, data_bytes_written. Closes the merge opacity gap surfaced by the cycle 6 21.3 B run (8+ h of unobservable merge progress).
+  - `MergeCompletedEvent` — one-shot end-of-merge with full pool stats and totals. Replaces the ad-hoc `Console.WriteLine "[merge-pool]"` line with structured JSONL emission.
+- **`docs/architecture/technical/bulk-load-flow.md`** — end-to-end ingest flow map (Reference profile, Sorted-backed). Eight stages from `.ttl.bz2` source to sealed Reference store with measured wall-clock numbers per phase. The structural map we hold visible while we work — every limits-register entry, every optimization, every "where is the wall-clock cost living" question lands somewhere on this diagram.
+- **`docs/architecture/technical/observability-coverage.md`** — observability discipline. Inventories observable surfaces (Phase 7a parser/rebuild/process state) vs gaps (long-running internals, live state vs counters, startup configuration disclosure, decision/invariant approach states, failure-mode visibility). States the discipline: every operation projected to take >1 min in production must emit periodic progress before being considered shippable.
+- **`docs/limits/cognitive-orchestrator-absent.md`** (`9181453`) — architectural deferral. ADR-005 names James as the cognitive orchestrator; until it exists in code, every Sky Omega session depends on a human reviewer applying EEE in real time to gate LLM expression through substrate measurement before action. Three caught-by-human cases in a single 24-hour window (atom-store dispatch bug, FD-cap raise reflex, wrong-constant chunk-size commit) demonstrate the structural risk.
+- **`docs/limits/observability-coverage-gap.md`** (`39df7a0`) — register entry that gates promotion of new long-running work on the discipline.
+- **`docs/limits/spill-blocks-parser.md`** (`993d207`) → promoted **Triggered** in `8864baa`. Cycle 8 measured 38% of parser wall-clock blocked on sort (3,923 spills × ~5 sec each = ~5.5 h of 14 h 15 m parser). Sort:write 12-16:1 cross-scale (10M / 100M / 1B / 21.3B). Mitigation: pipelined spill (worker thread + double buffer) — Round 2 candidate, evidence-justified.
+- **`docs/limits/external-merge-intermediate-disk-pressure.md`** (`a0a6e91`) — peak intermediate disk volume (~5 TB at 21.3B). Mitigation: prefix-compress chunk records (extends ADR-034 Round 2's output-side compression to the intermediate layer).
+- **`docs/limits/intermediate-cleanup-deferred-to-run-end.md`** (`7ebe8ad`) — **Triggered** during cycle 8 drain phase. 3.6 TB of post-merge occurrence chunks held until run end instead of merge end. Cycle 8 came within ~600 GB of the min-free-space abort during drain on a 7.3 TB host; smaller hosts would have aborted. Cause: `SortedAtomBulkBuilder._ownsTempDir = false` when `QuadStore` provides explicit tempDir; no phase-transition cleanup hook fires. Mitigation: phase-transition cleanup hooks at end of `MergeAndWrite` or incremental delete as `ChunkReader.MoveNext` returns false.
+- **`docs/limits/trigram-drain-cap-eviction.md`** — Latent (Monitoring). Cycle 8 trigram drain processes 10,456 chunks vs 8K cap → ~23% miss rate, ~3-4 h overhead. Mitigation: larger trigram chunks (1 GB → ~2,000 chunks ≪ cap) or hierarchical merge.
+- **`docs/limits/runtime-fd-detection.md`** — Latent. Hard-coded 8K cap is conservative outside macOS launchd context. Linux (typical FD limit 65K) leaves ~57K unused. Mitigation: `getrlimit(RLIMIT_NOFILE)` via P/Invoke at pool construction.
+- **`docs/validations/adr-034-21b-2026-05-06.md`** (`ee265a6`) — cycle 8 validation report. All measured numbers across 8 phases. Compared to Phase 6 baseline (85 h v1 retired): 2.0× wall-clock improvement, 42% atom-store size reduction (99 GB vs ~170 GB) via prefix compression + sorted layout. Six Round 2 optimization candidates with evidence-justified estimated wins.
+- **`tools/smoke-test-21b-r1.cs`** (`1ddb0ba`) — file-based dotnet script that verifies the cycle 8 substrate is queryable end-to-end. Five checks (open store, statistics, bounded SELECT, predicate-bound GPOS lookup, trigram FILTER text:match). Captures the dedup baseline: 21.32 B triples loaded → 20,935,927,828 quads stored (1.79% RDF set-semantics dedup). Future r2 ingest should land within 0.01% of this number.
+
+### Fixed
+- **Cycle 1 / cycle 4 / cycle 8 trigram-drain FD-ceiling crashes** — same crash mode at chunk-010131 across three different code paths. Fix layered in three commits:
+  - `b2d4e97` — `BoundedFileStreamPool` wired into `SortedAtomStoreExternalBuilder.MergeAndWrite` (the atom-merge path).
+  - `97d6ad6` — pool sized to chunk count instead of fixed 64.
+  - `dddfda3` — same pool wired into `ExternalSorter<T>.Merge` (the trigram-drain path that the original fix didn't cover; surfaced as the cycle 8 trigram-drain crash).
+  - `880bfe1` — cap lowered 32K → 8K. The 32K theoretical cap (based on `kern.maxfilesperproc`) is fictional in practice — macOS launchd applies ~10,240 effective FD soft limit to spawned children regardless of `ulimit -n` showing 1M+. 8K leaves comfortable headroom under that.
+  - The full audit forced by Martin (`Are there more FD error risks? You obviously don't look for that? Why?`) revealed that the architectural pattern (k-way merge over many spilled chunks opening each via FileStream) was the load-bearing class, not the individual sites. Both surviving merge paths are now pool-wired with consistent sizing policy.
+- **Profile-derived AtomStore — dispatch bug surfaced cycles 1-3** — `--profile Reference` silently used HashAtomStore for cycles 1, 2, 3 because the launch command lacked `--atom-store Sorted`. The atom-merge code path was running on the legacy hash-table architecture even though the docs, ADRs, and validation runs all assumed Sorted. Resolved by removing the `--atom-store` flag entirely (`e8fa14f`); Profile is now the single source of truth and illegal combinations are unrepresentable.
+- **Constant duplication — chunk-size unification** (`07102cb`). The first chunk-size bump (`4b7663c` from 256 MB to 1 GB) only updated `SortedAtomStoreExternalBuilder.DefaultChunkSizeBytes`; the production bulk-load path goes through `SortedAtomBulkBuilder` which had its own duplicate constant. Cycle 5 chunk-rate matched cycle 4 exactly (911 chunks at 1.16 B → ~17 K projected) instead of the ~4 K projection — caught the bug. Fix: `SortedAtomBulkBuilder.DefaultChunkBufferBytes` is now a const-of-const reference to `SortedAtomStoreExternalBuilder.DefaultChunkSizeBytes`.
+
+### Validated
+- **First successful 21.3 B Reference + Sorted bulk-load + rebuild** (`docs/validations/adr-034-21b-2026-05-06.md`). Substrate at `~/Library/SkyOmega/stores/wiki-21b-ref-r1`: atoms.atoms 99 GB, atoms.offsets 30 GB, gspo.tdb 1.0 TB, gpos.tdb 1.0 TB, trigram.posts 4.6 GB, total ~2.13 TB. Index state Ready. 21,316,531,403 triples loaded, 20,935,927,828 quads stored after RDF set-semantics dedup (1.79%), 4,005,235,528 unique atoms.
+- **Smoke test passed end-to-end:** open store 10 ms, statistics <1 ms, bounded SELECT 16 ms, predicate-bound GPOS query 1-6 ms, trigram FILTER `text:match("Stockholm")` 11 s cold returns 5 real Wikidata literal matches with proper `@nb`/`@sv`/`@pt` language tags.
+- **Cross-scale sort:write ratio measured:** 12.2 : 1 (10M), 15.8 : 1 (100M), ~14:1 (1B), ~13:1 (21.3B). Sort dominates spill — pipelined-spill optimization is evidence-justified, not projection-justified.
+- **Three-regime merge behavior at 21.3 B** (`urn:sky-omega:pattern:merge-three-regimes` in Mercury): warmup ~0.3 M/s, steady-state ~1.0-1.5 M/s, long-tail-cold-cache ~0.2-0.5 M/s. 1 B run merged at ~6 M/s sustained because 184 GB intermediate fit in 128 GB RAM; 21.3 B's 4 TB intermediate doesn't fit, hence the structural inflection. Pattern only emerges past the cache-fit boundary — the 1 B trace cannot surface it.
+- **Auto-pool design validated at 21.3 B atom-merge:** zero evictions across 64 billion `pool.Get()` calls. Hit rate exactly 1.000000.
+- **8 K cap fix validated at 21.3 B trigram drain:** 10,456 chunks > 8 K cap → ~23% miss rate, ~3-4 h overhead. No crash. Drain completes in 8 h 24 m at sustained 7.5 M/s.
+
+### Documented
+- **ADR-006: MCP Surface Discipline → Completed** (`79d6617`). Implementation verified shipped in `432f613`: `mercury_prune` removed from MCP tool surface; comment at `MercuryTools.cs:173` documents the deliberate exclusion.
+- **ADR-007: Sealed Substrate Immutability → Completed** (`79d6617`). Implementation verified shipped in `432f613`: `PruneEngine.cs:44` rejects Reference profile at plan time with re-creation guidance message; `PruneEngineTests.cs:185` asserts ADR-007 reference appears in error.
+- **`docs/limits/spill-blocks-parser.md` Latent (Monitoring) → Triggered** with cycle 8 measurements (38% sort-blocked, 12-16:1 sort:write cross-scale).
+- **`docs/limits/intermediate-cleanup-deferred-to-run-end.md` Triggered** (cycle 8 came within ~600 GB of min-free-space abort during drain).
+- **`docs/architecture/technical/bulk-load-flow.md` updated with measured-at-21.3B numbers** (Stage 5 atom-merge 15h20m, Stage 8a GPOS 60min32s, Stage 8c trigram drain 8h24m).
+
+### Behavioral discipline (memory + Mercury)
+
+Cycle 8 also surfaced behavioral discipline gaps that Mercury captured for future Sky Omega instances. Memory entries added:
+
+- **`feedback_resource_limit_class_audit.md`** — every interaction with an OS-enforced resource is mandatory to mind. One occurrence is too many. Plurality is a symptom; the discipline is upstream. Three FD crashes at chunk-010131 cost days because each was treated as a local fix. Sharpened from "plurality is the danger signal" per Martin's correction 2026-05-05: the rule is mandatory minding of every interaction, not threshold-based detection of plurality.
+- **`reference_resource_limits_checklist.md`** — catalog of OS-enforced ceilings (FDs, memory, threads, mmap, sockets, ephemeral ports, disk, inodes) with macOS-specific binding limits and the trust gap (`ulimit -n` 1M vs launchd-spawned process ~10K).
+- **`feedback_force_third_option.md`** updated — sharpened with cycle 8's reinforcement: when offering options, force a third before deciding; two-option framings share a hidden axis; the third path requires stepping off it.
+
+Mercury observations in graph `<urn:sky-omega:session:2026-05-05>`:
+- `urn:sky-omega:pattern:resource-limit-class-audit` — the canonical pattern with three exemplar incidents (cycle 1, cycle 4, cycle 8 trigram).
+- `urn:sky-omega:pattern:merge-three-regimes` — the architectural pattern surfaced by cycle 8.
+- `urn:sky-omega:pattern:third-path-dimension-shift` — sibling cognitive pattern reinforced by today's audit.
+- `urn:sky-omega:incident:cycle8-21b-instrumented-2026-05-04` + `urn:sky-omega:incident:cycle8-trigram-fd-crash-2026-05-05` — the run and the crash.
+- Five observations cross-referencing the patterns to incidents and fixes.
+
 ## [1.7.47] - 2026-04-30
 
 ### Added
