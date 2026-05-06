@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
@@ -188,5 +189,55 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
             Assert.True(id > 0);
             Assert.Equal(inputs[i], store.GetAtomString(id));
         }
+    }
+
+    [Fact]
+    public void MergeAndWrite_DeletesConsumedChunks_AndReportsCounts()
+    {
+        // Round 2 phase-transition cleanup: chunks must be deleted by the end of
+        // MergeAndWrite, and the MergeCompletedEvent must report counts that match.
+        // Limits: docs/limits/intermediate-cleanup-deferred-to-run-end.md
+        var bulkTempDir = Path.Combine(_testDir, "tmp_cleanup_event");
+        var basePath = Path.Combine(_testDir, "ext_cleanup_event");
+        var listener = new CapturingMergeListener();
+
+        using (var builder = new SortedAtomBulkBuilder(
+            basePath,
+            tempDir: bulkTempDir,
+            useDiskBackedAssigned: false,
+            chunkBufferBytes: 1L * 1024 * 1024,  // 1 MB → forces multiple chunks
+            listener: listener))
+        {
+            // ~30K atoms × ~40 bytes ≈ 1.2 MB raw; with overhead we cross the 1 MB
+            // chunk threshold a few times.
+            var rng = new Random(11);
+            for (int i = 0; i < 30_000; i++)
+            {
+                var s = $"http://example.org/s{i:D6}";
+                var p = $"http://example.org/p{rng.Next(50):D2}";
+                var o = $"http://example.org/o{i:D6}";
+                builder.AddTriple(default, s, p, o);
+            }
+            builder.Finalize();
+        }
+
+        Assert.NotNull(listener.LastCompleted);
+        var ev = listener.LastCompleted!.Value;
+        Assert.True(ev.ChunkCount >= 2, $"expected multiple chunks, got {ev.ChunkCount}");
+        Assert.Equal(ev.ChunkCount, ev.ChunksDeleted);
+        Assert.True(ev.ChunkBytesReclaimed > 0);
+
+        var occurrencesDir = Path.Combine(bulkTempDir, "occurrences");
+        if (Directory.Exists(occurrencesDir))
+        {
+            var leftover = Directory.GetFiles(occurrencesDir, "chunk-*.bin");
+            Assert.Empty(leftover);
+        }
+    }
+
+    private sealed class CapturingMergeListener : IObservabilityListener
+    {
+        public MergeCompletedEvent? LastCompleted { get; private set; }
+        public void OnMergeCompleted(in MergeCompletedEvent ev) => LastCompleted = ev;
     }
 }

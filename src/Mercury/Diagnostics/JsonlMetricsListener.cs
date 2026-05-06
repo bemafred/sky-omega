@@ -404,6 +404,8 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
             json.WriteNumber("atoms_emitted", ev.AtomsEmitted);
             json.WriteNumber("data_bytes", ev.DataBytes);
             json.WriteNumber("duration_ms", ev.Duration.TotalMilliseconds);
+            json.WriteNumber("chunks_deleted", ev.ChunksDeleted);
+            json.WriteNumber("chunk_bytes_reclaimed", ev.ChunkBytesReclaimed);
             json.WriteEndObject();
         }
         WriteBufferedLine(buffer);

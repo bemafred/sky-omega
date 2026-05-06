@@ -1,8 +1,8 @@
 # Limit: Intermediate cleanup deferred to run end (chunks held longer than needed)
 
-**Status:**        Latent (Triggered on cycle 8 — manually mitigated)
+**Status:**        Resolved (in-flight, gradient validation pending) — fixed in `MergeAndWrite` finally block; `MergeCompletedEvent` now reports `chunks_deleted` + `chunk_bytes_reclaimed`.
 **Surfaced:**      2026-05-05 16:25 CEST, during cycle 8 drain phase. After `MergeAndWrite` consumed all 3,923 occurrence chunks at 15:09 CEST, the 3.6 TB of `bulk-tmp/sorted-vocab/occurrences/chunk-*.bin` files remained on disk untouched. Free disk dropped from initial 6.5 TB to 699 GB during drain — within ~600 GB of the 100 GB min-free-space abort threshold — before manual cleanup recovered 3.5 TB.
-**Last reviewed:** 2026-05-05
+**Last reviewed:** 2026-05-06 — fix landed in `SortedAtomStoreExternalBuilder.MergeAndWrite`. Mitigation (1) shipped: phase-transition cleanup hook in the merge `finally` block deletes consumed chunks immediately after readers Dispose. Reader Dispose calls `_pool.Drop(_path)` which closes the underlying FD, so `File.Delete` is safe. `MergeCompletedEvent` extended with `ChunksDeleted` + `ChunkBytesReclaimed` for cycle 9+ observability. Gradient validation (1M/10M/100M) outstanding before promoting to fully Resolved + bumping 1.7.49.
 
 ## Description
 

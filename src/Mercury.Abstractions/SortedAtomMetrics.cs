@@ -89,4 +89,6 @@ public readonly record struct MergeCompletedEvent(
     long TotalGets,
     long AtomsEmitted,
     long DataBytes,
-    TimeSpan Duration);
+    TimeSpan Duration,
+    int ChunksDeleted,
+    long ChunkBytesReclaimed);

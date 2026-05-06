@@ -357,6 +357,8 @@ internal static class SortedAtomStoreExternalBuilder
         var poolSize = ResolveMergeFileStreamPoolSize(chunkFiles.Count);
         using var streamPool = new BoundedFileStreamPool(poolSize, MergeFileStreamBufferSize);
         var readers = new List<ChunkReader>(chunkFiles.Count);
+        int chunksDeleted = 0;
+        long chunkBytesReclaimed = 0;
         try
         {
             foreach (var path in chunkFiles)
@@ -445,6 +447,26 @@ internal static class SortedAtomStoreExternalBuilder
         finally
         {
             foreach (var r in readers) r.Dispose();
+
+            // Phase-transition cleanup: chunk files are no longer referenced by any
+            // active code path once readers are Disposed (each reader's Dispose calls
+            // _pool.Drop(_path) which closes the underlying FD). Deleting them here —
+            // rather than waiting for the caller's end-of-run tempDir wipe — releases
+            // disk pressure immediately. At 21.3B Wikidata cycle 8, ~3.6 TB of
+            // occurrence chunks were held until run end, putting the GSPO drain phase
+            // within ~600 GB of MinimumFreeDiskSpace abort on a 7.3 TB host. Smaller
+            // hosts would have aborted mid-run. Limits:
+            // docs/limits/intermediate-cleanup-deferred-to-run-end.md
+            foreach (var path in chunkFiles)
+            {
+                try
+                {
+                    chunkBytesReclaimed += new FileInfo(path).Length;
+                    File.Delete(path);
+                    chunksDeleted++;
+                }
+                catch { /* best effort — caller's tempDir cleanup catches stragglers */ }
+            }
         }
 
         // Emit final merge-completed event with full pool stats. Replaces the
@@ -462,7 +484,9 @@ internal static class SortedAtomStoreExternalBuilder
             TotalGets: totalGets,
             AtomsEmitted: atomCount,
             DataBytes: contentBytes,
-            Duration: mergeDuration));
+            Duration: mergeDuration,
+            ChunksDeleted: chunksDeleted,
+            ChunkBytesReclaimed: chunkBytesReclaimed));
 
         if (useDiskBacked)
         {
