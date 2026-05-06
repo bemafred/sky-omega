@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-05-06
+**Status:** Accepted — 2026-05-06
 
 ## Context
 
@@ -18,46 +18,6 @@ Sort and write are not on the parser's critical path semantically. The parser do
 This ADR scopes a pipelined spill: parser keeps filling buffers; one background worker thread sorts + writes spilled buffers in the background; parser blocks only when the worker is behind.
 
 Limits register: [`docs/limits/spill-blocks-parser.md`](../../limits/spill-blocks-parser.md) — Triggered with measurement.
-
-## CPU vs I/O budget — why 1 worker is right *now*
-
-The design choice "single background worker doing sort + write together" is not laziness — it is principled given cycle 8's measurements. Both constraints fall out:
-
-**Per-chunk timing budget at 21.3 B (re-derived from cycle 8):**
-
-- Parser wall-clock: 14 h 15 m = 51,300 s across 3,923 spills → **~13 s parser-active per chunk**.
-- Parser-blocked share of wall-clock: 38% → ~19,500 s blocked total → **~4.9 s blocked per spill on average** (the inherent spill cost).
-- Sort:write ratio 12–16:1 → of that ~4.9 s, sort is ~4.5 s, write is ~0.4 s.
-
-**Sort is CPU-bound.** `List<T>.Sort` with `SequenceCompareTo`-based comparator on a 1 GB / ~17 M-record buffer is pure CPU — no I/O. On the M5 Max (10 P-cores + 4 E-cores), one parallel sort does not compete with the single-threaded parser; they run on different cores.
-
-**Write is I/O-bound, single-SSD.** Cycle 8's hardware is a single Apple Silicon NVMe (no RAID — see [`feedback_eee_discipline`](../../../) and the Phase 5.2 trace doc). Write throughput is maximized by **sequential streams from one writer**. Multiple concurrent writers would interleave on the device queue, fragment the write pattern, and reduce effective throughput. One worker thread doing all writes naturally gives the optimal access pattern — the constraint is satisfied incidentally by the 1-worker design, not deliberately.
-
-**Why 1 worker is sufficient (not just allowed):**
-
-```
-parser-active  : ~13.0 s/chunk
-sort + write   : ~4.9 s/chunk  (sort ~4.5 s + write ~0.4 s)
-                  ───────────
-parser is the bottleneck.
-```
-
-With one sort+write worker running in parallel with parser-fill, the entire spill cost (4.9 s) hides inside the next chunk's parser-fill window (13 s). Adding more parallel sorts gains nothing — the parser can't feed them faster. Adding parallel writers actively hurts — they would compete on the SSD.
-
-**Memory cost of 1 worker:** one extra 1 GB buffer on LOH (the snapshot in the worker's hand while parser fills the next one). Total LOH residency for the bulk builder: 2 × chunk size = 2 GB. Cycle 8 ran 114 GB / 128 GB peak — 2 GB headroom is present and fits the OS reserve.
-
-## When this design changes (trigger conditions for revision)
-
-The 1-worker design is correct *at cycle 8 numbers*. It would become wrong if the timing budget shifts such that sort + write per chunk exceeds parser-fill per chunk. Possible triggers:
-
-1. **Parser parallelizes.** If parser throughput rises (e.g., parallel BZip2 streaming were piped into a parallel parser), parser-active per chunk drops below the spill cost. Sort becomes the new bottleneck.
-2. **Sort cost rises faster than parser cost at scale.** Sort is O(N log N) in records-per-chunk. With chunk size fixed at 1 GB, N is bounded — sort cost per chunk is roughly constant. Parser cost is O(input bytes). Ratio holds at scale unless chunk size changes.
-3. **Atom average length drops dramatically.** Smaller atoms → more records per 1 GB chunk → larger N → larger sort cost. Wikidata-class workloads sit at ~50 bytes/atom; FHIR or DBpedia could differ. Worth measuring.
-4. **The host changes.** A high-IOPS RAID would not change the analysis (parser is still the bottleneck). A slow SSD where write dominates the ratio would — write would become I/O-bound in absolute terms, not just relatively.
-
-When any of these triggers, the right architectural change is **N sort workers + 1 writer thread**: parser → sort-queue → N parallel sort workers (CPU-parallel) → write-queue → 1 writer thread (sequential SSD writes preserved). Sort scales with available cores; write stays single-threaded. The current ADR's `BlockingCollection` handoff generalizes — it becomes two queues instead of one, but the ownership-transfer + exception-propagation contracts carry over unchanged.
-
-The `worker_queue_depth_at_handoff` metric (Decision 8) is what surfaces this trigger. If steady-state depth > 0 at any scale, the per-chunk budget has flipped — re-measure and consider the split design.
 
 ## Hypothesis (falsifiable)
 
