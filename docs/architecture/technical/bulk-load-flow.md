@@ -102,10 +102,15 @@ Estimates → measurements: cycle 8 (2026-05-04, first instrumented 21.3B run) r
 | 2 | Parse | `TurtleStreamParser` | **14 h 15 m measured** (avg 415 K triples/sec) | parser CPU |
 | 3 | Intern + buffer | atom bytes into `_spillBuffer` | overlapped with parse | parser CPU |
 | 4 | **Spill (sort + write)** | per-chunk introsort + sequential write | **3,923 spills × ~5 sec sort + 0.4 sec write each, blocking parser** | **sort CPU** (12-16:1 sort:write ratio measured cross-scale) |
-| 5 | Merge atoms | k-way merge + prefix compress | **~10 h measured at 21.3B (cache-pressure-bound)** | **OS page cache** (see "Three regimes" below) |
-| 6 | Resolver drain | `EnumerateResolved` 3-at-a-time | ~1 h | sequential read |
-| 7 | GSPO bulk sort | `ExternalSorter` on 32-byte records | ~3 h | external sort I/O |
-| 8 | Rebuild | iterate GSPO, project to GPOS + trigram | ~6 h | tree traversal + writes |
+| 5 | Merge atoms | k-way merge + prefix compress | **15 h 20 m measured** | **OS page cache** (4 TB intermediate ≫ 120 GB RAM, three-regime; see below) |
+| 6 | Resolver drain | `EnumerateResolved` 3-at-a-time | **~1 h measured** (overlapped with stage 7) | sequential read |
+| 7 | GSPO bulk sort | `ExternalSorter` on 32-byte records | **~1 h measured** (faster than projected — fixed-width keys cache-fit) | external sort I/O |
+| 8a | Rebuild — GPOS emission + drain | scan GSPO → B+Tree | **60 m 32 s measured** | sequential B+Tree |
+| 8b | Rebuild — Trigram emission | n-gram extraction from atoms | **~150 m measured** | atom mmap scan + n-gram extraction |
+| 8c | Rebuild — Trigram drain | `ExternalSorter` over 167 B grams | **8 h 24 m measured** | k-way merge + 8K-cap eviction (~23% miss rate; see below) |
+| **Bulk-load total** | (parser + atom-merge + drain + GSPO sort) | | **31 h 18 m measured** | |
+| **Rebuild total** | (8a + 8b + 8c) | | **9 h 25 m measured** | |
+| **End-to-end clean** | (cycle 8 minus crash + intervention) | | **~32 h projected** | |
 
 ### Stage 5 has three measured throughput regimes
 
@@ -121,7 +126,11 @@ For comparison: the 1B run merged at **~6 M/s sustained** because 184 GB of inte
 
 ### Auto-pool validated at 21.3B
 
-`BoundedFileStreamPool` sized to chunk count (3,923 at 21.3B) capped at 32K. Cycle 8 telemetry: every `merge_progress` event shows `pool_open=3923, misses=3923` — exactly one miss per chunk on initial open, **zero evictions thereafter**. Hit rate effectively 100% across the entire merge. The auto-pool design (commit `97d6ad6`) is structurally correct at scale; FD pressure is no longer the binding constraint. **The new binding constraint at 21.3B is OS page cache, not pool capacity.**
+`BoundedFileStreamPool` sized to chunk count (3,923 at 21.3B) capped at **8K** (lowered from 32K in commit `880bfe1` after the cycle 8 trigram drain crash exposed the macOS launchd-applied ~10K FD limit). Cycle 8 atom-merge telemetry: every `merge_progress` event shows `pool_open=3923, misses=3923` — exactly one miss per chunk on initial open, **zero evictions thereafter**. Hit rate effectively 100% (1.000000) across **64 billion** `pool.Get()` calls.
+
+The atom-merge case fits the cap (3,923 ≪ 8K). The **trigram drain** at 21.3B has 10,456 chunks > 8K cap, so the pool runs in eviction mode (~23% miss rate) — completes cleanly but ~3-4 h slower than no-eviction would have been. Round 2 candidate: hierarchical merge or larger chunk size to stay below cap.
+
+**The pool design works on both sides of the cap:** below the cap → 100% hit rate; above the cap → eviction at the cap (no crash, just slower). Critical: the cap must be at or below the **effective OS-applied FD limit** (~10K on macOS launchd children), not the documented `ulimit -n` (1M+) or `kern.maxfilesperproc` (245K).
 
 ## Disk artifacts and lifetime
 
