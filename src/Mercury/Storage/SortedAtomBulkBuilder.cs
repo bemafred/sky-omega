@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -65,11 +69,30 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     // ADR-034 Phase 1B-5e streaming-input state. The buffer accumulates atom occurrences
     // until it crosses the chunk threshold, then sorts + spills to a chunk file. Memory
     // is bounded by chunkBufferBytes regardless of input scale.
-    private readonly List<(byte[] Bytes, long InputIdx)> _spillBuffer = new();
+    private List<(byte[] Bytes, long InputIdx)> _spillBuffer = new();
     private long _spillBufferBytes;
     private readonly List<string> _chunkFiles = new();
     private long _globalIdx;  // monotonic input-occurrence index across all atoms; widened from int to long for >500M-triple bulk loads (1B triples × 4 atoms = 4B occurrences exceeds int32)
     private long _tripleCount;
+
+    // ADR-037 pipelined-spill state. The handoff queue is bounded at 1 — exactly enough
+    // for one snapshot-in-flight to overlap with the next buffer fill. Worker exclusively
+    // owns _workerChunkFiles; parser merges into _chunkFiles after Wait() at Finalize.
+    // _workerException captures any sort/write/listener fault on the worker thread; the
+    // parser checks it on every AddOneAtomOccurrence so faults surface synchronously
+    // rather than being silently lost.
+    private const int SpillQueueBoundedCapacity = 1;
+    private BlockingCollection<SpillJob>? _spillQueue;
+    private Task? _workerTask;
+    private readonly List<string> _workerChunkFiles = new();
+    private volatile Exception? _workerException;
+    // Worker signals fault by cancelling this CTS. Parser's BlockingCollection.Add
+    // is called with the token so it wakes up promptly rather than hanging on a
+    // never-to-drain queue. CompleteAdding from the worker is unsafe (racy with
+    // a concurrent Add) — cancellation is the documented BCL pattern for this case.
+    private CancellationTokenSource? _faultCts;
+    private TimeSpan _parserBlockedDuration;
+    private readonly Stopwatch _parserWallClock = new();
 
     // Disk-backed AssignedIds resolver (Phase 1B-5d). Allocated lazily in EnsureSpillerInitialized
     // when useDiskBackedAssigned is true. Receives empty-slot sentinels directly from
@@ -154,6 +177,11 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
 
     private void AddOneAtomOccurrence(ReadOnlySpan<byte> bytes)
     {
+        // ADR-037 Decision 4: surface worker faults synchronously on the parser thread.
+        // Check on every occurrence — a fault between AddTriple calls must propagate
+        // to the next caller, not be silently lost until Finalize.
+        ThrowIfWorkerFaulted();
+
         if (bytes.IsEmpty)
         {
             // Empty-slot sentinel. Disk-backed: emit (globalIdx, 0) to the resolver so it
@@ -176,25 +204,95 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
             FlushSpillBuffer();
     }
 
+    /// <summary>
+    /// ADR-037 Decision 2 + 4: snapshot-and-swap buffer ownership transfer + parser-blocked
+    /// timing. The parser captures the current buffer, replaces <c>_spillBuffer</c> with a
+    /// fresh List, and hands the snapshot to the worker via <c>BlockingCollection.Add</c>.
+    /// After <c>Add</c>, the parser never touches the snapshot — the worker has exclusive
+    /// ownership. <c>Add</c> blocks if the queue is at <see cref="SpillQueueBoundedCapacity"/>;
+    /// the wall-time spent blocked is the load-bearing measurement.
+    /// </summary>
     private void FlushSpillBuffer()
     {
         if (_spillBuffer.Count == 0) return;
-        int chunkIndex = _chunkFiles.Count;
-        int recordCount = _spillBuffer.Count;
-        var result = SortedAtomStoreExternalBuilder.SpillOneChunk(_occurrenceTempDir, _spillBuffer, chunkIndex);
-        _chunkFiles.Add(result.Path);
-        _spillBuffer.Clear();
+
+        // Snapshot + swap. Parser never touches `snapshot` after this line; worker has
+        // exclusive ownership starting at the Add below.
+        var snapshot = _spillBuffer;
+        _spillBuffer = new List<(byte[] Bytes, long InputIdx)>();
         _spillBufferBytes = 0;
-        if (_listener is not null)
+
+        int chunkIndex = _nextChunkIndex++;
+        int queueDepth = _spillQueue!.Count;
+        var blockStart = Stopwatch.GetTimestamp();
+        try
         {
-            _listener.OnSpill(new Abstractions.SpillEvent(
-                Timestamp: DateTimeOffset.UtcNow,
-                ChunkIndex: chunkIndex,
-                RecordCount: recordCount,
-                BytesWritten: result.BytesWritten,
-                SortDuration: result.SortDuration,
-                WriteDuration: result.WriteDuration));
+            _spillQueue.Add(new SpillJob(snapshot, chunkIndex, queueDepth), _faultCts!.Token);
         }
+        catch (OperationCanceledException)
+        {
+            // Worker faulted and cancelled the token to wake us up; surface the
+            // original exception via ThrowIfWorkerFaulted (which has the captured
+            // _workerException as its source of truth).
+            ThrowIfWorkerFaulted();
+            throw;  // unreachable if _workerException is set; safety net
+        }
+        _parserBlockedDuration += Stopwatch.GetElapsedTime(blockStart);
+    }
+
+    private int _nextChunkIndex;
+
+    /// <summary>
+    /// Worker thread loop. Drains <see cref="_spillQueue"/>, runs sort + write per snapshot,
+    /// emits <see cref="Abstractions.SpillEvent"/>, and accumulates output paths in
+    /// <see cref="_workerChunkFiles"/>. On any fault, captures the exception in
+    /// <see cref="_workerException"/> and signals <c>CompleteAdding</c> so subsequent
+    /// parser <c>Add</c> calls throw <see cref="InvalidOperationException"/>; the parser's
+    /// <see cref="ThrowIfWorkerFaulted"/> rethrows the original.
+    /// </summary>
+    private void RunSpillWorker()
+    {
+        try
+        {
+            foreach (var job in _spillQueue!.GetConsumingEnumerable())
+            {
+                int recordCount = job.Buffer.Count;
+                var result = SortedAtomStoreExternalBuilder.SpillOneChunk(
+                    _occurrenceTempDir, job.Buffer, job.ChunkIndex);
+                _workerChunkFiles.Add(result.Path);
+
+                if (_listener is not null)
+                {
+                    _listener.OnSpill(new Abstractions.SpillEvent(
+                        Timestamp: DateTimeOffset.UtcNow,
+                        ChunkIndex: job.ChunkIndex,
+                        RecordCount: recordCount,
+                        BytesWritten: result.BytesWritten,
+                        SortDuration: result.SortDuration,
+                        WriteDuration: result.WriteDuration,
+                        QueueDepthAtHandoff: job.QueueDepthAtHandoff));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _workerException = ex;
+            // Wake any parser thread blocked in Add. We must NOT call CompleteAdding
+            // from the worker — that races with concurrent Add and throws
+            // InvalidOperationException ("CompleteAdding may not be used concurrently
+            // with additions to the collection"). Cancellation is the BCL-supported
+            // pattern: parser's Add(item, token) throws OperationCanceledException,
+            // gets caught, ThrowIfWorkerFaulted then rethrows the original.
+            try { _faultCts!.Cancel(); } catch { /* already disposed */ }
+        }
+    }
+
+    private void ThrowIfWorkerFaulted()
+    {
+        var ex = _workerException;
+        if (ex is not null)
+            throw new InvalidOperationException(
+                "Spill worker faulted; bulk-load aborted. See InnerException.", ex);
     }
 
     private void EnsureSpillerInitialized()
@@ -211,7 +309,31 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
             _resolveSorter = new ExternalSorter<ResolveRecord, ResolveRecordChunkSorter>(
                 resolverTempDir, _resolveSorterChunkSize);
         }
+
+        // ADR-037: spill queue + worker thread come up here so they exist before any
+        // FlushSpillBuffer call. Bound = 1 → 2 buffers alive at peak (one in parser's
+        // hand, one in queue / being processed by worker).
+        _spillQueue = new BlockingCollection<SpillJob>(boundedCapacity: SpillQueueBoundedCapacity);
+        _faultCts = new CancellationTokenSource();
+        _workerTask = Task.Factory.StartNew(
+            RunSpillWorker,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+
+        _parserWallClock.Start();
     }
+
+    /// <summary>
+    /// ADR-037: a single buffer-handoff record passed from parser to worker. The
+    /// <paramref name="Buffer"/> is the parser's pre-fill snapshot, owned by the
+    /// worker after enqueue. <paramref name="QueueDepthAtHandoff"/> is captured by
+    /// the parser immediately before <c>Add</c> for the per-spill metric.
+    /// </summary>
+    private readonly record struct SpillJob(
+        List<(byte[] Bytes, long InputIdx)> Buffer,
+        int ChunkIndex,
+        int QueueDepthAtHandoff);
 
     private static byte[] EncodeUtf8(ReadOnlySpan<char> chars, Span<byte> _)
     {
@@ -233,7 +355,34 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
         if (_finalized) return _buildResult!;
 
         EnsureSpillerInitialized();
+
+        // ADR-037: surface a worker fault before pushing the trailing buffer through
+        // the same handoff path. Without this check, FlushSpillBuffer's Add could hang
+        // on a queue whose worker has faulted and not yet completed.
+        ThrowIfWorkerFaulted();
         FlushSpillBuffer();
+
+        // ADR-037 Decision 3: signal end-of-input, wait for worker drain, surface any
+        // fault that happened during the final spills, then merge worker's chunk paths
+        // into the parser-owned _chunkFiles list (FIFO order preserved by the queue).
+        _spillQueue!.CompleteAdding();
+        try { _workerTask!.Wait(); }
+        catch (AggregateException) { /* RunSpillWorker swallows; _workerException is the source of truth */ }
+        ThrowIfWorkerFaulted();
+        _chunkFiles.AddRange(_workerChunkFiles);
+
+        _parserWallClock.Stop();
+
+        if (_listener is not null)
+        {
+            _listener.OnBulkBuilderCompleted(new Abstractions.BulkBuilderCompletedEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                TripleCount: _tripleCount,
+                AtomOccurrenceCount: _globalIdx,
+                SpillCount: _chunkFiles.Count,
+                ParserBlockedOnSpill: _parserBlockedDuration,
+                TotalParserWallClock: _parserWallClock.Elapsed));
+        }
 
         // MergeAndWrite consumes the chunks, dedupes, assigns dense atom IDs, writes
         // .atoms + .offsets, and (when resolveSorter is non-null) emits resolution
@@ -292,6 +441,21 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        // ADR-037 Decision 5: shut the worker down cleanly when Dispose runs without
+        // a preceding Finalize (cancellation or error path). CompleteAdding lets the
+        // worker drain any in-flight job and exit; the 30 s wait is a safety bound for
+        // the largest plausible chunk write — well above measured spill durations.
+        if (!_finalized && _spillQueue is not null)
+        {
+            // CompleteAdding here is safe — Dispose runs on the parser/owner thread,
+            // never concurrently with Add (the caller has stopped using the builder).
+            try { _spillQueue.CompleteAdding(); } catch { /* already completed */ }
+            try { _workerTask?.Wait(TimeSpan.FromSeconds(30)); }
+            catch { /* worker fault or timeout — nothing actionable in Dispose */ }
+        }
+        _spillQueue?.Dispose();
+        _faultCts?.Dispose();
 
         // Disk-backed AssignedIds owns an ExternalSorter with its own tempDir under _tempDir;
         // dispose it first so its tempDir is cleaned before _tempDir's recursive delete.

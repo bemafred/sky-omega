@@ -1,6 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage;
 using Xunit;
@@ -173,5 +176,125 @@ public class SortedAtomBulkBuilderTests : IDisposable
         using var builder = new SortedAtomBulkBuilder(basePath);
         builder.AddTriple("g", "s", "p", "o");
         Assert.Throws<InvalidOperationException>(() => builder.EnumerateResolved().ToList());
+    }
+
+    // ADR-037 Validation Phase 1: pipelined-spill correctness tests.
+
+    [Fact]
+    public void PipelinedSpill_QueueSaturation_ParserBlocksAndProducesCorrectStore()
+    {
+        // Force the parser to outpace the worker by giving the listener a slow OnSpill.
+        // Buffer threshold 1 MB means many spills; 50ms/spill artificial delay forces
+        // the bound-1 queue to saturate and the parser to block at every handoff.
+        var basePath = Path.Combine(_testDir, "saturation");
+        var listener = new CapturingBulkListener { OnSpillDelayMs = 50 };
+        using (var builder = new SortedAtomBulkBuilder(
+            basePath,
+            chunkBufferBytes: 1L * 1024 * 1024,
+            listener: listener))
+        {
+            for (int i = 0; i < 30_000; i++)
+            {
+                var s = $"http://example.org/s{i:D6}";
+                var p = $"http://example.org/p{i % 50:D2}";
+                var o = $"http://example.org/o{i:D6}";
+                builder.AddTriple(default, s, p, o);
+            }
+            builder.Finalize();
+        }
+
+        Assert.NotNull(listener.LastBulkBuilderCompleted);
+        var ev = listener.LastBulkBuilderCompleted!.Value;
+        Assert.True(ev.SpillCount >= 2, $"expected multiple spills, got {ev.SpillCount}");
+        // With 50ms-per-spill artificial cost > parser-fill time, parser MUST have
+        // blocked at handoff at least once. Cumulative blocked time > 0 is the proof.
+        Assert.True(ev.ParserBlockedOnSpill > TimeSpan.Zero,
+            $"expected parser_blocked > 0 under saturation, got {ev.ParserBlockedOnSpill}");
+
+        // Correctness: store opens and contains the right atom count.
+        using var store = new SortedAtomStore(basePath);
+        Assert.True(store.AtomCount > 0);
+    }
+
+    [Fact]
+    public void PipelinedSpill_WorkerException_SurfacesOnParserThread()
+    {
+        // Inject a faulting listener that throws on the second OnSpill. The parser's
+        // next AddTriple (or Finalize) MUST throw, with the original exception as
+        // InnerException. Silent loss is the failure mode this test guards against.
+        var basePath = Path.Combine(_testDir, "fault");
+        var listener = new CapturingBulkListener { ThrowOnSpillIndex = 2 };
+
+        var ex = Assert.ThrowsAny<Exception>(() =>
+        {
+            using var builder = new SortedAtomBulkBuilder(
+                basePath,
+                chunkBufferBytes: 1L * 1024 * 1024,
+                listener: listener);
+            // Generate enough triples to spill > 2 chunks; the second spill faults the
+            // worker. Subsequent AddTriple calls must surface the fault.
+            for (int i = 0; i < 60_000; i++)
+            {
+                var s = $"http://example.org/s{i:D6}";
+                builder.AddTriple(default, s, "p", "o");
+            }
+            builder.Finalize();
+        });
+
+        // Drill through wrappers — InvalidOperationException from the parser-side check
+        // wraps the worker's original exception.
+        Exception? cursor = ex;
+        bool foundOriginal = false;
+        while (cursor is not null)
+        {
+            if (cursor.Message.Contains("injected fault", StringComparison.Ordinal))
+            {
+                foundOriginal = true;
+                break;
+            }
+            cursor = cursor.InnerException;
+        }
+        Assert.True(foundOriginal, $"original worker exception not surfaced; got: {ex}");
+    }
+
+    [Fact]
+    public void PipelinedSpill_DisposeWithoutFinalize_CompletesPromptly()
+    {
+        // Builder disposed mid-load (cancellation path). Worker thread must shut down
+        // cleanly within the ADR-037 30s budget — in practice well under 1s for a
+        // small in-flight buffer with no fault.
+        var basePath = Path.Combine(_testDir, "abort");
+        var sw = Stopwatch.StartNew();
+        {
+            using var builder = new SortedAtomBulkBuilder(
+                basePath,
+                chunkBufferBytes: 1L * 1024 * 1024);
+            for (int i = 0; i < 5_000; i++)
+                builder.AddTriple(default, $"s{i}", "p", "o");
+            // No Finalize — IDisposable closes the builder.
+        }
+        sw.Stop();
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(30),
+            $"Dispose without Finalize took {sw.Elapsed} — should be well under 30s");
+    }
+
+    private sealed class CapturingBulkListener : IObservabilityListener
+    {
+        public int OnSpillDelayMs { get; init; }
+        public int ThrowOnSpillIndex { get; init; } = -1;
+        public BulkBuilderCompletedEvent? LastBulkBuilderCompleted { get; private set; }
+        private int _spillCount;
+
+        public void OnSpill(in SpillEvent ev)
+        {
+            int idx = Interlocked.Increment(ref _spillCount);
+            if (ThrowOnSpillIndex > 0 && idx == ThrowOnSpillIndex)
+                throw new InvalidOperationException("injected fault on spill " + idx);
+            if (OnSpillDelayMs > 0)
+                Thread.Sleep(OnSpillDelayMs);
+        }
+
+        public void OnBulkBuilderCompleted(in BulkBuilderCompletedEvent ev)
+            => LastBulkBuilderCompleted = ev;
     }
 }

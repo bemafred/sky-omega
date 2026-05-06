@@ -363,6 +363,27 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
             json.WriteNumber("bytes_written", ev.BytesWritten);
             json.WriteNumber("sort_ms", ev.SortDuration.TotalMilliseconds);
             json.WriteNumber("write_ms", ev.WriteDuration.TotalMilliseconds);
+            json.WriteNumber("queue_depth_at_handoff", ev.QueueDepthAtHandoff);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnBulkBuilderCompleted(in BulkBuilderCompletedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "bulk_builder_completed", "event", ev.Timestamp);
+            json.WriteNumber("triple_count", ev.TripleCount);
+            json.WriteNumber("atom_occurrence_count", ev.AtomOccurrenceCount);
+            json.WriteNumber("spill_count", ev.SpillCount);
+            json.WriteNumber("parser_blocked_on_spill_ms", ev.ParserBlockedOnSpill.TotalMilliseconds);
+            json.WriteNumber("total_parser_wall_clock_ms", ev.TotalParserWallClock.TotalMilliseconds);
+            double blockedFraction = ev.TotalParserWallClock.TotalMilliseconds > 0
+                ? ev.ParserBlockedOnSpill.TotalMilliseconds / ev.TotalParserWallClock.TotalMilliseconds
+                : 0.0;
+            json.WriteNumber("parser_blocked_fraction", blockedFraction);
             json.WriteEndObject();
         }
         WriteBufferedLine(buffer);

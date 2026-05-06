@@ -19,6 +19,14 @@ namespace SkyOmega.Mercury.Abstractions;
 /// hot threads, see the bounded-channel path on <c>JsonlMetricsListener</c>.
 /// </para>
 /// <para>
+/// <b>Multi-thread invocation (ADR-037).</b> With pipelined spill, listener methods can
+/// be invoked from either the parser thread or the bulk-builder's spill worker thread
+/// concurrently. Specifically, <see cref="OnSpill"/> fires from the worker; other bulk
+/// methods (<see cref="OnRunConfiguration"/>, <see cref="OnBulkBuilderCompleted"/>,
+/// <see cref="OnMergeProgress"/>, <see cref="OnMergeCompleted"/>) fire from the parser
+/// thread. Implementations must serialize their own state.
+/// </para>
+/// <para>
 /// All events carry a <see cref="DateTimeOffset"/> timestamp. Schema version is enforced
 /// by the JSONL writer (Decision 4); listener implementations that emit elsewhere are
 /// responsible for their own versioning.
@@ -77,6 +85,13 @@ public interface IObservabilityListener
 
     /// <summary>One-shot end-of-merge summary with full pool stats and totals.</summary>
     void OnMergeCompleted(in MergeCompletedEvent ev) { }
+
+    /// <summary>
+    /// One-shot end-of-bulk-builder summary emitted at <c>SortedAtomBulkBuilder.Finalize</c>,
+    /// just before <c>MergeAndWrite</c> begins. ADR-037: carries
+    /// <c>ParserBlockedOnSpill</c> as the load-bearing pipelined-spill measurement.
+    /// </summary>
+    void OnBulkBuilderCompleted(in BulkBuilderCompletedEvent ev) { }
 
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }

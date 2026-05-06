@@ -42,9 +42,14 @@ public readonly record struct MergePoolState(
 
 /// <summary>
 /// Per-chunk spill in <c>SortedAtomBulkBuilder</c>. One record per <c>SpillOneChunk</c>
-/// call — directly measures the parser-blocking cost (sibling limit:
-/// <c>spill-blocks-parser.md</c>) and lets us decide on pipelined-spill from data
-/// rather than projection.
+/// call — directly measures the inherent spill cost (sort + write per chunk).
+/// <para>
+/// <c>QueueDepthAtHandoff</c> is the load-bearing pipelined-spill tuning measurement
+/// (ADR-037 Decision 8): the depth of the worker handoff queue observed by the parser
+/// immediately before the parser's <c>Add</c> call. Steady-state 0 → bound-1 queue
+/// is sufficient and parser is never blocked. Values > 0 indicate the worker is behind
+/// the parser and the bound should be increased.
+/// </para>
 /// </summary>
 public readonly record struct SpillEvent(
     DateTimeOffset Timestamp,
@@ -52,7 +57,8 @@ public readonly record struct SpillEvent(
     int RecordCount,
     long BytesWritten,
     TimeSpan SortDuration,
-    TimeSpan WriteDuration);
+    TimeSpan WriteDuration,
+    int QueueDepthAtHandoff);
 
 /// <summary>
 /// Periodic progress emission from <c>MergeAndWrite</c> during k-way merge over
@@ -92,3 +98,20 @@ public readonly record struct MergeCompletedEvent(
     TimeSpan Duration,
     int ChunksDeleted,
     long ChunkBytesReclaimed);
+
+/// <summary>
+/// One-shot end-of-bulk-builder summary emitted at <c>SortedAtomBulkBuilder.Finalize</c>,
+/// just before <c>MergeAndWrite</c> begins. Carries the cumulative pipelined-spill
+/// measurements that aren't visible from per-spill <see cref="SpillEvent"/> alone:
+/// <c>ParserBlockedOnSpill</c> is the load-bearing claim from ADR-037 — the wall-time
+/// the parser thread spent waiting in <c>BlockingCollection.Add</c> for the worker to
+/// drain a slot. With pipelining successful, this drops to ≈ 0 vs the sequential
+/// version where it equaled <c>Σ(SortDuration + WriteDuration)</c>.
+/// </summary>
+public readonly record struct BulkBuilderCompletedEvent(
+    DateTimeOffset Timestamp,
+    long TripleCount,
+    long AtomOccurrenceCount,
+    int SpillCount,
+    TimeSpan ParserBlockedOnSpill,
+    TimeSpan TotalParserWallClock);
