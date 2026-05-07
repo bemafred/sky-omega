@@ -7,11 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## What's Next
 
-**Sky Omega 1.7.x** — Phase 7 performance rounds in flight. Phase 6 (21.3 B Wikidata Reference-profile end-to-end) **complete** as of 2026-04-26. Phase 7a metrics infrastructure (ADR-035) and Phase 7b BCL-only bz2 streaming (ADR-036) shipped as Completed; validated together at 1 B Reference on 2026-04-27. Phase 7c SortedAtomStore for Reference (ADR-034) in flight — Phase 1A through 1B-5c shipped; gradient validation pending. WDBench cold baseline against the hardened substrate (1.7.47) sealed 2026-04-30 — disclosure-marked baseline for Phase 7c optimization rounds.
+**Sky Omega 1.7.x** — Round 2 substrate performance work in flight. Cycle 8 (1.7.48, 2026-05-06) closed ADR-034 Phase 1 with the first successful 21.3 B Reference + Sorted bulk-load + rebuild. Round 2 #2 (cleanup hook, 1.7.49) and Round 2 #1 (ADR-037 pipelined spill, 1.7.50) both shipped 2026-05-06; cycle 9 21.3 B run launched 2026-05-06 21:30 CEST on 1.7.50 — production validation of ADR-037 (~5 h parser wall-clock saved at scale) and the cleanup hook (3.6 TB reclaimed at end-of-merge instead of end-of-run). At 5 h elapsed cycle 9 holds ~640 K triples/sec on the parser vs cycle 8's 415 K — pipelined-spill win tracks projection, no mid-run slowdown.
 
 **Sky Omega 1.8.0** — production hardening release per [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md). All six phases of the original roadmap shipped (ADR-028 rehash, ADR-029 profiles, ADR-030 measurement + Decision 5, ADR-031 Dispose gate, ADR-032 radix external sort, ADR-033 bulk-load radix). 1.8.0 will roll up the Phase 7 round series once Round 2 (atom-ID bit packing, hash-function quality) lands.
 
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
+
+---
+
+## [1.7.50] - 2026-05-06
+
+**Headline:** [ADR-037](docs/adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md) pipelined spill in `SortedAtomBulkBuilder`. 100 M Wikidata Reference + Sorted gradient: parser-blocked-on-spill drops from 95 s (33 % of parser wall-clock) to **0.44 ms (~0 %)** — a 216,000× reduction on the load-bearing metric. End-to-end wall-clock −25.6 % (285 s → 212 s). Queue depth steady-state 0 across all 18 handoffs (bound-1 sufficient). Merge phase unchanged within ±5 %.
+
+### Added
+
+- **`SortedAtomBulkBuilder` pipelined-spill architecture** (`src/Mercury/Storage/SortedAtomBulkBuilder.cs`). Single background worker thread drains a `BlockingCollection<SpillJob>` at `BoundedCapacity = 1`. Parser snapshots the full buffer, swaps in a fresh List, hands the snapshot to the worker via `Add` — after which the parser never touches the snapshot. Worker exclusively owns its in-flight buffer; runs sort + write on a separate core; accumulates output paths in `_workerChunkFiles`; merges those into the parser-owned `_chunkFiles` at `Finalize`. With cycle 8's parser-fill ~13 s/chunk vs sort+write ~7–8 s/chunk, queue depth stays at 0 — the parser never blocks, exactly the falsifiable hypothesis ADR-037 stated.
+- **Worker-fault propagation via `CancellationTokenSource`** (Decision 4). Worker captures any sort/write/listener exception in `_workerException`, then cancels `_faultCts`. Parser's `Add(item, _faultCts.Token)` unblocks via `OperationCanceledException`; the catch path calls `ThrowIfWorkerFaulted` which throws `InvalidOperationException` with the original exception as `InnerException`. *Initial draft used `CompleteAdding` from the worker; that races with concurrent parser `Add` and throws `InvalidOperationException("CompleteAdding may not be used concurrently with additions to the collection")`* — caught immediately by the worker-exception unit test. Race fix recorded in Mercury as `pattern:cancellation-not-completeadding-for-fault-wake`.
+- **`ThrowIfWorkerFaulted` on every `AddOneAtomOccurrence`** (Decision 4). The check is the load-bearing concurrency-correctness bit — a silent loss of a sort/write exception would corrupt the resulting store. Surfaced on the parser's stack with the worker's exception chained, never lost.
+- **`Dispose` shutdown contract for cancellation paths** (Decision 5). When the bulk builder is disposed without `Finalize`, `Dispose` calls `CompleteAdding` on the queue (safe because Dispose runs on the parser/owner thread, never concurrently with Add) and waits up to 30 s for the worker to drain. Verified in unit test `PipelinedSpill_DisposeWithoutFinalize_CompletesPromptly` (in practice well under 1 s).
+- **`SpillEvent.QueueDepthAtHandoff`** field (`src/Mercury.Abstractions/SortedAtomMetrics.cs`). Captured by the parser immediately before `_spillQueue.Add` — the load-bearing measurement for tuning the bound. Steady-state 0 → bound-1 is sufficient and parser is never blocked. Cycle 9 will tell whether 21.3 B-scale composition holds the same.
+- **`BulkBuilderCompletedEvent`** (`src/Mercury.Abstractions/SortedAtomMetrics.cs`). One-shot end-of-bulk-builder summary emitted at `Finalize`, just before `MergeAndWrite` begins. Carries `TripleCount`, `AtomOccurrenceCount`, `SpillCount`, `ParserBlockedOnSpill` (cumulative wall-time across all `Add` calls), `TotalParserWallClock` (start of first `AddTriple` to start of `MergeAndWrite`). With pipelining successful, `ParserBlockedOnSpill` drops to ≈ 0 vs the sequential version where it equaled `Σ(SortDuration + WriteDuration)`.
+- **`IObservabilityListener.OnBulkBuilderCompleted`** (default no-op). The interface contract docstring now states explicitly that `OnSpill` fires from the worker thread while other bulk methods fire from the parser thread — ADR-037 Decision 6. `JsonlMetricsListener` is thread-safe via its existing internal bounded channel.
+- **`docs/validations/adr-037-pipelined-spill-gradient-2026-05-06.md`** — A/B at 1 M / 10 M / 100 M against the 1.7.49 baseline. Headline numbers, queue-depth distribution (`{0: 18}` at 100 M), per-spill cost A/B (sort total +43 %, write total +60 % under pipelining — explained as expected: per-spill cost rises slightly under cross-thread contention but is hidden behind parser-fill, so net wall-clock drops), memory cost (~2.5× working set from holding the worker's snapshot concurrent with the parser's accumulator).
+- **Three pipelined-spill unit tests** (`tests/Mercury.Tests/Storage/SortedAtomBulkBuilderTests.cs`):
+  - `PipelinedSpill_QueueSaturation_ParserBlocksAndProducesCorrectStore` — 50 ms-delayed listener forces the worker behind; asserts `parser_blocked > 0` and store correctness.
+  - `PipelinedSpill_WorkerException_SurfacesOnParserThread` — injected fault on the 2nd `OnSpill`; asserts the original surfaces on the parser stack with `InnerException` chain intact. Regression guard for the `CompleteAdding`-race fix.
+  - `PipelinedSpill_DisposeWithoutFinalize_CompletesPromptly` — disposes mid-load; asserts shutdown < 30 s budget (in practice well under 1 s).
+
+### Documented
+
+- **[`docs/limits/spill-blocks-parser.md`](docs/limits/spill-blocks-parser.md) Triggered → Resolved (gradient validated, 21.3 B pending).** ADR-037 closes the cycle 8-projected ~5 h parser wall-clock reduction at gradient scale; cycle 9 closes the production claim.
+- **[`docs/limits/bz2-decompression-single-threaded.md`](docs/limits/bz2-decompression-single-threaded.md) — 2026-05-06 wiring experiment recorded.** After 1.7.50 landed, parser consumption rose to ~31 MB/s at 100 M — close to the 33 MB/s single-threaded bz2 ceiling. Hypothesis: wire `ParallelBZip2DecompressorStream` (workerCount=4) into `LoadFileAsync`'s bulk-load path to restore producer-side headroom. **Measured:** all four metrics regressed (end-to-end +11 % slower, parser_blocked 25,000× worse, merge phase +54 %, RSS 7.5×). Reverted before shipping. Likely cause: thread + memory-bandwidth contention with the spill worker; parallel decoder's output side appears un-back-pressured. Recorded in Mercury as `pattern:component-vs-system-optimization` — isolated-component speedups (ADR-036 Phase 2's clean 2.62× bz2 measurement) are not predictive of system-level effect when components share scarce host resources.
+
+### Behavioral discipline (memory + Mercury)
+
+- **`feedback_gradient_scope.md`** — gradient validates performance changes; correctness/disk-pressure/observability changes need unit test + production-scale validation, not gradient theatre. Caught 2026-05-06 after running the gradient on a `File.Delete`-in-finally cleanup hook with no perf signal to detect.
+- Mercury observation `obs:adr037-pipelined-spill-shipped-2026-05-06`: 100 M gradient confirms the hypothesis (`teaches pattern:cancellation-not-completeadding-for-fault-wake`).
+- Mercury observation `obs:parallel-bz2-bulk-load-regresses-2026-05-06` + `pattern:component-vs-system-optimization`: end-to-end measurement at composition scale is the load-bearing protocol.
+
+---
+
+## [1.7.49] - 2026-05-06
+
+**Headline:** Round 2 #2 — phase-transition cleanup hook in `SortedAtomStoreExternalBuilder.MergeAndWrite`. Cycle 8 surfaced that consumed occurrence chunks were held until run end (3.6 TB at 21.3 B), putting the GSPO drain phase within ~600 GB of `MinimumFreeDiskSpace` abort on a 7.3 TB host. Smaller hosts would have aborted mid-flight. Fix: delete chunk files in the merge `finally` block, immediately after readers Dispose. `MergeCompletedEvent` extended with `ChunksDeleted` + `ChunkBytesReclaimed` for cycle 9+ observability.
+
+### Added
+
+- **Phase-transition cleanup hook** (`src/Mercury/Storage/SortedAtomStoreExternalBuilder.cs`, `MergeAndWrite` finally block). After the merge loop completes and readers Dispose (each reader's Dispose calls `_pool.Drop(_path)` which closes the underlying FD), the chunk files are `File.Delete`'d. Best-effort try/catch — the caller's tempDir cleanup catches any stragglers. Releases disk pressure immediately at end-of-merge instead of waiting for end-of-run.
+- **`MergeCompletedEvent.ChunksDeleted` + `ChunkBytesReclaimed`** (`src/Mercury.Abstractions/SortedAtomMetrics.cs`) — the cleanup is observable from JSONL without re-running with extra logging. JSONL emits `chunks_deleted` and `chunk_bytes_reclaimed` fields on `merge_completed` events.
+- **Unit test `MergeAndWrite_DeletesConsumedChunks_AndReportsCounts`** (`tests/Mercury.Tests/Storage/SortedAtomStoreExternalBuilderTests.cs`) — uses a `CapturingMergeListener` to verify that `ChunkCount == ChunksDeleted` post-merge AND that the `occurrences/` filesystem directory is empty.
+- **`docs/validations/intermediate-cleanup-gradient-2026-05-06.md`** — 1 M / 10 M / 100 M JSONL artefacts confirming counter wiring. Reframed as smoke + observability check, not perf gradient (the change is a `File.Delete` loop in a `finally`, off the hot path; running the gradient was over-scoped for the change class — surfaced the `feedback_gradient_scope` discipline).
+
+### Documented
+
+- **[`docs/limits/intermediate-cleanup-deferred-to-run-end.md`](docs/limits/intermediate-cleanup-deferred-to-run-end.md) Triggered → Resolved (in-flight; production validation = cycle 9).**
 
 ---
 
