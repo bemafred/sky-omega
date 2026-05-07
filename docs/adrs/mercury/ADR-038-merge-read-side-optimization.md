@@ -97,6 +97,40 @@ The architectural insight is that this transforms the access pattern *from the k
 
 Compression first (it's a chunk file format change; small implementation, big leverage on cache-fit). Frontier cache second (it's a `ChunkReader` behavioral change; depends on chunk format being stable). Both ship in sequence, gradient-validated independently before compose-validation.
 
+### Interaction with existing ADR-034 Round 2 output compression
+
+The two compressions operate on independent sort orders and do not interfere. ADR-034 Round 2 prefix-compresses the output `atoms.atoms` based on *global* sort order across all chunks (post-dedup). ADR-038 Part 1 prefix-compresses each intermediate chunk based on *chunk-local* sort order. Both work because Wikidata URIs share long base-path prefixes either way, but the prefix-share contexts are independent.
+
+The merge loop receives full reconstructed bytes from `ChunkReader.MoveNext` — same interface as today. The output compression's per-record `prefix_len` calculation is unchanged, and its measured ratio (53 % on `atoms.atoms` at cycle 8) should be preserved.
+
+### Chunk format and pool eviction (the new concern)
+
+Today's chunk format is *self-synchronizing per record*: `[int32 length][int64 InputIdx][raw bytes]`. On `BoundedFileStreamPool` eviction-and-re-acquire, `ChunkReader` simply seeks to the saved `_offset` and the next `Read` decodes correctly without prior context.
+
+The compressed format introduces stateful decoding: `prevBytes` (the previous record's reconstructed bytes) is needed to compute the next record's full bytes from a non-anchor `[prefix_len][suffix]`. State must survive across `MoveNext` calls, and crucially, across pool eviction-and-re-acquire.
+
+**Mitigation: per-chunk anchor offset table (sidecar).**
+
+When a chunk is sealed (parser-side spill complete), write a small sidecar `chunk-NNNNNN.idx` containing `[anchor_record_index, file_offset]` pairs — one entry per anchor (every 64 records).
+
+- Storage: at 21.3 B with 3,923 chunks averaging ~17 M records each, anchors-per-chunk ≈ 266 K, sidecar size ≈ 4 MB per chunk → ~16 GB total. Cleaned up by the same end-of-merge cleanup hook as the chunk files.
+- Recovery: on re-acquire after eviction, binary-search the sidecar for the largest anchor offset ≤ saved `_offset`. Seek to anchor, reset `prevBytes`, replay forward at most 63 records to reach `_offset`. O(log) lookup, O(1) bounded reconstruction.
+- Discipline: sidecar is written atomically with the chunk file — partial sidecar means partial chunk; the cleanup hook treats them as a unit.
+
+**Alternatives considered and rejected:**
+
+- *Magic-byte synchronization markers* — every anchor begins with a fixed 4-byte sentinel, scan-backward to recover. Cheaper to write but requires linear scan on recovery, and false positives if record bytes happen to contain the magic. Sidecar is strictly better for the cost.
+- *Reset `prevBytes` on every record* — kills compression ratio. Not viable.
+- *No sidecar, scan from chunk start on re-acquire* — re-acquire becomes O(N) in chunk size; pathological under any pool-eviction pressure.
+
+**Scope discipline — atom-merge vs trigram drain:**
+
+For the atom-merge path specifically, cycle 8 + cycle 9 measurements show **zero evictions in practice** (3,923 chunks << 8K pool cap). The eviction recovery path is structurally exercised only at scales beyond 21.3 B Wikidata. We *could* ship ADR-038 Part 1 for atom-merge without the sidecar and accept that re-acquire-after-eviction would re-scan from chunk start (rare path; performance bug, not correctness bug).
+
+For the trigram drain (a follow-on ADR if ADR-038 extends there), cycle 8 measured 10,456 chunks > 8K cap → 23 % miss rate, ~3.4 h overhead. There the sidecar is mandatory; without it, the eviction recovery cost would dominate.
+
+**Decision:** ship the sidecar for atom-merge from the start, even though it's not load-bearing at current scale. Reasons: (a) avoids a future-scale performance cliff that's invisible until 50 B+ runs hit it; (b) makes the chunk format identical for any future application of the same compression to trigram or other ExternalSorter-backed paths — a single format spec, not two; (c) ~16 GB sidecar cost on a host that already commits 4 TB to chunks is negligible. The "ship without sidecar" alternative trades clarity for marginal storage savings; not worth it.
+
 ## Validation protocol
 
 ### Unit tests
