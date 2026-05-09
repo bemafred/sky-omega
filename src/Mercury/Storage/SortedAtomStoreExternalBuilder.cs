@@ -290,26 +290,116 @@ internal static class SortedAtomStoreExternalBuilder
         });
         var sortDuration = System.Diagnostics.Stopwatch.GetElapsedTime(sortStart);
 
+        // ADR-038 Part 1: prefix-compressed chunk records.
+        // Per record: [byte prefix_len][varint InputIdx][varint suffix_length][suffix bytes].
+        // Anchor every ChunkAnchorInterval records — anchors have prefix_len=0 and
+        // carry full bytes (suffix_length == bytes.Length). Non-anchor records carry
+        // only the bytes that differ from the previous record's full bytes.
+        //
+        // Sidecar (chunk-NNNNNN.idx): per-anchor file offset. Enables seek-to-anchor
+        // recovery on BoundedFileStreamPool eviction-and-re-acquire (the offset of
+        // record k*ChunkAnchorInterval lives at sidecar entry k). Without the sidecar,
+        // re-acquire would O(N) scan from chunk start to reconstruct prevBytes context.
         var path = Path.Combine(tempDir, $"chunk-{chunkIndex:D6}.bin");
+        var sidecarPath = Path.Combine(tempDir, $"chunk-{chunkIndex:D6}.idx");
         long bytesWritten = 0;
+        var anchorOffsets = new List<long>(buffer.Count / ChunkAnchorInterval + 1);
         var writeStart = System.Diagnostics.Stopwatch.GetTimestamp();
         using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 64 * 1024, FileOptions.SequentialScan))
         {
-            // Record format: int32 length + int64 input-idx + raw bytes. (12-byte header.)
-            // InputIdx widened from int32 to int64 to support >500M-triple bulk loads
-            // (1B triples × 4 atoms = 4B occurrences exceeds int32 max).
-            Span<byte> header = stackalloc byte[12];
-            foreach (var (bytes, inputIdx) in buffer)
+            byte[]? prevBytes = null;
+            Span<byte> varintBuf = stackalloc byte[10];
+            for (int i = 0; i < buffer.Count; i++)
             {
-                BinaryPrimitives.WriteInt32LittleEndian(header.Slice(0, 4), bytes.Length);
-                BinaryPrimitives.WriteInt64LittleEndian(header.Slice(4, 8), inputIdx);
-                fs.Write(header);
-                fs.Write(bytes);
-                bytesWritten += 12 + bytes.Length;
+                var (bytes, inputIdx) = buffer[i];
+                bool isAnchor = (i % ChunkAnchorInterval) == 0;
+                int prefixLen = 0;
+                if (!isAnchor && prevBytes is not null)
+                {
+                    // ComputeLongestCommonPrefix bounded at 255 — fits in single byte.
+                    prefixLen = ComputeLongestCommonPrefix(prevBytes, bytes, maxLen: 255);
+                }
+                int suffixLen = bytes.Length - prefixLen;
+
+                if (isAnchor) anchorOffsets.Add(fs.Position);
+
+                // [byte prefix_len]
+                fs.WriteByte((byte)prefixLen);
+                bytesWritten++;
+                // [varint InputIdx]  (zigzag not needed — InputIdx is non-negative, monotonic)
+                int n = WriteVarUInt64(varintBuf, (ulong)inputIdx);
+                fs.Write(varintBuf.Slice(0, n));
+                bytesWritten += n;
+                // [varint suffix_length]
+                n = WriteVarUInt64(varintBuf, (ulong)suffixLen);
+                fs.Write(varintBuf.Slice(0, n));
+                bytesWritten += n;
+                // [suffix bytes]
+                if (suffixLen > 0)
+                    fs.Write(bytes, prefixLen, suffixLen);
+                bytesWritten += suffixLen;
+
+                prevBytes = bytes;
+            }
+        }
+        // Sidecar: [magic(4)][version(4)][anchor_count(4)][anchor_count × 8 bytes offsets]
+        using (var sfs = new FileStream(sidecarPath, FileMode.Create, FileAccess.Write, FileShare.None, 4 * 1024, FileOptions.SequentialScan))
+        {
+            Span<byte> hdr = stackalloc byte[12];
+            BinaryPrimitives.WriteUInt32BigEndian(hdr.Slice(0, 4), ChunkSidecarMagic);
+            BinaryPrimitives.WriteUInt32LittleEndian(hdr.Slice(4, 4), ChunkSidecarVersion);
+            BinaryPrimitives.WriteUInt32LittleEndian(hdr.Slice(8, 4), (uint)anchorOffsets.Count);
+            sfs.Write(hdr);
+            Span<byte> off = stackalloc byte[8];
+            foreach (var pos in anchorOffsets)
+            {
+                BinaryPrimitives.WriteInt64LittleEndian(off, pos);
+                sfs.Write(off);
             }
         }
         var writeDuration = System.Diagnostics.Stopwatch.GetElapsedTime(writeStart);
         return new SpillResult(path, bytesWritten, sortDuration, writeDuration);
+    }
+
+    /// <summary>
+    /// Write a 64-bit unsigned integer as LEB128 varint into the destination span.
+    /// Returns the number of bytes written (1..10). Caller must provide ≥ 10 bytes.
+    /// Standard LEB128: each byte holds 7 data bits + 1 continuation bit (high bit).
+    /// </summary>
+    internal static int WriteVarUInt64(Span<byte> dest, ulong value)
+    {
+        int written = 0;
+        while (value >= 0x80)
+        {
+            dest[written++] = (byte)((value & 0x7F) | 0x80);
+            value >>= 7;
+        }
+        dest[written++] = (byte)value;
+        return written;
+    }
+
+    /// <summary>
+    /// Read a 64-bit unsigned integer LEB128 varint. Returns the value;
+    /// <paramref name="bytesConsumed"/> reports how many bytes were read.
+    /// Throws <see cref="InvalidDataException"/> on a malformed varint (more than 10 bytes).
+    /// </summary>
+    internal static ulong ReadVarUInt64(ReadOnlySpan<byte> source, out int bytesConsumed)
+    {
+        ulong value = 0;
+        int shift = 0;
+        int i = 0;
+        while (i < source.Length && i < 10)
+        {
+            byte b = source[i++];
+            value |= ((ulong)(b & 0x7F)) << shift;
+            if ((b & 0x80) == 0)
+            {
+                bytesConsumed = i;
+                return value;
+            }
+            shift += 7;
+        }
+        throw new InvalidDataException("Malformed LEB128 varint (truncated or > 10 bytes)");
     }
 
     /// <summary>
@@ -325,6 +415,21 @@ internal static class SortedAtomStoreExternalBuilder
     /// large enough to keep the per-record dispatch overhead negligible.
     /// </summary>
     public const long MergeProgressEmissionInterval = 100_000_000L;
+
+    /// <summary>
+    /// ADR-038 Part 1: anchor every N records in the chunk file. Anchors carry full
+    /// bytes (prefix_len = 0); non-anchor records carry only the differing suffix
+    /// vs the previous record's reconstructed bytes. N = 64 chosen to bound
+    /// reconstruction-on-eviction cost (worst case 63 records) while keeping anchor
+    /// overhead small (~1.6% of records are full).
+    /// </summary>
+    internal const int ChunkAnchorInterval = 64;
+
+    /// <summary>Sidecar file format magic: "IDX\0" big-endian.</summary>
+    private const uint ChunkSidecarMagic = 0x49445800u;
+
+    /// <summary>Sidecar file format version. Bump on incompatible change.</summary>
+    private const uint ChunkSidecarVersion = 1;
 
     internal static SortedAtomStoreBuilder.BuildResult MergeAndWrite(
         string baseFilePath, List<string> chunkFiles, long inputCount,
@@ -466,6 +571,19 @@ internal static class SortedAtomStoreExternalBuilder
                     chunksDeleted++;
                 }
                 catch { /* best effort — caller's tempDir cleanup catches stragglers */ }
+                // ADR-038 Part 1: also delete the per-chunk sidecar (chunk-NNNNNN.idx).
+                // Sidecar carries anchor offsets for re-acquire-after-eviction; once the
+                // chunk is consumed, the sidecar is no longer referenced.
+                var sidecarPath = Path.ChangeExtension(path, ".idx");
+                try
+                {
+                    if (File.Exists(sidecarPath))
+                    {
+                        chunkBytesReclaimed += new FileInfo(sidecarPath).Length;
+                        File.Delete(sidecarPath);
+                    }
+                }
+                catch { /* best effort */ }
             }
         }
 
@@ -514,6 +632,17 @@ internal static class SortedAtomStoreExternalBuilder
         private readonly int _chunkIndex;
         private readonly BoundedFileStreamPool _pool;
         private long _offset;  // saved file position; restored on cache miss
+        // ADR-038 Part 1: prevBytes is the running-context for prefix-compressed records.
+        // Anchors (every ChunkAnchorInterval records) reset this to the anchor's full bytes.
+        // Re-acquire-after-eviction reuses _prevBytes if the pool kept the stream open.
+        // For true eviction recovery, the sidecar's anchor offsets allow seek-to-nearest-
+        // anchor + replay-up-to-_offset to rebuild _prevBytes correctly. Atom-merge at 21.3 B
+        // does not exercise eviction (3,923 chunks << 8 K pool cap) — sidecar exists for
+        // future trigram-drain extension; not used in atom-merge today.
+        private byte[]? _prevBytes;
+        // Read buffer for varint header (max 10 bytes prefix_len byte + 9 bytes varint InputIdx
+        // + 9 bytes varint suffix_length = ~19 bytes; round up to 32). Reused across MoveNext.
+        private readonly byte[] _headerBuf = new byte[32];
         public (byte[] Bytes, long InputIdx) Current { get; private set; }
         private bool _disposed;
 
@@ -538,23 +667,66 @@ internal static class SortedAtomStoreExternalBuilder
             var fs = _pool.Get(_path);
             if (fs.Position != _offset) fs.Position = _offset;
 
-            // Record format: int32 length + int64 input-idx + raw bytes (12-byte header).
-            Span<byte> header = stackalloc byte[12];
-            int read = fs.Read(header);
-            if (read < 12) return false;
+            // ADR-038 Part 1: prefix-compressed record format.
+            // [byte prefix_len][varint InputIdx][varint suffix_length][suffix bytes]
+            //
+            // Read up to 32 bytes opportunistically; varints are variable-length and
+            // we don't know record boundaries upfront. The reader unpicks the header
+            // from the buffer and seeks file position back to the suffix-data boundary.
+            int peekRead = fs.Read(_headerBuf, 0, _headerBuf.Length);
+            if (peekRead == 0) return false;
 
-            int length = BinaryPrimitives.ReadInt32LittleEndian(header.Slice(0, 4));
-            long inputIdx = BinaryPrimitives.ReadInt64LittleEndian(header.Slice(4, 8));
-            var bytes = new byte[length];
-            int got = 0;
-            while (got < length)
+            int hdrIdx = 0;
+            int prefixLen = _headerBuf[hdrIdx++];
+            ulong inputIdxRaw = ReadVarUInt64(_headerBuf.AsSpan(hdrIdx, peekRead - hdrIdx), out int idxBytes);
+            hdrIdx += idxBytes;
+            ulong suffixLenRaw = ReadVarUInt64(_headerBuf.AsSpan(hdrIdx, peekRead - hdrIdx), out int sufBytes);
+            hdrIdx += sufBytes;
+
+            int suffixLen = checked((int)suffixLenRaw);
+            // If we read past the suffix bytes, seek back so the next MoveNext starts
+            // at the next record header.
+            int totalRecordHeaderBytes = hdrIdx;
+
+            int fullLen = prefixLen + suffixLen;
+            var bytes = new byte[fullLen];
+            // Copy prefix from prevBytes (must be set unless this is an anchor record;
+            // anchor records have prefix_len == 0, so the prefix copy is a no-op).
+            if (prefixLen > 0)
             {
-                int n = fs.Read(bytes, got, length - got);
-                if (n == 0) throw new InvalidDataException($"Unexpected EOF in chunk {_chunkIndex}");
-                got += n;
+                if (_prevBytes is null || _prevBytes.Length < prefixLen)
+                    throw new InvalidDataException(
+                        $"Chunk {_chunkIndex} record at offset {_offset}: prefix_len={prefixLen} but prevBytes context insufficient");
+                Array.Copy(_prevBytes, 0, bytes, 0, prefixLen);
             }
+            // Copy suffix bytes — first from the peek buffer (whatever we already have),
+            // then read remaining from fs.
+            int suffixBytesInPeek = Math.Min(suffixLen, peekRead - totalRecordHeaderBytes);
+            if (suffixBytesInPeek > 0)
+                Array.Copy(_headerBuf, totalRecordHeaderBytes, bytes, prefixLen, suffixBytesInPeek);
+            int suffixRemaining = suffixLen - suffixBytesInPeek;
+            if (suffixRemaining > 0)
+            {
+                int got = 0;
+                while (got < suffixRemaining)
+                {
+                    int n = fs.Read(bytes, prefixLen + suffixBytesInPeek + got, suffixRemaining - got);
+                    if (n == 0) throw new InvalidDataException($"Unexpected EOF in chunk {_chunkIndex}");
+                    got += n;
+                }
+            }
+            else
+            {
+                // Suffix fit entirely in the peek buffer. Seek FileStream back to record-end
+                // so the next MoveNext starts at the next record's header byte.
+                int unconsumed = peekRead - totalRecordHeaderBytes - suffixLen;
+                if (unconsumed > 0)
+                    fs.Position -= unconsumed;
+            }
+
             _offset = fs.Position;
-            Current = (bytes, inputIdx);
+            _prevBytes = bytes;
+            Current = (bytes, (long)inputIdxRaw);
             return true;
         }
 

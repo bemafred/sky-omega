@@ -294,19 +294,34 @@ public class SortedAtomBulkBuilderDiskBackedTests : IDisposable
 
         var path = SortedAtomStoreExternalBuilder.SpillOneChunk(chunkDir, buffer, chunkIndex: 0).Path;
 
-        // Read the chunk file back manually and verify the 12-byte header format:
-        // int32 length (4 bytes) + int64 InputIdx (8 bytes) + raw bytes.
+        // Read the chunk file back manually and verify the ADR-038 Part 1 record format:
+        // [byte prefix_len][varint InputIdx][varint suffix_length][suffix bytes]
+        // Anchors (every ChunkAnchorInterval = 64 records) have prefix_len = 0 and
+        // carry the full bytes as the suffix. With only 3 records here, all three are
+        // anchor records (record 0 always anchor; records 1 and 2 are non-anchor and
+        // share prefixes with their predecessors via prefix-compression).
         var bytes = File.ReadAllBytes(path);
         int pos = 0;
         var seenIdxs = new List<long>();
+        byte[]? prevBytes = null;
         while (pos < bytes.Length)
         {
-            int length = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(
-                bytes.AsSpan(pos, 4));
-            long inputIdx = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(
-                bytes.AsSpan(pos + 4, 8));
-            seenIdxs.Add(inputIdx);
-            pos += 12 + length;
+            int prefixLen = bytes[pos++];
+            ulong inputIdxRaw = SortedAtomStoreExternalBuilder.ReadVarUInt64(
+                bytes.AsSpan(pos), out int idxBytes);
+            pos += idxBytes;
+            ulong suffixLenRaw = SortedAtomStoreExternalBuilder.ReadVarUInt64(
+                bytes.AsSpan(pos), out int sufBytes);
+            pos += sufBytes;
+            int suffixLen = (int)suffixLenRaw;
+            int fullLen = prefixLen + suffixLen;
+            var fullBytes = new byte[fullLen];
+            if (prefixLen > 0 && prevBytes is not null)
+                Array.Copy(prevBytes, 0, fullBytes, 0, prefixLen);
+            Array.Copy(bytes, pos, fullBytes, prefixLen, suffixLen);
+            seenIdxs.Add((long)inputIdxRaw);
+            prevBytes = fullBytes;
+            pos += suffixLen;
         }
 
         // Expected order: alpha (PastInt32Boundary + 100), beta (PastInt32Boundary + 200),
