@@ -53,6 +53,20 @@ Drop these from cycle 10 unless A and B come together fast and there's headroom 
 ## Sequencing
 
 ```
+Phase 0: Cognitive validation gradient (close the drought)
+  ├─ 1 M / 10 M / 100 M Cognitive bulk-load against latest-all.ttl.bz2
+  │   (same source as Reference gradients for clean comparison)
+  ├─ A/B against the 1.7.22 1B baseline (April 2026 — most recent
+  │   Cognitive measurement; substrate has shipped 10+ ADRs since)
+  ├─ Profile-agnostic shared infrastructure verified:
+  │   ADR-031 Dispose gate, ADR-028 atom-store rehash (Hash side),
+  │   ADR-035 Phase 7a metric channels, ADR-036 bz2 streaming,
+  │   property-path grammar refactor, cancellation gate
+  ├─ Implementation: 0 (pure measurement; no code changes)
+  ├─ Validation doc per gradient with per-scale wall-clock + state metrics
+  ├─ ~1-2 days at AI pace
+  └─ Closes docs/limits/cognitive-profile-validation-drought.md trigger
+
 Phase 1: Observability (A1, A2)
   ├─ Implementation: ~1-2 days at AI pace
   ├─ Unit tests + per-listener thread-safety checks
@@ -78,7 +92,42 @@ Phase 3: Cycle 10 production validation
   └─ Post-cycle attribution: read JSONL, decompose contributions per fix
 ```
 
-Total elapsed Phase 1 + Phase 2 + Phase 3 ≈ 1 week assuming dedicated execution.
+Total elapsed Phase 0 + Phase 1 + Phase 2 + Phase 3 ≈ 1 week + 1-2 days assuming dedicated execution.
+
+### Phase 0 — why before Phase 1?
+
+Phase 0 is *measurement*, not *implementation* — it exercises the existing 1.7.50 substrate against the Cognitive profile to close a documented validation drought. It is independent of cycle 10's perf changes (those are Reference-only: ADR-037 / ADR-038 / ADR-039 don't touch the `QuadStore.AddCurrentBatched` → `TemporalQuadIndex.InsertIntoLeaf` path Cognitive uses).
+
+Running it before Phase 1/2/3 has two benefits:
+1. **Catches Cognitive regressions before they compound.** If ADR-031 Dispose gate or ADR-028 rehash silently regressed Cognitive across the last weeks, we want to know before shipping more changes that share infrastructure.
+2. **Validates the cycle 10 plan's assumption** that Reference and Cognitive are independent code paths. If a Cognitive measurement shows unexpected interaction, that's a signal to revisit Phase 1/2 design.
+
+Phase 0 instrumentation alignment (see "Phase 0 metric coverage" subsection below):
+
+| Metric channel | Reference | Cognitive |
+|---|---|---|
+| LoadProgressMetrics | ✓ | ✓ |
+| RebuildPhaseMetrics / RebuildProgress / RebuildMetrics | ✓ | ✓ |
+| AtomStoreState (intern rate, load factor, probe distance) | ✓ (Sorted) | ✓ (Hash) |
+| AtomRehashEvent, AtomFileGrowthEvent | n/a (Sorted is sealed) | ✓ |
+| ProcessState (GC, RSS, LOH, disk-free) | ✓ | ✓ |
+| RunConfigurationEvent | ✓ | ✗ |
+| SpillEvent / BulkBuilderCompletedEvent | ✓ | ✗ (no `SortedAtomBulkBuilder` path) |
+| MergeProgressEvent / MergeCompletedEvent | ✓ | ✗ (no `MergeAndWrite` path) |
+
+Cognitive's instrumentation is the older Phase 7a baseline. Adequate for bulk-load throughput + rebuild measurement; lighter than Reference's cycle-7+ instrumentation because Cognitive doesn't go through the merge phase. No new instrumentation work required for Phase 0 — the metric channels already in place suffice.
+
+### Phase 0 falsification triggers
+
+- **1 M / 10 M Cognitive bulk-load wall-clock more than 1.5× slower than the 1.7.22 1B-extrapolation per-scale rate** → significant regression; pause cycle 10 perf work to investigate root cause first.
+- **AtomStoreState shows pathological probe distance (> 50, e.g. signs of hash drift)** → ADR-028 rehash regression; investigate before shipping more changes.
+- **Rebuild fails or returns wrong row counts on bound-term queries against the new store** → correctness regression; mandatory pivot.
+- **Otherwise (Cognitive holds within ~1.5× of historical performance + correctness)** → drought is closed; proceed to Phase 1.
+
+### Phase 0 — what's NOT included
+
+- **WDBench at 100 M Cognitive** is intentionally excluded. The harness runs unmodified, but at 100 M scale most queries match very few or zero rows, so the latency distribution is uninformative for perf comparison. Correctness signals (parser stability, cancellation contract, property-path execution) are useful but not sufficient justification for the ~3-4 hour run; the substrate-capability evidence already lives at 21.3 B Reference. Skip unless a specific Cognitive query-side concern surfaces.
+- **Truthy-subset ingest** is intentionally excluded. `latest-truthy.nt.bz2` would enable external comparability (QLever, Virtuoso, Blazegraph WDBench numbers are typically against truthy), but it's a publication-comparability question, not a cycle 10 gating question. Defer to a separate decision unless external publication is the immediate goal.
 
 ## Per-fix metric attribution discipline
 
