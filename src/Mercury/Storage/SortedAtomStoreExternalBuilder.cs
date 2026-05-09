@@ -616,6 +616,17 @@ internal static class SortedAtomStoreExternalBuilder
             ChunksDeleted: chunksDeleted,
             ChunkBytesReclaimed: chunkBytesReclaimed));
 
+        // ADR-039 / Phase 2 B3: build MPHF + translation table over the sealed
+        // atom set. Disabled when MERCURY_BUILD_MPHF env var is "0" — preserves
+        // backward-compatible behavior for callers that don't want the
+        // construction overhead, and lets the gradient A/B against no-MPHF
+        // baseline cleanly.
+        bool buildMphf = atomCount > 0 && Environment.GetEnvironmentVariable("MERCURY_BUILD_MPHF") != "0";
+        if (buildMphf)
+        {
+            BuildMphfFiles(baseFilePath, atomCount, listener);
+        }
+
         if (useDiskBacked)
         {
             // Finalize the resolver's spill so it's drainable. Caller wraps as DiskBackedAssignedIds.
@@ -627,6 +638,55 @@ internal static class SortedAtomStoreExternalBuilder
         }
 
         return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned);
+    }
+
+    /// <summary>
+    /// ADR-039 / Phase 2 B3: build MPHF + translation table after atoms.atoms +
+    /// atoms.offsets are sealed. Iterates atoms 1..N in sorted order, runs BBHash
+    /// construction, writes <c>baseFilePath.mphf</c> + <c>baseFilePath.idx</c>.
+    /// </summary>
+    /// <remarks>
+    /// One-time cost at bulk-load finalize. Atom bytes are read from the just-written
+    /// SortedAtomStore via <c>GetAtomSpan</c>; each call's span is valid only until the
+    /// next call, so we copy to byte[] for delegate consumption (the BBHash builder
+    /// performs multiple passes per level — caching here would help, but at 4 B atoms
+    /// the cache itself becomes large; tradeoff deferred to follow-up).
+    /// </remarks>
+    private static void BuildMphfFiles(string baseFilePath, long atomCount, Abstractions.IObservabilityListener? listener)
+    {
+        var mphfStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        // Open the just-written SortedAtomStore to iterate atoms in sorted order.
+        using var atoms = new SortedAtomStore(baseFilePath);
+        if (atoms.AtomCount != atomCount)
+            throw new InvalidOperationException(
+                $"BBHash construction: SortedAtomStore reports {atoms.AtomCount} atoms; expected {atomCount}");
+
+        var builder = new Mphf.BBHashBuilder();
+        // Wrap atom-bytes access in a delegate. Each call copies the span to a byte[] —
+        // BBHash builder makes multiple passes; the per-call alloc is unavoidable
+        // without restructuring. At gradient scales (≤ 100 M) the transient cost is
+        // bounded; at 4 B atoms a follow-up optimization (buffer reuse, batch
+        // iteration) is warranted.
+        var result = builder.Build(atomCount, sortedPos =>
+        {
+            var span = atoms.GetAtomSpan(sortedPos);
+            return span.ToArray();
+        });
+        var mphfBuildDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
+
+        var mphfPath = baseFilePath + ".mphf";
+        var idxPath = baseFilePath + ".idx";
+        result.Mphf.WriteTo(mphfPath);
+        Mphf.MphfTranslationTable.WriteTo(idxPath, result.Translation);
+
+        var mphfTotalDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
+        // Listener doesn't yet have a dedicated MPHF event — surface via stdout for
+        // initial validation runs. Add a structured event in a follow-up if cycle 10
+        // results warrant.
+        Console.Error.WriteLine(
+            $"[mphf] atoms={atomCount:N0} levels={result.Mphf.Levels.Length} " +
+            $"build_s={mphfBuildDuration.TotalSeconds:F2} total_s={mphfTotalDuration.TotalSeconds:F2} " +
+            $"mphf_bytes={new FileInfo(mphfPath).Length:N0} idx_bytes={new FileInfo(idxPath).Length:N0}");
     }
 
     /// <summary>

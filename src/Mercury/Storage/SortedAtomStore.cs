@@ -58,6 +58,14 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
     private MemoryMappedFile? _offsetsMap;
     private MemoryMappedViewAccessor? _offsetsAccessor;
     private long* _offsetsPtr;
+
+    // ADR-039 / Phase 2 B3: optional MPHF + translation table for O(1) lookup.
+    // Loaded at construction time if both atoms.mphf + atoms.idx exist alongside
+    // atoms.atoms / atoms.offsets. When loaded, GetAtomIdUtf8 dispatches through
+    // MPHF + verification instead of binary search. Older stores (without these
+    // files) keep using binary search — backward compatible.
+    private Mphf.BBHash? _mphf;
+    private Mphf.MphfTranslationTable? _mphfTable;
     private long _atomCount;
 
     private long _totalBytes;
@@ -130,6 +138,35 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
             // header; subtract atomCount to get the atom-content bytes (the value the
             // pre-compression API contract returned and tests assert against).
             _totalBytes = sentinel - _atomCount;
+        }
+
+        // ADR-039 / Phase 2 B3: optionally load MPHF + translation table for O(1)
+        // lookup. Both files must exist alongside atoms.atoms / atoms.offsets.
+        // Magic-byte mismatch / version mismatch → log + fall back to binary search
+        // (do NOT throw; older stores predate MPHF and continue working).
+        var mphfPath = _baseFilePath + ".mphf";
+        var idxPath = _baseFilePath + ".idx";
+        if (File.Exists(mphfPath) && File.Exists(idxPath))
+        {
+            try
+            {
+                _mphf = Mphf.BBHash.ReadFrom(mphfPath);
+                _mphfTable = Mphf.MphfTranslationTable.Open(idxPath);
+                if (_mphf.NumKeys != _atomCount)
+                {
+                    // Inconsistent state — disable MPHF, fall back to binary search.
+                    _mphf = null;
+                    _mphfTable?.Dispose();
+                    _mphfTable = null;
+                }
+            }
+            catch (InvalidDataException)
+            {
+                // Corrupt MPHF / idx — fall back silently.
+                _mphf = null;
+                _mphfTable?.Dispose();
+                _mphfTable = null;
+            }
         }
     }
 
@@ -251,9 +288,23 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
         if (utf8Value.IsEmpty) return 0;
         if (_atomCount == 0) return 0;
 
-        // Standard binary search on sorted UTF-8 byte order. log2(4 B) ≈ 32 probes
-        // at the Wikidata-scale upper bound; each probe is one offsets read + one
-        // SequenceCompareTo over the candidate atom's bytes.
+        // ADR-039 / Phase 2 B3: MPHF fast path. When atoms.mphf + atoms.idx are
+        // loaded, lookup is O(1) — one hash + one translation-table read + one
+        // verification (compare reconstructed atom bytes to query). Returns 0 for
+        // out-of-set keys (verification fails) — same semantic as binary search.
+        if (_mphf is not null && _mphfTable is not null)
+        {
+            long mphfPos = _mphf.Lookup(utf8Value);
+            if (mphfPos < 0 || mphfPos >= _mphfTable.EntryCount) return 0;
+            long sortedPos = _mphfTable.Get(mphfPos);
+            if (sortedPos < 1 || sortedPos > _atomCount) return 0;
+            var atomSpan = GetAtomSpanUnchecked(sortedPos);
+            return atomSpan.SequenceEqual(utf8Value) ? sortedPos : 0;
+        }
+
+        // Binary search fallback (used when MPHF is not loaded). log2(4 B) ≈ 32
+        // probes at the Wikidata-scale upper bound; each probe is one offsets
+        // read + one SequenceCompareTo over the candidate atom's bytes.
         long lo = 1;
         long hi = _atomCount;
         while (lo <= hi)
@@ -267,6 +318,9 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
         }
         return 0;
     }
+
+    /// <summary>True if MPHF + translation table are loaded and lookup uses O(1) path.</summary>
+    public bool HasMphf => _mphf is not null && _mphfTable is not null;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadOnlySpan<byte> GetAtomSpanUnchecked(long atomId)
@@ -369,6 +423,10 @@ internal sealed unsafe class SortedAtomStore : IAtomStore
         _offsetsAccessor?.Dispose();
         _offsetsMap?.Dispose();
         _offsetsFile?.Dispose();
+
+        _mphfTable?.Dispose();
+        _mphfTable = null;
+        _mphf = null;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
