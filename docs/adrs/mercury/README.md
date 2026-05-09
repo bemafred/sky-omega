@@ -36,6 +36,9 @@
 | [ADR-031](ADR-031-read-only-session-fast-path.md) | Read-Only Session Fast Path | Completed (Pieces 1+2; Piece 3 deferred to 031b) |
 | [ADR-032](ADR-032-radix-external-sort.md) | Radix External Sort for Index Rebuild | Completed |
 | [ADR-033](ADR-033-bulk-load-radix-external-sort.md) | Bulk-Load Radix External Sort | Completed |
-| [ADR-034](ADR-034-sorted-atom-store-for-reference.md) | SortedAtomStore for Reference Profile | Accepted |
+| [ADR-034](ADR-034-sorted-atom-store-for-reference.md) | SortedAtomStore for Reference Profile | Completed (Phase 1; Phase 2 BBHash → ADR-039) |
 | [ADR-035](ADR-035-phase7a-metrics-infrastructure.md) | Phase 7a Metrics Infrastructure | Completed |
-| [ADR-036](ADR-036-bzip2-streaming-decompression.md) | BZip2 Streaming Decompression | Accepted |
+| [ADR-036](ADR-036-bzip2-streaming-decompression.md) | BZip2 Streaming Decompression | Completed (Phase 1 + Phase 2 shipped) |
+| [ADR-037](ADR-037-pipelined-spill-bulk-builder.md) | Pipelined Spill in SortedAtomBulkBuilder | Completed (production-validated cycle 9, 2026-05-09) |
+| [ADR-038](ADR-038-merge-read-side-optimization.md) | Merge-phase Read-Side Optimization (intermediate prefix compression + frontier readahead) | Accepted |
+| [ADR-039](ADR-039-mphf-on-sealed-atom-set.md) | Minimal Perfect Hash Function (BBHash) over Sealed Atom Set | Proposed |
