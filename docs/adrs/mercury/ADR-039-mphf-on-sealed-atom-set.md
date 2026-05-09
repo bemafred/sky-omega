@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-09. Reviewed pre-implementation; four implementation-detail clarifications added below (verification cost, concurrency contract, construction memory budget, file-format magic bytes).
+**Status:** Accepted — 2026-05-09. Reviewed pre-implementation with four implementation-detail clarifications (verification cost, concurrency contract, construction memory budget, file-format magic bytes). Updated 2026-05-09 with a fifth clarification surfaced during B3 implementation start: BBHash maps each key to a unique position in `[0, N)` determined by its hash algorithm — *not* our sorted-position atom ID. A **translation table** `T[mphf_pos] = sorted_pos` is required to convert MPHF output to our atom ID. At 4 B atoms × uint32 entries = ~16 GB additional storage (mmap'd, paged-in on demand). See "Translation table" section below.
 
 ## Context
 
@@ -24,15 +24,20 @@ ADR-034's Phase 2 sketch named "BBHash MPHF on top — O(1) lookups with zero co
 
 A minimal perfect hash function over a fixed set S of N strings maps S → {0, 1, …, N−1} bijectively: every string in S maps to a unique integer in the dense range; no collisions. Construction is over the static set; once built, lookup is O(1) — typically 1–3 hash computations plus a small table read.
 
-**Important: MPHF does not validate input.** For a string s ∉ S, `mphf(s)` returns *some* integer in [0, N), colliding with a real atom. Lookup must therefore be:
+**Important: MPHF does not validate input.** For a string s ∉ S, `mphf(s)` returns *some* integer in [0, N), colliding with a real atom. Lookup also requires a **translation step** because MPHF's output position is determined by its hash algorithm — *not* our sorted-position atom ID. The complete lookup:
 
 ```
-id = mphf(query_string)
-if id < 0 or id ≥ N: return NotFound
-atom_bytes = SortedAtomStore.GetAtomString(id)   // O(1) — direct offset read
+mphf_pos = bbhash(query_string)
+if mphf_pos < 0 or mphf_pos ≥ N: return NotFound
+sorted_pos = atoms.idx[mphf_pos]                 // mmap read of translation table
+atom_bytes = SortedAtomStore.GetAtomString(sorted_pos)   // O(1) — direct offset read
 if atom_bytes != query_string: return NotFound
-return id
+return sorted_pos
 ```
+
+The translation table `atoms.idx` is built at MPHF-construction time: as the BBHash builder iterates the sorted atoms (by `sorted_pos = 1..N`), it computes `mphf_pos = bbhash(atom_bytes)` and assigns `atoms.idx[mphf_pos] = sorted_pos`. Storage: ~16 GB at 4 B atoms (uint32 entries, since `sorted_pos ≤ 4 B ≤ 2³²`).
+
+The translation table mmap'd from `atoms.idx` lets the kernel page in entries on demand — only hot atom IDs occupy RAM. On the lookup hot path, a uint32 read from a mmap'd file is one cache miss (~10 ns warm).
 
 The verification step (read `atoms.atoms[id]`, compare to `query_string`) costs **2 cache misses + 1 memcmp**: first the offset lookup in `atoms.offsets[id]`, then the byte read in `atoms.atoms` at that offset. Both reads land in OS page cache after warmup. Vs binary search's 32 of each. Still a big win — the constant factor improvement is ~10–16×, plus the algorithmic O(1) vs O(log N) shape benefits at scale.
 
@@ -68,15 +73,37 @@ Alternatives considered:
 - **Cuckoo / open-addressing hash table** — *not* an MPHF; allows collisions; needs probing. Equivalent to today's HashAtomStore. Rejected.
 - **Trie-based string-to-ID lookup** — O(string length) lookup, no hashing. Slower than MPHF; rejected.
 
-### Storage: sibling file `atoms.mphf`
+### Storage: sibling files `atoms.mphf` + `atoms.idx`
 
-A new file alongside `atoms.atoms` and `atoms.offsets`:
+New files alongside `atoms.atoms` and `atoms.offsets`:
 
 ```
 atoms.atoms     ← prefix-compressed atom bytes (existing)
 atoms.offsets   ← per-atom offset into atoms.atoms (existing)
-atoms.mphf      ← BBHash blob (new, ~800 MB at 4 B atoms)
+atoms.mphf      ← BBHash blob (~800 MB at 4 B atoms; ~1.6 bits/key)
+atoms.idx       ← translation table mphf_pos → sorted_pos (~16 GB at 4 B atoms; uint32 entries)
 ```
+
+### Translation table: `atoms.idx`
+
+Format: a contiguous packed array of `uint32` (little-endian). Entry `i` is the
+sorted-position atom ID for the key whose `bbhash() == i`. Entry size = 4 bytes.
+Total file size = `4 × N` bytes.
+
+| | Size at scale |
+|---|---:|
+| 1 M atoms | 4 MB |
+| 100 M atoms | 400 MB |
+| 1 B atoms | 4 GB |
+| 4 B atoms (21.3 B Wikidata) | **~16 GB** |
+
+Mmap'd at store-open. Cold pages stay on disk; hot lookups page in their region.
+On a 128 GB host, the entire 16 GB can fit in RAM; on smaller hosts, only the
+working-set pages occupy memory.
+
+**Why not pack into `uint64`?** `sorted_pos ∈ [1, N]` and `N ≤ 4 B = 2³²`. The
+`uint32` encoding suffices for the cycle 8/9 measured atom count. A future scale
+beyond 4 B atoms would require `uint64` and a doubled storage cost.
 
 **File format (concrete spec):**
 
@@ -102,20 +129,27 @@ Magic bytes catch schema drift and partial-write corruption immediately at open:
 After `MergeAndWrite` completes the dedup+write of `atoms.atoms` and `atoms.offsets`:
 
 ```csharp
-// New step inside MergeAndWrite or as a chained call after it:
 if (profile == StoreProfile.Reference) {
-    var mphf = BBHashBuilder.Build(
-        atomCount,
-        i => GetAtomString(i),    // iterate keys via atoms.atoms
-        seed: stableHashSeed
-    );
-    File.Copy(mphf.SerializeToBytes(), $"{baseFilePath}.mphf");
+    // Build BBHash; iterate atoms in sorted order via atoms.atoms
+    var mphfBuilder = new BBHashBuilder(atomCount, seed: stableHashSeed);
+    var translationTable = new uint[atomCount];   // mphf_pos → sorted_pos
+    for (long sortedPos = 1; sortedPos <= atomCount; sortedPos++) {
+        var atomBytes = GetAtomString(sortedPos);
+        long mphfPos = mphfBuilder.AddKey(atomBytes);
+        translationTable[mphfPos] = (uint)sortedPos;
+    }
+    var mphf = mphfBuilder.Build();
+    mphf.WriteTo($"{baseFilePath}.mphf");
+    WriteTranslationTable(translationTable, $"{baseFilePath}.idx");
 }
 ```
 
-Construction cost is one-time, lives inside the bulk-load run. Adds to total wall-clock but is *not on the per-query path*; amortizes immediately.
+Construction cost: one-time at bulk-load finalize. Adds to total wall-clock but
+is not on the per-query path; amortizes immediately.
 
-Cycle 10 should measure construction time at 4 B atoms. Projected: 30 min – 2 h on M5 Max based on BBHash papers' published throughput (≈1–4 M keys/sec).
+Cycle 10 should measure construction time at 4 B atoms. Projected: 30 min – 2 h
+on M5 Max based on BBHash papers' published throughput (≈1–4 M keys/sec) plus
+~16 GB of sequential writes for the translation table.
 
 ### Lookup: opt-in via `IAtomStore.TryGetAtomIdMphf`
 
