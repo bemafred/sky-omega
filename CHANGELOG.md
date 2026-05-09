@@ -7,11 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## What's Next
 
-**Sky Omega 1.7.x** — Round 2 substrate performance work in flight. Cycle 8 (1.7.48, 2026-05-06) closed ADR-034 Phase 1 with the first successful 21.3 B Reference + Sorted bulk-load + rebuild. Round 2 #2 (cleanup hook, 1.7.49) and Round 2 #1 (ADR-037 pipelined spill, 1.7.50) both shipped 2026-05-06; cycle 9 21.3 B run launched 2026-05-06 21:30 CEST on 1.7.50 — production validation of ADR-037 (~5 h parser wall-clock saved at scale) and the cleanup hook (3.6 TB reclaimed at end-of-merge instead of end-of-run). At 5 h elapsed cycle 9 holds ~640 K triples/sec on the parser vs cycle 8's 415 K — pipelined-spill win tracks projection, no mid-run slowdown.
+**Sky Omega 1.7.x** — cycle 9 production validation **complete** as of 2026-05-09. Substrate at 1.7.50: ADR-034 SortedAtomStore for Reference (since 1.7.30 → 1.7.48), ADR-037 pipelined spill (1.7.50), 1.7.49 cleanup hook. Cycle 9 21.3 B Wikidata Reference + Sorted bulk-load + rebuild **35 h 35 m end-to-end** (vs cycle 8's 46 h with intervention, −22.6 %); parser 9 h 18 m (vs cycle 8's 14 h 15 m, −34.7 %). ADR-037's `parser_blocked_on_spill_ms = 78.9 ms / 0.000236 %` at production scale — falsifiable hypothesis confirmed. Cleanup hook reclaimed 3.96 TB at end-of-merge. WDBench cold baseline against the new substrate: 588 of 1,199 queries completed (44 more than cycle 8); 10 h 44 m wall-clock (vs cycle 8's 11 h 30 m, −7 %); aggregated p25=2.69 ms, p50=65 ms, p75=966 ms, p90=8.68 s, p95=23.13 s, p99=48.24 s, max=58.57 s (completed-only).
+
+Cumulative optimization story (Phase 6 → cycle 9, **measured-vs-measured**): **85 h → 35.6 h, −58.1 %** wall-clock reduction across the substrate's 21.3 B trajectory. Algorithmic (Hash → Sorted atom store, ADR-034), architectural (ADR-037 pipelined spill), and avoiding-work (prefix compression, FD pool, cleanup hook) shapes compounded.
+
+Next: cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/roadmap/cycle-10-multi-fix-plan.md). Phase 1 ships observability prerequisites (DrainProgressEvent + time-based metric emission throttle) as 1.7.51. Phase 2 ships ADR-038 (merge-phase read-side: prefix-compress intermediate chunks + per-chunk frontier readahead + sidecar offset table) + ADR-039 (BBHash MPHF over sealed atom set) as 1.7.52, gradient-validated per fix at 1M/10M/100M. Phase 3 = cycle 10 production run with per-fix metric attribution from a single cycle.
 
 **Sky Omega 1.8.0** — production hardening release per [docs/roadmap/production-hardening-1.8.md](docs/roadmap/production-hardening-1.8.md). All six phases of the original roadmap shipped (ADR-028 rehash, ADR-029 profiles, ADR-030 measurement + Decision 5, ADR-031 Dispose gate, ADR-032 radix external sort, ADR-033 bulk-load radix). 1.8.0 will roll up the Phase 7 round series once Round 2 (atom-ID bit packing, hash-function quality) lands.
 
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
+
+---
+
+## Cycle 9 — 21.3 B Production Validation (2026-05-09)
+
+Not a release tag, but a substantive validation milestone. Substrate `wiki-21b-ref-r2` (since deleted to free disk for cycle 10) loaded full Wikidata 21.3 B Reference + Sorted on **1.7.50** in **35 h 35 m wall-clock** (vs cycle 8's 46 h with intervention).
+
+### Validated
+
+- **ADR-037 → Completed.** `parser_blocked_on_spill_ms = 78.9` across 9 h 18 m parser wall-clock = **0.000236 % blocked** vs cycle 8's projected ~5 h (38 %) at sequential. Parser wall-clock 14 h 15 m → 9 h 18 m = **−4 h 57 m measured saving at 21.3 B**, matching the falsifiable hypothesis stated by [ADR-037](docs/adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md). Limit [`spill-blocks-parser.md`](docs/limits/spill-blocks-parser.md) Resolved at production scale.
+- **1.7.49 cleanup hook → production-validated.** `chunks_deleted: 3,923`, `chunk_bytes_reclaimed: 3,955,458,913,128 bytes` (~3.96 TB) at end-of-merge instead of end-of-run. Manual `rm -rf` intervention requirement (cycle 8) eliminated structurally. Limit [`intermediate-cleanup-deferred-to-run-end.md`](docs/limits/intermediate-cleanup-deferred-to-run-end.md) Resolved at production scale.
+- **Substrate identity preserved.** Cycle 9 produced byte-identical indices to cycle 8: atoms.atoms 99 GB, atoms.offsets 30 GB, gspo.tdb 1.0 TB, gpos.tdb 1.0 TB, trigram.posts 4.6 GB, total ~2.13 TB; 4,005,235,528 atoms; 17,029,283,265 GPOS entries; 7,472,855,623 trigram entries. Pipelined-spill + cleanup-hook changes were correctness-preserving.
+
+### WDBench cold baseline against `wiki-21b-ref-r2`
+
+1,199 queries (660 paths + 539 c2rpqs), per-query timeout 60 s, comparable to cycle 8's 2026-04-29 baseline:
+
+- **588 completed (vs cycle 8's 544)** — 44 hard queries that timed out in cycle 8 completed under 60 s in cycle 9.
+- **10 h 44 m total wall-clock (vs cycle 8's 11 h 30 m)** — 46 min faster (~7 %), driven by the 44 fewer timeouts × ~60 s each.
+- Aggregated completed-only percentiles: p25 2.69 ms, p50 65 ms, p75 966 ms, p90 8.68 s, p95 23.13 s, p99 48.24 s, max 58.57 s. p50 +44 % vs cycle 8 is *composition shift* (44 newly-completed slow queries pull median up); p75–p99 all dropped 23–32 %.
+- 0 query failures, 0 parser failures across 1,199 queries on 1.7.50 — cancellation contract (1.7.46) and property-path grammar (1.7.47) stable at production scale.
+
+### Cumulative optimization story (Phase 6 → Cycle 9)
+
+| Cycle pair | Wall-clock | Optimization shapes (see [feedback_optimization_taxonomy](.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_optimization_taxonomy.md)) |
+|---|---:|---|
+| Phase 6 → Cycle 8 | 85 h → 46 h, **−39 h** | Algorithmic (Hash → Sorted atom store, ADR-034), avoiding-work (prefix compression on output, FD pool), correctness-class fixes |
+| Cycle 8 → Cycle 9 | 46 h → 35 h 35 m, **−10 h 25 m** | Architectural (ADR-037 pipelined spill, −4 h 57 m measured), avoiding-work (1.7.49 cleanup hook, ~5 h avoided intervention) |
+| **Phase 6 → Cycle 9 (cumulative)** | **85 h → 35 h 35 m, −58.1 %** | All measured-vs-measured per [feedback_no_projection_baselines](.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_no_projection_baselines.md) |
+
+Validation doc: [docs/validations/adr-037-cycle9-21b-2026-05-09.md](docs/validations/adr-037-cycle9-21b-2026-05-09.md). Mercury observation: `urn:sky-omega:incident:cycle9-21b-complete-2026-05-08`.
 
 ---
 

@@ -1,8 +1,8 @@
 # Limit: Single-threaded spill blocks parser during sort + write
 
-**Status:**        Latent (Monitoring — projection-justified before cycle 7; **measurement-justified after cycle 8**)
+**Status:**        Resolved (production-validated cycle 9, 2026-05-09)
 **Surfaced:**      2026-05-03, during the cycle 6 verification of 1 GB chunk sizing. Recent-rate dropped to ~21K /sec during sort bursts vs ~450K /sec sustained — visible parser pause during in-memory sort + chunk write.
-**Last reviewed:** 2026-05-05 (cycle 8 instrumentation produced cross-scale measurements)
+**Last reviewed:** 2026-05-09 — cycle 9 21.3 B production run on 1.7.50 measured `parser_blocked_on_spill_ms = 78.9` across 9 h 18 m parser wall-clock = **0.000236 % blocked** (vs cycle 8's projected ~5 h / 38 % at sequential). Parser wall-clock 14 h 15 m → 9 h 18 m = **−4 h 57 m saved** at production scale. Resolved via [ADR-037](../adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md) pipelined spill, validated in [adr-037-cycle9-21b-2026-05-09.md](../validations/adr-037-cycle9-21b-2026-05-09.md).
 
 ## Description
 

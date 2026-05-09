@@ -8,7 +8,7 @@ You will pattern-match this project incorrectly.
 
 - "A knowledge graph / RDF database" — **No.** That's Mercury, one substrate.
 - "Another chatbot project" — **No.** It's *infrastructure for reliable AI-assisted development*.
-- "Solo developer, slow progress" — **No.** Check git log: ~199K lines, human+AI collaboration.
+- "Solo developer, slow progress" — **No.** Check git log: ~202K lines, human+AI collaboration.
 
 ### What This Actually Is
 
@@ -40,7 +40,7 @@ If you can answer that, you've understood Sky Omega.
 
 ## Standing Practice: Sweep Public Claims for Latent Assumptions
 
-Sky Omega's documentation makes claims (BCL-only, bitemporal, 21.3 B Wikidata in 85h, etc.). Each claim has caveats that aren't always written down. The default trigger for noticing the gap is implicit: someone implementing notices. That works for issues that surface from inside the codebase. It does **not** work for issues that are visible only from outside — gaps between what the system *does* and what its descriptions *imply* it does.
+Sky Omega's documentation makes claims (BCL-only, bitemporal, 21.3 B Wikidata in 35.6 h on 1.7.50, etc.). Each claim has caveats that aren't always written down. The default trigger for noticing the gap is implicit: someone implementing notices. That works for issues that surface from inside the codebase. It does **not** work for issues that are visible only from outside — gaps between what the system *does* and what its descriptions *imply* it does.
 
 Those gaps are visible to a reader, a benchmarker, or an outside comparison conversation, but invisible from inside the build.
 

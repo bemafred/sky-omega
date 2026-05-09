@@ -1,8 +1,8 @@
 # Limit: Intermediate cleanup deferred to run end (chunks held longer than needed)
 
-**Status:**        Resolved (in-flight, gradient validation pending) — fixed in `MergeAndWrite` finally block; `MergeCompletedEvent` now reports `chunks_deleted` + `chunk_bytes_reclaimed`.
+**Status:**        Resolved (production-validated cycle 9, 2026-05-09)
 **Surfaced:**      2026-05-05 16:25 CEST, during cycle 8 drain phase. After `MergeAndWrite` consumed all 3,923 occurrence chunks at 15:09 CEST, the 3.6 TB of `bulk-tmp/sorted-vocab/occurrences/chunk-*.bin` files remained on disk untouched. Free disk dropped from initial 6.5 TB to 699 GB during drain — within ~600 GB of the 100 GB min-free-space abort threshold — before manual cleanup recovered 3.5 TB.
-**Last reviewed:** 2026-05-06 — fix landed in `SortedAtomStoreExternalBuilder.MergeAndWrite`. Mitigation (1) shipped: phase-transition cleanup hook in the merge `finally` block deletes consumed chunks immediately after readers Dispose. Reader Dispose calls `_pool.Drop(_path)` which closes the underlying FD, so `File.Delete` is safe. `MergeCompletedEvent` extended with `ChunksDeleted` + `ChunkBytesReclaimed` for cycle 9+ observability. Gradient validation (1M/10M/100M) outstanding before promoting to fully Resolved + bumping 1.7.49.
+**Last reviewed:** 2026-05-09 — cycle 9 production run measured `chunks_deleted: 3,923`, `chunk_bytes_reclaimed: 3,955,458,913,128` (~3.96 TB) at end-of-merge instead of end-of-run. Disk free recovered from ~1.3 TB pre-cleanup to 4.5 TB immediately after merge. Manual `rm -rf` intervention requirement (cycle 8) eliminated structurally. Resolved via 1.7.49 phase-transition cleanup hook in `SortedAtomStoreExternalBuilder.MergeAndWrite` finally block (commit `40793e1`); validated in [adr-037-cycle9-21b-2026-05-09.md](../validations/adr-037-cycle9-21b-2026-05-09.md).
 
 ## Description
 

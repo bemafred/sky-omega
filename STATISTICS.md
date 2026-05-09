@@ -2,7 +2,7 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-05-06 (1.7.50 — [ADR-037](docs/adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md) pipelined spill in `SortedAtomBulkBuilder` shipped + gradient-validated at 100 M (parser_blocked 95 s → 0.44 ms; end-to-end −25.6 %; merge unchanged); 1.7.49 cleanup hook resolves intermediate-cleanup-deferred-to-run-end limit. Cycle 9 21.3 B production validation **in flight** since 21:30 CEST on 1.7.50, holding ~640 K triples/sec on the parser at 5 h elapsed, vs cycle 8's 415 K asymptote — tracking the projected ~5 h parser wall-clock saving.)
+**Last updated:** 2026-05-09 — cycle 9 21.3 B production validation **complete** at 35 h 35 m wall-clock (vs cycle 8's 46 h with intervention, −22.6 %). [ADR-037](docs/adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md) **Completed**: parser wall-clock 14 h 15 m → 9 h 18 m measured (−4 h 57 m); `parser_blocked_on_spill_ms = 78.9 / 0.000236 %` at production scale. 1.7.49 cleanup hook **production-validated**: 3.96 TB reclaimed at end-of-merge instead of end-of-run. WDBench cold baseline against the new substrate: 588 of 1,199 completed (44 more than cycle 8); 10 h 44 m wall-clock (−7 % vs cycle 8). Cumulative Phase 6 → cycle 9: **85 h → 35.6 h, −58.1 %** measured-vs-measured. ADR-038 + ADR-039 sequenced for cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/roadmap/cycle-10-multi-fix-plan.md).
 
 Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-benchmarks live in `benchmarks/Mercury.Benchmarks/`. This document tracks codebase metrics and W3C conformance counts.
 
@@ -80,7 +80,7 @@ Property-path hardening (2026-04-29 → 2026-04-30, versions 1.7.46 → 1.7.47):
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | 39,532 |
+| All docs (*.md, *.ttl) | 40,353 |
 | CLAUDE.md | 291 |
 
 ## Totals
@@ -91,8 +91,8 @@ Property-path hardening (2026-04-29 → 2026-04-30, versions 1.7.46 → 1.7.47):
 | Tests | ~58,831 |
 | Benchmarks | ~3,352 |
 | Examples | ~972 |
-| Documentation | ~39,532 |
-| **Grand total** | **~201,163** |
+| Documentation | ~40,353 |
+| **Grand total** | **~201,984** |
 
 ## W3C Conformance
 
@@ -255,7 +255,8 @@ Profile attribution per [ADR-008 — Workload Profiles and Validation Attributio
 | 2026-04-29 | Reference | WDBench 1.7.47 cold baseline | Hardened-substrate WDBench against `wiki-21b-ref` (full Wikidata, 21.3 B triples) | 1,199 queries (660 paths + 539 c2rpqs). 11h 30m total wall. **0 parser failures**, **655/655 timeouts honored 60 s cap** (max 63.62 s, min 60.00 s — contract honored at scale). p25=4ms, p50=45ms, p75=1.39s, p90=12.82s, p95=29.85s, p99=49.50s, max=59.82s. Disclosure-marked baseline for Phase 7c optimization rounds; running on full Wikidata is intentional (substrate-capability claim, not the truthy subset that QLever/Virtuoso WDBench numbers use — see [memos/2026-04-30-latent-assumptions-from-qlever-comparison.md](memos/2026-04-30-latent-assumptions-from-qlever-comparison.md)). Sealed: `docs/validations/wdbench-paths-21b-2026-04-29-1747.jsonl` + `docs/validations/wdbench-c2rpqs-21b-2026-04-29-1747.jsonl` |
 | 2026-05-06 | Reference | [Cleanup-hook 1M/10M/100M smoke](docs/validations/intermediate-cleanup-gradient-2026-05-06.md) | 1.7.49 phase-transition cleanup hook | All scales: `chunks_deleted == chunk_count` (1, 2, 18); `chunk_bytes_reclaimed` 164 MB / 1.6 GB / 16.4 GB; filesystem confirms `occurrences/` empty post-merge. Reframed as smoke + observability check (not perf gradient — change is `File.Delete` in a `finally`, off the hot path). Production claim deferred to cycle 9 |
 | 2026-05-06 | Reference | [ADR-037 pipelined-spill gradient](docs/validations/adr-037-pipelined-spill-gradient-2026-05-06.md) | 1.7.49 sequential vs 1.7.50 pipelined A/B at 1 M / 10 M / 100 M | **100 M parser_blocked 95.0 s → 0.44 ms (216,000× reduction)**; end-to-end 285 s → 212 s (−25.6 %); queue_depth_at_handoff = 0 across all 18 handoffs (bound-1 sufficient); merge phase 30,149 → 31,057 ms (+3 %, within ±5 %). Per-spill sort+write costs rose 43–60 % under cross-thread contention but stay hidden behind parser-fill — net wall-clock drops. Memory cost ~2.5× working set (3.1 → 7.7 GB) from holding worker's snapshot concurrent with parser's accumulator. Hypothesis confirmed at every gradient scale; production validation = cycle 9 |
-| 2026-05-06 | Reference | Cycle 9 21.3 B production validation (in flight) | 1.7.50 (pipelined spill + cleanup hook) full Wikidata Reference + Sorted | Launched 21:30 CEST detached via `nohup`. Holding ~640 K triples/sec on the parser at 5 h elapsed (54.4 % complete) vs cycle 8's 415 K asymptote — ADR-037 win tracking. No mid-run slowdown observable past the cycle 8 cache-fit boundary. Validates ADR-037 production-scale claim (~5 h parser wall-clock saved) + cleanup hook (3.6 TB reclaimed at end-of-merge). WDBench rerun against the new store closes the publication numbers post-completion |
+| 2026-05-09 | Reference | [Cycle 9 21.3 B production validation](docs/validations/adr-037-cycle9-21b-2026-05-09.md) | 1.7.50 (pipelined spill + cleanup hook) full Wikidata Reference + Sorted | **Completed** 2026-05-08 06:54 UTC at **35 h 35 m end-to-end** (vs cycle 8's 46 h with intervention, −22.6 %). Parser 9 h 18 m (vs 14 h 15 m, −4 h 57 m measured = ADR-037 production validation); merge 15 h 21 m (wash); drain ~1 h 40 m; Phase B (GPOS + trigram rebuild) 9 h 15 m. `parser_blocked_on_spill_ms = 78.9 / 0.000236 %` at production scale — falsifiable hypothesis confirmed. Cleanup hook reclaimed 3.96 TB at end-of-merge (vs cycle 8's manual `rm -rf` requirement, eliminated). Substrate identity vs cycle 8: byte-identical (4,005,235,528 atoms, 17,029,283,265 GPOS entries, 7,472,855,623 trigram entries; total ~2.13 TB). [ADR-037](docs/adrs/mercury/ADR-037-pipelined-spill-bulk-builder.md) advanced to **Completed**. Limits [`spill-blocks-parser`](docs/limits/spill-blocks-parser.md) and [`intermediate-cleanup-deferred-to-run-end`](docs/limits/intermediate-cleanup-deferred-to-run-end.md) Resolved at production scale |
+| 2026-05-09 | Reference | [WDBench cycle 9 cold baseline](docs/validations/wdbench-paths-21b-2026-05-08-cycle9.jsonl) + [c2rpqs](docs/validations/wdbench-c2rpqs-21b-2026-05-08-cycle9.jsonl) | 1.7.50 cold-cache run against `wiki-21b-ref-r2` | 1,199 queries (660 paths + 539 c2rpqs), 60 s timeout. **588 completed (vs cycle 8's 544 — 44 hard queries that timed out in cycle 8 completed under 60 s in cycle 9)**. **10 h 44 m total wall-clock (vs cycle 8's 11 h 30 m, −7 %)**. Aggregated completed-only: p25=2.69 ms, p50=65 ms, p75=966 ms, p90=8.68 s, p95=23.13 s, p99=48.24 s, max=58.57 s. p50 shift +44 % is sample-composition (44 newly-completed slow queries); p75–p99 all dropped 23–32 %. 0 query failures, 0 parser failures across 2,398 queries (cycle 8 + cycle 9). Substrate `wiki-21b-ref-r2` deleted post-baseline to free disk for cycle 10 |
 
 ## Maintenance Instructions
 

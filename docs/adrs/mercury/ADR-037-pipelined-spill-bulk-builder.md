@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-06
+**Status:** Completed — 2026-05-09. Production validation closed by [adr-037-cycle9-21b-2026-05-09.md](../../validations/adr-037-cycle9-21b-2026-05-09.md): cycle 9 measured `parser_blocked = 78.9 ms / 0.000236 %` across 9 h 18 m parser wall-clock at 21.3 B Wikidata; parser wall-clock 14 h 15 m → 9 h 18 m = **−4 h 57 m saved**. Falsifiable hypothesis confirmed; queue depth steady-state 0 across 3,923 handoffs; merge phase unchanged within ±5 %.
 
 ## Context
 

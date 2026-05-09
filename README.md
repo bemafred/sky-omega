@@ -32,36 +32,35 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.47 — Phase 6 complete. Phase 7 in flight. Substrate hardened.**
-> 21.3 B Wikidata, ingested, sealed, queryable on a single laptop. Disclosure-marked WDBench cold baseline against the hardened substrate.
+> **v1.7.50 — Cycle 9 complete. Substrate at 35.6 h end-to-end at 21.3 B.**
+> Three measured 21.3 B Wikidata production runs across the trajectory; substrate now 2.4× faster than its first incarnation, all on a single laptop, BCL-only .NET.
 >
-> **Phase 6 — capacity proven** *(2026-04-26, Reference profile)*
-> - 21,260,051,924 triples ingested from a 3.1 TB N-Triples source
-> - **85 h end-to-end** on an M5 Max, 128 GB RAM, BCL-only .NET
-> - Query-side validated: `wdt:P31` (instance-of) bound queries return real Wikidata instances in tens of milliseconds cold-cache; `LIMIT 10` over the full graph in **17 ms**
-> - Both primary (GSPO) and secondary (GPOS) indexes correct at full scale
-> - *The capacity dimension of production hardening is empirical, not estimated.*
-> - *Phase 6/7 numbers are Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). Cognitive-profile validation gradient pending — see [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).*
+> **Cumulative trajectory** *(measured-vs-measured, three completed full-Wikidata runs)*
+> - **Phase 6** *(2026-04-25, 1.7.x pre-Sorted)* — 85 h end-to-end. First successful 21.3 B Reference end-to-end on a single M5 Max.
+> - **Cycle 8** *(2026-05-06, 1.7.48)* — 46 h with intervention. ADR-034 SortedAtomStore for Reference closed Phase 1; algorithmic switch from Hash → Sorted atom store; ~42 % atoms.atoms reduction via prefix compression; cleanup-class FD fixes.
+> - **Cycle 9** *(2026-05-09, 1.7.50)* — **35 h 35 m clean**. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); 1.7.49 cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
+> - Cumulative: **85 h → 35.6 h, −58.1 %** wall-clock reduction across the substrate's evolution.
 >
-> **Phase 7 — performance rounds landing** *(2026-04-27 →)*
-> - **ADR-035 Phase 7a** — metrics infrastructure — *Completed*
-> - **ADR-036 Phase 7b** — BCL-only bz2 streaming decompression — *Completed*
-> - Validated together at 1 B Reference: bulk-load **55 m 22 s @ 300 K triples/sec** direct from `latest-all.ttl.bz2`, full metrics emission across all four channels
-> - **ADR-034 Phase 7c** — SortedAtomStore for Reference — *in flight* (Phase 1B-5c shipped; gradient validation pending)
+> **Cycle 9 — production validation of ADR-037 + 1.7.49** *(2026-05-09)*
+> - 21,316,531,403 triples ingested + sealed in **35 h 35 m end-to-end** (parser 9 h 18 m + merge 15 h 21 m + drain 1 h 40 m + Phase B 9 h 15 m)
+> - `parser_blocked_on_spill_ms = 78.9 / 0.000236 %` at 21.3 B — the falsifiable hypothesis ADR-037 stated, confirmed
+> - Substrate identity preserved vs cycle 8 (byte-identical indices: 4 B atoms, 17 B GPOS entries, 7.5 B trigram entries; total ~2.13 TB)
+> - WDBench cold baseline: **588 of 1,199 queries completed** (44 more than cycle 8); **10 h 44 m wall-clock** (−7 % vs cycle 8); aggregated p25=2.69 ms, p50=65 ms, p75=966 ms, p90=8.68 s, p95=23.13 s, p99=48.24 s, max=58.57 s; **0 query failures, 0 parser failures across 2,398 queries** (cycle 8 + cycle 9 combined)
 >
-> **Phase 7c WDBench cold baseline — substrate hardened** *(2026-04-29 → 2026-04-30)*
-> - 1.7.46 + 1.7.47 closed three latent property-path defects (12 cancellation-token gaps, 12 grammar-gap combinations, 1 silent Case 2 binding bug) the W3C SPARQL 1.1 conformance suite did not exercise
-> - **1.7.47 WDBench cold baseline**: 1,199 queries against full Wikidata (21.3 B), **0 parser failures**, p50 = 45 ms, p95 = 29.85 s, every one of 655 timeouts closed between 60.000 s and 63.620 s — cancellation contract honored at scale
-> - **ADR-006** (MCP surface discipline) + **ADR-007** (sealed substrate immutability) shipped — operationalize the governed-automation thesis at concrete decision points
->
-> **Trajectory**: 85 h baseline projects toward **15-25 h** on the same laptop after the round series ships. **4,335 Mercury + 25 Solid tests green** throughout.
+> **Substrate components shipped** *(cumulative)*
+> - **ADR-034** SortedAtomStore for Reference — *Completed* (1.7.30 → 1.7.48)
+> - **ADR-035** Phase 7a metrics infrastructure — *Completed*
+> - **ADR-036** BCL-only bz2 streaming decompression — *Completed*
+> - **ADR-037** Pipelined spill in `SortedAtomBulkBuilder` — *Completed* (1.7.50, production-validated cycle 9)
+> - **ADR-038** Merge-phase read-side optimization — *Accepted*, sequenced for cycle 10
+> - **ADR-039** MPHF over sealed atom set — *Proposed*, sequenced for cycle 10
+> - *Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). Cognitive-profile validation drought persists — see [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).*
 >
 > **Read more**
 > - [21.3 Billion Triples on a Laptop, in .NET](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the Phase 6 article
 > - [What Compounds](docs/articles/2026-04-28-what-compounds.md) — Sky Omega's first four months, the recipe
-> - [21 B query-side validation](docs/validations/21b-query-validation-2026-04-26.md) — Phase 6 closing measurement
-> - [ADR-035 Phase 7a 1 B validation](docs/validations/adr-035-phase7a-1b-2026-04-27.md) — first 7a + 7b together
-> - [ADR-006 MCP Surface Discipline](docs/adrs/ADR-006-mcp-surface-discipline.md) · [ADR-007 Sealed Substrate Immutability](docs/adrs/ADR-007-sealed-substrate-immutability.md) — governed-automation operationalized
+> - [Cycle 9 21.3 B production validation](docs/validations/adr-037-cycle9-21b-2026-05-09.md) — most recent measurement
+> - [Cycle 10 multi-fix plan](docs/roadmap/cycle-10-multi-fix-plan.md) — ADR-038 + ADR-039 + observability prerequisites composed
 > - [CHANGELOG.md](CHANGELOG.md) · [Roadmap](docs/roadmap/production-hardening-1.8.md) · [Validations](docs/validations/) · [Limits register](docs/limits/)
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
