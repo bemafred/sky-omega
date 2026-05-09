@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-05-08
+**Status:** Accepted — 2026-05-09. Reviewed pre-implementation; four implementation-detail clarifications added below (verification cost, concurrency contract, construction memory budget, file-format magic bytes).
 
 ## Context
 
@@ -34,7 +34,7 @@ if atom_bytes != query_string: return NotFound
 return id
 ```
 
-The verification step (read `atoms.atoms[id]`, compare to `query_string`) is a single cache miss + one memcmp — vs the binary search's 32 of each. Still a big win.
+The verification step (read `atoms.atoms[id]`, compare to `query_string`) costs **2 cache misses + 1 memcmp**: first the offset lookup in `atoms.offsets[id]`, then the byte read in `atoms.atoms` at that offset. Both reads land in OS page cache after warmup. Vs binary search's 32 of each. Still a big win — the constant factor improvement is ~10–16×, plus the algorithmic O(1) vs O(log N) shape benefits at scale.
 
 ## Hypothesis (falsifiable)
 
@@ -78,7 +78,24 @@ atoms.offsets   ← per-atom offset into atoms.atoms (existing)
 atoms.mphf      ← BBHash blob (new, ~800 MB at 4 B atoms)
 ```
 
-Self-contained format with magic bytes + version + bit-vector layouts. Schema: `BBHashHeader` (magic, version, num_keys, hash_seed, bit_vector_count) + `BitVectorHeader[]` + `BitVector[]`. Single mmap-backed read at store-open.
+**File format (concrete spec):**
+
+```
+[ 4 bytes ]  magic:    0x4D504846 ("MPHF" big-endian)
+[ 4 bytes ]  version:  0x00000001 (uint32, schema version; bumped on incompatible change)
+[ 8 bytes ]  num_keys: uint64
+[ 8 bytes ]  hash_seed: uint64 (xxHash3 seed)
+[ 4 bytes ]  bit_vector_count: uint32 (BBHash iteration count, typically 3-5)
+[ 4 bytes ]  reserved
+─── per bit-vector (repeated bit_vector_count times) ───
+[ 8 bytes ]  bv_bit_count: uint64
+[ 8 bytes ]  bv_byte_count: uint64 (= ceil(bv_bit_count / 8))
+[ 8 bytes ]  rank_table_byte_count: uint64
+[ ... ]      bit_vector_bytes (raw bit array)
+[ ... ]      rank_table_bytes (precomputed rank lookup, every 512 bits)
+```
+
+Magic bytes catch schema drift and partial-write corruption immediately at open: any mismatch → fall back to binary-search path with a warning, do not silently use a corrupt MPHF. Version bump is the discipline if the format ever changes.
 
 ### Construction: integrate into `MergeAndWrite` post-write
 
@@ -113,6 +130,26 @@ public interface IAtomStore {
 ```
 
 Default `GetAtomId` keeps binary search as the correctness baseline. Callers that benefit (SPARQL bound-term resolution, trigram FILTER lookups) opt into the MPHF path. Falls back to binary search if `atoms.mphf` doesn't exist (e.g., older cycle 8 stores or Cognitive profile).
+
+### Concurrency / thread-safety contract
+
+After construction, the MPHF blob is **immutable**. Bit-vectors and rank tables are read-only; lookup performs no mutation. Multiple threads can call `TryGetAtomIdMphf` concurrently without coordination. The mmap-backed read in `atoms.atoms` (verification step) is also read-only and thread-safe — same contract as the existing `GetAtomString(id)`.
+
+No locks, no atomics, no `volatile` reads. Readers see consistent state because the file is read-only after creation, and the single-process-writer contract for atoms persists from ADR-034 (Reference profile is sealed at finalize).
+
+### Construction memory budget
+
+BBHash's iterative algorithm needs working memory for two parallel bit-vectors per iteration: a *collision* bit-vector and an *output* bit-vector. At 4 B keys with ~3 iterations and ~1.6 bits/key per iteration, peak working memory is approximately:
+
+| | Approximate peak |
+|---|---:|
+| 1 M atoms | ~1 MB |
+| 10 M atoms | ~10 MB |
+| 100 M atoms | ~100 MB |
+| 1 B atoms | ~1 GB |
+| 4 B atoms (21.3 B Wikidata) | **~1.5–2 GB peak** |
+
+Comfortable on a 128 GB host. Construction also performs N reads from `atoms.atoms` (one per key) → ~99 GB of sequential disk reads at 4 B-atom scale. Sequential scan is fast on NVMe (~30 s at 3 GB/s), so disk I/O is not the binding cost.
 
 ### Profile applicability
 
