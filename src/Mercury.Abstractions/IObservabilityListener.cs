@@ -93,6 +93,13 @@ public interface IObservabilityListener
     /// </summary>
     void OnBulkBuilderCompleted(in BulkBuilderCompletedEvent ev) { }
 
+    /// <summary>
+    /// Periodic progress emission from the GSPO drain phase
+    /// (<c>QuadStore.FinalizeSortedAtomBulkIfPresent</c> + <c>DrainBulkSorter</c>).
+    /// Closes the silent drain-phase gap surfaced by cycle 9.
+    /// </summary>
+    void OnDrainProgress(in DrainProgressEvent progress) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 

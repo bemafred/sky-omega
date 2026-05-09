@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
@@ -85,6 +87,94 @@ public class SortedAtomStoreBulkLoadTests : IDisposable
             Assert.Equal(8, store.Atoms.AtomCount);
             Assert.Equal(5, store.Atoms.GetAtomId("<http://ex/alice>"));
         }
+    }
+
+    [Fact]
+    public void DrainProgress_BothSubPhasesEmitted_WithExpectedFields()
+    {
+        // Cycle 10 Phase 1 / A1: GSPO drain phase emits DrainProgressEvent with
+        // sub-phase "ReplayResolved" (replay loop in FinalizeSortedAtomBulkIfPresent)
+        // AND sub-phase "AppendSorted" (drain loop in DrainBulkSorter). Closes the
+        // silent-phase gap from cycle 9.
+        var dir = Path.Combine(_testDir, "drain_progress");
+        Directory.CreateDirectory(dir);
+        var schema = StoreSchema.ForProfile(StoreProfile.Reference)
+            with { AtomStore = AtomStoreImplementation.Sorted };
+        schema.WriteTo(dir);
+
+        var captured = new List<DrainProgressEvent>();
+        var listener = new CapturingDrainListener(captured);
+
+        var bulkOpts = new StorageOptions { BulkMode = true, Profile = StoreProfile.Reference };
+        using (var store = new QuadStore(dir, null, null, bulkOpts))
+        {
+            store.ObservabilityListener = listener;
+            // Bypass time-based throttle (default 30s) so emission fires per-entry
+            // in this fast unit test.
+            store.ProgressEmissionMinInterval = TimeSpan.Zero;
+
+            store.BeginBatch();
+            // 200 triples → 200 ReplayResolved iterations + 200 AppendSorted iterations.
+            // With ProgressEmissionMinInterval = Zero, emission fires on every entry.
+            for (int i = 0; i < 200; i++)
+                store.AddCurrentBatched($"<http://ex/s{i}>", "<http://ex/p>", $"\"v{i}\"");
+            store.CommitBatch();
+            store.FlushToDisk();
+        }
+
+        Assert.NotEmpty(captured);
+        var subPhases = captured.Select(e => e.SubPhase).Distinct().ToHashSet();
+        Assert.Contains("ReplayResolved", subPhases);
+        Assert.Contains("AppendSorted", subPhases);
+        Assert.All(captured, e => Assert.Equal("GSPO", e.PhaseName));
+        Assert.All(captured, e => Assert.True(e.EntriesProcessed > 0));
+        Assert.All(captured, e => Assert.True(e.RatePerSecond >= 0));
+        // ReplayResolved knows total (TripleCount); AppendSorted does not.
+        var replay = captured.Where(e => e.SubPhase == "ReplayResolved").ToList();
+        var append = captured.Where(e => e.SubPhase == "AppendSorted").ToList();
+        Assert.NotEmpty(replay);
+        Assert.NotEmpty(append);
+        Assert.All(replay, e => Assert.True(e.EstimatedTotal.HasValue && e.EstimatedTotal.Value > 0));
+        Assert.All(append, e => Assert.False(e.EstimatedTotal.HasValue));
+    }
+
+    [Fact]
+    public void DrainProgress_TimeBasedThrottle_LimitsEmissionRate()
+    {
+        // A2: with ProgressEmissionMinInterval > 0, emission is rate-capped.
+        // Default 30s would emit < 1 event in this test; we test the upper bound
+        // (a long interval) by using an interval longer than the run time and
+        // confirming no events fire.
+        var dir = Path.Combine(_testDir, "drain_throttle");
+        Directory.CreateDirectory(dir);
+        var schema = StoreSchema.ForProfile(StoreProfile.Reference)
+            with { AtomStore = AtomStoreImplementation.Sorted };
+        schema.WriteTo(dir);
+
+        var captured = new List<DrainProgressEvent>();
+        var listener = new CapturingDrainListener(captured);
+
+        var bulkOpts = new StorageOptions { BulkMode = true, Profile = StoreProfile.Reference };
+        using var store = new QuadStore(dir, null, null, bulkOpts);
+        store.ObservabilityListener = listener;
+        // 1 hour interval — guarantees no emission for any test that completes faster.
+        store.ProgressEmissionMinInterval = TimeSpan.FromHours(1);
+
+        store.BeginBatch();
+        for (int i = 0; i < 50; i++)
+            store.AddCurrentBatched($"<http://ex/s{i}>", "<http://ex/p>", $"\"v{i}\"");
+        store.CommitBatch();
+        store.FlushToDisk();
+
+        // No DrainProgressEvent should have fired given the 1-hour throttle.
+        Assert.Empty(captured);
+    }
+
+    private sealed class CapturingDrainListener : IObservabilityListener
+    {
+        private readonly List<DrainProgressEvent> _captured;
+        public CapturingDrainListener(List<DrainProgressEvent> captured) => _captured = captured;
+        public void OnDrainProgress(in DrainProgressEvent ev) { lock (_captured) _captured.Add(ev); }
     }
 
     [Fact]

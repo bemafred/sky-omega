@@ -150,6 +150,26 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnDrainProgress(in DrainProgressEvent progress)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "drain_progress", "event", progress.Timestamp);
+            json.WriteString("phase_name", progress.PhaseName);
+            json.WriteString("sub_phase", progress.SubPhase);
+            json.WriteNumber("entries_processed", progress.EntriesProcessed);
+            if (progress.EstimatedTotal.HasValue)
+                json.WriteNumber("estimated_total", progress.EstimatedTotal.Value);
+            json.WriteNumber("rate_per_sec", progress.RatePerSecond);
+            json.WriteNumber("gc_heap_bytes", progress.GcHeapBytes);
+            json.WriteNumber("rss_bytes", progress.WorkingSetBytes);
+            json.WriteNumber("elapsed_ms", progress.Elapsed.TotalMilliseconds);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnRebuildComplete(RebuildMetrics summary)
     {
         using var buffer = new MemoryStream();

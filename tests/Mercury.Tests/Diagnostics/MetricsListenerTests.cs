@@ -496,6 +496,7 @@ public class MetricsListenerTests : IDisposable
         var listener = new CapturingProgressListener(captured);
         store.ObservabilityListener = listener;
         store.RebuildProgressTickThreshold = 100;
+        store.ProgressEmissionMinInterval = TimeSpan.Zero;  // bypass time-based throttle for fast test
         store.RebuildSecondaryIndexes();
 
         Assert.NotEmpty(captured);
@@ -532,6 +533,7 @@ public class MetricsListenerTests : IDisposable
         using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true);
         store.ObservabilityListener = jsonl;
         store.RebuildProgressTickThreshold = 50;
+        store.ProgressEmissionMinInterval = TimeSpan.Zero;  // bypass time-based throttle for fast test
         store.RebuildSecondaryIndexes();
         jsonl.Flush();
 

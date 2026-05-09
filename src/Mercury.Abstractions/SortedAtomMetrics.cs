@@ -115,3 +115,26 @@ public readonly record struct BulkBuilderCompletedEvent(
     int SpillCount,
     TimeSpan ParserBlockedOnSpill,
     TimeSpan TotalParserWallClock);
+
+/// <summary>
+/// Periodic progress emission from <c>QuadStore.FinalizeSortedAtomBulkIfPresent</c> +
+/// <c>DrainBulkSorter</c> during the silent GSPO drain phase. Closes the cycle 9
+/// drain-phase opacity gap (cycle 8 + cycle 9 measured but unobserved). Two sub-phases:
+/// <list type="bullet">
+///   <item><b>"ReplayResolved"</b> — replaying resolved triples from the
+///   <c>SortedAtomBulkBuilder</c> into the GSPO external sorter
+///   (<c>EnumerateResolved</c> loop). Has a known total = TripleCount.</item>
+///   <item><b>"AppendSorted"</b> — draining the sorter into the GSPO B+Tree via
+///   <c>AppendSorted</c> (<c>TryDrainNext</c> loop). Same total as ReplayResolved.</item>
+/// </list>
+/// </summary>
+public readonly record struct DrainProgressEvent(
+    DateTimeOffset Timestamp,
+    string PhaseName,
+    string SubPhase,
+    long EntriesProcessed,
+    long? EstimatedTotal,
+    double RatePerSecond,
+    long GcHeapBytes,
+    long WorkingSetBytes,
+    TimeSpan Elapsed);

@@ -334,6 +334,13 @@ public sealed class QuadStore : IDisposable
     internal void EmitRebuildProgress(in RebuildProgressMetrics progress)
         => ObservabilityListener?.OnRebuildProgress(in progress);
 
+    /// <summary>
+    /// Fan out a drain-phase progress record. Closes the silent GSPO drain gap surfaced
+    /// by cycle 9. Only ObservabilityListener carries this event.
+    /// </summary>
+    internal void EmitDrainProgress(in Abstractions.DrainProgressEvent progress)
+        => ObservabilityListener?.OnDrainProgress(in progress);
+
     /// <summary>True iff the umbrella observer is registered (rebuild progress only fans there).</summary>
     internal bool HasRebuildProgressListener => ObservabilityListener is not null;
 
@@ -342,6 +349,25 @@ public sealed class QuadStore : IDisposable
     /// chunk-flush cadence; tests lower it to validate emission with smaller datasets.
     /// </summary>
     internal long RebuildProgressTickThreshold { get; set; } = 1_000_000;
+
+    /// <summary>
+    /// Minimum time gap between progress-event emissions (rebuild + drain). Caps the
+    /// emission rate regardless of record-throughput — addresses the cycle 9
+    /// backpressure-on-shared-disk pattern where per-records emission queued events
+    /// faster than the JSONL writer could flush against a disk saturated by the
+    /// workload's mmap I/O. Default 30 s matches <c>--metrics-state-interval</c>.
+    /// <para>
+    /// Composed with record-based threshold via AND: emission requires both N records
+    /// since last emit AND T seconds since last emit. At low rates the record threshold
+    /// dominates (cadence is records-based); at high rates the time threshold dominates
+    /// (cadence is rate-capped). Tests use <c>TimeSpan.Zero</c> to bypass time gating
+    /// and rely on records threshold alone.
+    /// </para>
+    /// </summary>
+    internal TimeSpan ProgressEmissionMinInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Drain-phase emission uses time-based cadence only (no record threshold).</summary>
+    internal TimeSpan DrainProgressEmissionInterval => ProgressEmissionMinInterval;
 
     /// <summary>
     /// Internal accessor for the ADR-031 Piece 2 session-mutation flag. Tests assert
@@ -1064,6 +1090,18 @@ public sealed class QuadStore : IDisposable
                     tempDir: bulkTempDir,
                     chunkSize: 16_000_000);
             }
+            // ADR-A1 (cycle 10 Phase 1): emit drain progress on a time-based cadence.
+            // Closes the silent-phase gap surfaced by cycle 9 (drain ran ~1 h 40 m
+            // with no progress emission). Time-based interval (default 30 s) caps
+            // emission rate regardless of throughput — addresses the
+            // backpressure-on-shared-disk pattern (cycle 9 trigram drain showed
+            // record-based emission queueing 2 h behind real time when the workload
+            // saturates the disk).
+            var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var lastReplayEmit = TimeSpan.Zero;
+            long replayEntries = 0;
+            long replayLastEmittedAt = 0;
+            long? replayEstimatedTotal = bulkBuilder.TripleCount > 0 ? bulkBuilder.TripleCount : null;
             foreach (var (g, s, p, o) in bulkBuilder.EnumerateResolved())
             {
                 var key = new ReferenceQuadIndex.ReferenceKey
@@ -1074,6 +1112,27 @@ public sealed class QuadStore : IDisposable
                     Tertiary = o,
                 };
                 _bulkSorter.Add(in key);
+                replayEntries++;
+
+                if (ObservabilityListener is not null &&
+                    replayStopwatch.Elapsed - lastReplayEmit >= DrainProgressEmissionInterval)
+                {
+                    var elapsed = replayStopwatch.Elapsed;
+                    var dt = (elapsed - lastReplayEmit).TotalSeconds;
+                    var rate = dt > 0 ? (replayEntries - replayLastEmittedAt) / dt : 0;
+                    EmitDrainProgress(new Abstractions.DrainProgressEvent(
+                        Timestamp: DateTimeOffset.UtcNow,
+                        PhaseName: "GSPO",
+                        SubPhase: "ReplayResolved",
+                        EntriesProcessed: replayEntries,
+                        EstimatedTotal: replayEstimatedTotal,
+                        RatePerSecond: rate,
+                        GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                        WorkingSetBytes: Environment.WorkingSet,
+                        Elapsed: elapsed));
+                    lastReplayEmit = elapsed;
+                    replayLastEmittedAt = replayEntries;
+                }
             }
             bulkBuilder.Dispose();
         }
@@ -1097,9 +1156,35 @@ public sealed class QuadStore : IDisposable
             try
             {
                 _gspoReference!.BeginAppendSorted();
+                // ADR-A1: emit drain progress on time-based cadence (matches replay loop).
+                var appendStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var lastAppendEmit = TimeSpan.Zero;
+                long appendEntries = 0;
+                long appendLastEmittedAt = 0;
                 while (_bulkSorter.TryDrainNext(out var key))
                 {
                     _gspoReference.AppendSorted(key);
+                    appendEntries++;
+
+                    if (ObservabilityListener is not null &&
+                        appendStopwatch.Elapsed - lastAppendEmit >= DrainProgressEmissionInterval)
+                    {
+                        var elapsed = appendStopwatch.Elapsed;
+                        var dt = (elapsed - lastAppendEmit).TotalSeconds;
+                        var rate = dt > 0 ? (appendEntries - appendLastEmittedAt) / dt : 0;
+                        EmitDrainProgress(new Abstractions.DrainProgressEvent(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            PhaseName: "GSPO",
+                            SubPhase: "AppendSorted",
+                            EntriesProcessed: appendEntries,
+                            EstimatedTotal: null, // append doesn't know total in advance
+                            RatePerSecond: rate,
+                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                            WorkingSetBytes: Environment.WorkingSet,
+                            Elapsed: elapsed));
+                        lastAppendEmit = elapsed;
+                        appendLastEmittedAt = appendEntries;
+                    }
                 }
                 _gspoReference.EndAppendSorted();
             }
@@ -1314,6 +1399,7 @@ public sealed class QuadStore : IDisposable
             // with disk-activity patterns. Ticking-rate calculation mirrors LoadProgress's
             // sliding-window discipline: rate is over the most recent interval, not lifetime.
             long progressTickThreshold = RebuildProgressTickThreshold;
+            TimeSpan progressMinInterval = ProgressEmissionMinInterval;
             bool emitProgress = HasRebuildProgressListener;
             long gposEstimatedTotal = _gspoReference!.QuadCount;
             try
@@ -1341,7 +1427,9 @@ public sealed class QuadStore : IDisposable
                     sorter.Add(in gposKey);
                     gposScanned++;
 
-                    if (emitProgress && gposScanned - lastTickEntries >= progressTickThreshold)
+                    if (emitProgress &&
+                        gposScanned - lastTickEntries >= progressTickThreshold &&
+                        gposStopwatch.Elapsed - lastTickElapsed >= progressMinInterval)
                     {
                         var elapsed = gposStopwatch.Elapsed;
                         var dt = (elapsed - lastTickElapsed).TotalSeconds;
@@ -1375,7 +1463,9 @@ public sealed class QuadStore : IDisposable
                     _gposReference.AppendSorted(sortedKey);
                     gposCount++;
 
-                    if (emitProgress && gposCount - lastTickEntries >= progressTickThreshold)
+                    if (emitProgress &&
+                        gposCount - lastTickEntries >= progressTickThreshold &&
+                        gposStopwatch.Elapsed - lastTickElapsed >= progressMinInterval)
                     {
                         var elapsed = gposStopwatch.Elapsed;
                         var dt = (elapsed - lastTickElapsed).TotalSeconds;
@@ -1454,7 +1544,9 @@ public sealed class QuadStore : IDisposable
                     }
                     quadsScanned++;
 
-                    if (emitProgress && quadsScanned - lastTickEntries >= progressTickThreshold)
+                    if (emitProgress &&
+                        quadsScanned - lastTickEntries >= progressTickThreshold &&
+                        trigramStopwatch.Elapsed - lastTickElapsed >= progressMinInterval)
                     {
                         var elapsed = trigramStopwatch.Elapsed;
                         var dt = (elapsed - lastTickElapsed).TotalSeconds;
@@ -1503,7 +1595,9 @@ public sealed class QuadStore : IDisposable
                     }
                     drainEntries++;
 
-                    if (emitProgress && drainEntries - lastTickEntries >= progressTickThreshold)
+                    if (emitProgress &&
+                        drainEntries - lastTickEntries >= progressTickThreshold &&
+                        trigramStopwatch.Elapsed - lastTickElapsed >= progressMinInterval)
                     {
                         var elapsed = trigramStopwatch.Elapsed;
                         var dt = (elapsed - lastTickElapsed).TotalSeconds;
