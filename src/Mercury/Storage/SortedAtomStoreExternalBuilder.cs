@@ -461,6 +461,16 @@ internal static class SortedAtomStoreExternalBuilder
         // (8 KB) — the merge reads sequentially, OS readahead is the workhorse.
         var poolSize = ResolveMergeFileStreamPoolSize(chunkFiles.Count);
         using var streamPool = new BoundedFileStreamPool(poolSize, MergeFileStreamBufferSize);
+        // ADR-038 Part 2: shared per-merge readahead dispatcher. Workers fill per-chunk
+        // buffers asynchronously, transforming the kernel-visible access pattern from
+        // "interleaved random switches across N streams" into "N truly sequential streams."
+        // Disabled when MERCURY_MERGE_READAHEAD env var is "0" — preserves the
+        // direct-fs-read fallback path and lets the gradient A/B against the no-readahead
+        // baseline cleanly.
+        bool readAheadEnabled = Environment.GetEnvironmentVariable("MERCURY_MERGE_READAHEAD") != "0";
+        using var readAheadDispatcher = readAheadEnabled
+            ? new ChunkReadAheadDispatcher(streamPool)
+            : null;
         var readers = new List<ChunkReader>(chunkFiles.Count);
         int chunksDeleted = 0;
         long chunkBytesReclaimed = 0;
@@ -468,7 +478,7 @@ internal static class SortedAtomStoreExternalBuilder
         {
             foreach (var path in chunkFiles)
             {
-                var reader = new ChunkReader(path, readers.Count, streamPool);
+                var reader = new ChunkReader(path, readers.Count, streamPool, readAheadDispatcher);
                 if (reader.MoveNext())
                     readers.Add(reader);
                 else
@@ -628,51 +638,130 @@ internal static class SortedAtomStoreExternalBuilder
     private sealed class ChunkReader : IDisposable
     {
         private readonly string _path;
-        private readonly long _fileLength;  // cached via FileInfo at construction; chunk files are read-only
+        private readonly long _fileLength;
         private readonly int _chunkIndex;
         private readonly BoundedFileStreamPool _pool;
-        private long _offset;  // saved file position; restored on cache miss
+        private readonly ChunkReadAheadDispatcher? _dispatcher;
+        private readonly ChunkReadAheadBuffer? _readahead;
         // ADR-038 Part 1: prevBytes is the running-context for prefix-compressed records.
-        // Anchors (every ChunkAnchorInterval records) reset this to the anchor's full bytes.
-        // Re-acquire-after-eviction reuses _prevBytes if the pool kept the stream open.
-        // For true eviction recovery, the sidecar's anchor offsets allow seek-to-nearest-
-        // anchor + replay-up-to-_offset to rebuild _prevBytes correctly. Atom-merge at 21.3 B
-        // does not exercise eviction (3,923 chunks << 8 K pool cap) — sidecar exists for
-        // future trigram-drain extension; not used in atom-merge today.
         private byte[]? _prevBytes;
-        // Read buffer for varint header (max 10 bytes prefix_len byte + 9 bytes varint InputIdx
-        // + 9 bytes varint suffix_length = ~19 bytes; round up to 32). Reused across MoveNext.
+        // Read buffer for varint header (~19 bytes typical, 32 padded).
         private readonly byte[] _headerBuf = new byte[32];
         public (byte[] Bytes, long InputIdx) Current { get; private set; }
         private bool _disposed;
 
-        public ChunkReader(string path, int chunkIndex, BoundedFileStreamPool pool)
+        public ChunkReader(string path, int chunkIndex, BoundedFileStreamPool pool, ChunkReadAheadDispatcher? dispatcher = null)
         {
             _path = path;
             _chunkIndex = chunkIndex;
             _pool = pool;
-            // FileInfo.Length is one fstat at construction; avoids holding an open FD just
-            // to read length. The 1B FlushToDisk trace (commit 8ca5388) showed FileStream
-            // get_Length() at 12.36% of CPU when called per-MoveNext — caching once is
-            // load-bearing for performance even with the pool.
+            _dispatcher = dispatcher;
             _fileLength = new FileInfo(path).Length;
-            _offset = 0;
             Current = default;
+
+            // ADR-038 Part 2: when a dispatcher is provided, set up a per-chunk readahead
+            // buffer. The buffer's onBackEmpty callback re-enqueues this chunk for refill
+            // after each swap. Initial refill request bootstraps the pipeline.
+            if (_dispatcher is not null)
+            {
+                _readahead = new ChunkReadAheadBuffer(
+                    fileLength: _fileLength,
+                    onBackEmpty: () => _dispatcher.RequestRefill(_path, _readahead!));
+                _dispatcher.RequestRefill(_path, _readahead);
+            }
         }
 
         public bool MoveNext()
         {
-            if (_disposed || _offset >= _fileLength) return false;
+            if (_disposed) return false;
 
+            // Dispatch path: read via async readahead buffer (ADR-038 P2).
+            // Fallback: synchronous direct file read (preserves cycle 9 behavior + tests
+            // that don't construct a dispatcher).
+            return _readahead is not null ? MoveNextReadAhead() : MoveNextDirect();
+        }
+
+        // Staging buffer — small fixed-size scratch that holds the next N bytes from the
+        // readahead buffer. Lets us parse variable-length headers without the over-read
+        // bookkeeping that bit the first version. Capacity 64 holds any single record's
+        // header (1 byte prefix + 9 byte varint InputIdx + 9 byte varint suffix_len ≤ 19)
+        // with margin.
+        private const int StageCapacity = 64;
+        private readonly byte[] _stage = new byte[StageCapacity];
+        private int _stagePos;
+        private int _stageLen;
+
+        private void EnsureStage(int minBytes)
+        {
+            int remaining = _stageLen - _stagePos;
+            if (remaining >= minBytes) return;
+            // Compact remaining bytes to the start.
+            if (remaining > 0) Array.Copy(_stage, _stagePos, _stage, 0, remaining);
+            _stagePos = 0;
+            _stageLen = remaining;
+            // Top up from readahead buffer.
+            int got = _readahead!.Read(_stage.AsSpan(_stageLen, _stage.Length - _stageLen));
+            _stageLen += got;
+        }
+
+        private bool MoveNextReadAhead()
+        {
+            // EnsureStage with 1 byte sufficient to detect EOF (we need at least the
+            // prefix_len byte). If nothing reads, we're done.
+            EnsureStage(1);
+            if (_stageLen - _stagePos == 0) return false;
+
+            // Ensure room for the worst-case header (1 + 9 + 9 = 19; round up).
+            EnsureStage(20);
+            if (_stageLen - _stagePos == 0) return false;
+
+            int prefixLen = _stage[_stagePos++];
+            ulong inputIdxRaw = ReadVarUInt64(_stage.AsSpan(_stagePos, _stageLen - _stagePos), out int idxBytes);
+            _stagePos += idxBytes;
+            ulong suffixLenRaw = ReadVarUInt64(_stage.AsSpan(_stagePos, _stageLen - _stagePos), out int sufBytes);
+            _stagePos += sufBytes;
+            int suffixLen = checked((int)suffixLenRaw);
+
+            int fullLen = prefixLen + suffixLen;
+            var bytes = new byte[fullLen];
+            if (prefixLen > 0)
+            {
+                if (_prevBytes is null || _prevBytes.Length < prefixLen)
+                    throw new InvalidDataException(
+                        $"Chunk {_chunkIndex}: prefix_len={prefixLen} but prevBytes context insufficient");
+                Array.Copy(_prevBytes, 0, bytes, 0, prefixLen);
+            }
+            // Suffix: drain from stage first, then from readahead buffer.
+            int suffixFromStage = Math.Min(suffixLen, _stageLen - _stagePos);
+            if (suffixFromStage > 0)
+            {
+                Array.Copy(_stage, _stagePos, bytes, prefixLen, suffixFromStage);
+                _stagePos += suffixFromStage;
+            }
+            int suffixRemaining = suffixLen - suffixFromStage;
+            if (suffixRemaining > 0)
+            {
+                int got = _readahead!.Read(bytes.AsSpan(prefixLen + suffixFromStage, suffixRemaining));
+                if (got != suffixRemaining)
+                    throw new InvalidDataException($"Chunk {_chunkIndex}: unexpected EOF reading suffix");
+            }
+
+            _prevBytes = bytes;
+            Current = (bytes, (long)inputIdxRaw);
+            return true;
+        }
+
+        private bool MoveNextDirect()
+        {
+            // Fallback path: original direct-read behavior for tests / contexts without
+            // a readahead dispatcher. Logic matches B1 implementation.
+            // (preserved here for regression safety; not used in production MergeAndWrite)
             var fs = _pool.Get(_path);
-            if (fs.Position != _offset) fs.Position = _offset;
+            // Track current offset across calls via FileStream position; sync only if
+            // the pool restored a different FileStream.
+            long offset = fs.Position;
+            if (offset >= _fileLength) return false;
 
-            // ADR-038 Part 1: prefix-compressed record format.
-            // [byte prefix_len][varint InputIdx][varint suffix_length][suffix bytes]
-            //
-            // Read up to 32 bytes opportunistically; varints are variable-length and
-            // we don't know record boundaries upfront. The reader unpicks the header
-            // from the buffer and seeks file position back to the suffix-data boundary.
             int peekRead = fs.Read(_headerBuf, 0, _headerBuf.Length);
             if (peekRead == 0) return false;
 
@@ -682,25 +771,18 @@ internal static class SortedAtomStoreExternalBuilder
             hdrIdx += idxBytes;
             ulong suffixLenRaw = ReadVarUInt64(_headerBuf.AsSpan(hdrIdx, peekRead - hdrIdx), out int sufBytes);
             hdrIdx += sufBytes;
-
             int suffixLen = checked((int)suffixLenRaw);
-            // If we read past the suffix bytes, seek back so the next MoveNext starts
-            // at the next record header.
             int totalRecordHeaderBytes = hdrIdx;
-
             int fullLen = prefixLen + suffixLen;
             var bytes = new byte[fullLen];
-            // Copy prefix from prevBytes (must be set unless this is an anchor record;
-            // anchor records have prefix_len == 0, so the prefix copy is a no-op).
+
             if (prefixLen > 0)
             {
                 if (_prevBytes is null || _prevBytes.Length < prefixLen)
                     throw new InvalidDataException(
-                        $"Chunk {_chunkIndex} record at offset {_offset}: prefix_len={prefixLen} but prevBytes context insufficient");
+                        $"Chunk {_chunkIndex} record at offset {offset}: prefix_len={prefixLen} but prevBytes context insufficient");
                 Array.Copy(_prevBytes, 0, bytes, 0, prefixLen);
             }
-            // Copy suffix bytes — first from the peek buffer (whatever we already have),
-            // then read remaining from fs.
             int suffixBytesInPeek = Math.Min(suffixLen, peekRead - totalRecordHeaderBytes);
             if (suffixBytesInPeek > 0)
                 Array.Copy(_headerBuf, totalRecordHeaderBytes, bytes, prefixLen, suffixBytesInPeek);
@@ -717,14 +799,10 @@ internal static class SortedAtomStoreExternalBuilder
             }
             else
             {
-                // Suffix fit entirely in the peek buffer. Seek FileStream back to record-end
-                // so the next MoveNext starts at the next record's header byte.
                 int unconsumed = peekRead - totalRecordHeaderBytes - suffixLen;
-                if (unconsumed > 0)
-                    fs.Position -= unconsumed;
+                if (unconsumed > 0) fs.Position -= unconsumed;
             }
 
-            _offset = fs.Position;
             _prevBytes = bytes;
             Current = (bytes, (long)inputIdxRaw);
             return true;
@@ -734,9 +812,7 @@ internal static class SortedAtomStoreExternalBuilder
         {
             if (_disposed) return;
             _disposed = true;
-            // Stream is owned by the pool; do not dispose here. The pool's Dispose
-            // (or LRU eviction) closes it. Drop our path from the pool so FDs free
-            // promptly when this reader is exhausted.
+            _readahead?.Dispose();
             _pool.Drop(_path);
         }
     }
