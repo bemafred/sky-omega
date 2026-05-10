@@ -1,5 +1,8 @@
 using System;
 using System.Collections.Generic;
+using SkyOmega.Bcl.Collections;
+using SkyOmega.Bcl.DataStructures;
+using SkyOmega.Bcl.Hashing;
 
 namespace SkyOmega.Mercury.Storage.Mphf;
 
@@ -8,6 +11,17 @@ namespace SkyOmega.Mercury.Storage.Mphf;
 /// each level allocates a bit vector and hashes remaining keys; collisions bump
 /// to the next level. Convergence in 3–5 levels at gamma=2.0.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Capacity discipline.</b> All per-key collections use long-typed
+/// <see cref="ChunkedList{T}"/> / <see cref="ChunkedArray{T}"/> from
+/// <c>SkyOmega.Bcl</c>; no path is bounded by int32. Collision detection uses a
+/// bit-vector pair (<c>seen</c> + <c>collided</c>) instead of
+/// <c>Dictionary&lt;long,int&gt;</c> — both for int32 immunity and memory
+/// economy: at 4 B atoms, the Dictionary alternative would have required &gt;96 GB
+/// per level vs ~2 GB for the bit-vector pair.
+/// </para>
+/// </remarks>
 internal sealed class BBHashBuilder
 {
     /// <summary>Default gamma — bits-per-key per level. 2.0 is the BBHash-paper default.</summary>
@@ -20,12 +34,6 @@ internal sealed class BBHashBuilder
     /// converge in fewer levels by chance (lucky key distribution); adversarial
     /// inputs may need this many or more.
     /// </summary>
-    /// <remarks>
-    /// 24 is comfortably above the worst case at 4 B atoms but below pathological
-    /// failure mode where construction grinds. For production at 4 B atoms,
-    /// consider future dense-final-level extension (the 1.6 bits/key headline from
-    /// the BBHash paper assumes such a tail).
-    /// </remarks>
     public const int MaxLevels = 24;
 
     private readonly double _gamma;
@@ -51,52 +59,58 @@ internal sealed class BBHashBuilder
     /// </summary>
     /// <param name="keyCount">Total number of keys.</param>
     /// <param name="getKey">Callback to retrieve key bytes by input index (1-based on caller's
-    /// convention; mapped 0-based here).</param>
+    /// convention; passed through here unchanged).</param>
     public BuildResult Build(long keyCount, Func<long, byte[]> getKey)
     {
         if (keyCount < 0) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (keyCount == 0)
-            return new BuildResult(new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0), Array.Empty<long>());
+            return new BuildResult(new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0), new ChunkedArray<long>(0));
 
         // Track which keys remain to be placed (by input-index, 1-based).
-        var remaining = new List<long>(checked((int)keyCount));
+        // ChunkedList — long-indexed, no doubling-copy on growth, no int32 cap.
+        var remaining = new ChunkedList<long>();
         for (long i = 1; i <= keyCount; i++) remaining.Add(i);
 
         var levels = new List<BitVector>();
         var levelOffsets = new List<long>();
-        // mphf_pos → input_index. Built incrementally as bits are placed.
-        var translation = new long[keyCount];
+        // mphf_pos → input_index. ChunkedArray — fixed length, eager allocation.
+        var translation = new ChunkedArray<long>(keyCount);
 
         long globalOffset = 0;
         for (int levelIdx = 0; levelIdx < _maxLevels; levelIdx++)
         {
-            if (remaining.Count == 0) break;
+            long remainingCount = remaining.Count;
+            if (remainingCount == 0) break;
 
-            long bitCount = (long)Math.Ceiling(_gamma * remaining.Count);
+            long bitCount = (long)Math.Ceiling(_gamma * remainingCount);
             if (bitCount < 1) bitCount = 1;
             var bv = new BitVector(bitCount);
             ulong seed = _baseSeed + (ulong)levelIdx;
 
-            // First pass: count collisions per position. We use a sparse map since most
-            // positions get 0 or 1 keys.
-            var positionToCount = new Dictionary<long, int>(remaining.Count);
-            var keyPositions = new long[remaining.Count];
-            for (int k = 0; k < remaining.Count; k++)
+            // First pass: detect collisions via bit-vector pair. seen[pos]=1 once any
+            // key hashes there; collided[pos]=1 once a second key hashes there. This
+            // replaces the prior Dictionary<long,int> position counter — same semantics
+            // (we only care about "0/1 keys" vs "2+ keys"), but bounded by ~bitCount
+            // bits each instead of ~32 bytes per distinct position.
+            var seen = new BitVector(bitCount);
+            var collided = new BitVector(bitCount);
+            var keyPositions = new ChunkedArray<long>(remainingCount);
+            for (long k = 0; k < remainingCount; k++)
             {
                 var keyBytes = getKey(remaining[k]);
-                ulong h = MphfHash.Hash64(keyBytes, seed);
+                ulong h = SplitMix64Hash.Hash64(keyBytes, seed);
                 long pos = (long)(h % (ulong)bitCount);
                 keyPositions[k] = pos;
-                positionToCount[pos] = positionToCount.GetValueOrDefault(pos, 0) + 1;
+                if (seen.Get(pos)) collided.Set(pos);
+                seen.Set(pos);
             }
 
-            // Second pass: set bits for non-colliding positions, place into translation,
-            // collect bumped keys.
-            var bumped = new List<long>();
-            for (int k = 0; k < remaining.Count; k++)
+            // Second pass: set bits for non-colliding positions; bump collided keys.
+            var bumped = new ChunkedList<long>();
+            for (long k = 0; k < remainingCount; k++)
             {
                 long pos = keyPositions[k];
-                if (positionToCount[pos] == 1)
+                if (!collided.Get(pos))
                 {
                     bv.Set(pos);
                 }
@@ -108,12 +122,11 @@ internal sealed class BBHashBuilder
 
             // Build rank table for this level so we can compute placement positions.
             bv.BuildRankTable();
-            // Fill translation for placed keys: for each placed key, the mphf_pos =
-            // globalOffset + rank(level, key_position).
-            for (int k = 0; k < remaining.Count; k++)
+            // Fill translation for placed keys: mphf_pos = globalOffset + rank(pos).
+            for (long k = 0; k < remainingCount; k++)
             {
                 long pos = keyPositions[k];
-                if (positionToCount[pos] == 1)
+                if (!collided.Get(pos))
                 {
                     long mphfPos = globalOffset + bv.Rank(pos);
                     translation[mphfPos] = remaining[k];
@@ -136,5 +149,5 @@ internal sealed class BBHashBuilder
     }
 
     /// <summary>Result of <see cref="Build"/>: the MPHF + a translation array <c>mphf_pos → input_index</c>.</summary>
-    public sealed record BuildResult(BBHash Mphf, long[] Translation);
+    public sealed record BuildResult(BBHash Mphf, ChunkedArray<long> Translation);
 }

@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.IO.MemoryMappedFiles;
+using SkyOmega.Bcl.Collections;
 
 namespace SkyOmega.Mercury.Storage.Mphf;
 
@@ -89,12 +90,14 @@ internal sealed class MphfTranslationTable : IDisposable
 
     /// <summary>
     /// Write a translation table to disk. Caller provides the mphf_pos → sorted_pos
-    /// mapping as a <c>long[]</c> (sorted-positions fit in uint32 at &lt; 4 B atoms).
+    /// mapping as a <see cref="ChunkedArray{T}"/> of <c>long</c> (sorted-positions fit
+    /// in uint32 at ≤ 4 B atoms). ChunkedArray is required because at production scale
+    /// (≥ 2.15 B atoms) BCL <c>long[]</c> exceeds the int32 element-count cap.
     /// </summary>
-    public static void WriteTo(string path, long[] mphfPosToSortedPos)
+    public static void WriteTo(string path, ChunkedArray<long> mphfPosToSortedPos)
     {
         if (mphfPosToSortedPos is null) throw new ArgumentNullException(nameof(mphfPosToSortedPos));
-        long n = mphfPosToSortedPos.LongLength;
+        long n = mphfPosToSortedPos.Length;
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, FileOptions.SequentialScan);
 
         Span<byte> hdr = stackalloc byte[HeaderBytes];

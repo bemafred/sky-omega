@@ -2,6 +2,8 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using SkyOmega.Bcl.DataStructures;
+using SkyOmega.Bcl.Hashing;
 
 namespace SkyOmega.Mercury.Storage.Mphf;
 
@@ -57,7 +59,7 @@ internal sealed class BBHash
         for (int level = 0; level < Levels.Length; level++)
         {
             ulong seed = BaseSeed + (ulong)level;
-            ulong h = MphfHash.Hash64(key, seed);
+            ulong h = SplitMix64Hash.Hash64(key, seed);
             long pos = (long)(h % (ulong)Levels[level].BitCount);
             if (Levels[level].Get(pos))
             {

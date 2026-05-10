@@ -1,11 +1,12 @@
 using System;
 using System.Numerics;
 
-namespace SkyOmega.Mercury.Storage.Mphf;
+namespace SkyOmega.Bcl.DataStructures;
 
 /// <summary>
 /// Compact bit array backed by <c>ulong[]</c>. Supports get/set + precomputed
-/// rank queries. Used by <see cref="BBHash"/> as the per-level data structure.
+/// rank queries. Used by minimal-perfect-hash data structures (BBHash) and other
+/// substrate-level workloads that need >int.MaxValue logical bit addressing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,13 +15,18 @@ namespace SkyOmega.Mercury.Storage.Mphf;
 /// 1 word longer to accommodate the off-by-one for whole-word reads.
 /// </para>
 /// <para>
+/// <b>Capacity.</b> The backing <c>ulong[]</c> is bounded by .NET's int.MaxValue
+/// element cap, giving a maximum of ~2.15 G ulongs = ~137 G bits. For substrate
+/// workloads at 4 B atoms × γ=2.0 = 8 B bits, this is well within bounds.
+/// </para>
+/// <para>
 /// <b>Rank table.</b> <see cref="BuildRankTable"/> precomputes cumulative popcount
 /// every <see cref="RankBlockSize"/> bits. <see cref="Rank"/> returns the count of
 /// set bits in [0, position] in O(1) — one rank-table lookup + one popcount over the
 /// remainder of the active word's preceding bits.
 /// </para>
 /// </remarks>
-internal sealed class BitVector
+public sealed class BitVector
 {
     /// <summary>Bits per rank-table block. 512 = 8 words; rank lookup table is N / 512 entries.</summary>
     public const int RankBlockSize = 512;
@@ -109,7 +115,6 @@ internal sealed class BitVector
         long bitsToScan = position - blockStartBit;
 
         long rank = _rank[blockIdx];
-        // Scan whole words within the block until we reach the partial word.
         long wordsPerBlock = RankBlockSize / 64;
         long startWord = blockIdx * wordsPerBlock;
         long fullWords = bitsToScan / 64;
@@ -117,7 +122,6 @@ internal sealed class BitVector
         {
             rank += BitOperations.PopCount(_words[startWord + w]);
         }
-        // Partial word at end.
         long partialBits = bitsToScan % 64;
         if (partialBits > 0)
         {

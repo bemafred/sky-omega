@@ -19,6 +19,41 @@ Next: cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/road
 
 ---
 
+## [1.7.53] - 2026-05-10
+
+**Headline:** New `SkyOmega.Bcl` project (substrate-level BCL extensions) + `BBHashBuilder` int32-overflow fix surfaced by cycle 10 Phase 3 production-run crash at ~4 B atoms. Phase 3 unblocked.
+
+### Added
+
+- **`SkyOmega.Bcl` project** (`src/SkyOmega.Bcl/`). Substrate-level home for BCL extensions Sky Omega needs but cannot NuGet-ify due to the substrate-independence discipline. Mercury now references it; future migrations queued for `BZip2*` decompression streams and `Varint` encoding helpers.
+- **`ChunkedList<T>`** and **`ChunkedArray<T>`** (`src/SkyOmega.Bcl/Collections/`). Long-indexed, chunked storage (default 1 M elements per chunk) supporting > `int.MaxValue` element collections. No doubling-on-growth element copy (only the top-level pointer array doubles). 12 unit tests covering basic round-trip, chunk-boundary crossings, and indexing past the int32 limit.
+- **`BitVector`** relocated from `SkyOmega.Mercury.Storage.Mphf` → `SkyOmega.Bcl.DataStructures` (already long-indexed, qualifies as substrate-level BCL extension).
+- **`SplitMix64Hash`** in `SkyOmega.Bcl.Hashing` (relocated and renamed from `SkyOmega.Mercury.Storage.Mphf.MphfHash`). Same algorithm, broader home.
+- **`docs/limits/collection-element-count.md`** — limits-register entry capturing the int32-cap class as a *resolved* substrate-level concern. Sister entry to `runtime-fd-detection.md` and `bulk-load-memory-pressure.md` — same family of "hard OS/BCL ceiling that the application surface obscures."
+
+### Fixed
+
+- **`BBHashBuilder` int32 overflow at production scale** (`src/Mercury/Storage/Mphf/BBHashBuilder.cs`). Cycle 10 Phase 3 21.3 B production run on 1.7.52 crashed during MPHF construction at chunk-004045 (~4 B atoms) with `OverflowException` from `new List<long>(checked((int)keyCount))`. Five distinct int32 traps in one method:
+  - `new List<long>(checked((int)keyCount))` — capacity arg
+  - `new long[keyCount]` translation array — int32 element cap
+  - `new Dictionary<long,int>(remaining.Count)` — capacity + bucket count
+  - `new long[remaining.Count]` keyPositions — same
+  - `new List<long>()` bumped collector — hits cap on next bump past 2.15 B
+- Rewrite uses `ChunkedList<long>` for `remaining` / `bumped`, `ChunkedArray<long>` for `translation` / `keyPositions`, and a **bit-vector pair (seen + collided)** in place of the `Dictionary<long,int>` collision counter. Bit-vector pair is bounded by `~bitCount × 2 / 8` bytes — at 4 B atoms × γ=2.0 = ~2 GB per level vs the `Dictionary<long,int>`'s estimated > 96 GB at the same scale (which would have OOM'd before reaching the int32 trap). All loop counters widened to `long`.
+- `BBHashBuilder.BuildResult.Translation` signature changed `long[]` → `ChunkedArray<long>`. `MphfTranslationTable.WriteTo` signature updated correspondingly. All callers and tests updated.
+
+### Validated
+
+- All 4395 Mercury.Tests pass (37 BBHash/MPHF/SortedAtomStore-specific).
+- All 12 SkyOmega.Bcl.Tests pass.
+- Phase 3 production restart unblocked: same substrate, same algorithms, same lookup semantics; only the construction-time data structures changed.
+
+### Notes
+
+- This fix triggered the **collection-element-count** limits-register entry. Per `feedback_resource_limit_class_audit`, the discipline is: *every* interaction with an int32-bounded BCL collection where the count is input-derived must use the chunked equivalents. The substrate forbids "safe-N" thinking.
+
+---
+
 ## Cycle 9 — 21.3 B Production Validation (2026-05-09)
 
 Not a release tag, but a substantive validation milestone. Substrate `wiki-21b-ref-r2` (since deleted to free disk for cycle 10) loaded full Wikidata 21.3 B Reference + Sorted on **1.7.50** in **35 h 35 m wall-clock** (vs cycle 8's 46 h with intervention).
