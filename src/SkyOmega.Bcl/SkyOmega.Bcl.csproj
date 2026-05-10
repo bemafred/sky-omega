@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SkyOmega.Bcl</RootNamespace>
+    <AssemblyName>SkyOmega.Bcl</AssemblyName>
+
+    <PackageId>SkyOmega.Bcl</PackageId>
+    <Title>Sky Omega BCL Extensions</Title>
+    <Description>Substrate-independent BCL extensions for the Sky Omega substrates. Pure-C# data structures, encoding helpers, hashing, and compression that should be in the BCL but aren't, that we can't NuGet because of substrate-independence discipline. No external dependencies.</Description>
+
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SkyOmega.Bcl.Tests" />
+    <InternalsVisibleTo Include="SkyOmega.Mercury" />
+    <InternalsVisibleTo Include="Mercury.Tests" />
+  </ItemGroup>
+
+</Project>

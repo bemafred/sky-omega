@@ -136,7 +136,7 @@ public class BBHashTests : IDisposable
         var builder = new BBHashBuilder();
         var result = builder.Build(0, idx => throw new InvalidOperationException("Should not be called for empty set"));
         Assert.Equal(0, result.Mphf.NumKeys);
-        Assert.Empty(result.Translation);
+        Assert.Equal(0L, result.Translation.Length);
     }
 
     [Fact]
