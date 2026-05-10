@@ -137,4 +137,33 @@ public class BoundedFileStreamPoolTests : System.IDisposable
         pool.Dispose();
         Assert.Throws<System.ObjectDisposedException>(() => pool.Get(path));
     }
+
+    [Fact]
+    public void Get_CrossThreadAccess_ThrowsContractViolation()
+    {
+        // Pool documents a single-threaded contract; cross-thread access corrupts
+        // LinkedList + Dictionary state silently. The contract guard catches the
+        // failure mode at first cross-thread Get rather than at runtime corruption.
+        // This guard was added after the cycle 10 B2 readahead concurrency hazard
+        // (ChunkReadAheadDispatcher shared this pool across N workers, violating
+        // the contract). Defense-in-depth: removing the violator + adding the guard.
+        var path = MakeFile("a.bin", new byte[] { 1, 2, 3 });
+        using var pool = new BoundedFileStreamPool(maxOpen: 4);
+
+        // Claim ownership on the test thread.
+        _ = pool.Get(path);
+
+        System.Exception? thrown = null;
+        var t = new System.Threading.Thread(() =>
+        {
+            try { _ = pool.Get(path); }
+            catch (System.Exception ex) { thrown = ex; }
+        });
+        t.Start();
+        t.Join();
+
+        Assert.NotNull(thrown);
+        Assert.IsType<System.InvalidOperationException>(thrown);
+        Assert.Contains("single-threaded", thrown!.Message);
+    }
 }

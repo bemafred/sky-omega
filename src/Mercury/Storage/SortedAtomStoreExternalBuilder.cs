@@ -464,12 +464,14 @@ internal static class SortedAtomStoreExternalBuilder
         // ADR-038 Part 2: shared per-merge readahead dispatcher. Workers fill per-chunk
         // buffers asynchronously, transforming the kernel-visible access pattern from
         // "interleaved random switches across N streams" into "N truly sequential streams."
+        // Workers open short-lived per-refill FileStreams (NOT shared with streamPool —
+        // the pool's documented single-threaded contract would otherwise be violated).
         // Disabled when MERCURY_MERGE_READAHEAD env var is "0" — preserves the
         // direct-fs-read fallback path and lets the gradient A/B against the no-readahead
         // baseline cleanly.
         bool readAheadEnabled = Environment.GetEnvironmentVariable("MERCURY_MERGE_READAHEAD") != "0";
         using var readAheadDispatcher = readAheadEnabled
-            ? new ChunkReadAheadDispatcher(streamPool)
+            ? new ChunkReadAheadDispatcher(MergeFileStreamBufferSize)
             : null;
         var readers = new List<ChunkReader>(chunkFiles.Count);
         int chunksDeleted = 0;

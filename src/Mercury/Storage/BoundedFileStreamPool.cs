@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -44,6 +45,13 @@ internal sealed class BoundedFileStreamPool : IDisposable
     private int _peakOpenCount;
     private bool _disposed;
 
+    // Contract guard: claim ownership on first Get/Drop, then trip if any other thread
+    // ever touches the pool. Catches the failure mode where shared mutable state
+    // (LinkedList + Dictionary) gets concurrently mutated under pressure — silent
+    // corruption otherwise. See ChunkReadAheadDispatcher for the path that previously
+    // violated this contract before the worker-local-FileStream refactor.
+    private int _ownerThreadId; // 0 = unowned; otherwise managed-thread-id of claimant
+
     public BoundedFileStreamPool(int maxOpen, int bufferSize = 64 * 1024)
     {
         if (maxOpen < 1) throw new ArgumentOutOfRangeException(nameof(maxOpen), "maxOpen must be >= 1");
@@ -74,6 +82,7 @@ internal sealed class BoundedFileStreamPool : IDisposable
     public FileStream Get(string path)
     {
         if (_disposed) throw new ObjectDisposedException(nameof(BoundedFileStreamPool));
+        AssertSingleThreadedAccess();
 
         if (_byPath.TryGetValue(path, out var node))
         {
@@ -111,6 +120,7 @@ internal sealed class BoundedFileStreamPool : IDisposable
     public void Drop(string path)
     {
         if (_disposed) return;
+        AssertSingleThreadedAccess();
         if (_byPath.TryGetValue(path, out var node))
         {
             _lru.Remove(node);
@@ -129,6 +139,24 @@ internal sealed class BoundedFileStreamPool : IDisposable
         }
         _lru.Clear();
         _byPath.Clear();
+    }
+
+    /// <summary>
+    /// Claims thread ownership on first call; throws if any other thread touches the pool.
+    /// Enforces the documented single-threaded contract. Constant-time fast path after the
+    /// first call (one volatile read + one int compare).
+    /// </summary>
+    private void AssertSingleThreadedAccess()
+    {
+        int currentTid = Environment.CurrentManagedThreadId;
+        int prior = Interlocked.CompareExchange(ref _ownerThreadId, currentTid, 0);
+        if (prior != 0 && prior != currentTid)
+        {
+            throw new InvalidOperationException(
+                $"BoundedFileStreamPool accessed from thread {currentTid}; previously claimed by thread {prior}. " +
+                "Pool is single-threaded by design — see class docstring. Concurrent callers must use " +
+                "their own short-lived FileStreams (cf. ChunkReadAheadDispatcher).");
+        }
     }
 
     private sealed record PoolEntry(string Path, FileStream Stream);

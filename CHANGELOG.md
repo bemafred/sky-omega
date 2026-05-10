@@ -19,6 +19,28 @@ Next: cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/road
 
 ---
 
+## [1.7.54] - 2026-05-10
+
+**Headline:** Fix B2 readahead concurrency-contract violation surfaced by external review during cycle 10 Phase 3. `ChunkReadAheadDispatcher` was sharing `BoundedFileStreamPool` across N workers in violation of the pool's single-threaded contract. Phase 3 run killed at ~28 % parser before merge could exercise the racy path; substrate corrected before resuming.
+
+### Fixed
+
+- **`ChunkReadAheadDispatcher` worker-local short-lived FileStreams** (`src/Mercury/Storage/ChunkReadAheadDispatcher.cs`). Workers now open `using var fs = new FileStream(req.Path, ...)` per refill instead of calling `_pool.Get(req.Path)`. `FillBack` already seeks to its tracked `_filePosition` (`ChunkReadAheadBuffer.cs:148`), so a fresh stream per refill is always at the correct offset. Per-refill `open() + seek() ≈ 12 µs`, negligible against the ~10 ms cold / ~0.3 ms cached 4 MB-buffer read. FD pressure unchanged (peak ≈ `poolSize + workerCount` ≈ 64 + 8 = 72).
+- **Constructor signature change**: `ChunkReadAheadDispatcher(BoundedFileStreamPool pool, int? workerCount)` → `ChunkReadAheadDispatcher(int streamBufferSize, int? workerCount)`. Caller in `SortedAtomStoreExternalBuilder` passes `MergeFileStreamBufferSize` (8 KB).
+
+### Added
+
+- **`BoundedFileStreamPool` thread-affinity contract guard** (`src/Mercury/Storage/BoundedFileStreamPool.cs`). First `Get`/`Drop` claims `_ownerThreadId` via `Interlocked.CompareExchange`; any subsequent call from a different managed-thread-id throws `InvalidOperationException` naming the violator. Cost: one volatile read + int compare per call after the first. Catches the failure mode at first cross-thread access rather than at runtime corruption.
+- **`BoundedFileStreamPoolTests.Get_CrossThreadAccess_ThrowsContractViolation`** — regression guard for the contract.
+- **`docs/limits/readahead-pool-concurrency-contract.md`** — limits-register entry capturing this contract violation as a *resolved* substrate concern. Sister entry to `collection-element-count.md` and `runtime-fd-detection.md` — same family of "documented contract that the type system cannot enforce; needs a runtime guard at the abstraction boundary."
+
+### Notes
+
+- Reviewer's short-term workaround (`MERCURY_MERGE_READAHEAD=0`) was rejected per substrate-discipline call ("no shortcuts"). Structural fix shipped instead.
+- Phase 3 attribution rerun against 1.7.54: B1 + B2 + B3 + ADR-037 + cleanup hook all measured cleanly. The B2 attribution is preserved (not deferred) because the fix preserves B2's architectural intent (per-chunk frontier readahead) while removing the unsafe shared mutation.
+
+---
+
 ## [1.7.53] - 2026-05-10
 
 **Headline:** New `SkyOmega.Bcl` project (substrate-level BCL extensions) + `BBHashBuilder` int32-overflow fix surfaced by cycle 10 Phase 3 production-run crash at ~4 B atoms. Phase 3 unblocked.

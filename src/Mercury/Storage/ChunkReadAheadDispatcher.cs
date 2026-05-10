@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,11 +13,28 @@ namespace SkyOmega.Mercury.Storage;
 /// <remarks>
 /// <para>
 /// One dispatcher per <c>MergeAndWrite</c> invocation. Workers pull
-/// <see cref="RefillRequest"/> entries from a shared FIFO queue, get the chunk's
-/// FileStream from <see cref="BoundedFileStreamPool"/>, and call
-/// <see cref="ChunkReadAheadBuffer.FillBack"/>. Sized at <c>min(8, ProcessorCount/2)</c>
-/// by default — enough parallelism to keep all 3,923 chunk frontiers prefilled at
-/// 21.3 B Wikidata scale without saturating CPU or SSD bandwidth.
+/// <see cref="RefillRequest"/> entries from a shared FIFO queue, open a short-lived
+/// per-refill <see cref="FileStream"/>, and call <see cref="ChunkReadAheadBuffer.FillBack"/>.
+/// Sized at <c>min(8, ProcessorCount/2)</c> by default — enough parallelism to keep
+/// all 3,923 chunk frontiers prefilled at 21.3 B Wikidata scale without saturating
+/// CPU or SSD bandwidth.
+/// </para>
+/// <para>
+/// <b>Why worker-local short-lived streams (not the shared pool).</b> The merge's
+/// <see cref="BoundedFileStreamPool"/> documents a single-threaded contract; sharing
+/// it across N readahead workers violates that contract and races
+/// <c>LinkedList</c> + <c>Dictionary</c> mutation. The pool was a tempting fit
+/// because it caches FDs — but the readahead path's access pattern (one large
+/// sequential read per refill) makes per-refill <c>open() + seek() ≈ 12 µs</c>
+/// negligible against the ~10 ms cold-page read or ~0.3 ms cached-page read of
+/// a 4 MB buffer fill. Eliminating shared mutable state from the readahead path
+/// is the right tradeoff. <see cref="FillBack"/> seeks to its tracked file
+/// position itself, so a fresh stream per refill is always at the correct offset.
+/// </para>
+/// <para>
+/// <b>FD pressure.</b> Worker-local streams add at most <c>workerCount</c>
+/// transient FDs above the merge thread's pool — peak ≈ <c>poolSize + workerCount</c>
+/// ≈ 64 + 8 = 72. Well within macOS launchd's ~10,240 cap.
 /// </para>
 /// <para>
 /// <b>Lifecycle:</b> created at start of <c>MergeAndWrite</c>; <see cref="Dispose"/>
@@ -40,14 +58,15 @@ internal sealed class ChunkReadAheadDispatcher : IDisposable
     /// </summary>
     public static int DefaultWorkerCount => Math.Max(1, Math.Min(8, Environment.ProcessorCount / 2));
 
-    private readonly BoundedFileStreamPool _pool;
+    private readonly int _streamBufferSize;
     private readonly BlockingCollection<RefillRequest> _queue;
     private readonly Task[] _workers;
     private bool _disposed;
 
-    public ChunkReadAheadDispatcher(BoundedFileStreamPool pool, int? workerCount = null)
+    public ChunkReadAheadDispatcher(int streamBufferSize, int? workerCount = null)
     {
-        _pool = pool ?? throw new ArgumentNullException(nameof(pool));
+        if (streamBufferSize < 1024) throw new ArgumentOutOfRangeException(nameof(streamBufferSize), "streamBufferSize must be at least 1 KB");
+        _streamBufferSize = streamBufferSize;
         int n = workerCount ?? DefaultWorkerCount;
         if (n < 1) throw new ArgumentOutOfRangeException(nameof(workerCount), "workerCount must be >= 1");
         // Bounded capacity matches worker count × 2 — enough to absorb a burst of
@@ -82,7 +101,11 @@ internal sealed class ChunkReadAheadDispatcher : IDisposable
         {
             foreach (var req in _queue.GetConsumingEnumerable())
             {
-                var fs = _pool.Get(req.Path);
+                // Worker-local FileStream per refill. No shared mutable state — eliminates
+                // the BoundedFileStreamPool concurrency hazard. FillBack seeks to its
+                // tracked _filePosition itself, so opening fresh is always correct.
+                using var fs = new FileStream(req.Path, FileMode.Open, FileAccess.Read,
+                    FileShare.Read, _streamBufferSize, FileOptions.SequentialScan);
                 req.Buffer.FillBack(fs);
             }
         }
