@@ -42,7 +42,14 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 internal sealed class ChunkReadAheadBuffer : IDisposable
 {
-    /// <summary>Default buffer size per chunk (4 MB). Trades memory for prefetch granularity.</summary>
+    /// <summary>
+    /// Default buffer size per chunk side (4 MB). The buffer is double-buffered, so the
+    /// real per-chunk-reader memory footprint is <b>2 ×</b> this value (front + back) =
+    /// 8 MB by default. At 21.3 B Wikidata atoms / ~3,923 chunks, peak user-space
+    /// anonymous memory across all simultaneously-warm chunk readers is ≈ 31 GiB.
+    /// Substrate hosts are sized for this (128 GB target host); see
+    /// <c>docs/limits/readahead-buffer-memory-budget.md</c> for the full characterization.
+    /// </summary>
     public const int DefaultBufferSize = 4 * 1024 * 1024;
 
     private byte[] _front;
