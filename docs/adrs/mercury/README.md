@@ -42,3 +42,4 @@
 | [ADR-037](ADR-037-pipelined-spill-bulk-builder.md) | Pipelined Spill in SortedAtomBulkBuilder | Completed (production-validated cycle 9, 2026-05-09) |
 | [ADR-038](ADR-038-merge-read-side-optimization.md) | Merge-phase Read-Side Optimization (intermediate prefix compression + frontier readahead) | Accepted |
 | [ADR-039](ADR-039-mphf-on-sealed-atom-set.md) | Minimal Perfect Hash Function (BBHash) over Sealed Atom Set | Proposed |
+| [ADR-040](ADR-040-readahead-memory-adaptive-sizing.md) | Readahead Memory Adaptive Sizing — Substrate Adapts to Host RAM | Proposed |
