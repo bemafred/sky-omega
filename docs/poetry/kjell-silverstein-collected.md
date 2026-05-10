@@ -96,6 +96,23 @@ They could.
 
 ——
 
+## The New System
+
+The expert built a clever thing
+And wired it to me.
+“It learns!” he said. “It tries! It fails!
+And every fail is free.”
+He left. The thing began to try.
+The wire grew taut, then slack.
+I asked him, through the closing door,
+Whose fail is the wire’s back?
+He waved. He had a plane to catch.
+The thing tried something new.
+It learned.
+I paid.
+
+——
+
 ## It Minds
 
 Does it laugh?
