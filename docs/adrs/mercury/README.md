@@ -44,3 +44,4 @@
 | [ADR-039](ADR-039-mphf-on-sealed-atom-set.md) | Minimal Perfect Hash Function (BBHash) over Sealed Atom Set | Proposed |
 | [ADR-040](ADR-040-readahead-memory-adaptive-sizing.md) | Readahead Memory Adaptive Sizing — Substrate Adapts to Host RAM | Proposed |
 | [ADR-041](ADR-041-cleanup-on-finalize-exception.md) | Cleanup-on-Exception for Bulk-Tmp Intermediates | Proposed |
+| [ADR-042](ADR-042-mphf-construction-memory-adaptive-sizing.md) | MPHF Construction Memory Adaptive Sizing — Substrate-Correct Data Shapes | Proposed |
