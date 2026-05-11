@@ -2,7 +2,20 @@
 
 ## Status
 
-**Status:** Proposed — 2026-05-10
+**Status:** Proposed — 2026-05-10 (revised 2026-05-11 with measured MPHF evidence + scope clarification)
+
+## Scope
+
+This ADR covers **readahead memory only** — the per-chunk double-buffered `ChunkReadAheadBuffer` allocation pattern in `SortedAtomStoreExternalBuilder.MergeAndWrite`. It does **not** cover MPHF construction memory, which the 2026-05-11 `rebuild-mphf` measurement (see "Measured baseline" below) revealed as the substrate's *actual* peak memory consumer — roughly 3× the readahead's peak. ADR-040's readahead-adaptive design is necessary but not sufficient for substrate-host-portability; a sibling ADR (proposed: **ADR-042 — MPHF construction memory adaptive sizing**) will address the dominant memory phase.
+
+The two memory phases are sequential, not concurrent:
+
+| Phase | Lifetime | Measured peak working set (4 B atoms, 128 GB host) |
+|---|---|---:|
+| Merge (readahead active) | MergeAndWrite enter → atoms.atoms sealed | ~6 GB parser + 31 GB readahead + page cache (projected; not yet measured with `ReadAheadFootprintSampleEvent`) |
+| MPHF construction | BuildMphfFiles enter → atoms.idx written | **89 GB measured** (rebuild-mphf, 2026-05-11, level 0 peak) |
+
+ADR-040 addresses the merge phase. ADR-042 will address the MPHF phase. Each must independently scale to the host; together they bound the substrate's host-portability surface.
 
 ## Context
 
@@ -172,6 +185,30 @@ Cycle 11 (or a dedicated Phase post-cycle-10):
 
 Validation document: `docs/validations/adr-040-adaptive-readahead-{date}.md`.
 
+## Measured baseline (rebuild-mphf, 2026-05-11)
+
+The 1.7.55 `mercury --rebuild-mphf wiki-21b-ref-r3` run against the existing sealed atoms.atoms (99 GB, 4,005,235,528 atoms) was the first opportunity to measure the substrate's MPHF-phase memory footprint in isolation (no readahead active, no parser running — just BBHashBuilder reading atoms via mmap and building levels in memory).
+
+| Observation point | Elapsed (m:s) | RSS | %CPU |
+|---|---:|---:|---:|
+| Process start (BBHashBuilder allocates `remaining` + `translation` ChunkedArrays) | 02:00 | 31 GB | 87.6 % |
+| Level 0 bit-vector hashing + position capture peak | 34:42 | **89 GB** | 71.6 % |
+
+**Memory consumers at level 0 (4 B atoms):**
+
+| Component | Allocation | Lifetime | Approx size |
+|---|---|---|---:|
+| `translation` | `ChunkedArray<long>(N)` | All levels (persistent) | **32 GB** |
+| `keyPositions` | `ChunkedArray<long>(N)` | This level only | **32 GB** |
+| `remaining` (start of level 0) | `ChunkedList<long>` of length N | This level only | ~32 GB |
+| `bv` + `seen` + `collided` BitVectors | 3 × γ N bits = 3 GB level 0 | This level only | ~3 GB |
+| `bumped` (level 0 → level 1 input) | `ChunkedList<long>` of length ~0.39 N | Cross-level transient | ~12 GB |
+| Per-atom byte[] allocations from `GetAtomSpan().ToArray()` | N × ~60 B with GC churn | Continuous | hidden in GC |
+
+The peak 89 GB observed at level 0 represents ~70 % of available physical RAM on the 128 GB substrate target host. **This is the substrate's binding memory constraint, not readahead.** Subsequent levels see geometric decay (each level processes ~0.39× the previous), so the level-0 peak is the all-phase peak.
+
+For a 32 GB host, this workload is currently impossible — the substrate would OOM during MPHF construction long before readahead became the issue. ADR-042 will need to address chunked `translation` (mmap-backed instead of in-memory), elimination of `keyPositions` via re-hashing in the second pass, and a streaming `remaining`/`bumped` model.
+
 ## Alternatives considered
 
 - **Hard-code a smaller buffer (e.g., 2 MiB) globally.** Halves the budget at the cost of merge throughput on hosts where the budget is fine. Doesn't address the host-portability concern; just shifts the assumed-host point.
@@ -182,6 +219,8 @@ Validation document: `docs/validations/adr-040-adaptive-readahead-{date}.md`.
 ## References
 
 - ADR-038 §Part 2 — original readahead architecture (this ADR refines its memory accounting and adds host-adaptivity)
+- ADR-042 (forward reference, to be drafted) — MPHF construction memory adaptive sizing; the *dominant* memory-phase substrate-host-adaptation. ADR-040 alone does not deliver substrate host-portability — both are required.
 - [`docs/limits/readahead-buffer-memory-budget.md`](../../limits/readahead-buffer-memory-budget.md) — limits-register characterization that ADR-040 makes Resolved
 - [`docs/reviews/sky-omega-latest-version-review-2026-05-10.md`](../../reviews/sky-omega-latest-version-review-2026-05-10.md) §7 — external review that surfaced the 2× undercount in ADR-038's stated budget
+- 1.7.55 `rebuild-mphf` measurement (2026-05-11) — log: `docs/validations/cycle10-phase3-21b-resume-2026-05-11.log` — first direct measurement of MPHF-phase RSS at 4 B-atom scale, motivating the scope clarification above
 - [feedback_resource_limit_class_audit](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_resource_limit_class_audit.md) — discipline that motivates this ADR (memory is a resource class; treating it as host-independent is the same anti-pattern as treating FDs as host-independent)
