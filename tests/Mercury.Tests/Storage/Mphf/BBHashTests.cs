@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Storage.Mphf;
 using Xunit;
@@ -253,6 +254,75 @@ public class BBHashTests : IDisposable
             long actual = loaded.Lookup(keys[i]);
             Assert.Equal(expected, actual);
         }
+    }
+
+    [Fact]
+    public void Build_WithListener_EmitsStartLevelAndCompleteEvents()
+    {
+        // 1.7.56 instrumentation: confirm the listener path fires start + per-level +
+        // completed events. Dense-fallback path covered by the next test.
+        const int N = 3000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"<http://ex/instr/k{i:D5}>");
+
+        var sink = new RecordingListener();
+        var builder = new BBHashBuilder();
+        var result = builder.Build(N, idx => keys[idx], sink);
+
+        Assert.Single(sink.Starts);
+        Assert.Equal(N, sink.Starts[0].AtomCount);
+        Assert.Equal(BBHashBuilder.DefaultGamma, sink.Starts[0].Gamma);
+        Assert.Equal(BBHashBuilder.MaxLevels, sink.Starts[0].MaxLevels);
+
+        Assert.Equal(result.Mphf.Levels.Length, sink.Levels.Count);
+        // First level enters with all N keys; later levels strictly fewer.
+        Assert.Equal(N, sink.Levels[0].RemainingAtEntry);
+        for (int i = 1; i < sink.Levels.Count; i++)
+            Assert.True(sink.Levels[i].RemainingAtEntry < sink.Levels[i - 1].RemainingAtEntry);
+        // Placed + bumped at each level == RemainingAtEntry.
+        foreach (var lvl in sink.Levels)
+            Assert.Equal(lvl.RemainingAtEntry, lvl.Placed + lvl.Bumped);
+
+        Assert.Empty(sink.DenseFallbacks);  // default MaxLevels=40, no dense engagement expected for 3K keys
+
+        // MphfBuildCompletedEvent is emitted by SortedAtomStoreExternalBuilder.BuildMphfFiles
+        // (which knows the on-disk file sizes), not by BBHashBuilder. Integration coverage
+        // for that surface lives with the SortedAtomStore tests.
+        Assert.Empty(sink.Completes);
+    }
+
+    [Fact]
+    public void Build_WithListener_DenseFallback_EmitsDenseFallbackEvent()
+    {
+        // Force dense engagement via low MaxLevels; confirm the dense-fallback event
+        // fires with the right counts.
+        const int N = 2000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"<http://ex/dense_instr/k{i:D5}>");
+
+        var sink = new RecordingListener();
+        var builder = new BBHashBuilder(maxLevels: 4);
+        var result = builder.Build(N, idx => keys[idx], sink);
+
+        Assert.True(result.Mphf.DenseKeys.Length > 0);
+        Assert.Single(sink.DenseFallbacks);
+        Assert.Equal(result.Mphf.DenseKeys.Length, sink.DenseFallbacks[0].DenseKeysCount);
+        Assert.Equal(result.Mphf.Levels.Length, sink.DenseFallbacks[0].LevelsUsed);
+    }
+
+    private sealed class RecordingListener : IObservabilityListener
+    {
+        public List<MphfBuildStartedEvent> Starts { get; } = new();
+        public List<MphfLevelCompletedEvent> Levels { get; } = new();
+        public List<MphfDenseFallbackEvent> DenseFallbacks { get; } = new();
+        public List<MphfBuildCompletedEvent> Completes { get; } = new();
+
+        public void OnMphfBuildStarted(in MphfBuildStartedEvent ev) => Starts.Add(ev);
+        public void OnMphfLevelCompleted(in MphfLevelCompletedEvent ev) => Levels.Add(ev);
+        public void OnMphfDenseFallback(in MphfDenseFallbackEvent ev) => DenseFallbacks.Add(ev);
+        public void OnMphfBuildCompleted(in MphfBuildCompletedEvent ev) => Completes.Add(ev);
     }
 
     [Fact]

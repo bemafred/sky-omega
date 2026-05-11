@@ -19,6 +19,37 @@ Next: cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/road
 
 ---
 
+## [1.7.56] - 2026-05-11
+
+**Headline:** MPHF construction instrumented end-to-end. ADR-039 attribution gap surfaced mid-flight by cycle 10 Phase 3 — the substrate had zero MPHF-specific metric emission, so per-level convergence, dense-fallback engagement, and per-level wall-clock were invisible. Four new JSONL event records close the gap. The in-flight cycle 10 Phase 3 process (loaded with 1.7.55) keeps its mapped binary, so 1.7.56's value materializes for `mercury --rebuild-mphf` post-cycle re-runs and all subsequent MPHF construction.
+
+### Added
+
+- **MPHF event surface in `IObservabilityListener`** (`src/Mercury.Abstractions/MphfMetrics.cs`, `IObservabilityListener.cs`). Four new event structs + listener methods:
+  - `MphfBuildStartedEvent` — atom count, γ, MaxLevels, MaxDenseKeys, base seed.
+  - `MphfLevelCompletedEvent` — per-level convergence: index, remaining at entry, bit count, placed, bumped, level duration. Closes the per-level opacity gap.
+  - `MphfDenseFallbackEvent` — fires only when the iterative phase leaves keys un-placed; carries dense key count + levels used.
+  - `MphfBuildCompletedEvent` — atom count, level count, dense count, file sizes, build + total durations.
+- **JsonlMetricsListener handlers** for all four events (`src/Mercury/Diagnostics/JsonlMetricsListener.cs`). Each emits as a `phase=mphf_*` JSONL record with `record_kind=event`. `mphf_level` records carry a precomputed `placement_ratio` (`placed / remaining_at_entry`) — expected ≈ 1 − e^(−1/γ) ≈ 0.63 at γ=2.0; meaningful drift indicates hash-distribution problems on the input set.
+- **`BBHashBuilder.Build` accepts an optional `IObservabilityListener`** (`src/Mercury/Storage/Mphf/BBHashBuilder.cs`). Per-level Stopwatch + listener callbacks at level completion + dense engagement. Default null preserves the original signature; existing call sites and tests need no changes.
+- **`SortedAtomStoreExternalBuilder.BuildMphfFiles` threads the listener through** to the builder and emits the completed event with on-disk file sizes after writing `atoms.mphf` and `atoms.idx`. The existing stderr `[mphf]` summary line is kept for human-tail visibility; structured events go to JSONL.
+- **Two new BBHash listener tests** (`tests/Mercury.Tests/Storage/Mphf/BBHashTests.cs`):
+  - `Build_WithListener_EmitsStartLevelAndCompleteEvents` — confirms start + per-level events fire with correct shape (remaining strictly decreases, placed + bumped == remaining at each level).
+  - `Build_WithListener_DenseFallback_EmitsDenseFallbackEvent` — confirms dense-fallback event fires when forced via low `MaxLevels`.
+
+### Background
+
+The cycle 10 plan attributes per-fix wins via cycle 9 baseline + ~55 min MPHF − any B1/B2/B3 wins. Without MPHF-specific timing, that "+~55 min" assumption was unfalsifiable from this run alone — total rebuild wall-clock alone would aggregate MPHF construction over secondary-index construction with no causal evidence. The gap surfaced when grepping the in-flight bulk JSONL for MPHF events returned zero hits: 1.7.55 had zero structured MPHF emission anywhere in `BBHashBuilder`, `BBHash`, or `MphfTranslationTable`. A previous TODO in `BuildMphfFiles` ("add a structured event in a follow-up if cycle 10 results warrant") deferred the work; cycle 10 results warrant.
+
+### Validation
+
+- 12 Mercury.Tests BBHash tests pass (was 10; +2 new listener-event tests).
+- Full solution builds clean with no warnings.
+- Global tool installed at 1.7.56; running cycle 10 Phase 3 process unaffected (binary loaded at process start, file overwrite doesn't reach loaded image).
+- Post-cycle `mercury --store wiki-21b-ref-r3 --rebuild-mphf --no-repl --metrics-out <file>` will produce the full per-level breakdown against the production 21.3 B sealed atom store; in-flight cycle 10 Phase 3 retains the coarse `[mphf]` stderr signal (total wall-clock + level count) for cross-check.
+
+---
+
 ## [1.7.55] - 2026-05-11
 
 **Headline:** BBHash MPHF construction made deterministic at any N via dense final-level fallback + `MaxLevels` 24→40. Surfaced by cycle 10 Phase 3 second failure (2 keys still bumped after 24 iterative levels). Adds `mercury --rebuild-mphf` recovery surface so a 12-hour parser+merge investment isn't lost to MPHF-only failures. Plus ADR-040 / ADR-041 for the substrate-discipline follow-ups (Proposed).

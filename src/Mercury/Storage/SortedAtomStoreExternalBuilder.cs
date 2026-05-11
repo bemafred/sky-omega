@@ -687,7 +687,7 @@ internal static class SortedAtomStoreExternalBuilder
         {
             var span = atoms.GetAtomSpan(sortedPos);
             return span.ToArray();
-        });
+        }, listener);
         var mphfBuildDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
 
         var mphfPath = baseFilePath + ".mphf";
@@ -696,13 +696,24 @@ internal static class SortedAtomStoreExternalBuilder
         Mphf.MphfTranslationTable.WriteTo(idxPath, result.Translation);
 
         var mphfTotalDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
-        // Listener doesn't yet have a dedicated MPHF event — surface via stdout for
-        // initial validation runs. Add a structured event in a follow-up if cycle 10
-        // results warrant.
+        long mphfBytes = new FileInfo(mphfPath).Length;
+        long idxBytes = new FileInfo(idxPath).Length;
+        listener?.OnMphfBuildCompleted(new Abstractions.MphfBuildCompletedEvent(
+            DateTimeOffset.UtcNow,
+            atomCount,
+            result.Mphf.Levels.Length,
+            result.Mphf.DenseKeys.Length,
+            mphfBytes,
+            idxBytes,
+            mphfBuildDuration,
+            mphfTotalDuration));
+        // Keep the human-readable summary on stderr for operators tailing the run log;
+        // structured per-level + dense-fallback events go through the listener above.
         Console.Error.WriteLine(
             $"[mphf] atoms={atomCount:N0} levels={result.Mphf.Levels.Length} " +
+            $"dense={result.Mphf.DenseKeys.Length} " +
             $"build_s={mphfBuildDuration.TotalSeconds:F2} total_s={mphfTotalDuration.TotalSeconds:F2} " +
-            $"mphf_bytes={new FileInfo(mphfPath).Length:N0} idx_bytes={new FileInfo(idxPath).Length:N0}");
+            $"mphf_bytes={mphfBytes:N0} idx_bytes={idxBytes:N0}");
     }
 
     /// <summary>

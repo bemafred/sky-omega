@@ -100,6 +100,28 @@ public interface IObservabilityListener
     /// </summary>
     void OnDrainProgress(in DrainProgressEvent progress) { }
 
+    /// <summary>
+    /// MPHF construction start. Discloses the tuning (gamma, MaxLevels, MaxDenseKeys,
+    /// base seed) over the atom set being built. ADR-039 / cycle 10 Phase 3.
+    /// </summary>
+    void OnMphfBuildStarted(in MphfBuildStartedEvent ev) { }
+
+    /// <summary>
+    /// Per-level BBHash convergence: placement vs bump counts plus per-level wall-clock.
+    /// Closes the MPHF-internals opacity gap surfaced by cycle 10 Phase 3.
+    /// </summary>
+    void OnMphfLevelCompleted(in MphfLevelCompletedEvent ev) { }
+
+    /// <summary>
+    /// Dense-fallback engagement — fires only when the iterative phase leaves keys
+    /// un-placed at the configured MaxLevels. Empty case is silent
+    /// (the common path at γ=2.0 with MaxLevels=40).
+    /// </summary>
+    void OnMphfDenseFallback(in MphfDenseFallbackEvent ev) { }
+
+    /// <summary>One-shot end-of-build summary for MPHF construction.</summary>
+    void OnMphfBuildCompleted(in MphfBuildCompletedEvent ev) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 

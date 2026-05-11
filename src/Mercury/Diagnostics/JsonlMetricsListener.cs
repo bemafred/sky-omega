@@ -452,6 +452,74 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnMphfBuildStarted(in MphfBuildStartedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "mphf_build_started", "event", ev.Timestamp);
+            json.WriteNumber("atom_count", ev.AtomCount);
+            json.WriteNumber("gamma", ev.Gamma);
+            json.WriteNumber("max_levels", ev.MaxLevels);
+            json.WriteNumber("max_dense_keys", ev.MaxDenseKeys);
+            json.WriteNumber("base_seed", ev.BaseSeed);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnMphfLevelCompleted(in MphfLevelCompletedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "mphf_level", "event", ev.Timestamp);
+            json.WriteNumber("level_index", ev.LevelIndex);
+            json.WriteNumber("remaining_at_entry", ev.RemainingAtEntry);
+            json.WriteNumber("bit_count", ev.BitCount);
+            json.WriteNumber("placed", ev.Placed);
+            json.WriteNumber("bumped", ev.Bumped);
+            double placementRatio = ev.RemainingAtEntry > 0
+                ? (double)ev.Placed / ev.RemainingAtEntry
+                : 0.0;
+            json.WriteNumber("placement_ratio", placementRatio);
+            json.WriteNumber("level_duration_ms", ev.LevelDuration.TotalMilliseconds);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnMphfDenseFallback(in MphfDenseFallbackEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "mphf_dense_fallback", "event", ev.Timestamp);
+            json.WriteNumber("dense_keys_count", ev.DenseKeysCount);
+            json.WriteNumber("levels_used", ev.LevelsUsed);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
+    public void OnMphfBuildCompleted(in MphfBuildCompletedEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "mphf_build_completed", "event", ev.Timestamp);
+            json.WriteNumber("atom_count", ev.AtomCount);
+            json.WriteNumber("level_count", ev.LevelCount);
+            json.WriteNumber("dense_keys_count", ev.DenseKeysCount);
+            json.WriteNumber("mphf_bytes", ev.MphfBytes);
+            json.WriteNumber("idx_bytes", ev.IdxBytes);
+            json.WriteNumber("build_duration_ms", ev.BuildDuration.TotalMilliseconds);
+            json.WriteNumber("total_duration_ms", ev.TotalDuration.TotalMilliseconds);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp)
     {
         using var buffer = new MemoryStream();

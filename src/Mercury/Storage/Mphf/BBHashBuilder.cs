@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using SkyOmega.Bcl.Collections;
 using SkyOmega.Bcl.DataStructures;
 using SkyOmega.Bcl.Hashing;
+using SkyOmega.Mercury.Abstractions;
 
 namespace SkyOmega.Mercury.Storage.Mphf;
 
@@ -76,13 +78,19 @@ internal sealed class BBHashBuilder
     /// <param name="keyCount">Total number of keys.</param>
     /// <param name="getKey">Callback to retrieve key bytes by input index (1-based on caller's
     /// convention; passed through here unchanged).</param>
-    public BuildResult Build(long keyCount, Func<long, byte[]> getKey)
+    /// <param name="listener">Optional observability sink. When non-null, emits per-level
+    /// + dense-fallback + start/complete events for ADR-039 attribution. Default null
+    /// preserves the original signature for tests and standalone callers.</param>
+    public BuildResult Build(long keyCount, Func<long, byte[]> getKey, IObservabilityListener? listener = null)
     {
         if (keyCount < 0) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (keyCount == 0)
             return new BuildResult(
                 new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0, 0, Array.Empty<byte[]>()),
                 new ChunkedArray<long>(0));
+
+        listener?.OnMphfBuildStarted(new MphfBuildStartedEvent(
+            DateTimeOffset.UtcNow, keyCount, _gamma, _maxLevels, MaxDenseKeys, _baseSeed));
 
         // Track which keys remain to be placed (by input-index, 1-based).
         // ChunkedList — long-indexed, no doubling-copy on growth, no int32 cap.
@@ -100,6 +108,7 @@ internal sealed class BBHashBuilder
             long remainingCount = remaining.Count;
             if (remainingCount == 0) break;
 
+            var levelStart = Stopwatch.GetTimestamp();
             long bitCount = (long)Math.Ceiling(_gamma * remainingCount);
             if (bitCount < 1) bitCount = 1;
             var bv = new BitVector(bitCount);
@@ -153,7 +162,17 @@ internal sealed class BBHashBuilder
 
             levels.Add(bv);
             levelOffsets.Add(globalOffset);
-            globalOffset += bv.PopCount();
+            long placed = bv.PopCount();
+            globalOffset += placed;
+            long bumpedCount = bumped.Count;
+            listener?.OnMphfLevelCompleted(new MphfLevelCompletedEvent(
+                DateTimeOffset.UtcNow,
+                levelIdx,
+                remainingCount,
+                bitCount,
+                placed,
+                bumpedCount,
+                Stopwatch.GetElapsedTime(levelStart)));
             remaining = bumped;
         }
 
@@ -180,6 +199,8 @@ internal sealed class BBHashBuilder
                 long mphfPos = denseOffset + i;
                 translation[mphfPos] = inputIdx;
             }
+            listener?.OnMphfDenseFallback(new MphfDenseFallbackEvent(
+                DateTimeOffset.UtcNow, denseCount, levels.Count));
         }
 
         return new BuildResult(
