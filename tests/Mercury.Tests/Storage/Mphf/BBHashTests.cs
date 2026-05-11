@@ -185,9 +185,91 @@ public class BBHashTests : IDisposable
 
         // Convergence within MaxLevels. At gamma=2.0, per-level reduction is ~0.39;
         // for N=10000, expected to reach 0-key bumped in ~10-12 levels (depends on
-        // hash distribution). Bound at MaxLevels (24) — anything else is OK.
+        // hash distribution). Bound at MaxLevels (40) — anything else is OK.
         Assert.True(result.Mphf.Levels.Length <= BBHashBuilder.MaxLevels,
             $"Expected <={BBHashBuilder.MaxLevels} levels, got {result.Mphf.Levels.Length}");
         Assert.True(result.Mphf.Levels.Length >= 1);
+    }
+
+    [Fact]
+    public void Build_DenseFinalLevel_HandlesUnconvergedKeys()
+    {
+        // Force the dense fallback path: low MaxLevels with enough keys that at least
+        // some don't converge in the iterative phase. This exercises the dense-keys
+        // capture, dense lookup, and translation-table entries for dense positions.
+        // Cycle 10 Phase 3 (2026-05-10) hit this with 2 keys at MaxLevels=24 over 4 B
+        // atoms; the dense fallback closes that gap.
+        const int N = 2000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"<http://ex/dense/k{i:D5}>");
+
+        // MaxLevels=4 with N=2000 at gamma=2.0 leaves ~2000 * 0.39^4 ≈ 47 keys for the
+        // dense set — well within MaxDenseKeys (1024) but a meaningful test population.
+        var builder = new BBHashBuilder(maxLevels: 4);
+        var result = builder.Build(N, idx => keys[idx]);
+
+        Assert.Equal(N, result.Mphf.NumKeys);
+        Assert.True(result.Mphf.DenseKeys.Length > 0, "Expected dense fallback to capture some keys with MaxLevels=4");
+
+        // Every key must lookup to a unique position in [0, N).
+        var seen = new HashSet<long>();
+        for (int i = 1; i <= N; i++)
+        {
+            long mphfPos = result.Mphf.Lookup(keys[i]);
+            Assert.InRange(mphfPos, 0, N - 1);
+            Assert.True(seen.Add(mphfPos), $"Duplicate mphf_pos={mphfPos} for key {i}");
+            Assert.Equal(i, result.Translation[mphfPos]);
+        }
+        Assert.Equal(N, seen.Count);
+    }
+
+    [Fact]
+    public void Build_DenseFallback_RoundTripsThroughSerialization()
+    {
+        // Force dense fallback via low MaxLevels, persist + reload, verify lookup
+        // behavior matches across the serialization boundary including dense keys.
+        const int N = 1500;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"<http://ex/denser/k{i:D5}>");
+
+        var builder = new BBHashBuilder(maxLevels: 3);
+        var result = builder.Build(N, idx => keys[idx]);
+        Assert.True(result.Mphf.DenseKeys.Length > 0);
+
+        var path = Path.Combine(_testDir, "dense.mphf");
+        result.Mphf.WriteTo(path);
+        var loaded = BBHash.ReadFrom(path);
+
+        Assert.Equal(result.Mphf.NumKeys, loaded.NumKeys);
+        Assert.Equal(result.Mphf.Levels.Length, loaded.Levels.Length);
+        Assert.Equal(result.Mphf.DenseKeys.Length, loaded.DenseKeys.Length);
+        Assert.Equal(result.Mphf.DenseOffset, loaded.DenseOffset);
+
+        for (int i = 1; i <= N; i++)
+        {
+            long expected = result.Mphf.Lookup(keys[i]);
+            long actual = loaded.Lookup(keys[i]);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void Build_DenseFallback_ExceedsMaxDenseKeys_ThrowsWithDiagnostic()
+    {
+        // Pathological case: very low MaxLevels with many keys → > MaxDenseKeys remain.
+        // Should fail fast with a diagnostic, not silently corrupt or hang.
+        const int N = 50_000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"<http://ex/overflow/k{i:D6}>");
+
+        // MaxLevels=1 over 50K keys at gamma=2.0 leaves ~50K * 0.39 = ~19,500 keys for
+        // dense — vastly exceeds MaxDenseKeys (1024).
+        var builder = new BBHashBuilder(maxLevels: 1);
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.Build(N, idx => keys[idx]));
+        Assert.Contains("dense final level overflow", ex.Message);
+        Assert.Contains("MaxDenseKeys", ex.Message);
     }
 }

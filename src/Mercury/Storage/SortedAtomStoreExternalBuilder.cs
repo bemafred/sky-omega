@@ -654,6 +654,20 @@ internal static class SortedAtomStoreExternalBuilder
     /// performs multiple passes per level — caching here would help, but at 4 B atoms
     /// the cache itself becomes large; tradeoff deferred to follow-up).
     /// </remarks>
+    /// <summary>
+    /// Build the MPHF + translation-table files (<c>atoms.mphf</c>, <c>atoms.idx</c>) against
+    /// an already-sealed <see cref="SortedAtomStore"/> on disk. Used both by the bulk-load
+    /// pipeline (MergeAndWrite) and by the standalone recovery path
+    /// (<c>mercury --rebuild-mphf</c>). The recovery path is critical after a Finalize-time
+    /// MPHF failure: the parser+merge work is preserved on disk, only MPHF construction
+    /// needs to re-run.
+    /// </summary>
+    internal static void RebuildMphfFromSealedStore(string baseFilePath, Abstractions.IObservabilityListener? listener = null)
+    {
+        using var atoms = new SortedAtomStore(baseFilePath);
+        BuildMphfFiles(baseFilePath, atoms.AtomCount, listener);
+    }
+
     private static void BuildMphfFiles(string baseFilePath, long atomCount, Abstractions.IObservabilityListener? listener)
     {
         var mphfStart = System.Diagnostics.Stopwatch.GetTimestamp();

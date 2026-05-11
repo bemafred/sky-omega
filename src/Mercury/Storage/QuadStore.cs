@@ -1207,6 +1207,26 @@ public sealed class QuadStore : IDisposable
     public StoreIndexState IndexState => _indexState;
 
     /// <summary>
+    /// Rebuild the MPHF + translation-table files (<c>atoms.mphf</c>, <c>atoms.idx</c>) against
+    /// the already-sealed <see cref="SortedAtomStore"/>. Recovery path for Finalize-time
+    /// MPHF construction failures — preserves the parser+merge work, only re-runs MPHF
+    /// construction. Requires a SortedAtomStore-backed store (Reference profile); throws
+    /// for Hash-backed stores (Cognitive profile) which don't use MPHF.
+    /// </summary>
+    public void RebuildMphf(Abstractions.IObservabilityListener? listener = null)
+    {
+        ThrowIfDisposed();
+        if (_atoms is not SortedAtomStore)
+        {
+            throw new InvalidOperationException(
+                "RebuildMphf requires a SortedAtomStore-backed store (Reference profile). " +
+                $"This store uses {_atoms.GetType().Name}.");
+        }
+        var baseFilePath = Path.Combine(_baseDirectory, "atoms");
+        SortedAtomStoreExternalBuilder.RebuildMphfFromSealedStore(baseFilePath, listener);
+    }
+
+    /// <summary>
     /// Rebuild all secondary indexes (GPOS, GOSP, TGSP) and trigram index
     /// by scanning the primary GSPO index. Call after a bulk load to make
     /// all query patterns available.

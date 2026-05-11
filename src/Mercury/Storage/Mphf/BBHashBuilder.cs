@@ -7,9 +7,8 @@ using SkyOmega.Bcl.Hashing;
 namespace SkyOmega.Mercury.Storage.Mphf;
 
 /// <summary>
-/// Constructs a <see cref="BBHash"/> over a known key set. Iterative algorithm:
-/// each level allocates a bit vector and hashes remaining keys; collisions bump
-/// to the next level. Convergence in 3–5 levels at gamma=2.0.
+/// Constructs a <see cref="BBHash"/> over a known key set. Iterative algorithm
+/// with a dense final-level fallback for any keys the iterative phase cannot place.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,6 +20,14 @@ namespace SkyOmega.Mercury.Storage.Mphf;
 /// economy: at 4 B atoms, the Dictionary alternative would have required &gt;96 GB
 /// per level vs ~2 GB for the bit-vector pair.
 /// </para>
+/// <para>
+/// <b>Convergence guarantee.</b> The iterative phase is probabilistic — at γ=2.0,
+/// expected levels for N=4 × 10⁹ is ~24, but variance puts ~50 % of runs over that
+/// threshold. <see cref="MaxLevels"/> = 40 gives comfortable headroom; any keys
+/// still un-converged after the iterative phase fall through to the
+/// <see cref="BBHash.DenseKeys"/> array (bounded by <see cref="MaxDenseKeys"/>).
+/// Together they make convergence deterministic at any N.
+/// </para>
 /// </remarks>
 internal sealed class BBHashBuilder
 {
@@ -28,13 +35,22 @@ internal sealed class BBHashBuilder
     public const double DefaultGamma = 2.0;
 
     /// <summary>
-    /// Maximum levels before failing — safety bound. At γ=2.0, per-level reduction
-    /// is ~0.39 (40 % bumped). Convergence to &lt; 1 key remaining requires
-    /// log(1/N) / log(0.39) ≈ 24 levels for N=4 B atoms. Actual implementation may
-    /// converge in fewer levels by chance (lucky key distribution); adversarial
-    /// inputs may need this many or more.
+    /// Maximum iterative levels. At γ=2.0, expected convergence for N=4 × 10⁹ is ~24
+    /// levels; <see cref="MaxLevels"/> = 40 gives comfortable variance headroom.
+    /// Cycle 10 Phase 3 (2026-05-10) failed at the prior limit of 24 with 2 keys
+    /// un-converged — coin-flip from the substrate's own expected boundary. The dense
+    /// final-level fallback in <see cref="BBHash"/> handles any keys still un-placed
+    /// at this limit, so this constant is a performance knob, not a correctness one.
     /// </summary>
-    public const int MaxLevels = 24;
+    public const int MaxLevels = 40;
+
+    /// <summary>
+    /// Maximum size of the dense final level. If more than this many keys remain after
+    /// the iterative phase, construction fails fast — beyond ~1024 keys, the BBHash
+    /// is mis-tuned (γ too low or MaxLevels too low) and a dense set this large
+    /// indicates a deeper problem rather than ordinary variance.
+    /// </summary>
+    public const int MaxDenseKeys = 1024;
 
     private readonly double _gamma;
     private readonly ulong _baseSeed;
@@ -64,7 +80,9 @@ internal sealed class BBHashBuilder
     {
         if (keyCount < 0) throw new ArgumentOutOfRangeException(nameof(keyCount));
         if (keyCount == 0)
-            return new BuildResult(new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0), new ChunkedArray<long>(0));
+            return new BuildResult(
+                new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0, 0, Array.Empty<byte[]>()),
+                new ChunkedArray<long>(0));
 
         // Track which keys remain to be placed (by input-index, 1-based).
         // ChunkedList — long-indexed, no doubling-copy on growth, no int32 cap.
@@ -139,12 +157,33 @@ internal sealed class BBHashBuilder
             remaining = bumped;
         }
 
+        // Dense final level: any keys the iterative phase couldn't place go here.
+        // At γ=2.0 with MaxLevels=40, this is empty on the overwhelming majority of
+        // runs at any N. Cycle 10 Phase 3 (24 levels) hit non-empty dense set with
+        // 2 keys remaining — the dense path makes that case routine instead of fatal.
+        long denseOffset = globalOffset;
+        var denseKeys = Array.Empty<byte[]>();
         if (remaining.Count > 0)
-            throw new InvalidOperationException(
-                $"BBHashBuilder did not converge: {remaining.Count} keys still bumped after {_maxLevels} levels. Increase MaxLevels or gamma.");
+        {
+            if (remaining.Count > MaxDenseKeys)
+            {
+                throw new InvalidOperationException(
+                    $"BBHashBuilder: dense final level overflow — {remaining.Count} keys still bumped after {_maxLevels} levels, " +
+                    $"exceeds MaxDenseKeys={MaxDenseKeys}. Increase gamma or MaxLevels; or raise MaxDenseKeys if the workload genuinely needs it.");
+            }
+            int denseCount = (int)remaining.Count;
+            denseKeys = new byte[denseCount][];
+            for (int i = 0; i < denseCount; i++)
+            {
+                long inputIdx = remaining[i];
+                denseKeys[i] = getKey(inputIdx);
+                long mphfPos = denseOffset + i;
+                translation[mphfPos] = inputIdx;
+            }
+        }
 
         return new BuildResult(
-            new BBHash(_baseSeed, levels.ToArray(), levelOffsets.ToArray(), keyCount),
+            new BBHash(_baseSeed, levels.ToArray(), levelOffsets.ToArray(), keyCount, denseOffset, denseKeys),
             translation);
     }
 

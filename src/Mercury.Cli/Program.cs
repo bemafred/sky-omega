@@ -25,6 +25,7 @@ string? bulkLoadFile = null;
 string? convertInput = null;
 string? convertOutput = null;
 bool rebuildIndexes = false;
+bool rebuildMphf = false;
 long? minFreeSpaceGB = null;
 long? loadLimit = null;
 string? metricsOutPath = null;
@@ -88,6 +89,9 @@ for (int i = 0; i < args.Length; i++)
             break;
         case "--rebuild-indexes":
             rebuildIndexes = true;
+            break;
+        case "--rebuild-mphf":
+            rebuildMphf = true;
             break;
         case "--min-free-space":
             if (i + 1 < args.Length && long.TryParse(args[++i], out var gb))
@@ -186,12 +190,13 @@ if (showHelp)
           --bulk-load <file>         Bulk load (GSPO only, no fsync), then enter REPL
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
+          --rebuild-mphf             Rebuild MPHF (atoms.mphf + atoms.idx) from sealed SortedAtomStore — recovery after MPHF-only failure
           --profile <Cognitive|Reference>     Storage profile at store creation (default: Cognitive). Atom-store implementation is derived from profile (Reference→Sorted, others→Hash) — no separate flag.
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
           --limit <N>                Cap triples added (--bulk-load/--load) or emitted (--convert) at N
           --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
           --metrics-state-interval <seconds>  Periodic GC/RSS/LOH/disk-free state emission (default 0 = off)
-          --no-repl                  Skip the REPL after --load/--bulk-load/--rebuild-indexes (for profilers, CI, or pipes that stay open)
+          --no-repl                  Skip the REPL after --load/--bulk-load/--rebuild-indexes/--rebuild-mphf (for profilers, CI, or pipes that stay open)
 
         Examples:
           mercury                                # Default store (cli)
@@ -370,7 +375,7 @@ if (jsonlListener is not null)
 }
 
 // Print startup diagnostics when loading or rebuilding
-if (loadFile != null || bulkLoadFile != null || rebuildIndexes)
+if (loadFile != null || bulkLoadFile != null || rebuildIndexes || rebuildMphf)
 {
     var freeSpace = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(resolvedStorePath))!).AvailableFreeSpace;
     Console.WriteLine($"Store:           {resolvedStorePath}");
@@ -506,6 +511,21 @@ if (fileToLoad != null)
         working_set_bytes = (long)(finalWsMB * 1024 * 1024),
         free_disk_bytes = freeAfter,
     });
+}
+
+if (rebuildMphf)
+{
+    Console.WriteLine("Rebuilding MPHF (atoms.mphf + atoms.idx) from sealed SortedAtomStore...");
+    var mphfStart = DateTimeOffset.UtcNow;
+    pool.Active.RebuildMphf();
+    var mphfElapsed = DateTimeOffset.UtcNow - mphfStart;
+    WriteMetric(new
+    {
+        ts = DateTimeOffset.UtcNow.ToString("o"),
+        phase = "rebuild_mphf.summary",
+        elapsed_sec = mphfElapsed.TotalSeconds,
+    });
+    Console.WriteLine($"MPHF rebuilt in {mphfElapsed.TotalSeconds:F1}s.");
 }
 
 if (rebuildIndexes)

@@ -19,6 +19,42 @@ Next: cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/road
 
 ---
 
+## [1.7.55] - 2026-05-11
+
+**Headline:** BBHash MPHF construction made deterministic at any N via dense final-level fallback + `MaxLevels` 24→40. Surfaced by cycle 10 Phase 3 second failure (2 keys still bumped after 24 iterative levels). Adds `mercury --rebuild-mphf` recovery surface so a 12-hour parser+merge investment isn't lost to MPHF-only failures. Plus ADR-040 / ADR-041 for the substrate-discipline follow-ups (Proposed).
+
+### Fixed
+
+- **`BBHashBuilder` non-convergence at production scale.** At γ=2.0, expected levels for N=4 × 10⁹ ≈ 23.7 — the prior `MaxLevels=24` sat at the *expected* value, not the worst case, so ~50 % of runs would land over the threshold. Cycle 10 Phase 3 (2026-05-10) reached parser-end + merge-end (atoms.atoms 99 GB byte-identical to cycle 9) only to fail in `BuildMphfFiles` with `"2 keys still bumped after 24 levels"`. Substrate documentation flagged the risk and deferred the fix — the deferral cost 12 hours of recoverable work.
+- Two-part structural correction:
+  - `MaxLevels` 24 → 40 (defense-in-depth: probability of needing 40+ levels at any reasonable N is effectively zero).
+  - **Dense final-level fallback** per the BBHash paper. Any keys still un-placed after the iterative phase are stored in `BBHash.DenseKeys` (a flat `byte[][]` set, bounded by `MaxDenseKeys = 1024`). `Lookup` chains: iterative levels → dense linear-scan (exact byte compare, no false positives) → -1 (definitively not in set). Convergence is now deterministic at any N — the substrate's own predicted "pathological seed" failure mode is structurally closed.
+
+### Added
+
+- **`mercury --rebuild-mphf` CLI subcommand** (`src/Mercury.Cli/Program.cs`). Opens an existing sealed `SortedAtomStore` and reruns `BuildMphfFiles` standalone. Saves the 12+ hours of parser + merge work that would otherwise be re-done after an MPHF-only failure. Recovery flow: kill failed bulk-load → `mercury --store X --rebuild-mphf --no-repl` → MPHF + idx written → `mercury --store X --rebuild-indexes --no-repl` → Phase B complete.
+- **`QuadStore.RebuildMphf(IObservabilityListener?)`** (`src/Mercury/Storage/QuadStore.cs`). Public method that delegates to a new `internal static SortedAtomStoreExternalBuilder.RebuildMphfFromSealedStore`. Asserts SortedAtomStore-backed (Reference profile); throws clearly for Hash-backed stores.
+- **`BBHash` file format Version 2.** Adds `[u64 dense_offset][u32 dense_count][per dense key: u32 length + bytes]` tail after the iterative level data. Version 1 readers explicitly rejected (v1 files never reached production — the 1.7.52 v1 codepath only crashed before any v1 MPHF file persisted).
+- **Three new BBHash tests** (`tests/Mercury.Tests/Storage/Mphf/BBHashTests.cs`):
+  - `Build_DenseFinalLevel_HandlesUnconvergedKeys` — forces dense path via `MaxLevels=4`, validates correctness + uniqueness.
+  - `Build_DenseFallback_RoundTripsThroughSerialization` — write/read round-trip preserves dense keys + lookup behavior.
+  - `Build_DenseFallback_ExceedsMaxDenseKeys_ThrowsWithDiagnostic` — fail-fast when dense set overflows `MaxDenseKeys`.
+- **ADR-040 — Readahead Memory Adaptive Sizing** (Proposed). Substrate-adaptive readahead budget at MergeAndWrite start; lazy back-buffer allocation; eager teardown on chunk exhaustion; `ReadAheadBudgetEvent` + `ReadAheadFootprintSampleEvent` observability; `ProcessMemoryProbe.AvailablePhysicalBytes()` via P/Invoke. Implementation deferred to cycle 11.
+- **ADR-041 — Cleanup-on-Exception for Bulk-Tmp Intermediates** (Proposed). Try/finally around bulk-tmp consumers in `MergeAndWrite` so cleanup fires on both success and exception paths. Resolves the 1.2 TB orphaning observed in both cycle 10 Phase 3 failures (1.7.52, 1.7.54). `MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION=1` opt-out for diagnostic sessions. Implementation deferred to cycle 11.
+
+### Validation
+
+- 4399 Mercury.Tests pass (was 4396; +3 new dense-fallback tests).
+- 12 SkyOmega.Bcl.Tests pass.
+- Cycle 10 Phase 3 recovery: planned via `mercury --rebuild-mphf wiki-21b-ref-r3` against the existing 99 GB sealed atoms — runs MPHF construction only, expected ~15-30 min vs the 12+ hours that would be required to restart from latest-all.ttl.bz2.
+
+### Notes
+
+- The substrate's own predicted convergence-boundary risk in `BBHashBuilder.cs:23-28` (pre-1.7.55) is now structurally resolved. The deferred-debt pattern — flagging a risk but not building the structural mitigation — cost a 12-hour production run. Lesson documented in the Phase 3 retrospective.
+- File-format Version bumped 1→2. The v1 path shipped in 1.7.52 / 1.7.53 / 1.7.54 but never produced a persisted MPHF file at production scale (all three failed before writing). v1 readers are not required.
+
+---
+
 ## [1.7.54] - 2026-05-10
 
 **Headline:** Fix B2 readahead concurrency-contract violation surfaced by external review during cycle 10 Phase 3. `ChunkReadAheadDispatcher` was sharing `BoundedFileStreamPool` across N workers in violation of the pool's single-threaded contract. Phase 3 run killed at ~28 % parser before merge could exercise the racy path; substrate corrected before resuming.
