@@ -107,6 +107,71 @@ public class SortedAtomStoreCliPlumbingTests : IDisposable
     }
 
     [Fact]
+    public async Task RebuildMphf_NoExplicitListener_UsesInstanceObservabilityListener()
+    {
+        // 1.7.57 regression test for the 1.7.56 cycle 10 incident: QuadStore.RebuildMphf
+        // previously took an optional listener parameter that defaulted to null, silently
+        // discarding the instance-level ObservabilityListener set by the CLI. The fix
+        // makes the method fall back to _observabilityListener when no explicit listener
+        // is supplied; this test pins that contract so a future refactor can't reintroduce
+        // the silent no-op.
+        var dir = Path.Combine(_testDir, "rebuild_mphf_listener");
+
+        const string nt = """
+        <http://ex.org/s1> <http://ex.org/p> <http://ex.org/o1> .
+        <http://ex.org/s2> <http://ex.org/p> <http://ex.org/o2> .
+        <http://ex.org/s3> <http://ex.org/p> <http://ex.org/o3> .
+        <http://ex.org/s4> <http://ex.org/p> <http://ex.org/o4> .
+        """;
+
+        // Bulk-load without any listener — establishes the sealed atom store + MPHF.
+        using (var store = new QuadStore(dir, null, null, new StorageOptions
+        {
+            Profile = StoreProfile.Reference,
+            BulkMode = true,
+        }))
+        {
+            await RdfEngine.LoadStreamingAsync(store, StreamFrom(nt), RdfFormat.NTriples);
+        }
+
+        // Simulate the recovery scenario: bulk-load wrote atoms.atoms + atoms.offsets
+        // but MPHF construction failed (or was never run). The .mphf/.idx files don't
+        // exist yet, so RebuildMphf must build them from the sealed atom store.
+        foreach (var f in Directory.GetFiles(dir, "atoms.mphf", SearchOption.AllDirectories))
+            File.Delete(f);
+        foreach (var f in Directory.GetFiles(dir, "atoms.idx", SearchOption.AllDirectories))
+            File.Delete(f);
+
+        // Reopen, set the listener as an instance property (matches CLI startup pattern),
+        // and call RebuildMphf() WITHOUT passing a listener argument. The instance
+        // listener must be honored, not silently discarded.
+        var sink = new RecordingMphfListener();
+        using (var store = new QuadStore(dir))
+        {
+            store.ObservabilityListener = sink;
+            store.RebuildMphf();  // <-- no arg; instance listener must reach BBHashBuilder
+        }
+
+        Assert.Single(sink.Starts);
+        Assert.True(sink.Levels.Count >= 1, "Expected at least one level event");
+        Assert.Single(sink.Completes);
+        Assert.Equal(sink.Levels.Count, sink.Completes[0].LevelCount);
+    }
+
+    private sealed class RecordingMphfListener : IObservabilityListener
+    {
+        public System.Collections.Generic.List<MphfBuildStartedEvent> Starts { get; } = new();
+        public System.Collections.Generic.List<MphfLevelCompletedEvent> Levels { get; } = new();
+        public System.Collections.Generic.List<MphfDenseFallbackEvent> DenseFallbacks { get; } = new();
+        public System.Collections.Generic.List<MphfBuildCompletedEvent> Completes { get; } = new();
+
+        public void OnMphfBuildStarted(in MphfBuildStartedEvent ev) => Starts.Add(ev);
+        public void OnMphfLevelCompleted(in MphfLevelCompletedEvent ev) => Levels.Add(ev);
+        public void OnMphfDenseFallback(in MphfDenseFallbackEvent ev) => DenseFallbacks.Add(ev);
+        public void OnMphfBuildCompleted(in MphfBuildCompletedEvent ev) => Completes.Add(ev);
+    }
+
+    [Fact]
     public async Task FreshStore_ReferenceProfile_QueriesAfterReopen()
     {
         var dir = Path.Combine(_testDir, "queryable");

@@ -1223,7 +1223,14 @@ public sealed class QuadStore : IDisposable
                 $"This store uses {_atoms.GetType().Name}.");
         }
         var baseFilePath = Path.Combine(_baseDirectory, "atoms");
-        SortedAtomStoreExternalBuilder.RebuildMphfFromSealedStore(baseFilePath, listener);
+        // Fall back to the instance-level listener when no explicit one is supplied.
+        // Matches the pattern at SortedAtomBulkBuilder construction — the CLI sets
+        // ObservabilityListener once at startup; methods should honor it without
+        // forcing every caller to pass the listener explicitly. The 2026-05-11 1.7.56
+        // MPHF instrumentation crash + recovery was caused by --rebuild-mphf silently
+        // passing null because Program.cs forgot the listener argument.
+        SortedAtomStoreExternalBuilder.RebuildMphfFromSealedStore(
+            baseFilePath, listener ?? _observabilityListener);
     }
 
     /// <summary>

@@ -19,6 +19,45 @@ Next: cycle 10 multi-fix per [docs/roadmap/cycle-10-multi-fix-plan.md](docs/road
 
 ---
 
+## [1.7.57] - 2026-05-11
+
+**Headline:** Closes the listener wire-through gap that made 1.7.56's MPHF instrumentation silently no-op for `--rebuild-mphf`. Audit pass over every `IObservabilityListener? listener = null` method confirms this was the only category-error gap. Adds a regression test that pins the contract.
+
+### Fixed
+
+- **`QuadStore.RebuildMphf` was ignoring its own `_observabilityListener` instance field.** The CLI sets `pool.Active.ObservabilityListener = jsonlListener` once at startup (Program.cs:364), but `pool.Active.RebuildMphf()` at line 520 was passing no listener, and `RebuildMphf(listener = null)` did NOT fall back to the instance field — silently passing null down the chain. Result: zero MPHF events emitted during `--rebuild-mphf` despite the 1.7.56 instrumentation being correctly plumbed through `BBHashBuilder` and `BuildMphfFiles`. Two-part fix:
+  - `QuadStore.RebuildMphf` now uses `listener ?? _observabilityListener` so the instance-set listener is honored when no explicit listener is supplied (matches the pattern at SortedAtomBulkBuilder construction).
+  - `Program.cs:520` passes `jsonlListener` explicitly (belt-and-suspenders — clearer to future readers, robust against future API refactors).
+
+### Added
+
+- **Regression test** `RebuildMphf_NoExplicitListener_UsesInstanceObservabilityListener` (`tests/Mercury.Tests/Storage/SortedAtomStoreCliPlumbingTests.cs`). Builds a small Reference store, deletes `atoms.mphf` + `atoms.idx` to simulate the post-crash recovery scenario, reopens, sets the listener as an instance property, calls `RebuildMphf()` WITHOUT a listener argument, and asserts the listener receives `MphfBuildStartedEvent` + `MphfLevelCompletedEvent` + `MphfBuildCompletedEvent`. Pins the contract so a future refactor can't reintroduce the silent no-op.
+
+### Audit
+
+Exhaustive pass over every method accepting `IObservabilityListener? listener = null` confirms `QuadStore.RebuildMphf` was the only critical gap:
+
+| Method | Caller | Listener flow | Status |
+|---|---|---|---|
+| `SortedAtomBulkBuilder` ctor | `QuadStore.cs:669` | `listener: ObservabilityListener` instance | ✅ |
+| `MergeAndWrite` | `SortedAtomBulkBuilder.cs:391` | `_listener` field | ✅ |
+| `MergeAndWrite` | `BuildExternal` (line 175) | NONE — non-production (tests only) | ⚠️ documented |
+| `RebuildMphfFromSealedStore` | `QuadStore.cs:1226` | passes through param (gap was upstream) | ✅ |
+| `QuadStore.RebuildMphf` | **`Program.cs:520`** | **was: ignored instance, now: falls back to it** | ✅ FIXED |
+| `BBHashBuilder.Build` | `BuildMphfFiles` (line 686) | YES (1.7.56 wiring) | ✅ |
+
+### Background
+
+The 2026-05-11 cycle 10 Phase 3 incident: 1.7.56 added MPHF instrumentation to `BBHashBuilder` + `BuildMphfFiles`, but the `--rebuild-mphf` CLI entry point silently dropped the listener at `QuadStore.RebuildMphf`. The recovery run (after the deploy-during-running-process crash) consumed 48 minutes producing only state records (gc/loh/rss/disk_free) with zero MPHF-specific events. The 1.7.56 instrumentation surface was correct; the wire-through gap was at the CLI/QuadStore boundary. This release closes it and audits the broader pattern.
+
+### Validation
+
+- 4402 Mercury.Tests pass (was 4401; +1 regression test).
+- Full solution builds clean with no warnings.
+- Global tool installed at 1.7.57.
+
+---
+
 ## [1.7.56] - 2026-05-11
 
 **Headline:** MPHF construction instrumented end-to-end. ADR-039 attribution gap surfaced mid-flight by cycle 10 Phase 3 — the substrate had zero MPHF-specific metric emission, so per-level convergence, dense-fallback engagement, and per-level wall-clock were invisible. Four new JSONL event records close the gap. The in-flight cycle 10 Phase 3 process (loaded with 1.7.55) keeps its mapped binary, so 1.7.56's value materializes for `mercury --rebuild-mphf` post-cycle re-runs and all subsequent MPHF construction.

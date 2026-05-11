@@ -517,7 +517,7 @@ if (rebuildMphf)
 {
     Console.WriteLine("Rebuilding MPHF (atoms.mphf + atoms.idx) from sealed SortedAtomStore...");
     var mphfStart = DateTimeOffset.UtcNow;
-    pool.Active.RebuildMphf();
+    pool.Active.RebuildMphf(jsonlListener);
     var mphfElapsed = DateTimeOffset.UtcNow - mphfStart;
     WriteMetric(new
     {
