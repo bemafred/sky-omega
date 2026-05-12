@@ -1234,9 +1234,16 @@ public sealed class QuadStore : IDisposable
     }
 
     /// <summary>
-    /// Rebuild all secondary indexes (GPOS, GOSP, TGSP) and trigram index
-    /// by scanning the primary GSPO index. Call after a bulk load to make
-    /// all query patterns available.
+    /// Rebuild the profile-appropriate secondary indexes by scanning the primary GSPO
+    /// index. Call after a bulk load to make all query patterns available. The exact
+    /// set rebuilt depends on profile (per ADR-030 Decision 5):
+    /// <list type="bullet">
+    ///   <item><b>Reference:</b> GPOS + trigram (two targets) — dispatched to
+    ///   <see cref="RebuildReferenceSecondaryIndexes"/> via the radix external sort path
+    ///   (ADR-032).</item>
+    ///   <item><b>Cognitive / temporal:</b> GPOS + GOSP + TGSP + trigram (four targets) —
+    ///   the in-line branch below.</item>
+    /// </list>
     /// </summary>
     /// <param name="onProgress">Optional progress callback with (indexName, entriesProcessed).</param>
     public void RebuildSecondaryIndexes(Action<string, long>? onProgress = null)

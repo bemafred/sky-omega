@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Launch Cycle 10 Phase 3 — 21.3 B Wikidata Reference + Sorted bulk-load on 1.7.55.
+# Launch Cycle 10 Phase 3 — 21.3 B Wikidata Reference + Sorted bulk-load on 1.7.57.
 # Substrate fixes in this cycle: ADR-037 pipelined spill (1.7.50), B1 prefix-compress
 # intermediate chunks + B2 readahead (1.7.52/1.7.54), B3 BBHash MPHF with
 # MaxLevels=40 + dense final-level fallback (1.7.55), --rebuild-mphf recovery
-# surface. Cycle 9 baseline 35h35m end-to-end on 1.7.50.
+# surface (1.7.55), MPHF per-level instrumentation (1.7.56) + listener
+# wire-through fix at QuadStore.RebuildMphf (1.7.57). Cycle 9 baseline
+# 35h35m end-to-end on 1.7.50.
 #
-# Prior attempts (preserved as docs/validations/*aborted-1.7.5{3,4}.jsonl):
+# Prior attempts (preserved as docs/validations/*aborted-*.jsonl):
 #   1.7.52: int32 overflow in BBHashBuilder at ~4 B atoms     → fixed 1.7.53 (SkyOmega.Bcl)
 #   1.7.54: BBHash non-convergence after 24 iterative levels  → fixed 1.7.55 (40 + dense)
+#   1.7.55: Claude deployed 1.7.56 mid-run, lazy-loaded
+#           SkyOmega.Bcl 1.7.55 vanished from disk             → discipline + 1.7.57
 #
 # Usage: ./tools/launch-cycle10-phase3.sh
 # Behavior: refuses to launch if substrate is not in clean state. Exits with
 # clear diagnostic on each precondition failure; only spawns the background
 # bulk-load+rebuild-indexes chain when all checks pass.
+#
+# DISCIPLINE (HARD RULE): NO `dotnet tool` operations on mercury while this
+# chain is active. .NET lazy-loads referenced assemblies; replacing the
+# on-disk tool image breaks the running process at the next lazy-load.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-STORE_NAME=wiki-21b-ref-r3
+STORE_NAME=wiki-21b-ref-r4
 STORE_PATH="$HOME/Library/SkyOmega/stores/$STORE_NAME"
 SOURCE="$HOME/Library/SkyOmega/datasets/wikidata/full/latest-all.ttl.bz2"
 DATE_TAG="$(date -u +%Y-%m-%d)"
@@ -38,9 +46,9 @@ fi
 MERCURY_VERSION_LINE="$(mercury --version)"
 echo "  mercury: $MERCURY_VERSION_LINE"
 case "$MERCURY_VERSION_LINE" in
-    "mercury 1.7.55"*) ;;
+    "mercury 1.7.57"*) ;;
     *)
-        echo "ERROR: expected mercury 1.7.55+, got '$MERCURY_VERSION_LINE'." >&2
+        echo "ERROR: expected mercury 1.7.57+, got '$MERCURY_VERSION_LINE'." >&2
         echo "       Run ./tools/install-tools.sh to update global tool." >&2
         exit 2
         ;;
