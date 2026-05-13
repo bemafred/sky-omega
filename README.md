@@ -6,6 +6,8 @@
 
 *A home for AI & Shared Knowledge*
 
+**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by cycle 10 Phase 3 r4 (21.3 B full Wikidata, 23 h 57 m end-to-end, 2026-05-13)
+
 Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
 
 Sky Omega gives them a place to stay.

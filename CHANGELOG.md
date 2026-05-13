@@ -5,6 +5,8 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+**Current release: [Mercury 1.7.57](#1757---2026-05-11)** — released 2026-05-11; production-validated by cycle 10 Phase 3 r4 at 21.3 B full Wikidata in 23 h 57 m end-to-end on 2026-05-13. Run `mercury --version` to confirm.
+
 ## What's Next
 
 **Sky Omega 1.7.x** — cycle 10 Phase 3 r4 production validation **complete** as of 2026-05-13. Substrate at 1.7.57: ADR-034 SortedAtomStore for Reference (since 1.7.30), ADR-037 pipelined spill (1.7.50), 1.7.49 cleanup hook, **ADR-038 merge-phase read-side** (B1 prefix-compress intermediate chunks 1.7.52 + B2 frontier readahead + sidecar 1.7.52/1.7.54), **ADR-039 BBHash MPHF** over the sealed atom set (1.7.55 with `MaxLevels`=40 + dense final-level fallback), **MPHF instrumentation** (per-level events + dense-fallback + start/complete summary, 1.7.56), and the **listener wire-through fix** at `QuadStore.RebuildMphf` (1.7.57). Cycle 10 r4 21.3 B Wikidata Reference + Sorted bulk-load + rebuild **23 h 56 m 50 s end-to-end** (vs cycle 9's 35 h 35 m on 1.7.50, **−11 h 38 m / −32.7 %**). Phase breakdown: parse 9 h 17 m (cycle 9 parity), merge 2 h 41 m, MPHF construction **54 m 29 s** (first instrumented production-scale measurement on 4.005 B atoms — 25 levels, 0 dense fallback, placement_ratio held at 0.6065 = BBHash theoretical for γ=2.0), GSPO drain ~1 h 38 m, GPOS rebuild 55 m 27 s, Trigram rebuild 8 h 30 m 30 s. Final substrate ~2.1 TB on disk; MPHF blob 1.75 GB + idx table 16.0 GB are the new ADR-039 line items.
