@@ -77,7 +77,17 @@ public static class WdBenchRunner
         StreamWriter? metricsWriter = null;
         if (opts.MetricsOutPath is not null)
         {
-            metricsWriter = new StreamWriter(opts.MetricsOutPath, append: true) { AutoFlush = true };
+            // 2026-05-13: truncate-on-open rather than append. Re-running with an existing
+            // --metrics-out filename should overwrite the stale file, not silently mix two
+            // runs' records into one JSONL. Append-on-open is a measurement footgun — a
+            // mixed file has no internal marker between runs and corrupts downstream
+            // analysis without surfacing the error. Truncate is the honest benchmark
+            // semantic (re-runs replace; users provide a distinct path for a separate run).
+            if (File.Exists(opts.MetricsOutPath))
+            {
+                Console.WriteLine($"  Note: {opts.MetricsOutPath} exists — truncating for a fresh run.");
+            }
+            metricsWriter = new StreamWriter(opts.MetricsOutPath, append: false) { AutoFlush = true };
         }
 
         var elapsedTimes = new List<long>();   // microseconds, for completed queries
