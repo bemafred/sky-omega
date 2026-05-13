@@ -1,6 +1,8 @@
 # Cycle 10 — multi-fix plan with per-fix metric attribution
 
-**Status:** Proposed — 2026-05-08
+**Status:** Completed — 2026-05-13. Cycle 10 Phase 3 r4 21.3 B production validation finished at 23 h 56 m 50 s end-to-end on 1.7.57 vs cycle 9's 35 h 35 m on 1.7.50 (**−11 h 38 m / −32.7 %**). ADR-038 and ADR-039 both advanced to **Completed**. MPHF instrumentation surface (1.7.56) + listener wire-through fix (1.7.57) shipped. Three open follow-ups deferred to cycle 11: `ExternalSorter` FD pool integration, ADR-041 cleanup-on-exception (third orphaning), ADR-040 readahead memory adaptive sizing. Methodology shift validated: per-fix metric attribution from a single cycle worked — MPHF wall-clock at 54 m 29 s landed within 1 % of the plan's "+~55 min" budget. Validation: [docs/validations/cycle10-phase3-r4-21b-2026-05-12.md](../validations/cycle10-phase3-r4-21b-2026-05-12.md). Cycle retrospective: three abort/retry attempts before clean r4 (1.7.53 int32 / 1.7.54 BBHash non-convergence / 1.7.55 Claude-induced deploy-during-run crash) — discipline-rule memorialized as `feedback_no_deploy_during_long_running_process.md`.
+
+**Original proposal:** 2026-05-08
 **Methodology shift:** first cycle to ship multiple architectural changes in a single release, with attribution via per-fix instrumentation rather than separate runs.
 
 ## Why a multi-fix cycle (the methodology shift)

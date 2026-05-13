@@ -2,7 +2,9 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-07
+**Status:** Completed — 2026-05-13. Production-validated by cycle 10 Phase 3 r4 on 1.7.57: 21.3 B Reference + Sorted bulk-load completed in 23 h 56 m 50 s end-to-end (vs cycle 9's 35 h 35 m on 1.7.50 pre-ADR-038/039, **−32.7 %**). Merge wall-clock isolated for the first time: **2 h 41 m 1 s** for 85.27 B atom occurrences over 3,923 chunks. B1 (prefix-compress intermediate chunks, 1.7.52) and B2 (per-chunk frontier readahead + sidecar offset table, 1.7.52/1.7.54) shipped together. Per-spill sort:write ratio measured at 6.04:1 mean (vs the pre-ADR-038 "12-16:1" memory range — candidate-not-confirmed by design since cycle 9 per-spill JSONL was not preserved; see cycle 10 r4 validation doc for the reproducibility check across the 1.7.54 abort and r4 runs at 5.72/6.04 mean). Validation: [docs/validations/cycle10-phase3-r4-21b-2026-05-12.md](../../validations/cycle10-phase3-r4-21b-2026-05-12.md).
+
+**Original acceptance:** 2026-05-07
 
 ## Context
 

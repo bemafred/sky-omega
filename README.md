@@ -32,35 +32,36 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.50 — Cycle 9 complete. Substrate at 35.6 h end-to-end at 21.3 B.**
-> Three measured 21.3 B Wikidata production runs across the trajectory; substrate now 2.4× faster than its first incarnation, all on a single laptop, BCL-only .NET.
+> **v1.7.57 — Cycle 10 Phase 3 r4 complete. Substrate at 23 h 57 m end-to-end at 21.3 B.**
+> Four measured 21.3 B Wikidata production runs across the trajectory; substrate now **3.5× faster** than its first incarnation, all on a single laptop, BCL-only .NET.
 >
-> **Cumulative trajectory** *(measured-vs-measured, three completed full-Wikidata runs)*
+> **Cumulative trajectory** *(measured-vs-measured, four completed full-Wikidata runs)*
 > - **Phase 6** *(2026-04-25, 1.7.x pre-Sorted)* — 85 h end-to-end. First successful 21.3 B Reference end-to-end on a single M5 Max.
 > - **Cycle 8** *(2026-05-06, 1.7.48)* — 46 h with intervention. ADR-034 SortedAtomStore for Reference closed Phase 1; algorithmic switch from Hash → Sorted atom store; ~42 % atoms.atoms reduction via prefix compression; cleanup-class FD fixes.
-> - **Cycle 9** *(2026-05-09, 1.7.50)* — **35 h 35 m clean**. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); 1.7.49 cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
-> - Cumulative: **85 h → 35.6 h, −58.1 %** wall-clock reduction across the substrate's evolution.
+> - **Cycle 9** *(2026-05-09, 1.7.50)* — 35 h 35 m clean. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); 1.7.49 cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
+> - **Cycle 10 r4** *(2026-05-13, 1.7.57)* — **23 h 57 m clean**. ADR-038 merge-phase read-side (prefix-compress intermediate chunks + frontier readahead + sidecar offset table); ADR-039 BBHash MPHF over sealed atom set with `MaxLevels`=40 + dense final-level fallback; MPHF instrumentation surface (per-level events + dense-fallback + start/complete summary); listener wire-through fix at `QuadStore.RebuildMphf`.
+> - Cumulative: **85 h → 24 h, −71.8 %** wall-clock reduction across the substrate's evolution.
 >
-> **Cycle 9 — production validation of ADR-037 + 1.7.49** *(2026-05-09)*
-> - 21,316,531,403 triples ingested + sealed in **35 h 35 m end-to-end** (parser 9 h 18 m + merge 15 h 21 m + drain 1 h 40 m + Phase B 9 h 15 m)
-> - `parser_blocked_on_spill_ms = 78.9 / 0.000236 %` at 21.3 B — the falsifiable hypothesis ADR-037 stated, confirmed
-> - Substrate identity preserved vs cycle 8 (byte-identical indices: 4 B atoms, 17 B GPOS entries, 7.5 B trigram entries; total ~2.13 TB)
-> - WDBench cold baseline: **588 of 1,199 queries completed** (44 more than cycle 8); **10 h 44 m wall-clock** (−7 % vs cycle 8); aggregated p25=2.69 ms, p50=65 ms, p75=966 ms, p90=8.68 s, p95=23.13 s, p99=48.24 s, max=58.57 s; **0 query failures, 0 parser failures across 2,398 queries** (cycle 8 + cycle 9 combined)
+> **Cycle 10 r4 — production validation of ADR-038 + ADR-039 + MPHF instrumentation** *(2026-05-13)*
+> - 21,316,531,403 triples ingested + sealed in **23 h 56 m 50 s end-to-end** (parse 9 h 17 m + merge 2 h 41 m + MPHF 54 m 29 s + GSPO drain ~1 h 38 m + GPOS rebuild 55 m 27 s + Trigram rebuild 8 h 30 m 30 s)
+> - **MPHF construction characterized at production scale (4.005 B atoms):** 25 levels, 0 dense fallback engaged, placement_ratio held at **0.6065** across all levels — exact match to BBHash theoretical `1 − e^(−1/γ)` for γ=2.0. Total 54 m 29 s, within 1 % of the cycle 10 plan's "+~55 min MPHF" budget.
+> - Substrate output identity: 4,005,235,528 atoms, 17,029,283,265 GPOS entries, 7,472,855,623 trigram entries — bit-for-bit identical to cycle 9's measurements (same input, deterministic substrate). MPHF surface is purely additive: 1.75 GB `atoms.mphf` blob + 16.0 GB `atoms.idx` translation table.
+> - FD trajectory peaked at 8,325 during trigram rebuild (8,192 simultaneously-open chunks) vs the launchd ~10K effective ceiling = 17 % headroom held for 8 h+ — `ExternalSorter` k-way merge bypasses `BoundedFileStreamPool`; class-fix follow-up for cycle 11.
 >
 > **Substrate components shipped** *(cumulative)*
 > - **ADR-034** SortedAtomStore for Reference — *Completed* (1.7.30 → 1.7.48)
 > - **ADR-035** Phase 7a metrics infrastructure — *Completed*
 > - **ADR-036** BCL-only bz2 streaming decompression — *Completed*
 > - **ADR-037** Pipelined spill in `SortedAtomBulkBuilder` — *Completed* (1.7.50, production-validated cycle 9)
-> - **ADR-038** Merge-phase read-side optimization — *Accepted*, sequenced for cycle 10
-> - **ADR-039** MPHF over sealed atom set — *Proposed*, sequenced for cycle 10
+> - **ADR-038** Merge-phase read-side optimization — *Completed* (1.7.52/1.7.54, production-validated cycle 10 r4)
+> - **ADR-039** MPHF over sealed atom set — *Completed* (1.7.55 with dense fallback; instrumented 1.7.56 + wire-through fix 1.7.57; production-validated cycle 10 r4)
 > - *Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). Cognitive-profile validation drought persists — see [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).*
 >
 > **Read more**
 > - [21.3 Billion Triples on a Laptop, in .NET](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the Phase 6 article
 > - [What Compounds](docs/articles/2026-04-28-what-compounds.md) — Sky Omega's first four months, the recipe
-> - [Cycle 9 21.3 B production validation](docs/validations/adr-037-cycle9-21b-2026-05-09.md) — most recent measurement
-> - [Cycle 10 multi-fix plan](docs/roadmap/cycle-10-multi-fix-plan.md) — ADR-038 + ADR-039 + observability prerequisites composed
+> - [Cycle 10 Phase 3 r4 production validation](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — most recent measurement (1.7.57)
+> - [Cycle 9 21.3 B production validation](docs/validations/adr-037-cycle9-21b-2026-05-09.md) — the comparison baseline
 > - [CHANGELOG.md](CHANGELOG.md) · [Roadmap](docs/roadmap/production-hardening-1.8.md) · [Validations](docs/validations/) · [Limits register](docs/limits/)
 
 **If you're an AI assistant, start with [AI.md](AI.md).**
