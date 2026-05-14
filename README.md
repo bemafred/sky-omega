@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by cycle 10 Phase 3 r4 (21.3 B full Wikidata, 23 h 57 m end-to-end, 2026-05-13)
+**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by two paired measurements: cycle 10 Phase 3 r4 (**21.3 B full** Wikidata, 23 h 57 m end-to-end, 2026-05-13) + [truthy r1](docs/validations/truthy-r1-2026-05-14.md) (**8.17 B truthy** Wikidata, 14 h 13 m end-to-end, 2026-05-14). Truthy is the apples-to-apples companion for comparison vs published WDBench / QLever / Virtuoso numbers.
 
 Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
 
@@ -34,7 +34,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.57 — Cycle 10 Phase 3 r4 complete. Substrate at 23 h 57 m end-to-end at 21.3 B.**
+> **v1.7.57 — Cycle 10 Phase 3 r4 + truthy r1 complete. Substrate at 23 h 57 m / 14 h 13 m end-to-end at 21.3 B full / 8.17 B truthy.**
 > Four measured 21.3 B Wikidata production runs across the trajectory; substrate now **3.5× faster** than its first incarnation, all on a single laptop, BCL-only .NET.
 >
 > **Cumulative trajectory** *(measured-vs-measured, four completed full-Wikidata runs)*
@@ -42,6 +42,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > - **Cycle 8** *(2026-05-06, 1.7.48)* — 46 h with intervention. ADR-034 SortedAtomStore for Reference closed Phase 1; algorithmic switch from Hash → Sorted atom store; ~42 % atoms.atoms reduction via prefix compression; cleanup-class FD fixes.
 > - **Cycle 9** *(2026-05-09, 1.7.50)* — 35 h 35 m clean. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); 1.7.49 cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
 > - **Cycle 10 r4** *(2026-05-13, 1.7.57)* — **23 h 57 m clean**. ADR-038 merge-phase read-side (prefix-compress intermediate chunks + frontier readahead + sidecar offset table); ADR-039 BBHash MPHF over sealed atom set with `MaxLevels`=40 + dense final-level fallback; MPHF instrumentation surface (per-level events + dense-fallback + start/complete summary); listener wire-through fix at `QuadStore.RebuildMphf`.
+> - **Truthy r1** *(2026-05-14, 1.7.57)* — **14 h 13 m** end-to-end on the same substrate. 8,171,214,990 truthy-Wikidata triples (vs full's 21.3 B). Apples-to-apples companion to cycle 10 r4 for comparison vs published WDBench / QLever / Virtuoso numbers. Key finding: trigram entries 90.7 % of full at 38.3 % triple-count ratio = ~2.4× more literal-density per triple in truthy → trigram-phase prediction needs literal-volume scaling, not triple-count scaling (dump-date confounder noted in the [validation doc](docs/validations/truthy-r1-2026-05-14.md)).
 > - Cumulative: **85 h → 24 h, −71.8 %** wall-clock reduction across the substrate's evolution.
 >
 > **Cycle 10 r4 — production validation of ADR-038 + ADR-039 + MPHF instrumentation** *(2026-05-13)*
