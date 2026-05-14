@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by two paired measurements: cycle 10 Phase 3 r4 (**21.3 B full** Wikidata, 23 h 57 m end-to-end, 2026-05-13) + [truthy r1](docs/validations/truthy-r1-2026-05-14.md) (**8.17 B truthy** Wikidata, 14 h 13 m end-to-end, 2026-05-14). Truthy is the apples-to-apples companion for comparison vs published WDBench / QLever / Virtuoso numbers.
+**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by two paired measurements: cycle 10 Phase 3 r4 (**21.3 B full** Wikidata, 23 h 57 m end-to-end, 2026-05-13) + [truthy r1](docs/validations/truthy-r1-2026-05-14.md) (**8.17 B truthy** Wikidata, 14 h 13 m end-to-end, 2026-05-14). Truthy is the apples-to-apples companion for comparison vs published WDBench / QLever / Virtuoso numbers — but note Mercury Reference includes a built-in full-text-search trigram index that those systems don't carry by default. **Like-for-like (no trigram): 15 h 26 m / 6 h 49 m**; trigram is a +8 h 30 m / +7 h 24 m feature cost that buys SPARQL `text:match` out of the box.
 
 Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
 
@@ -34,7 +34,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.57 — Cycle 10 Phase 3 r4 + truthy r1 complete. Substrate at 23 h 57 m / 14 h 13 m end-to-end at 21.3 B full / 8.17 B truthy.**
+> **v1.7.57 — Cycle 10 Phase 3 r4 + truthy r1 complete. Substrate at 23 h 57 m / 14 h 13 m end-to-end at 21.3 B full / 8.17 B truthy** (with full-text trigram index). **Without the trigram (apples-to-apples vs published QLever / Virtuoso numbers): 15 h 26 m / 6 h 49 m.**
 > Four measured 21.3 B Wikidata production runs across the trajectory; substrate now **3.5× faster** than its first incarnation, all on a single laptop, BCL-only .NET.
 >
 > **Cumulative trajectory** *(measured-vs-measured, four completed full-Wikidata runs)*
