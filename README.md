@@ -6,7 +6,12 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by two paired measurements: cycle 10 Phase 3 r4 (**21.3 B full** Wikidata, 23 h 57 m end-to-end, 2026-05-13) + [truthy r1](docs/validations/truthy-r1-2026-05-14.md) (**8.17 B truthy** Wikidata, 14 h 13 m end-to-end, 2026-05-14). Truthy is the apples-to-apples companion for comparison vs published WDBench / QLever / Virtuoso numbers — but note Mercury Reference includes a built-in full-text-search trigram index that those systems don't carry by default. **Like-for-like (no trigram): 15 h 26 m / 6 h 49 m**; trigram is a +8 h 30 m / +7 h 24 m feature cost that buys SPARQL `text:match` out of the box.
+**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by **three paired measurements** on the same substrate generation:
+- [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
+- [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
+- [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
+
+Truthy is the apples-to-apples companion vs published WDBench / QLever / Virtuoso numbers. WGPB enables comparison vs MillenniumDB's published systematic-graph-pattern benchmarks. **Cumulative discipline: 0 substrate failures across ~9,763 measured queries.** Note Mercury Reference includes a built-in full-text trigram index — like-for-like vs systems without text indexes: **15 h 26 m / 6 h 49 m / n/a** (trigram is a +8 h 30 m / +7 h 24 m / ~negligible feature cost that buys SPARQL `text:match` out of the box).
 
 Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
 
@@ -34,7 +39,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.57 — Cycle 10 Phase 3 r4 + truthy r1 complete. Substrate at 23 h 57 m / 14 h 13 m end-to-end at 21.3 B full / 8.17 B truthy** (with full-text trigram index). **Without the trigram (apples-to-apples vs published QLever / Virtuoso numbers): 15 h 26 m / 6 h 49 m.**
+> **v1.7.57 — Three paired measurements: cycle 10 Phase 3 r4 + truthy r1 + WGPB step C complete. Substrate at 23 h 57 m / 14 h 13 m / 4 m 30 s end-to-end at 21.3 B full / 8.17 B truthy / ~150 M WGPB-filtered** (with full-text trigram index). Like-for-like (no trigram, comparing vs published QLever / Virtuoso / WDBench / MillenniumDB numbers): **15 h 26 m / 6 h 49 m / 4 m 30 s**. WGPB queries: 849/850 in 4 m 43 s (99.88 % completion, 0 timeouts).
 > Four measured 21.3 B Wikidata production runs across the trajectory; substrate now **3.5× faster** than its first incarnation, all on a single laptop, BCL-only .NET.
 >
 > **Cumulative trajectory** *(measured-vs-measured, four completed full-Wikidata runs)*
@@ -43,6 +48,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > - **Cycle 9** *(2026-05-09, 1.7.50)* — 35 h 35 m clean. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); 1.7.49 cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
 > - **Cycle 10 r4** *(2026-05-13, 1.7.57)* — **23 h 57 m clean**. ADR-038 merge-phase read-side (prefix-compress intermediate chunks + frontier readahead + sidecar offset table); ADR-039 BBHash MPHF over sealed atom set with `MaxLevels`=40 + dense final-level fallback; MPHF instrumentation surface (per-level events + dense-fallback + start/complete summary); listener wire-through fix at `QuadStore.RebuildMphf`.
 > - **Truthy r1** *(2026-05-14, 1.7.57)* — **14 h 13 m** end-to-end on the same substrate. 8,171,214,990 truthy-Wikidata triples (vs full's 21.3 B). Apples-to-apples companion to cycle 10 r4 for comparison vs published WDBench / QLever / Virtuoso numbers. Key finding: trigram entries 90.7 % of full at 38.3 % triple-count ratio = ~2.4× more literal-density per triple in truthy → trigram-phase prediction needs literal-volume scaling, not triple-count scaling (dump-date confounder noted in the [validation doc](docs/validations/truthy-r1-2026-05-14.md)).
+> - **WGPB step C** *(2026-05-16, 1.7.57)* — **4 m 30 s** end-to-end on a 2018 reduced-truthy Wikidata substrate (~150 M triples). MillenniumDB's Wikidata Graph Pattern Benchmark: **849/850 queries completed in 4 m 43 s** (99.88 %, 0 timeouts; 1 query rejected as malformed source SPARQL — Mercury's parser correctly identifying real defects in published benchmark data). Aggregate p50 53 ms, p95 1.8 s, p99 4.3 s. Apples-to-apples vs published MillenniumDB / Virtuoso / Blazegraph WGPB numbers. See [validation doc](docs/validations/wgpb-step-c-2026-05-16.md).
 > - Cumulative: **85 h → 24 h, −71.8 %** wall-clock reduction across the substrate's evolution.
 >
 > **Cycle 10 r4 — production validation of ADR-038 + ADR-039 + MPHF instrumentation** *(2026-05-13)*
