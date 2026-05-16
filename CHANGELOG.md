@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.60](#1760---2026-05-16)** — released 2026-05-16; ADR-042 Parts 1 + 4 land — `BBHashBuilder` level-0 range iterator (eliminates the [1..N] ChunkedList materialization, saves 32 GB at N=4B atoms) and Span-based `GetKey` API (eliminates ~770 GB of GC churn across a 4 B-atom build). Stacks on 1.7.58's ADR-041 cleanup-on-exception and 1.7.59's N-Triples Peek inlining. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.61](#1761---2026-05-16)** — released 2026-05-16; pre-push robustness audit on 1.7.60 caught a too-small scratch buffer (4 KB) for Mercury's 64 KB parser-bounded atom maximum. 1.7.61 bumps the scratch to 64 KB + adds a per-call fallback for any (in-practice impossible) outlier. Stacks on 1.7.60's ADR-042 Parts 1+4. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,33 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.61] - 2026-05-16
+
+**Headline:** Defensive scratch sizing for ADR-042 Part 4. The pre-push audit on 1.7.60 caught that the 4 KB scratch buffer sized for "typical Wikidata atoms" was below the practical worst-case bound: Mercury's parsers cap term-output buffers at 16 K chars × max 4 bytes/char UTF-8 = 64 KB. An outlier atom larger than 4 KB would have triggered `ArgumentException` on `CopyTo(scratch)`. 1.7.61 raises the scratch to 64 KB and adds a per-call fallback that returns the source span directly via `(ReadOnlySpan<byte>)keyBytes` when even 64 KB is exceeded (in-practice impossible at parser-bounded scales, defensive belt-and-braces).
+
+### Fixed
+
+- **`BBHashBuilder.Build(long, Func<long, byte[]>, ...)`** legacy wrapper — scratch sized 4 KB → 64 KB, plus a guarded fallback when `keyBytes.Length > scratch.Length` returns the source array directly. Preserves the historical Func<long, byte[]> contract (which accepted arbitrary-size byte[]) without surprise.
+- **`SortedAtomStoreExternalBuilder.BuildMphfFiles`** — scratch sized 4 KB → 64 KB. Outlier-path returns `span.ToArray()` via implicit conversion to `ReadOnlySpan<byte>`. Matches Mercury's parser-bounded atom byte-length envelope.
+
+### Audit notes
+
+Pre-push audit verified for **int vs long correctness** across the ADR-042 Parts 1+4 surface:
+- `keyCount`, `remainingCount`, `bitCount`, `globalOffset` — all `long`. ✓
+- `remaining`, `bumped` — `ChunkedList<long>` (long-indexed). ✓
+- `keyPositions`, `translation` — `ChunkedArray<long>` (long-indexed). ✓
+- Loop counter `k` — `long`. ✓
+- Branch-on-level `(k + 1)` arithmetic — `long`. ✓
+- `(int)denseRemaining` cast — bounded by `MaxDenseKeys = 1024` checked before cast. ✓
+- `maxKeyByteLength` parameter — `int`, bounded at 64 KB ≪ int.MaxValue. ✓
+
+No int-vs-long bugs introduced by Parts 1+4. The cycle-10 r3 `OverflowException` class of bug (which motivated `SkyOmega.Bcl` long-indexed structures in 1.7.53) is structurally prevented by the existing long-indexed primitives.
+
+### Validation
+
+- 15 BBHash/Mphf tests green (including the two ADR-042 equivalence tests from 1.7.60).
+- 546 Storage tests green.
 
 ## [1.7.60] - 2026-05-16
 

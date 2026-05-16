@@ -96,15 +96,22 @@ internal sealed class BBHashBuilder
     /// <param name="listener">Optional observability sink.</param>
     public BuildResult Build(long keyCount, Func<long, byte[]> getKey, IObservabilityListener? listener = null)
     {
-        // Default scratch sizing: 4 KB covers every practical RDF atom shape (Wikidata
-        // IRIs are ~60 bytes; the longest plausible literal is bounded by SPARQL parser
-        // limits well below 4 KB). Tests use smaller keys; this is a safe upper bound.
-        return Build(keyCount, maxKeyByteLength: 4096,
+        // Scratch sizing: 64 KB covers any practical RDF atom byte length — Mercury's
+        // parsers cap term-output buffers at 16K chars × max 4 bytes/char UTF-8 = 64 KB.
+        // Outlier path: if the caller's getKey returns a byte[] larger than the scratch
+        // (in-practice impossible at parser-bounded scales but theoretically possible
+        // for synthesized test inputs), we fall back to returning the byte[] directly
+        // via implicit conversion to ReadOnlySpan<byte>. No truncation; no surprise.
+        return Build(keyCount, maxKeyByteLength: 64 * 1024,
             (long inputIdx, Span<byte> scratch) =>
             {
                 var keyBytes = getKey(inputIdx);
-                keyBytes.AsSpan().CopyTo(scratch);
-                return scratch.Slice(0, keyBytes.Length);
+                if (keyBytes.Length <= scratch.Length)
+                {
+                    keyBytes.AsSpan().CopyTo(scratch);
+                    return (ReadOnlySpan<byte>)scratch.Slice(0, keyBytes.Length);
+                }
+                return keyBytes;
             }, listener);
     }
 

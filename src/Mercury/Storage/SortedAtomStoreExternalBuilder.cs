@@ -756,14 +756,24 @@ internal static class SortedAtomStoreExternalBuilder
         // the prior Func<long, byte[]> shape caused. BBHash makes ~2-3 passes per level
         // over every remaining key (~25 levels at 4 B atoms); replacing each per-key
         // ToArray() with a scratch-buffer copy saves ~770 GB of GC churn across a 4 B
-        // build. Buffer sized to MaxAtomByteLength (4 KB) — bounded above by Mercury's
-        // SortedAtomStore key shape; covers every practical Wikidata atom.
-        var result = builder.Build(atomCount, maxKeyByteLength: 4096,
+        // build. Buffer sized to 64 KB — bounded above by Mercury's parser output limit
+        // (16K chars × max 4 bytes/char UTF-8 = 65,536 bytes). The lambda has a
+        // defensive fallback for any atom that somehow exceeds this — span.ToArray()
+        // is allocated only for the (in-practice impossible) outlier case.
+        const int ScratchSize = 64 * 1024;
+        var result = builder.Build(atomCount, maxKeyByteLength: ScratchSize,
             (long sortedPos, Span<byte> scratch) =>
             {
                 var span = atoms.GetAtomSpan(sortedPos);
-                span.CopyTo(scratch);
-                return scratch.Slice(0, span.Length);
+                if (span.Length <= scratch.Length)
+                {
+                    span.CopyTo(scratch);
+                    return (ReadOnlySpan<byte>)scratch.Slice(0, span.Length);
+                }
+                // Outlier path: atom exceeds the 64 KB scratch. Fall back to per-call
+                // allocation. Not expected on any practical RDF workload; the parser
+                // chokes well below this limit. Defensive belt-and-braces.
+                return span.ToArray();
             }, listener);
         var mphfBuildDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
 
