@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.68](#1768---2026-05-16)** — released 2026-05-16; **ADR-029 fully closed**. Minimal profile shipped as a single-file slice (`MinimalQuadIndex` + `QuadStore` integration + CLI + 17 tests). All four ADR-029 profiles now operate as distinct concrete index implementations per the no-behavior-flags rule. Entry-size sweep across the matrix: 88 B (Cognitive) → 64 B (Graph) → 32 B (Reference) → 24 B (Minimal). Four release bumps in one day closed the matrix-completion arc. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.69](#1769---2026-05-16)** — released 2026-05-16; **ADR-029 post-completion refactor**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,38 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.69] - 2026-05-16
+
+**Headline:** ADR-029 post-completion refactor. `BTreeFile` extracted to `Mercury.Runtime` as the substrate-level B+Tree-on-mmap building block. The four concrete index classes that closed the ADR-029 matrix yesterday all converged on byte-identical FileStream/mmap/PageCache/AllocatePage/SaveMetadata/Dispose boilerplate — that block is now a single `BTreeFile` field, ~150 lines per class shorter. Each index retains its profile-specific surface (key layout, entry layout, comparison, mutation semantics, split logic, query enumerator). 592 Storage tests green; 4454 total Mercury tests green; zero behavioral changes.
+
+### Naming
+
+The infrastructure block is `BTreeFile` — "A single B+Tree's persistent home on disk." User caught the original `MmapBackedBTreeInfra` working name with: *"I think you discovered an infrastructural building block that deserves a better semantic name than what the suffix Infra suggests? What is it? What is its purpose? What does it represent?"* — `BTreeFile` names what the thing **is** rather than how it relates to other things. Naming lesson saved.
+
+### Added
+
+- **`src/Mercury.Runtime/BTreeFile.cs`** (~290 lines, `public sealed unsafe class`). The substrate-level B+Tree-on-mmap building block. Owns FileStream + MemoryMappedFile + MemoryMappedViewAccessor + pinned base pointer + LRU page cache + 32 B metadata header (RootPageId, NextPageId, EntryCount, MagicNumber). Public surface: `BasePtr`, `RootPageId` (settable), `NextPageId`, `EntryCount`, `MagicNumber`, `DeferMsync`, `AllocatePage()`, `GetPagePointer<T>(pageId)`, `FlushPage()`, `Flush()`, `SaveMetadata()`, `IncrementEntryCount()`, `Reset()`, `Dispose()`. Constructor accepts a fresh-file `initRoot` callback so consumers initialize page 1 (root leaf) through their own profile-specific page-header struct. Magic-number mismatch on existing files raises `InvalidDataException` — opening a Cognitive store as Reference (etc.) fails loudly rather than corrupting through mismatched key layouts.
+
+### Changed
+
+- **`PageCache` relocated** from `src/Mercury/Storage/PageCache.cs` to `src/Mercury.Runtime/PageCache.cs`. Namespace changed from `SkyOmega.Mercury.Storage` to `SkyOmega.Mercury.Runtime`. Visibility changed from `internal sealed unsafe class` to `public sealed unsafe class` so `BTreeFile` and downstream consumers can reference it.
+- **`src/Mercury.Runtime/Mercury.Runtime.csproj`** — added `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` so `PageCache` and `BTreeFile` can compile.
+- **`TemporalQuadIndex`** (1394 → ~1180 lines) — boilerplate replaced with single `BTreeFile _file` field. `GetPage` wraps `_file.GetPagePointer<TemporalBTreePage>` to preserve the DEBUG page-access counter. Page struct uses `BTreeFile.PageSize`. `Clear()` / `Dispose()` / `Flush()` / `SetDeferMsync()` / `QuadCount` all delegate.
+- **`VersionedQuadIndex`** (854 → ~580 lines) — same delegation pattern. Page struct uses `BTreeFile.PageSize`. Mutation semantics (RDF idempotency on live + un-delete-on-soft-deleted) preserved.
+- **`ReferenceQuadIndex`** (779 → ~620 lines) — same delegation pattern. Sort-insert fast path (`BeginAppendSorted` / `AppendSorted` / `EndAppendSorted`) preserved. Page struct uses `BTreeFile.HeaderBytes`.
+- **`MinimalQuadIndex`** (632 → ~480 lines) — same delegation pattern. RDF set semantics (silent duplicate no-op) preserved. Page struct uses `BTreeFile.HeaderBytes`.
+- **`tests/Mercury.Tests/Storage/PageCacheTests.cs`** — `using SkyOmega.Mercury.Storage` → `using SkyOmega.Mercury.Runtime` (PageCache moved namespaces).
+
+### Validation
+
+- 592 Storage tests green (same count as 1.7.68; no regressions).
+- 4454 total Mercury tests pass; 6 W3C-corner skipped (pre-existing); 0 failed.
+- File-format magic mismatch detection still verified at construction (every profile passes its own magic to `BTreeFile`; mismatched magic raises `InvalidDataException`).
+
+### Architecture note
+
+`BTreeFile` lives in `Mercury.Runtime` alongside `ProcessMemoryProbe`, `DiskSpaceGuard`, `TempPath`, and now `PageCache`. The placement question — *"Where should the implementation reside? I think we a natural place for it?"* — answered itself: Mercury.Runtime is the pure-infrastructure layer with no RDF / SPARQL domain concepts. `BTreeFile` doesn't know what an RDF triple is; it knows about pages, pointers, file capacity, and metadata headers. That's the substrate, not the application.
 
 ## [1.7.68] - 2026-05-16
 

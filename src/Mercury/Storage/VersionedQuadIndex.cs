@@ -1,8 +1,7 @@
 using System;
-using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -30,30 +29,20 @@ namespace SkyOmega.Mercury.Storage;
 /// Graph profile at plan time. Soft-deleted entries are filtered out by default;
 /// audit access (include deleted) is via the explicit <see cref="QueryAllVersions"/>
 /// surface.</para>
+/// <para><b>Backing file:</b> FileStream + mmap + page-cache + metadata header are
+/// delegated to <see cref="BTreeFile"/> in <c>Mercury.Runtime</c>.</para>
 /// <para><b>INTERNAL USE ONLY.</b> Public surface is via <see cref="QuadStore"/>.</para>
 /// </remarks>
 internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 {
-    private const int PageSize = 16384;
     private const int NodeDegree = 255; // (16384 - 32) / 64 bytes per versioned entry
 
     /// <summary>File-format magic for VersionedQuadIndex pages. "GRAPHIDX" as long.</summary>
     private const long MagicNumber = 0x4752415048494458L;
 
-    private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmapFile;
-    private readonly MemoryMappedViewAccessor _accessor;
+    private readonly BTreeFile _file;
     private readonly IAtomStore _atoms;
     private readonly bool _ownsAtomStore;
-    private readonly PageCache _pageCache;
-    private bool _deferMsync;
-
-    private byte* _basePtr;
-
-    private long _rootPageId;
-    private long _nextPageId;
-    private long _quadCount;
-    private long _fileCapacity;
 
     /// <summary>Create a versioned quad store with its own atom store.</summary>
     public VersionedQuadIndex(string filePath, long initialSizeBytes = 1L << 30)
@@ -65,37 +54,13 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     internal VersionedQuadIndex(string filePath, IAtomStore? sharedAtoms,
         long initialSizeBytes = 1L << 30, bool bulkMode = false)
     {
-        _deferMsync = bulkMode;
-        _fileStream = new FileStream(
+        _file = new BTreeFile(
             filePath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 4096,
-            FileOptions.RandomAccess | (bulkMode ? FileOptions.None : FileOptions.WriteThrough)
-        );
-
-        var actualInitialSize = bulkMode
-            ? Math.Max(initialSizeBytes, 256L << 30)
-            : initialSizeBytes;
-
-        if (_fileStream.Length == 0)
-        {
-            _fileStream.SetLength(actualInitialSize);
-        }
-        _fileCapacity = _fileStream.Length;
-
-        _mmapFile = MemoryMappedFile.CreateFromFile(
-            _fileStream,
-            mapName: null,
-            capacity: 0,
-            MemoryMappedFileAccess.ReadWrite,
-            HandleInheritability.None,
-            leaveOpen: false
-        );
-
-        _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePtr);
+            initialSizeBytes,
+            bulkMode,
+            bulkModeFloor: 256L << 30,
+            magicNumber: MagicNumber,
+            initRoot: InitializeRootPage);
 
         if (sharedAtoms != null)
         {
@@ -108,10 +73,16 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             _atoms = new HashAtomStore(atomFilePath);
             _ownsAtomStore = true;
         }
+    }
 
-        _pageCache = new PageCache(capacity: 10_000);
-
-        LoadMetadata();
+    private static void InitializeRootPage(BTreeFile f)
+    {
+        var root = f.GetPagePointer<VersionedBTreePage>(1);
+        root->PageId = 1;
+        root->IsLeaf = true;
+        root->EntryCount = 0;
+        root->ParentPageId = 0;
+        root->NextLeaf = 0;
     }
 
     internal IAtomStore Atoms => _atoms;
@@ -151,7 +122,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             Tertiary = tertiary,
         };
 
-        InsertIntoTree(key, _rootPageId);
+        InsertIntoTree(key, _file.RootPageId);
     }
 
     /// <summary>
@@ -211,7 +182,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     {
         var minKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: true);
         var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, isMin: false);
-        var leafPageId = FindLeafPage(_rootPageId, minKey);
+        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
         return new VersionedQuadEnumerator(this, leafPageId, minKey, maxKey, includeDeleted);
     }
 
@@ -237,7 +208,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 
     private bool DeleteFromTree(VersionedKey key)
     {
-        var leafPageId = FindLeafPage(_rootPageId, key);
+        var leafPageId = FindLeafPage(_file.RootPageId, key);
         var page = GetPage(leafPageId);
 
         for (int i = 0; i < page->EntryCount; i++)
@@ -250,7 +221,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
                 entry.IsDeleted = true;
                 entry.Version = checked(entry.Version + 1);
                 entry.ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                FlushPage(page);
+                _file.FlushPage();
                 return true;
             }
             if (cmp > 0) break;
@@ -301,7 +272,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     }
 
     /// <summary>B+Tree page for versioned triples (16 KB).</summary>
-    [StructLayout(LayoutKind.Explicit, Size = PageSize)]
+    [StructLayout(LayoutKind.Explicit, Size = BTreeFile.PageSize)]
     private struct VersionedBTreePage
     {
         [FieldOffset(0)] public long PageId;
@@ -427,20 +398,13 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private VersionedBTreePage* GetPage(long pageId)
-    {
-        if (_pageCache.TryGet(pageId, out var cachedPtr))
-            return (VersionedBTreePage*)cachedPtr;
-
-        var pagePtr = (VersionedBTreePage*)(_basePtr + pageId * PageSize);
-        _pageCache.Add(pageId, pagePtr);
-        return pagePtr;
-    }
+    private VersionedBTreePage* GetPage(long pageId) =>
+        _file.GetPagePointer<VersionedBTreePage>(pageId);
 
     private void InsertIntoTree(VersionedKey key, long pageId)
     {
         var result = InsertRecursive(key, pageId);
-        if (result.DidSplit && pageId == _rootPageId)
+        if (result.DidSplit && pageId == _file.RootPageId)
         {
             CreateNewRoot(pageId, result.PromotedKey, result.NewRightPageId);
         }
@@ -468,7 +432,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 
     private void CreateNewRoot(long oldRootPageId, VersionedKey promotedKey, long newRightPageId)
     {
-        var newRootId = AllocatePage();
+        var newRootId = _file.AllocatePage();
         var newRoot = GetPage(newRootId);
 
         newRoot->PageId = newRootId;
@@ -487,12 +451,10 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         var rightPage = GetPage(newRightPageId);
         rightPage->ParentPageId = newRootId;
 
-        _rootPageId = newRootId;
+        _file.RootPageId = newRootId;
 
-        FlushPage(newRoot);
-        FlushPage(oldRoot);
-        FlushPage(rightPage);
-        SaveMetadata();
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 
     private SplitResult InsertIntoLeaf(VersionedBTreePage* page, VersionedKey key)
@@ -513,7 +475,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
                     entry.IsDeleted = false;
                     entry.Version = checked(entry.Version + 1);
                     entry.ModifiedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                    FlushPage(page);
+                    _file.FlushPage();
                 }
                 return default;
             }
@@ -545,15 +507,15 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         newEntry.Reserved = 0;
 
         page->EntryCount++;
-        System.Threading.Interlocked.Increment(ref _quadCount);
-        FlushPage(page);
+        _file.IncrementEntryCount();
+        _file.FlushPage();
 
         return default;
     }
 
     private SplitResult SplitLeafPage(VersionedBTreePage* page, VersionedKey key)
     {
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newPage = GetPage(newPageId);
 
         newPage->PageId = newPageId;
@@ -584,8 +546,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             InsertIntoLeaf(newPage, key);
         }
 
-        FlushPage(page);
-        FlushPage(newPage);
+        _file.FlushPage();
 
         return new SplitResult
         {
@@ -628,15 +589,14 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 
         var childPage = GetPage(rightChildPageId);
         childPage->ParentPageId = page->PageId;
-        FlushPage(childPage);
-        FlushPage(page);
+        _file.FlushPage();
 
         return default;
     }
 
     private SplitResult SplitInternalPage(VersionedBTreePage* page, VersionedKey key, long rightChildPageId)
     {
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newPage = GetPage(newPageId);
 
         newPage->PageId = newPageId;
@@ -659,14 +619,12 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
 
         var leftmostChild = GetPage(newPage->NextLeaf);
         leftmostChild->ParentPageId = newPageId;
-        FlushPage(leftmostChild);
 
         for (int i = 0; i < newPage->EntryCount; i++)
         {
             var childId = newPage->GetEntry(i).ChildOrValue;
             var child = GetPage(childId);
             child->ParentPageId = newPageId;
-            FlushPage(child);
         }
 
         if (CompareKeys(in key, in promotedKey) < 0)
@@ -678,8 +636,7 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             InsertIntoInternal(newPage, key, rightChildPageId);
         }
 
-        FlushPage(page);
-        FlushPage(newPage);
+        _file.FlushPage();
 
         return new SplitResult
         {
@@ -687,28 +644,6 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
             PromotedKey = promotedKey,
             NewRightPageId = newPageId
         };
-    }
-
-    private long AllocatePage()
-    {
-        var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
-
-        var requiredSize = (pageId + 1) * PageSize;
-        if (requiredSize > _fileCapacity)
-        {
-            lock (_fileStream)
-            {
-                if (requiredSize > _fileCapacity)
-                {
-                    var newSize = Math.Max(_fileCapacity * 2, requiredSize);
-                    _fileStream.SetLength(newSize);
-                    _fileCapacity = newSize;
-                }
-            }
-        }
-
-        SaveMetadata();
-        return pageId;
     }
 
     private long FindLeafPage(long pageId, VersionedKey key)
@@ -744,74 +679,20 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
         return page->GetEntry(right).ChildOrValue;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void FlushPage(VersionedBTreePage* page)
-    {
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
-
     /// <summary>Force all pending mmap writes to disk. Called at end of bulk-load.</summary>
-    public void Flush() => _accessor.Flush();
+    public void Flush() => _file.Flush();
 
     /// <summary>Toggle deferred-msync mode (used by rebuild paths, mirrors TemporalQuadIndex).</summary>
-    internal void SetDeferMsync(bool value) => _deferMsync = value;
-
-    private void LoadMetadata()
-    {
-        _accessor.Read(24, out long magic);
-        if (magic == MagicNumber)
-        {
-            _accessor.Read(0, out _rootPageId);
-            _accessor.Read(8, out _nextPageId);
-            _accessor.Read(16, out _quadCount);
-        }
-        else
-        {
-            _rootPageId = 1;
-            _nextPageId = 2;
-            _quadCount = 0;
-
-            var root = GetPage(_rootPageId);
-            root->PageId = _rootPageId;
-            root->IsLeaf = true;
-            root->EntryCount = 0;
-            root->ParentPageId = 0;
-            root->NextLeaf = 0;
-
-            SaveMetadata();
-        }
-    }
-
-    private void SaveMetadata()
-    {
-        _accessor.Write(0, _rootPageId);
-        _accessor.Write(8, _nextPageId);
-        _accessor.Write(16, _quadCount);
-        _accessor.Write(24, MagicNumber);
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
+    internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 
     public void Dispose()
     {
-        SaveMetadata();
-
-        if (_basePtr != null)
-        {
-            _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
-            _basePtr = null;
-        }
-
-        _accessor?.Dispose();
-        _mmapFile?.Dispose();
-        _fileStream?.Dispose();
+        _file.Dispose();
         if (_ownsAtomStore)
             _atoms?.Dispose();
-        _pageCache?.Dispose();
     }
 
-    public long QuadCount => _quadCount;
+    public long QuadCount => _file.EntryCount;
 
     /// <summary>
     /// Reset the index to empty state. File size preserved (mmap stays valid).
@@ -819,21 +700,10 @@ internal sealed unsafe class VersionedQuadIndex : IQuadIndex
     /// </summary>
     public void Clear()
     {
-        _pageCache.Clear();
-
-        _rootPageId = 1;
-        _nextPageId = 2;
-        _quadCount = 0;
-
-        var root = GetPage(_rootPageId);
-        root->PageId = _rootPageId;
-        root->IsLeaf = true;
-        root->EntryCount = 0;
-        root->ParentPageId = 0;
-        root->NextLeaf = 0;
-
-        FlushPage(root);
-        SaveMetadata();
+        _file.Reset();
+        InitializeRootPage(_file);
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 }
 

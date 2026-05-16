@@ -1,5 +1,5 @@
 using System;
-using SkyOmega.Mercury.Storage;
+using SkyOmega.Mercury.Runtime;
 using Xunit;
 
 namespace SkyOmega.Mercury.Tests.Storage;

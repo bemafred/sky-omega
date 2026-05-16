@@ -1,8 +1,7 @@
 using System;
-using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -29,28 +28,14 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 {
-    private const int PageSize = 16384;
-    private const int HeaderBytes = 32;
     private const int LeafEntryBytes = 32;
     private const int InternalEntryBytes = 40;
-    internal const int LeafDegree = (PageSize - HeaderBytes) / LeafEntryBytes;          // 511
-    internal const int InternalDegree = (PageSize - HeaderBytes) / InternalEntryBytes;  // 408
+    internal const int LeafDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / LeafEntryBytes;          // 511
+    internal const int InternalDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / InternalEntryBytes;  // 408
 
-    private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmapFile;
-    private readonly MemoryMappedViewAccessor _accessor;
+    private readonly BTreeFile _file;
     private readonly IAtomStore _atoms;
     private readonly bool _ownsAtomStore;
-    private readonly PageCache _pageCache;
-
-    // Mirror the temporal index's msync-deferral knob for bulk ingest symmetry.
-    private bool _deferMsync;
-
-    private byte* _basePtr;
-    private long _rootPageId;
-    private long _nextPageId;
-    private long _quadCount;
-    private long _fileCapacity;
 
     /// <summary>
     /// Magic number stamped into the index file header. Distinct from TemporalQuadIndex's
@@ -63,42 +48,20 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     internal ReferenceQuadIndex(string filePath, IAtomStore? sharedAtoms,
         long initialSizeBytes = 1L << 30, bool bulkMode = false)
     {
-        _deferMsync = bulkMode;
-
-        _fileStream = new FileStream(
-            filePath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 4096,
-            FileOptions.RandomAccess | (bulkMode ? FileOptions.None : FileOptions.WriteThrough)
-        );
-
         // Bulk-mode floor set to 1 TB so 21.3B Wikidata Reference bulk-load doesn't
         // overrun the mmap view. A 256 GB allocation (the earlier floor) fits ~8.2B
         // triples at 16 KB pages × 511 entries/leaf; past that the file must grow,
-        // but this class acquires a single fixed-size mmap view at open and has no
+        // but BTreeFile acquires a single fixed-size mmap view at open and has no
         // remap logic (docs/limits/btree-mmap-remap.md). 1 TB covers the full
         // Wikidata 21.3B case (~670 GB actual on APFS sparse storage); anything
         // larger would currently need the proper remap implementation.
-        var actualInitialSize = bulkMode
-            ? Math.Max(initialSizeBytes, 1024L << 30)
-            : initialSizeBytes;
-
-        if (_fileStream.Length == 0)
-            _fileStream.SetLength(actualInitialSize);
-        _fileCapacity = _fileStream.Length;
-
-        _mmapFile = MemoryMappedFile.CreateFromFile(
-            _fileStream,
-            mapName: null,
-            capacity: 0,
-            MemoryMappedFileAccess.ReadWrite,
-            HandleInheritability.None,
-            leaveOpen: false);
-
-        _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePtr);
+        _file = new BTreeFile(
+            filePath,
+            initialSizeBytes,
+            bulkMode,
+            bulkModeFloor: 1024L << 30,
+            magicNumber: MagicNumber,
+            initRoot: InitializeRootPage);
 
         if (sharedAtoms != null)
         {
@@ -110,10 +73,16 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
             _atoms = new HashAtomStore(filePath + ".atoms");
             _ownsAtomStore = true;
         }
+    }
 
-        _pageCache = new PageCache(capacity: 10_000);
-
-        LoadMetadata();
+    private static void InitializeRootPage(BTreeFile f)
+    {
+        var root = f.GetPagePointer<ReferencePageHeader>(1);
+        root->PageId = 1;
+        root->IsLeaf = true;
+        root->EntryCount = 0;
+        root->ParentPageId = 0;
+        root->NextLeafOrLeftmostChild = 0;
     }
 
     /// <summary>Internal access to the shared atom store (under QuadStore lock).</summary>
@@ -121,42 +90,23 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 
     #region IQuadIndex
 
-    public long QuadCount => _quadCount;
+    public long QuadCount => _file.EntryCount;
 
-    public void Flush() => _accessor.Flush();
+    public void Flush() => _file.Flush();
 
     public void Clear()
     {
-        _pageCache.Clear();
-        _rootPageId = 1;
-        _nextPageId = 2;
-        _quadCount = 0;
-
-        var root = GetPage(_rootPageId);
-        root->PageId = _rootPageId;
-        root->IsLeaf = true;
-        root->EntryCount = 0;
-        root->ParentPageId = 0;
-        root->NextLeafOrLeftmostChild = 0;
-
-        FlushPage();
-        SaveMetadata();
+        _file.Reset();
+        InitializeRootPage(_file);
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 
     public void Dispose()
     {
-        SaveMetadata();
-        if (_basePtr != null)
-        {
-            _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
-            _basePtr = null;
-        }
-        _accessor?.Dispose();
-        _mmapFile?.Dispose();
-        _fileStream?.Dispose();
+        _file.Dispose();
         if (_ownsAtomStore)
             _atoms?.Dispose();
-        _pageCache?.Dispose();
     }
 
     #endregion
@@ -181,7 +131,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     internal void AddRaw(long graph, long primary, long secondary, long tertiary)
     {
         var key = new ReferenceKey { Graph = graph, Primary = primary, Secondary = secondary, Tertiary = tertiary };
-        InsertIntoTree(key, _rootPageId);
+        InsertIntoTree(key, _file.RootPageId);
     }
 
     // Cached rightmost-leaf page id for the ADR-032 sort-insert fast path.
@@ -244,15 +194,15 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
             // Fast path: append directly to the tail leaf.
             view.LeafEntry(header.EntryCount) = key;
             header.EntryCount = (short)(header.EntryCount + 1);
-            System.Threading.Interlocked.Increment(ref _quadCount);
-            FlushPage();
+            _file.IncrementEntryCount();
+            _file.FlushPage();
             return;
         }
 
         // Tail leaf is full — fall back to the full-tree insert which handles splits,
         // then refresh the cached tail. Cost: one log-N tree walk per ~LeafDegree
         // entries, amortized to near-zero per entry.
-        InsertIntoTree(key, _rootPageId);
+        InsertIntoTree(key, _file.RootPageId);
         _sortInsertTailLeafPageId = FindRightmostLeaf();
     }
 
@@ -268,7 +218,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 
     private long FindRightmostLeaf()
     {
-        var pageId = _rootPageId;
+        var pageId = _file.RootPageId;
         while (true)
         {
             var view = GetView(pageId);
@@ -289,7 +239,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     /// Mirrors TemporalQuadIndex.SetDeferMsync — toggled by QuadStore around bulk
     /// phases. Caller is responsible for invoking Flush() before turning deferral off.
     /// </summary>
-    internal void SetDeferMsync(bool value) => _deferMsync = value;
+    internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 
     /// <summary>Number of times Query pages have been traversed (debug builds only).</summary>
     public ReferenceQuadEnumerator Query(long graph, long primary, long secondary, long tertiary)
@@ -297,7 +247,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         var minKey = BuildSearchKey(graph, primary, secondary, tertiary, isMin: true);
         var maxKey = BuildSearchKey(graph, primary, secondary, tertiary, isMin: false);
 
-        var leafPageId = FindLeafPage(_rootPageId, minKey);
+        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
         return new ReferenceQuadEnumerator(this, leafPageId, minKey, maxKey);
     }
 
@@ -379,7 +329,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     /// <see cref="NextLeafOrLeftmostChild"/> field is the next-leaf link; on internal pages
     /// it is the leftmost child pointer (B+Tree separator layout).
     /// </summary>
-    [StructLayout(LayoutKind.Explicit, Size = HeaderBytes)]
+    [StructLayout(LayoutKind.Explicit, Size = BTreeFile.HeaderBytes)]
     private struct ReferencePageHeader
     {
         [FieldOffset(0)] public long PageId;
@@ -403,99 +353,23 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref ReferenceKey LeafEntry(int index) =>
-            ref ((ReferenceKey*)(Base + HeaderBytes))[index];
+            ref ((ReferenceKey*)(Base + BTreeFile.HeaderBytes))[index];
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref ReferenceInternalEntry InternalEntry(int index) =>
-            ref ((ReferenceInternalEntry*)(Base + HeaderBytes))[index];
+            ref ((ReferenceInternalEntry*)(Base + BTreeFile.HeaderBytes))[index];
     }
 
     #endregion
 
-    #region Page access / metadata
+    #region Page access
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ReferencePageHeader* GetPage(long pageId)
-    {
-        if (_pageCache.TryGet(pageId, out var cached))
-            return (ReferencePageHeader*)cached;
-        var ptr = _basePtr + pageId * PageSize;
-        _pageCache.Add(pageId, ptr);
-        return (ReferencePageHeader*)ptr;
-    }
+    private ReferencePageHeader* GetPage(long pageId) =>
+        _file.GetPagePointer<ReferencePageHeader>(pageId);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private PageView GetView(long pageId) => new((byte*)GetPage(pageId));
-
-    private long AllocatePage()
-    {
-        var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
-        var requiredSize = (pageId + 1) * PageSize;
-        if (requiredSize > _fileCapacity)
-        {
-            lock (_fileStream)
-            {
-                if (requiredSize > _fileCapacity)
-                {
-                    var newSize = Math.Max(_fileCapacity * 2, requiredSize);
-                    _fileStream.SetLength(newSize);
-                    _fileCapacity = newSize;
-                }
-            }
-        }
-        SaveMetadata();
-        return pageId;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void FlushPage()
-    {
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
-
-    private void LoadMetadata()
-    {
-        _accessor.Read(24, out long magic);
-        if (magic == MagicNumber)
-        {
-            _accessor.Read(0, out _rootPageId);
-            _accessor.Read(8, out _nextPageId);
-            _accessor.Read(16, out _quadCount);
-        }
-        else if (magic != 0)
-        {
-            throw new InvalidDataException(
-                $"Index file magic 0x{magic:X16} is not a Reference-profile index " +
-                "(expected REFERENN marker). Opening a Cognitive or otherwise-shaped index " +
-                "as Reference is refused by design — reload from source to change profiles.");
-        }
-        else
-        {
-            _rootPageId = 1;
-            _nextPageId = 2;
-            _quadCount = 0;
-
-            var root = GetPage(_rootPageId);
-            root->PageId = _rootPageId;
-            root->IsLeaf = true;
-            root->EntryCount = 0;
-            root->ParentPageId = 0;
-            root->NextLeafOrLeftmostChild = 0;
-
-            SaveMetadata();
-        }
-    }
-
-    private void SaveMetadata()
-    {
-        _accessor.Write(0, _rootPageId);
-        _accessor.Write(8, _nextPageId);
-        _accessor.Write(16, _quadCount);
-        _accessor.Write(24, MagicNumber);
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
 
     #endregion
 
@@ -511,7 +385,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
     private void InsertIntoTree(ReferenceKey key, long pageId)
     {
         var result = InsertRecursive(key, pageId);
-        if (result.DidSplit && pageId == _rootPageId)
+        if (result.DidSplit && pageId == _file.RootPageId)
             CreateNewRoot(pageId, result.PromotedKey, result.NewRightPageId);
     }
 
@@ -549,14 +423,14 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
 
         view.LeafEntry(insertPos) = key;
         view.Header.EntryCount = (short)(count + 1);
-        System.Threading.Interlocked.Increment(ref _quadCount);
-        FlushPage();
+        _file.IncrementEntryCount();
+        _file.FlushPage();
         return default;
     }
 
     private SplitResult SplitLeafPage(PageView page, ReferenceKey key, int insertPosHint)
     {
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newView = GetView(newPageId);
         ref var newHeader = ref newView.Header;
         ref var pageHeader = ref page.Header;
@@ -583,7 +457,7 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         else
             InsertIntoLeaf(newView, key);
 
-        FlushPage();
+        _file.FlushPage();
         return new SplitResult { DidSplit = true, PromotedKey = promoted, NewRightPageId = newPageId };
     }
 
@@ -610,13 +484,13 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         var child = GetPage(rightChildPageId);
         child->ParentPageId = view.Header.PageId;
 
-        FlushPage();
+        _file.FlushPage();
         return default;
     }
 
     private SplitResult SplitInternalPage(PageView page, ReferenceKey key, long rightChildPageId)
     {
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newView = GetView(newPageId);
         ref var newHeader = ref newView.Header;
         ref var pageHeader = ref page.Header;
@@ -654,13 +528,13 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         else
             InsertIntoInternal(newView, key, rightChildPageId);
 
-        FlushPage();
+        _file.FlushPage();
         return new SplitResult { DidSplit = true, PromotedKey = promoted, NewRightPageId = newPageId };
     }
 
     private void CreateNewRoot(long oldRootPageId, ReferenceKey promotedKey, long newRightPageId)
     {
-        var newRootId = AllocatePage();
+        var newRootId = _file.AllocatePage();
         var newRoot = GetView(newRootId);
         ref var header = ref newRoot.Header;
 
@@ -682,9 +556,9 @@ internal sealed unsafe class ReferenceQuadIndex : IQuadIndex
         var right = GetPage(newRightPageId);
         right->ParentPageId = newRootId;
 
-        _rootPageId = newRootId;
-        FlushPage();
-        SaveMetadata();
+        _file.RootPageId = newRootId;
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 
     private long FindLeafPage(long pageId, ReferenceKey key)

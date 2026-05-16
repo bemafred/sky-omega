@@ -1,8 +1,7 @@
 using System;
-using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Mercury.Runtime;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -31,29 +30,21 @@ namespace SkyOmega.Mercury.Storage;
 /// <para><strong>Graph dimension:</strong> not stored. QuadStore enforces graph=default
 /// at the API boundary for Minimal-profile stores; queries with named-graph constraints
 /// are rejected at plan time.</para>
+///
+/// <para><strong>Backing file:</strong> the FileStream + mmap + page-cache + metadata
+/// header are delegated to <see cref="BTreeFile"/> in <c>Mercury.Runtime</c>; this class
+/// owns only the B+Tree algorithm and the 24-byte key layout.</para>
 /// </remarks>
 internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 {
-    private const int PageSize = 16384;
-    private const int HeaderBytes = 32;
     private const int LeafEntryBytes = 24;
     private const int InternalEntryBytes = 32;
-    internal const int LeafDegree = (PageSize - HeaderBytes) / LeafEntryBytes;          // 681
-    internal const int InternalDegree = (PageSize - HeaderBytes) / InternalEntryBytes;  // 510
+    internal const int LeafDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / LeafEntryBytes;          // 681
+    internal const int InternalDegree = (BTreeFile.PageSize - BTreeFile.HeaderBytes) / InternalEntryBytes;  // 510
 
-    private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmapFile;
-    private readonly MemoryMappedViewAccessor _accessor;
+    private readonly BTreeFile _file;
     private readonly IAtomStore _atoms;
     private readonly bool _ownsAtomStore;
-    private readonly PageCache _pageCache;
-    private bool _deferMsync;
-
-    private byte* _basePtr;
-    private long _rootPageId;
-    private long _nextPageId;
-    private long _quadCount;
-    private long _fileCapacity;
 
     /// <summary>
     /// Magic number stamped into the index file header. Distinct from Reference / Cognitive /
@@ -66,38 +57,16 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     internal MinimalQuadIndex(string filePath, IAtomStore? sharedAtoms,
         long initialSizeBytes = 1L << 30, bool bulkMode = false)
     {
-        _deferMsync = bulkMode;
-
-        _fileStream = new FileStream(
+        // Minimal profile targets small-to-mid-scale Linked Data endpoints. The 1 GB
+        // bulk-mode floor covers ~28M entries at 24 B/entry × 681 entries/leaf — plenty
+        // for typical Minimal workloads.
+        _file = new BTreeFile(
             filePath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 4096,
-            FileOptions.RandomAccess | (bulkMode ? FileOptions.None : FileOptions.WriteThrough)
-        );
-
-        // Minimal profile targets small-to-mid-scale Linked Data endpoints. The default
-        // initialSizeBytes (1 GB) covers ~28M entries at 24 B/entry × 681 entries/leaf —
-        // plenty for typical Minimal workloads. No bulk-mode floor lift required.
-        var actualInitialSize = bulkMode
-            ? Math.Max(initialSizeBytes, 1L << 30)
-            : initialSizeBytes;
-
-        if (_fileStream.Length == 0)
-            _fileStream.SetLength(actualInitialSize);
-        _fileCapacity = _fileStream.Length;
-
-        _mmapFile = MemoryMappedFile.CreateFromFile(
-            _fileStream,
-            mapName: null,
-            capacity: 0,
-            MemoryMappedFileAccess.ReadWrite,
-            HandleInheritability.None,
-            leaveOpen: false);
-
-        _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePtr);
+            initialSizeBytes,
+            bulkMode,
+            bulkModeFloor: 1L << 30,
+            magicNumber: MagicNumber,
+            initRoot: InitializeRootPage);
 
         if (sharedAtoms != null)
         {
@@ -109,55 +78,42 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
             _atoms = new HashAtomStore(filePath + ".atoms");
             _ownsAtomStore = true;
         }
+    }
 
-        _pageCache = new PageCache(capacity: 10_000);
-
-        LoadMetadata();
+    private static void InitializeRootPage(BTreeFile f)
+    {
+        var root = f.GetPagePointer<MinimalPageHeader>(1);
+        root->PageId = 1;
+        root->IsLeaf = true;
+        root->EntryCount = 0;
+        root->ParentPageId = 0;
+        root->NextLeafOrLeftmostChild = 0;
     }
 
     internal IAtomStore Atoms => _atoms;
 
     // ===== IQuadIndex =====
 
-    public long QuadCount => _quadCount;
+    public long QuadCount => _file.EntryCount;
 
-    public void Flush() => _accessor.Flush();
+    public void Flush() => _file.Flush();
 
     public void Clear()
     {
-        _pageCache.Clear();
-        _rootPageId = 1;
-        _nextPageId = 2;
-        _quadCount = 0;
-
-        var root = GetPage(_rootPageId);
-        root->PageId = _rootPageId;
-        root->IsLeaf = true;
-        root->EntryCount = 0;
-        root->ParentPageId = 0;
-        root->NextLeafOrLeftmostChild = 0;
-
-        FlushPage();
-        SaveMetadata();
+        _file.Reset();
+        InitializeRootPage(_file);
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 
     public void Dispose()
     {
-        SaveMetadata();
-        if (_basePtr != null)
-        {
-            _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
-            _basePtr = null;
-        }
-        _accessor?.Dispose();
-        _mmapFile?.Dispose();
-        _fileStream?.Dispose();
+        _file.Dispose();
         if (_ownsAtomStore)
             _atoms?.Dispose();
-        _pageCache?.Dispose();
     }
 
-    internal void SetDeferMsync(bool value) => _deferMsync = value;
+    internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 
     // ===== Public add =====
 
@@ -177,7 +133,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     internal void AddRaw(long primary, long secondary, long tertiary)
     {
         var key = new MinimalKey { Primary = primary, Secondary = secondary, Tertiary = tertiary };
-        InsertIntoTree(key, _rootPageId);
+        InsertIntoTree(key, _file.RootPageId);
     }
 
     // ===== Query =====
@@ -191,7 +147,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     {
         var minKey = CreateSearchKey(primary, secondary, tertiary, isMin: true);
         var maxKey = CreateSearchKey(primary, secondary, tertiary, isMin: false);
-        var leafPageId = FindLeafPage(_rootPageId, minKey);
+        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
         return new MinimalQuadEnumerator(this, leafPageId, minKey, maxKey);
     }
 
@@ -249,7 +205,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     }
 
     /// <summary>32-byte page header shared by leaf and internal pages.</summary>
-    [StructLayout(LayoutKind.Explicit, Size = HeaderBytes)]
+    [StructLayout(LayoutKind.Explicit, Size = BTreeFile.HeaderBytes)]
     private struct MinimalPageHeader
     {
         [FieldOffset(0)] public long PageId;
@@ -273,11 +229,11 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref MinimalKey LeafEntry(int index) =>
-            ref ((MinimalKey*)(Base + HeaderBytes))[index];
+            ref ((MinimalKey*)(Base + BTreeFile.HeaderBytes))[index];
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ref MinimalInternalEntry InternalEntry(int index) =>
-            ref ((MinimalInternalEntry*)(Base + HeaderBytes))[index];
+            ref ((MinimalInternalEntry*)(Base + BTreeFile.HeaderBytes))[index];
     }
 
     /// <summary>Zero-allocation enumerator for a bounded leaf-page scan.</summary>
@@ -335,90 +291,14 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         public MinimalQuadEnumerator GetEnumerator() => this;
     }
 
-    // ===== Page access / metadata =====
+    // ===== Page access =====
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private MinimalPageHeader* GetPage(long pageId)
-    {
-        if (_pageCache.TryGet(pageId, out var cached))
-            return (MinimalPageHeader*)cached;
-        var ptr = _basePtr + pageId * PageSize;
-        _pageCache.Add(pageId, ptr);
-        return (MinimalPageHeader*)ptr;
-    }
+    private MinimalPageHeader* GetPage(long pageId) =>
+        _file.GetPagePointer<MinimalPageHeader>(pageId);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private PageView GetView(long pageId) => new((byte*)GetPage(pageId));
-
-    private long AllocatePage()
-    {
-        var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
-        var requiredSize = (pageId + 1) * PageSize;
-        if (requiredSize > _fileCapacity)
-        {
-            lock (_fileStream)
-            {
-                if (requiredSize > _fileCapacity)
-                {
-                    var newSize = Math.Max(_fileCapacity * 2, requiredSize);
-                    _fileStream.SetLength(newSize);
-                    _fileCapacity = newSize;
-                }
-            }
-        }
-        SaveMetadata();
-        return pageId;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void FlushPage()
-    {
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
-
-    private void LoadMetadata()
-    {
-        _accessor.Read(24, out long magic);
-        if (magic == MagicNumber)
-        {
-            _accessor.Read(0, out _rootPageId);
-            _accessor.Read(8, out _nextPageId);
-            _accessor.Read(16, out _quadCount);
-        }
-        else if (magic != 0)
-        {
-            throw new InvalidDataException(
-                $"Index file magic 0x{magic:X16} is not a Minimal-profile index. " +
-                "Opening a Cognitive / Graph / Reference store as Minimal is refused by design — " +
-                "reload from source to change profiles.");
-        }
-        else
-        {
-            _rootPageId = 1;
-            _nextPageId = 2;
-            _quadCount = 0;
-
-            var root = GetPage(_rootPageId);
-            root->PageId = _rootPageId;
-            root->IsLeaf = true;
-            root->EntryCount = 0;
-            root->ParentPageId = 0;
-            root->NextLeafOrLeftmostChild = 0;
-
-            SaveMetadata();
-        }
-    }
-
-    private void SaveMetadata()
-    {
-        _accessor.Write(0, _rootPageId);
-        _accessor.Write(8, _nextPageId);
-        _accessor.Write(16, _quadCount);
-        _accessor.Write(24, MagicNumber);
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
 
     // ===== B+Tree ops =====
 
@@ -432,7 +312,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
     private void InsertIntoTree(MinimalKey key, long pageId)
     {
         var result = InsertRecursive(key, pageId);
-        if (result.DidSplit && pageId == _rootPageId)
+        if (result.DidSplit && pageId == _file.RootPageId)
             CreateNewRoot(pageId, result.PromotedKey, result.NewRightPageId);
     }
 
@@ -470,14 +350,14 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
 
         view.LeafEntry(insertPos) = key;
         view.Header.EntryCount = (short)(count + 1);
-        System.Threading.Interlocked.Increment(ref _quadCount);
-        FlushPage();
+        _file.IncrementEntryCount();
+        _file.FlushPage();
         return default;
     }
 
     private SplitResult SplitLeafPage(PageView page, MinimalKey key)
     {
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newView = GetView(newPageId);
         ref var newHeader = ref newView.Header;
         ref var pageHeader = ref page.Header;
@@ -503,7 +383,7 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         else
             InsertIntoLeaf(newView, key);
 
-        FlushPage();
+        _file.FlushPage();
         return new SplitResult { DidSplit = true, PromotedKey = promoted, NewRightPageId = newPageId };
     }
 
@@ -530,13 +410,13 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         var child = GetPage(rightChildPageId);
         child->ParentPageId = view.Header.PageId;
 
-        FlushPage();
+        _file.FlushPage();
         return default;
     }
 
     private SplitResult SplitInternalPage(PageView page, MinimalKey key, long rightChildPageId)
     {
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newView = GetView(newPageId);
         ref var newHeader = ref newView.Header;
         ref var pageHeader = ref page.Header;
@@ -572,13 +452,13 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         else
             InsertIntoInternal(newView, key, rightChildPageId);
 
-        FlushPage();
+        _file.FlushPage();
         return new SplitResult { DidSplit = true, PromotedKey = promoted, NewRightPageId = newPageId };
     }
 
     private void CreateNewRoot(long oldRootPageId, MinimalKey promotedKey, long newRightPageId)
     {
-        var newRootId = AllocatePage();
+        var newRootId = _file.AllocatePage();
         var newRoot = GetView(newRootId);
         ref var header = ref newRoot.Header;
 
@@ -600,9 +480,9 @@ internal sealed unsafe class MinimalQuadIndex : IQuadIndex
         var right = GetPage(newRightPageId);
         right->ParentPageId = newRootId;
 
-        _rootPageId = newRootId;
-        FlushPage();
-        SaveMetadata();
+        _file.RootPageId = newRootId;
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 
     private long FindLeafPage(long pageId, MinimalKey key)

@@ -1,9 +1,8 @@
 using System;
-using System.Buffers;
-using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using SkyOmega.Mercury.Runtime;
+
 namespace SkyOmega.Mercury.Storage;
 
 /// <summary>
@@ -19,36 +18,14 @@ namespace SkyOmega.Mercury.Storage;
 /// </remarks>
 internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 {
-    private const int PageSize = 16384;
     private const int NodeDegree = 185; // (16384 - 32) / 88 bytes per temporal entry
+    private const long MagicNumber = 0x54454D504F52414C; // "TEMPORAL" as long
 
-    private readonly FileStream _fileStream;
-    private readonly MemoryMappedFile _mmapFile;
-    private readonly MemoryMappedViewAccessor _accessor;
+    private readonly BTreeFile _file;
     private readonly IAtomStore _atoms;
     private readonly bool _ownsAtomStore;
-    private readonly PageCache _pageCache;
     private readonly KeyComparer _comparer;
     private readonly KeySortOrder _sortOrder;
-    // _deferMsync controls whether FlushPage and SaveMetadata issue _accessor.Flush()
-    // (an msync over the whole mapped region — the expensive part). It is initialized
-    // from the constructor's bulkMode parameter but is NOT readonly: RebuildSecondaryIndexes
-    // toggles it around the rebuild loop so secondary-index construction avoids the same
-    // per-page msync cost that the 1.7.15 bulk-load fix removed from the primary path.
-    // "Bulk mode" conflated a construction-time decision (pre-size the mmap) with a
-    // runtime behavior (defer msync); this field is the runtime half.
-    private bool _deferMsync;
-
-    // Cached base pointer acquired once during construction (avoids repeated AcquirePointer calls)
-    private byte* _basePtr;
-
-    private long _rootPageId;
-    private long _nextPageId;
-    private long _quadCount;
-    // Tracked file capacity. Reading FileStream.Length on every page allocation
-    // issued fstat() — up to 0.5% of bulk-load time on macOS. Mirror SetLength
-    // so the hot path in AllocatePage stays in process.
-    private long _fileCapacity;
 
     /// <summary>
     /// Create a temporal quad store with its own atom store
@@ -69,54 +46,23 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         KeySortOrder sortOrder = KeySortOrder.EntityFirst, bool bulkMode = false)
     {
         _sortOrder = sortOrder;
-        _deferMsync = bulkMode;
         _comparer = sortOrder == KeySortOrder.TimeFirst
             ? TemporalKey.CompareTimeFirst
             : TemporalKey.CompareEntityFirst;
-        // Bulk mode: FileOptions.None lets the OS write cache batch B+Tree page
-        // writes; durability is deferred to QuadStore.FlushToDisk() at end of load.
-        // Cognitive mode: FileOptions.WriteThrough makes every page write reach
-        // storage immediately, matching the WAL's per-write fsync discipline.
-        // Same pattern WriteAheadLog already uses for its own file open.
-        _fileStream = new FileStream(
+
+        // In bulk mode, pre-size the file to 256 GB so AllocatePage can extend the
+        // underlying file via SetLength without ever needing to remap. Sparse-file
+        // behavior (APFS, ZFS, NTFS) means disk usage tracks actual touched pages.
+        // macOS per-process VM ceiling is ~64 TB so 256 GB per index leaves comfortable
+        // headroom for full Wikidata. Cognitive mode keeps the original initial — small
+        // stores never grow past it, large cognitive stores stay rare.
+        _file = new BTreeFile(
             filePath,
-            FileMode.OpenOrCreate,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 4096,
-            FileOptions.RandomAccess | (bulkMode ? FileOptions.None : FileOptions.WriteThrough)
-        );
-
-        // In bulk mode, pre-size the file to a large mmap capacity so AllocatePage
-        // can extend the underlying file via SetLength without ever needing to
-        // remap. Sparse-file behavior (APFS, ZFS, NTFS) means disk usage tracks
-        // actual touched pages, not this size. macOS per-process VM ceiling is
-        // ~64 TB so 256 GB per index leaves comfortable headroom for full Wikidata.
-        // Cognitive mode keeps the original 1 GB initial — small stores never grow
-        // past it, large cognitive stores stay rare.
-        var actualInitialSize = bulkMode
-            ? Math.Max(initialSizeBytes, 256L << 30)  // 256 GB
-            : initialSizeBytes;
-
-        if (_fileStream.Length == 0)
-        {
-            _fileStream.SetLength(actualInitialSize);
-        }
-        _fileCapacity = _fileStream.Length;
-
-        _mmapFile = MemoryMappedFile.CreateFromFile(
-            _fileStream,
-            mapName: null,
-            capacity: 0,
-            MemoryMappedFileAccess.ReadWrite,
-            HandleInheritability.None,
-            leaveOpen: false
-        );
-
-        _accessor = _mmapFile.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-
-        // Acquire base pointer once (released in Dispose)
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _basePtr);
+            initialSizeBytes,
+            bulkMode,
+            bulkModeFloor: 256L << 30,
+            magicNumber: MagicNumber,
+            initRoot: InitializeRootPage);
 
         if (sharedAtoms != null)
         {
@@ -129,10 +75,16 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             _atoms = new HashAtomStore(atomFilePath);
             _ownsAtomStore = true;
         }
+    }
 
-        _pageCache = new PageCache(capacity: 10_000);
-
-        LoadMetadata();
+    private static void InitializeRootPage(BTreeFile f)
+    {
+        var root = f.GetPagePointer<TemporalBTreePage>(1);
+        root->PageId = 1;
+        root->IsLeaf = true;
+        root->EntryCount = 0;
+        root->ParentPageId = 0;
+        root->NextLeaf = 0;
     }
 
     /// <summary>
@@ -183,7 +135,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             TransactionTime = transactionTime
         };
 
-        InsertIntoTree(temporalKey, _rootPageId);
+        InsertIntoTree(temporalKey, _file.RootPageId);
     }
 
     /// <summary>
@@ -205,7 +157,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             TransactionTime = transactionTime
         };
 
-        InsertIntoTree(temporalKey, _rootPageId);
+        InsertIntoTree(temporalKey, _file.RootPageId);
     }
 
     /// <summary>
@@ -332,7 +284,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// </summary>
     private bool DeleteFromTree(TemporalKey key)
     {
-        var leafPageId = FindLeafPage(_rootPageId, key);
+        var leafPageId = FindLeafPage(_file.RootPageId, key);
         var page = GetPage(leafPageId);
 
         // Scan leaf page for matching entry
@@ -348,7 +300,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
                 {
                     entry.IsDeleted = true;
                     entry.ModifiedAt = key.TransactionTime;
-                    FlushPage(page);
+                    _file.FlushPage();
                     return true;
                 }
             }
@@ -374,7 +326,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         var minKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: true);
         var maxKey = CreateSearchKey(graph, primary, secondary, tertiary, temporalQuery, isMin: false);
 
-        var leafPageId = FindLeafPage(_rootPageId, minKey);
+        var leafPageId = FindLeafPage(_file.RootPageId, minKey);
 
         return new TemporalQuadEnumerator(
             this,
@@ -614,7 +566,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// <summary>
     /// B+Tree page for temporal triples (16KB)
     /// </summary>
-    [StructLayout(LayoutKind.Explicit, Size = PageSize)]
+    [StructLayout(LayoutKind.Explicit, Size = BTreeFile.PageSize)]
     private struct TemporalBTreePage
     {
         [FieldOffset(0)] public long PageId;
@@ -781,14 +733,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 #if DEBUG
         System.Threading.Interlocked.Increment(ref _pageAccessCount);
 #endif
-        if (_pageCache.TryGet(pageId, out var cachedPtr))
-            return (TemporalBTreePage*)cachedPtr;
-
-        // Use cached base pointer (acquired during construction, released in Dispose)
-        var pagePtr = (TemporalBTreePage*)(_basePtr + pageId * PageSize);
-        _pageCache.Add(pageId, pagePtr);
-
-        return pagePtr;
+        return _file.GetPagePointer<TemporalBTreePage>(pageId);
     }
 
     private void InsertIntoTree(TemporalKey key, long pageId)
@@ -796,7 +741,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         var result = InsertRecursive(key, pageId);
 
         // If root split, create new root
-        if (result.DidSplit && pageId == _rootPageId)
+        if (result.DidSplit && pageId == _file.RootPageId)
         {
             CreateNewRoot(pageId, result.PromotedKey, result.NewRightPageId);
         }
@@ -827,7 +772,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
 
     private void CreateNewRoot(long oldRootPageId, TemporalKey promotedKey, long newRightPageId)
     {
-        var newRootId = AllocatePage();
+        var newRootId = _file.AllocatePage();
         var newRoot = GetPage(newRootId);
 
         newRoot->PageId = newRootId;
@@ -857,12 +802,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         var rightPage = GetPage(newRightPageId);
         rightPage->ParentPageId = newRootId;
 
-        _rootPageId = newRootId;
+        _file.RootPageId = newRootId;
 
-        FlushPage(newRoot);
-        FlushPage(oldRoot);
-        FlushPage(rightPage);
-        SaveMetadata();
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 
     private SplitResult InsertIntoLeaf(TemporalBTreePage* page, TemporalKey key)
@@ -921,8 +864,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         newEntry.IsDeleted = false;
 
         page->EntryCount++;
-        System.Threading.Interlocked.Increment(ref _quadCount);
-        FlushPage(page);
+        _file.IncrementEntryCount();
+        _file.FlushPage();
 
         return default; // No split
     }
@@ -946,14 +889,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             // Truncate existing entry
             existing.Key.ValidTo = newKey.ValidFrom;
             existing.ModifiedAt = newKey.TransactionTime;
-            FlushPage(page);
+            _file.FlushPage();
         }
     }
 
     private SplitResult SplitLeafPage(TemporalBTreePage* page, TemporalKey key)
     {
         // Allocate new page for right half
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newPage = GetPage(newPageId);
 
         newPage->PageId = newPageId;
@@ -988,8 +931,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             InsertIntoLeaf(newPage, key);
         }
 
-        FlushPage(page);
-        FlushPage(newPage);
+        _file.FlushPage();
+        _file.FlushPage();
 
         // Return split result for parent to handle
         return new SplitResult
@@ -1037,9 +980,9 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         // Update parent pointer of the new child
         var childPage = GetPage(rightChildPageId);
         childPage->ParentPageId = page->PageId;
-        FlushPage(childPage);
+        _file.FlushPage();
 
-        FlushPage(page);
+        _file.FlushPage();
 
         return default; // No split
     }
@@ -1047,7 +990,7 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     private SplitResult SplitInternalPage(TemporalBTreePage* page, TemporalKey key, long rightChildPageId)
     {
         // Allocate new page for right half
-        var newPageId = AllocatePage();
+        var newPageId = _file.AllocatePage();
         var newPage = GetPage(newPageId);
 
         newPage->PageId = newPageId;
@@ -1079,14 +1022,14 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         // Update leftmost child of new page
         var leftmostChild = GetPage(newPage->NextLeaf);
         leftmostChild->ParentPageId = newPageId;
-        FlushPage(leftmostChild);
+        _file.FlushPage();
 
         for (int i = 0; i < newPage->EntryCount; i++)
         {
             var childId = newPage->GetEntry(i).ChildOrValue;
             var child = GetPage(childId);
             child->ParentPageId = newPageId;
-            FlushPage(child);
+            _file.FlushPage();
         }
 
         // Insert the new key into the appropriate page
@@ -1099,8 +1042,8 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             InsertIntoInternal(newPage, key, rightChildPageId);
         }
 
-        FlushPage(page);
-        FlushPage(newPage);
+        _file.FlushPage();
+        _file.FlushPage();
 
         // Return split result for parent to handle
         return new SplitResult
@@ -1109,30 +1052,6 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
             PromotedKey = promotedKey,
             NewRightPageId = newPageId
         };
-    }
-
-    private long AllocatePage()
-    {
-        var pageId = System.Threading.Interlocked.Increment(ref _nextPageId) - 1;
-
-        // Extend file if needed — uses tracked capacity to avoid fstat() on every
-        // page allocation (profile showed ~0.5% of bulk-load time in FStat).
-        var requiredSize = (pageId + 1) * PageSize;
-        if (requiredSize > _fileCapacity)
-        {
-            lock (_fileStream)
-            {
-                if (requiredSize > _fileCapacity)
-                {
-                    var newSize = Math.Max(_fileCapacity * 2, requiredSize);
-                    _fileStream.SetLength(newSize);
-                    _fileCapacity = newSize;
-                }
-            }
-        }
-
-        SaveMetadata();
-        return pageId;
     }
 
     private long FindLeafPage(long pageId, TemporalKey key)
@@ -1229,104 +1148,29 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
         };
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void FlushPage(TemporalBTreePage* page)
-    {
-        // In bulk mode, defer all msync to a single Flush() at load completion.
-        // _accessor.Flush() on macOS is msync of the ENTIRE mapped region (not a
-        // page) — calling it per page write produces O(N×region_size) work and
-        // saturates the SSD random-write IOPS at ~5,500/sec, capping bulk-load
-        // throughput at ~1,000 triples/sec independent of CPU. The OS page cache
-        // holds dirty pages; QuadStore.FlushToDisk() at end of bulk load issues
-        // the single msync. Cognitive mode keeps per-page durability.
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
-
     /// <summary>
     /// Force all pending mmap writes to disk. Called once at the end of a bulk
-    /// load to flush dirty pages that FlushPage skipped in bulk mode.
+    /// load to flush dirty pages that BTreeFile.FlushPage skipped in bulk mode.
     /// </summary>
-    public void Flush()
-    {
-        _accessor.Flush();
-    }
+    public void Flush() => _file.Flush();
 
     /// <summary>
-    /// Toggle whether FlushPage / SaveMetadata issue per-operation msyncs.
+    /// Toggle whether BTreeFile.FlushPage / SaveMetadata issue per-operation msyncs.
     /// Used by QuadStore.RebuildSecondaryIndexes to borrow the bulk-load msync-deferral
     /// semantics during secondary-index construction — same pattern, same durability
     /// contract ("call Flush() when done"). Caller MUST invoke Flush() before turning
     /// deferral off again, or dirty mmap pages may never reach disk.
     /// </summary>
-    internal void SetDeferMsync(bool value) => _deferMsync = value;
-
-    private const long MagicNumber = 0x54454D504F52414C; // "TEMPORAL" as long
-
-    private void LoadMetadata()
-    {
-        // Check for valid metadata using magic number
-        _accessor.Read(24, out long magic);
-
-        if (magic == MagicNumber)
-        {
-            _accessor.Read(0, out _rootPageId);
-            _accessor.Read(8, out _nextPageId);
-            _accessor.Read(16, out _quadCount);
-        }
-        else
-        {
-            _rootPageId = 1;
-            _nextPageId = 2;
-            _quadCount = 0;
-
-            var root = GetPage(_rootPageId);
-            root->PageId = _rootPageId;
-            root->IsLeaf = true;
-            root->EntryCount = 0;
-            root->ParentPageId = 0;
-            root->NextLeaf = 0;
-
-            SaveMetadata();
-        }
-    }
-
-    private void SaveMetadata()
-    {
-        // The writes go straight to mmap memory (no syscall). The msync is the
-        // expensive part — on macOS _accessor.Flush() syncs the whole region.
-        // AllocatePage calls SaveMetadata per new page; at bulk-load rates that
-        // was 1.56% of profile time in the dominant Flush call. Same class of
-        // fix as FlushPage (1.7.9 Bug 1): defer the msync in bulk mode and let
-        // QuadStore.FlushToDisk() at load completion sync once.
-        _accessor.Write(0, _rootPageId);
-        _accessor.Write(8, _nextPageId);
-        _accessor.Write(16, _quadCount);
-        _accessor.Write(24, MagicNumber);
-        if (_deferMsync) return;
-        _accessor.Flush();
-    }
+    internal void SetDeferMsync(bool value) => _file.DeferMsync = value;
 
     public void Dispose()
     {
-        SaveMetadata();
-
-        // Release acquired pointer before disposing accessor
-        if (_basePtr != null)
-        {
-            _accessor?.SafeMemoryMappedViewHandle.ReleasePointer();
-            _basePtr = null;
-        }
-
-        _accessor?.Dispose();
-        _mmapFile?.Dispose();
-        _fileStream?.Dispose();
+        _file.Dispose();
         if (_ownsAtomStore)
             _atoms?.Dispose();
-        _pageCache?.Dispose();
     }
 
-    public long QuadCount => _quadCount;
+    public long QuadCount => _file.EntryCount;
 
     /// <summary>
     /// Resets the index to empty state. All data is logically discarded.
@@ -1337,24 +1181,10 @@ internal sealed unsafe class TemporalQuadIndex : IQuadIndex
     /// </remarks>
     public void Clear()
     {
-        // Clear page cache first (contains pointers to old pages)
-        _pageCache.Clear();
-
-        // Reset to initial state: root at page 1, next allocation at page 2
-        _rootPageId = 1;
-        _nextPageId = 2;
-        _quadCount = 0;
-
-        // Reinitialize root page as empty leaf
-        var root = GetPage(_rootPageId);
-        root->PageId = _rootPageId;
-        root->IsLeaf = true;
-        root->EntryCount = 0;
-        root->ParentPageId = 0;
-        root->NextLeaf = 0;
-
-        FlushPage(root);
-        SaveMetadata();
+        _file.Reset();
+        InitializeRootPage(_file);
+        _file.FlushPage();
+        _file.SaveMetadata();
     }
 }
 

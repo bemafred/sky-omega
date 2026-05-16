@@ -1,19 +1,19 @@
 using System;
 using System.Runtime.CompilerServices;
 
-namespace SkyOmega.Mercury.Storage;
+namespace SkyOmega.Mercury.Runtime;
 
 /// <summary>
-/// LRU page cache for B+Tree pages.
-/// Uses hash table for O(1) lookup and clock algorithm for eviction.
-/// Zero-allocation design using fixed-size arrays.
+/// LRU page cache for B+Tree pages. Hash-table O(1) lookup; clock algorithm
+/// (second-chance) for eviction; zero-allocation steady-state with fixed-size arrays.
 /// </summary>
 /// <remarks>
-/// <para><strong>INTERNAL USE ONLY:</strong> This class is internal because it is an
-/// implementation detail of <see cref="TemporalQuadIndex"/>. The page cache is managed
-/// automatically by the storage layer.</para>
+/// <para>Lives in <c>Mercury.Runtime</c> alongside <see cref="BTreeFile"/> and the
+/// other pure-infrastructure helpers. Originally <c>internal</c> to the storage layer;
+/// promoted to <c>public</c> at ADR-029 post-completion refactor (2026-05-16) when the
+/// four concrete index classes converged on a shared backing-file substrate.</para>
 /// </remarks>
-internal sealed unsafe class PageCache : IDisposable
+public sealed unsafe class PageCache : IDisposable
 {
     private readonly int _capacity;
     private readonly CacheEntry[] _entries;
