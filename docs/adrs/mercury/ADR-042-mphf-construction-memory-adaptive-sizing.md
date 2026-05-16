@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-05-11
+**Status:** Accepted — 2026-05-16 (Proposed 2026-05-11; Accepted 2026-05-16 — substrate host-portability at the MPHF construction phase committed as 1.7.x Tier 2 engineering work before 1.8.0 cognitive-layers entry)
 
 ## Context
 
