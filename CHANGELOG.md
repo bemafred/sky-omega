@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
 
-Plus the **complete WDBench paired matrix** (5 categories × 2 substrates, 5,316 queries) and the cumulative **0-substrate-failure discipline across ~9,763 measured queries**. Run `mercury --version` to confirm.
+Plus the **complete WDBench paired matrix** (5 categories × 2 substrates, 5,316 queries) — now synthesized into the [aggregate distribution table](docs/validations/wdbench-aggregate-distribution-2026-05-16.md) with publication-grade percentiles (median 69 ms full / 62 ms truthy; p99 ≈ 52 s; 52.2 % completion rate; **0 failed**). Cumulative **0-substrate-failure discipline across ~9,763 measured queries**. Run `mercury --version` to confirm.
 
 ## What's Next
 
@@ -58,6 +58,11 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 
 - All 4 new ADR-041 cleanup tests green.
 - 540 Storage tests green after rename of test tempDir paths to use `bulk-tmp` as a path segment (mechanical, matches the production convention).
+
+### Documentation
+
+- **WDBench aggregate distribution table shipped** ([docs/validations/wdbench-aggregate-distribution-2026-05-16.md](docs/validations/wdbench-aggregate-distribution-2026-05-16.md)) — publication-grade percentile synthesis across the complete 5-category × 2-substrate paired matrix (5,316 queries, 1.7.57 substrate generation). Headline: median 69 ms (full) / 62 ms (truthy); p99 ≈ 52 s; 52.2 % completion rate; **0 failed**. Closes the Tier 2 publication-prep deliverable.
+- `externalsorter-fd-pool-bypass.md` limits doc retracted as a false alarm (code review confirmed the FD pool IS engaged on the trigram-drain path via `ExternalSorter.ChunkReader.RefillBuffer → BoundedFileStreamPool.Get`).
 
 ### References
 

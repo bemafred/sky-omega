@@ -315,7 +315,7 @@ Both were *latent under W3C conformance* and *surfaced under WDBench*, which is 
 - ADR-040 implementation — readahead memory adaptive sizing. Adaptive `bufferSize` at MergeAndWrite start (`ProcessMemoryProbe` + 0.25 budget fraction, scale halving down to 256 KiB), lazy back-buffer allocation, eager per-chunk teardown on exhaustion, `ReadAheadBudgetEvent` + `ReadAheadFootprintSampleEvent` observability. Validation: H1 (target host throughput unchanged), H2 (32 GB host completes successfully), H3 (lazy-back reduces peak).
 - ADR-042 implementation — MPHF construction memory adaptive sizing. Range iterator at level 0 (−32 GB), mmap-backed streaming translation (−32 GB persistent), re-hash second pass eliminating `keyPositions` (−32 GB per level), Span-based `GetKey` API (eliminates ~770 GB GC churn), `MphfBuildBudgetEvent` + per-level progress events. Validation: byte-equivalent `atoms.mphf` + `atoms.idx` vs 1.7.55 baseline; peak RSS < 20 GB at 4 B atoms vs 100 GB today; 1 B-atom build completes on 32 GB host.
 - ~~ExternalSorter FD pool integration~~ — **Retracted 2026-05-16 as false alarm**: code review against `ExternalSorter.ChunkReader.RefillBuffer → _pool.Get(_path)` confirms the FD pool IS engaged on the trigram-drain path. The 8,192 cycle-10-r4 FD count was the pool running at its `MergeFileStreamPoolHardCap = 8 * 1024` cap with LRU eviction, as designed. The actual eviction-overhead concern is captured by [trigram-drain-cap-eviction](../limits/trigram-drain-cap-eviction.md) (structural mitigation: larger chunks → fewer chunks; hierarchical merge; runtime FD-limit detection on Linux).
-- WDBench aggregate completed-only percentile distribution — synthesize the 5-category paired full+truthy measurements into a publication-grade distribution table.
+- ✅ WDBench aggregate completed-only percentile distribution — shipped 2026-05-16. See [wdbench-aggregate-distribution-2026-05-16.md](../validations/wdbench-aggregate-distribution-2026-05-16.md). Headline: median 69 ms (full) / 62 ms (truthy); p99 ~52 s; 5,316 queries, 0 failed, 52.2 % completion rate.
 - N-Triples parser per-triple profile + decision — truthy r1 surfaced 23% parse-side gap vs `.ttl` path. Profile, decide, then either ship a fix or document as a deliberate trade-off in the limits register.
 
 **Explicitly deferred to 1.8.x (decision 2026-05-16):**
@@ -444,7 +444,7 @@ Under the amended version-line model, the original "one-page 1.8.0 checklist" sp
 - [x] ADR-041 implementation — cleanup-on-exception for bulk-tmp intermediates. *(Shipped 1.7.58, 2026-05-16; 4 validation tests green; 4,406 Mercury.Tests green.)*
 - [ ] ADR-042 implementation — MPHF construction memory adaptive sizing (Tier 2).
 - [x] ~~ExternalSorter FD pool integration~~ — Retracted 2026-05-16 as false alarm; pool IS engaged on trigram-drain path. See [externalsorter-fd-pool-bypass](../limits/externalsorter-fd-pool-bypass.md) retraction.
-- [ ] WDBench aggregate completed-only percentile distribution — synthesized publication-grade table from paired full+truthy measurements.
+- [x] WDBench aggregate completed-only percentile distribution — *(Shipped 2026-05-16. p50: 69 ms full / 62 ms truthy; p99 ≈ 52 s; 0 failures across 5,316 queries.)*
 - [ ] N-Triples parser per-triple profile + decision (fix / accept / defer with reason).
 - [ ] `STATISTICS.md` updated to reflect cycle 10 r4 + truthy r1 + WGPB step C.
 
