@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.65](#1765---2026-05-16)** — released 2026-05-16; ADR-029 Graph profile **Commit 1 of 3** — new `VersionedQuadIndex` substrate class lands alongside `TemporalQuadIndex` (Cognitive) and `ReferenceQuadIndex` (Reference). 64-byte entries (32 B key + 8 B child/value + 24 B versioning metadata). No-behavior-flags rule honored: distinct concrete class, not a parameterization of an existing index. QuadStore integration is queued for Commit 2. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.66](#1766---2026-05-16)** — released 2026-05-16; ADR-029 Graph profile **Commit 2 of 3** — `QuadStore` wires the new `VersionedQuadIndex` substrate through the session-API + query paths. `mercury --create-store --profile Graph` (Commit 3) becomes the user-visible surface; today's substrate state is "Graph profile fully functional through the programmatic API, AS_OF / Range queries rejected at the API boundary with clear guidance, bulk-load + secondary-index rebuild for Graph queued for Commit 3." Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,44 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.66] - 2026-05-16
+
+**Headline:** ADR-029 Graph profile **Commit 2 of 3** — `QuadStore` integration. The Graph profile is now functional end-to-end through the session-API + query paths. Open a store with `Profile = StoreProfile.Graph`; `BeginBatch` / `AddBatched` / `CommitBatch` / `QueryCurrent` / `Delete` all work and route through `VersionedQuadIndex`. Temporal queries (AS_OF, Range, AllTime) against Graph profile reject at the API boundary with a Graph-specific ProfileCapabilityException message per ADR-029 Decision 4. Bulk-load + RebuildSecondaryIndexes for Graph throw with explicit guidance — queued for Commit 3.
+
+### Added
+
+- **Graph-profile index fields** in `QuadStore`: `_gspoGraph`, `_gposGraph`, `_gospGraph`, `_tgspGraph` (all `VersionedQuadIndex?`). Null for Cognitive/Reference/Minimal.
+- **Constructor dispatch** in `QuadStore`'s profile switch: `StoreProfile.Graph` instantiates four `VersionedQuadIndex` instances + the WAL (same WAL infrastructure as Cognitive — LogRecord shape is shared; temporal fields are zeroed/sentinel for Graph records, costing 24 unused bytes per WAL record but avoiding parallel WAL serialization surface).
+- **`SelectOptimalGraphIndex`** — picks GSPO / GPOS / GOSP / TGSP for a Graph-profile query based on bound-dimensions. Mirrors `SelectOptimalReferenceIndex` (no temporal-range branch).
+- **`QueryGraphCurrent`** — Graph-profile query entry point. Resolves spans to atom IDs, picks the index, remaps dimensions to (Primary, Secondary, Tertiary), wraps the resulting `VersionedQuadIndex.VersionedQuadEnumerator` in a `TemporalResultEnumerator` for uniform SPARQL consumption.
+- **`TemporalResultEnumerator` Graph branch** — third backing enumerator (`_graphEnumerator`) + `_isGraph` flag, new constructor accepting `VersionedQuadIndex.VersionedQuadEnumerator`. `MoveNext` and `Current` dispatch to the Graph branch when `_isGraph` is set. Projected `ResolvedTemporalQuad` synthesizes temporal fields (always-current ValidFrom/MaxValue ValidTo) like Reference, but the `IsDeleted` flag flows through from `VersionedQuad`.
+- **11 new tests** in `tests/Mercury.Tests/Storage/QuadStoreGraphProfileTests.cs`: opens Graph store with persisted schema, add+query round-trip, idempotent add, batched-add+commit-populates-all-indexes, soft-delete-hides-from-live-query, re-add-after-delete-un-deletes, persistence across reopen, AS_OF query rejects, Range query rejects, RebuildSecondaryIndexes rejects with guidance, graph-isolation.
+
+### Changed
+
+- **`ApplyToIndexesById`** — profile-aware dispatch. Graph branch calls `_gspoGraph.AddRaw(g, s, p, o)` etc. (no temporal args); trigram indexing inline (same as Cognitive non-bulk path).
+- **`ApplyDeleteToIndexesById`** — profile-aware. Graph branch calls `_gspoGraph.DeleteRaw(g, s, p, o)` etc.; returns true if any index reports the entry was live and is now soft-deleted.
+- **`RequireWriteCapableProfile`** — relaxed MemberNotNull annotation from the four temporal indexes to just `_wal`. Downstream Apply* methods branch on profile to dispatch to the right index family.
+- **`CollectPredicateStatistics`** — profile-aware. Graph branch scans `_gposGraph` via the live-only `Query(-1, -1, -1, -1)` (no temporal time bounds — Graph has no time dimension).
+- **`Flush`, `Dispose`, `Clear`** — extended to handle the four `_*Graph` indexes (`?.Flush() / ?.Dispose() / ?.Clear()` patterns).
+- **Public `Query`** — Graph branch added before the temporal-profile require. AS_OF with explicit time + Graph = throw; Range / AllTime + Graph = throw. Routes to `QueryGraphCurrent`.
+- **Public `QueryCurrentWithCandidates`** — Graph branch added to route candidate-filtered queries through `QueryGraphCurrent`.
+- **`RebuildSecondaryIndexes`** — Graph profile rejects with explicit guidance pointing to the Commit 3 implementation slice. Session-API workflows on Graph profile populate all four indexes synchronously via `ApplyToIndexesById` (the `!_bulkLoadMode` branch), so rebuild is unnecessary in that path.
+
+### Validation
+
+- 11 new Graph profile E2E tests green.
+- 575 Storage tests green (564 pre-existing + 11 new).
+- No regressions in any existing profile path.
+
+### What's queued for Commit 3
+
+- `mercury --create-store --profile Graph` CLI integration + bulk-load via WAL path (the BeginBatch/AddCurrentBatched/CommitBatch programmatic interface works today; CLI bulk-load wires it).
+- `RebuildSecondaryIndexes` Graph branch — extract VersionedKey-aware rebuild loop alongside the existing TemporalKey + ReferenceKey rebuild paths. Required for bulk-load durability.
+- ADR-029 status update reflecting Graph profile Completed.
+- Validation gradient: 1M / 10M Graph profile bulk-load measurement; entry-size verification (64 B on disk per entry).
+- STATISTICS.md update.
 
 ## [1.7.65] - 2026-05-16
 

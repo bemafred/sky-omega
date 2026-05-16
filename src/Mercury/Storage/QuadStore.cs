@@ -24,12 +24,18 @@ namespace SkyOmega.Mercury.Storage;
 /// </summary>
 public sealed class QuadStore : IDisposable
 {
-    // Temporal-profile indexes (Cognitive, Graph). Null for Reference/Minimal.
+    // Cognitive-profile indexes. Null for Graph/Reference/Minimal.
     private readonly TemporalQuadIndex? _gspoIndex; // Primary index: S→Primary, P→Secondary, O→Tertiary
     private readonly TemporalQuadIndex? _gposIndex; // Predicate-first: P→Primary, O→Secondary, S→Tertiary
     private readonly TemporalQuadIndex? _gospIndex; // Object-first: O→Primary, S→Secondary, P→Tertiary
     private readonly TemporalQuadIndex? _tgspIndex; // Time-first: S→Primary, P→Secondary, O→Tertiary
-    // Reference-profile indexes. Null for Cognitive/Graph.
+    // Graph-profile indexes (ADR-029 Graph: versioned, soft-delete, no temporal).
+    // Null for Cognitive/Reference/Minimal.
+    private readonly VersionedQuadIndex? _gspoGraph;
+    private readonly VersionedQuadIndex? _gposGraph;
+    private readonly VersionedQuadIndex? _gospGraph;
+    private readonly VersionedQuadIndex? _tgspGraph;
+    // Reference-profile indexes. Null for Cognitive/Graph/Minimal.
     private readonly ReferenceQuadIndex? _gspoReference;
     private readonly ReferenceQuadIndex? _gposReference;
     private readonly TrigramIndex _trigramIndex;
@@ -190,19 +196,36 @@ public sealed class QuadStore : IDisposable
         _trigramIndex = new TrigramIndex(trigramPath, _bufferManager);
 
         // ADR-029 Phase 2d: dispatch index-family and WAL creation on the store's
-        // schema profile. Cognitive/Graph produce four TemporalQuadIndex instances
-        // and a WAL; Reference produces two ReferenceQuadIndex instances and no WAL
-        // (bulk-load is the only write path per Decision 7, no per-session durability).
+        // schema profile. Cognitive produces four TemporalQuadIndex instances (88 B
+        // entries, bitemporal); Graph produces four VersionedQuadIndex instances
+        // (64 B entries, versioned + soft-delete, no temporal); both carry a WAL.
+        // Reference produces two ReferenceQuadIndex instances (32 B entries) with
+        // no WAL — bulk-load is the only write path per Decision 7. Each profile
+        // gets its own concrete index implementation per the no-behavior-flags rule
+        // (`feedback_no_behavior_flags.md`, 2026-05-16).
         switch (_schema.Profile)
         {
             case StoreProfile.Cognitive:
-            case StoreProfile.Graph:
                 _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
                     WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
                 _gspoIndex = new TemporalQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
                 _gposIndex = new TemporalQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
                 _gospIndex = new TemporalQuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.EntityFirst, options.BulkMode);
                 _tgspIndex = new TemporalQuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, TemporalQuadIndex.KeySortOrder.TimeFirst, options.BulkMode);
+                break;
+
+            case StoreProfile.Graph:
+                // ADR-029 Graph profile: VersionedQuadIndex × 4. No temporal sort order
+                // variants — single G→P→S→T comparison. WAL is identical to Cognitive's
+                // (LogRecord shape is shared; temporal fields are zeroed/sentinel for
+                // Graph records, costing 24 unused bytes per WAL record but avoiding
+                // a parallel WAL serialization surface).
+                _wal = new WriteAheadLog(walPath, WriteAheadLog.DefaultCheckpointSizeThreshold,
+                    WriteAheadLog.DefaultCheckpointTimeSeconds, _bufferManager, options.BulkMode);
+                _gspoGraph = new VersionedQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
+                _gposGraph = new VersionedQuadIndex(gposPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
+                _gospGraph = new VersionedQuadIndex(gospPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
+                _tgspGraph = new VersionedQuadIndex(tgspPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
                 break;
 
             case StoreProfile.Reference:
@@ -214,7 +237,7 @@ public sealed class QuadStore : IDisposable
             case StoreProfile.Minimal:
                 throw new System.NotSupportedException(
                     "Minimal profile is defined in ADR-029 but not yet dispatched by QuadStore. " +
-                    "Use Cognitive or Reference until Minimal-profile work begins.");
+                    "Use Cognitive, Graph, or Reference until Minimal-profile work begins.");
 
             default:
                 throw new System.NotSupportedException(
@@ -379,14 +402,14 @@ public sealed class QuadStore : IDisposable
     /// Throws <see cref="ProfileCapabilityException"/> when the store's profile does not
     /// permit session-API writes. Reference (and future Minimal) are read-only at the
     /// session API per ADR-029 Decision 7 — bulk-load is the only write path.
-    /// After this call returns, <see cref="_gspoIndex"/>/<see cref="_gposIndex"/>/
-    /// <see cref="_gospIndex"/>/<see cref="_tgspIndex"/>/<see cref="_wal"/> are non-null.
+    /// After this call returns, <see cref="_wal"/> is non-null (both Cognitive and Graph
+    /// profiles carry a WAL); the index fields are profile-discriminated and the
+    /// downstream Apply* methods branch on <see cref="_schema"/>.Profile.
     /// </summary>
-    [MemberNotNull(nameof(_gspoIndex), nameof(_gposIndex), nameof(_gospIndex), nameof(_tgspIndex), nameof(_wal))]
+    [MemberNotNull(nameof(_wal))]
     private void RequireWriteCapableProfile(string operation)
     {
-        if (_schema.HasVersioning && _gspoIndex is not null && _gposIndex is not null
-            && _gospIndex is not null && _tgspIndex is not null && _wal is not null)
+        if (_schema.HasVersioning && _wal is not null)
             return;
         throw new ProfileCapabilityException(
             $"Operation '{operation}' requires a store profile that supports session-API writes. " +
@@ -1047,6 +1070,10 @@ public sealed class QuadStore : IDisposable
         _gposIndex?.Flush();
         _gospIndex?.Flush();
         _tgspIndex?.Flush();
+        _gspoGraph?.Flush();
+        _gposGraph?.Flush();
+        _gospGraph?.Flush();
+        _tgspGraph?.Flush();
         _gspoReference?.Flush();
         _gposReference?.Flush();
     }
@@ -1270,6 +1297,21 @@ public sealed class QuadStore : IDisposable
         {
             RebuildReferenceSecondaryIndexes(onProgress);
             return;
+        }
+
+        // ADR-029 Graph profile bulk-load + RebuildSecondaryIndexes is queued for the
+        // Commit 3 slice. Session-API workflows on Graph profile populate all four
+        // indexes synchronously via ApplyToIndexesById (the !_bulkLoadMode branch), so
+        // rebuild is unnecessary in that path. Bulk-load for Graph would require a
+        // VersionedQuadIndex-aware rebuild loop here — explicitly out of scope for
+        // Commit 2.
+        if (_schema.Profile == StoreProfile.Graph)
+        {
+            throw new ProfileCapabilityException(
+                "RebuildSecondaryIndexes for the Graph profile is not yet implemented. " +
+                "Session-API workflows (BeginBatch/AddBatched/CommitBatch) work today; " +
+                "bulk-load + rebuild for Graph is queued for the next implementation slice. " +
+                "If you need bulk-load now, use the Cognitive or Reference profile.");
         }
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
@@ -1767,6 +1809,30 @@ public sealed class QuadStore : IDisposable
         // mutated flag so Dispose knows to run CheckpointInternal.
         _sessionMutated = true;
 
+        // ADR-029 Graph profile: dispatch by profile. VersionedQuadIndex has no
+        // temporal fields, so the WAL's ValidFrom/ValidTo/TransactionTime are
+        // ignored on the Graph path. CreatedAt/ModifiedAt/Version are recorded
+        // inside VersionedQuadIndex from `DateTimeOffset.UtcNow` at insert time.
+        if (_schema.Profile == StoreProfile.Graph)
+        {
+            _gspoGraph!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
+
+            if (!_bulkLoadMode)
+            {
+                _gposGraph!.AddRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId);
+                _gospGraph!.AddRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId);
+                _tgspGraph!.AddRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
+
+                var utf8Span = _atoms.GetAtomSpan(record.ObjectId);
+                if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                {
+                    _trigramIndex.IndexAtom(record.ObjectId, utf8Span);
+                }
+            }
+            return;
+        }
+
+        // Cognitive profile path.
         // LogRecord stores valid-time as .UtcTicks (100-ns since year 1); the B+Tree
         // keys are Unix milliseconds. Convert once per record instead of per index.
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
@@ -1808,7 +1874,19 @@ public sealed class QuadStore : IDisposable
         // ADR-031 Piece 2: delete is a mutation — track it.
         _sessionMutated = true;
 
-        // Precondition mirrors ApplyToIndexesById: temporal indexes non-null on entry.
+        // ADR-029 Graph profile: dispatch by profile. Graph delete is soft (IsDeleted
+        // flag + version bump) per VersionedQuadIndex semantics. Returns true if at
+        // least one index found the entry live.
+        if (_schema.Profile == StoreProfile.Graph)
+        {
+            var g1 = _gspoGraph!.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
+            var g2 = _gposGraph!.DeleteRaw(record.GraphId, record.PredicateId, record.ObjectId, record.SubjectId);
+            var g3 = _gospGraph!.DeleteRaw(record.GraphId, record.ObjectId, record.SubjectId, record.PredicateId);
+            var g4 = _tgspGraph!.DeleteRaw(record.GraphId, record.SubjectId, record.PredicateId, record.ObjectId);
+            return g1 || g2 || g3 || g4;
+        }
+
+        // Cognitive profile path. Precondition: temporal indexes non-null on entry.
         var validFromMs = UtcTicksToUnixMs(record.ValidFromTicks);
         var validToMs = UtcTicksToUnixMs(record.ValidToTicks);
 
@@ -1951,34 +2029,57 @@ public sealed class QuadStore : IDisposable
         var stats = new System.Collections.Generic.Dictionary<long, (long count, System.Collections.Generic.HashSet<long> subjects, System.Collections.Generic.HashSet<long> objects)>();
         long totalTriples = 0;
 
-        // Scan GPOS index using QueryAsOf with empty bounds
-        // GPOS ordering: Predicate-Object-Subject, so grouped by predicate.
-        // CollectPredicateStatistics is only called from CheckpointInternal, which
-        // short-circuits on non-versioned profiles — _gposIndex is non-null here.
-        var enumerator = _gposIndex!.QueryAsOf(
-            ReadOnlySpan<char>.Empty,  // All predicates
-            ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
-            ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
-            DateTimeOffset.UtcNow);
-
-        while (enumerator.MoveNext())
+        // ADR-029 Graph profile: scan via the VersionedQuadIndex GPOS instead of
+        // TemporalQuadIndex. Same Predicate→Object→Subject mapping; no temporal
+        // bounds because Graph has no time dimension.
+        if (_schema.Profile == StoreProfile.Graph)
         {
-            var quad = enumerator.Current;
-
-            // In GPOS index: Primary=predicate, Secondary=object, Tertiary=subject
-            var predicateAtom = quad.Primary;
-            var objectAtom = quad.Secondary;
-            var subjectAtom = quad.Tertiary;
-
-            if (!stats.TryGetValue(predicateAtom, out var entry))
+            var gEnum = _gposGraph!.Query(-1, -1, -1, -1);
+            while (gEnum.MoveNext())
             {
-                entry = (0, new System.Collections.Generic.HashSet<long>(), new System.Collections.Generic.HashSet<long>());
-            }
+                var gquad = gEnum.Current;
+                var predicateAtom = gquad.Primary;
+                var objectAtom = gquad.Secondary;
+                var subjectAtom = gquad.Tertiary;
 
-            entry.subjects.Add(subjectAtom);
-            entry.objects.Add(objectAtom);
-            stats[predicateAtom] = (entry.count + 1, entry.subjects, entry.objects);
-            totalTriples++;
+                if (!stats.TryGetValue(predicateAtom, out var entry))
+                {
+                    entry = (0, new System.Collections.Generic.HashSet<long>(), new System.Collections.Generic.HashSet<long>());
+                }
+                entry.subjects.Add(subjectAtom);
+                entry.objects.Add(objectAtom);
+                stats[predicateAtom] = (entry.count + 1, entry.subjects, entry.objects);
+                totalTriples++;
+            }
+        }
+        else
+        {
+            // Cognitive profile: scan TemporalQuadIndex GPOS via AsOf-now.
+            var enumerator = _gposIndex!.QueryAsOf(
+                ReadOnlySpan<char>.Empty,  // All predicates
+                ReadOnlySpan<char>.Empty,  // All objects (Secondary in GPOS)
+                ReadOnlySpan<char>.Empty,  // All subjects (Tertiary in GPOS)
+                DateTimeOffset.UtcNow);
+
+            while (enumerator.MoveNext())
+            {
+                var quad = enumerator.Current;
+
+                // In GPOS index: Primary=predicate, Secondary=object, Tertiary=subject
+                var predicateAtom = quad.Primary;
+                var objectAtom = quad.Secondary;
+                var subjectAtom = quad.Tertiary;
+
+                if (!stats.TryGetValue(predicateAtom, out var entry))
+                {
+                    entry = (0, new System.Collections.Generic.HashSet<long>(), new System.Collections.Generic.HashSet<long>());
+                }
+
+                entry.subjects.Add(subjectAtom);
+                entry.objects.Add(objectAtom);
+                stats[predicateAtom] = (entry.count + 1, entry.subjects, entry.objects);
+                totalTriples++;
+            }
         }
 
         // Convert to immutable PredicateStats
@@ -2014,11 +2115,11 @@ public sealed class QuadStore : IDisposable
         DateTimeOffset? rangeEnd = null,
         ReadOnlySpan<char> graph = default)
     {
-        // ADR-029 Phase 2d query dispatch. A Reference store has no time dimension, so
-        // only "current state" queries make sense. Range, AllTime, and asOf-at-a-
-        // specific-past-time are all temporal queries and fail loudly at the API boundary
-        // (Decision 4). QueryCurrent's pass-through lands here with queryType=AsOf and
-        // asOfTime=null, which is exactly the supported shape.
+        // ADR-029 Phase 2d query dispatch. A Reference or Graph store has no time
+        // dimension, so only "current state" queries make sense. Range, AllTime, and
+        // asOf-at-a-specific-past-time are all temporal queries and fail loudly at the
+        // API boundary (Decision 4). QueryCurrent's pass-through lands here with
+        // queryType=AsOf and asOfTime=null, which is exactly the supported shape.
         if (_schema.Profile == StoreProfile.Reference)
         {
             if (queryType != TemporalQueryType.AsOf)
@@ -2026,6 +2127,19 @@ public sealed class QuadStore : IDisposable
                     $"Query type {queryType} requires temporal semantics. This store's profile is Reference, " +
                     "which has no temporal dimension — only current-state (AsOf, no explicit time) queries are supported.");
             return QueryReferenceCurrent(subject, predicate, @object, graph);
+        }
+        if (_schema.Profile == StoreProfile.Graph)
+        {
+            if (queryType != TemporalQueryType.AsOf)
+                throw new ProfileCapabilityException(
+                    $"Query type {queryType} requires temporal semantics. This store's profile is Graph, " +
+                    "which has no temporal dimension (versioning is mutation-audit only, not bitemporal). " +
+                    "Only current-state (AsOf, no explicit time) queries are supported.");
+            if (asOfTime is not null)
+                throw new ProfileCapabilityException(
+                    "Explicit AsOf time-travel requires temporal semantics. This store's profile is Graph, " +
+                    "which has no temporal dimension. Use QueryCurrent (no explicit time) instead.");
+            return QueryGraphCurrent(subject, predicate, @object, graph);
         }
 
         RequireTemporalProfile(nameof(Query));
@@ -2180,6 +2294,8 @@ public sealed class QuadStore : IDisposable
         // bulk-load, so candidate-filtered iteration works there too.
         if (_schema.Profile == StoreProfile.Reference)
             return QueryReferenceCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
+        if (_schema.Profile == StoreProfile.Graph)
+            return QueryGraphCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
 
         RequireTemporalProfile(nameof(QueryCurrentWithCandidates));
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, TemporalQueryType.AsOf);
@@ -2257,6 +2373,85 @@ public sealed class QuadStore : IDisposable
         if (predicateBound && !subjectBound)
             return (_gposReference!, TemporalIndexType.GPOS);
         return (_gspoReference!, TemporalIndexType.GSPO);
+    }
+
+    /// <summary>
+    /// Pick GSPO / GPOS / GOSP / TGSP for a Graph-profile query. Graph has all four
+    /// indexes available like Cognitive, so the selection logic is the same shape
+    /// minus the temporal-range branch. ADR-029 Graph profile.
+    /// </summary>
+    private (VersionedQuadIndex Index, TemporalIndexType Type) SelectOptimalGraphIndex(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object)
+    {
+        var subjectBound = !subject.IsEmpty && subject[0] != '?';
+        var predicateBound = !predicate.IsEmpty && predicate[0] != '?';
+        var objectBound = !@object.IsEmpty && @object[0] != '?';
+
+        // When secondary indexes aren't built yet, fall back to GSPO scan.
+        if (_indexState != StoreIndexState.Ready)
+        {
+            var gposAvailable = _indexState != StoreIndexState.PrimaryOnly
+                && _indexState != StoreIndexState.BuildingGPOS;
+            var gospAvailable = gposAvailable
+                && _indexState != StoreIndexState.BuildingGOSP;
+
+            if (subjectBound)
+                return (_gspoGraph!, TemporalIndexType.GSPO);
+            if (predicateBound && gposAvailable)
+                return (_gposGraph!, TemporalIndexType.GPOS);
+            if (objectBound && gospAvailable)
+                return (_gospGraph!, TemporalIndexType.GOSP);
+            return (_gspoGraph!, TemporalIndexType.GSPO);
+        }
+
+        if (subjectBound)
+            return (_gspoGraph!, TemporalIndexType.GSPO);
+        if (predicateBound)
+            return (_gposGraph!, TemporalIndexType.GPOS);
+        if (objectBound)
+            return (_gospGraph!, TemporalIndexType.GOSP);
+        return (_gspoGraph!, TemporalIndexType.GSPO);
+    }
+
+    /// <summary>
+    /// Query entry for Graph profile. Mirrors <see cref="QueryReferenceCurrent"/>'s
+    /// shape but routes through <see cref="VersionedQuadIndex"/>. Live-only by default
+    /// (soft-deleted entries are filtered out by VersionedQuadIndex.Query).
+    /// </summary>
+    private TemporalResultEnumerator QueryGraphCurrent(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph,
+        HashSet<long>? candidateObjectAtomIds = null)
+    {
+        var (gIndex, indexType) = SelectOptimalGraphIndex(subject, predicate, @object);
+
+        var g = ResolveQueryGraph(graph);
+        long primary, secondary, tertiary;
+        switch (indexType)
+        {
+            case TemporalIndexType.GPOS:
+                primary = ResolveQueryTerm(predicate);
+                secondary = ResolveQueryTerm(@object);
+                tertiary = ResolveQueryTerm(subject);
+                break;
+            case TemporalIndexType.GOSP:
+                primary = ResolveQueryTerm(@object);
+                secondary = ResolveQueryTerm(subject);
+                tertiary = ResolveQueryTerm(predicate);
+                break;
+            default: // GSPO (TGSP for Graph is also entity-first; query the same as GSPO)
+                primary = ResolveQueryTerm(subject);
+                secondary = ResolveQueryTerm(predicate);
+                tertiary = ResolveQueryTerm(@object);
+                break;
+        }
+
+        var enumerator = gIndex.Query(g, primary, secondary, tertiary);
+        return new TemporalResultEnumerator(enumerator, indexType, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -2400,6 +2595,10 @@ public sealed class QuadStore : IDisposable
         _gposIndex?.Dispose();
         _gospIndex?.Dispose();
         _tgspIndex?.Dispose();
+        _gspoGraph?.Dispose();
+        _gposGraph?.Dispose();
+        _gospGraph?.Dispose();
+        _tgspGraph?.Dispose();
         _gspoReference?.Dispose();
         _gposReference?.Dispose();
         _trigramIndex.Dispose();
@@ -2434,6 +2633,10 @@ public sealed class QuadStore : IDisposable
             _gposIndex?.Clear();
             _gospIndex?.Clear();
             _tgspIndex?.Clear();
+            _gspoGraph?.Clear();
+            _gposGraph?.Clear();
+            _gospGraph?.Clear();
+            _tgspGraph?.Clear();
             _gspoReference?.Clear();
             _gposReference?.Clear();
 
@@ -2464,7 +2667,7 @@ public sealed class QuadStore : IDisposable
     {
         // Whichever index family this store has, GSPO is always the primary. Sum its
         // count; for WAL bytes, non-versioned profiles have no WAL so report 0.
-        var quadCount = (_gspoIndex?.QuadCount) ?? (_gspoReference?.QuadCount) ?? 0;
+        var quadCount = (_gspoIndex?.QuadCount) ?? (_gspoGraph?.QuadCount) ?? (_gspoReference?.QuadCount) ?? 0;
         var (atomCount, atomBytes, _) = _atoms.GetStatistics();
         var walBytes = _wal?.LogSize ?? 0;
         return (quadCount, atomCount, atomBytes + walBytes);
@@ -2498,7 +2701,9 @@ public struct TemporalResultEnumerator
     // based on the profile of the store that produced the result. ADR-029 Phase 2d.
     private TemporalQuadIndex.TemporalQuadEnumerator _baseEnumerator;
     private ReferenceQuadIndex.ReferenceQuadEnumerator _referenceEnumerator;
+    private VersionedQuadIndex.VersionedQuadEnumerator _graphEnumerator;
     private readonly bool _isReference;
+    private readonly bool _isGraph;
 
     private readonly TemporalIndexType _indexType;
     private readonly IAtomStore _atoms;
@@ -2516,7 +2721,9 @@ public struct TemporalResultEnumerator
     {
         _baseEnumerator = baseEnumerator;
         _referenceEnumerator = default;
+        _graphEnumerator = default;
         _isReference = false;
+        _isGraph = false;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = null;
@@ -2532,7 +2739,9 @@ public struct TemporalResultEnumerator
     {
         _baseEnumerator = baseEnumerator;
         _referenceEnumerator = default;
+        _graphEnumerator = default;
         _isReference = false;
+        _isGraph = false;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
@@ -2554,7 +2763,35 @@ public struct TemporalResultEnumerator
     {
         _baseEnumerator = default;
         _referenceEnumerator = referenceEnumerator;
+        _graphEnumerator = default;
         _isReference = true;
+        _isGraph = false;
+        _indexType = indexType;
+        _atoms = atoms;
+        _candidateObjectAtomIds = candidateObjectAtomIds;
+        _buffer = null;
+        _bufferOffset = 0;
+    }
+
+    /// <summary>
+    /// Wrap a Graph-profile enumeration (ADR-029 Graph). Temporal fields are
+    /// synthesized identically to the Reference path (no time dimension); the
+    /// VersionedQuad's <c>IsDeleted</c> flag flows through into the projected
+    /// <see cref="ResolvedTemporalQuad"/>. Soft-deleted entries are filtered out
+    /// by <see cref="VersionedQuadIndex.Query"/> before they reach this enumerator,
+    /// so the IsDeleted flag here is always false for live queries.
+    /// </summary>
+    internal TemporalResultEnumerator(
+        VersionedQuadIndex.VersionedQuadEnumerator graphEnumerator,
+        TemporalIndexType indexType,
+        IAtomStore atoms,
+        HashSet<long>? candidateObjectAtomIds = null)
+    {
+        _baseEnumerator = default;
+        _referenceEnumerator = default;
+        _graphEnumerator = graphEnumerator;
+        _isReference = false;
+        _isGraph = true;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
@@ -2579,6 +2816,26 @@ public struct TemporalResultEnumerator
                 {
                     TemporalIndexType.GPOS => key.Secondary,
                     _ => key.Tertiary // GSPO (Reference has no GOSP/TGSP)
+                };
+                if (_candidateObjectAtomIds.Contains(objectAtomId))
+                    return true;
+            }
+            return false;
+        }
+
+        if (_isGraph)
+        {
+            if (_candidateObjectAtomIds is null)
+                return _graphEnumerator.MoveNext();
+
+            while (_graphEnumerator.MoveNext())
+            {
+                var gquad = _graphEnumerator.Current;
+                long objectAtomId = _indexType switch
+                {
+                    TemporalIndexType.GPOS => gquad.Secondary,
+                    TemporalIndexType.GOSP => gquad.Primary,
+                    _ => gquad.Tertiary // GSPO, TGSP
                 };
                 if (_candidateObjectAtomIds.Contains(objectAtomId))
                     return true;
@@ -2641,6 +2898,44 @@ public struct TemporalResultEnumerator
                     DateTimeOffset.MaxValue,
                     DateTimeOffset.MinValue,
                     false);
+            }
+
+            if (_isGraph)
+            {
+                var gquad = _graphEnumerator.Current;
+                graph = gquad.Graph;
+                // Graph supports GSPO/GPOS/GOSP/TGSP.
+                switch (_indexType)
+                {
+                    case TemporalIndexType.GSPO:
+                    case TemporalIndexType.TGSP:
+                        s = gquad.Primary; p = gquad.Secondary; o = gquad.Tertiary;
+                        break;
+                    case TemporalIndexType.GPOS:
+                        p = gquad.Primary; o = gquad.Secondary; s = gquad.Tertiary;
+                        break;
+                    case TemporalIndexType.GOSP:
+                        o = gquad.Primary; s = gquad.Secondary; p = gquad.Tertiary;
+                        break;
+                    default:
+                        s = p = o = 0;
+                        break;
+                }
+
+                // Graph has versioning (CreatedAt/ModifiedAt/Version/IsDeleted) but no
+                // bitemporal time dimension. Project ValidFrom/ValidTo/TransactionTime
+                // as synthesized "always current" values (same shape as Reference); the
+                // IsDeleted flag flows through from the entry — though under live queries
+                // (the default) only live entries reach here, so it's always false.
+                return new ResolvedTemporalQuad(
+                    graph == 0 ? ReadOnlySpan<char>.Empty : DecodeAtomToBuffer(graph),
+                    DecodeAtomToBuffer(s),
+                    DecodeAtomToBuffer(p),
+                    DecodeAtomToBuffer(o),
+                    DateTimeOffset.MinValue,
+                    DateTimeOffset.MaxValue,
+                    DateTimeOffset.MinValue,
+                    gquad.IsDeleted);
             }
 
             var quad = _baseEnumerator.Current;
