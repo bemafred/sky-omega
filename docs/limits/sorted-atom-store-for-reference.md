@@ -1,9 +1,9 @@
 # Limit: Hash-based atom store is profile-generic; Reference could use a sorted vocabulary
 
-**Status:**        Latent
+**Status:**        Resolved (ADR-034 Phase 1 Completed; ADR-039 Phase 2 Completed)
 **Surfaced:**      2026-04-22, during Phase 6 21.3B Wikidata bulk-load when rate-drift analysis pointed at atom-store hash cache pressure as the dominant contributor
-**Last reviewed:** 2026-04-22
-**Promotes to:**   ADR when (a) atom-store hash cache pressure becomes the binding constraint on Reference bulk-load throughput, OR (b) a concrete motivating workload wants Reference-profile performance past the 21.3B Wikidata scale, OR (c) query-time vocabulary compactness becomes load-bearing for memory footprint
+**Resolved:**      [ADR-034](../adrs/mercury/ADR-034-sorted-atom-store-reference-profile.md) Phase 1 (sorted vocabulary + binary-search lookup) shipped 1.7.30 (2026-04-23), removed the hash drift entirely. ADR-039 Phase 2 (BBHash MPHF + dense final-level fallback) shipped 1.7.55 (2026-05-12). Production-validated cycle 8 (1.7.48, 2026-05-03, 46h end-to-end), cycle 9 (1.7.50, 2026-05-07, 35h35m), cycle 10 r4 (1.7.57, 2026-05-13, ~22h excluding rebuild), truthy r1 (1.7.57, 2026-05-14, 14h13m). Three cumulative production validations against 21.3B substrate and one 8.17B; structural rate-drift gone. Phase 3 (delta-plus-merge) remains deferred and would be its own ADR if a future incremental-update workload triggers it.
+**Last reviewed:** 2026-05-16 — limits register paperwork sweep; status updated to Resolved retroactively (the original limit was characterized 2026-04-22, the resolution chain shipped 2026-04-23 onwards, but the limits doc was never closed out).
 
 ## Description
 

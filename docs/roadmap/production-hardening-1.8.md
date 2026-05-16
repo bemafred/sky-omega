@@ -1,6 +1,6 @@
 # Production Hardening Roadmap — Sky Omega 1.8.0
 
-**Status:** Drafted 2026-04-20. Amended 2026-04-26 after Phase 6 (21.3 B Wikidata) validated end-to-end. Amended 2026-04-29 after Phase 7b (ADR-036 bzip2 substrate) shipped in 1.7.45 and the WDBench cold baseline against `wiki-21b-ref` surfaced two distinct executor/parser issues (one fixed in `527016f`, one characterized in `744edf7`). Amended 2026-04-30 after the property-path hardening arc closed all surfaced flaws: 1.7.46 cancellation token coverage (12 sites), 1.7.47 parser refactor + zero-GC walker + Case 2 binding fix, ADR-006 (MCP surface discipline) and ADR-007 (sealed substrate immutability) shipped Proposed. WDBench cold baseline 1.7.47 sealed as the disclosure-marked Phase 7c starting point. Sequences ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, ADR-036, ADR-006, ADR-007, the Phase 7 performance rounds (`docs/limits/`), and the DrHook engine — all within 1.7.x — toward 1.8.0 as the cognitive-layers entry point.
+**Status:** Drafted 2026-04-20. Amended 2026-04-26 after Phase 6 (21.3 B Wikidata) validated end-to-end. Amended 2026-04-29 after Phase 7b (ADR-036 bzip2 substrate) shipped in 1.7.45 and the WDBench cold baseline against `wiki-21b-ref` surfaced two distinct executor/parser issues (one fixed in `527016f`, one characterized in `744edf7`). Amended 2026-04-30 after the property-path hardening arc closed all surfaced flaws: 1.7.46 cancellation token coverage (12 sites), 1.7.47 parser refactor + zero-GC walker + Case 2 binding fix, ADR-006 (MCP surface discipline) and ADR-007 (sealed substrate immutability) shipped Proposed. WDBench cold baseline 1.7.47 sealed as the disclosure-marked Phase 7c starting point. **Amended 2026-05-16** after the cycle 8 → cycle 9 → cycle 10 r4 → truthy r1 → WGPB step C arc landed: ADR-037 pipelined spill (1.7.48, cycle 8 46h), ADR-038 merge-phase read-side (1.7.50, cycle 9 35h35m), ADR-039 BBHash MPHF (1.7.55, cycle 10 r4 22h excluding rebuild), ADR-040 MPHF instrumentation (1.7.56, listener wire-through gap closed in 1.7.57). Three production-validated 21.3B Reference runs + one 8.17B truthy + one ~150M WGPB (paired three-substrate publication record). **DrHook engine BCL-only rewrite explicitly deferred to 1.8.x** — substrate work hard-stops at the 1.8.0 release boundary; DrHook engine ships post-cognitive-entry. Sequences ADR-028, ADR-029, ADR-030, ADR-031, ADR-032, ADR-033, ADR-036, ADR-037, ADR-038, ADR-039, ADR-040, ADR-006, ADR-007, and the remaining Phase 7 performance rounds (`docs/limits/`) — all within 1.7.x — toward 1.8.0 as the cognitive-layers entry point.
 
 ## Version-line model (amended 2026-04-26)
 
@@ -9,14 +9,17 @@ The 2026-04-20 draft framed 1.8.0 as "Mercury production-hardening complete." Th
 ```
 1.7.x development
   ├── Phases 1–6: Production hardening (ADR-028/029/030/031/032/033) ✅ complete 2026-04-26
-  ├── Phase 7:    Performance rounds (limits register — bz2 streaming, metrics, sorted atom store, …)
-  └── Phase 8:    DrHook engine (BCL-only replacement of netcoredbg + Microsoft.Diagnostics.NETCore.Client)
+  ├── Phase 7:    Performance rounds (limits register — bz2 streaming, metrics, sorted atom store, MPHF) ✅ substantially complete through 1.7.57 (2026-05-16)
+  └── Phase 8:    Tier 1 substrate close-out — limits register paperwork, ADR-041 cleanup-on-exception, ExternalSorter FD pool, ntriples-parser characterization
 
 1.8.0 release marker
   └── Cognitive layers begin (Lucy / James / Mira / Sky)
+
+1.8.x post-cognitive-entry
+  └── DrHook engine (BCL-only replacement of netcoredbg + Microsoft.Diagnostics.NETCore.Client) — deferred 2026-05-16
 ```
 
-DrHook is "the very last of 1.7, possibly" — possibly because the engineering may prove larger than expected, in which case the 1.8.0 boundary may move. The current working assumption is: substrate work (Mercury hardened + Phase 7 rounds + DrHook engine BCL-only) ends in 1.7; cognitive layers begin at 1.8.0.
+**DrHook engine BCL-only rewrite has moved from Phase 8 of 1.7.x to 1.8.x.** Decision recorded 2026-05-16. Rationale: cycle 10 r4 + truthy r1 + WGPB step C established the three-substrate publication record; remaining substrate work is paperwork and characterized-but-bounded items, not architectural. Holding 1.8.0 for a multi-month BCL-only DAP rewrite would delay the cognitive-layers entry without delivering corresponding hardening value. DrHook in its current netcoredbg-backed form is functionally sufficient through cognitive-layer bring-up; the BCL-only rewrite remains queued post-1.8.0 and gets its own 1.8.x release line. The current working assumption is: substrate close-out (Mercury hardened + Phase 7 rounds + Tier 1 paperwork) ends in 1.7; cognitive layers begin at 1.8.0; DrHook engine rewrite is the first 1.8.x substrate-discipline task.
 
 This roadmap remains canonically `production-hardening-1.8.md` because the document still tracks the work *toward* 1.8.0 — even though 1.8.0's meaning has shifted from "production-hardening release" to "substrate-complete, cognitive entry point."
 
@@ -40,9 +43,10 @@ This roadmap remains canonically `production-hardening-1.8.md` because the docum
 | 7b | Phase 7b — bzip2 streaming source decompression (ADR-036) | 1.7.45 | ✅ Substrate complete 2026-04-26 | `7bba720` ADR-036 Phase 7b — bzip2 substrate complete. `8e0c688` packed BWT + tight MTF shift. End-to-end `--bulk-load latest-all.ttl.bz2 --limit N` runs without uncompressed staging; full gradient validation at 1 M / 10 M / 100 M / 1 B is still pending (Phase 7c sequencing input). |
 | 7c-baseline | WDBench cold baseline against `wiki-21b-ref` | 1.7.47 | ✅ Sealed 2026-04-30 | Final disclosure-marked baseline at `docs/validations/wdbench-paths-21b-2026-04-29-1747.jsonl` + `wdbench-c2rpqs-21b-2026-04-29-1747.jsonl`. 1,199 queries, **0 parser failures**, p50=45ms, p95=29.85s, p99=49.50s, max=59.82s; cancellation contract honored at scale (every one of 655 timeouts closed 60.000s–63.620s). The 1.7.46 cancellation fix (commits `527016f` + `963340c`) closed 12 cancellation-token gaps across `Operators/TriplePatternScan.cs`, `SlotBasedOperators.cs`, `MultiPatternScan.cs`, `QueryResults.Patterns.cs`. The 1.7.47 parser refactor (commit `1be7a4d`) + walker rewrite + Case 2 binding fix closed the 12 grammar-gap shapes (Shape 1 `^(P){q}`, Shape 2 `^((A\|B)){q}`, Shape 3 `(^A/B)`) plus a latent silent-zero-row failure mode for object-bound transitive paths. Limits-register entries `cancellable-executor-paths.md` and `property-path-grammar-gaps.md` move Triggered → Resolved. |
 | 7c-governance | ADR-006 + ADR-007 | 1.7.47 | ✅ Shipped 2026-04-30 | ADR-006 MCP Surface Discipline + ADR-007 Sealed Substrate Immutability landed Proposed (commit `432f613`). MCP `mercury_prune` removed; PruneEngine rejects Reference profile at plan time with bulk-load re-creation guidance. Operationalizes the governed-automation thesis at concrete decision points. |
-| 7c-rounds | Phase 7c — measured perf rounds (limits register) | 1.7.x | ⏭ Pending | Sequence determined by post-Phase-6 trace at 1 B + WDBench cold-baseline distribution. Each round ships with captured JSONL pre/post artifact. |
-| 8 | DrHook engine (BCL-only) | 1.7.x | ⏭ Pending | The very last of 1.7, possibly. |
-| — | Release 1.8.0 — cognitive layers begin | 1.8.0 | ⏭ Future | After Phase 8 lands. Entry to a different roadmap. |
+| 7c-rounds | Phase 7c — measured perf rounds (limits register) | 1.7.48–1.7.57 | ✅ Substantially complete | ADR-037 pipelined spill (1.7.48, cycle 8 46h end-to-end, −46% vs cycle 7 baseline). ADR-038 merge-phase read-side (1.7.50, cycle 9 35h35m, −22% vs cycle 8). ADR-039 BBHash MPHF dense final-level (1.7.55, cycle 10 r4 ~22h excluding rebuild, −38% vs cycle 9). ADR-040 MPHF instrumentation listener (1.7.56, regression-fixed 1.7.57 — `QuadStore.RebuildMphf` listener wire-through). Three measured 21.3B substrate runs + 8.17B truthy (1.7.57, 14h13m) + ~150M WGPB step C (849/850 in 4m43s). Cumulative ~9,763 WDBench + WGPB queries across 1.7.46 → 1.7.57; **0 substrate failures**. |
+| 7c-paired-record | Three-substrate publication record | 1.7.57 | ✅ Sealed 2026-05-16 | Full Wikidata (cycle 10 r4, `wiki-21b-ref`), truthy (truthy r1, `wiki-truthy-ref`), and WGPB-filtered (`wikidata-wcg-filtered`, ~150M) — all built and benchmarked on the same 1.7.57 substrate generation. Paired validation docs: `docs/validations/cycle10-phase3-r4-21b-2026-05-12.md`, `docs/validations/truthy-r1-2026-05-14.md`, `docs/validations/wgpb-step-c-2026-05-16.md`. WDBench coverage gap closed 2026-05-15 (extended-coverage rerun added single-bgps + multiple-bgps + opts on both full and truthy substrates; previously only paths + c2rpqs were measured). |
+| 8 | Tier 1 substrate close-out — limits paperwork + ADR-041 + FD-pool + parser characterization | 1.7.x | 🚧 In progress 2026-05-16 | Limits register paperwork sweep (4 stale Resolveds closed retroactively; 2 new limits docs for cycle-10 discoveries). Roadmap amendment (this doc). ADR-041 cleanup-on-exception for bulk-tmp intermediates (Tier 2). ExternalSorter FD pool integration (Tier 2). N-Triples parser per-triple profile + decision (Tier 2). DrHook engine BCL-only **deferred to 1.8.x** per 2026-05-16 decision. |
+| — | Release 1.8.0 — cognitive layers begin | 1.8.0 | ⏭ Future | After Phase 8 (Tier 1+2 substrate close-out) lands. Entry to the cognitive-layers roadmap. DrHook engine BCL-only follows in 1.8.x. |
 
 Phases 5c-5d (the radix architecture) took roughly two days of focused work (2026-04-21 → 2026-04-23) after the Phase 5.2 pivot exposed the architectural mistake in Phases 5a+5b. The discipline of **measuring before claiming, reverting when the evidence demands, and documenting limits as they surface** is what turned a wall-clock-neutral failure into a 10.5× rebuild speedup and a 3.92× combined speedup at 1 B.
 
@@ -297,21 +301,30 @@ Both were *latent under W3C conformance* and *surfaced under WDBench*, which is 
 
 **Both profiles in scope.** Every Phase 7 metric and every Phase 7 round answers "and what does this mean for Cognitive?" before it's considered done. The seven characterized rounds skew Reference; Phase 7 must not let Cognitive get under-served.
 
-### Phase 8 — DrHook engine (BCL-only)
+### Phase 8 — Tier 1 substrate close-out
 
-**Target versions:** 1.7.x (the very last of 1.7, possibly)
-**Objective:** Replace the netcoredbg + Microsoft.Diagnostics.NETCore.Client dependency in DrHook with a BCL-only implementation. Restores the substrate-independence ethos that the rest of Sky Omega holds — DrHook is currently the only substrate that depends on a non-BCL package, due to the historical POC trajectory documented in memory entry `project_drhook_engine_concept`.
+**Target versions:** 1.7.x (1.7.58 onwards)
+**Objective:** Close out the limits register paperwork and the remaining characterized-but-bounded items so the substrate work ends in a clean, audited state before the 1.8.0 release boundary.
 
-DrHook today provides MCP-exposed runtime inspection (EventPipe + DAP-via-netcoredbg). The DAP path is the dependency: netcoredbg is an external process, and `Microsoft.Diagnostics.NETCore.Client` wraps the EventPipe protocol. Both can be replaced — EventPipe is a documented protocol that BCL types can speak directly; DAP is overkill for the inspection surface DrHook actually exposes (process attach, stack walk, breakpoint, step, var inspect). A BCL-only implementation cuts the netcoredbg subprocess and the NuGet package, restoring the same ownership model Mercury and Minerva already have.
+**Tier 1 (in progress 2026-05-16):**
+- Limits register paperwork sweep — 4 stale Resolveds closed retroactively (`cancellable-executor-paths.md`, `property-path-grammar-gaps.md`, `sorted-atom-store-for-reference.md`, `streaming-source-decompression.md`). Two new limits docs capture cycle-10-era discoveries (`externalsorter-fd-pool-bypass.md`, `ntriples-parser-per-triple-perf.md`). Roadmap doc (this file) amended to reflect post-cycle-9 state and the DrHook deferral.
+- ADR-040 + ADR-042 status decisions — both Proposed; transition to Accepted/Completed based on cycle 10 r4 + truthy r1 production evidence.
 
-Known limits going in: `project_drhook_eval_dead.md` — function evaluation deadlocks on macOS/ARM64 with netcoredbg. A BCL-only rewrite has the opportunity to either (a) avoid the same architectural constraint, or (b) explicitly accept the limit as fundamental rather than implementation-specific.
+**Tier 2 (next, after Tier 1):**
+- ADR-041 implementation — cleanup-on-exception for bulk-tmp intermediates. Currently end-of-merge cleanup hook reclaims at successful completion; cleanup on exception path leaves 3-4 TB of intermediate sort-chunk artifacts behind when bulk-load aborts. Closes the operational footgun for the unhappy path.
+- ExternalSorter FD pool integration — cycle 10 r4 trigram drain held 8,192 chunks at 17% headroom under launchd-effective 10,240 FD limit. FD pool would bound peak FD count regardless of chunk count.
+- WDBench aggregate completed-only percentile distribution — synthesize the 5-category paired full+truthy measurements into a publication-grade distribution table.
+- N-Triples parser per-triple profile + decision — truthy r1 surfaced 23% parse-side gap vs `.ttl` path. Profile, decide, then either ship a fix or document as a deliberate trade-off in the limits register.
+
+**Explicitly deferred to 1.8.x (decision 2026-05-16):**
+- **DrHook engine BCL-only rewrite.** Memory entry `project_drhook_engine_concept`. Three-substrate publication record (cycle 10 r4 + truthy r1 + WGPB step C, all 1.7.57) establishes the substrate-discipline claim well enough that a multi-month BCL-only DAP rewrite cannot earn its way back to 1.7.x without delaying the cognitive-layers entry. The rewrite remains scoped and queued; it becomes the first 1.8.x substrate-discipline task post-cognitive-entry. DrHook in its current netcoredbg + Microsoft.Diagnostics.NETCore.Client form is functionally sufficient through cognitive-layer bring-up.
 
 **Exit:**
-- DrHook MCP server runs without netcoredbg or `Microsoft.Diagnostics.NETCore.Client`.
-- All 13 currently-exposed MCP tools functional on the BCL-only path (or the subset that can be made functional, with the rest explicitly retired).
-- The substrate-independence claim ("Sky Omega's substrates are BCL-only") becomes true across all three substrates, not just two.
-
-**The "possibly" in "very last of 1.7, possibly":** this work is unscoped at the time of this amendment. If it proves substantially larger than expected (multi-month), the 1.8.0 boundary may move — DrHook engine could become its own release line, with cognitive layers shifting to 1.9.0. The version-line model in this doc is the working assumption, not a commitment.
+- All limits register entries reflect actual substrate state as of 1.7.x close.
+- ADR-041 cleanup hook covers exception path.
+- ExternalSorter FD pool integrated and validated on a non-trivial bulk-load.
+- N-Triples parser characterized; decision (fix / accept / defer) recorded.
+- `STATISTICS.md` updated to reflect all measurements through cycle 10 r4 + truthy r1 + WGPB step C.
 
 ### Release 1.8.0 — cognitive layers entry point
 
@@ -420,12 +433,20 @@ Under the amended version-line model, the original "one-page 1.8.0 checklist" sp
 - [ ] **WDBench final** at Phase 7 close: consolidated comparison to QLever/Virtuoso published numbers, externally-defensible, distribution-aware, sourced from a sealed artifact.
 - [ ] `docs/validations/phase7-rounds-summary.md` consolidates the measured impact across rounds *and* the WDBench arc (cold → per-round → final). The 21.3 B re-run, if undertaken, is its own deliberately-chosen validation, not an obligation.
 
-### Phase 8 — DrHook engine close-out
+### Phase 8 — Tier 1 substrate close-out
 
-- [ ] DrHook MCP server runs without netcoredbg subprocess and without `Microsoft.Diagnostics.NETCore.Client` package.
-- [ ] All 13 currently-exposed MCP tools functional on the BCL-only path, or the subset that can be made functional with the rest explicitly retired.
-- [ ] Substrate-independence claim true across all three substrates (Mercury + Minerva + DrHook all BCL-only).
-- [ ] Validation entry recording the BCL-only inspection path's behavior on macOS/ARM64 and Linux.
+- [x] Limits register paperwork sweep — 4 stale Resolveds closed retroactively, 2 new limits docs created. *(Shipped 2026-05-16.)*
+- [x] Roadmap doc amended to reflect post-cycle-9 state and DrHook deferral to 1.8.x. *(This document, 2026-05-16.)*
+- [ ] ADR-040 + ADR-042 status decisions — Proposed → Accepted/Completed based on cycle 10 r4 + truthy r1 evidence.
+- [ ] ADR-041 cleanup-on-exception for bulk-tmp intermediates — Tier 2 implementation.
+- [ ] ExternalSorter FD pool integration — Tier 2 implementation, validated on non-trivial bulk-load.
+- [ ] WDBench aggregate completed-only percentile distribution — synthesized publication-grade table from paired full+truthy measurements.
+- [ ] N-Triples parser per-triple profile + decision (fix / accept / defer with reason).
+- [ ] `STATISTICS.md` updated to reflect cycle 10 r4 + truthy r1 + WGPB step C.
+
+### DrHook engine BCL-only — deferred to 1.8.x (decision 2026-05-16)
+
+Not in this release. Substrate work hard-stops at 1.8.0; DrHook engine BCL-only rewrite is the first 1.8.x substrate-discipline task post-cognitive-entry. The current netcoredbg + Microsoft.Diagnostics.NETCore.Client implementation is functionally sufficient through cognitive-layer bring-up. See [memory entry `project_drhook_engine_concept`](../../memory/) for scoped rewrite plan.
 
 ### Release 1.8.0 — cognitive layers entry point
 

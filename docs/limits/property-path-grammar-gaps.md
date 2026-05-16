@@ -1,9 +1,9 @@
 # Limit: Property-path grammar — three combinations not yet handled by the parser
 
-**Status:**        Triggered
+**Status:**        Resolved (1.7.47, commit `1be7a4d`, 2026-04-30)
 **Surfaced:**      2026-04-28, via a parse-only sweep of all 1,199 WDBench `paths` + `c2rpqs` queries against `wiki-21b-ref`. The sweep was triggered by 3 visible parser failures during the post-cancellation-fix rerun (commit `527016f`); the sweep characterized the full inventory upfront rather than discovering shapes one-by-one across multi-hour runs.
-**Last reviewed:** 2026-04-28
-**Promotes to:**   ADR for a property-path grammar completeness pass. Trigger: scheduled engineering window for SPARQL spec hardening; ideally before any externally-published WDBench results, since these shapes show up in real-world property-path workloads.
+**Resolved:**      1.7.47 grammar completeness pass shipped 2026-04-30 (commit `1be7a4d`). Option B applied — `ParsePredicateOrPath` factored into `ParsePathPrimary` + `ParsePathExpr` so quantifiers, sequences, and alternatives compose after any primary (term / `^X` / `(X)` / `!X`), not only after base terms. All three failure shapes (inverse-quantified group, inverse-grouped-alternative with quantifier, sequence/alternative inside group with non-trivial first element) accepted. W3C SPARQL 1.1 conformance suite unaffected — 618 query + 94 update + 103 syntax tests still 100%. WDBench 1.7.47 cold baseline 2026-04-29: 0 parse failures across 1,199 paths+c2rpqs queries. Re-validated cycle 9 (2026-05-09 1199 queries 0 parser failures), cycle 10 r4 (2026-05-13 1199 queries 0 parser failures), truthy r1 + extended coverage (2026-05-14/15/16 paired full WDBench matrix 0 parser failures), WGPB step C (2026-05-16, 849/850 with the 1 rejection being malformed source data, not a Mercury grammar gap).
+**Last reviewed:** 2026-05-16 — limits register paperwork sweep; status updated to Resolved retroactively.
 
 ## Description
 

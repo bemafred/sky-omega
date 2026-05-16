@@ -1,9 +1,9 @@
 # Limit: Intermediate uncompressed N-Triples / Turtle as workflow inefficiency
 
-**Status:**        Latent
+**Status:**        Resolved (ADR-036 substrate streaming `.bz2` shipped 1.7.45, 2026-04-29; canonical-source recommendation adopted Phase 7)
 **Surfaced:**      2026-04-25, during Phase 6 21.3B Wikidata bulk-load. The 3.1 TB uncompressed `latest-all.nt` source file was contrasted with the 160 GB compressed `.bz2` Wikimedia dump — 2.94 TB of avoidable disk overhead was made visible by the contrast with the working state of the run.
-**Last reviewed:** 2026-04-26
-**Promotes to:**   ADR when any of (a) a target deployment has constrained disk and the 2.94 TB decompressed-intermediate overhead becomes load-bearing, OR (b) a workflow ships compressed-only (no uncompressed form available — common for cloud-distributed datasets), OR (c) measured BZip2 decompression throughput in `Mercury.Compression` is shown to bottleneck the parse pipeline at Mercury's per-second triple target
+**Resolved:**      [ADR-036](../adrs/mercury/ADR-036-substrate-streaming-bz2-decompression.md) substrate streaming `.bz2` decompression shipped 1.7.45 (2026-04-29). Trigger condition (c) was satisfied directly — Mercury.Compression's BZip2 decoder was characterized and integrated as a streaming front-end to `RdfEngine.LoadFileAsync`. Trigger (a) is implicitly satisfied because Phase 7+ gradient runs eliminate the 3.1 TB intermediate. Production-validated cycle 8 (2026-05-03), cycle 9 (2026-05-07), cycle 10 r4 (2026-05-13) — all three 21.3B runs read directly from `latest-all.ttl.bz2`. Truthy r1 (2026-05-14) read `latest-truthy.nt.bz2` directly. The `.ttl.bz2`-as-canonical-source workflow recommendation is the documented default for Phase 7 onwards. WGPB step C (2026-05-16) read the filtered `.nt.bz2` source directly.
+**Last reviewed:** 2026-05-16 — limits register paperwork sweep; status updated to Resolved retroactively. The substrate work shipped 1.7.45; this limits doc was never closed out.
 
 ## Phase 7 source-format recommendation: `.ttl.bz2`
 
