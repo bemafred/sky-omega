@@ -342,4 +342,83 @@ public class BBHashTests : IDisposable
         Assert.Contains("dense final level overflow", ex.Message);
         Assert.Contains("MaxDenseKeys", ex.Message);
     }
+
+    // ===== ADR-042 Parts 1 + 4 validation =====
+
+    [Fact]
+    public void Build_SpanApi_ProducesIdenticalResultToFuncApi()
+    {
+        // ADR-042 Parts 1 (range iterator at level 0) + 4 (Span-based GetKey API):
+        // the new Build(keyCount, maxKeyByteLength, GetKeyDelegate) overload must
+        // produce byte-identical output to the legacy Build(keyCount, Func<long, byte[]>)
+        // overload on the same key set + same seed.
+        const int N = 5000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"http://www.wikidata.org/entity/Q{i:D8}");
+
+        // Legacy Func-based path
+        var builderLegacy = new BBHashBuilder();
+        var resultLegacy = builderLegacy.Build(N, idx => keys[idx]);
+
+        // New Span-based path with explicit maxKeyByteLength
+        var builderSpan = new BBHashBuilder();
+        var resultSpan = builderSpan.Build(N, maxKeyByteLength: 64,
+            (long idx, Span<byte> scratch) =>
+            {
+                keys[idx].AsSpan().CopyTo(scratch);
+                return scratch.Slice(0, keys[idx].Length);
+            });
+
+        // Same MPHF structure: numkeys + level count + dense offset.
+        Assert.Equal(resultLegacy.Mphf.NumKeys, resultSpan.Mphf.NumKeys);
+        Assert.Equal(resultLegacy.Mphf.Levels.Length, resultSpan.Mphf.Levels.Length);
+        Assert.Equal(resultLegacy.Mphf.DenseOffset, resultSpan.Mphf.DenseOffset);
+
+        // Same translation array contents: every position maps to the same input index.
+        Assert.Equal(resultLegacy.Translation.Length, resultSpan.Translation.Length);
+        for (long pos = 0; pos < resultLegacy.Translation.Length; pos++)
+            Assert.Equal(resultLegacy.Translation[pos], resultSpan.Translation[pos]);
+
+        // Same per-key lookup results.
+        for (int i = 1; i <= N; i++)
+        {
+            long legacyPos = resultLegacy.Mphf.Lookup(keys[i]);
+            long spanPos = resultSpan.Mphf.Lookup(keys[i]);
+            Assert.Equal(legacyPos, spanPos);
+        }
+    }
+
+    [Fact]
+    public void Build_SpanApi_ScratchBufferReuseDoesNotCorruptHash()
+    {
+        // Defensive: the Span GetKey delegate returns slices of the caller's scratch
+        // buffer. The buffer is reused across every getKey call. Verify that the
+        // builder neither caches keyBytes spans past their lifetime nor double-hashes
+        // an aliased buffer.
+        const int N = 2000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"<http://example.org/q/{i}>");
+
+        var builder = new BBHashBuilder();
+        var result = builder.Build(N, maxKeyByteLength: 256,
+            (long idx, Span<byte> scratch) =>
+            {
+                // Intentionally overwrite scratch with garbage BEFORE filling the
+                // actual key — verifies that the builder's cached span (if any)
+                // hasn't been retained from a prior call.
+                scratch.Fill(0xFF);
+                keys[idx].AsSpan().CopyTo(scratch);
+                return scratch.Slice(0, keys[idx].Length);
+            });
+
+        Assert.Equal(N, result.Mphf.NumKeys);
+        // Every key should still round-trip cleanly.
+        for (int i = 1; i <= N; i++)
+        {
+            long mphfPos = result.Mphf.Lookup(keys[i]);
+            Assert.Equal(i, result.Translation[mphfPos]);
+        }
+    }
 }

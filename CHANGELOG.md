@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.59](#1759---2026-05-16)** — released 2026-05-16; targeted N-Triples parser optimization (Peek inlining) closes the asymmetry vs Turtle's `Peek`. Measured +6.0 % end-to-end / +7.4 % steady-state on 10M-triple bulk-load; 25 % grammar-inherent gap remains. Stacks on 1.7.58's ADR-041 cleanup-on-exception. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.60](#1760---2026-05-16)** — released 2026-05-16; ADR-042 Parts 1 + 4 land — `BBHashBuilder` level-0 range iterator (eliminates the [1..N] ChunkedList materialization, saves 32 GB at N=4B atoms) and Span-based `GetKey` API (eliminates ~770 GB of GC churn across a 4 B-atom build). Stacks on 1.7.58's ADR-041 cleanup-on-exception and 1.7.59's N-Triples Peek inlining. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,38 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.60] - 2026-05-16
+
+**Headline:** ADR-042 Parts 1 + 4 — first slice of MPHF construction memory adaptive sizing. The `BBHashBuilder.Build` algorithm now (1) iterates the level-0 input range [1..N] directly rather than materializing it into a `ChunkedList<long>` (saves 32 GB at N=4B atoms), and (2) accepts a Span-based `GetKeyDelegate` that fills a caller-owned scratch buffer instead of allocating a fresh `byte[]` per call (saves ~770 GB of GC churn across the multi-pass build at 4 B atoms). The remaining ADR-042 work — Part 2 (mmap-backed streaming translation) and Part 3 (re-hash second pass eliminating per-level `keyPositions`) — is queued for the next slice.
+
+### Added
+
+- **`GetKeyDelegate`** in `BBHashBuilder.cs`: `delegate ReadOnlySpan<byte> GetKeyDelegate(long inputIndex, Span<byte> scratch)`. The new key-access shape for high-volume MPHF construction.
+- **`BBHashBuilder.Build(long, int, GetKeyDelegate, IObservabilityListener?)`** — Span-based overload taking a maximum key byte length so the builder can allocate one scratch buffer for the entire build. Used by the production path (`SortedAtomStoreExternalBuilder.BuildMphfFiles`).
+- Two new validation tests in `BBHashTests.cs`:
+  - `Build_SpanApi_ProducesIdenticalResultToFuncApi` — equivalence pin between the legacy Func-based path and the Span-based path on the same key set.
+  - `Build_SpanApi_ScratchBufferReuseDoesNotCorruptHash` — defensive test that intentionally fills the scratch with garbage before each key copy, verifying the builder doesn't retain a span past a single call.
+
+### Changed
+
+- **`BBHashBuilder.Build`** internal structure: level 0 no longer materializes `remaining = new ChunkedList<long>` populated with [1..keyCount]. Instead, the level loop branches on `levelIdx == 0` and uses `(k + 1)` directly for input-index lookup; the `remaining` list is allocated lazily as the level-0 `bumped` set when entering level 1+. Branch is constant per level, perfectly predicted, zero per-iteration cost.
+- **`BBHashBuilder.Build(long, Func<long, byte[]>, ...)`** is now a thin wrapper around the Span-based overload. Existing callers (tests, ad-hoc usage) continue to work unchanged; the wrapper copies the legacy byte[] into the scratch on each call. Behavior is byte-equivalent to the pre-1.7.60 implementation.
+- **`SortedAtomStoreExternalBuilder.BuildMphfFiles`** switched to the Span-based `BBHashBuilder.Build` overload with `maxKeyByteLength: 4096`. Per call: `atoms.GetAtomSpan(sortedPos).CopyTo(scratch); return scratch.Slice(0, span.Length);` — no per-key allocation.
+
+### Validation
+
+- 14 BBHash tests green (12 pre-existing + 2 new explicit ADR-042 tests).
+- 546 Storage tests green.
+- Output byte-equivalence verified at test scale via the Func ⇄ Span equivalence test.
+
+### What's queued for next ADR-042 slice
+
+- Part 2 — Mmap-backed streaming `atoms.idx` translation (eliminates the 32 GB persistent `ChunkedArray<long>` translation).
+- Part 3 — Re-hash second pass (eliminates the 32 GB-at-level-0-decaying `keyPositions` `ChunkedArray<long>`).
+- Part 5 — `ProcessMemoryProbe` (shared with ADR-040) and host-adaptive validation.
+
+After all four substrate parts ship, ADR-042 moves Accepted → Completed and the projected peak RSS drops from 100 GB at 4 B atoms to ~15 GB (BitVectors + `bumped` transient).
 
 ## [1.7.59] - 2026-05-16
 

@@ -752,16 +752,19 @@ internal static class SortedAtomStoreExternalBuilder
                 $"BBHash construction: SortedAtomStore reports {atoms.AtomCount} atoms; expected {atomCount}");
 
         var builder = new Mphf.BBHashBuilder();
-        // Wrap atom-bytes access in a delegate. Each call copies the span to a byte[] —
-        // BBHash builder makes multiple passes; the per-call alloc is unavoidable
-        // without restructuring. At gradient scales (≤ 100 M) the transient cost is
-        // bounded; at 4 B atoms a follow-up optimization (buffer reuse, batch
-        // iteration) is warranted.
-        var result = builder.Build(atomCount, sortedPos =>
-        {
-            var span = atoms.GetAtomSpan(sortedPos);
-            return span.ToArray();
-        }, listener);
+        // ADR-042 Part 4: Span-based GetKey API eliminates the per-call byte[] allocation
+        // the prior Func<long, byte[]> shape caused. BBHash makes ~2-3 passes per level
+        // over every remaining key (~25 levels at 4 B atoms); replacing each per-key
+        // ToArray() with a scratch-buffer copy saves ~770 GB of GC churn across a 4 B
+        // build. Buffer sized to MaxAtomByteLength (4 KB) — bounded above by Mercury's
+        // SortedAtomStore key shape; covers every practical Wikidata atom.
+        var result = builder.Build(atomCount, maxKeyByteLength: 4096,
+            (long sortedPos, Span<byte> scratch) =>
+            {
+                var span = atoms.GetAtomSpan(sortedPos);
+                span.CopyTo(scratch);
+                return scratch.Slice(0, span.Length);
+            }, listener);
         var mphfBuildDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
 
         var mphfPath = baseFilePath + ".mphf";

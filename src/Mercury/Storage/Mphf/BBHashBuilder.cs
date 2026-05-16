@@ -9,6 +9,19 @@ using SkyOmega.Mercury.Abstractions;
 namespace SkyOmega.Mercury.Storage.Mphf;
 
 /// <summary>
+/// ADR-042 Part 4: Span-based key access callback. The caller fills <paramref name="scratch"/>
+/// with the key bytes for <paramref name="inputIndex"/> and returns a slice of the written portion.
+/// Eliminates the per-call <c>byte[]</c> allocation the old <c>Func&lt;long, byte[]&gt;</c> shape
+/// caused — ~770 GB of GC churn across a 4 B-atom build at multiple BBHash passes.
+/// </summary>
+/// <remarks>
+/// The scratch buffer is owned by <see cref="BBHashBuilder.Build(long, int, GetKeyDelegate, IObservabilityListener?)"/>
+/// and is sized to the caller-declared <c>maxKeyByteLength</c>. The returned span is valid only
+/// for the duration of the calling iteration; the next call overwrites the scratch contents.
+/// </remarks>
+internal delegate ReadOnlySpan<byte> GetKeyDelegate(long inputIndex, Span<byte> scratch);
+
+/// <summary>
 /// Constructs a <see cref="BBHash"/> over a known key set. Iterative algorithm
 /// with a dense final-level fallback for any keys the iterative phase cannot place.
 /// </summary>
@@ -71,19 +84,49 @@ internal sealed class BBHashBuilder
     }
 
     /// <summary>
-    /// Build the MPHF over the given keys. Returns the constructed <see cref="BBHash"/>
-    /// plus a translation array mapping <c>mphf_pos → input_index</c>. Caller can use the
-    /// translation array to populate <c>atoms.idx</c>.
+    /// Build the MPHF over the given keys (legacy <c>byte[]</c>-allocating overload).
+    /// Wraps the Span-based <see cref="Build(long, int, GetKeyDelegate, IObservabilityListener?)"/>
+    /// for callers that don't need the zero-allocation hot path. Each <paramref name="getKey"/>
+    /// call's returned <c>byte[]</c> is copied into the scratch buffer; the underlying allocation
+    /// is unchanged from the pre-ADR-042 behavior.
     /// </summary>
     /// <param name="keyCount">Total number of keys.</param>
     /// <param name="getKey">Callback to retrieve key bytes by input index (1-based on caller's
     /// convention; passed through here unchanged).</param>
+    /// <param name="listener">Optional observability sink.</param>
+    public BuildResult Build(long keyCount, Func<long, byte[]> getKey, IObservabilityListener? listener = null)
+    {
+        // Default scratch sizing: 4 KB covers every practical RDF atom shape (Wikidata
+        // IRIs are ~60 bytes; the longest plausible literal is bounded by SPARQL parser
+        // limits well below 4 KB). Tests use smaller keys; this is a safe upper bound.
+        return Build(keyCount, maxKeyByteLength: 4096,
+            (long inputIdx, Span<byte> scratch) =>
+            {
+                var keyBytes = getKey(inputIdx);
+                keyBytes.AsSpan().CopyTo(scratch);
+                return scratch.Slice(0, keyBytes.Length);
+            }, listener);
+    }
+
+    /// <summary>
+    /// Build the MPHF over the given keys (Span-based zero-allocation overload).
+    /// Returns the constructed <see cref="BBHash"/> plus a translation array mapping
+    /// <c>mphf_pos → input_index</c>. Caller can use the translation array to populate
+    /// <c>atoms.idx</c>.
+    /// </summary>
+    /// <param name="keyCount">Total number of keys.</param>
+    /// <param name="maxKeyByteLength">Maximum byte length of any key returned by <paramref name="getKey"/>.
+    /// Used to size the scratch buffer once. For Wikidata-shape atoms, 4096 is a safe upper bound.</param>
+    /// <param name="getKey">Callback that fills the supplied scratch buffer with key bytes for the
+    /// given input index and returns a slice of the written portion. Per ADR-042 Part 4 — eliminates
+    /// the per-call <c>byte[]</c> allocation the prior Func-shape caused.</param>
     /// <param name="listener">Optional observability sink. When non-null, emits per-level
     /// + dense-fallback + start/complete events for ADR-039 attribution. Default null
     /// preserves the original signature for tests and standalone callers.</param>
-    public BuildResult Build(long keyCount, Func<long, byte[]> getKey, IObservabilityListener? listener = null)
+    public BuildResult Build(long keyCount, int maxKeyByteLength, GetKeyDelegate getKey, IObservabilityListener? listener = null)
     {
         if (keyCount < 0) throw new ArgumentOutOfRangeException(nameof(keyCount));
+        if (maxKeyByteLength < 1) throw new ArgumentOutOfRangeException(nameof(maxKeyByteLength));
         if (keyCount == 0)
             return new BuildResult(
                 new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0, 0, Array.Empty<byte[]>()),
@@ -92,10 +135,20 @@ internal sealed class BBHashBuilder
         listener?.OnMphfBuildStarted(new MphfBuildStartedEvent(
             DateTimeOffset.UtcNow, keyCount, _gamma, _maxLevels, MaxDenseKeys, _baseSeed));
 
-        // Track which keys remain to be placed (by input-index, 1-based).
-        // ChunkedList — long-indexed, no doubling-copy on growth, no int32 cap.
-        var remaining = new ChunkedList<long>();
-        for (long i = 1; i <= keyCount; i++) remaining.Add(i);
+        // ADR-042 Part 4: single scratch buffer reused across every key access for the
+        // entire build. Sized to the caller-declared maxKeyByteLength; in practice 4 KB
+        // for Wikidata-shape atoms. The buffer's contents are valid only until the next
+        // getKey call — none of the hot paths cache the keyBytes span beyond hashing.
+        byte[] scratchBuffer = new byte[maxKeyByteLength];
+
+        // ADR-042 Part 1: range-iterator at level 0. The level-0 input is always the
+        // dense range [1..keyCount]; materializing it into a ChunkedList costs 32 GB
+        // at N=4B atoms (8 bytes × N). Instead, we iterate the range directly at
+        // level 0 and only allocate `remaining` lazily when level 0 produces a
+        // non-empty bumped set (i.e., entering level 1+). The hot loops branch on
+        // levelIdx to select the input-index source — branch is constant per level,
+        // perfectly predicted, zero per-iteration cost.
+        ChunkedList<long>? remaining = null;
 
         var levels = new List<BitVector>();
         var levelOffsets = new List<long>();
@@ -105,7 +158,7 @@ internal sealed class BBHashBuilder
         long globalOffset = 0;
         for (int levelIdx = 0; levelIdx < _maxLevels; levelIdx++)
         {
-            long remainingCount = remaining.Count;
+            long remainingCount = levelIdx == 0 ? keyCount : remaining!.Count;
             if (remainingCount == 0) break;
 
             var levelStart = Stopwatch.GetTimestamp();
@@ -122,9 +175,11 @@ internal sealed class BBHashBuilder
             var seen = new BitVector(bitCount);
             var collided = new BitVector(bitCount);
             var keyPositions = new ChunkedArray<long>(remainingCount);
+            bool isLevel0 = levelIdx == 0;
             for (long k = 0; k < remainingCount; k++)
             {
-                var keyBytes = getKey(remaining[k]);
+                long inputIdx = isLevel0 ? (k + 1) : remaining![k];
+                var keyBytes = getKey(inputIdx, scratchBuffer);
                 ulong h = SplitMix64Hash.Hash64(keyBytes, seed);
                 long pos = (long)(h % (ulong)bitCount);
                 keyPositions[k] = pos;
@@ -143,7 +198,8 @@ internal sealed class BBHashBuilder
                 }
                 else
                 {
-                    bumped.Add(remaining[k]);
+                    long inputIdx = isLevel0 ? (k + 1) : remaining![k];
+                    bumped.Add(inputIdx);
                 }
             }
 
@@ -156,7 +212,8 @@ internal sealed class BBHashBuilder
                 if (!collided.Get(pos))
                 {
                     long mphfPos = globalOffset + bv.Rank(pos);
-                    translation[mphfPos] = remaining[k];
+                    long inputIdx = isLevel0 ? (k + 1) : remaining![k];
+                    translation[mphfPos] = inputIdx;
                 }
             }
 
@@ -180,22 +237,31 @@ internal sealed class BBHashBuilder
         // At γ=2.0 with MaxLevels=40, this is empty on the overwhelming majority of
         // runs at any N. Cycle 10 Phase 3 (24 levels) hit non-empty dense set with
         // 2 keys remaining — the dense path makes that case routine instead of fatal.
+        //
+        // ADR-042 Part 1: `remaining` is null when the iterative phase converged with
+        // an empty bumped set at every level — including the level-0-converges case
+        // (every key placed at level 0, no bumps). Treat null as empty.
+        long denseRemaining = remaining?.Count ?? 0;
         long denseOffset = globalOffset;
         var denseKeys = Array.Empty<byte[]>();
-        if (remaining.Count > 0)
+        if (denseRemaining > 0)
         {
-            if (remaining.Count > MaxDenseKeys)
+            if (denseRemaining > MaxDenseKeys)
             {
                 throw new InvalidOperationException(
-                    $"BBHashBuilder: dense final level overflow — {remaining.Count} keys still bumped after {_maxLevels} levels, " +
+                    $"BBHashBuilder: dense final level overflow — {denseRemaining} keys still bumped after {_maxLevels} levels, " +
                     $"exceeds MaxDenseKeys={MaxDenseKeys}. Increase gamma or MaxLevels; or raise MaxDenseKeys if the workload genuinely needs it.");
             }
-            int denseCount = (int)remaining.Count;
+            int denseCount = (int)denseRemaining;
             denseKeys = new byte[denseCount][];
             for (int i = 0; i < denseCount; i++)
             {
-                long inputIdx = remaining[i];
-                denseKeys[i] = getKey(inputIdx);
+                long inputIdx = remaining![i];
+                // Dense keys must be stored persistently in the BBHash for membership
+                // checks on lookup; copy from scratch into a fresh per-key byte[].
+                // Bounded by MaxDenseKeys (1024), so the copy cost is trivial.
+                var keyBytes = getKey(inputIdx, scratchBuffer);
+                denseKeys[i] = keyBytes.ToArray();
                 long mphfPos = denseOffset + i;
                 translation[mphfPos] = inputIdx;
             }
