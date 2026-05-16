@@ -1,10 +1,10 @@
 <Project>
   <PropertyGroup>
     <!-- Version information -->
-    <Version>1.7.66</Version>
-    <AssemblyVersion>1.7.66.0</AssemblyVersion>
-    <FileVersion>1.7.66.0</FileVersion>
-    <InformationalVersion>1.7.66</InformationalVersion>
+    <Version>1.7.67</Version>
+    <AssemblyVersion>1.7.67.0</AssemblyVersion>
+    <FileVersion>1.7.67.0</FileVersion>
+    <InformationalVersion>1.7.67</InformationalVersion>
 
     <!-- Package metadata -->
     <Authors>Sky Omega Contributors</Authors>

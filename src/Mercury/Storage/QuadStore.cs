@@ -1299,19 +1299,17 @@ public sealed class QuadStore : IDisposable
             return;
         }
 
-        // ADR-029 Graph profile bulk-load + RebuildSecondaryIndexes is queued for the
-        // Commit 3 slice. Session-API workflows on Graph profile populate all four
-        // indexes synchronously via ApplyToIndexesById (the !_bulkLoadMode branch), so
-        // rebuild is unnecessary in that path. Bulk-load for Graph would require a
-        // VersionedQuadIndex-aware rebuild loop here — explicitly out of scope for
-        // Commit 2.
+        // ADR-029 Graph profile (Commit 3): structurally parallel to Cognitive's
+        // rebuild but uses VersionedQuadIndex.AddRaw (no temporal args). Scans
+        // _gspoGraph as primary; populates _gposGraph / _gospGraph / _tgspGraph
+        // and the trigram posting list. Uses the random-insert AddRaw path rather
+        // than AppendSorted — Graph isn't aiming for Wikidata-scale; the
+        // radix-external-sort optimization is a follow-up if a Graph workload
+        // surfaces past-RAM-working-set behavior.
         if (_schema.Profile == StoreProfile.Graph)
         {
-            throw new ProfileCapabilityException(
-                "RebuildSecondaryIndexes for the Graph profile is not yet implemented. " +
-                "Session-API workflows (BeginBatch/AddBatched/CommitBatch) work today; " +
-                "bulk-load + rebuild for Graph is queued for the next implementation slice. " +
-                "If you need bulk-load now, use the Cognitive or Reference profile.");
+            RebuildGraphSecondaryIndexes(onProgress);
+            return;
         }
 
         RequireTemporalProfile(nameof(RebuildSecondaryIndexes));
@@ -1429,6 +1427,153 @@ public sealed class QuadStore : IDisposable
             // One msync covers every deferred metadata write and page flush
             // performed during the rebuild. Must run before SetDeferMsync(false)
             // so subsequent cognitive-mode writes see a consistent durable state.
+            target.Flush();
+            target.SetDeferMsync(false);
+            phaseStopwatch.Stop();
+        }
+
+        onProgress?.Invoke(name, count);
+
+        if (phases is not null)
+        {
+            var phase = new RebuildPhaseMetrics(
+                Timestamp: DateTimeOffset.UtcNow,
+                IndexName: name,
+                EntriesProcessed: count,
+                Elapsed: phaseStopwatch.Elapsed);
+            phases.Add(phase);
+            EmitRebuildPhase(in phase);
+        }
+    }
+
+    /// <summary>
+    /// Rebuild secondary indexes for a Graph-profile store — ADR-029 Commit 3.
+    /// Scans the primary <see cref="_gspoGraph"/> once per target, remapping
+    /// (Graph, Subject, Predicate, Object) → (Graph, Primary, Secondary, Tertiary)
+    /// to populate GPOS / GOSP / TGSP; then scans a final time for the trigram
+    /// posting list (literal objects only). State transitions PrimaryOnly →
+    /// BuildingGPOS → BuildingGOSP → BuildingTGSP → BuildingTrigram → Ready.
+    /// </summary>
+    /// <remarks>
+    /// Uses random-insert <see cref="VersionedQuadIndex.AddRaw"/> rather than
+    /// AppendSorted. AppendSorted would require a sorted scan via an external sorter
+    /// (the Reference profile's ADR-032 pattern) — VersionedQuadIndex doesn't expose
+    /// AppendSorted today, and Graph workloads aren't aimed at Wikidata-scale where
+    /// the radix-external-sort win becomes load-bearing. If a Graph workload surfaces
+    /// scale past in-memory page cache, follow the ADR-032 pattern as a sibling round.
+    /// </remarks>
+    private void RebuildGraphSecondaryIndexes(Action<string, long>? onProgress)
+    {
+        _lock.EnterWriteLock();
+        _sessionMutated = true;
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var phases = HasRebuildListener ? new List<RebuildPhaseMetrics>(4) : null;
+        try
+        {
+            // Source index is GSPO: VersionedQuad.{Primary, Secondary, Tertiary} = (s, p, o).
+            // The remap lambda projects logical RDF roles (g, s, p, o) onto each target's
+            // (Graph, Primary, Secondary, Tertiary).
+            RebuildGraphIndex(_gposGraph!, "GPOS", StoreIndexState.BuildingGPOS,
+                (g, s, p, o) => (g, p, o, s), // GPOS: Primary=P, Secondary=O, Tertiary=S
+                onProgress, phases);
+
+            RebuildGraphIndex(_gospGraph!, "GOSP", StoreIndexState.BuildingGOSP,
+                (g, s, p, o) => (g, o, s, p), // GOSP: Primary=O, Secondary=S, Tertiary=P
+                onProgress, phases);
+
+            RebuildGraphIndex(_tgspGraph!, "TGSP", StoreIndexState.BuildingTGSP,
+                (g, s, p, o) => (g, s, p, o), // TGSP: Primary=S, Secondary=P, Tertiary=O (same as GSPO; no time-leading variant for Graph)
+                onProgress, phases);
+
+            // Trigram rebuild from the primary GSPO scan.
+            _indexState = StoreIndexState.BuildingTrigram;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+            _trigramIndex.Clear();
+            var trigramStopwatch = System.Diagnostics.Stopwatch.StartNew();
+            long trigramCount = 0;
+            var gspoEnum = _gspoGraph!.Query(-1, -1, -1, -1);
+            while (gspoEnum.MoveNext())
+            {
+                var quad = gspoEnum.Current;
+                var objectId = quad.Tertiary; // GSPO: Tertiary = object
+                if (objectId > 0)
+                {
+                    var utf8Span = _atoms.GetAtomSpan(objectId);
+                    if (utf8Span.Length > 0 && utf8Span[0] == (byte)'"')
+                    {
+                        _trigramIndex.IndexAtom(objectId, utf8Span);
+                        trigramCount++;
+                    }
+                }
+            }
+            trigramStopwatch.Stop();
+            onProgress?.Invoke("Trigram", trigramCount);
+
+            if (HasRebuildListener)
+            {
+                var trigramPhase = new RebuildPhaseMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    IndexName: "Trigram",
+                    EntriesProcessed: trigramCount,
+                    Elapsed: trigramStopwatch.Elapsed);
+                phases!.Add(trigramPhase);
+                EmitRebuildPhase(in trigramPhase);
+            }
+
+            _indexState = StoreIndexState.Ready;
+            _bulkLoadMode = false;
+            StoreStateFile.Write(_baseDirectory, _indexState);
+        }
+        finally
+        {
+            totalStopwatch.Stop();
+            _lock.ExitWriteLock();
+
+            if (HasRebuildListener)
+            {
+                EmitRebuildComplete(new RebuildMetrics(
+                    Timestamp: DateTimeOffset.UtcNow,
+                    Profile: _schema.Profile,
+                    TotalElapsed: totalStopwatch.Elapsed,
+                    Phases: phases ?? (IReadOnlyList<RebuildPhaseMetrics>)System.Array.Empty<RebuildPhaseMetrics>(),
+                    WasNoOp: false));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Per-target scan-and-fill for a Graph-profile secondary index. Mirrors
+    /// <see cref="RebuildIndex"/> (the Cognitive path) but consumes <see cref="VersionedQuad"/>
+    /// and dispatches to <see cref="VersionedQuadIndex.AddRaw"/>. Borrows the
+    /// deferred-msync pattern: rebuild is a bulk-shape operation, per-page msync
+    /// would dominate wall-clock for the same reason it does in Cognitive.
+    /// </summary>
+    private void RebuildGraphIndex(VersionedQuadIndex target, string name, StoreIndexState duringState,
+        Func<long, long, long, long, (long Graph, long Primary, long Secondary, long Tertiary)> remap,
+        Action<string, long>? onProgress,
+        List<RebuildPhaseMetrics>? phases)
+    {
+        _indexState = duringState;
+        StoreStateFile.Write(_baseDirectory, _indexState);
+        target.Clear();
+        target.SetDeferMsync(true);
+        long count = 0;
+        var phaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var gspoEnum = _gspoGraph!.Query(-1, -1, -1, -1);
+            while (gspoEnum.MoveNext())
+            {
+                var quad = gspoEnum.Current;
+                // Source is GSPO: quad.Primary=Subject, quad.Secondary=Predicate, quad.Tertiary=Object.
+                // The remap projects logical (g, s, p, o) onto the target's (Graph, Primary, Secondary, Tertiary).
+                var (tg, tp, ts, tt) = remap(quad.Graph, quad.Primary, quad.Secondary, quad.Tertiary);
+                target.AddRaw(tg, tp, ts, tt);
+                count++;
+            }
+        }
+        finally
+        {
             target.Flush();
             target.SetDeferMsync(false);
             phaseStopwatch.Stop();

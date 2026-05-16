@@ -225,17 +225,46 @@ public class QuadStoreGraphProfileTests : IDisposable
     }
 
     [Fact]
-    public void Graph_BulkLoadRebuildSecondaryIndexes_ThrowsWithGuidance()
+    public void Graph_BulkLoadAndRebuild_PopulatesAllSecondaryIndexes()
     {
-        // ADR-029 Graph profile Commit 2 scope: session API works; bulk-load + rebuild
-        // is queued for Commit 3. The throw documents this clearly.
-        var dir = NewStoreDir("bulk_reject");
-        using var store = CreateGraphStore(dir);
+        // ADR-029 Graph profile Commit 3: bulk-load + RebuildSecondaryIndexes.
+        // Opens the store in bulk mode (only the primary GSPO index is written
+        // inline by ApplyToIndexesById; secondaries deferred), populates triples,
+        // then runs RebuildSecondaryIndexes to fill GPOS/GOSP/TGSP + trigram.
+        var dir = NewStoreDir("bulk_rebuild");
+        Directory.CreateDirectory(dir);
 
-        var ex = Assert.Throws<ProfileCapabilityException>(() =>
-            store.RebuildSecondaryIndexes());
-        Assert.Contains("Graph", ex.Message);
-        Assert.Contains("Session-API", ex.Message);
+        using var store = new QuadStore(dir, null, null,
+            new StorageOptions { Profile = StoreProfile.Graph, BulkMode = true });
+
+        store.BeginBatch();
+        store.AddCurrentBatched("<http://ex/s1>", "<http://ex/p1>", "\"hello world\"@en");
+        store.AddCurrentBatched("<http://ex/s2>", "<http://ex/p1>", "\"hello galaxy\"@en");
+        store.AddCurrentBatched("<http://ex/s1>", "<http://ex/p2>", "<http://ex/o>");
+        store.CommitBatch();
+
+        // Pre-rebuild: only GSPO populated. Secondary-bound queries (by predicate
+        // alone) will fall through to GSPO scan, but the result-set should still
+        // be correct (just slower than after rebuild).
+        store.RebuildSecondaryIndexes();
+
+        // Predicate-bound query — relies on GPOS index post-rebuild.
+        int pCount = 0;
+        var pQuery = store.QueryCurrent("", "<http://ex/p1>", "");
+        while (pQuery.MoveNext()) pCount++;
+        Assert.Equal(2, pCount);
+
+        // Object-bound query — relies on GOSP post-rebuild.
+        int oCount = 0;
+        var oQuery = store.QueryCurrent("", "", "<http://ex/o>");
+        while (oQuery.MoveNext()) oCount++;
+        Assert.Equal(1, oCount);
+
+        // Subject-bound query — primary GSPO, always works.
+        int sCount = 0;
+        var sQuery = store.QueryCurrent("<http://ex/s1>", "", "");
+        while (sQuery.MoveNext()) sCount++;
+        Assert.Equal(2, sCount);
     }
 
     [Fact]

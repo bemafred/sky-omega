@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Completed — 2026-04-26 (Cognitive + Reference profiles shipped 1.7.27–1.7.30; Reference validated end-to-end through 21.3 B Wikidata in Phase 6, ~2.5 TB on disk vs the projected 2.6 TB. Graph and Minimal profiles deferred until use cases surface, per the original ADR scope. See [`adr-029-reference-gradient-2026-04-20.md`](../../validations/adr-029-reference-gradient-2026-04-20.md) and [`21b-query-validation-2026-04-26.md`](../../validations/21b-query-validation-2026-04-26.md))
+**Status:** Completed — 2026-04-26 (Cognitive + Reference); **Graph profile added 2026-05-16** as matrix-completion gesture, shipped across 1.7.65 (`VersionedQuadIndex` types), 1.7.66 (`QuadStore` session-API + query path integration), and 1.7.67 (bulk-load + `RebuildSecondaryIndexes` + CLI). Reference validated end-to-end through 21.3 B Wikidata in Phase 6, ~2.5 TB on disk vs the projected 2.6 TB. Graph validated through the 11-test E2E suite in `tests/Mercury.Tests/Storage/QuadStoreGraphProfileTests.cs` covering open/add/query/delete/un-delete/persistence/bulk-load+rebuild/AS_OF rejection/Range rejection/graph isolation. Minimal profile remains deferred per the original ADR scope. See [`adr-029-reference-gradient-2026-04-20.md`](../../validations/adr-029-reference-gradient-2026-04-20.md), [`21b-query-validation-2026-04-26.md`](../../validations/21b-query-validation-2026-04-26.md), and [`adr-029-graph-profile-2026-05-16.md`](../../validations/adr-029-graph-profile-2026-05-16.md).
 
 ## Context
 

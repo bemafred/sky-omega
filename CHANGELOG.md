@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.66](#1766---2026-05-16)** — released 2026-05-16; ADR-029 Graph profile **Commit 2 of 3** — `QuadStore` wires the new `VersionedQuadIndex` substrate through the session-API + query paths. `mercury --create-store --profile Graph` (Commit 3) becomes the user-visible surface; today's substrate state is "Graph profile fully functional through the programmatic API, AS_OF / Range queries rejected at the API boundary with clear guidance, bulk-load + secondary-index rebuild for Graph queued for Commit 3." Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.67](#1767---2026-05-16)** — released 2026-05-16; ADR-029 Graph profile **Commit 3 of 3** — bulk-load + `RebuildSecondaryIndexes` + CLI integration. ADR-029 status updated: Graph profile **Completed** alongside Cognitive and Reference. Three of four ADR-029 profiles ship; Minimal remains deferred. `mercury --create-store --profile Graph` is the user-visible end-to-end interface. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,44 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.67] - 2026-05-16
+
+**Headline:** ADR-029 Graph profile **Commit 3 of 3** — bulk-load + `RebuildSecondaryIndexes` + CLI integration. ADR-029 status updated to **Completed** for Graph alongside Cognitive and Reference. Three of four ADR-029 profiles now ship as concrete, distinct index implementations (Cognitive's TemporalQuadIndex, Graph's VersionedQuadIndex, Reference's ReferenceQuadIndex); Minimal remains deferred. Matrix-completion gesture closed in one day across 1.7.65 → 1.7.67 (three releases).
+
+### Added
+
+- **`RebuildGraphSecondaryIndexes`** in `QuadStore` — scans `_gspoGraph` as primary; rebuilds GPOS / GOSP / TGSP / trigram via the random-insert `AddRaw` path. Mirrors `RebuildReferenceSecondaryIndexes` structure but spans 4 targets (vs Reference's 2) and writes through `VersionedQuadIndex` with no temporal arguments.
+- **`RebuildGraphIndex`** helper — per-target scan-and-fill with deferred-msync (`SetDeferMsync(true)` → AddRaw loop → Flush → `SetDeferMsync(false)`). Mirrors `RebuildIndex` (the Cognitive path) but consumes `VersionedQuad` and remaps via a (g, s, p, o) → target (Graph, Primary, Secondary, Tertiary) tuple lambda.
+- **`Graph_BulkLoadAndRebuild_PopulatesAllSecondaryIndexes`** test — exercises the bulk-load workflow end-to-end: open in bulk mode, BeginBatch/AddCurrentBatched/CommitBatch (primary GSPO only written inline), `RebuildSecondaryIndexes`, then predicate-bound (GPOS), object-bound (GOSP), and subject-bound (GSPO) queries all return correct counts.
+- **`docs/validations/adr-029-graph-profile-2026-05-16.md`** — validation doc covering layout (32 B key + 64 B entry, 255 entries per page), mutation semantics, profile-boundary checks, all three commits across 1.7.65 → 1.7.67, E2E test inventory.
+
+### Changed
+
+- **`RebuildSecondaryIndexes`** — Graph profile branch replaces the "throw with guidance" Commit-2 placeholder with a real dispatch to `RebuildGraphSecondaryIndexes`. Reference + Cognitive branches unchanged.
+- **`QuadStoreGraphProfileTests.Graph_BulkLoadRebuildSecondaryIndexes_ThrowsWithGuidance`** renamed to `Graph_BulkLoadAndRebuild_PopulatesAllSecondaryIndexes` and rewritten to exercise the positive bulk-load + rebuild path.
+- **`mercury --help`** — `--profile` documentation updated from `<Cognitive|Reference>` to `<Cognitive|Graph|Reference>` with a note that Minimal is defined but not yet dispatched.
+- **`docs/adrs/mercury/ADR-029-store-profiles.md`** status field updated to reflect Graph as Completed: cites the three commits (1.7.65 / 1.7.66 / 1.7.67) and the validation doc.
+
+### Validation
+
+- 575 Storage tests green (11 Graph profile E2E tests including the new bulk-load+rebuild positive test; 14 `VersionedQuadIndex`-layer tests).
+- Zero regressions in existing Cognitive + Reference paths.
+
+### ADR-029 status summary
+
+| Profile | Concrete index | Entry size | Status (2026-05-16) |
+|---|---|---:|---|
+| Cognitive | `TemporalQuadIndex` | 88 B | Completed (1.7.27-1.7.30, validated through 21.3 B Wikidata) |
+| **Graph** | **`VersionedQuadIndex`** | **64 B** | **Completed (1.7.65-1.7.67, this slice)** |
+| Reference | `ReferenceQuadIndex` | 32 B | Completed (1.7.27-1.7.30, validated through 21.3 B Wikidata) |
+| Minimal | — | 24 B (designed) | Deferred — schema declared, no dispatch yet |
+
+### Design notes recorded for the Minimal slice (when it eventually lands)
+
+- Minimal's single GSPO index makes object-only queries full scans. Use case must accept this — or wait for a sibling round to add GPOS to Minimal.
+- Minimal entries are 24 B (drops Graph dimension from Reference's key); the `MinimalQuadIndex` will be a new concrete class per the no-behavior-flags rule, not a parameterization of `ReferenceQuadIndex`.
+- The post-implementation analysis pass the user authorized (look for genuinely-shared behavior, only refactor if straightforward) happens after Minimal ships — once all four concrete implementations exist.
 
 ## [1.7.66] - 2026-05-16
 
