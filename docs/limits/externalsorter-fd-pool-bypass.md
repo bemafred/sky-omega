@@ -1,8 +1,9 @@
 # Limit: ExternalSorter chunk-stream pool bypassed in cycle 10 trigram drain path
 
-**Status:**        Triggered (cycle 10 r4 evidence)
-**Surfaced:**      2026-05-13, during cycle 10 r4 trigram drain phase against `wiki-21b-ref`. With ~8,192 concurrent open trigram chunk streams and the launchd-effective FD limit of 10,240, the run sustained only 17% headroom on the FD ceiling for ~6 hours of drain wall-clock. The pool wired in commit `dddfda3` for the atom-merge path was *not engaged* on the trigram drain path; the trigram drain still opens-all-streams-up-front instead of opening through the pooled stream factory.
+**Status:**        Retracted — false alarm (2026-05-16)
+**Surfaced:**      2026-05-13, during cycle 10 r4 trigram drain phase against `wiki-21b-ref`. With ~8,192 concurrent open trigram chunk streams and the launchd-effective FD limit of 10,240, the run sustained only 17% headroom on the FD ceiling for ~6 hours of drain wall-clock.
 **Last reviewed:** 2026-05-16
+**Retraction:**    The "pool bypass" claim was speculative and incorrect. Code review against `src/Mercury/Storage/ExternalSorter.cs` confirms the pool IS engaged on every `ExternalSorter` consumer, including the trigram-drain path at `QuadStore.cs:1571`. `ChunkReader.RefillBuffer()` at `src/Mercury/Storage/ExternalSorter.cs:315` calls `_pool.Get(_path)` on every read. The ~8,192 observed concurrent FDs at cycle 10 r4 was the pool running at its documented `MergeFileStreamPoolHardCap = 8 * 1024` cap (`src/Mercury/Storage/SortedAtomStoreExternalBuilder.cs:97`) with LRU eviction operating as designed. The 17% headroom on the 10,240 launchd FD limit is the cap's intended behavior — leaving headroom for resolver/atom-store/parser/OS handles. The actual eviction-overhead concern is captured by the sibling limit [trigram-drain-cap-eviction](trigram-drain-cap-eviction.md), which proposes structural mitigations (larger trigram chunks → fewer total chunks → no eviction at all; hierarchical merge; runtime FD-limit detection on Linux). Those remain the right framing.
 
 ## Description
 
