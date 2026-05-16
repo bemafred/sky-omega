@@ -1,0 +1,10 @@
+﻿{"ts":"2026-05-16T05:32:04.5372390+00:00","phase":"rebuild","index":"GPOS","entries":81469145}
+{"schema_version":"1","phase":"rebuild_phase","record_kind":"event","ts":"2026-05-16T05:32:04.5399840\u002B00:00","index":"GPOS","entries":81469145,"elapsed_ms":13382.3684}
+{"schema_version":"1","phase":"gc","record_kind":"event","ts":"2026-05-16T05:32:21.1249060\u002B00:00","generation":0,"pause_ms":0.096,"heap_after_bytes":432723288}
+{"schema_version":"1","phase":"loh_delta","record_kind":"event","ts":"2026-05-16T05:32:21.1252810\u002B00:00","delta_bytes":3190833552,"total_allocated_bytes":3239826192}
+{"schema_version":"1","phase":"rss","record_kind":"state","ts":"2026-05-16T05:32:21.1258780\u002B00:00","rss_bytes":6612926464,"private_bytes":0}
+{"schema_version":"1","phase":"disk_free","record_kind":"state","ts":"2026-05-16T05:32:21.1270100\u002B00:00","path":"/Users/bemafred/Library/SkyOmega/stores/wiki-wgpb-ref-r1","free_bytes":4039542669312,"total_bytes":7998499225600}
+{"ts":"2026-05-16T05:32:41.0128820+00:00","phase":"rebuild","index":"Trigram","entries":42533439}
+{"schema_version":"1","phase":"rebuild_phase","record_kind":"event","ts":"2026-05-16T05:32:41.0129520\u002B00:00","index":"Trigram","entries":42533439,"elapsed_ms":36470.9037}
+{"schema_version":"1","phase":"rebuild_complete","record_kind":"event","ts":"2026-05-16T05:32:41.0131090\u002B00:00","profile":"Reference","total_ms":49860.1012,"phase_count":2,"no_op":false}
+{"ts":"2026-05-16T05:32:41.0133470+00:00","phase":"rebuild.summary","elapsed_sec":49.860784}
