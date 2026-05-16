@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.64](#1764---2026-05-16)** — released 2026-05-16; ADR-040 Parts 2 + 3 + ADR-042 Part 5 land — **lazy back-buffer allocation** + **eager per-chunk teardown** on exhaustion + **MPHF memory-budget check** at `BuildMphfFiles` start. With these shipping, both ADR-040 and ADR-042 move Accepted → **Completed** — the substrate is now host-portable across both the merge-phase readahead (~31 GiB pre-ADR-040 → adaptive) and the MPHF-phase construction (~100 GB pre-ADR-042 → ~15 GB) at the substrate's 4 B-atom production scale. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.65](#1765---2026-05-16)** — released 2026-05-16; ADR-029 Graph profile **Commit 1 of 3** — new `VersionedQuadIndex` substrate class lands alongside `TemporalQuadIndex` (Cognitive) and `ReferenceQuadIndex` (Reference). 64-byte entries (32 B key + 8 B child/value + 24 B versioning metadata). No-behavior-flags rule honored: distinct concrete class, not a parameterization of an existing index. QuadStore integration is queued for Commit 2. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,43 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.65] - 2026-05-16
+
+**Headline:** ADR-029 Graph profile **Commit 1 of 3** — substrate types + index class. Closes the matrix-completion gesture: the four ADR-029 profiles (Cognitive, Graph, Reference, Minimal) each get a distinct concrete index implementation per the no-behavior-flags rule (`feedback_no_behavior_flags.md`, 2026-05-16). Cognitive and Reference shipped 1.7.27-1.7.30; Graph lands here; Minimal follows in a later slice.
+
+### Added
+
+- **`VersionedQuadIndex`** (`src/Mercury/Storage/VersionedQuadIndex.cs`, 590 lines) — B+Tree index for the Graph profile. 64-byte entries, single sort order (G → P → S → T), no temporal semantics, no AS_OF queries. Mirrors `TemporalQuadIndex`'s mmap-backed implementation surface (constructor variants, AddRaw / DeleteRaw, Query / QueryAllVersions, Flush / Clear / Dispose, SetDeferMsync, magic-number metadata). Implements `IQuadIndex`.
+- **`VersionedKey`** struct (32 B, Pack=1) — `Graph + Primary + Secondary + Tertiary`, same shape as `ReferenceKey`. Lexicographic comparison.
+- **`VersionedBTreeEntry`** struct (64 B, Pack=1) — `VersionedKey (32) + ChildOrValue (8) + CreatedAt (8) + ModifiedAt (8) + Version (4) + IsDeleted (1) + Flags (1) + Reserved (2)`. NodeDegree = 255 entries per 16 KB page (vs Cognitive's 185, Reference's 511).
+- **`VersionedQuad`** projection struct + **`VersionedQuadEnumerator`** (zero-allocation, struct-not-ref-struct per ADR-011 pattern).
+- **14 new tests** in `tests/Mercury.Tests/Storage/VersionedQuadIndexTests.cs`: layout invariants (32 B / 64 B / field order), basic add+query, idempotent re-add (no-op + Version=1), soft-delete + audit query, re-add un-deletes + version bump, page splits at >255 entries, persistence across dispose+reopen, Clear, graph-isolation, wildcards.
+
+### Mutation semantics (the load-bearing design decision per the chat plan)
+
+| Operation | Existing entry state | Behavior |
+|---|---|---|
+| `AddRaw(G,P,S,T)` | not present | new entry: `Version=1`, `CreatedAt=ModifiedAt=now`, `IsDeleted=false` |
+| `AddRaw(G,P,S,T)` | present, `!IsDeleted` | **no-op** (RDF set semantics — `Version` does NOT advance) |
+| `AddRaw(G,P,S,T)` | present, `IsDeleted` | un-delete: `Version++`, `ModifiedAt=now`, `IsDeleted=false` |
+| `DeleteRaw(G,P,S,T)` | present, `!IsDeleted` | soft-delete: `Version++`, `ModifiedAt=now`, `IsDeleted=true`; returns `true` |
+| `DeleteRaw(G,P,S,T)` | missing or `IsDeleted` | returns `false` |
+| `Query(...)` (live) | any | filters `IsDeleted=true` |
+| `QueryAllVersions(...)` (audit) | any | includes deleted entries |
+
+### What's queued for Commit 2
+
+- `QuadStore.Open` dispatch — instantiate `VersionedQuadIndex` for the four indexes when `_schema.Profile == StoreProfile.Graph`.
+- WAL `LogRecord` variants — versioned add / versioned delete records (smaller than temporal variants since no time fields).
+- `QueryExecutor` rejects temporal queries (AS_OF, time-range) against the Graph profile at plan time — mirrors Reference's rejection.
+- E2E QuadStore tests covering Graph profile through the public API.
+
+### Validation
+
+- 14 VersionedQuadIndex tests green.
+- 564 Storage tests green (550 pre-existing + 14 new).
+- File-format magic byte `0x4752415048494458` ("GRAPHIDX") distinct from Cognitive's `0x54454D504F52414C` ("TEMPORAL") and Reference's separate format — store-schema mismatch detected at open time.
 
 ## [1.7.64] - 2026-05-16
 
