@@ -226,17 +226,18 @@ public class QuadStoreProfileDispatchTests : IDisposable
     #region Minimal profile
 
     [Fact]
-    public void Minimal_OpenThrowsNotSupported()
+    public void Minimal_OpensSuccessfullyWithPersistedSchema()
     {
+        // ADR-029 Minimal profile shipped 2026-05-16 alongside Graph profile.
+        // Previous "throws NotSupported" assertion is retired; substrate now dispatches
+        // to MinimalQuadIndex on open.
         var dir = NewStoreDir("minimal");
         Directory.CreateDirectory(dir);
 
-        // Schema creation happens before index construction, so the schema file is
-        // written before the dispatch throws. That's fine — the error tells the caller
-        // what's going on. Subsequent attempts to open will also throw for the same reason.
-        var ex = Assert.Throws<NotSupportedException>(() =>
-            new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Minimal }));
-        Assert.Contains("Minimal", ex.Message);
+        using var store = new QuadStore(dir, null, null, new StorageOptions { Profile = StoreProfile.Minimal });
+        Assert.Equal(StoreProfile.Minimal, store.Schema.Profile);
+        Assert.False(store.Schema.HasGraph);
+        Assert.True(File.Exists(Path.Combine(dir, StoreSchema.FileName)));
     }
 
     #endregion

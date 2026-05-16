@@ -38,6 +38,9 @@ public sealed class QuadStore : IDisposable
     // Reference-profile indexes. Null for Cognitive/Graph/Minimal.
     private readonly ReferenceQuadIndex? _gspoReference;
     private readonly ReferenceQuadIndex? _gposReference;
+    // Minimal-profile index — single GSPO with no graph dimension (ADR-029).
+    // Null for Cognitive/Graph/Reference.
+    private readonly MinimalQuadIndex? _gspoMinimal;
     private readonly TrigramIndex _trigramIndex;
 
     // Non-readonly: ADR-034 Phase 1B-5b allows replacement after a SortedAtomStore-backed
@@ -60,6 +63,10 @@ public sealed class QuadStore : IDisposable
     // in-bulk flag lets AddCurrentBatched / CommitBatch enforce the "must be inside
     // BeginBatch" contract without fabricating a tx id that has no durable meaning.
     private bool _referenceBulkActive;
+    // ADR-029 Minimal profile: same shape as Reference's bulk-active flag — no WAL,
+    // writes go straight into the single GSPO index. CommitBatch is a no-op (no WAL
+    // marker); durability via FlushToDisk at the end of the bulk-load session.
+    private bool _minimalBulkActive;
     // ADR-031 Piece 2: tracks whether anything has actually been written since the
     // last checkpoint. Set by every mutation entry point; reset by CheckpointInternal.
     // Dispose gates the 14-min CollectPredicateStatistics + WAL-checkpoint-marker path
@@ -235,9 +242,13 @@ public sealed class QuadStore : IDisposable
                 break;
 
             case StoreProfile.Minimal:
-                throw new System.NotSupportedException(
-                    "Minimal profile is defined in ADR-029 but not yet dispatched by QuadStore. " +
-                    "Use Cognitive, Graph, or Reference until Minimal-profile work begins.");
+                // ADR-029 Minimal profile: single GSPO index, no graph dimension, no
+                // versioning, no temporal, no WAL. Bulk-load is the session-API entry
+                // (same shape as Reference) — Decision 7 stance applies. Re-add is a
+                // no-op enforced at the B+Tree level. Distinct concrete class
+                // (MinimalQuadIndex, 24 B leaf entries) per the no-behavior-flags rule.
+                _gspoMinimal = new MinimalQuadIndex(gspoPath, _atoms, options.IndexInitialSizeBytes, options.BulkMode);
+                break;
 
             default:
                 throw new System.NotSupportedException(
@@ -650,8 +661,19 @@ public sealed class QuadStore : IDisposable
         _lock.EnterWriteLock();
         try
         {
-            if (_activeBatchTxId >= 0 || _referenceBulkActive)
+            if (_activeBatchTxId >= 0 || _referenceBulkActive || _minimalBulkActive)
                 throw new InvalidOperationException("A batch is already active.");
+
+            // ADR-029 Minimal profile: same shape as Reference but with a single GSPO
+            // index and no graph dimension. No WAL, no sorter (Minimal is mid-scale,
+            // not Wikidata-scale), no SortedAtomBulkBuilder. Writes go straight into
+            // _gspoMinimal via AddRaw on each AddCurrentBatched call; durability comes
+            // from FlushToDisk at the session's end.
+            if (_schema.Profile == StoreProfile.Minimal)
+            {
+                _minimalBulkActive = true;
+                return;
+            }
 
             // ADR-029 Decision 7: Reference allows bulk-load as a programmatic interface
             // but has no WAL. Hold the writer lock and set a flag; all writes go straight
@@ -752,6 +774,13 @@ public sealed class QuadStore : IDisposable
             AddReferenceBulkTriple(subject, predicate, @object, graph);
             return;
         }
+        // Minimal-profile bulk: single GSPO index, no graph. Non-empty graph rejected
+        // at the API boundary — Minimal's schema declares hasGraph=false (ADR-029).
+        if (_schema.Profile == StoreProfile.Minimal)
+        {
+            AddMinimalBulkTriple(subject, predicate, @object, graph);
+            return;
+        }
 
         RequireWriteCapableProfile(nameof(AddBatched));
         if (_activeBatchTxId < 0)
@@ -846,6 +875,37 @@ public sealed class QuadStore : IDisposable
         {
             _gspoReference!.AddRaw(graphId, subjectId, predicateId, objectId);
         }
+    }
+
+    /// <summary>
+    /// Materialize a single Minimal-profile triple inside an active bulk-load batch.
+    /// ADR-029 Minimal: no graph dimension, no WAL, single GSPO index. Non-empty
+    /// graph spans are rejected at the API boundary — Minimal's schema declares
+    /// hasGraph=false; queries against a Minimal store with a graph constraint
+    /// also fail at plan time.
+    /// </summary>
+    private void AddMinimalBulkTriple(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph)
+    {
+        if (!_minimalBulkActive)
+            throw new InvalidOperationException("No active batch. Call BeginBatch() first.");
+        if (!graph.IsEmpty)
+            throw new ProfileCapabilityException(
+                "Minimal profile does not support named graphs (hasGraph=false per ADR-029). " +
+                "Use Cognitive / Graph / Reference if your workload requires multi-graph semantics.");
+
+        // Mutation tracking is irrelevant for Minimal (no WAL, no CheckpointInternal),
+        // but flip the flag so the invariant "pure-query leaves flag false" holds uniformly.
+        _sessionMutated = true;
+
+        var subjectId = _atoms.Intern(subject);
+        var predicateId = _atoms.Intern(predicate);
+        var objectId = _atoms.Intern(@object);
+
+        _gspoMinimal!.AddRaw(subjectId, predicateId, objectId);
     }
 
     /// <summary>
@@ -959,6 +1019,17 @@ public sealed class QuadStore : IDisposable
                 return;
             }
 
+            // Minimal-profile commit: flush the single GSPO index, release lock. No WAL,
+            // no sorter, no trigram (Minimal doesn't index literals — the single-index
+            // simplicity is the point).
+            if (_minimalBulkActive)
+            {
+                _gspoMinimal!.Flush();
+                _minimalBulkActive = false;
+                CheckDiskSpaceAfterWrite();
+                return;
+            }
+
             RequireWriteCapableProfile(nameof(CommitBatch));
             if (_activeBatchTxId < 0)
                 throw new InvalidOperationException("No active batch.");
@@ -1002,6 +1073,16 @@ public sealed class QuadStore : IDisposable
     /// </summary>
     public void RollbackBatch()
     {
+        // Minimal profile rollback: no WAL, no sorter — once AddCurrentBatched writes
+        // a triple, it's already in _gspoMinimal. Per ADR-026's pattern, a mid-bulk
+        // failure means "delete the store and retry"; RollbackBatch just releases the lock.
+        if (_minimalBulkActive)
+        {
+            _minimalBulkActive = false;
+            _lock.ExitWriteLock();
+            return;
+        }
+
         // Reference profile has no WAL — once AddCurrentBatched writes a triple, it is
         // already in the indexes. Per ADR-026, a mid-bulk failure means "delete the store
         // and retry." RollbackBatch here just releases the lock so the caller can do that.
@@ -1076,6 +1157,7 @@ public sealed class QuadStore : IDisposable
         _tgspGraph?.Flush();
         _gspoReference?.Flush();
         _gposReference?.Flush();
+        _gspoMinimal?.Flush();
     }
 
     private void FinalizeSortedAtomBulkIfPresent()
@@ -1309,6 +1391,26 @@ public sealed class QuadStore : IDisposable
         if (_schema.Profile == StoreProfile.Graph)
         {
             RebuildGraphSecondaryIndexes(onProgress);
+            return;
+        }
+
+        // ADR-029 Minimal profile: single GSPO index, no secondaries to rebuild.
+        // Just transition the state to Ready so subsequent queries can route through
+        // the optimal path. Stays under the writer lock for the brief state flip;
+        // mutation tracking is a no-op since Minimal has no checkpoint discipline.
+        if (_schema.Profile == StoreProfile.Minimal)
+        {
+            _lock.EnterWriteLock();
+            try
+            {
+                _indexState = StoreIndexState.Ready;
+                _bulkLoadMode = false;
+                StoreStateFile.Write(_baseDirectory, _indexState);
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
             return;
         }
 
@@ -2286,6 +2388,18 @@ public sealed class QuadStore : IDisposable
                     "which has no temporal dimension. Use QueryCurrent (no explicit time) instead.");
             return QueryGraphCurrent(subject, predicate, @object, graph);
         }
+        if (_schema.Profile == StoreProfile.Minimal)
+        {
+            if (queryType != TemporalQueryType.AsOf)
+                throw new ProfileCapabilityException(
+                    $"Query type {queryType} requires temporal semantics. This store's profile is Minimal, " +
+                    "which has no temporal dimension. Only current-state (AsOf, no explicit time) queries are supported.");
+            if (asOfTime is not null)
+                throw new ProfileCapabilityException(
+                    "Explicit AsOf time-travel requires temporal semantics. This store's profile is Minimal, " +
+                    "which has no temporal dimension. Use QueryCurrent (no explicit time) instead.");
+            return QueryMinimalCurrent(subject, predicate, @object, graph);
+        }
 
         RequireTemporalProfile(nameof(Query));
         // Select optimal index
@@ -2441,6 +2555,8 @@ public sealed class QuadStore : IDisposable
             return QueryReferenceCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
         if (_schema.Profile == StoreProfile.Graph)
             return QueryGraphCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
+        if (_schema.Profile == StoreProfile.Minimal)
+            return QueryMinimalCurrent(subject, predicate, @object, graph, candidateObjectAtomIds);
 
         RequireTemporalProfile(nameof(QueryCurrentWithCandidates));
         var (selectedIndex, indexType) = SelectOptimalIndex(subject, predicate, @object, TemporalQueryType.AsOf);
@@ -2518,6 +2634,32 @@ public sealed class QuadStore : IDisposable
         if (predicateBound && !subjectBound)
             return (_gposReference!, TemporalIndexType.GPOS);
         return (_gspoReference!, TemporalIndexType.GSPO);
+    }
+
+    /// <summary>
+    /// Query entry for Minimal profile. Resolves SPARQL-shaped spans to atom IDs,
+    /// rejects any non-empty graph constraint, queries the single GSPO index, and
+    /// wraps the resulting <see cref="MinimalQuadIndex.MinimalQuadEnumerator"/> in
+    /// a <see cref="TemporalResultEnumerator"/>. ADR-029 Minimal profile.
+    /// </summary>
+    private TemporalResultEnumerator QueryMinimalCurrent(
+        ReadOnlySpan<char> subject,
+        ReadOnlySpan<char> predicate,
+        ReadOnlySpan<char> @object,
+        ReadOnlySpan<char> graph,
+        HashSet<long>? candidateObjectAtomIds = null)
+    {
+        if (!graph.IsEmpty && graph[0] != '?')
+            throw new ProfileCapabilityException(
+                "Minimal profile does not support named-graph queries (hasGraph=false per ADR-029). " +
+                "Drop the graph parameter or use Cognitive / Graph / Reference for multi-graph workloads.");
+
+        var primary = ResolveQueryTerm(subject);
+        var secondary = ResolveQueryTerm(predicate);
+        var tertiary = ResolveQueryTerm(@object);
+
+        var enumerator = _gspoMinimal!.Query(primary, secondary, tertiary);
+        return new TemporalResultEnumerator(enumerator, _atoms, candidateObjectAtomIds);
     }
 
     /// <summary>
@@ -2746,6 +2888,7 @@ public sealed class QuadStore : IDisposable
         _tgspGraph?.Dispose();
         _gspoReference?.Dispose();
         _gposReference?.Dispose();
+        _gspoMinimal?.Dispose();
         _trigramIndex.Dispose();
         _atoms?.Dispose();
         _lock?.Dispose();
@@ -2784,6 +2927,7 @@ public sealed class QuadStore : IDisposable
             _tgspGraph?.Clear();
             _gspoReference?.Clear();
             _gposReference?.Clear();
+            _gspoMinimal?.Clear();
 
             // Clear atom store
             _atoms.Clear();
@@ -2812,7 +2956,7 @@ public sealed class QuadStore : IDisposable
     {
         // Whichever index family this store has, GSPO is always the primary. Sum its
         // count; for WAL bytes, non-versioned profiles have no WAL so report 0.
-        var quadCount = (_gspoIndex?.QuadCount) ?? (_gspoGraph?.QuadCount) ?? (_gspoReference?.QuadCount) ?? 0;
+        var quadCount = (_gspoIndex?.QuadCount) ?? (_gspoGraph?.QuadCount) ?? (_gspoReference?.QuadCount) ?? (_gspoMinimal?.QuadCount) ?? 0;
         var (atomCount, atomBytes, _) = _atoms.GetStatistics();
         var walBytes = _wal?.LogSize ?? 0;
         return (quadCount, atomCount, atomBytes + walBytes);
@@ -2847,8 +2991,10 @@ public struct TemporalResultEnumerator
     private TemporalQuadIndex.TemporalQuadEnumerator _baseEnumerator;
     private ReferenceQuadIndex.ReferenceQuadEnumerator _referenceEnumerator;
     private VersionedQuadIndex.VersionedQuadEnumerator _graphEnumerator;
+    private MinimalQuadIndex.MinimalQuadEnumerator _minimalEnumerator;
     private readonly bool _isReference;
     private readonly bool _isGraph;
+    private readonly bool _isMinimal;
 
     private readonly TemporalIndexType _indexType;
     private readonly IAtomStore _atoms;
@@ -2867,8 +3013,10 @@ public struct TemporalResultEnumerator
         _baseEnumerator = baseEnumerator;
         _referenceEnumerator = default;
         _graphEnumerator = default;
+        _minimalEnumerator = default;
         _isReference = false;
         _isGraph = false;
+        _isMinimal = false;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = null;
@@ -2885,8 +3033,10 @@ public struct TemporalResultEnumerator
         _baseEnumerator = baseEnumerator;
         _referenceEnumerator = default;
         _graphEnumerator = default;
+        _minimalEnumerator = default;
         _isReference = false;
         _isGraph = false;
+        _isMinimal = false;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
@@ -2909,8 +3059,10 @@ public struct TemporalResultEnumerator
         _baseEnumerator = default;
         _referenceEnumerator = referenceEnumerator;
         _graphEnumerator = default;
+        _minimalEnumerator = default;
         _isReference = true;
         _isGraph = false;
+        _isMinimal = false;
         _indexType = indexType;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
@@ -2935,9 +3087,37 @@ public struct TemporalResultEnumerator
         _baseEnumerator = default;
         _referenceEnumerator = default;
         _graphEnumerator = graphEnumerator;
+        _minimalEnumerator = default;
         _isReference = false;
         _isGraph = true;
+        _isMinimal = false;
         _indexType = indexType;
+        _atoms = atoms;
+        _candidateObjectAtomIds = candidateObjectAtomIds;
+        _buffer = null;
+        _bufferOffset = 0;
+    }
+
+    /// <summary>
+    /// Wrap a Minimal-profile enumeration (ADR-029 Minimal). Graph dimension is
+    /// projected as the default graph (empty span); temporal fields are synthesized
+    /// identically to Reference / Graph (no time dimension). Minimal has only a
+    /// single GSPO index, so <see cref="_indexType"/> is always
+    /// <see cref="TemporalIndexType.GSPO"/>.
+    /// </summary>
+    internal TemporalResultEnumerator(
+        MinimalQuadIndex.MinimalQuadEnumerator minimalEnumerator,
+        IAtomStore atoms,
+        HashSet<long>? candidateObjectAtomIds = null)
+    {
+        _baseEnumerator = default;
+        _referenceEnumerator = default;
+        _graphEnumerator = default;
+        _minimalEnumerator = minimalEnumerator;
+        _isReference = false;
+        _isGraph = false;
+        _isMinimal = true;
+        _indexType = TemporalIndexType.GSPO;
         _atoms = atoms;
         _candidateObjectAtomIds = candidateObjectAtomIds;
         _buffer = null;
@@ -2983,6 +3163,20 @@ public struct TemporalResultEnumerator
                     _ => gquad.Tertiary // GSPO, TGSP
                 };
                 if (_candidateObjectAtomIds.Contains(objectAtomId))
+                    return true;
+            }
+            return false;
+        }
+
+        if (_isMinimal)
+        {
+            if (_candidateObjectAtomIds is null)
+                return _minimalEnumerator.MoveNext();
+
+            while (_minimalEnumerator.MoveNext())
+            {
+                // Minimal has only GSPO; Tertiary = object.
+                if (_candidateObjectAtomIds.Contains(_minimalEnumerator.Current.Tertiary))
                     return true;
             }
             return false;
@@ -3039,6 +3233,22 @@ public struct TemporalResultEnumerator
                     DecodeAtomToBuffer(p),
                     DecodeAtomToBuffer(o),
                     // Synthesized temporal fields: Reference has no time dimension.
+                    DateTimeOffset.MinValue,
+                    DateTimeOffset.MaxValue,
+                    DateTimeOffset.MinValue,
+                    false);
+            }
+
+            if (_isMinimal)
+            {
+                // Minimal has only GSPO with no graph dimension. Project graph as
+                // default (empty span); temporal fields are synthesized like Reference.
+                var mkey = _minimalEnumerator.Current;
+                return new ResolvedTemporalQuad(
+                    ReadOnlySpan<char>.Empty,
+                    DecodeAtomToBuffer(mkey.Primary),
+                    DecodeAtomToBuffer(mkey.Secondary),
+                    DecodeAtomToBuffer(mkey.Tertiary),
                     DateTimeOffset.MinValue,
                     DateTimeOffset.MaxValue,
                     DateTimeOffset.MinValue,

@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.67](#1767---2026-05-16)** — released 2026-05-16; ADR-029 Graph profile **Commit 3 of 3** — bulk-load + `RebuildSecondaryIndexes` + CLI integration. ADR-029 status updated: Graph profile **Completed** alongside Cognitive and Reference. Three of four ADR-029 profiles ship; Minimal remains deferred. `mercury --create-store --profile Graph` is the user-visible end-to-end interface. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.68](#1768---2026-05-16)** — released 2026-05-16; **ADR-029 fully closed**. Minimal profile shipped as a single-file slice (`MinimalQuadIndex` + `QuadStore` integration + CLI + 17 tests). All four ADR-029 profiles now operate as distinct concrete index implementations per the no-behavior-flags rule. Entry-size sweep across the matrix: 88 B (Cognitive) → 64 B (Graph) → 32 B (Reference) → 24 B (Minimal). Four release bumps in one day closed the matrix-completion arc. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,60 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.68] - 2026-05-16
+
+**Headline:** ADR-029 fully closed. Minimal profile shipped as the final matrix-completion gesture. All four profiles now operate as distinct concrete index implementations — Cognitive's `TemporalQuadIndex` (88 B entries), Graph's `VersionedQuadIndex` (64 B), Reference's `ReferenceQuadIndex` (32 B), Minimal's `MinimalQuadIndex` (24 B) — per the no-behavior-flags rule (`feedback_no_behavior_flags.md`, 2026-05-16). Four release bumps in one day (1.7.65 / 1.7.66 / 1.7.67 / 1.7.68) closed the matrix.
+
+### Added
+
+- **`MinimalQuadIndex`** (`src/Mercury/Storage/MinimalQuadIndex.cs`, ~530 lines) — B+Tree implementation for the Minimal profile. 24 B leaf entries (Primary + Secondary + Tertiary; no Graph dimension), 32 B internal entries (24 B separator + 8 B child pointer), 681 entries per 16 KB leaf page. Single sort order (P → S → T). File magic `0x4D494E494D414C00` ("MINIMAL\0") — distinct from all other profile magics so cross-profile mismatch is detected at metadata load.
+- **`MinimalKey`** struct (24 B, Pack=1) — three longs (Primary, Secondary, Tertiary). No graph atom ID.
+- **`MinimalQuad`** projection + **`MinimalQuadEnumerator`** (zero-allocation, struct).
+- **`QuadStore._gspoMinimal`** field + constructor dispatch for `StoreProfile.Minimal`.
+- **`_minimalBulkActive`** flag (same shape as `_referenceBulkActive`) — guards the BeginBatch/AddCurrentBatched/CommitBatch lifecycle for Minimal.
+- **`AddMinimalBulkTriple`** — rejects non-empty graph spans at the API boundary with a ProfileCapabilityException; writes via `_gspoMinimal.AddRaw(s, p, o)`.
+- **`QueryMinimalCurrent`** — rejects non-empty graph constraints, queries the single GSPO index, wraps the resulting `MinimalQuadEnumerator` in a `TemporalResultEnumerator`.
+- **`TemporalResultEnumerator` Minimal branch** — fourth backing enumerator (`_minimalEnumerator`) + `_isMinimal` flag, new constructor accepting `MinimalQuadIndex.MinimalQuadEnumerator`. `MoveNext` + `Current` dispatch. Projected `ResolvedTemporalQuad` uses `ReadOnlySpan<char>.Empty` for the graph (Minimal stores no graph dimension); temporal fields synthesized like Reference / Graph.
+- **8 storage-layer tests** in `MinimalQuadIndexTests.cs` (layout invariants, basic add+query, idempotent add, page split at >681 entries, persistence, Clear, specific-tertiary query).
+- **9 E2E tests** in `QuadStoreMinimalProfileTests.cs` (open with persisted schema, batched-add round-trip, idempotent add, named-graph-in-add rejection, named-graph-in-query rejection, direct-Add() rejection, AS_OF rejection, persistence across reopen, RebuildSecondaryIndexes no-op).
+- **`docs/validations/adr-029-minimal-profile-2026-05-16.md`** — validation doc.
+
+### Changed
+
+- **`QuadStore.RebuildSecondaryIndexes`** — Minimal branch: transitions state to Ready and returns (no secondaries to rebuild; Minimal has only GSPO).
+- **`QuadStore.CommitBatch` / `RollbackBatch`** — Minimal branches: no WAL marker, no sorter cleanup, just release the writer lock + flush the single GSPO index on commit.
+- **`QuadStore.Query` + `QueryCurrentWithCandidates`** — Minimal dispatch added; AS_OF / Range queries reject with Minimal-specific messages.
+- **`QuadStoreProfileDispatchTests.Minimal_OpenThrowsNotSupported`** renamed to `Minimal_OpensSuccessfullyWithPersistedSchema` — the throw-assertion retired because Minimal is now dispatched.
+- **`mercury --help`** — `--profile` documentation updated to `<Cognitive|Graph|Reference|Minimal>` with a note that all four ship.
+- **`docs/adrs/mercury/ADR-029-store-profiles.md`** status field updated to reflect Minimal as Completed alongside Graph.
+
+### Validation
+
+- 592 Storage tests green (575 + 17 new for Minimal). Zero regressions across Cognitive / Graph / Reference paths.
+- File-format magic mismatch detection verified at LoadMetadata (cross-profile open fails with `InvalidDataException`).
+
+### Cumulative ADR-029 matrix-completion arc (2026-05-16)
+
+| Version | Slice |
+|---|---|
+| 1.7.65 | Graph commit 1: `VersionedQuadIndex` types + storage tests |
+| 1.7.66 | Graph commit 2: `QuadStore` session-API + query path integration |
+| 1.7.67 | Graph commit 3: bulk-load + `RebuildSecondaryIndexes` + CLI |
+| 1.7.68 | Minimal slice: `MinimalQuadIndex` + `QuadStore` + CLI + tests |
+
+### ADR-029 status summary (post-completion)
+
+| Profile | Concrete index | Entry size | Status |
+|---|---|---:|---|
+| Cognitive | `TemporalQuadIndex` | 88 B | Completed (1.7.27-1.7.30) |
+| Graph | `VersionedQuadIndex` | 64 B | Completed (1.7.65-1.7.67) |
+| Reference | `ReferenceQuadIndex` | 32 B | Completed (1.7.27-1.7.30) |
+| **Minimal** | **`MinimalQuadIndex`** | **24 B** | **Completed (1.7.68, today)** |
+
+### Post-completion refactoring opportunity (deferred)
+
+With all four profiles shipping, the post-implementation analysis the user authorized in the chat ("look for shared behavior; refactor only when straightforward") becomes possible. Candidates worth a separate review pass: `TemporalResultEnumerator`'s four-way flag discriminator and the page-cache/mmap-base setup that repeats across the four index classes. Both are deferred to a future "ADR-029 post-completion refactor" slice; today's commit doesn't touch them.
 
 ## [1.7.67] - 2026-05-16
 

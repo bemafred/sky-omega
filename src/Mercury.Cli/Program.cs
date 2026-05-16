@@ -191,7 +191,7 @@ if (showHelp)
           --convert <in> <out>       Streaming format conversion (no store, exits after)
           --rebuild-indexes          Rebuild secondary indexes, then enter REPL
           --rebuild-mphf             Rebuild MPHF (atoms.mphf + atoms.idx) from sealed SortedAtomStore — recovery after MPHF-only failure
-          --profile <Cognitive|Graph|Reference>   Storage profile at store creation (default: Cognitive). Atom-store implementation is derived from profile (Reference→Sorted, others→Hash) — no separate flag. Minimal is defined in ADR-029 but not yet dispatched.
+          --profile <Cognitive|Graph|Reference|Minimal>   Storage profile at store creation (default: Cognitive). Atom-store implementation is derived from profile (Reference→Sorted, others→Hash) — no separate flag. All four ADR-029 profiles ship as distinct concrete index implementations.
           --min-free-space <GB>      Minimum free disk space (default: 100 for bulk, 1 otherwise)
           --limit <N>                Cap triples added (--bulk-load/--load) or emitted (--convert) at N
           --metrics-out <file>       Append JSONL metrics records (one per progress tick) for convert/load/rebuild
