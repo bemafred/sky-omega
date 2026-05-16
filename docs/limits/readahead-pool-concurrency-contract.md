@@ -1,9 +1,9 @@
 # Limit: readahead-pool concurrency-contract violation
 
-Status:        Resolved (introduced 2026-05-09 in 1.7.52 / Phase 2 B2; resolved 2026-05-10 in 1.7.54)
-Surfaced:      2026-05-10, via external review of [`docs/reviews/sky-omega-latest-version-review-2026-05-10.md`](../reviews/sky-omega-latest-version-review-2026-05-10.md) §5
-Last reviewed: 2026-05-10
-Promotes to:   N/A — resolved by removing the violator and adding a thread-affinity contract guard
+**Status:**        Resolved (introduced 2026-05-09 in 1.7.52 / Phase 2 B2; resolved 2026-05-10 in 1.7.54)
+**Surfaced:**      2026-05-10, via external review of [`docs/reviews/sky-omega-latest-version-review-2026-05-10.md`](../reviews/sky-omega-latest-version-review-2026-05-10.md) §5
+**Last reviewed:** 2026-05-10
+**Promotes to:**   N/A — resolved by removing the violator and adding a thread-affinity contract guard
 
 ## Description
 

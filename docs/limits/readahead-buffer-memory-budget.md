@@ -1,9 +1,9 @@
 # Limit: readahead buffer memory budget (front + back per chunk)
 
-Status:        Promoted to ADR (ADR-040 Accepted 2026-05-16; awaiting Tier 2 engineering)
-Surfaced:      2026-05-10, via external review of [`docs/reviews/sky-omega-latest-version-review-2026-05-10.md`](../reviews/sky-omega-latest-version-review-2026-05-10.md) §7
-Last reviewed: 2026-05-16
-Promoted to:   [ADR-040 — Readahead Memory Adaptive Sizing](../adrs/mercury/ADR-040-readahead-memory-adaptive-sizing.md). Status moved Proposed → Accepted 2026-05-16 with substrate host-portability committed as 1.7.x Tier 2 engineering work before 1.8.0 cognitive-layers entry. Limits entry preserved as the historical record of the characterization that motivated the ADR.
+**Status:**        Resolved (ADR-040 Completed 2026-05-16; Parts 1+4 shipped 1.7.63, Parts 2+3 shipped 1.7.64)
+**Surfaced:**      2026-05-10, via external review of [`docs/reviews/sky-omega-latest-version-review-2026-05-10.md`](../reviews/sky-omega-latest-version-review-2026-05-10.md) §7
+**Last reviewed:** 2026-05-16 (Completed)
+**Promoted to:**   [ADR-040 — Readahead Memory Adaptive Sizing](../adrs/mercury/ADR-040-readahead-memory-adaptive-sizing.md). Proposed 2026-05-10 → Accepted 2026-05-16 (substrate host-portability committed as Tier 2 engineering before 1.8.0) → Completed 2026-05-16 (Parts 1+4 shipped 1.7.63 with `ProcessMemoryProbe`, Parts 2+3 shipped 1.7.64; end-to-end verified on 10M-triple bulk-load). Periodic `ReadAheadFootprintSampleEvent` left as a follow-up enhancement, not blocking. Limits entry preserved as the historical record of the characterization that motivated the ADR.
 
 ## Description
 

@@ -1,9 +1,9 @@
 # Limit: collection element count (BCL int32 cap)
 
-Status:        Resolved (introduced 2026-05-10, resolved same day in 1.7.53)
-Surfaced:      2026-05-10, via cycle 10 Phase 3 production-run crash on 1.7.52 — `OverflowException` in `BBHashBuilder.Build` at chunk-004045 (~4 B atoms)
-Last reviewed: 2026-05-10
-Promotes to:   N/A — resolved via `SkyOmega.Bcl.Collections.{ChunkedList,ChunkedArray}<T>` substrate
+**Status:**        Resolved (introduced 2026-05-10, resolved same day in 1.7.53)
+**Surfaced:**      2026-05-10, via cycle 10 Phase 3 production-run crash on 1.7.52 — `OverflowException` in `BBHashBuilder.Build` at chunk-004045 (~4 B atoms)
+**Last reviewed:** 2026-05-10
+**Promotes to:**   N/A — resolved via `SkyOmega.Bcl.Collections.{ChunkedList,ChunkedArray}<T>` substrate
 
 ## Description
 
