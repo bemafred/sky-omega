@@ -1,9 +1,9 @@
 # Limit: Cognitive profile validation drought
 
-**Status:**        Triggered
+**Status:**        Resolved (cycle 10 Phase 0, 2026-05-09)
 **Surfaced:**      2026-04-30, via the public-claims sweep prompted by `memos/2026-04-30-latent-assumptions-from-qlever-comparison.md`. ADR-008 makes profile-attribution mandatory for validations; the sweep revealed that all measured validations from 2026-04-19 onward exercise the Reference profile. The Cognitive profile's last measured wall-clock at 1B was 2026-04-19 (`docs/validations/full-pipeline-gradient-2026-04-19.md`), which predates ADR-031 (Dispose gate, 1.7.32), ADR-032 (radix external sort, 1.7.39+), ADR-033 (bulk-load radix, 1.7.43), ADR-034 (SortedAtomStore — Reference-only), ADR-035 Phase 7a (metrics), ADR-036 Phase 7b (bz2 streaming), and the 1.7.46/1.7.47 property-path hardening.
-**Last reviewed:** 2026-04-30
-**Promotes to:**   ADR for a Cognitive validation gradient run, OR a small workgroup of validation runs at 1M / 10M / 100M Cognitive scales against the current 1.7.47 substrate. Trigger: any external comparison conversation that touches Cognitive (write-heavy, bitemporal-dense workloads), OR any 2.0 cognitive-component readiness review (Lucy/James/Sky entry implies Cognitive performance must be characterized).
+**Last reviewed:** 2026-05-09 (closed by cycle 10 Phase 0)
+**Resolved by:**   [docs/validations/cycle10-phase0-cognitive-gradient-2026-05-09.md](../validations/cycle10-phase0-cognitive-gradient-2026-05-09.md) — Cognitive bulk-load gradient at 1 M / 10 M / 100 M against `latest-all.ttl.bz2` on 1.7.50 substrate. All three falsification triggers cleared (wall-clock no regression vs 1.7.22; max probe distance = 4 at 25 M atoms; correctness smoke pass). Cognitive throughput rises with scale — 256 K/sec at 100 M vs Reference Sorted's ~350 K/sec at the same scale (~30 % overhead attributable to 88 B vs 32 B entries).
 
 ## Description
 
