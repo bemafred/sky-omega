@@ -805,6 +805,45 @@ internal static class SortedAtomStoreExternalBuilder
     private static void BuildMphfFiles(string baseFilePath, long atomCount, Abstractions.IObservabilityListener? listener)
     {
         var mphfStart = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        // ADR-042 Part 5: host-adaptive memory check. After Parts 1+2+3+4 the projected
+        // peak working set for MPHF construction at N atoms is approximately
+        // N × 4 bytes — dominated by the `bumped` ChunkedList at level 0→1 (~0.39 × N × 8 B)
+        // plus the level-0 BitVectors (~γ × N / 8 B × 3). At N=4 B atoms that's
+        // ~15 GB. Probe the host before kicking off the build; if the projection
+        // exceeds the fraction-of-available threshold, emit a memory-budget event
+        // (informational) so the operator knows MPHF construction is about to consume
+        // a substantial fraction of host RAM. Substrate proceeds regardless —
+        // discipline allows the operator to make the call. Fraction tunable via
+        // MERCURY_MPHF_MEMORY_FRACTION env var (default 0.8).
+        if (listener is not null)
+        {
+            double memoryFraction = 0.8;
+            var memFracEnv = Environment.GetEnvironmentVariable("MERCURY_MPHF_MEMORY_FRACTION");
+            if (!string.IsNullOrEmpty(memFracEnv) &&
+                double.TryParse(memFracEnv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedFrac) &&
+                parsedFrac > 0 && parsedFrac <= 1.0)
+            {
+                memoryFraction = parsedFrac;
+            }
+            long availableBytes = SkyOmega.Mercury.Runtime.ProcessMemoryProbe.AvailablePhysicalBytes();
+            long projectedPeakBytes = atomCount * 4L;
+            long maxAllowedBytes = (long)(availableBytes * memoryFraction);
+            bool withinBudget = projectedPeakBytes <= maxAllowedBytes;
+            string decisionLog = withinBudget
+                ? $"ok: projected={projectedPeakBytes / (1024 * 1024)}MB allowed={maxAllowedBytes / (1024 * 1024)}MB"
+                : $"warn: projected={projectedPeakBytes / (1024 * 1024)}MB exceeds allowed={maxAllowedBytes / (1024 * 1024)}MB ({100.0 * projectedPeakBytes / availableBytes:F1}% of available); proceeding";
+            listener.OnMphfMemoryBudget(new Abstractions.MphfMemoryBudgetEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                AtomCount: atomCount,
+                ProjectedPeakBytes: projectedPeakBytes,
+                AvailableMemoryBytes: availableBytes,
+                MemoryFraction: memoryFraction,
+                MaxAllowedBytes: maxAllowedBytes,
+                WithinBudget: withinBudget,
+                DecisionLog: decisionLog));
+        }
+
         // Open the just-written SortedAtomStore to iterate atoms in sorted order.
         using var atoms = new SortedAtomStore(baseFilePath);
         if (atoms.AtomCount != atomCount)
@@ -957,11 +996,11 @@ internal static class SortedAtomStoreExternalBuilder
             // EnsureStage with 1 byte sufficient to detect EOF (we need at least the
             // prefix_len byte). If nothing reads, we're done.
             EnsureStage(1);
-            if (_stageLen - _stagePos == 0) return false;
+            if (_stageLen - _stagePos == 0) { DisposeReadAheadOnExhaustion(); return false; }
 
             // Ensure room for the worst-case header (1 + 9 + 9 = 19; round up).
             EnsureStage(20);
-            if (_stageLen - _stagePos == 0) return false;
+            if (_stageLen - _stagePos == 0) { DisposeReadAheadOnExhaustion(); return false; }
 
             int prefixLen = _stage[_stagePos++];
             ulong inputIdxRaw = ReadVarUInt64(_stage.AsSpan(_stagePos, _stageLen - _stagePos), out int idxBytes);
@@ -1054,6 +1093,19 @@ internal static class SortedAtomStoreExternalBuilder
             _prevBytes = bytes;
             Current = (bytes, (long)inputIdxRaw);
             return true;
+        }
+
+        // ADR-040 Part 3: eager per-chunk teardown. Called from MoveNextReadAhead when
+        // the chunk's stage buffer drains past EOF — at that point the readahead buffer's
+        // per-side allocations (front + back, up to 2 × bufferSize each) are no longer
+        // needed. Disposing here frees them within the merge loop rather than holding
+        // them resident until the outer end-of-merge `using` cleanup. Significant on
+        // long-skewed merges where some chunks exhaust hours before others.
+        // Dispose is idempotent (ChunkReadAheadBuffer.Dispose guards on _disposed),
+        // so the outer Dispose call still works correctly.
+        private void DisposeReadAheadOnExhaustion()
+        {
+            _readahead?.Dispose();
         }
 
         public void Dispose()

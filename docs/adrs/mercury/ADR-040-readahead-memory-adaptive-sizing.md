@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-16 (Proposed 2026-05-10; revised 2026-05-11 with measured MPHF evidence + scope clarification; Accepted 2026-05-16 — substrate host-portability committed as 1.7.x Tier 2 engineering work before 1.8.0 cognitive-layers entry)
+**Status:** Completed — 2026-05-16 (Proposed 2026-05-10; revised 2026-05-11 with measured MPHF evidence + scope clarification; Accepted 2026-05-16; Completed 2026-05-16 — Parts 1+4 shipped 1.7.63 with `ProcessMemoryProbe`, Parts 2+3 shipped 1.7.64; end-to-end verified on 10M-triple bulk-load; periodic `ReadAheadFootprintSampleEvent` left as a follow-up enhancement, not blocking)
 
 ## Scope
 

@@ -63,7 +63,13 @@ internal sealed class ChunkReadAheadBuffer : IDisposable
     public const int MinBufferSize = 256 * 1024;
 
     private byte[] _front;
+    // ADR-040 Part 2: `_back` is lazily allocated on first FillBack call. Until then,
+    // it holds the Array.Empty<byte>() sentinel (zero-length, no per-side cost). For
+    // chunks that consume their _front content entirely before any refill is needed
+    // (small chunks, or chunks at the tail of a long-skewed merge), the second
+    // bufferSize-byte allocation is never made.
     private byte[] _back;
+    private readonly int _backCapacity;
     private int _frontPos;
     private int _frontLen;
     private int _backLen;
@@ -92,7 +98,11 @@ internal sealed class ChunkReadAheadBuffer : IDisposable
     {
         if (bufferSize < 1024) throw new ArgumentOutOfRangeException(nameof(bufferSize), "bufferSize must be at least 1 KB");
         _front = new byte[bufferSize];
-        _back = new byte[bufferSize];
+        // ADR-040 Part 2: _back is lazy. Hold the empty sentinel until FillBack
+        // allocates the real buffer on first refill. Pre-refill memory footprint per
+        // chunk is exactly bufferSize (front only) instead of 2×bufferSize.
+        _back = Array.Empty<byte>();
+        _backCapacity = bufferSize;
         _fileLength = fileLength;
         _onBackEmpty = onBackEmpty;
         // Initial state: front is empty (consumer must wait for first fill);
@@ -163,7 +173,10 @@ internal sealed class ChunkReadAheadBuffer : IDisposable
                 return;
             }
             if (fs.Position != _filePosition) fs.Position = _filePosition;
-            int n = fs.Read(_back, 0, _back.Length);
+            // ADR-040 Part 2: lazy back-buffer allocation. First refill replaces the
+            // empty sentinel with the real allocation; subsequent refills reuse it.
+            if (_back.Length == 0) _back = new byte[_backCapacity];
+            int n = fs.Read(_back, 0, _backCapacity);
             _backLen = n;
             _filePosition += n;
             if (n == 0 || _filePosition >= _fileLength) _eof = true;
@@ -190,5 +203,12 @@ internal sealed class ChunkReadAheadBuffer : IDisposable
         try { _backFilled.Release(); } catch { }
         _backEmpty.Dispose();
         _backFilled.Dispose();
+        // ADR-040 Part 3: drop the per-side bufferSize allocations so GC can reclaim
+        // them as soon as the disposing ChunkReader's exhausted reference is released.
+        // Pre-1.7.64 the byte[] fields stayed referenced until the whole reader was
+        // collected at end-of-merge; on a long-skewed merge that held ~8 MB × N chunks
+        // alive long past their use. Replace with the empty sentinel (no allocation).
+        _front = Array.Empty<byte>();
+        _back = Array.Empty<byte>();
     }
 }

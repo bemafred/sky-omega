@@ -557,6 +557,24 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnMphfMemoryBudget(in MphfMemoryBudgetEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "mphf_memory_budget", "event", ev.Timestamp);
+            json.WriteNumber("atom_count", ev.AtomCount);
+            json.WriteNumber("projected_peak_bytes", ev.ProjectedPeakBytes);
+            json.WriteNumber("available_memory_bytes", ev.AvailableMemoryBytes);
+            json.WriteNumber("memory_fraction", ev.MemoryFraction);
+            json.WriteNumber("max_allowed_bytes", ev.MaxAllowedBytes);
+            json.WriteBoolean("within_budget", ev.WithinBudget);
+            json.WriteString("decision_log", ev.DecisionLog);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp)
     {
         using var buffer = new MemoryStream();

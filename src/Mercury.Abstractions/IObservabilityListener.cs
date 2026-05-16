@@ -138,6 +138,14 @@ public interface IObservabilityListener
     /// </summary>
     void OnReadAheadBudget(in ReadAheadBudgetEvent ev) { }
 
+    /// <summary>
+    /// ADR-042 Part 5: MPHF construction memory-budget check emitted at
+    /// <c>BuildMphfFiles</c> start. Compares projected peak (≈ AtomCount × 4 bytes)
+    /// against ProcessMemoryProbe.AvailablePhysicalBytes × MemoryFraction.
+    /// Informational only — substrate proceeds regardless of <c>WithinBudget</c>.
+    /// </summary>
+    void OnMphfMemoryBudget(in MphfMemoryBudgetEvent ev) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 

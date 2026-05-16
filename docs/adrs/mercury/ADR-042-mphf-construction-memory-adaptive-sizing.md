@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-16 (Proposed 2026-05-11; Accepted 2026-05-16 — substrate host-portability at the MPHF construction phase committed as 1.7.x Tier 2 engineering work before 1.8.0 cognitive-layers entry)
+**Status:** Completed — 2026-05-16 (Proposed 2026-05-11; Accepted 2026-05-16; Completed 2026-05-16 — Parts 1+4 shipped 1.7.60, Parts 2+3 shipped 1.7.62, Part 5 host-adaptive validation shipped 1.7.64 via shared `ProcessMemoryProbe`; projected peak RSS at 4 B atoms reduced from ~100 GB to ~15 GB; output byte-equivalence preserved at every slice)
 
 ## Context
 

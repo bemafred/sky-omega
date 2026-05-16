@@ -62,3 +62,23 @@ public readonly record struct MphfBuildCompletedEvent(
     long IdxBytes,
     TimeSpan BuildDuration,
     TimeSpan TotalDuration);
+
+/// <summary>
+/// ADR-042 Part 5: one-shot memory-budget check emitted at <c>BuildMphfFiles</c> start.
+/// Compares the projected MPHF-phase peak working set (≈ <c>AtomCount × 4 bytes</c>
+/// after ADR-042 Parts 1+2+3+4 substrate work) against
+/// <c>ProcessMemoryProbe.AvailablePhysicalBytes() × MemoryFraction</c> (default 0.8).
+/// <c>WithinBudget</c> is true on every healthy host; false signals the operator that
+/// MPHF construction is about to consume a substantial fraction of host RAM and may
+/// trigger swap pressure. Substrate proceeds regardless — discipline allows the
+/// operator to make the call.
+/// </summary>
+public readonly record struct MphfMemoryBudgetEvent(
+    DateTimeOffset Timestamp,
+    long AtomCount,
+    long ProjectedPeakBytes,
+    long AvailableMemoryBytes,
+    double MemoryFraction,
+    long MaxAllowedBytes,
+    bool WithinBudget,
+    string DecisionLog);

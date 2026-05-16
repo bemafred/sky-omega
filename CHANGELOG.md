@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.63](#1763---2026-05-16)** — released 2026-05-16; ADR-040 Parts 1 + 4 + shared `ProcessMemoryProbe` land — **adaptive readahead-buffer sizing** at `MergeAndWrite` start. Substrate now reads `ProcessMemoryProbe.AvailablePhysicalBytes()` and halves the per-chunk readahead buffer from 4 MiB → 256 KiB to fit a budget fraction (default 25 %) of available host memory; if the minimum still won't fit, falls back to synchronous direct-fs reads. Decision emitted as `merge_readahead_budget` JSONL event. End-to-end verified on a 10 M-triple run: 2 chunks, 102 GiB available, 25.6 GiB budget, accepts default 4 MiB. Stacks on 1.7.62's ADR-042 Parts 2+3. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.64](#1764---2026-05-16)** — released 2026-05-16; ADR-040 Parts 2 + 3 + ADR-042 Part 5 land — **lazy back-buffer allocation** + **eager per-chunk teardown** on exhaustion + **MPHF memory-budget check** at `BuildMphfFiles` start. With these shipping, both ADR-040 and ADR-042 move Accepted → **Completed** — the substrate is now host-portable across both the merge-phase readahead (~31 GiB pre-ADR-040 → adaptive) and the MPHF-phase construction (~100 GB pre-ADR-042 → ~15 GB) at the substrate's 4 B-atom production scale. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,47 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.64] - 2026-05-16
+
+**Headline:** Closes the ADR-040 and ADR-042 substrate-host-portability arc. Three slices in one release: ADR-040 Part 2 (lazy back-buffer allocation), ADR-040 Part 3 (eager per-chunk teardown), ADR-042 Part 5 (host-adaptive MPHF memory-budget check). Both ADRs move Accepted → **Completed**.
+
+### Added
+
+- **`MphfMemoryBudgetEvent`** — one-shot event emitted at `BuildMphfFiles` start. Fields: `AtomCount`, `ProjectedPeakBytes`, `AvailableMemoryBytes`, `MemoryFraction`, `MaxAllowedBytes`, `WithinBudget`, `DecisionLog`. JSONL `phase: "mphf_memory_budget"`. Informational only — substrate proceeds regardless of `WithinBudget` (operator discipline).
+- **`IObservabilityListener.OnMphfMemoryBudget`** — no-op default; `JsonlMetricsListener` serializes to JSONL.
+- **`ChunkReadAheadBuffer._backCapacity`** field — the intended bufferSize for `_back` when lazily allocated.
+- **`ChunkReader.DisposeReadAheadOnExhaustion`** — private helper called from `MoveNextReadAhead` when the chunk drains past EOF.
+
+### Changed
+
+- **`ChunkReadAheadBuffer._back` lazy allocation (ADR-040 Part 2)**. The back-buffer field is initially `Array.Empty<byte>()` (zero-byte sentinel, no per-side cost); `FillBack` replaces it with a real allocation on first refill. For chunks consumed entirely from `_front` before any refill is needed, the second `bufferSize`-byte allocation is never made. Pre-1.7.64 the constructor allocated both `_front` and `_back` upfront unconditionally.
+- **`ChunkReadAheadBuffer.Dispose` eager teardown (ADR-040 Part 3)**. Dispose now nulls the `_front` and `_back` references (replacing with the empty sentinel) so GC can reclaim the bufferSize-byte allocations as soon as the disposing ChunkReader's exhausted reference is released. Pre-1.7.64 the byte[] fields stayed referenced until the whole reader was collected at end-of-merge; on a long-skewed merge that held ~8 MB × N chunks alive long past their use.
+- **`ChunkReader.MoveNextReadAhead` invokes `DisposeReadAheadOnExhaustion`** when the chunk's stage buffer drains past EOF. The buffer's per-side allocations are freed within the merge loop rather than held resident until the outer end-of-merge `using` cleanup. `Dispose` is idempotent so the outer call still works correctly.
+- **`SortedAtomStoreExternalBuilder.BuildMphfFiles` runs a host-adaptive memory check at start** (ADR-042 Part 5). Computes `projectedPeakBytes = atomCount × 4` (the ADR-042 Parts 1+2+3+4 substrate's projection) and compares against `ProcessMemoryProbe.AvailablePhysicalBytes() × MemoryFraction` (default 0.8, overridable via `MERCURY_MPHF_MEMORY_FRACTION` env var). Emits `MphfMemoryBudgetEvent` regardless; non-blocking — substrate proceeds.
+
+### Validation
+
+- 550 Storage tests green.
+- End-to-end verified on a 10M-triple bulk-load: both `merge_readahead_budget` AND `mphf_memory_budget` JSONL records emit correctly with the expected fields. 4,443,401 atoms produced, projected 16 MB peak vs 83 GB allowed → "ok: projected=16MB allowed=83483MB" decision.
+
+### ADR-040 cumulative impact (Parts 1+2+3+4 across 1.7.63 → 1.7.64)
+
+| Mechanism | Pre-ADR-040 | Post-ADR-040 |
+|---|---|---|
+| Per-side readahead buffer | 4 MiB hardcoded | adaptive 256 KiB ↔ 4 MiB via `ProcessMemoryProbe` × 0.25 budget |
+| Back-buffer allocation timing | upfront in ctor (always 2× allocations) | lazy in `FillBack` (1× if chunk consumed before refill) |
+| Buffer release on chunk exhaustion | held until end-of-merge `Dispose` | per-chunk eager `Dispose` in `MoveNextReadAhead` |
+| Host-portability | 128 GB target host only (~31 GiB eager allocation at 21.3 B Wikidata) | adaptive: scales to fit any host within budget fraction |
+
+### ADR-042 status: Completed
+
+With Part 5 shipping, ADR-042 moves Accepted → Completed. The cumulative substrate impact from Parts 1+2+3+4+5 (1.7.60 → 1.7.64):
+
+- In-memory peak at 4 B atoms: ~100 GB → **~15 GB** (Parts 1+3 eliminate level-0 `remaining` + `keyPositions`; Part 2 eliminates persistent ChunkedArray translation).
+- GC churn during MPHF: ~770 GB → **0** (Part 4 Span-based GetKey API).
+- Persistent translation: 32 GB anonymous-mem ChunkedArray → **16 GB mmap'd `atoms.idx`** (Part 2; kernel-paged, evictable under memory pressure).
+- Host-adaptive runtime check: Part 5 emits `mphf_memory_budget` event with `WithinBudget` flag at every build start.
 
 ## [1.7.63] - 2026-05-16
 
