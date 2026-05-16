@@ -1,8 +1,8 @@
 # Limit: observability discipline is reactive, not systematic
 
-**Status:**        Triggered (cycle 9 GSPO drain — third recurrence of the same pattern)
+**Status:**        Triggered — promotes to James (Sky Omega 2.0)
 **Surfaced:**      2026-05-07, via cycle 9 GSPO drain phase running silent for 40+ min after `merge_completed`. Sibling to existing [`observability-coverage-gap.md`](observability-coverage-gap.md), but the angle is different — this entry is about the *discipline pattern*, not any specific gap.
-**Last reviewed:** 2026-05-07
+**Last reviewed:** 2026-05-16 — reframed: this is a category error, not a procedural gap. "Remember to audit periodically" asks human (or Claude Code) attention to be systematic, but attention is fundamentally reactive. The cure is a cognitive loop orchestrator (James, Sky Omega 2.0) that fires periodic substrate audits as behavior, not as discipline. Empirically observed across the matrix-completion arc: every time the discipline pattern repeated, it was caught reactively (today's drought-discrepancy = fourth instance). Promotes to a Sky Omega 2.0 architectural prerequisite, not a near-term procedural fix.
 
 ## Description
 
