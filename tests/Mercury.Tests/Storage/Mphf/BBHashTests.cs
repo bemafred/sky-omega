@@ -390,6 +390,71 @@ public class BBHashTests : IDisposable
     }
 
     [Fact]
+    public void Build_SinkApi_WritesSameEntriesAsChunkedArrayPath()
+    {
+        // ADR-042 Part 2: the new Build(keyCount, maxKeyByteLength, getKey, sink, listener)
+        // overload writes translation entries to a caller-provided sink instead of
+        // allocating an internal ChunkedArray. Verify the recorded entries match the
+        // legacy BuildResult.Translation exactly on the same key set + same seed.
+        const int N = 3000;
+        var keys = new byte[N + 1][];
+        for (int i = 1; i <= N; i++)
+            keys[i] = Encoding.UTF8.GetBytes($"http://wikidata.org/entity/Q{i:D9}");
+
+        // Legacy path → BuildResult.Translation
+        var builderLegacy = new BBHashBuilder();
+        var resultLegacy = builderLegacy.Build(N, idx => keys[idx]);
+
+        // Sink-based path → recording sink captures the same writes
+        var recordingSink = new RecordingMphfSink(N);
+        var builderSink = new BBHashBuilder();
+        var mphfSink = builderSink.Build(N, maxKeyByteLength: 64,
+            (long idx, Span<byte> scratch) =>
+            {
+                keys[idx].AsSpan().CopyTo(scratch);
+                return scratch.Slice(0, keys[idx].Length);
+            },
+            recordingSink);
+
+        // Same MPHF structure
+        Assert.Equal(resultLegacy.Mphf.NumKeys, mphfSink.NumKeys);
+        Assert.Equal(resultLegacy.Mphf.Levels.Length, mphfSink.Levels.Length);
+
+        // Same translation entries (every mphfPos → same inputIdx)
+        for (long pos = 0; pos < N; pos++)
+        {
+            Assert.True(recordingSink.WasWritten(pos), $"sink missed entry at mphfPos={pos}");
+            Assert.Equal(resultLegacy.Translation[pos], recordingSink.Get(pos));
+        }
+
+        // Same per-key lookup behavior
+        for (int i = 1; i <= N; i++)
+        {
+            long legacyPos = resultLegacy.Mphf.Lookup(keys[i]);
+            long sinkPos = mphfSink.Lookup(keys[i]);
+            Assert.Equal(legacyPos, sinkPos);
+        }
+    }
+
+    private sealed class RecordingMphfSink : IMphfTranslationSink
+    {
+        private readonly long[] _entries;
+        private readonly bool[] _written;
+        public RecordingMphfSink(long capacity)
+        {
+            _entries = new long[capacity];
+            _written = new bool[capacity];
+        }
+        public void Set(long mphfPos, long inputIdx)
+        {
+            _entries[mphfPos] = inputIdx;
+            _written[mphfPos] = true;
+        }
+        public bool WasWritten(long mphfPos) => _written[mphfPos];
+        public long Get(long mphfPos) => _entries[mphfPos];
+    }
+
+    [Fact]
     public void Build_SpanApi_ScratchBufferReuseDoesNotCorruptHash()
     {
         // Defensive: the Span GetKey delegate returns slices of the caller's scratch

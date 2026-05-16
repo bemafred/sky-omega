@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.61](#1761---2026-05-16)** — released 2026-05-16; pre-push robustness audit on 1.7.60 caught a too-small scratch buffer (4 KB) for Mercury's 64 KB parser-bounded atom maximum. 1.7.61 bumps the scratch to 64 KB + adds a per-call fallback for any (in-practice impossible) outlier. Stacks on 1.7.60's ADR-042 Parts 1+4. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.62](#1762---2026-05-16)** — released 2026-05-16; ADR-042 Parts 2 + 3 land — **re-hash second pass** (eliminates the 32 GB-per-level `keyPositions` ChunkedArray; trades ~12 s extra CPU for 32 GB level-0 RAM) + **mmap-backed streaming `atoms.idx`** (eliminates the 32 GB persistent in-memory ChunkedArray translation; kernel page cache handles working-set residency). Stacks on 1.7.61's defensive scratch sizing and 1.7.60's Parts 1+4. With all four ADR-042 substrate parts shipped, projected peak MPHF-phase RSS at 4 B atoms drops from ~100 GB to ~15 GB (BitVectors + bumped transient). Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,57 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.62] - 2026-05-16
+
+**Headline:** ADR-042 Parts 2 + 3 — second slice of MPHF construction memory adaptive sizing. Both algorithmic restructures preserve byte-equivalent output (level-by-level placement and translation entries match pre-1.7.62 builds exactly) while eliminating the two largest in-memory allocations of MPHF construction.
+
+Part 3 — Re-hash second pass:
+- Pre-1.7.62 the per-level build allocated a `keyPositions = new ChunkedArray<long>(remainingCount)` to store hashed positions across three passes (collide detect → place → translate). At level 0 with N=4B keys this allocation alone was 32 GB.
+- 1.7.62 shape: two passes over keys + one linear scan of bit vectors. Pass 1 populates `seen`+`collided` bit vectors only (no positions stored); the placement bit-vector `bv` is derived via bit-vector arithmetic (`bv[w] = seen[w] & ~collided[w]`) in one O(bitCount/64) scan; Pass 2 re-hashes each key and writes its translation entry or bumps it.
+- Re-hash cost: ~3 ns/key/pass × N = ~12 s extra CPU at level 0 for 4B keys. Negligible vs the ~50 min level-0 wall-clock.
+
+Part 2 — Mmap-backed streaming translation:
+- Pre-1.7.62 the build allocated a `translation = new ChunkedArray<long>(keyCount)` (32 GB persistent at 4B atoms × 8 bytes/long) and returned it as `BuildResult.Translation`; `SortedAtomStoreExternalBuilder.BuildMphfFiles` then wrote it to `atoms.idx` via `MphfTranslationTable.WriteTo` in 1 MB batches.
+- 1.7.62 production path: `MphfTranslationTable.CreateForWriting(path, atomCount)` pre-allocates the full `atoms.idx` file (16 byte header + 4 × N bytes data) via `FileStream.SetLength`, mmaps it as ReadWrite, and exposes an `IMphfTranslationSink`. The new `BBHashBuilder.Build(keyCount, maxKeyByteLength, getKey, sink, listener)` overload writes each `(mphf_pos, input_idx)` pair directly to the mmap as positions are assigned. The 32 GB anonymous-memory ChunkedArray is gone; the kernel page cache handles working-set residency under memory pressure.
+- File format is unchanged. The pre-1.7.62 `MphfTranslationTable.WriteTo(path, ChunkedArray<long>)` is preserved for tests that use the BuildResult-returning Build overload.
+
+### Added
+
+- **`IMphfTranslationSink`** internal interface in `BBHashBuilder.cs`: pluggable translation-entry receiver, declared once per `(mphf_pos, input_idx)` pair.
+- **`BBHashBuilder.Build(long, int, GetKeyDelegate, IMphfTranslationSink, IObservabilityListener?)`** — Span + sink overload that writes to a caller-provided sink and returns just `BBHash` (no `BuildResult.Translation`).
+- **`MphfTranslationTable.CreateForWriting(string path, long entryCount)`** — pre-allocates the `atoms.idx` file at full size, mmaps it for ReadWrite, and returns an `MphfTranslationWriter`.
+- **`MphfTranslationWriter`** — `IDisposable` wrapper exposing the mmap'd view as an `IMphfTranslationSink` via `AsSink()`. Dispose flushes the mmap.
+- One new validation test in `BBHashTests.cs` — `Build_SinkApi_WritesSameEntriesAsChunkedArrayPath` pins that the sink overload writes the same translation entries as the legacy `BuildResult.Translation` path on the same key set + same seed.
+
+### Changed
+
+- **`BBHashBuilder.Build` internals** restructured: extracted private `BuildToSink(...)` worker that takes an `IMphfTranslationSink`; the existing `BuildResult`-returning overload now creates an internal `ChunkedArraySink(translation)` and delegates to `BuildToSink`. Behavior is byte-equivalent to pre-1.7.62 from the caller's perspective.
+- **`SortedAtomStoreExternalBuilder.BuildMphfFiles`** switched to the sink-based path: creates `atoms.idx` via `MphfTranslationTable.CreateForWriting` before calling `BBHashBuilder.Build` with the writer's sink. No in-memory ChunkedArray translation; no separate `WriteTo` step after Build.
+
+### Validation
+
+- 16 BBHash/Mphf tests green (15 pre-existing + 1 new sink-based test).
+- 547 Storage tests green.
+- Output byte-equivalence preserved via the sink-vs-BuildResult equivalence test.
+
+### ADR-042 cumulative impact (Parts 1 + 2 + 3 + 4 shipped 1.7.60 → 1.7.62)
+
+Projected peak MPHF-phase RSS at 4 B atoms:
+
+| Structure | pre-ADR-042 | post-ADR-042 |
+|---|---:|---:|
+| `remaining = ChunkedList<long>` (level 0 input) | 32 GB | 0 (range iterator) |
+| `translation = ChunkedArray<long>` (persistent) | 32 GB | 0 (mmap'd `atoms.idx`) |
+| `keyPositions = ChunkedArray<long>` (per-level peak) | 32 GB | 0 (re-hash) |
+| Per-call `byte[]` allocations from `GetAtomSpan().ToArray()` | ~770 GB GC churn | 0 (Span API + 64 KB scratch) |
+| BitVectors at level 0 (γ=2.0, ~bitCount/8 × 3) | ~3 GB | ~3 GB |
+| `bumped` (level 0 → level 1 transient) | ~12 GB | ~12 GB |
+| **Total in-memory peak** | **~100 GB** | **~15 GB** |
+
+The `atoms.idx` file (16 GB on disk at 4B atoms) is mmap-backed — pages occupy RAM only when accessed. Under memory pressure the kernel can reclaim them.
+
+Part 5 (`ProcessMemoryProbe` + host-adaptive validation) is shared infrastructure with ADR-040 and is queued for the ADR-040 implementation slice.
 
 ## [1.7.61] - 2026-05-16
 

@@ -760,27 +760,38 @@ internal static class SortedAtomStoreExternalBuilder
         // (16K chars × max 4 bytes/char UTF-8 = 65,536 bytes). The lambda has a
         // defensive fallback for any atom that somehow exceeds this — span.ToArray()
         // is allocated only for the (in-practice impossible) outlier case.
+        //
+        // ADR-042 Part 2: mmap-backed streaming translation. Pre-1.7.62, BuildMphfFiles
+        // received a 32 GB in-memory ChunkedArray<long> back from Build and then wrote
+        // it to atoms.idx via MphfTranslationTable.WriteTo. The Part 2 path creates
+        // atoms.idx at full size up front, mmaps it for write, and lets BBHashBuilder
+        // write each translation entry directly into the file as positions are
+        // assigned. No 32 GB in-memory allocation; the kernel's page cache handles
+        // working-set residency.
         const int ScratchSize = 64 * 1024;
-        var result = builder.Build(atomCount, maxKeyByteLength: ScratchSize,
-            (long sortedPos, Span<byte> scratch) =>
-            {
-                var span = atoms.GetAtomSpan(sortedPos);
-                if (span.Length <= scratch.Length)
-                {
-                    span.CopyTo(scratch);
-                    return (ReadOnlySpan<byte>)scratch.Slice(0, span.Length);
-                }
-                // Outlier path: atom exceeds the 64 KB scratch. Fall back to per-call
-                // allocation. Not expected on any practical RDF workload; the parser
-                // chokes well below this limit. Defensive belt-and-braces.
-                return span.ToArray();
-            }, listener);
-        var mphfBuildDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
-
         var mphfPath = baseFilePath + ".mphf";
         var idxPath = baseFilePath + ".idx";
-        result.Mphf.WriteTo(mphfPath);
-        Mphf.MphfTranslationTable.WriteTo(idxPath, result.Translation);
+
+        Mphf.BBHash mphf;
+        using (var writer = Mphf.MphfTranslationTable.CreateForWriting(idxPath, atomCount))
+        {
+            mphf = builder.Build(atomCount, maxKeyByteLength: ScratchSize,
+                (long sortedPos, Span<byte> scratch) =>
+                {
+                    var span = atoms.GetAtomSpan(sortedPos);
+                    if (span.Length <= scratch.Length)
+                    {
+                        span.CopyTo(scratch);
+                        return (ReadOnlySpan<byte>)scratch.Slice(0, span.Length);
+                    }
+                    return span.ToArray();
+                },
+                writer.AsSink(),
+                listener);
+        }   // writer.Dispose() flushes the mmap and releases the file handle
+        var mphfBuildDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
+
+        mphf.WriteTo(mphfPath);
 
         var mphfTotalDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mphfStart);
         long mphfBytes = new FileInfo(mphfPath).Length;
@@ -788,8 +799,8 @@ internal static class SortedAtomStoreExternalBuilder
         listener?.OnMphfBuildCompleted(new Abstractions.MphfBuildCompletedEvent(
             DateTimeOffset.UtcNow,
             atomCount,
-            result.Mphf.Levels.Length,
-            result.Mphf.DenseKeys.Length,
+            mphf.Levels.Length,
+            mphf.DenseKeys.Length,
             mphfBytes,
             idxBytes,
             mphfBuildDuration,
@@ -797,8 +808,8 @@ internal static class SortedAtomStoreExternalBuilder
         // Keep the human-readable summary on stderr for operators tailing the run log;
         // structured per-level + dense-fallback events go through the listener above.
         Console.Error.WriteLine(
-            $"[mphf] atoms={atomCount:N0} levels={result.Mphf.Levels.Length} " +
-            $"dense={result.Mphf.DenseKeys.Length} " +
+            $"[mphf] atoms={atomCount:N0} levels={mphf.Levels.Length} " +
+            $"dense={mphf.DenseKeys.Length} " +
             $"build_s={mphfBuildDuration.TotalSeconds:F2} total_s={mphfTotalDuration.TotalSeconds:F2} " +
             $"mphf_bytes={mphfBytes:N0} idx_bytes={idxBytes:N0}");
     }

@@ -22,6 +22,19 @@ namespace SkyOmega.Mercury.Storage.Mphf;
 internal delegate ReadOnlySpan<byte> GetKeyDelegate(long inputIndex, Span<byte> scratch);
 
 /// <summary>
+/// ADR-042 Part 2: pluggable translation-table sink. Lets <see cref="BBHashBuilder"/>
+/// write each <c>(mphf_pos, input_idx)</c> entry as it's computed — either into an
+/// in-memory <see cref="ChunkedArray{T}"/> (legacy/test path) or directly into an mmap'd
+/// <c>atoms.idx</c> file (production path). Eliminates the 32 GB persistent in-memory
+/// translation allocation at N=4 B atoms.
+/// </summary>
+internal interface IMphfTranslationSink
+{
+    /// <summary>Write a single translation entry. Called once per placed key per level + once per dense key.</summary>
+    void Set(long mphfPos, long inputIdx);
+}
+
+/// <summary>
 /// Constructs a <see cref="BBHash"/> over a known key set. Iterative algorithm
 /// with a dense final-level fallback for any keys the iterative phase cannot place.
 /// </summary>
@@ -139,11 +152,53 @@ internal sealed class BBHashBuilder
                 new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0, 0, Array.Empty<byte[]>()),
                 new ChunkedArray<long>(0));
 
+        // ADR-042 Part 2: pre-ADR path allocates a 32 GB in-memory ChunkedArray and
+        // returns it as BuildResult.Translation. The sink-based path internally
+        // produces the same result by accumulating writes into a ChunkedArraySink.
+        // Tests rely on this shape; production paths should use the IMphfTranslationSink
+        // overload directly to avoid the 32 GB peak.
+        var translation = new ChunkedArray<long>(keyCount);
+        var sink = new ChunkedArraySink(translation);
+        var mphf = BuildToSink(keyCount, maxKeyByteLength, getKey, sink, listener);
+        return new BuildResult(mphf, translation);
+    }
+
+    /// <summary>
+    /// Build the MPHF over the given keys, writing each translation entry directly
+    /// to the caller-provided <paramref name="sink"/>. ADR-042 Part 2 production
+    /// path: caller wraps an mmap'd <c>atoms.idx</c> view as the sink, eliminating
+    /// the 32 GB in-memory <see cref="ChunkedArray{T}"/> translation at N=4 B atoms.
+    /// </summary>
+    /// <param name="keyCount">Total number of keys.</param>
+    /// <param name="maxKeyByteLength">Maximum byte length of any key returned by <paramref name="getKey"/>.</param>
+    /// <param name="getKey">Span-based key-access callback (see <see cref="GetKeyDelegate"/>).</param>
+    /// <param name="sink">Receives each <c>(mphf_pos, input_idx)</c> pair as it's computed.</param>
+    /// <param name="listener">Optional observability sink for MPHF construction events.</param>
+    /// <returns>The constructed <see cref="BBHash"/>. The translation entries are in the
+    /// caller-provided <paramref name="sink"/>.</returns>
+    public BBHash Build(long keyCount, int maxKeyByteLength, GetKeyDelegate getKey, IMphfTranslationSink sink, IObservabilityListener? listener = null)
+    {
+        if (keyCount < 0) throw new ArgumentOutOfRangeException(nameof(keyCount));
+        if (maxKeyByteLength < 1) throw new ArgumentOutOfRangeException(nameof(maxKeyByteLength));
+        if (sink is null) throw new ArgumentNullException(nameof(sink));
+        if (keyCount == 0)
+            return new BBHash(_baseSeed, Array.Empty<BitVector>(), Array.Empty<long>(), 0, 0, Array.Empty<byte[]>());
+        return BuildToSink(keyCount, maxKeyByteLength, getKey, sink, listener);
+    }
+
+    /// <summary>
+    /// Build the MPHF over the given keys, writing each translation entry directly
+    /// to the caller-provided <paramref name="sink"/>. Internal worker shared by
+    /// the <see cref="BuildResult"/>-returning <c>Build</c> overloads and the
+    /// sink-only <see cref="Build(long, int, GetKeyDelegate, IMphfTranslationSink, IObservabilityListener?)"/>.
+    /// </summary>
+    private BBHash BuildToSink(long keyCount, int maxKeyByteLength, GetKeyDelegate getKey, IMphfTranslationSink sink, IObservabilityListener? listener)
+    {
         listener?.OnMphfBuildStarted(new MphfBuildStartedEvent(
             DateTimeOffset.UtcNow, keyCount, _gamma, _maxLevels, MaxDenseKeys, _baseSeed));
 
         // ADR-042 Part 4: single scratch buffer reused across every key access for the
-        // entire build. Sized to the caller-declared maxKeyByteLength; in practice 4 KB
+        // entire build. Sized to the caller-declared maxKeyByteLength; in practice 64 KB
         // for Wikidata-shape atoms. The buffer's contents are valid only until the next
         // getKey call — none of the hot paths cache the keyBytes span beyond hashing.
         byte[] scratchBuffer = new byte[maxKeyByteLength];
@@ -159,8 +214,6 @@ internal sealed class BBHashBuilder
 
         var levels = new List<BitVector>();
         var levelOffsets = new List<long>();
-        // mphf_pos → input_index. ChunkedArray — fixed length, eager allocation.
-        var translation = new ChunkedArray<long>(keyCount);
 
         long globalOffset = 0;
         for (int levelIdx = 0; levelIdx < _maxLevels; levelIdx++)
@@ -171,9 +224,18 @@ internal sealed class BBHashBuilder
             var levelStart = Stopwatch.GetTimestamp();
             long bitCount = (long)Math.Ceiling(_gamma * remainingCount);
             if (bitCount < 1) bitCount = 1;
-            var bv = new BitVector(bitCount);
             ulong seed = _baseSeed + (ulong)levelIdx;
 
+            // ADR-042 Part 3: re-hash second pass eliminates per-level keyPositions
+            // ChunkedArray (32 GB at level 0 in the pre-1.7.62 implementation). New
+            // shape: two passes over keys instead of three. Pass 1 only populates
+            // collision-detection bit vectors (no positions stored); the placement
+            // bit-vector `bv` is derived via bit-vector arithmetic (`seen AND NOT
+            // collided`) in one linear scan; Pass 2 re-hashes each key and either
+            // writes its translation entry or bumps it. Re-hash cost ≈ 3 ns/key per
+            // pass ≈ 12 s extra CPU at level 0 for N=4 B keys — negligible vs the
+            // ~50 min level-0 wall-clock.
+            //
             // First pass: detect collisions via bit-vector pair. seen[pos]=1 once any
             // key hashes there; collided[pos]=1 once a second key hashes there. This
             // replaces the prior Dictionary<long,int> position counter — same semantics
@@ -181,7 +243,6 @@ internal sealed class BBHashBuilder
             // bits each instead of ~32 bytes per distinct position.
             var seen = new BitVector(bitCount);
             var collided = new BitVector(bitCount);
-            var keyPositions = new ChunkedArray<long>(remainingCount);
             bool isLevel0 = levelIdx == 0;
             for (long k = 0; k < remainingCount; k++)
             {
@@ -189,38 +250,46 @@ internal sealed class BBHashBuilder
                 var keyBytes = getKey(inputIdx, scratchBuffer);
                 ulong h = SplitMix64Hash.Hash64(keyBytes, seed);
                 long pos = (long)(h % (ulong)bitCount);
-                keyPositions[k] = pos;
                 if (seen.Get(pos)) collided.Set(pos);
                 seen.Set(pos);
             }
 
-            // Second pass: set bits for non-colliding positions; bump collided keys.
-            var bumped = new ChunkedList<long>();
-            for (long k = 0; k < remainingCount; k++)
+            // ADR-042 Part 3: derive bv via bit-vector arithmetic. bv[pos] is set iff
+            // exactly one key hashes to pos — i.e., seen[pos] AND NOT collided[pos].
+            // Single linear scan over the underlying ulong[] words; O(bitCount/64).
+            var bv = new BitVector(bitCount);
+            var bvWords = bv.Words;
+            var seenWords = seen.Words;
+            var collidedWords = collided.Words;
+            int wordCount = bvWords.Length;
+            for (int w = 0; w < wordCount; w++)
             {
-                long pos = keyPositions[k];
-                if (!collided.Get(pos))
-                {
-                    bv.Set(pos);
-                }
-                else
-                {
-                    long inputIdx = isLevel0 ? (k + 1) : remaining![k];
-                    bumped.Add(inputIdx);
-                }
+                bvWords[w] = seenWords[w] & ~collidedWords[w];
             }
+            // seen + collided no longer needed past this point. (GC can collect when
+            // the local-scope references drop at the next level iteration.)
 
             // Build rank table for this level so we can compute placement positions.
             bv.BuildRankTable();
-            // Fill translation for placed keys: mphf_pos = globalOffset + rank(pos).
+
+            // Second pass: re-hash each key, place or bump. For placed keys, compute
+            // mphfPos via the just-built rank table and write the translation entry.
+            // The re-hash is the cost ADR-042 Part 3 trades against the 32 GB savings.
+            var bumped = new ChunkedList<long>();
             for (long k = 0; k < remainingCount; k++)
             {
-                long pos = keyPositions[k];
+                long inputIdx = isLevel0 ? (k + 1) : remaining![k];
+                var keyBytes = getKey(inputIdx, scratchBuffer);
+                ulong h = SplitMix64Hash.Hash64(keyBytes, seed);
+                long pos = (long)(h % (ulong)bitCount);
                 if (!collided.Get(pos))
                 {
                     long mphfPos = globalOffset + bv.Rank(pos);
-                    long inputIdx = isLevel0 ? (k + 1) : remaining![k];
-                    translation[mphfPos] = inputIdx;
+                    sink.Set(mphfPos, inputIdx);
+                }
+                else
+                {
+                    bumped.Add(inputIdx);
                 }
             }
 
@@ -270,15 +339,25 @@ internal sealed class BBHashBuilder
                 var keyBytes = getKey(inputIdx, scratchBuffer);
                 denseKeys[i] = keyBytes.ToArray();
                 long mphfPos = denseOffset + i;
-                translation[mphfPos] = inputIdx;
+                sink.Set(mphfPos, inputIdx);
             }
             listener?.OnMphfDenseFallback(new MphfDenseFallbackEvent(
                 DateTimeOffset.UtcNow, denseCount, levels.Count));
         }
 
-        return new BuildResult(
-            new BBHash(_baseSeed, levels.ToArray(), levelOffsets.ToArray(), keyCount, denseOffset, denseKeys),
-            translation);
+        return new BBHash(_baseSeed, levels.ToArray(), levelOffsets.ToArray(), keyCount, denseOffset, denseKeys);
+    }
+
+    /// <summary>
+    /// <see cref="IMphfTranslationSink"/> backed by an in-memory <see cref="ChunkedArray{T}"/>.
+    /// Used by the <see cref="BuildResult"/>-returning <c>Build</c> overloads to preserve
+    /// the pre-ADR-042 API surface (tests + simpler callers).
+    /// </summary>
+    private sealed class ChunkedArraySink : IMphfTranslationSink
+    {
+        private readonly ChunkedArray<long> _translation;
+        public ChunkedArraySink(ChunkedArray<long> translation) => _translation = translation;
+        public void Set(long mphfPos, long inputIdx) => _translation[mphfPos] = inputIdx;
     }
 
     /// <summary>Result of <see cref="Build"/>: the MPHF + a translation array <c>mphf_pos → input_index</c>.</summary>

@@ -130,4 +130,97 @@ internal sealed class MphfTranslationTable : IDisposable
         _view?.Dispose();
         _mmap?.Dispose();
     }
+
+    /// <summary>
+    /// ADR-042 Part 2: create an <c>atoms.idx</c> file at full size and mmap it for
+    /// streaming write. The returned <see cref="MphfTranslationWriter"/> exposes an
+    /// <see cref="IMphfTranslationSink"/> that <see cref="BBHashBuilder"/> writes
+    /// each <c>(mphf_pos, input_idx)</c> pair into directly. Eliminates the 32 GB
+    /// in-memory <see cref="ChunkedArray{T}"/> at N=4 B atoms — the kernel's page
+    /// cache handles working-set residency under memory pressure.
+    /// </summary>
+    public static MphfTranslationWriter CreateForWriting(string path, long entryCount)
+    {
+        if (entryCount < 0) throw new ArgumentOutOfRangeException(nameof(entryCount));
+        long fileLength = HeaderBytes + 4L * entryCount;
+
+        // Create the file at full size first via a regular FileStream (SetLength).
+        // Cannot SetLength via the mmap once it's opened; do it up-front.
+        using (var fs = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.None, 4096, FileOptions.None))
+        {
+            fs.SetLength(fileLength);
+            // Write the header now so the mmap doesn't have to.
+            Span<byte> hdr = stackalloc byte[HeaderBytes];
+            BinaryPrimitives.WriteUInt32BigEndian(hdr.Slice(0, 4), Magic);
+            BinaryPrimitives.WriteUInt32LittleEndian(hdr.Slice(4, 4), Version);
+            BinaryPrimitives.WriteInt64LittleEndian(hdr.Slice(8, 8), entryCount);
+            fs.Write(hdr);
+            fs.Flush(flushToDisk: false);
+        }
+
+        var mmap = MemoryMappedFile.CreateFromFile(path, FileMode.Open, mapName: null,
+            capacity: 0, MemoryMappedFileAccess.ReadWrite);
+        var view = mmap.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
+        return new MphfTranslationWriter(mmap, view, entryCount);
+    }
+}
+
+/// <summary>
+/// ADR-042 Part 2: mmap-backed streaming writer for <c>atoms.idx</c>. Exposes an
+/// <see cref="IMphfTranslationSink"/> for <see cref="BBHashBuilder.Build(long, int, GetKeyDelegate, IMphfTranslationSink, IObservabilityListener?)"/>
+/// to write each <c>(mphf_pos, input_idx)</c> pair into directly. Dispose flushes
+/// the mmap and releases the file handle.
+/// </summary>
+internal sealed class MphfTranslationWriter : IDisposable
+{
+    private readonly MemoryMappedFile _mmap;
+    private readonly MemoryMappedViewAccessor _view;
+    private readonly long _entryCount;
+    private readonly Sink _sink;
+    private bool _disposed;
+
+    internal MphfTranslationWriter(MemoryMappedFile mmap, MemoryMappedViewAccessor view, long entryCount)
+    {
+        _mmap = mmap;
+        _view = view;
+        _entryCount = entryCount;
+        _sink = new Sink(view, entryCount);
+    }
+
+    /// <summary>The sink that <see cref="BBHashBuilder"/> writes translation entries into.</summary>
+    public IMphfTranslationSink AsSink() => _sink;
+
+    /// <summary>Number of translation entries this writer was sized for.</summary>
+    public long EntryCount => _entryCount;
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _view.Flush();
+        _view.Dispose();
+        _mmap.Dispose();
+    }
+
+    /// <summary>
+    /// Inner sink implementation. Writes each translation entry as a uint32 to the
+    /// mmap'd view at offset <c>HeaderBytes + 4 × mphfPos</c>. Validates that
+    /// <paramref name="inputIdx"/> fits in uint32 — bounded by atom count which is
+    /// ≤ 4 B ≤ 2³² at any practical scale.
+    /// </summary>
+    private sealed class Sink : IMphfTranslationSink
+    {
+        private readonly MemoryMappedViewAccessor _view;
+        private readonly long _entryCount;
+        public Sink(MemoryMappedViewAccessor view, long entryCount) { _view = view; _entryCount = entryCount; }
+        public void Set(long mphfPos, long inputIdx)
+        {
+            if ((ulong)mphfPos >= (ulong)_entryCount)
+                throw new ArgumentOutOfRangeException(nameof(mphfPos), $"mphfPos={mphfPos} out of range [0, {_entryCount})");
+            if (inputIdx < 0 || inputIdx > uint.MaxValue)
+                throw new InvalidOperationException(
+                    $"Translation table entry {mphfPos} out of range for uint32: {inputIdx}");
+            _view.Write(MphfTranslationTable.HeaderBytes + 4L * mphfPos, (uint)inputIdx);
+        }
+    }
 }
