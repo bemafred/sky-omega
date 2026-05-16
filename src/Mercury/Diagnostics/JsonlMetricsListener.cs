@@ -538,6 +538,25 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnReadAheadBudget(in ReadAheadBudgetEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "merge_readahead_budget", "event", ev.Timestamp);
+            json.WriteNumber("chunk_count", ev.ChunkCount);
+            json.WriteNumber("available_memory_bytes", ev.AvailableMemoryBytes);
+            json.WriteNumber("max_readahead_bytes", ev.MaxReadAheadBytes);
+            json.WriteNumber("requested_buffer_size", ev.RequestedBufferSize);
+            json.WriteNumber("effective_buffer_size", ev.EffectiveBufferSize);
+            json.WriteNumber("projected_total_bytes", ev.ProjectedTotalBytes);
+            json.WriteBoolean("readahead_enabled", ev.ReadAheadEnabled);
+            json.WriteString("decision_log", ev.DecisionLog);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp)
     {
         using var buffer = new MemoryStream();

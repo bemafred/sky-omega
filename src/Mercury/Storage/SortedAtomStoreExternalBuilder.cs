@@ -472,10 +472,70 @@ internal static class SortedAtomStoreExternalBuilder
         // Disabled when MERCURY_MERGE_READAHEAD env var is "0" — preserves the
         // direct-fs-read fallback path and lets the gradient A/B against the no-readahead
         // baseline cleanly.
+        //
+        // ADR-040 Part 1: adaptive readahead-buffer sizing. Compute the effective per-side
+        // buffer size before constructing any ChunkReadAheadBuffer. Budget = a fraction
+        // (default 0.25) of ProcessMemoryProbe.AvailablePhysicalBytes — adjustable via
+        // MERCURY_READAHEAD_BUDGET_FRACTION env var. We halve the buffer size from
+        // DefaultBufferSize (4 MiB) down to MinBufferSize (256 KiB) until projectedTotal
+        // = chunkCount × 2 × bufferSize fits the budget. If even MinBufferSize won't fit,
+        // readahead is disabled entirely and the synchronous direct-fs fallback takes
+        // over. Decision is emitted as ReadAheadBudgetEvent for replayable attribution.
         bool readAheadEnabled = Environment.GetEnvironmentVariable("MERCURY_MERGE_READAHEAD") != "0";
-        using var readAheadDispatcher = readAheadEnabled
-            ? new ChunkReadAheadDispatcher(MergeFileStreamBufferSize)
-            : null;
+        int effectiveReadAheadBufferSize = ChunkReadAheadBuffer.DefaultBufferSize;
+        ChunkReadAheadDispatcher? readAheadDispatcher = null;
+        if (readAheadEnabled && chunkFiles.Count > 0)
+        {
+            long availableMemoryBytes = SkyOmega.Mercury.Runtime.ProcessMemoryProbe.AvailablePhysicalBytes();
+            double budgetFraction = 0.25;
+            var fracEnv = Environment.GetEnvironmentVariable("MERCURY_READAHEAD_BUDGET_FRACTION");
+            if (!string.IsNullOrEmpty(fracEnv) &&
+                double.TryParse(fracEnv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedFrac) &&
+                parsedFrac > 0 && parsedFrac <= 1.0)
+            {
+                budgetFraction = parsedFrac;
+            }
+            long maxReadAheadBytes = (long)(availableMemoryBytes * budgetFraction);
+
+            int requestedBufferSize = ChunkReadAheadBuffer.DefaultBufferSize;
+            int effectiveBufferSize = requestedBufferSize;
+            var decisionLog = new System.Text.StringBuilder();
+            decisionLog.Append("start@").Append(requestedBufferSize);
+            while ((long)chunkFiles.Count * 2L * effectiveBufferSize > maxReadAheadBytes
+                   && effectiveBufferSize > ChunkReadAheadBuffer.MinBufferSize)
+            {
+                effectiveBufferSize /= 2;
+                decisionLog.Append("→halve@").Append(effectiveBufferSize);
+            }
+
+            long projectedTotal = (long)chunkFiles.Count * 2L * effectiveBufferSize;
+            bool disabledForBudget = projectedTotal > maxReadAheadBytes;
+            if (disabledForBudget)
+            {
+                decisionLog.Append("→disable(budget_exhausted_at_min)");
+                readAheadEnabled = false;
+            }
+            else
+            {
+                decisionLog.Append("→accept");
+                effectiveReadAheadBufferSize = effectiveBufferSize;
+                readAheadDispatcher = new ChunkReadAheadDispatcher(
+                    streamBufferSize: MergeFileStreamBufferSize,
+                    readAheadBufferSize: effectiveBufferSize);
+            }
+
+            listener?.OnReadAheadBudget(new ReadAheadBudgetEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                ChunkCount: chunkFiles.Count,
+                AvailableMemoryBytes: availableMemoryBytes,
+                MaxReadAheadBytes: maxReadAheadBytes,
+                RequestedBufferSize: requestedBufferSize,
+                EffectiveBufferSize: disabledForBudget ? 0 : effectiveBufferSize,
+                ProjectedTotalBytes: disabledForBudget ? 0 : projectedTotal,
+                ReadAheadEnabled: !disabledForBudget,
+                DecisionLog: decisionLog.ToString()));
+        }
+        using var _readAheadDispatcherDisposer = readAheadDispatcher;
         var readers = new List<ChunkReader>(chunkFiles.Count);
         int chunksDeleted = 0;
         long chunkBytesReclaimed = 0;
@@ -847,10 +907,13 @@ internal static class SortedAtomStoreExternalBuilder
             // ADR-038 Part 2: when a dispatcher is provided, set up a per-chunk readahead
             // buffer. The buffer's onBackEmpty callback re-enqueues this chunk for refill
             // after each swap. Initial refill request bootstraps the pipeline.
+            // ADR-040 Part 1: bufferSize comes from the dispatcher (MergeAndWrite's
+            // adaptive-sizing decision based on ProcessMemoryProbe.AvailablePhysicalBytes).
             if (_dispatcher is not null)
             {
                 _readahead = new ChunkReadAheadBuffer(
                     fileLength: _fileLength,
+                    bufferSize: _dispatcher.ReadAheadBufferSize,
                     onBackEmpty: () => _dispatcher.RequestRefill(_path, _readahead!));
                 _dispatcher.RequestRefill(_path, _readahead);
             }

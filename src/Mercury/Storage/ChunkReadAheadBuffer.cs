@@ -52,6 +52,16 @@ internal sealed class ChunkReadAheadBuffer : IDisposable
     /// </summary>
     public const int DefaultBufferSize = 4 * 1024 * 1024;
 
+    /// <summary>
+    /// ADR-040 Part 1: minimum buffer size per chunk side (256 KiB). The adaptive sizing
+    /// logic in <c>MergeAndWrite</c> halves <c>bufferSize</c> down from <see cref="DefaultBufferSize"/>
+    /// to <see cref="MinBufferSize"/> when the projected total (chunkCount × 2 × bufferSize)
+    /// exceeds the budget fraction of <c>ProcessMemoryProbe.AvailablePhysicalBytes()</c>.
+    /// If even <see cref="MinBufferSize"/> can't fit, readahead is disabled entirely and
+    /// the synchronous direct-file-read fallback path takes over.
+    /// </summary>
+    public const int MinBufferSize = 256 * 1024;
+
     private byte[] _front;
     private byte[] _back;
     private int _frontPos;

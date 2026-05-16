@@ -59,14 +59,25 @@ internal sealed class ChunkReadAheadDispatcher : IDisposable
     public static int DefaultWorkerCount => Math.Max(1, Math.Min(8, Environment.ProcessorCount / 2));
 
     private readonly int _streamBufferSize;
+    private readonly int _readAheadBufferSize;
     private readonly BlockingCollection<RefillRequest> _queue;
     private readonly Task[] _workers;
     private bool _disposed;
 
-    public ChunkReadAheadDispatcher(int streamBufferSize, int? workerCount = null)
+    /// <summary>
+    /// ADR-040 Part 1: per-side readahead buffer size for new <c>ChunkReadAheadBuffer</c>
+    /// instances created during this merge. Captured here so ChunkReader can construct
+    /// each chunk's buffer at the size MergeAndWrite's adaptive sizing decided on.
+    /// </summary>
+    public int ReadAheadBufferSize => _readAheadBufferSize;
+
+    public ChunkReadAheadDispatcher(int streamBufferSize, int readAheadBufferSize = ChunkReadAheadBuffer.DefaultBufferSize, int? workerCount = null)
     {
         if (streamBufferSize < 1024) throw new ArgumentOutOfRangeException(nameof(streamBufferSize), "streamBufferSize must be at least 1 KB");
+        if (readAheadBufferSize < ChunkReadAheadBuffer.MinBufferSize)
+            throw new ArgumentOutOfRangeException(nameof(readAheadBufferSize), $"must be at least {ChunkReadAheadBuffer.MinBufferSize}");
         _streamBufferSize = streamBufferSize;
+        _readAheadBufferSize = readAheadBufferSize;
         int n = workerCount ?? DefaultWorkerCount;
         if (n < 1) throw new ArgumentOutOfRangeException(nameof(workerCount), "workerCount must be >= 1");
         // Bounded capacity matches worker count × 2 — enough to absorb a burst of

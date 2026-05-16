@@ -140,6 +140,30 @@ public readonly record struct DrainProgressEvent(
     TimeSpan Elapsed);
 
 /// <summary>
+/// ADR-040 Part 4: one-shot readahead-budget decision emitted at <c>MergeAndWrite</c>
+/// start, before any <c>ChunkReadAheadBuffer</c> is constructed. Captures the
+/// substrate's adaptive-sizing decision so a future operator can reconstruct what
+/// the runtime did vs what was assumed. Substrate host-portability becomes data,
+/// not docstring.
+/// </summary>
+/// <remarks>
+/// Effective buffer size is the per-side (front or back) allocation. Real per-chunk
+/// memory footprint is <b>2 ×</b> <c>EffectiveBufferSize</c>. <c>ReadAheadEnabled</c>
+/// is <c>false</c> only when the budget couldn't fit the minimum at all — the
+/// substrate falls back to synchronous direct-file reads.
+/// </remarks>
+public readonly record struct ReadAheadBudgetEvent(
+    DateTimeOffset Timestamp,
+    int ChunkCount,
+    long AvailableMemoryBytes,
+    long MaxReadAheadBytes,
+    int RequestedBufferSize,
+    int EffectiveBufferSize,
+    long ProjectedTotalBytes,
+    bool ReadAheadEnabled,
+    string DecisionLog);
+
+/// <summary>
 /// Bulk-tmp cleanup outcome event emitted once per <c>MergeAndWrite</c> invocation.
 /// ADR-041: closes the cycle-10-r3 incident pattern where a Finalize-time exception
 /// (BBHash <c>OverflowException</c> 2026-05-10, MPHF non-convergence 2026-05-11) left

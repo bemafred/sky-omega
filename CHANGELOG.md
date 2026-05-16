@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.62](#1762---2026-05-16)** — released 2026-05-16; ADR-042 Parts 2 + 3 land — **re-hash second pass** (eliminates the 32 GB-per-level `keyPositions` ChunkedArray; trades ~12 s extra CPU for 32 GB level-0 RAM) + **mmap-backed streaming `atoms.idx`** (eliminates the 32 GB persistent in-memory ChunkedArray translation; kernel page cache handles working-set residency). Stacks on 1.7.61's defensive scratch sizing and 1.7.60's Parts 1+4. With all four ADR-042 substrate parts shipped, projected peak MPHF-phase RSS at 4 B atoms drops from ~100 GB to ~15 GB (BitVectors + bumped transient). Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.63](#1763---2026-05-16)** — released 2026-05-16; ADR-040 Parts 1 + 4 + shared `ProcessMemoryProbe` land — **adaptive readahead-buffer sizing** at `MergeAndWrite` start. Substrate now reads `ProcessMemoryProbe.AvailablePhysicalBytes()` and halves the per-chunk readahead buffer from 4 MiB → 256 KiB to fit a budget fraction (default 25 %) of available host memory; if the minimum still won't fit, falls back to synchronous direct-fs reads. Decision emitted as `merge_readahead_budget` JSONL event. End-to-end verified on a 10 M-triple run: 2 chunks, 102 GiB available, 25.6 GiB budget, accepts default 4 MiB. Stacks on 1.7.62's ADR-042 Parts 2+3. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,41 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.63] - 2026-05-16
+
+**Headline:** ADR-040 Parts 1 + 4 + the shared `ProcessMemoryProbe` infrastructure land. The substrate's merge-phase readahead now adapts its per-chunk buffer size to the host's available physical memory at run start, rather than committing unconditionally to the 4 MiB default. Sized at 21.3 B Wikidata scale on a 128 GB host the eager allocation is ~31 GiB (24 % of RAM); on a 64 GB or 32 GB host the same workload would have crowded out kernel page cache or OOM'd. Adaptive sizing closes this substrate-host-portability gap.
+
+### Added
+
+- **`SkyOmega.Mercury.Runtime.ProcessMemoryProbe`** — host-physical-memory probe. macOS path uses `host_statistics64(HOST_VM_INFO64)` + `sysctlbyname("hw.pagesize")` via P/Invoke; Linux parses `/proc/meminfo`'s `MemAvailable`; Windows uses `GlobalMemoryStatusEx`. Other platforms fall back to `GC.GetGCMemoryInfo().TotalAvailableMemoryBytes`. Pure BCL + P/Invoke, no NuGet. Shared infrastructure for ADR-040 and ADR-042 Part 5.
+- **`ReadAheadBudgetEvent`** — one-shot event emitted at `MergeAndWrite` start. Fields: `ChunkCount`, `AvailableMemoryBytes`, `MaxReadAheadBytes`, `RequestedBufferSize`, `EffectiveBufferSize`, `ProjectedTotalBytes`, `ReadAheadEnabled`, `DecisionLog`. JSONL `phase: "merge_readahead_budget"`.
+- **`IObservabilityListener.OnReadAheadBudget(in ReadAheadBudgetEvent ev)`** — no-op default; `JsonlMetricsListener` serializes to JSONL.
+- **`ChunkReadAheadBuffer.MinBufferSize`** = 256 KiB constant. Adaptive sizing halves down to this floor; if even MinBufferSize won't fit the budget, readahead is disabled entirely.
+- **`ChunkReadAheadDispatcher.ReadAheadBufferSize`** property — captures the per-side buffer size MergeAndWrite's adaptive sizing decided on, so `ChunkReader` constructs each chunk's buffer at that size.
+- 3 smoke tests in `ProcessMemoryProbeTests.cs` (positive value, plausible range, ≥ 1 MB sanity floor).
+
+### Changed
+
+- **`MergeAndWrite`** computes `effectiveBufferSize` at run start via `ProcessMemoryProbe.AvailablePhysicalBytes() × budgetFraction` where `budgetFraction` defaults to 0.25 (overridable via `MERCURY_READAHEAD_BUDGET_FRACTION` env var, range 0–1). Iteratively halves from 4 MiB → 256 KiB until `chunkCount × 2 × bufferSize ≤ maxReadAheadBytes`. If the floor doesn't fit, readahead is disabled and the synchronous fallback path takes over. The decision is logged via `ReadAheadBudgetEvent` regardless of outcome.
+- **`ChunkReadAheadDispatcher`** constructor signature extended with `readAheadBufferSize` parameter (defaulted to `ChunkReadAheadBuffer.DefaultBufferSize` for callers that don't care).
+- **`ChunkReader` (inside `SortedAtomStoreExternalBuilder`)** constructs each chunk's `ChunkReadAheadBuffer` at `_dispatcher.ReadAheadBufferSize` instead of the hard-coded default.
+
+### Validation
+
+- 550 Storage tests green (547 + 3 new `ProcessMemoryProbe` tests).
+- End-to-end verified on a 10M-triple bulk-load: substrate probes 102 GiB available, computes 25.6 GiB budget, accepts 4 MiB default (2 chunks × 2 × 4 MiB = 16 MB ≪ 25.6 GiB). JSONL `merge_readahead_budget` record emitted as specified.
+- macOS `ProcessMemoryProbe` returns 106 GiB on a 128 GB host (correctly excluding 22 GB of in-use anonymous memory); BCL fallback returns the full 128 GB total, motivating the macOS-specific path.
+
+### What's queued for next ADR-040 slice
+
+- Part 2 — Lazy back-buffer allocation. `ChunkReadAheadBuffer` constructor allocates only `_front`; `_back` is lazily allocated on first `FillBack` call. Reduces standing footprint when chunks consume their `_front` content before any refill is needed.
+- Part 3 — Eager per-chunk teardown. `ChunkReader` disposes its `ChunkReadAheadBuffer` when `IsExhausted` becomes true, rather than waiting for end-of-merge.
+- Periodic `ReadAheadFootprintSampleEvent` emission during merge (tracks live buffer allocations).
+
+### ADR-042 Part 5 (host-adaptive validation)
+
+`ProcessMemoryProbe` shipped here unblocks ADR-042 Part 5 — the projected-peak vs available-bytes warning that the MPHF build can now emit before consuming 89-102 GB of RSS on a constrained host. Implementation will follow with the ADR-042 Completed milestone.
 
 ## [1.7.62] - 2026-05-16
 

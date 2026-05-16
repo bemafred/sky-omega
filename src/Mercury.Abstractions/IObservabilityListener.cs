@@ -130,6 +130,14 @@ public interface IObservabilityListener
     /// </summary>
     void OnBulkTmpCleanup(in BulkTmpCleanupEvent ev) { }
 
+    /// <summary>
+    /// ADR-040 Part 4: readahead-budget decision emitted at <c>MergeAndWrite</c> start.
+    /// Captures the substrate's adaptive-sizing decision (effective buffer size,
+    /// projected total, host available memory) so future analysis can verify the
+    /// runtime did what was assumed.
+    /// </summary>
+    void OnReadAheadBudget(in ReadAheadBudgetEvent ev) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 
