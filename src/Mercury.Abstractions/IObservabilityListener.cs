@@ -122,6 +122,14 @@ public interface IObservabilityListener
     /// <summary>One-shot end-of-build summary for MPHF construction.</summary>
     void OnMphfBuildCompleted(in MphfBuildCompletedEvent ev) { }
 
+    /// <summary>
+    /// Bulk-tmp cleanup outcome (success path or exception path). ADR-041:
+    /// closes the cycle-10-r3 incident pattern where a Finalize-time exception left
+    /// intermediate chunk files orphaned. <see cref="BulkTmpCleanupEvent.Trigger"/>
+    /// distinguishes the path that fired.
+    /// </summary>
+    void OnBulkTmpCleanup(in BulkTmpCleanupEvent ev) { }
+
     /// <summary>Scope correlation: emitted when a <c>MetricsScope</c> is opened.</summary>
     void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp) { }
 

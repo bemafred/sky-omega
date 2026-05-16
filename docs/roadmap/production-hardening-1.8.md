@@ -310,9 +310,9 @@ Both were *latent under W3C conformance* and *surfaced under WDBench*, which is 
 - ✅ Limits register paperwork sweep — 4 stale Resolveds closed retroactively (`cancellable-executor-paths.md`, `property-path-grammar-gaps.md`, `sorted-atom-store-for-reference.md`, `streaming-source-decompression.md`). Two new limits docs capture cycle-10-era discoveries (`externalsorter-fd-pool-bypass.md`, `ntriples-parser-per-triple-perf.md`). Roadmap doc (this file) amended to reflect post-cycle-9 state and the DrHook deferral. *(Shipped commit `14e8d57`, 2026-05-16.)*
 - ✅ ADR-040 + ADR-042 status decisions — both moved Proposed → **Accepted (2026-05-16)**. Substrate host-portability committed as 1.7.x engineering work before 1.8.0 cognitive-layers entry.
 
-**Tier 2 (next, after Tier 1):**
+**Tier 2 (in progress):**
+- ✅ ADR-041 implementation — cleanup-on-exception for bulk-tmp intermediates. Shipped 1.7.58 (2026-05-16). `MergeAndWrite` meta try/finally with `BulkTmpCleanupEvent` emission, `MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION=1` forensic env var, `bulk-tmp/` segment assertion, default tempDir conventions updated, `QuadStore.FinalizeSortedAtomBulkIfPresent` now wraps `bulkBuilder.Finalize()` in try/finally so `bulkBuilder.Dispose()` always runs. 4 new validation tests; 4,406 Mercury.Tests green. See [adr-041-cleanup-on-exception-2026-05-16.md](../validations/adr-041-cleanup-on-exception-2026-05-16.md).
 - ADR-040 implementation — readahead memory adaptive sizing. Adaptive `bufferSize` at MergeAndWrite start (`ProcessMemoryProbe` + 0.25 budget fraction, scale halving down to 256 KiB), lazy back-buffer allocation, eager per-chunk teardown on exhaustion, `ReadAheadBudgetEvent` + `ReadAheadFootprintSampleEvent` observability. Validation: H1 (target host throughput unchanged), H2 (32 GB host completes successfully), H3 (lazy-back reduces peak).
-- ADR-041 implementation — cleanup-on-exception for bulk-tmp intermediates. Currently end-of-merge cleanup hook reclaims at successful completion; cleanup on exception path leaves 3-4 TB of intermediate sort-chunk artifacts behind when bulk-load aborts. Closes the operational footgun for the unhappy path.
 - ADR-042 implementation — MPHF construction memory adaptive sizing. Range iterator at level 0 (−32 GB), mmap-backed streaming translation (−32 GB persistent), re-hash second pass eliminating `keyPositions` (−32 GB per level), Span-based `GetKey` API (eliminates ~770 GB GC churn), `MphfBuildBudgetEvent` + per-level progress events. Validation: byte-equivalent `atoms.mphf` + `atoms.idx` vs 1.7.55 baseline; peak RSS < 20 GB at 4 B atoms vs 100 GB today; 1 B-atom build completes on 32 GB host.
 - ExternalSorter FD pool integration — cycle 10 r4 trigram drain held 8,192 chunks at 17% headroom under launchd-effective 10,240 FD limit. FD pool would bound peak FD count regardless of chunk count.
 - WDBench aggregate completed-only percentile distribution — synthesize the 5-category paired full+truthy measurements into a publication-grade distribution table.
@@ -441,7 +441,7 @@ Under the amended version-line model, the original "one-page 1.8.0 checklist" sp
 - [x] Roadmap doc amended to reflect post-cycle-9 state and DrHook deferral to 1.8.x. *(This document, 2026-05-16.)*
 - [x] ADR-040 + ADR-042 status decisions — both moved Proposed → **Accepted (2026-05-16)**. Substrate host-portability committed as 1.7.x Tier 2 engineering work.
 - [ ] ADR-040 implementation — readahead memory adaptive sizing (Tier 2).
-- [ ] ADR-041 implementation — cleanup-on-exception for bulk-tmp intermediates (Tier 2).
+- [x] ADR-041 implementation — cleanup-on-exception for bulk-tmp intermediates. *(Shipped 1.7.58, 2026-05-16; 4 validation tests green; 4,406 Mercury.Tests green.)*
 - [ ] ADR-042 implementation — MPHF construction memory adaptive sizing (Tier 2).
 - [ ] ExternalSorter FD pool integration — Tier 2 implementation, validated on non-trivial bulk-load.
 - [ ] WDBench aggregate completed-only percentile distribution — synthesized publication-grade table from paired full+truthy measurements.

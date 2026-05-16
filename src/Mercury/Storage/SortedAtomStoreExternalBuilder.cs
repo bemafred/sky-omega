@@ -144,7 +144,10 @@ internal static class SortedAtomStoreExternalBuilder
         if (useDiskBackedAssigned && resolveSorterChunkSize < 1024)
             throw new ArgumentOutOfRangeException(nameof(resolveSorterChunkSize), "resolveSorterChunkSize must be at least 1024 records");
 
-        var resolvedTempDir = tempDir ?? Path.Combine(Path.GetTempPath(), "sorted-atom-build-" + Guid.NewGuid().ToString("N"));
+        // ADR-041: default tempDir includes "bulk-tmp" as a path segment so the
+        // MergeAndWrite cleanup assertion (chunkFiles must live under bulk-tmp/)
+        // passes by construction without callers having to know about it.
+        var resolvedTempDir = tempDir ?? Path.Combine(Path.GetTempPath(), "bulk-tmp", "sorted-atom-build-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(resolvedTempDir);
 
         // The resolveSorter outlives this method when disk-backed: ownership transfers to
@@ -476,170 +479,241 @@ internal static class SortedAtomStoreExternalBuilder
         var readers = new List<ChunkReader>(chunkFiles.Count);
         int chunksDeleted = 0;
         long chunkBytesReclaimed = 0;
+        // ADR-041: track cleanup outcome across the merge-phase and MPHF-phase try-blocks.
+        // success flips true at the function's last reachable statement; the outer finally
+        // emits BulkTmpCleanupEvent with Trigger derived from this flag, distinguishing
+        // success-path from exception-path cleanup for per-cycle attribution.
+        bool mergeOk = false;
+        bool success = false;
+        bool preserveBulkTmp = Environment.GetEnvironmentVariable("MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION") == "1";
+        bool anyDeleteFailures = false;
+        string? firstFailureMessage = null;
+        TimeSpan cleanupDuration = TimeSpan.Zero;
+
         try
         {
-            foreach (var path in chunkFiles)
+            try
             {
-                var reader = new ChunkReader(path, readers.Count, streamPool, readAheadDispatcher);
-                if (reader.MoveNext())
-                    readers.Add(reader);
-                else
-                    streamPool.Drop(path);
-            }
-
-            // Priority queue keyed by (current bytes, then chunk index for stable ordering).
-            var pq = new PriorityQueue<int, ChunkPriorityKey>(readers.Count, ChunkPriorityKeyComparer.Instance);
-            for (int i = 0; i < readers.Count; i++)
-                pq.Enqueue(i, new ChunkPriorityKey(readers[i].Current.Bytes, i));
-
-            using var dataFs = new FileStream(dataPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
-            using var offsetsFs = new FileStream(offsetsPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
-            Span<byte> offsetBuf = stackalloc byte[8];
-
-            // offsets[0] = 0 (first atom starts at byte 0 of .atoms).
-            BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, 0);
-            offsetsFs.Write(offsetBuf);
-
-            byte[]? prevBytes = null;
-
-            while (pq.Count > 0)
-            {
-                int readerIdx = pq.Dequeue();
-                var rec = readers[readerIdx].Current;
-
-                bool isNew = prevBytes is null || !rec.Bytes.AsSpan().SequenceEqual(prevBytes);
-                if (isNew)
+                foreach (var path in chunkFiles)
                 {
-                    atomCount++;
-                    // ADR-034 Round 2 prefix compression: anchor every Nth atom (full bytes,
-                    // prefix_len=0); all others are delta-encoded against their predecessor
-                    // in sort order. Anchor on the FIRST atom (atomCount==1) and every
-                    // PrefixCompressionAnchorInterval thereafter.
-                    bool isAnchor = ((atomCount - 1) % PrefixCompressionAnchorInterval) == 0;
-                    int prefixLen = 0;
-                    if (!isAnchor && prevBytes is not null)
+                    var reader = new ChunkReader(path, readers.Count, streamPool, readAheadDispatcher);
+                    if (reader.MoveNext())
+                        readers.Add(reader);
+                    else
+                        streamPool.Drop(path);
+                }
+
+                // Priority queue keyed by (current bytes, then chunk index for stable ordering).
+                var pq = new PriorityQueue<int, ChunkPriorityKey>(readers.Count, ChunkPriorityKeyComparer.Instance);
+                for (int i = 0; i < readers.Count; i++)
+                    pq.Enqueue(i, new ChunkPriorityKey(readers[i].Current.Bytes, i));
+
+                using var dataFs = new FileStream(dataPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
+                using var offsetsFs = new FileStream(offsetsPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.SequentialScan);
+                Span<byte> offsetBuf = stackalloc byte[8];
+
+                // offsets[0] = 0 (first atom starts at byte 0 of .atoms).
+                BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, 0);
+                offsetsFs.Write(offsetBuf);
+
+                byte[]? prevBytes = null;
+
+                while (pq.Count > 0)
+                {
+                    int readerIdx = pq.Dequeue();
+                    var rec = readers[readerIdx].Current;
+
+                    bool isNew = prevBytes is null || !rec.Bytes.AsSpan().SequenceEqual(prevBytes);
+                    if (isNew)
                     {
-                        prefixLen = ComputeLongestCommonPrefix(prevBytes, rec.Bytes, maxLen: 255);
+                        atomCount++;
+                        // ADR-034 Round 2 prefix compression: anchor every Nth atom (full bytes,
+                        // prefix_len=0); all others are delta-encoded against their predecessor
+                        // in sort order. Anchor on the FIRST atom (atomCount==1) and every
+                        // PrefixCompressionAnchorInterval thereafter.
+                        bool isAnchor = ((atomCount - 1) % PrefixCompressionAnchorInterval) == 0;
+                        int prefixLen = 0;
+                        if (!isAnchor && prevBytes is not null)
+                        {
+                            prefixLen = ComputeLongestCommonPrefix(prevBytes, rec.Bytes, maxLen: 255);
+                        }
+                        int suffixLen = rec.Bytes.Length - prefixLen;
+                        dataFs.WriteByte((byte)prefixLen);
+                        if (suffixLen > 0)
+                            dataFs.Write(rec.Bytes, prefixLen, suffixLen);
+                        fileBytes += 1 + suffixLen;
+                        contentBytes += rec.Bytes.Length;
+                        BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, fileBytes);
+                        offsetsFs.Write(offsetBuf);
+                        prevBytes = rec.Bytes;
                     }
-                    int suffixLen = rec.Bytes.Length - prefixLen;
-                    dataFs.WriteByte((byte)prefixLen);
-                    if (suffixLen > 0)
-                        dataFs.Write(rec.Bytes, prefixLen, suffixLen);
-                    fileBytes += 1 + suffixLen;
-                    contentBytes += rec.Bytes.Length;
-                    BinaryPrimitives.WriteInt64LittleEndian(offsetBuf, fileBytes);
-                    offsetsFs.Write(offsetBuf);
-                    prevBytes = rec.Bytes;
+
+                    if (useDiskBacked)
+                    {
+                        resolveSorter!.Add(new ResolveRecord(rec.InputIdx, atomCount));
+                        resolverRecordsSpilled++;
+                    }
+                    else
+                        assigned[checked((int)rec.InputIdx)] = atomCount;
+
+                    if (readers[readerIdx].MoveNext())
+                        pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
+
+                    recordsProcessed++;
+                    if (listener is not null && recordsProcessed % MergeProgressEmissionInterval == 0)
+                    {
+                        listener.OnMergeProgress(new MergeProgressEvent(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            RecordsProcessed: recordsProcessed,
+                            AtomsEmitted: atomCount,
+                            ResolverRecordsSpilled: resolverRecordsSpilled,
+                            CurrentPoolOpenCount: streamPool.OpenCount,
+                            CurrentPoolHits: streamPool.Hits,
+                            CurrentPoolMisses: streamPool.Misses,
+                            DataBytesWritten: fileBytes));
+                    }
                 }
 
-                if (useDiskBacked)
+                dataFs.Flush(flushToDisk: true);
+                offsetsFs.Flush(flushToDisk: true);
+                mergeOk = true;
+            }
+            finally
+            {
+                foreach (var r in readers) r.Dispose();
+
+                // ADR-041 Part 1+2: chunkFile cleanup with bulk-tmp segment assertion and
+                // diagnostic-preserve env var. Phase-transition cleanup: chunk files are no
+                // longer referenced by any active code path once readers are Disposed (each
+                // reader's Dispose calls _pool.Drop(_path) which closes the underlying FD).
+                // Deleting them here — rather than waiting for the caller's end-of-run
+                // tempDir wipe — releases disk pressure immediately. At 21.3B Wikidata
+                // cycle 8, ~3.6 TB of occurrence chunks were held until run end, putting
+                // the GSPO drain phase within ~600 GB of MinimumFreeDiskSpace abort on a
+                // 7.3 TB host. Limits: docs/limits/intermediate-cleanup-deferred-to-run-end.md.
+                //
+                // ADR-041 preserve flag: on merge-phase exception, MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION=1
+                // keeps chunkFiles in place for forensic inspection. Success-path cleanup
+                // is unconditional. The flag does NOT preserve through MPHF-phase exception
+                // (the chunks are already gone by then; the resolveSorter residue is upstream
+                // and handled by SortedAtomBulkBuilder.Dispose in FinalizeSortedAtomBulkIfPresent).
+                long cleanupStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                bool shouldCleanup = mergeOk || !preserveBulkTmp;
+                if (shouldCleanup)
                 {
-                    resolveSorter!.Add(new ResolveRecord(rec.InputIdx, atomCount));
-                    resolverRecordsSpilled++;
-                }
-                else
-                    assigned[checked((int)rec.InputIdx)] = atomCount;
+                    foreach (var path in chunkFiles)
+                    {
+                        // ADR-041 Part 2: refuse to delete any path that does not live under
+                        // a "bulk-tmp" directory segment. Fail-fast defends against a future
+                        // refactor that accidentally populates chunkFiles with output paths
+                        // (atoms.atoms, atoms.offsets, atoms.mphf, atoms.idx) — those live
+                        // at baseFilePath, not under bulk-tmp/.
+                        if (!IsUnderBulkTmp(path))
+                            throw new InvalidOperationException(
+                                $"MergeAndWrite cleanup refusing to delete non-bulk-tmp path: {path}");
 
-                if (readers[readerIdx].MoveNext())
-                    pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
-
-                recordsProcessed++;
-                if (listener is not null && recordsProcessed % MergeProgressEmissionInterval == 0)
-                {
-                    listener.OnMergeProgress(new MergeProgressEvent(
-                        Timestamp: DateTimeOffset.UtcNow,
-                        RecordsProcessed: recordsProcessed,
-                        AtomsEmitted: atomCount,
-                        ResolverRecordsSpilled: resolverRecordsSpilled,
-                        CurrentPoolOpenCount: streamPool.OpenCount,
-                        CurrentPoolHits: streamPool.Hits,
-                        CurrentPoolMisses: streamPool.Misses,
-                        DataBytesWritten: fileBytes));
+                        try
+                        {
+                            chunkBytesReclaimed += new FileInfo(path).Length;
+                            File.Delete(path);
+                            chunksDeleted++;
+                        }
+                        catch (Exception ex)
+                        {
+                            anyDeleteFailures = true;
+                            firstFailureMessage ??= ex.Message;
+                        }
+                        // ADR-038 Part 1: also delete the per-chunk sidecar (chunk-NNNNNN.idx).
+                        // Sidecar carries anchor offsets for re-acquire-after-eviction; once the
+                        // chunk is consumed, the sidecar is no longer referenced.
+                        var sidecarPath = Path.ChangeExtension(path, ".idx");
+                        try
+                        {
+                            if (File.Exists(sidecarPath))
+                            {
+                                chunkBytesReclaimed += new FileInfo(sidecarPath).Length;
+                                File.Delete(sidecarPath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            anyDeleteFailures = true;
+                            firstFailureMessage ??= ex.Message;
+                        }
+                    }
                 }
+                cleanupDuration = System.Diagnostics.Stopwatch.GetElapsedTime(cleanupStartTicks);
             }
 
-            dataFs.Flush(flushToDisk: true);
-            offsetsFs.Flush(flushToDisk: true);
+            // Emit final merge-completed event with full pool stats. Replaces the
+            // earlier ad-hoc Console.WriteLine [merge-pool] line with structured
+            // emission to the JSONL listener — single source of truth for run data.
+            long totalGets = streamPool.Hits + streamPool.Misses;
+            var mergeDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mergeStartTicks);
+            listener?.OnMergeCompleted(new MergeCompletedEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                ChunkCount: chunkFiles.Count,
+                PoolMaxOpen: streamPool.MaxOpen,
+                PoolPeakOpen: streamPool.PeakOpenCount,
+                PoolHits: streamPool.Hits,
+                PoolMisses: streamPool.Misses,
+                TotalGets: totalGets,
+                AtomsEmitted: atomCount,
+                DataBytes: contentBytes,
+                Duration: mergeDuration,
+                ChunksDeleted: chunksDeleted,
+                ChunkBytesReclaimed: chunkBytesReclaimed));
+
+            // ADR-039 / Phase 2 B3: build MPHF + translation table over the sealed
+            // atom set. Disabled when MERCURY_BUILD_MPHF env var is "0" — preserves
+            // backward-compatible behavior for callers that don't want the
+            // construction overhead, and lets the gradient A/B against no-MPHF
+            // baseline cleanly.
+            bool buildMphf = atomCount > 0 && Environment.GetEnvironmentVariable("MERCURY_BUILD_MPHF") != "0";
+            if (buildMphf)
+            {
+                BuildMphfFiles(baseFilePath, atomCount, listener);
+            }
+
+            if (useDiskBacked)
+            {
+                // Finalize the resolver's spill so it's drainable. Caller wraps as DiskBackedAssignedIds.
+                resolveSorter!.Complete();
+                success = true;
+                return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned)
+                {
+                    AssignedIdsResolver = new DiskBackedAssignedIds(resolveSorter, inputCount),
+                };
+            }
+
+            success = true;
+            return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned);
         }
         finally
         {
-            foreach (var r in readers) r.Dispose();
-
-            // Phase-transition cleanup: chunk files are no longer referenced by any
-            // active code path once readers are Disposed (each reader's Dispose calls
-            // _pool.Drop(_path) which closes the underlying FD). Deleting them here —
-            // rather than waiting for the caller's end-of-run tempDir wipe — releases
-            // disk pressure immediately. At 21.3B Wikidata cycle 8, ~3.6 TB of
-            // occurrence chunks were held until run end, putting the GSPO drain phase
-            // within ~600 GB of MinimumFreeDiskSpace abort on a 7.3 TB host. Smaller
-            // hosts would have aborted mid-run. Limits:
-            // docs/limits/intermediate-cleanup-deferred-to-run-end.md
-            foreach (var path in chunkFiles)
-            {
-                try
-                {
-                    chunkBytesReclaimed += new FileInfo(path).Length;
-                    File.Delete(path);
-                    chunksDeleted++;
-                }
-                catch { /* best effort — caller's tempDir cleanup catches stragglers */ }
-                // ADR-038 Part 1: also delete the per-chunk sidecar (chunk-NNNNNN.idx).
-                // Sidecar carries anchor offsets for re-acquire-after-eviction; once the
-                // chunk is consumed, the sidecar is no longer referenced.
-                var sidecarPath = Path.ChangeExtension(path, ".idx");
-                try
-                {
-                    if (File.Exists(sidecarPath))
-                    {
-                        chunkBytesReclaimed += new FileInfo(sidecarPath).Length;
-                        File.Delete(sidecarPath);
-                    }
-                }
-                catch { /* best effort */ }
-            }
+            // ADR-041 Part 4: emit one BulkTmpCleanupEvent per MergeAndWrite invocation.
+            // Trigger="merge_success" when the function returned normally; "merge_exception"
+            // when any exception (merge phase, MergeCompletedEvent emit, BuildMphfFiles)
+            // propagates out. Per-cycle attribution preserves the signal.
+            listener?.OnBulkTmpCleanup(new BulkTmpCleanupEvent(
+                Timestamp: DateTimeOffset.UtcNow,
+                Trigger: success ? "merge_success" : "merge_exception",
+                ChunksDeleted: chunksDeleted,
+                ChunkBytesReclaimed: chunkBytesReclaimed,
+                ElapsedDuration: cleanupDuration,
+                AnyDeleteFailures: anyDeleteFailures,
+                FirstFailureMessage: firstFailureMessage));
         }
+    }
 
-        // Emit final merge-completed event with full pool stats. Replaces the
-        // earlier ad-hoc Console.WriteLine [merge-pool] line with structured
-        // emission to the JSONL listener — single source of truth for run data.
-        long totalGets = streamPool.Hits + streamPool.Misses;
-        var mergeDuration = System.Diagnostics.Stopwatch.GetElapsedTime(mergeStartTicks);
-        listener?.OnMergeCompleted(new MergeCompletedEvent(
-            Timestamp: DateTimeOffset.UtcNow,
-            ChunkCount: chunkFiles.Count,
-            PoolMaxOpen: streamPool.MaxOpen,
-            PoolPeakOpen: streamPool.PeakOpenCount,
-            PoolHits: streamPool.Hits,
-            PoolMisses: streamPool.Misses,
-            TotalGets: totalGets,
-            AtomsEmitted: atomCount,
-            DataBytes: contentBytes,
-            Duration: mergeDuration,
-            ChunksDeleted: chunksDeleted,
-            ChunkBytesReclaimed: chunkBytesReclaimed));
-
-        // ADR-039 / Phase 2 B3: build MPHF + translation table over the sealed
-        // atom set. Disabled when MERCURY_BUILD_MPHF env var is "0" — preserves
-        // backward-compatible behavior for callers that don't want the
-        // construction overhead, and lets the gradient A/B against no-MPHF
-        // baseline cleanly.
-        bool buildMphf = atomCount > 0 && Environment.GetEnvironmentVariable("MERCURY_BUILD_MPHF") != "0";
-        if (buildMphf)
-        {
-            BuildMphfFiles(baseFilePath, atomCount, listener);
-        }
-
-        if (useDiskBacked)
-        {
-            // Finalize the resolver's spill so it's drainable. Caller wraps as DiskBackedAssignedIds.
-            resolveSorter!.Complete();
-            return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned)
-            {
-                AssignedIdsResolver = new DiskBackedAssignedIds(resolveSorter, inputCount),
-            };
-        }
-
-        return new SortedAtomStoreBuilder.BuildResult(atomCount, contentBytes, assigned);
+    // ADR-041 Part 2: bulk-tmp segment assertion helper. Checks for the literal
+    // path segment "bulk-tmp" surrounded by directory separators on either platform.
+    private static bool IsUnderBulkTmp(string path)
+    {
+        const string Marker = "bulk-tmp";
+        // Normalize the comparison: a "/bulk-tmp/" or "\\bulk-tmp\\" segment anywhere.
+        return path.Contains(Path.DirectorySeparatorChar + Marker + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || path.Contains(Path.AltDirectorySeparatorChar + Marker + Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     /// <summary>

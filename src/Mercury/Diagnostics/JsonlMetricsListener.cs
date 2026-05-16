@@ -520,6 +520,24 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         WriteBufferedLine(buffer);
     }
 
+    public void OnBulkTmpCleanup(in BulkTmpCleanupEvent ev)
+    {
+        using var buffer = new MemoryStream();
+        using (var json = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            WriteHeader(json, "bulk_tmp_cleanup", "event", ev.Timestamp);
+            json.WriteString("trigger", ev.Trigger);
+            json.WriteNumber("chunks_deleted", ev.ChunksDeleted);
+            json.WriteNumber("chunk_bytes_reclaimed", ev.ChunkBytesReclaimed);
+            json.WriteNumber("elapsed_ms", ev.ElapsedDuration.TotalMilliseconds);
+            json.WriteBoolean("any_delete_failures", ev.AnyDeleteFailures);
+            if (ev.FirstFailureMessage is not null)
+                json.WriteString("first_failure_message", ev.FirstFailureMessage);
+            json.WriteEndObject();
+        }
+        WriteBufferedLine(buffer);
+    }
+
     public void OnScopeEnter(long scopeId, long parentScopeId, string name, DateTimeOffset timestamp)
     {
         using var buffer = new MemoryStream();

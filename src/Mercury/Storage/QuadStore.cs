@@ -1064,77 +1064,89 @@ public sealed class QuadStore : IDisposable
             _sortedAtomBulkBuilder = null;
             var atomPath = Path.Combine(_baseDirectory, "atoms");
 
-            // Release the placeholder mmap before the builder rewrites the files.
-            _atoms.Dispose();
-
-            bulkBuilder.Finalize();
-
-            // Reopen over the fresh vocab files so GetAtomSpan works for the rest
-            // of the session.
-            _atoms = new SortedAtomStore(atomPath);
-
-            // Replay the resolved triples into the GSPO sorter (same path the
-            // Hash-backed Reference bulk uses; see _bulkSorter declaration).
-            //
-            // ADR-034 Phase 1B-5d: scope the GSPO sorter's tempDir to a dedicated
-            // subdirectory ("bulk-tmp/gspo"). The previous shape ("bulk-tmp")
-            // collided with the SortedAtomBulkBuilder's resolver chunks at
-            // "bulk-tmp/sorted-vocab/assigned-ids-resolver/", because
-            // ExternalSorter's constructor wipes its tempDir recursively — which
-            // would delete the resolver's chunks before EnumerateResolved drains
-            // them just below.
-            if (_bulkSorter is null)
+            // ADR-041: bulkBuilder.Dispose() must run on every exit path so its tempDir
+            // (bulk-tmp/sorted-vocab/* including the resolveSorter chunks at
+            // bulk-tmp/sorted-vocab/assigned-ids-resolver/) is reclaimed even when
+            // bulkBuilder.Finalize() throws — the cycle-10-r3 incident pattern
+            // (BBHash OverflowException 2026-05-10, MPHF non-convergence 2026-05-11)
+            // left ~1.2 TB orphaned because Dispose lived on the success path.
+            try
             {
-                var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "gspo");
-                _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
-                    tempDir: bulkTempDir,
-                    chunkSize: 16_000_000);
-            }
-            // ADR-A1 (cycle 10 Phase 1): emit drain progress on a time-based cadence.
-            // Closes the silent-phase gap surfaced by cycle 9 (drain ran ~1 h 40 m
-            // with no progress emission). Time-based interval (default 30 s) caps
-            // emission rate regardless of throughput — addresses the
-            // backpressure-on-shared-disk pattern (cycle 9 trigram drain showed
-            // record-based emission queueing 2 h behind real time when the workload
-            // saturates the disk).
-            var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var lastReplayEmit = TimeSpan.Zero;
-            long replayEntries = 0;
-            long replayLastEmittedAt = 0;
-            long? replayEstimatedTotal = bulkBuilder.TripleCount > 0 ? bulkBuilder.TripleCount : null;
-            foreach (var (g, s, p, o) in bulkBuilder.EnumerateResolved())
-            {
-                var key = new ReferenceQuadIndex.ReferenceKey
-                {
-                    Graph = g,
-                    Primary = s,
-                    Secondary = p,
-                    Tertiary = o,
-                };
-                _bulkSorter.Add(in key);
-                replayEntries++;
+                // Release the placeholder mmap before the builder rewrites the files.
+                _atoms.Dispose();
 
-                if (ObservabilityListener is not null &&
-                    replayStopwatch.Elapsed - lastReplayEmit >= DrainProgressEmissionInterval)
+                bulkBuilder.Finalize();
+
+                // Reopen over the fresh vocab files so GetAtomSpan works for the rest
+                // of the session.
+                _atoms = new SortedAtomStore(atomPath);
+
+                // Replay the resolved triples into the GSPO sorter (same path the
+                // Hash-backed Reference bulk uses; see _bulkSorter declaration).
+                //
+                // ADR-034 Phase 1B-5d: scope the GSPO sorter's tempDir to a dedicated
+                // subdirectory ("bulk-tmp/gspo"). The previous shape ("bulk-tmp")
+                // collided with the SortedAtomBulkBuilder's resolver chunks at
+                // "bulk-tmp/sorted-vocab/assigned-ids-resolver/", because
+                // ExternalSorter's constructor wipes its tempDir recursively — which
+                // would delete the resolver's chunks before EnumerateResolved drains
+                // them just below.
+                if (_bulkSorter is null)
                 {
-                    var elapsed = replayStopwatch.Elapsed;
-                    var dt = (elapsed - lastReplayEmit).TotalSeconds;
-                    var rate = dt > 0 ? (replayEntries - replayLastEmittedAt) / dt : 0;
-                    EmitDrainProgress(new Abstractions.DrainProgressEvent(
-                        Timestamp: DateTimeOffset.UtcNow,
-                        PhaseName: "GSPO",
-                        SubPhase: "ReplayResolved",
-                        EntriesProcessed: replayEntries,
-                        EstimatedTotal: replayEstimatedTotal,
-                        RatePerSecond: rate,
-                        GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
-                        WorkingSetBytes: Environment.WorkingSet,
-                        Elapsed: elapsed));
-                    lastReplayEmit = elapsed;
-                    replayLastEmittedAt = replayEntries;
+                    var bulkTempDir = Path.Combine(_baseDirectory, "bulk-tmp", "gspo");
+                    _bulkSorter = new ExternalSorter<ReferenceQuadIndex.ReferenceKey, ReferenceKeyChunkSorter>(
+                        tempDir: bulkTempDir,
+                        chunkSize: 16_000_000);
+                }
+                // ADR-A1 (cycle 10 Phase 1): emit drain progress on a time-based cadence.
+                // Closes the silent-phase gap surfaced by cycle 9 (drain ran ~1 h 40 m
+                // with no progress emission). Time-based interval (default 30 s) caps
+                // emission rate regardless of throughput — addresses the
+                // backpressure-on-shared-disk pattern (cycle 9 trigram drain showed
+                // record-based emission queueing 2 h behind real time when the workload
+                // saturates the disk).
+                var replayStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var lastReplayEmit = TimeSpan.Zero;
+                long replayEntries = 0;
+                long replayLastEmittedAt = 0;
+                long? replayEstimatedTotal = bulkBuilder.TripleCount > 0 ? bulkBuilder.TripleCount : null;
+                foreach (var (g, s, p, o) in bulkBuilder.EnumerateResolved())
+                {
+                    var key = new ReferenceQuadIndex.ReferenceKey
+                    {
+                        Graph = g,
+                        Primary = s,
+                        Secondary = p,
+                        Tertiary = o,
+                    };
+                    _bulkSorter.Add(in key);
+                    replayEntries++;
+
+                    if (ObservabilityListener is not null &&
+                        replayStopwatch.Elapsed - lastReplayEmit >= DrainProgressEmissionInterval)
+                    {
+                        var elapsed = replayStopwatch.Elapsed;
+                        var dt = (elapsed - lastReplayEmit).TotalSeconds;
+                        var rate = dt > 0 ? (replayEntries - replayLastEmittedAt) / dt : 0;
+                        EmitDrainProgress(new Abstractions.DrainProgressEvent(
+                            Timestamp: DateTimeOffset.UtcNow,
+                            PhaseName: "GSPO",
+                            SubPhase: "ReplayResolved",
+                            EntriesProcessed: replayEntries,
+                            EstimatedTotal: replayEstimatedTotal,
+                            RatePerSecond: rate,
+                            GcHeapBytes: GC.GetTotalMemory(forceFullCollection: false),
+                            WorkingSetBytes: Environment.WorkingSet,
+                            Elapsed: elapsed));
+                        lastReplayEmit = elapsed;
+                        replayLastEmittedAt = replayEntries;
+                    }
                 }
             }
-            bulkBuilder.Dispose();
+            finally
+            {
+                bulkBuilder.Dispose();
+            }
         }
         finally
         {

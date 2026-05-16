@@ -138,3 +138,34 @@ public readonly record struct DrainProgressEvent(
     long GcHeapBytes,
     long WorkingSetBytes,
     TimeSpan Elapsed);
+
+/// <summary>
+/// Bulk-tmp cleanup outcome event emitted once per <c>MergeAndWrite</c> invocation.
+/// ADR-041: closes the cycle-10-r3 incident pattern where a Finalize-time exception
+/// (BBHash <c>OverflowException</c> 2026-05-10, MPHF non-convergence 2026-05-11) left
+/// ~1.2 TB of intermediate chunk files orphaned on disk and required manual
+/// <c>rm -rf</c> before retry.
+/// <para>
+/// The <c>Trigger</c> field distinguishes the path that fired cleanup so per-cycle
+/// attribution stays accurate after the substrate becomes uniform across success
+/// and exception paths. Values:
+/// </para>
+/// <list type="bullet">
+///   <item><b>"merge_success"</b> — normal end-of-merge cleanup; carries the
+///   measurement Cycle 9 surfaced (3.96 TB reclaimed at end-of-merge).</item>
+///   <item><b>"merge_exception"</b> — cleanup fired through the exception path.
+///   <c>FirstFailureMessage</c> when non-null carries the diagnostic from a cleanup
+///   that itself partially failed (e.g., file locked by a sibling process).</item>
+///   <item><b>"manual_rebuild"</b> — cleanup invoked from
+///   <c>mercury --rebuild-mphf</c> after a successful MPHF rebuild; surfaces any
+///   leftover bulk-tmp residue the operator may want to know about.</item>
+/// </list>
+/// </summary>
+public readonly record struct BulkTmpCleanupEvent(
+    DateTimeOffset Timestamp,
+    string Trigger,
+    int ChunksDeleted,
+    long ChunkBytesReclaimed,
+    TimeSpan ElapsedDuration,
+    bool AnyDeleteFailures,
+    string? FirstFailureMessage);

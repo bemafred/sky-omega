@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.57](#1757---2026-05-11)** — released 2026-05-11; production-validated by **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.58](#1758---2026-05-16)** — released 2026-05-16; ADR-041 cleanup-on-exception for bulk-tmp intermediates ships, closing the cycle-10-r3 incident pattern where a Finalize-time exception left ~1.2 TB orphaned. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,39 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.58] - 2026-05-16
+
+**Headline:** Ships ADR-041 cleanup-on-exception for bulk-tmp intermediates. The cycle-10 r3 incident pattern (BBHash `OverflowException` 2026-05-10 1.7.52, MPHF non-convergence 2026-05-11 1.7.54) left ~1.2 TB of intermediate chunk files orphaned after a Finalize-time exception, requiring manual `rm -rf` before retry. 1.7.58 closes this operationally: cleanup fires uniformly on both success and exception paths, with a `MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION=1` env var preserving the existing behavior for diagnostic sessions.
+
+### Added
+
+- **`BulkTmpCleanupEvent`** structured event emitted once per `MergeAndWrite` invocation. Includes `Trigger` ("merge_success" | "merge_exception" | "manual_rebuild"), `ChunksDeleted`, `ChunkBytesReclaimed`, `ElapsedDuration`, `AnyDeleteFailures`, and `FirstFailureMessage`. JSONL records emit under `phase: "bulk_tmp_cleanup"` for per-cycle attribution after the substrate becomes uniform across success and exception paths.
+- **`MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION=1` env var.** When set, chunk files are preserved on merge-phase exception (forensic mode). Default behavior cleans unconditionally — matches the pre-1.7.58 success-path contract uniformly extended.
+- Four new validation tests in `Mercury.Tests.Storage.SortedAtomStoreExternalBuilderTests`:
+  - `BulkTmpCleanup_SuccessPath_EmitsMergeSuccessTrigger`
+  - `BulkTmpCleanup_MergeException_CleansAndEmitsMergeExceptionTrigger`
+  - `BulkTmpCleanup_PreserveFlagSet_KeepsChunksOnException`
+  - `BulkTmpCleanup_NonBulkTmpPath_FailsAssertion`
+
+### Changed
+
+- **`MergeAndWrite` cleanup loop now asserts** that every chunk file path contains `bulk-tmp` as a directory segment. Fail-fast `InvalidOperationException` defends against a future refactor accidentally passing output paths (`atoms.atoms`, `atoms.offsets`, `atoms.mphf`, `atoms.idx`) into `chunkFiles`. Per ADR-041 Part 2.
+- **Default tempDir conventions updated.** `BuildExternal` default tempDir is now `<TempPath>/bulk-tmp/sorted-atom-build-<guid>` (was `<TempPath>/sorted-atom-build-<guid>`). `SortedAtomBulkBuilder` default tempDir is now `<TempPath>/bulk-tmp/sorted-atom-bulk-<guid>` (was `<TempPath>/sorted-atom-bulk-<guid>`). Both now satisfy the segment assertion by construction without requiring callers to wire the convention.
+- **`QuadStore.FinalizeSortedAtomBulkIfPresent` now wraps `bulkBuilder.Finalize()` and the EnumerateResolved replay loop in try/finally so `bulkBuilder.Dispose()` always runs.** This closes the cycle-10-r3 actual root cause: on `bulkBuilder.Finalize()` exception (BBHash failure), the `bulkBuilder.Dispose()` call lived on the success path. The Dispose cleans the SortedAtomBulkBuilder's `_tempDir` (including the resolveSorter's `bulk-tmp/sorted-vocab/assigned-ids-resolver/` subdirectory) — without it, the ~1.2 TB resolver-spill chunks were orphaned even though the `MergeAndWrite` internal finally cleaned its chunkFiles.
+
+### Fixed
+
+- **Cycle 10 r3 incident pattern fully closed.** The combination of `MergeAndWrite` cleanup-on-exception (already in finally; this release adds the `BulkTmpCleanupEvent` for visibility) + the new `BulkBuilder.Dispose()` guarantee in `QuadStore.FinalizeSortedAtomBulkIfPresent` means a Finalize-time exception (BBHash overflow, non-convergence, or any other post-merge failure) reclaims all bulk-tmp residue without operator intervention. The `mercury --rebuild-mphf` recovery path's "after rebuild, operator still has to clean manually" footgun is gone.
+
+### Validation
+
+- All 4 new ADR-041 cleanup tests green.
+- 540 Storage tests green after rename of test tempDir paths to use `bulk-tmp` as a path segment (mechanical, matches the production convention).
+
+### References
+
+- [ADR-041](docs/adrs/mercury/ADR-041-cleanup-on-finalize-exception.md) — moved Proposed → **Completed (2026-05-16)**.
 
 ## [1.7.57] - 2026-05-11
 

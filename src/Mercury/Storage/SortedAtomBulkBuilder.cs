@@ -126,7 +126,10 @@ internal sealed class SortedAtomBulkBuilder : IDisposable
         _listener = listener;
         if (tempDir is null)
         {
-            _tempDir = Path.Combine(Path.GetTempPath(), "sorted-atom-bulk-" + Guid.NewGuid().ToString("N"));
+            // ADR-041: default tempDir includes "bulk-tmp" as a path segment so
+            // the MergeAndWrite cleanup assertion (chunkFiles must live under
+            // bulk-tmp/) passes without callers having to wire the convention.
+            _tempDir = Path.Combine(Path.GetTempPath(), "bulk-tmp", "sorted-atom-bulk-" + Guid.NewGuid().ToString("N"));
             _ownsTempDir = true;
         }
         else

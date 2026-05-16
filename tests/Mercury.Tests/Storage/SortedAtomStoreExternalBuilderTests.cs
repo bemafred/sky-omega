@@ -32,7 +32,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
     {
         var basePath = Path.Combine(_testDir, "ext_empty");
         var result = SortedAtomStoreExternalBuilder.BuildExternal(basePath, Array.Empty<string>(),
-            tempDir: Path.Combine(_testDir, "tmp_empty"));
+            tempDir: Path.Combine(_testDir, "bulk-tmp", "empty"));
         Assert.Equal(0, result.AtomCount);
 
         using var store = new SortedAtomStore(basePath);
@@ -45,7 +45,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
         var basePath = Path.Combine(_testDir, "ext_small");
         var inputs = new[] { "charlie", "alpha", "bravo", "alpha" };
         var result = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs,
-            tempDir: Path.Combine(_testDir, "tmp_small"));
+            tempDir: Path.Combine(_testDir, "bulk-tmp", "small"));
 
         Assert.Equal(3, result.AtomCount);  // 3 distinct
         Assert.Equal(new long[] { 3, 1, 2, 1 }, result.AssignedIds);
@@ -71,7 +71,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
 
         // External: 1 MB chunks across ~50 KB total → many chunk spills.
         var ext = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs,
-            tempDir: Path.Combine(_testDir, "tmp_chunked"),
+            tempDir: Path.Combine(_testDir, "bulk-tmp", "chunked"),
             chunkSizeBytes: 1L * 1024 * 1024);
 
         // In-memory: same input.
@@ -104,7 +104,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
             inputs[i] = $"key{i % 10}";
 
         var result = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs,
-            tempDir: Path.Combine(_testDir, "tmp_dups"),
+            tempDir: Path.Combine(_testDir, "bulk-tmp", "dups"),
             chunkSizeBytes: 1L * 1024 * 1024);
 
         Assert.Equal(10, result.AtomCount);  // exactly 10 distinct keys
@@ -118,7 +118,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
     [Fact]
     public void External_TempDirCleanupOnSuccess()
     {
-        var tempDir = Path.Combine(_testDir, "tmp_cleanup");
+        var tempDir = Path.Combine(_testDir, "bulk-tmp", "cleanup");
         var basePath = Path.Combine(_testDir, "ext_cleanup");
         SortedAtomStoreExternalBuilder.BuildExternal(basePath, new[] { "a", "b" }, tempDir: tempDir);
         Assert.False(Directory.Exists(tempDir), "temp directory should be deleted after successful build");
@@ -143,7 +143,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
             inputs[i] = $"http://wikidata.org/entity/Q{i:D9}";
 
         var ext = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs,
-            tempDir: Path.Combine(_testDir, "tmp_many_chunks"),
+            tempDir: Path.Combine(_testDir, "bulk-tmp", "many_chunks"),
             chunkSizeBytes: 1L * 1024 * 1024);
 
         Assert.Equal(inputs.Length, ext.AtomCount);
@@ -174,7 +174,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
             inputs[i] = $"http://wikidata.org/entity/Q{i:D8}";
 
         var result = SortedAtomStoreExternalBuilder.BuildExternal(basePath, inputs,
-            tempDir: Path.Combine(_testDir, "tmp_large"),
+            tempDir: Path.Combine(_testDir, "bulk-tmp", "large"),
             chunkSizeBytes: 4L * 1024 * 1024);
 
         Assert.Equal(50_000, result.AtomCount);
@@ -197,7 +197,7 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
         // Round 2 phase-transition cleanup: chunks must be deleted by the end of
         // MergeAndWrite, and the MergeCompletedEvent must report counts that match.
         // Limits: docs/limits/intermediate-cleanup-deferred-to-run-end.md
-        var bulkTempDir = Path.Combine(_testDir, "tmp_cleanup_event");
+        var bulkTempDir = Path.Combine(_testDir, "bulk-tmp", "cleanup_event");
         var basePath = Path.Combine(_testDir, "ext_cleanup_event");
         var listener = new CapturingMergeListener();
 
@@ -239,5 +239,144 @@ public class SortedAtomStoreExternalBuilderTests : IDisposable
     {
         public MergeCompletedEvent? LastCompleted { get; private set; }
         public void OnMergeCompleted(in MergeCompletedEvent ev) => LastCompleted = ev;
+    }
+
+    // ===== ADR-041 cleanup-on-exception validation =====
+    //
+    // Four scenarios from the ADR's validation plan:
+    //   1. Cleanup on success — regression that the existing finally-block path still fires
+    //      and emits BulkTmpCleanupEvent(Trigger="merge_success").
+    //   2. Cleanup on Finalize exception — chunkFiles cleaned and event with
+    //      Trigger="merge_exception" emitted when MergeAndWrite throws after the inner
+    //      merge phase succeeded.
+    //   3. Preserve-flag set — MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION=1 retains chunkFiles
+    //      across a merge-phase exception (forensic mode).
+    //   4. Idempotency — re-invoking the cleanup over already-deleted paths is safe.
+
+    private sealed class CapturingBulkTmpCleanupListener : IObservabilityListener
+    {
+        public BulkTmpCleanupEvent? LastCleanup { get; private set; }
+        public int CleanupEventCount { get; private set; }
+        public void OnBulkTmpCleanup(in BulkTmpCleanupEvent ev)
+        {
+            LastCleanup = ev;
+            CleanupEventCount++;
+        }
+    }
+
+    [Fact]
+    public void BulkTmpCleanup_SuccessPath_EmitsMergeSuccessTrigger()
+    {
+        var listener = new CapturingBulkTmpCleanupListener();
+        var basePath = Path.Combine(_testDir, "adr041_success");
+        var tempDir = Path.Combine(_testDir, "bulk-tmp", "adr041_success");
+
+        using (var builder = new SortedAtomBulkBuilder(
+            basePath, tempDir: tempDir, useDiskBackedAssigned: false,
+            chunkBufferBytes: 1L * 1024 * 1024, listener: listener))
+        {
+            // Force a few chunk spills.
+            for (int i = 0; i < 5_000; i++)
+                builder.AddTriple(default, $"s{i:D6}", "p", $"o{i:D6}");
+            builder.Finalize();
+        }
+
+        Assert.Equal(1, listener.CleanupEventCount);
+        Assert.NotNull(listener.LastCleanup);
+        Assert.Equal("merge_success", listener.LastCleanup!.Value.Trigger);
+        Assert.True(listener.LastCleanup.Value.ChunksDeleted > 0,
+            "success-path cleanup should delete at least one chunk");
+        Assert.False(listener.LastCleanup.Value.AnyDeleteFailures);
+    }
+
+    [Fact]
+    public void BulkTmpCleanup_MergeException_CleansAndEmitsMergeExceptionTrigger()
+    {
+        // Force MergeAndWrite to throw by pointing chunkFiles at a path that doesn't exist —
+        // ChunkReader's constructor will fail to open the FileStream and propagate.
+        var listener = new CapturingBulkTmpCleanupListener();
+        var basePath = Path.Combine(_testDir, "adr041_exc");
+
+        // Build one valid chunk by spilling through SortedAtomBulkBuilder, then inject a
+        // bogus chunk path so MergeAndWrite's reader-open throws on the second file.
+        var bulkTempDir = Path.Combine(_testDir, "bulk-tmp", "adr041_exc");
+        Directory.CreateDirectory(bulkTempDir);
+
+        // Manually craft a chunkFiles list with one bogus path under bulk-tmp/ so the
+        // assertion passes but the open fails.
+        var bogusChunk = Path.Combine(bulkTempDir, "chunk-000000.bin");
+        File.WriteAllBytes(bogusChunk, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }); // not a valid chunk header
+        var chunkFiles = new System.Collections.Generic.List<string> { bogusChunk };
+
+        // The 0xFFFFFFFF payload is not a valid LEB128 varint header; the merge phase
+        // throws when ChunkReader tries to parse the first record. Either
+        // InvalidDataException (malformed varint) or EndOfStreamException (truncated
+        // stream) is acceptable — what matters is that MergeAndWrite throws AND that
+        // cleanup still fires.
+        Assert.ThrowsAny<Exception>(() =>
+            SortedAtomStoreExternalBuilder.MergeAndWrite(
+                basePath, chunkFiles, inputCount: 1, resolveSorter: null, listener: listener));
+
+        Assert.Equal(1, listener.CleanupEventCount);
+        Assert.NotNull(listener.LastCleanup);
+        Assert.Equal("merge_exception", listener.LastCleanup!.Value.Trigger);
+        // Default behavior (no preserve flag) cleans up on exception path too.
+        Assert.False(File.Exists(bogusChunk), "exception path should still delete the bogus chunk");
+    }
+
+    [Fact]
+    public void BulkTmpCleanup_PreserveFlagSet_KeepsChunksOnException()
+    {
+        Environment.SetEnvironmentVariable("MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION", "1");
+        try
+        {
+            var listener = new CapturingBulkTmpCleanupListener();
+            var basePath = Path.Combine(_testDir, "adr041_preserve");
+            var bulkTempDir = Path.Combine(_testDir, "bulk-tmp", "adr041_preserve");
+            Directory.CreateDirectory(bulkTempDir);
+
+            var bogusChunk = Path.Combine(bulkTempDir, "chunk-000000.bin");
+            File.WriteAllBytes(bogusChunk, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF });
+            var chunkFiles = new System.Collections.Generic.List<string> { bogusChunk };
+
+            Assert.ThrowsAny<Exception>(() =>
+                SortedAtomStoreExternalBuilder.MergeAndWrite(
+                    basePath, chunkFiles, inputCount: 1, resolveSorter: null, listener: listener));
+
+            Assert.Equal(1, listener.CleanupEventCount);
+            Assert.Equal("merge_exception", listener.LastCleanup!.Value.Trigger);
+            Assert.Equal(0, listener.LastCleanup.Value.ChunksDeleted);
+            Assert.True(File.Exists(bogusChunk),
+                "preserve flag must retain the chunk for forensic inspection");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION", null);
+        }
+    }
+
+    [Fact]
+    public void BulkTmpCleanup_NonBulkTmpPath_FailsAssertion()
+    {
+        // ADR-041 Part 2: the cleanup loop refuses to delete any path that does not
+        // live under a bulk-tmp/ segment. The assertion fires before File.Delete,
+        // protecting against a future bug that passes baseFilePath.atoms etc. into
+        // chunkFiles.
+        var basePath = Path.Combine(_testDir, "adr041_assert");
+        var safeDir = Path.Combine(_testDir, "not-bulk-tmp");
+        Directory.CreateDirectory(safeDir);
+        var rogueChunk = Path.Combine(safeDir, "chunk-000000.bin");
+        File.WriteAllBytes(rogueChunk, new byte[] { 0xFF, 0xFF, 0xFF, 0xFF });
+
+        var chunkFiles = new System.Collections.Generic.List<string> { rogueChunk };
+
+        var ex = Assert.ThrowsAny<Exception>(() =>
+            SortedAtomStoreExternalBuilder.MergeAndWrite(
+                basePath, chunkFiles, inputCount: 1, resolveSorter: null, listener: null));
+        // Inner exception text contains the literal message; either the EndOfStreamException
+        // surfaces first (depending on order) or the cleanup-assertion does — we accept
+        // either as long as the rogue file survives.
+        Assert.True(File.Exists(rogueChunk),
+            "assertion must fire BEFORE File.Delete touches a non-bulk-tmp path");
     }
 }

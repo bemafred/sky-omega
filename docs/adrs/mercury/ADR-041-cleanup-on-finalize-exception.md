@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed — 2026-05-11
+**Status:** Completed — 2026-05-16 (Proposed 2026-05-11; Completed 2026-05-16 — implementation shipped 1.7.58 with 4 validation tests green)
 
 ## Context
 

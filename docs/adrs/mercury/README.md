@@ -43,5 +43,5 @@
 | [ADR-038](ADR-038-merge-read-side-optimization.md) | Merge-phase Read-Side Optimization (intermediate prefix compression + frontier readahead) | Completed (production-validated cycle 10 r4, 2026-05-13) |
 | [ADR-039](ADR-039-mphf-on-sealed-atom-set.md) | Minimal Perfect Hash Function (BBHash) over Sealed Atom Set | Completed (production-validated cycle 10 r4, 2026-05-13) |
 | [ADR-040](ADR-040-readahead-memory-adaptive-sizing.md) | Readahead Memory Adaptive Sizing — Substrate Adapts to Host RAM | Accepted (2026-05-16; engineering queued Tier 2 before 1.8.0) |
-| [ADR-041](ADR-041-cleanup-on-finalize-exception.md) | Cleanup-on-Exception for Bulk-Tmp Intermediates | Proposed |
+| [ADR-041](ADR-041-cleanup-on-finalize-exception.md) | Cleanup-on-Exception for Bulk-Tmp Intermediates | Completed (1.7.58, 2026-05-16) |
 | [ADR-042](ADR-042-mphf-construction-memory-adaptive-sizing.md) | MPHF Construction Memory Adaptive Sizing — Substrate-Correct Data Shapes | Accepted (2026-05-16; engineering queued Tier 2 before 1.8.0) |
