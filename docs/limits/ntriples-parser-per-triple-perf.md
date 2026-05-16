@@ -1,7 +1,9 @@
 # Limit: N-Triples parser ~23% slower per triple than Turtle parser at Wikidata scale
 
-**Status:**        Latent (truthy r1 evidence)
+**Status:**        Resolved-Partially (1.7.59, 2026-05-16; Peek-inlining shipped, +7.4% steady-state win; Options B+C deferred as Latent)
 **Surfaced:**      2026-05-14, during truthy r1 bulk-load against `wiki-truthy-ref`. Truthy parsed 8.17B triples in 14h13m end-to-end with ~160 K triples/sec sustained on the parse path. The full Wikidata cycle 10 r4 run (Turtle source, 21.3B) parsed at ~196 K triples/sec on the same hardware and the same 1.7.x substrate generation. **Parse-path throughput is ~18-23% lower on `.nt.bz2` than on `.ttl.bz2`** for equivalent disk-fitting workloads.
+**1.7.59 mitigation:**  `NTriplesStreamParser.Peek()` was missing `[MethodImpl(MethodImplOptions.AggressiveInlining)]` — the same annotation Turtle's `Peek()` has carried since 1.7.4. Adding it produced a measured **+6.0% end-to-end / +7.4% steady-state** improvement on 10M-triple bulk-load. The remaining ~25% steady-state gap is grammar-inherent (~6× more source bytes per triple in N-Triples). See [ntriples-parser-profile-2026-05-16.md](../validations/ntriples-parser-profile-2026-05-16.md) for the full profile + measurement.
+**Deferred candidates:** Option B (vectorized IRI body scan via `MemoryExtensions.IndexOfAny`) and Option C (specialized `ConsumeNonNewline` for IRI bodies) remain Latent. Promote if a future workload requires sub-1.25× format-gap and the steady-state Wikidata-shape workload is `.nt`-only.
 **Last reviewed:** 2026-05-16
 
 ## Description

@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.58](#1758---2026-05-16)** — released 2026-05-16; ADR-041 cleanup-on-exception for bulk-tmp intermediates ships, closing the cycle-10-r3 incident pattern where a Finalize-time exception left ~1.2 TB orphaned. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.59](#1759---2026-05-16)** — released 2026-05-16; targeted N-Triples parser optimization (Peek inlining) closes the asymmetry vs Turtle's `Peek`. Measured +6.0 % end-to-end / +7.4 % steady-state on 10M-triple bulk-load; 25 % grammar-inherent gap remains. Stacks on 1.7.58's ADR-041 cleanup-on-exception. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,28 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 2.0.0** will introduce cognitive components: Lucy (semantic memory), James (orchestration), Sky (LLM interaction), and Minerva (local inference).
 
 ---
+
+## [1.7.59] - 2026-05-16
+
+**Headline:** Targeted N-Triples parser optimization. `NTriplesStreamParser.Peek()` was missing `[MethodImpl(MethodImplOptions.AggressiveInlining)]` — the same annotation `TurtleStreamParser.Peek()` has carried since 1.7.4. Adding it produced a measured **+6.0 % end-to-end / +7.4 % steady-state** improvement on 10M-triple bulk-load. The remaining ~25 % steady-state gap (Turtle 730K tps vs N-Triples 583K tps at Wikidata shape) is grammar-inherent: N-Triples reads ~6× more source bytes per triple than prefix-resolved Turtle.
+
+### Changed
+
+- **`NTriplesStreamParser.Peek()` and `PeekAhead()`** annotated with `[MethodImpl(MethodImplOptions.AggressiveInlining)]`. The hot path through `ParseIriRefSpan` (lines 319-396) calls `Peek` once per IRI byte — ~38 calls for a typical Wikidata IRI vs ~6 for the prefix-resolved Turtle equivalent. Inlining the bounds-check + array index eliminates per-call dispatch overhead.
+
+### Validation
+
+- 137 N-Triples-related tests in Mercury.Tests green.
+- 10M-triple bulk-load comparison: avg 360,889 → 382,425 triples/sec (+6.0 %). Steady-state mid-run samples 543,394 → 583,548 tps (+7.4 %). Limits register entry [ntriples-parser-per-triple-perf](docs/limits/ntriples-parser-per-triple-perf.md) moves Latent → **Resolved-Partially**.
+
+### Methodology note
+
+The Tier 2 profile (intended via `dotnet-trace` + `cpu-sampling`) revealed that `cpu-sampling` is `collect-linux`-only; the `dotnet-sampled-thread-time` profile on macOS reports nearly 100 % `UNMANAGED_CODE_TIME` on I/O-mixed workloads because samples land on the kernel side of `read()` / `recv()`. Replacement methodology: **steady-state rate measurement** from the existing 100K-triple-interval `load.progress` JSONL records, plus **structural code-read comparison** with the Turtle parser's `Peek()` annotation. Combined evidence was sufficient to ship the bounded fix; deeper hot-method attribution (Apple Instruments.app / `xctrace`) is queued for future rounds if/when Options B (vectorized `IndexOfAny` IRI scan) or C (`ConsumeNonNewline` specialization) become candidates.
+
+### References
+
+- [N-Triples parser profile + decision (2026-05-16)](docs/validations/ntriples-parser-profile-2026-05-16.md) — full measurement + structural analysis.
+- [ntriples-parser-per-triple-perf](docs/limits/ntriples-parser-per-triple-perf.md) — limits register entry, now Resolved-Partially.
 
 ## [1.7.58] - 2026-05-16
 

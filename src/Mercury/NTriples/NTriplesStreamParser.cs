@@ -611,6 +611,14 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
 
     #region Buffer Management
 
+    // ADR/Tier-2 note: AggressiveInlining matches TurtleStreamParser.Peek's
+    // long-standing annotation. The hot path through ParseIriRefSpan
+    // (NTriplesStreamParser.cs:319-396) calls Peek per IRI byte — ~38 calls
+    // for a typical Wikidata IRI vs ~6 for the prefix-resolved Turtle equivalent.
+    // Inlining the bounds-check + array index eliminates the per-call dispatch
+    // overhead. The cold refill branch (while-loop) won't be inlined; the JIT
+    // splits inline candidates at unlikely branches.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int Peek()
     {
         // Refill on exhaustion. Loop because slow streams may return less than
@@ -626,6 +634,7 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
         return _inputBuffer[_bufferPosition];
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int PeekAhead(int offset)
     {
         var pos = _bufferPosition + offset;
