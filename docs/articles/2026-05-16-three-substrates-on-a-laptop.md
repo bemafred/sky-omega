@@ -124,15 +124,20 @@ With three paired substrates documented and the full WDBench + WGPB query corpus
 
 We've made the comparison easy on purpose. The publication arc continues.
 
-## Open follow-ups
+## Follow-ups (status as of 2026-05-17)
 
-- ADR-041 (cleanup-on-exception for bulk-tmp intermediates) — third orphaning occurrence happened during the 1.7.55 cycle-10-r3 abort; the fix has been documented and deferred to cycle 11
-- `ExternalSorter` FD pool integration — trigram rebuild on full Wikidata held 8,192 simultaneously-open chunk FileStreams (17 % headroom below the macOS launchd effective FD ceiling); class fix deferred to cycle 11
-- ADR-040 (readahead memory adaptive sizing) — Proposed; deferred to cycle 11
-- N-Triples parser optimization — the .nt parse path runs ~23 % slower per triple than the .ttl path on the same data; profiling needed before the optimization analysis is grounded in measurement (instrumentation candidates documented)
-- WDBench-aggregate completion-percentile distribution — to provide cycle-9-comparable single-row percentiles across the union of paths + c2rpqs results
-- Same-dated full+truthy pair to cleanly isolate literal-density-per-triple from dump-date growth
-- Query-side WDBench against the cycle-11 substrate when it materializes
+The five items characterized as open at writing closed out during the Phase 8 Tier 1+2 close-out batch on 2026-05-16 (versions 1.7.58 through 1.7.64):
+
+- **ADR-041 cleanup-on-exception for bulk-tmp intermediates** — third orphaning occurrence during the 1.7.55 cycle-10-r3 abort surfaced the gap. **Shipped 1.7.58, 2026-05-16**: `MergeAndWrite` meta try/finally with `BulkTmpCleanupEvent` emission, `MERCURY_PRESERVE_BULK_TMP_ON_EXCEPTION` forensic env var, 4 validation tests green.
+- **`ExternalSorter` FD pool integration** — **retracted 2026-05-16 as false alarm**. Code review against `ExternalSorter.ChunkReader.RefillBuffer → _pool.Get(_path)` confirms the pool IS engaged on the trigram-drain path; the 8,192 FD count was the pool running at its 8K cap with LRU eviction, as designed. The actual eviction-overhead concern is tracked separately in the limits register as `trigram-drain-cap-eviction`.
+- **ADR-040 readahead memory adaptive sizing** — **Parts 1+4 shipped 1.7.63, Parts 2+3 shipped 1.7.64**. Adaptive `bufferSize` at `MergeAndWrite` start via `ProcessMemoryProbe` (0.25 budget fraction, halving down to 256 KiB); lazy back-buffer allocation; eager per-chunk teardown on exhaustion; `ReadAheadBudgetEvent` JSONL emission. Periodic sampling event deferred as a follow-up enhancement.
+- **N-Triples parser optimization** — Tier 2 profile localized the gap to two contributors. **Shipped 1.7.59, 2026-05-16**: `NTriplesStreamParser.Peek()` `AggressiveInlining` annotation (the same one Turtle's `Peek` had carried since 1.7.4); +6.0 % end-to-end / +7.4 % steady-state at 10M-triple bulk-load. Remaining ~25 % steady-state gap characterized as grammar-inherent (~6× more source bytes per N-Triples triple); Options B (vectorized `IndexOfAny` IRI body scan) + C (`ConsumeNonNewline` specialization) deferred Latent.
+- **WDBench-aggregate completion-percentile distribution** — **shipped 2026-05-16**. Median 69 ms (full) / 62 ms (truthy); p99 ≈ 52 s; 5,316 queries, 0 failed, 52.2 % completion rate. See [wdbench-aggregate-distribution-2026-05-16.md](../validations/wdbench-aggregate-distribution-2026-05-16.md).
+
+Still open:
+
+- **Same-dated full+truthy pair** — cleanly isolate literal-density-per-triple from dump-date growth. Requires the full dump on the truthy dump's date (or vice versa).
+- **Query-side WDBench against the cycle-11 substrate** — when cycle 11 materializes.
 
 ## Where the artifacts are
 
