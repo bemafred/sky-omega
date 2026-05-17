@@ -142,7 +142,7 @@ Still open:
 ## Where the artifacts are
 
 - **Repository**: github.com/bemafred/sky-omega
-- **Current substrate**: Mercury 1.7.57, commit `f801ec7` at the time of this writing
+- **Substrate of record**: Mercury 1.7.57, commit `f801ec7` (current substrate version is further along after the Phase 8 Tier 1+2 close-out documented above)
 - **Three validation docs**:
   - [Cycle 10 Phase 3 r4 (full)](../validations/cycle10-phase3-r4-21b-2026-05-12.md)
   - [Truthy r1](../validations/truthy-r1-2026-05-14.md)
