@@ -19,9 +19,11 @@ This week the substrate reached production readiness.
 
 Three Wikidata builds on the same MacBook Pro (M5 Max, 128 GB unified memory, 8 TB SSD), same .NET 10 substrate, BCL-only — no third-party runtime dependencies:
 
-- **Full Wikidata** — **21,316,531,403 triples** ingested + sealed in **23 h 57 m** end-to-end.
-- **Truthy** — **8.17 billion triples** in **14 h 13 m**.
+- **Full Wikidata** — **21,316,531,403 triples** ingested + sealed in **23 h 57 m** end-to-end (**15 h 26 m** without the trigram text index).
+- **Truthy** — **8.17 billion triples** in **14 h 13 m** (**6 h 49 m** without trigram).
 - **WGPB filtered** — **150 million triples** built to queryable in **4 m 30 s**.
+
+The wall-clock numbers include the trigram text index Mercury builds unconditionally for SPARQL `text:match`. The parenthetical numbers are the like-for-like comparable against QLever-class systems that omit text indexes by default.
 
 Across the three builds plus prior validation cycles: **8,564 SPARQL queries measured, 0 substrate failures.** Median query latency on the full 21.3 B graph is **69 ms cold-cache** (p50, single-shot, 60-second timeout). Every metric record is committed as JSONL in the public repo. Anyone can re-derive any number we publish.
 
