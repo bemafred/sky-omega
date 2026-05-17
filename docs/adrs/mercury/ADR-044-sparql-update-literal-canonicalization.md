@@ -259,21 +259,21 @@ The decode loop is a copy of `TurtleStreamParser.ParseAndAppendEscapeToSb` (43 l
 
 ### Part 2 — Phase 0: consolidate duplicated term-resolution methods
 
-*Added in rev 3 after the duplication finding (Scope revision → Rev 2 → rev 3).*
+*Added in rev 3 after the duplication finding (Scope revision → Rev 2 → rev 3). Outcome updated post-execution: Phase 0b shipped; Phase 0a deferred per the fallback clause.*
 
 Before adding `LiteralForm.Canonicalize` at every materialization site, the duplicated `ResolveTerm`-shaped methods in the operator code should be consolidated into a single shared helper. The four near-identical copies (sites 6-9 in the Context surface table) make the canonicalization edit 4×; consolidation makes it 1×. Independently, the duplication is overdue cleanup.
 
-**Phase 0a:** Extract a single `ResolveTermShared` method (or `Mercury.Sparql.Execution.TermResolver` static helper) that takes a `Term`, source span, prefix mappings, binding table, and position discriminator, and returns the canonicalized span. The four pattern-execution methods become thin call-throughs.
+**Phase 0a — DEFERRED.** Attempted 2026-05-17. The four `ResolveTerm`-shaped methods (`ResolveSlotTerm` in `QueryResults.Patterns.cs`, `ResolveTerm` in `MultiPatternScan.cs`, `ResolveTermWithStorage` and `ResolveTermForQuery` in `TriplePatternScan.cs`) were found to share prefix-expansion logic but diverge on five feature axes — synthetic term handling, blank-node handling, numeric literal expansion, typed-value formatting from bindings, and position-specific vs shared scratch buffers. A single consolidated helper would need feature flags on all five axes (Christmas-tree pattern, trades one debt for another). Per this ADR's fallback clause, Phase 0a is deferred and the duplication is held as separate debt in [`docs/limits/sparql-resolve-term-family-duplication.md`](../../limits/sparql-resolve-term-family-duplication.md). Sites 6-9 receive per-site canonicalization edits in Part 3 (4 mechanical edits instead of 1 consolidated edit).
 
-**Phase 0b:** Extract a single `InstantiateTermShared` method that subsumes `UpdateExecutor.InstantiateTerm` (line 442) and `UpdateExecutor.InstantiateTermFromSpan` (line 697). The two methods differ in their input shape (`Term` vs span-pair); the consolidation can either take a discriminated union or have the two callers normalize before calling.
+**Phase 0b — SHIPPED.** Consolidated 2026-05-17. `UpdateExecutor.InstantiateTerm` (line 442) and `UpdateExecutor.InstantiateTermFromSpan` (line 697) were verified byte-for-byte identical (same signature `(Term, BindingTable) → string?`, same body). The latter was deleted; its six callers redirected to the former. Full Mercury suite green post-consolidation (4,463 / 0 failed / 6 skipped — same as baseline), confirming the refactor is behavior-preserving. Sites 4-5 collapse to one canonicalization edit in Part 3.
 
-**Phase 0 validation:** Full Mercury test suite (4,463 tests) green after consolidation but before any canonicalization changes. This isolates "did the refactor break anything" from "did canonicalization break anything." If the suite is green after Phase 0, Phase 0's behavior-preserving property is empirically verified.
+**Phase 0 validation (Validation plan item 0):** Full Mercury test suite green after Phase 0b and BEFORE any canonicalization changes. Passed: 4,463 tests, 0 failures, 6 skipped — identical to pre-Phase-0 baseline.
 
-If Phase 0 turns out non-trivial (the discriminator differences are more substantive than they appear at a glance), it gets its own ADR and ADR-044's Part 2 keeps the per-site edits as a fallback — but the duplication remains a debt to pay separately.
+**Net impact on Part 3 edit count:** Phase 0b's consolidation drops sites 4+5 to 1 edit; Phase 0a's deferral keeps sites 6-9 at 4 edits. Post-Phase-0 total: 3 (write side: GetTermValue + DELETE WHERE fast path + consolidated InstantiateTerm) + 4 (read-match side: per-site) + 2 (filter/BIND) = **9 mechanical edits**, not the rev 3 projected ~6 nor the un-consolidated 11. The duplication debt is paid in Part 3 with 3 extra edits rather than in Phase 0 with a feature-flag refactor.
 
 ### Part 3 — Update every literal-materialization site
 
-The Context section enumerates 11 verified sites. After Phase 0 consolidation, the actual edit count drops to ~5-7 (one edit at each consolidated helper, one edit at each non-consolidated site like FILTER and BIND).
+The Context section enumerates 11 verified sites. After Phase 0b shipped and Phase 0a deferred (see Part 2), the actual edit count is 9.
 
 Each site changes mechanically:
 
@@ -289,13 +289,13 @@ var obj = LiteralForm.Canonicalize(GetTermValue(quad.ObjectStart, quad.ObjectLen
 var literal = LiteralForm.Canonicalize(_source.Slice(term.Start, term.Length), out _literalScratch);
 ```
 
-Sites by category (post-Phase-0):
+Sites by category (post-Phase-0b):
 
-1. **Write side (3 edits after Phase 0b consolidation):** `UpdateExecutor.GetTermValue` (covers sites 1+2 from Context), `UpdateExecutor` DELETE WHERE fast path (site 3), consolidated `InstantiateTermShared` (covers sites 4+5).
-2. **Read-match side (1 edit after Phase 0a consolidation):** consolidated `ResolveTermShared` (covers sites 6-9).
+1. **Write side (3 edits):** `UpdateExecutor.GetTermValue` (covers sites 1+2 from Context), `UpdateExecutor` DELETE WHERE fast path (site 3), consolidated `InstantiateTerm` (covers sites 4+5 after Phase 0b).
+2. **Read-match side (4 edits, Phase 0a deferred):** `QueryResults.Patterns.cs:79` `ResolveSlotTerm`, `MultiPatternScan.cs:957` `ResolveTerm`, `TriplePatternScan.cs:1527` `ResolveTermWithStorage`, `TriplePatternScan.cs:1583` `ResolveTermForQuery`. Each gets the same one-line edit at its literal-return point. See [`docs/limits/sparql-resolve-term-family-duplication.md`](../../limits/sparql-resolve-term-family-duplication.md) for the duplication debt.
 3. **Filter / BIND (2 edits, no consolidation candidate):** `FilterEvaluator` literal-argument materialization (site 10), `BindExpressionEvaluator` literal-argument materialization (site 11).
 
-Total post-consolidation: 6 edits + canonicalizer helper. Each edit needs a position-specific scratch field on its owning class (`_objectScratch`, `_filterLiteralScratch`, etc.) — see the aliasing note in Part 1.
+Total: 9 edits + canonicalizer helper. Each edit needs a position-specific scratch field on its owning class (`_objectScratch`, `_filterLiteralScratch`, etc.) — see the aliasing note in Part 1.
 
 ### Part 4 — Tests must close the cross-form conformance gap
 
@@ -332,7 +332,7 @@ Recommend (A) for the documented migration path. (B) is in place by construction
 ### Negative / risks
 
 - **Performance regression on escape-containing literals.** The zero-allocation fast path (verbatim source span) becomes an allocate-into-scratch path for any literal containing `\`. Affects both write-path (INSERT DATA) and read-path (FILTER literal arguments, pattern literal positions). Mitigation: most bulk-load goes through the streaming parsers (which already canonicalize); SPARQL INSERT is the cognitive-write path, not the bulk path; volume is low. Hot SPARQL queries with many escape-containing filter literals would see a slight regression; profiling would tell if it matters.
-- **11 materialization sites, ~6 edits after Phase 0 consolidation.** The Context-enumerated surface is the change blast radius. Phase 0 (consolidate duplicated `ResolveTerm` and `InstantiateTerm` methods) collapses 4 pattern-match copy-pastes into 1 shared helper and 2 update-template copy-pastes into 1 shared helper, dropping the post-Phase-0 edit count from 11 → ~6. Each remaining edit needs a position-specific scratch field (see Part 1 aliasing note) plus the `LiteralForm.Canonicalize` call. Risk: missing a site means cross-form FILTER returns empty rows for that path. Validation plan tests are designed to surface this; categorize each test failure as "missed site to fix" or "legitimate canonicalization side-effect."
+- **11 materialization sites, 9 edits post-Phase-0.** The Context-enumerated surface is the change blast radius. Phase 0b shipped (consolidated `InstantiateTerm` collapses sites 4+5 to 1 edit); Phase 0a deferred (4 pattern-match copies stay as separate edits per the [duplication-debt limit](../../limits/sparql-resolve-term-family-duplication.md)). Each edit needs a position-specific scratch field (see Part 1 aliasing note) plus the `LiteralForm.Canonicalize` call. Risk: missing a site means cross-form FILTER returns empty rows for that path. Validation plan tests are designed to surface this; categorize each test failure as "missed site to fix" or "legitimate canonicalization side-effect."
 - **Legacy-store atom duplication under tolerant read.** Until a Cognitive store is migrated via export → reload, the atom store may contain both `\"` and `"` forms of the same logical literal. Indexes route to one or the other depending on which path interned it. Query results stay consistent (LastIndexOf handles both) but storage is non-optimal. Mitigation: documented in the migration runbook (Part 5A).
 - **`STR()` semantic change for legacy SPARQL-INSERT data on upgrade.** A query that previously got `a\"b` from `STR(?o)` on legacy-stored data will get `a"b` after the store is migrated via export → reload. SPARQL specification says the latter is correct; users relying on the literal-text-of-the-source-form behavior have a workaround (`REPLACE(STR(?o), "\"", "\\\\\"")` or similar). Acknowledge in the CHANGELOG.
 
@@ -381,8 +381,8 @@ The three storage-representation options (verbatim source, wrapped-decoded, tagg
 *Rev 3: now decomposed with Phase 0 consolidation. Total similar to rev 2 (~10-13h), but distributed across a more honest set of phases.*
 
 - Part 1 (`LiteralForm.Canonicalize` helper): ~2 hours. Single static method, fast path + slow path, decode loop ported from `TurtleStreamParser.ParseAndAppendEscapeToSb`. Direct unit tests in `SkyOmega.Bcl.Tests` or a new `LiteralFormTests`.
-- Part 2 (Phase 0 consolidation refactor): ~3-4 hours. Extract `ResolveTermShared` from 4 near-identical copies in operator code; extract `InstantiateTermShared` from 2 near-identical copies in `UpdateExecutor`. Full test suite green before Part 3 starts (Validation plan item 0).
-- Part 3 (canonicalization call-site edits): ~2 hours. ~6 edits after consolidation (1 per consolidated helper + 2 for filter/BIND that don't consolidate). Each needs a position-specific scratch field + the `LiteralForm.Canonicalize` call.
+- Part 2 (Phase 0 consolidation refactor): ~1 hour actual. Phase 0b only: `InstantiateTermFromSpan` (byte-identical with `InstantiateTerm`) deleted, callers redirected. Phase 0a deferred — `ResolveTerm`-family duplication held in `docs/limits/sparql-resolve-term-family-duplication.md`. Full Mercury test suite green post-Phase-0b (4,463 / 0 failed / 6 skipped, baseline-identical).
+- Part 3 (canonicalization call-site edits): ~3 hours. 9 edits post-Phase-0b (3 write + 4 read-match + 2 filter/BIND). Each needs a position-specific scratch field + the `LiteralForm.Canonicalize` call.
 - Part 4 (tests — paired ingestion + cross-form FILTER + pattern + DELETE WHERE + BIND + uncertainty-surface): ~2-3 hours. ~8-10 tests across Validation plan categories.
 - Part 5A (migration runbook): ~30 min. CHANGELOG note + one-paragraph addition to MERCURY.md.
 - Validation pass (full Mercury suite + W3C SPARQL + small WDBench + uncertainty-surface tests): ~1-2 hours.

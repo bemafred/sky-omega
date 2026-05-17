@@ -659,9 +659,9 @@ internal class UpdateExecutor
                 for (int i = 0; i < deleteTemplate.PatternCount; i++)
                 {
                     var tp = deleteTemplate.GetPattern(i);
-                    var s = InstantiateTermFromSpan(tp.Subject, b);
-                    var p = InstantiateTermFromSpan(tp.Predicate, b);
-                    var o = InstantiateTermFromSpan(tp.Object, b);
+                    var s = InstantiateTerm(tp.Subject, b);
+                    var p = InstantiateTerm(tp.Predicate, b);
+                    var o = InstantiateTerm(tp.Object, b);
 
                     if (s != null && p != null && o != null)
                     {
@@ -673,9 +673,9 @@ internal class UpdateExecutor
                 for (int i = 0; i < insertTemplate.PatternCount; i++)
                 {
                     var tp = insertTemplate.GetPattern(i);
-                    var s = InstantiateTermFromSpan(tp.Subject, b);
-                    var p = InstantiateTermFromSpan(tp.Predicate, b);
-                    var o = InstantiateTermFromSpan(tp.Object, b);
+                    var s = InstantiateTerm(tp.Subject, b);
+                    var p = InstantiateTerm(tp.Predicate, b);
+                    var o = InstantiateTerm(tp.Object, b);
 
                     if (s != null && p != null && o != null)
                     {
@@ -688,31 +688,6 @@ internal class UpdateExecutor
         {
             results.Dispose();
         }
-    }
-
-    /// <summary>
-    /// Instantiate a term from a span-based source.
-    /// Expands prefixed names to full IRIs.
-    /// </summary>
-    private string? InstantiateTermFromSpan(Term term, BindingTable bindings)
-    {
-        var termSpan = _source.AsSpan(term.Start, term.Length);
-
-        if (term.Type == TermType.Variable)
-        {
-            var idx = bindings.FindBinding(termSpan);
-            if (idx >= 0)
-                return bindings.GetString(idx).ToString();
-            return null;
-        }
-
-        // Handle blank nodes with scoped identity
-        if (term.Type == TermType.BlankNode || (termSpan.Length > 2 && termSpan[0] == '_' && termSpan[1] == ':'))
-        {
-            return GetScopedBlankNode(termSpan).ToString();
-        }
-
-        return ExpandPrefixedName(termSpan).ToString();
     }
 
     private void ProcessModifyTemplates(
