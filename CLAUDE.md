@@ -196,13 +196,15 @@ SkyOmega.sln
 │   │   ├── Tokenizers/      # BPE, SentencePiece tokenizers
 │   │   ├── Tensors/         # Tensor operations
 │   │   └── Inference/       # Model inference
-│   ├── Minerva.Cli/         # Minerva CLI
-│   ├── Minerva.Mcp/         # Minerva MCP server
+│   ├── Minerva.Cli/         # (placeholder dir, no csproj yet)
+│   ├── Minerva.Mcp/         # (placeholder dir, no csproj yet)
 │   │
 │   ├── DrHook/              # Runtime observation substrate (EventPipe + DAP)
 │   │   ├── Diagnostics/     # ProcessAttacher, StackInspector (EventPipe)
 │   │   └── Stepping/        # DapClient, SteppingSessionManager, NetCoreDbgLocator
-│   └── DrHook.Mcp/          # MCP server for .NET runtime inspection
+│   ├── DrHook.Mcp/          # MCP server for .NET runtime inspection
+│   │
+│   └── SkyOmega.Bcl/        # BCL extensions (ChunkedList/ChunkedArray, BitVector, SplitMix64Hash)
 ├── tests/
 │   ├── Mercury.Tests/       # Mercury xUnit tests
 │   │   ├── Diagnostics/     # Diagnostic system tests
@@ -215,16 +217,16 @@ SkyOmega.sln
 │   │   ├── Storage/         # Storage layer tests (QuadStore, AtomStore, WAL)
 │   │   └── W3C/             # W3C conformance test suites
 │   ├── Mercury.Solid.Tests/ # Mercury Solid protocol tests
-│   ├── DrHook.Tests/        # DrHook xUnit tests
-│   ├── Minerva.Tests/       # Minerva xUnit tests
+│   ├── SkyOmega.Bcl.Tests/  # SkyOmega.Bcl xUnit tests
+│   ├── Minerva.Tests/       # (placeholder dir, no csproj yet)
 │   ├── w3c-json-ld-api/     # W3C JSON-LD conformance test suite data
 │   └── w3c-rdf-tests/       # W3C RDF conformance test suite data
 ├── benchmarks/
 │   ├── Mercury.Benchmarks/  # Mercury BenchmarkDotNet tests
-│   └── Minerva.Benchmarks/  # Minerva benchmarks (future)
+│   └── Minerva.Benchmarks/  # (placeholder dir, no csproj yet)
 └── examples/
     ├── Mercury.Examples/    # Mercury usage examples
-    └── Minerva.Examples/    # Minerva usage examples (future)
+    └── Minerva.Examples/    # (placeholder dir, no csproj yet)
 ```
 
 ## API Usage Examples

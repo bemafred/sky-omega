@@ -17,6 +17,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Minerva", "Minerva", "{E5F6
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Documentation", "Documentation", "{7FA0A47B-7556-4F7D-869D-744000F071D0}"
 	ProjectSection(SolutionItems) = preProject
+		AI.md = AI.md
 		CHANGELOG.md = CHANGELOG.md
 		CLAUDE.md = CLAUDE.md
 		LICENSE = LICENSE
@@ -35,6 +36,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Architecture", "Architectur
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Canonical Concepts", "Canonical Concepts", "{F5B6C7D8-E9F0-1234-5678-AAAAAAAAAAAA}"
 	ProjectSection(SolutionItems) = preProject
+		docs\architecture\concepts\canonical\aepistemics.md = docs\architecture\concepts\canonical\aepistemics.md
+		docs\architecture\concepts\canonical\business-domain.md = docs\architecture\concepts\canonical\business-domain.md
 		docs\architecture\concepts\canonical\canonical-definition.md = docs\architecture\concepts\canonical\canonical-definition.md
 		docs\architecture\concepts\canonical\domain-catalog.md = docs\architecture\concepts\canonical\domain-catalog.md
 		docs\architecture\concepts\canonical\e-clean.md = docs\architecture\concepts\canonical\e-clean.md
@@ -44,14 +47,18 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Canonical Concepts", "Canon
 		docs\architecture\concepts\canonical\inspect-adapt.md = docs\architecture\concepts\canonical\inspect-adapt.md
 		docs\architecture\concepts\canonical\james.md = docs\architecture\concepts\canonical\james.md
 		docs\architecture\concepts\canonical\lucy.md = docs\architecture\concepts\canonical\lucy.md
+		docs\architecture\concepts\canonical\mercury.md = docs\architecture\concepts\canonical\mercury.md
+		docs\architecture\concepts\canonical\minerva.md = docs\architecture\concepts\canonical\minerva.md
 		docs\architecture\concepts\canonical\mira.md = docs\architecture\concepts\canonical\mira.md
 		docs\architecture\concepts\canonical\rdf.md = docs\architecture\concepts\canonical\rdf.md
 		docs\architecture\concepts\canonical\README.md = docs\architecture\concepts\canonical\README.md
 		docs\architecture\concepts\canonical\semantic-architecture.md = docs\architecture\concepts\canonical\semantic-architecture.md
+		docs\architecture\concepts\canonical\semantic-braid.md = docs\architecture\concepts\canonical\semantic-braid.md
 		docs\architecture\concepts\canonical\semantic-core.md = docs\architecture\concepts\canonical\semantic-core.md
 		docs\architecture\concepts\canonical\semantic-drift.md = docs\architecture\concepts\canonical\semantic-drift.md
 		docs\architecture\concepts\canonical\semantic-registry.md = docs\architecture\concepts\canonical\semantic-registry.md
 		docs\architecture\concepts\canonical\sky-omega.md = docs\architecture\concepts\canonical\sky-omega.md
+		docs\architecture\concepts\canonical\sky.md = docs\architecture\concepts\canonical\sky.md
 		docs\architecture\concepts\canonical\sparql.md = docs\architecture\concepts\canonical\sparql.md
 		docs\architecture\concepts\canonical\structured-intelligence.md = docs\architecture\concepts\canonical\structured-intelligence.md
 		docs\architecture\concepts\canonical\technical-domain.md = docs\architecture\concepts\canonical\technical-domain.md
@@ -62,13 +69,43 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Narratives", "Narratives", 
 	ProjectSection(SolutionItems) = preProject
 		docs\architecture\narratives\conclusions.md = docs\architecture\narratives\conclusions.md
 		docs\architecture\narratives\eee-manifesto.md = docs\architecture\narratives\eee-manifesto.md
+		docs\architecture\narratives\mercury-retrospective-1.md = docs\architecture\narratives\mercury-retrospective-1.md
+		docs\architecture\narratives\mercury-retrospective-2.md = docs\architecture\narratives\mercury-retrospective-2.md
+		docs\architecture\narratives\sky-omega-convergence-sv.md = docs\architecture\narratives\sky-omega-convergence-sv.md
 		docs\architecture\narratives\sky-omega-convergence.md = docs\architecture\narratives\sky-omega-convergence.md
 		docs\architecture\narratives\sky-omega-identity.md = docs\architecture\narratives\sky-omega-identity.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Technical", "Technical", "{F7D8E9F0-A1B2-3456-789A-CCCCCCCCCCCC}"
 	ProjectSection(SolutionItems) = preProject
+		docs\architecture\technical\bulk-load-flow.md = docs\architecture\technical\bulk-load-flow.md
+		docs\architecture\technical\llm-architecture.md = docs\architecture\technical\llm-architecture.md
+		docs\architecture\technical\llm-lanscape-map.md = docs\architecture\technical\llm-lanscape-map.md
+		docs\architecture\technical\mercury-internals.md = docs\architecture\technical\mercury-internals.md
+		docs\architecture\technical\metrics-emission.md = docs\architecture\technical\metrics-emission.md
+		docs\architecture\technical\observability-coverage.md = docs\architecture\technical\observability-coverage.md
+		docs\architecture\technical\production-hardening.md = docs\architecture\technical\production-hardening.md
+		docs\architecture\technical\sparql-reference.md = docs\architecture\technical\sparql-reference.md
 		docs\architecture\technical\temporal-rdf.md = docs\architecture\technical\temporal-rdf.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Editorial", "Editorial", "{1E5C8B91-3F47-4D2A-9C1B-100000000004}"
+	ProjectSection(SolutionItems) = preProject
+		docs\architecture\editorial\editorial-charter.md = docs\architecture\editorial\editorial-charter.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{1E5C8B91-3F47-4D2A-9C1B-100000000003}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\ADR-000-repository-restructure.md = docs\adrs\ADR-000-repository-restructure.md
+		docs\adrs\ADR-001-sky-omega-1.0-operational-scope.md = docs\adrs\ADR-001-sky-omega-1.0-operational-scope.md
+		docs\adrs\ADR-002-documentation-and-tutorial-strategy.md = docs\adrs\ADR-002-documentation-and-tutorial-strategy.md
+		docs\adrs\ADR-003-mercury-encapsulation-and-api-surface.md = docs\adrs\ADR-003-mercury-encapsulation-and-api-surface.md
+		docs\adrs\ADR-004-drhook-runtime-observation-substrate.md = docs\adrs\ADR-004-drhook-runtime-observation-substrate.md
+		docs\adrs\ADR-005-cognitive-component-libraries.md = docs\adrs\ADR-005-cognitive-component-libraries.md
+		docs\adrs\ADR-006-mcp-surface-discipline.md = docs\adrs\ADR-006-mcp-surface-discipline.md
+		docs\adrs\ADR-007-sealed-substrate-immutability.md = docs\adrs\ADR-007-sealed-substrate-immutability.md
+		docs\adrs\ADR-008-workload-profiles-and-validation-attribution.md = docs\adrs\ADR-008-workload-profiles-and-validation-attribution.md
+		docs\adrs\README.md = docs\adrs\README.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "API", "API", "{F2A3B4C5-D6E7-8901-BCDE-222222222222}"
@@ -110,6 +147,40 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F3A4B5C6-D
 		docs\adrs\mercury\ADR-008-quadstore-pool-unified.md = docs\adrs\mercury\ADR-008-quadstore-pool-unified.md
 		docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md = docs\adrs\mercury\ADR-009-stack-overflow-mitigation.md
 		docs\adrs\mercury\ADR-010-w3c-test-suite-integration.md = docs\adrs\mercury\ADR-010-w3c-test-suite-integration.md
+		docs\adrs\mercury\ADR-011-queryresults-stack-reduction.md = docs\adrs\mercury\ADR-011-queryresults-stack-reduction.md
+		docs\adrs\mercury\ADR-011b-implementation-plan.md = docs\adrs\mercury\ADR-011b-implementation-plan.md
+		docs\adrs\mercury\ADR-012-conformance-fix-plan.md = docs\adrs\mercury\ADR-012-conformance-fix-plan.md
+		docs\adrs\mercury\ADR-013-remaining-w3c-sparql-gaps.md = docs\adrs\mercury\ADR-013-remaining-w3c-sparql-gaps.md
+		docs\adrs\mercury\ADR-014-culture-invariance.md = docs\adrs\mercury\ADR-014-culture-invariance.md
+		docs\adrs\mercury\ADR-015-solid-architecture.md = docs\adrs\mercury\ADR-015-solid-architecture.md
+		docs\adrs\mercury\ADR-016-cli-tool-upgrade.md = docs\adrs\mercury\ADR-016-cli-tool-upgrade.md
+		docs\adrs\mercury\ADR-017-test-environment-independence.md = docs\adrs\mercury\ADR-017-test-environment-independence.md
+		docs\adrs\mercury\ADR-018-cli-library-extraction.md = docs\adrs\mercury\ADR-018-cli-library-extraction.md
+		docs\adrs\mercury\ADR-019-global-tool-packaging.md = docs\adrs\mercury\ADR-019-global-tool-packaging.md
+		docs\adrs\mercury\ADR-020-atomstore-single-writer-contract.md = docs\adrs\mercury\ADR-020-atomstore-single-writer-contract.md
+		docs\adrs\mercury\ADR-021-hardening-store-contract-query-ergonomics-and-surface-isolation.md = docs\adrs\mercury\ADR-021-hardening-store-contract-query-ergonomics-and-surface-isolation.md
+		docs\adrs\mercury\ADR-022-quadindex-generic-keys-and-temporal-sort-order.md = docs\adrs\mercury\ADR-022-quadindex-generic-keys-and-temporal-sort-order.md
+		docs\adrs\mercury\ADR-023-transactional-integrity.md = docs\adrs\mercury\ADR-023-transactional-integrity.md
+		docs\adrs\mercury\ADR-024-trigram-index-read-path-disconnection.md = docs\adrs\mercury\ADR-024-trigram-index-read-path-disconnection.md
+		docs\adrs\mercury\ADR-025-repl-line-editor.md = docs\adrs\mercury\ADR-025-repl-line-editor.md
+		docs\adrs\mercury\ADR-026-bulk-load-path.md = docs\adrs\mercury\ADR-026-bulk-load-path.md
+		docs\adrs\mercury\ADR-027-wikidata-scale-streaming-pipeline.md = docs\adrs\mercury\ADR-027-wikidata-scale-streaming-pipeline.md
+		docs\adrs\mercury\ADR-028-atomstore-rehash-on-grow.md = docs\adrs\mercury\ADR-028-atomstore-rehash-on-grow.md
+		docs\adrs\mercury\ADR-029-store-profiles.md = docs\adrs\mercury\ADR-029-store-profiles.md
+		docs\adrs\mercury\ADR-030-bulk-load-and-rebuild-performance.md = docs\adrs\mercury\ADR-030-bulk-load-and-rebuild-performance.md
+		docs\adrs\mercury\ADR-031-read-only-session-fast-path.md = docs\adrs\mercury\ADR-031-read-only-session-fast-path.md
+		docs\adrs\mercury\ADR-032-radix-external-sort.md = docs\adrs\mercury\ADR-032-radix-external-sort.md
+		docs\adrs\mercury\ADR-033-bulk-load-radix-external-sort.md = docs\adrs\mercury\ADR-033-bulk-load-radix-external-sort.md
+		docs\adrs\mercury\ADR-034-sorted-atom-store-for-reference.md = docs\adrs\mercury\ADR-034-sorted-atom-store-for-reference.md
+		docs\adrs\mercury\ADR-035-phase7a-metrics-infrastructure.md = docs\adrs\mercury\ADR-035-phase7a-metrics-infrastructure.md
+		docs\adrs\mercury\ADR-036-bzip2-streaming-decompression.md = docs\adrs\mercury\ADR-036-bzip2-streaming-decompression.md
+		docs\adrs\mercury\ADR-037-pipelined-spill-bulk-builder.md = docs\adrs\mercury\ADR-037-pipelined-spill-bulk-builder.md
+		docs\adrs\mercury\ADR-038-merge-read-side-optimization.md = docs\adrs\mercury\ADR-038-merge-read-side-optimization.md
+		docs\adrs\mercury\ADR-039-mphf-on-sealed-atom-set.md = docs\adrs\mercury\ADR-039-mphf-on-sealed-atom-set.md
+		docs\adrs\mercury\ADR-040-readahead-memory-adaptive-sizing.md = docs\adrs\mercury\ADR-040-readahead-memory-adaptive-sizing.md
+		docs\adrs\mercury\ADR-041-cleanup-on-finalize-exception.md = docs\adrs\mercury\ADR-041-cleanup-on-finalize-exception.md
+		docs\adrs\mercury\ADR-042-mphf-construction-memory-adaptive-sizing.md = docs\adrs\mercury\ADR-042-mphf-construction-memory-adaptive-sizing.md
+		docs\adrs\mercury\ADR-043-metric-emission-decoupling.md = docs\adrs\mercury\ADR-043-metric-emission-decoupling.md
 		docs\adrs\mercury\README.md = docs\adrs\mercury\README.md
 	EndProjectSection
 EndProject
@@ -120,6 +191,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{F4A5B6C7-D
 		docs\adrs\minerva\ADR-001-weight-formats.md = docs\adrs\minerva\ADR-001-weight-formats.md
 		docs\adrs\minerva\ADR-002-hardware-acceleration-strategy.md = docs\adrs\minerva\ADR-002-hardware-acceleration-strategy.md
 		docs\adrs\minerva\ADR-003-metal-compute-architecture.md = docs\adrs\minerva\ADR-003-metal-compute-architecture.md
+		docs\adrs\minerva\ADR-004-bootstrap-validation-architecture.md = docs\adrs\minerva\ADR-004-bootstrap-validation-architecture.md
 		docs\adrs\minerva\README.md = docs\adrs\minerva\README.md
 	EndProjectSection
 EndProject
@@ -147,11 +219,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Ontologies", "Ontologies", 
 		..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl = ..\..\..\..\..\Volumes\Mercury SSD\ontologies\schemaorg.ttl
 	EndProjectSection
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Solid", "src\Mercury.Solid\Mercury.Solid.csproj", "{62700C5C-5830-439B-93C6-45BB17413E42}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mercury.Solid.Tests", "tests\Mercury.Solid.Tests\Mercury.Solid.Tests.csproj", "{9F0111E6-9966-44EB-828E-F189DA657C6F}"
 EndProject
@@ -170,6 +238,19 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DrHook", "src\DrHook\DrHook.csproj", "{7481DE63-0577-4D38-80C3-C8D0A2CDDFDE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DrHook.Mcp", "src\DrHook.Mcp\DrHook.Mcp.csproj", "{CAC00E0C-660A-441A-A6BB-8F180CCCB3CD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ADRs", "ADRs", "{1E5C8B91-3F47-4D2A-9C1B-100000000002}"
+	ProjectSection(SolutionItems) = preProject
+		docs\adrs\drhook\ADR-001-breakpoint-registry.md = docs\adrs\drhook\ADR-001-breakpoint-registry.md
+		docs\adrs\drhook\ADR-002-expression-evaluation.md = docs\adrs\drhook\ADR-002-expression-evaluation.md
+		docs\adrs\drhook\ADR-003-mcp-sdk-adoption.md = docs\adrs\drhook\ADR-003-mcp-sdk-adoption.md
+		docs\adrs\drhook\ADR-004-step-run.md = docs\adrs\drhook\ADR-004-step-run.md
+		docs\adrs\drhook\ADR-005-expression-evaluation-diagnosis-correction.md = docs\adrs\drhook\ADR-005-expression-evaluation-diagnosis-correction.md
+		docs\adrs\drhook\ADR-006-drhook-engine.md = docs\adrs\drhook\ADR-006-drhook-engine.md
+		docs\adrs\drhook\README.md = docs\adrs\drhook\README.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SkyOmega.Bcl", "SkyOmega.Bcl", "{1E5C8B91-3F47-4D2A-9C1B-100000000001}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SkyOmega.Bcl", "src\SkyOmega.Bcl\SkyOmega.Bcl.csproj", "{170375BD-977E-46F4-9723-8CE6B56A5E31}"
 EndProject
@@ -466,8 +547,12 @@ Global
 		{733C4E8E-7D6E-7320-75CD-609B0973E1F5} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 		{7481DE63-0577-4D38-80C3-C8D0A2CDDFDE} = {733C4E8E-7D6E-7320-75CD-609B0973E1F5}
 		{CAC00E0C-660A-441A-A6BB-8F180CCCB3CD} = {733C4E8E-7D6E-7320-75CD-609B0973E1F5}
-		{170375BD-977E-46F4-9723-8CE6B56A5E31} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
-		{490645F8-54CF-40F9-8FDF-724CAAEE86E9} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{1E5C8B91-3F47-4D2A-9C1B-100000000001} = {A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+		{170375BD-977E-46F4-9723-8CE6B56A5E31} = {1E5C8B91-3F47-4D2A-9C1B-100000000001}
+		{490645F8-54CF-40F9-8FDF-724CAAEE86E9} = {1E5C8B91-3F47-4D2A-9C1B-100000000001}
+		{1E5C8B91-3F47-4D2A-9C1B-100000000002} = {733C4E8E-7D6E-7320-75CD-609B0973E1F5}
+		{1E5C8B91-3F47-4D2A-9C1B-100000000003} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
+		{1E5C8B91-3F47-4D2A-9C1B-100000000004} = {F1A2B3C4-D5E6-7890-ABCD-111111111111}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {F44A55EF-8B8C-4287-96E0-5C14B3983CB3}
