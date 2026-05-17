@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Production-validated substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** (current development substrate: [1.7.72](CHANGELOG.md#1772---2026-05-17)) · **three paired measurements** on the same substrate generation:
+**Substrate: [Mercury 1.8](CHANGELOG.md)** · production-validated across the 1.7 line · **three paired measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
@@ -39,16 +39,16 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **Measurements on v1.7.57 — Three paired measurements: cycle 10 Phase 3 r4 + truthy r1 + WGPB step C complete. Substrate at 23 h 57 m / 14 h 13 m / 4 m 30 s end-to-end at 21.3 B full / 8.17 B truthy / ~150 M WGPB-filtered** (with full-text trigram index). Like-for-like (no trigram, comparing vs published QLever / Virtuoso / WDBench / MillenniumDB numbers): **15 h 26 m / 6 h 49 m / 4 m 30 s**. WGPB queries: 849/850 in 4 m 43 s (99.88 % completion, 0 timeouts).
+> **Measurements on v1.7 — Three paired measurements: cycle 10 Phase 3 r4 + truthy r1 + WGPB step C complete. Substrate at 23 h 57 m / 14 h 13 m / 4 m 30 s end-to-end at 21.3 B full / 8.17 B truthy / ~150 M WGPB-filtered** (with full-text trigram index). Like-for-like (no trigram, comparing vs published QLever / Virtuoso / WDBench / MillenniumDB numbers): **15 h 26 m / 6 h 49 m / 4 m 30 s**. WGPB queries: 849/850 in 4 m 43 s (99.88 % completion, 0 timeouts).
 > Four measured 21.3 B Wikidata production runs across the trajectory; substrate now **3.5× faster** than its first incarnation, all on a single laptop, BCL-only .NET.
 >
 > **Cumulative trajectory** *(measured-vs-measured, four completed full-Wikidata runs)*
-> - **Phase 6** *(2026-04-25, 1.7.x pre-Sorted)* — 85 h end-to-end. First successful 21.3 B Reference end-to-end on a single M5 Max.
-> - **Cycle 8** *(2026-05-06, 1.7.48)* — 46 h with intervention. ADR-034 SortedAtomStore for Reference closed Phase 1; algorithmic switch from Hash → Sorted atom store; ~42 % atoms.atoms reduction via prefix compression; cleanup-class FD fixes.
-> - **Cycle 9** *(2026-05-09, 1.7.50)* — 35 h 35 m clean. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); 1.7.49 cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
-> - **Cycle 10 r4** *(2026-05-13, 1.7.57)* — **23 h 57 m clean**. ADR-038 merge-phase read-side (prefix-compress intermediate chunks + frontier readahead + sidecar offset table); ADR-039 BBHash MPHF over sealed atom set with `MaxLevels`=40 + dense final-level fallback; MPHF instrumentation surface (per-level events + dense-fallback + start/complete summary); listener wire-through fix at `QuadStore.RebuildMphf`.
-> - **Truthy r1** *(2026-05-14, 1.7.57)* — **14 h 13 m** end-to-end on the same substrate. 8,171,214,990 truthy-Wikidata triples (vs full's 21.3 B). Apples-to-apples companion to cycle 10 r4 for comparison vs published WDBench / QLever / Virtuoso numbers. Key finding: trigram entries 90.7 % of full at 38.3 % triple-count ratio = ~2.4× more literal-density per triple in truthy → trigram-phase prediction needs literal-volume scaling, not triple-count scaling (dump-date confounder noted in the [validation doc](docs/validations/truthy-r1-2026-05-14.md)).
-> - **WGPB step C** *(2026-05-16, 1.7.57)* — **4 m 30 s** end-to-end on a 2018 reduced-truthy Wikidata substrate (~150 M triples). MillenniumDB's Wikidata Graph Pattern Benchmark: **849/850 queries completed in 4 m 43 s** (99.88 %, 0 timeouts; 1 query rejected as malformed source SPARQL — Mercury's parser correctly identifying real defects in published benchmark data). Aggregate p50 53 ms, p95 1.8 s, p99 4.3 s. Apples-to-apples vs published MillenniumDB / Virtuoso / Blazegraph WGPB numbers. See [validation doc](docs/validations/wgpb-step-c-2026-05-16.md).
+> - **Phase 6** *(2026-04-25, 1.7 pre-Sorted)* — 85 h end-to-end. First successful 21.3 B Reference end-to-end on a single M5 Max.
+> - **Cycle 8** *(2026-05-06, 1.7)* — 46 h with intervention. ADR-034 SortedAtomStore for Reference closed Phase 1; algorithmic switch from Hash → Sorted atom store; ~42 % atoms.atoms reduction via prefix compression; cleanup-class FD fixes.
+> - **Cycle 9** *(2026-05-09, 1.7)* — 35 h 35 m clean. ADR-037 pipelined spill (parser 14 h 15 m → 9 h 18 m, *measured*); cleanup hook (3.96 TB reclaimed at end-of-merge, manual intervention requirement eliminated).
+> - **Cycle 10 r4** *(2026-05-13, 1.7)* — **23 h 57 m clean**. ADR-038 merge-phase read-side (prefix-compress intermediate chunks + frontier readahead + sidecar offset table); ADR-039 BBHash MPHF over sealed atom set with `MaxLevels`=40 + dense final-level fallback; MPHF instrumentation surface (per-level events + dense-fallback + start/complete summary); listener wire-through fix at `QuadStore.RebuildMphf`.
+> - **Truthy r1** *(2026-05-14, 1.7)* — **14 h 13 m** end-to-end on the same substrate. 8,171,214,990 truthy-Wikidata triples (vs full's 21.3 B). Apples-to-apples companion to cycle 10 r4 for comparison vs published WDBench / QLever / Virtuoso numbers. Key finding: trigram entries 90.7 % of full at 38.3 % triple-count ratio = ~2.4× more literal-density per triple in truthy → trigram-phase prediction needs literal-volume scaling, not triple-count scaling (dump-date confounder noted in the [validation doc](docs/validations/truthy-r1-2026-05-14.md)).
+> - **WGPB step C** *(2026-05-16, 1.7)* — **4 m 30 s** end-to-end on a 2018 reduced-truthy Wikidata substrate (~150 M triples). MillenniumDB's Wikidata Graph Pattern Benchmark: **849/850 queries completed in 4 m 43 s** (99.88 %, 0 timeouts; 1 query rejected as malformed source SPARQL — Mercury's parser correctly identifying real defects in published benchmark data). Aggregate p50 53 ms, p95 1.8 s, p99 4.3 s. Apples-to-apples vs published MillenniumDB / Virtuoso / Blazegraph WGPB numbers. See [validation doc](docs/validations/wgpb-step-c-2026-05-16.md).
 > - Cumulative: **85 h → 24 h, −71.8 %** wall-clock reduction across the substrate's evolution.
 >
 > **Cycle 10 r4 — production validation of ADR-038 + ADR-039 + MPHF instrumentation** *(2026-05-13)*
@@ -59,18 +59,18 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > - FD trajectory peaked at 8,325 during trigram rebuild (8,192 simultaneously-open chunks) vs the launchd ~10K effective ceiling = 17 % headroom held for 8 h+. *Initial framing as `ExternalSorter` pool-bypass retracted 2026-05-16 as false alarm — code review confirms the pool IS engaged on the trigram-drain path via `ExternalSorter.ChunkReader.RefillBuffer → _pool.Get(_path)`; 8,192 was the pool running at its 8K cap with LRU eviction as designed. Eviction-overhead concern tracked in [`docs/limits/trigram-drain-cap-eviction.md`](docs/limits/trigram-drain-cap-eviction.md).*
 >
 > **Substrate components shipped** *(cumulative)*
-> - **ADR-034** SortedAtomStore for Reference — *Completed* (1.7.30 → 1.7.48)
+> - **ADR-034** SortedAtomStore for Reference — *Completed* (1.7)
 > - **ADR-035** Phase 7a metrics infrastructure — *Completed*
 > - **ADR-036** BCL-only bz2 streaming decompression — *Completed*
-> - **ADR-037** Pipelined spill in `SortedAtomBulkBuilder` — *Completed* (1.7.50, production-validated cycle 9)
-> - **ADR-038** Merge-phase read-side optimization — *Completed* (1.7.52/1.7.54, production-validated cycle 10 r4)
-> - **ADR-039** MPHF over sealed atom set — *Completed* (1.7.55 with dense fallback; instrumented 1.7.56 + wire-through fix 1.7.57; production-validated cycle 10 r4)
+> - **ADR-037** Pipelined spill in `SortedAtomBulkBuilder` — *Completed* (1.7, production-validated cycle 9)
+> - **ADR-038** Merge-phase read-side optimization — *Completed* (1.7, production-validated cycle 10 r4)
+> - **ADR-039** MPHF over sealed atom set — *Completed* (1.7, production-validated cycle 10 r4)
 > - *Reference-profile measurements per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). Cognitive-profile validation drought persists — see [docs/limits/cognitive-profile-validation-drought.md](docs/limits/cognitive-profile-validation-drought.md).*
 >
 > **Read more**
 > - [21.3 Billion Triples on a Laptop, in .NET](docs/articles/2026-04-26-21b-wikidata-on-a-laptop.md) — the Phase 6 article
 > - [What Compounds](docs/articles/2026-04-28-what-compounds.md) — Sky Omega's first four months, the recipe
-> - [Cycle 10 Phase 3 r4 production validation](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — most recent measurement (1.7.57)
+> - [Cycle 10 Phase 3 r4 production validation](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — most recent measurement (1.7)
 > - [Cycle 9 21.3 B production validation](docs/validations/adr-037-cycle9-21b-2026-05-09.md) — the comparison baseline
 > - [CHANGELOG.md](CHANGELOG.md) · [Roadmap](docs/roadmap/production-hardening-1.8.md) · [Validations](docs/validations/) · [Limits register](docs/limits/)
 
@@ -204,7 +204,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 88,534 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7.69): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury**            | Temporal RDF substrate — 88,534 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
 | **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
@@ -214,7 +214,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 ## 🔭 Architectural Vision
 
-The agent architecture that Mercury is being built to support. These components begin in **Sky Omega 1.8.0** — the cognitive-layers entry point — per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26).
+The agent architecture that Mercury is being built to support. These components begin in **Sky Omega 1.8** — the cognitive-layers entry point — per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26).
 
 | Component                      | Role                                                                                        |
 |--------------------------------|---------------------------------------------------------------------------------------------|

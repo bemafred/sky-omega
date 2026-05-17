@@ -40,7 +40,7 @@ If you can answer that, you've understood Sky Omega.
 
 ## Standing Practice: Sweep Public Claims for Latent Assumptions
 
-Sky Omega's documentation makes claims (BCL-only, bitemporal, 21.3 B Wikidata in 23 h 57 m on 1.7.57, etc.). Each claim has caveats that aren't always written down. The default trigger for noticing the gap is implicit: someone implementing notices. That works for issues that surface from inside the codebase. It does **not** work for issues that are visible only from outside — gaps between what the system *does* and what its descriptions *imply* it does.
+Sky Omega's documentation makes claims (BCL-only, bitemporal, 21.3 B Wikidata in 23 h 57 m on 1.7, etc.). Each claim has caveats that aren't always written down. The default trigger for noticing the gap is implicit: someone implementing notices. That works for issues that surface from inside the codebase. It does **not** work for issues that are visible only from outside — gaps between what the system *does* and what its descriptions *imply* it does.
 
 Those gaps are visible to a reader, a benchmarker, or an outside comparison conversation, but invisible from inside the build.
 
