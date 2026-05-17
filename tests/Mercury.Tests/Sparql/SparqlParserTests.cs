@@ -617,6 +617,43 @@ public class SparqlParserTests
     // storing session observations in Mercury). Full-IRI datatype works — only the
     // PrefixedName form in the '^^' iri slot triggers the bug.
 
+    // Diagnostic 2026-05-17: property-list shorthand in SELECT WHERE.
+    // Expectation: ?s p1 ?o1 ; p2 ?o2  →  two TriplePatterns, both with subject=?s,
+    // distinct predicates, distinct object variables ?o1 and ?o2.
+    [Fact]
+    public void Select_PropertyListShorthand_ProducesTwoTriplePatternsWithDistinctObjects()
+    {
+        var query = @"SELECT ?s ?o1 ?o2 WHERE {
+                        ?s <urn:p1> ?o1 ;
+                           <urn:p2> ?o2 .
+                      }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Select, result.Type);
+        var bgp = result.WhereClause.Pattern;
+
+        Assert.Equal(2, bgp.PatternCount);
+
+        var p0 = bgp.GetPattern(0);
+        var p1 = bgp.GetPattern(1);
+
+        // Same subject (both reference ?s)
+        Assert.Equal(p0.Subject.Type, p1.Subject.Type);
+        Assert.Equal(p0.Subject.Start, p1.Subject.Start);
+        Assert.Equal(p0.Subject.Length, p1.Subject.Length);
+
+        // Distinct predicates
+        Assert.NotEqual(p0.Predicate.Start, p1.Predicate.Start);
+
+        // Distinct object variables - the bug would show as p1.Object being equal to p0.Object,
+        // or p1.Object having Length=0 / default value
+        Assert.Equal(TermType.Variable, p0.Object.Type);
+        Assert.Equal(TermType.Variable, p1.Object.Type);
+        Assert.NotEqual(p0.Object.Start, p1.Object.Start);
+        Assert.True(p1.Object.Length > 0, "Second pattern's object should have non-zero length");
+    }
+
     [Fact]
     public void InsertData_PrefixedDatatypeFollowedBySemicolon_DefaultGraph()
     {

@@ -97,15 +97,26 @@ W3C SPARQL conformance suites likely don't trigger this — the W3C tests use ca
 
 ## Candidate mitigations
 
-Surface-localization complete (see Current state above) — the bug is in the SPARQL executor. Remaining investigation:
+Surface-localization complete (see Current state above) — the bug is in the SPARQL executor, not in any surface layer.
 
-1. **Inspect property-list-shorthand parser expansion.** The SPARQL parser expands `?s pred1 ?o1 ; pred2 ?o2` into two `TriplePattern` objects sharing the same subject. Verify both patterns retain their distinct object variable names through parsing. Check `SparqlParser.Parsing` for the `;` continuation handler.
+**Parser cleared 2026-05-17.** A diagnostic test (`SparqlParserTests.Select_PropertyListShorthand_ProducesTwoTriplePatternsWithDistinctObjects`, passing) confirms the parser correctly produces two `TriplePattern` objects for `?s p1 ?o1 ; p2 ?o2`:
 
-2. **Inspect `MultiPatternScan` (or whichever operator joins multiple TriplePatternScans on a shared subject).** The operator should emit a result row where every scan's binding contributes. The bug may be that the operator emits a single row with only the first scan's binding for the object variable. Check `src/Mercury/Sparql/Execution/Operators/MultiPatternScan.cs` for the row-assembly logic.
+- `PatternCount == 2`
+- Both patterns share the same subject term (same Start, Length, Type)
+- Predicates have distinct source positions
+- Both objects are `TermType.Variable`, with distinct source positions and non-zero length
 
-3. **Inspect `QueryResults` / projection layer.** Even if the operator binds correctly, the SELECT projection may be reading column indexes wrong for non-first-predicate variables. Check `src/Mercury/Sparql/Execution/QueryResults.cs` for the column-to-variable mapping.
+The parser is innocent. The bug is downstream of parsing.
 
-4. **Add a regression test.** A direct test against the property-list shorthand projection shape — `?s p1 ?o1 ; p2 ?o2` with SELECT projecting both `?o1` and `?o2` — should be added to `tests/Mercury.Tests/Sparql/` once the bug is fixed, to prevent recurrence. The fact that W3C SPARQL 1.1 Query conformance (421/421 passing per STATISTICS.md) doesn't catch this is itself evidence that the W3C tests don't exercise property-list shorthand chained beyond two predicates with all objects projected.
+Remaining investigation, in priority order:
+
+1. **`MultiPatternScan` (or whichever operator joins multiple TriplePatternScans on a shared subject).** The operator should emit a result row where every scan's binding contributes. The most likely root cause: the operator emits a single row with only the first scan's binding for the object variable. Check `src/Mercury/Sparql/Execution/Operators/MultiPatternScan.cs` for the row-assembly logic.
+
+2. **`QueryResults` / projection layer.** Even if the operator binds correctly, the SELECT projection may be reading column indexes wrong for non-first-predicate variables. Check `src/Mercury/Sparql/Execution/QueryResults.cs` for the column-to-variable mapping.
+
+3. **Add an end-to-end regression test.** Once the bug is fixed, add a test in `tests/Mercury.Tests/Sparql/` that INSERTs two patterns on a shared subject, runs `SELECT ?s ?o1 ?o2 WHERE { ?s p1 ?o1 ; p2 ?o2 }`, and asserts both `?o1` and `?o2` bindings are present in the result row. The parser-only test added 2026-05-17 covers the parsing layer; the end-to-end test would cover the execution + projection layers.
+
+The fact that W3C SPARQL 1.1 Query conformance (421/421 passing per STATISTICS.md) doesn't catch this is itself evidence that the W3C tests don't exercise property-list shorthand chained beyond two predicates with all objects projected.
 
 ## Workaround
 
