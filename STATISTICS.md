@@ -16,7 +16,7 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **87,227** | Knowledge substrate |
+| **Mercury (total)** | **88,534** | Knowledge substrate |
 | ├─ Sparql | 45,468 | SPARQL parser, executor, protocol (1.7.47: parser refactor + zero-GC property-path walker) |
 | ├─ Storage | 14,219 | B+Tree indexes (temporal + reference), atom stores (Hash + Sorted), RadixSort, ExternalSorter (with bounded file-stream pool, 1.7.48), AppendSorted, WAL, schema plumbing, bulk builders, BoundedFileStreamPool, **pipelined-spill `SortedAtomBulkBuilder` (ADR-037, 1.7.50)**, **ADR-038 readahead + sidecar (1.7.52)**, **ADR-039 BBHash MPHF + dense-final-level fallback (1.7.55)**, **ADR-040 adaptive readahead sizing + lazy back-buffer + eager teardown (1.7.63 → 1.7.64)**, **ADR-041 cleanup-on-exception (1.7.58)**, **ADR-042 range iterator + Span GetKey + re-hash + mmap-backed atoms.idx + host-adaptive memory check (1.7.60 → 1.7.64)** |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |

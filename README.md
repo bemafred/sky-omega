@@ -204,7 +204,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 82,887 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury**            | Temporal RDF substrate — 88,534 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
 | **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
