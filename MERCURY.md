@@ -298,6 +298,25 @@ SELECT ?graph ?agent ?when ?comment WHERE {
 
 ---
 
+## Upgrade notes — Mercury 1.7.73 (ADR-044 literal canonicalization)
+
+Mercury 1.7.73 closes the cross-format literal-escape asymmetry surfaced during the 1.7.72 `GetLexicalForm` fix. SPARQL `INSERT/DELETE DATA`, `INSERT/DELETE WHERE` templates, pattern object positions, FILTER literal arguments, and BIND literal arguments now canonicalize literals to the same wrapped-decoded form Turtle / N-Triples / N-Quads / TriG already store. The motivating shape — `FILTER(?o = "a\"b")` against a Turtle-loaded literal `"a\"b"` — now returns the row instead of zero rows.
+
+**For fresh stores created on 1.7.73 or later:** no action needed. Every literal is interned in canonical form by construction.
+
+**For legacy stores written under 1.7.69 → 1.7.72 with `INSERT DATA` literals containing escape sequences:** those literals are stored verbatim (`\"` preserved as two characters). They remain queryable under 1.7.73 — the 1.7.72 `LastIndexOf` boundary-detection logic handles both verbatim and canonical forms — but verbatim atoms and any new canonical writes coexist as distinct atom IDs for the same logical literal. To converge the store on canonical form:
+
+```bash
+mercury export <legacy-store> --format=nt > out.nt
+mercury bulk-load <new-store> out.nt
+```
+
+The N-Triples writer emits canonical lexical forms; the bulk-load streaming parser produces canonical atoms. Result: a single-form store with no atom duplication. The Reference profile is unaffected (sealed snapshots never see SPARQL UPDATE writes); only Cognitive stores need this attention, and only those that actually ingested escape-containing literals through SPARQL.
+
+See [ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) for the full rationale, surface analysis, and the four hypotheses (H1-H4) closed by the implementation.
+
+---
+
 ## Available Tools
 
 | Tool | Purpose |

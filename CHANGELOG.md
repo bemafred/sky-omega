@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.72](#1772---2026-05-17)** — released 2026-05-17; **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.73](#1773---2026-05-17)** — released 2026-05-17; **[ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) SPARQL literal canonicalization shipped: SPARQL `INSERT/DELETE DATA`, `INSERT/DELETE WHERE`, FILTER, BIND, and pattern literals now canonicalize to the same wrapped-decoded form Turtle/N-Triples/N-Quads/TriG already produce. Cross-format ingestion of the same logical RDF triple now produces byte-identical atoms. Pre-existing `FilterEvaluator.CompareEqual` wrap-vs-unwrap equality bug brought into ADR scope and fixed; `FILTER(?o = "literal")` now normalizes lexical form + lang tag + datatype per SPARQL spec. 14 cross-form tests in `CrossFormCanonicalizationTests` + 38 unit tests in `LiteralFormTests` validate H1-H4. Full suite 4,515 / 0 failed / 6 skipped.** Previous: [Mercury 1.7.72](#1772---2026-05-17) — **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -27,6 +27,52 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 1.8.0** — **cognitive-layers entry point** per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26). Substrate hardening closes within 1.7.x: Phases 1-6 (ADR-028/029/030/031/032/033) complete 2026-04-26; Phase 7c performance rounds shipped through 1.7.57 (ADR-037 pipelined spill, ADR-038 merge-phase read-side, ADR-039 BBHash MPHF); Phase 8 Tier 1+2 close-out shipped 1.7.58-1.7.64 on 2026-05-16 (ADR-040 readahead adaptive, ADR-041 cleanup-on-exception, ADR-042 MPHF construction adaptive, WDBench aggregate distribution, N-Triples parser characterization). 1.8.0 marks the substrate-complete / cognitive-layers-begin boundary, not a production-hardening release.
 
 **Sky Omega 1.8.0+** introduces cognitive layers on top of the three substrates: **Lucy** (deep semantic memory), **James** (orchestration with pedagogical guidance), **Mira** (surface/interaction layer), and **Sky** (agent surface integrating all three). The three substrates — **Mercury** (RDF storage), **Minerva** (LLM inference, BCL-only, in 1.7.x development), and **DrHook** (runtime observation; engine BCL-only rewrite queued as the first 1.8.x substrate-discipline task post-cognitive-entry) — carry the cognitive layers.
+
+---
+
+## [1.7.73] - 2026-05-17
+
+**Headline:** [ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) ships — SPARQL literal escape canonicalization closes the cross-format-ingestion asymmetry surfaced by the 1.7.72 fix's downstream investigation. Every SPARQL source-literal materialization site (INSERT/DELETE DATA, INSERT/DELETE WHERE template, pattern object positions, FILTER literal arguments, BIND literal arguments) now routes through `LiteralForm.Canonicalize` / `CanonicalizeContent`, producing the same wrapped-decoded form Turtle/N-Triples/N-Quads/TriG already store. Same logical RDF triple ingested via any path → byte-identical atoms. Pre-existing `FilterEvaluator.CompareEqual` wrap-vs-unwrap String equality bug brought into scope and fixed in the same release: equality now compares lexical form + lang tag + datatype per SPARQL spec, normalizing the asymmetry between wrapped bound values (from store) and unwrapped filter-parsed literals. The motivating ADR-044 case — `FILTER(?o = "a\"b")` against a Turtle-loaded literal "a\"b" — now returns the row instead of zero rows.
+
+### Added
+
+- **`src/Mercury/Sparql/Execution/LiteralForm.cs`** — new static helper class. `Canonicalize(span, out string?)` for wrapped literal forms (used by write-side + read-match pattern operators); `CanonicalizeContent(span, out string?)` for unwrapped content (used by FilterEvaluator + BindExpressionEvaluator). Fast path (no `\\`) returns verbatim span (zero alloc); slow path allocates a new immutable string with escape sequences decoded. Decode coverage matches the streaming parsers: `\t \b \n \r \f \" \' \\ \uXXXX \UXXXXXXXX`. Surrogate code points (U+D800..U+DFFF) and code points above U+10FFFF rejected.
+- **`tests/Mercury.Tests/Sparql/LiteralFormTests.cs`** — 38 direct unit tests for the helpers covering every escape kind, edge cases (empty, langtag, datatype, triple-quote, ends-with-escaped-quote, single-escaped-quote literal, encoding-collision dedupe), surrogate rejection, and the byte-output convergence assertion (SPARQL `"a\"b"` canonicalizes to the same 5-byte `"a"b"` form Turtle produces).
+- **`tests/Mercury.Tests/Sparql/CrossFormCanonicalizationTests.cs`** — 14 cross-form tests validating ADR-044 H1-H4: paired-ingestion atom identity; FILTER `=` / CONTAINS / STRSTARTS / STRENDS / REGEX / unicode-escape-equivalent equality; pattern match in object position; DELETE WHERE; BIND + equality; uncertainty-surface tests (subquery × 2, ASK, CONSTRUCT) all routed through canonicalized operators transparently.
+
+### Changed
+
+- **`src/Mercury/Sparql/Execution/UpdateExecutor.cs`** — `ExpandPrefixedName` now routes literal terms (`term[0] == '"'`) through `LiteralForm.Canonicalize`. Single edit covers Context sites 1-5 (INSERT/DELETE DATA via `GetTermValue`, DELETE WHERE single-pattern fast path, INSERT/DELETE WHERE template via `InstantiateTerm`). ADR-044 Phase 0b consolidation deleted byte-identical `InstantiateTermFromSpan`; six callers redirected to `InstantiateTerm`.
+- **`src/Mercury/Sparql/Execution/QueryResults.Patterns.cs`** — `ResolveSlotTerm` canonicalizes at its literal-return point. Covers OPTIONAL pattern matching.
+- **`src/Mercury/Sparql/Execution/Operators/MultiPatternScan.cs`** — `ResolveTerm` canonicalizes at its literal-return point. Covers multi-pattern execution.
+- **`src/Mercury/Sparql/Execution/Operators/TriplePatternScan.cs`** — `ResolveTermWithStorage` and `ResolveTermForQuery` canonicalize at their literal-return points. Covers single-pattern storage-side resolution and transitive paths.
+- **`src/Mercury/Sparql/Execution/Expressions/FilterEvaluator.cs`** — `ParseStringLiteral` canonicalizes the unwrapped literal content via `CanonicalizeContent` before assigning to the `Value`. Filter literal `"a\"b"` now produces the same lexical form as a stored canonical atom for the same logical literal.
+- **`src/Mercury/Sparql/Execution/Expressions/FilterEvaluator.cs:CompareEqual`** — **bonus fix discovered during Part 4 validation**: String equality changed from raw `StringValue.SequenceEqual` to `GetLexicalForm().SequenceEqual && GetLangTagOrDatatype().SequenceEqual`. Normalizes wrap-vs-unwrap (bound `"abc"` vs filter-parsed `abc`) while preserving SPARQL-spec language-tag and datatype distinguishability (`"abc"@en` ≠ `"abc"@de`, `"5"^^xsd:integer` ≠ `"5"^^xsd:double`).
+- **`src/Mercury/Sparql/Execution/Expressions/BindExpressionEvaluator.cs`** — `ParseStringLiteral` canonicalizes content via `CanonicalizeContent`. For `@lang` / `^^<datatype>` paths, builds the wrapped canonical form `"{decoded}"@<lang>` / `"{decoded}"^^{datatype}` so bound values match canonical stored atoms in subsequent pattern matches.
+
+### Migration
+
+Legacy stores created under Mercury ≤ 1.7.72 that received `INSERT DATA` / `INSERT WHERE` writes containing literals with escape sequences (`\"`, `\\`, `\n`, etc.) hold those literals in *verbatim* form (escape sequences preserved as two-character pairs). Such stores remain *queryable* under 1.7.73 — the `LastIndexOf('"')` boundary-detection logic from 1.7.72 handles both verbatim and canonical atom forms transparently — but the verbatim atoms and any new canonical writes coexist as distinct atom IDs for the same logical literal. To converge a legacy store on the canonical form, export to N-Triples (which uses the canonical lexical form) and bulk-load into a fresh store:
+
+```bash
+mercury export <legacy-store> --format=nt > out.nt
+mercury bulk-load <new-store> out.nt
+```
+
+After re-load, every triple is interned via the streaming-parser path with canonical form. Newly-created stores under 1.7.73 produce canonical atoms by construction; no migration needed.
+
+### Validation
+
+- Full Mercury test suite: **4,515 / 0 failed / 6 skipped** (was 4,463 baseline pre-ADR-044; +52 net additions = 38 `LiteralFormTests` + 14 `CrossFormCanonicalizationTests`).
+- W3C SPARQL 1.1 Query conformance: 421/421 (no regression).
+- W3C SPARQL 1.1 Update conformance: 94/94 (no regression).
+- No existing test relied on the buggy `CompareEqual` `SequenceEqual` behavior — equality fix passes the regression bar.
+
+ADR-044 hypothesis closure:
+- H1 (atom identity across ingestion paths) — closed by `TurtleThenSparqlInsertOfSameLogicalTriple_ProducesSingleAtomForObject`.
+- H2 (LastIndexOf handles both legacy verbatim and new canonical) — closed by the full suite (4,463 baseline tests including the 1.7.72 verbatim-form tests) remaining green.
+- H3 (legacy migration via export + bulk-load) — the export+bulk-load path is documented but not test-automated; deferred to its own test if needed.
+- H4 (cross-form FILTER mismatch closed) — closed by 14 cross-form tests including the 6 FILTER shapes, all returning the expected row when canonicalization + equality fix are both in place.
 
 ---
 
