@@ -398,7 +398,11 @@ public sealed class QuadStore : IDisposable
     /// and rely on records threshold alone.
     /// </para>
     /// </summary>
-    internal TimeSpan ProgressEmissionMinInterval { get; set; } = TimeSpan.FromSeconds(30);
+    // ADR-043 Part 2: lowered from 30s → 5s. The 30s default predated ADR-043 and
+    // was set before cycle 9's 2-hour staleness symptom surfaced the live-observability
+    // ceiling. 5s matches the merge-side throttle default and bounds live JSONL
+    // tail-to-real-time staleness at the metric-emission layer.
+    internal TimeSpan ProgressEmissionMinInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Drain-phase emission uses time-based cadence only (no record threshold).</summary>
     internal TimeSpan DrainProgressEmissionInterval => ProgressEmissionMinInterval;

@@ -40,7 +40,13 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
     private readonly object _gate = new();
     private readonly List<StateProducer> _stateProducers = new();
     private readonly Timer? _stateTimer;
+    private readonly Timer? _flushTimer;
     private bool _disposed;
+
+    /// <summary>Default flush-tick interval (ADR-043 Part 1). 5 seconds bounds the worst-case
+    /// JSONL tail-to-real-time staleness on shared-disk configurations to ~5 s + page-cache
+    /// writeback latency, regardless of workload-side mmap I/O queue pressure.</summary>
+    public static readonly TimeSpan DefaultFlushInterval = TimeSpan.FromSeconds(5);
 
     private static readonly JsonWriterOptions WriterOptions = new() { Indented = false };
 
@@ -48,27 +54,46 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
     public delegate void StateProducer(JsonlMetricsListener listener);
 
     /// <summary>Wrap an existing stream; caller retains ownership unless <paramref name="leaveOpen"/> is false.</summary>
-    public JsonlMetricsListener(Stream stream, bool leaveOpen = true, TimeSpan? stateEmissionInterval = null)
+    /// <remarks>
+    /// <para>ADR-043 Part 1: <paramref name="flushInterval"/> (default 5s) bounds the worst-case
+    /// JSONL tail-to-real-time staleness under shared-disk pressure. Pass <c>TimeSpan.Zero</c>
+    /// to opt out (no periodic flush; AutoFlush per-write still applies).</para>
+    /// </remarks>
+    public JsonlMetricsListener(
+        Stream stream,
+        bool leaveOpen = true,
+        TimeSpan? stateEmissionInterval = null,
+        TimeSpan? flushInterval = null)
     {
         // AutoFlush=true so a missed explicit Dispose still leaves the file complete on disk.
         _writer = new StreamWriter(stream, System.Text.Encoding.UTF8, leaveOpen: leaveOpen) { AutoFlush = true };
         _ownsWriter = !leaveOpen;
-        _stateTimer = StartTimerIfRequested(stateEmissionInterval);
+        _stateTimer = StartTimerIfRequested(stateEmissionInterval, StateTimerTick);
+        _flushTimer = StartTimerIfRequested(flushInterval ?? DefaultFlushInterval, FlushTimerTick);
     }
 
     /// <summary>Open or append to a file.</summary>
-    public JsonlMetricsListener(string path, TimeSpan? stateEmissionInterval = null)
+    /// <remarks>
+    /// <para>ADR-043 Part 1: <paramref name="flushInterval"/> (default 5s) bounds the worst-case
+    /// JSONL tail-to-real-time staleness under shared-disk pressure. Pass <c>TimeSpan.Zero</c>
+    /// to opt out.</para>
+    /// </remarks>
+    public JsonlMetricsListener(
+        string path,
+        TimeSpan? stateEmissionInterval = null,
+        TimeSpan? flushInterval = null)
     {
         var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read);
         _writer = new StreamWriter(stream, System.Text.Encoding.UTF8) { AutoFlush = true };
         _ownsWriter = true;
-        _stateTimer = StartTimerIfRequested(stateEmissionInterval);
+        _stateTimer = StartTimerIfRequested(stateEmissionInterval, StateTimerTick);
+        _flushTimer = StartTimerIfRequested(flushInterval ?? DefaultFlushInterval, FlushTimerTick);
     }
 
-    private Timer? StartTimerIfRequested(TimeSpan? interval)
+    private Timer? StartTimerIfRequested(TimeSpan? interval, TimerCallback callback)
     {
         if (interval is not { } i || i <= TimeSpan.Zero) return null;
-        return new Timer(StateTimerTick, null, i, i);
+        return new Timer(callback, null, i, i);
     }
 
     /// <summary>Register a producer invoked on each state-emission tick.</summary>
@@ -94,6 +119,29 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         foreach (var producer in snapshot)
         {
             try { producer(this); }
+            catch { /* swallow — observability must never break the producer */ }
+        }
+    }
+
+    /// <summary>
+    /// ADR-043 Part 1: periodic explicit FileStream flush. AutoFlush=true forces the
+    /// StreamWriter buffer → FileStream buffer handoff per-line; this tick forces the
+    /// FileStream buffer → OS page cache handoff on a bounded cadence. Without this,
+    /// under shared-disk pressure the page-cache writeback queue can starve small-writer
+    /// flush requests for hours (cycle 9 trigram drain measured 2+ h staleness).
+    /// </summary>
+    /// <remarks>
+    /// Does NOT call fsync — crash recovery is not the goal; live observability is.
+    /// The OS page cache is "the file" from the perspective of <c>tail -f</c> and any
+    /// in-flight reader. Adding fsync would increase contention with the workload,
+    /// the opposite of what we want.
+    /// </remarks>
+    private void FlushTimerTick(object? _)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            try { _writer.BaseStream.Flush(); }
             catch { /* swallow — observability must never break the producer */ }
         }
     }
@@ -648,6 +696,7 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
     public void Dispose()
     {
         _stateTimer?.Dispose();
+        _flushTimer?.Dispose();
         lock (_gate)
         {
             if (_disposed) return;

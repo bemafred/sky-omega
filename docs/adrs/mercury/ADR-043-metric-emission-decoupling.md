@@ -2,7 +2,15 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-16 (Proposed 2026-05-16; Accepted 2026-05-16 — approach approved, ready for engineering; three-part decoupling (periodic FileStream.Flush + time-based emission throttle + separate-disk runbook) is the substrate-correct answer to the cycle 9 trigram-drain 2-hour staleness observation)
+**Status:** Completed — 2026-05-17 (Proposed 2026-05-16; Accepted 2026-05-16; Completed 2026-05-17 in Mercury 1.7.74 — Parts 1+2+3 all shipped; full Mercury suite 4,522 / 0 failed / 6 skipped)
+
+### Implementation outcome (2026-05-17)
+
+- **Part 1 — Periodic FileStream flush:** Added `_flushTimer` to `JsonlMetricsListener` mirroring the existing `_stateTimer` pattern. Default 5s interval (configurable via constructor, `TimeSpan.Zero` opts out). Calls `_writer.BaseStream.Flush()` under `_gate`. Does NOT call fsync — live observability is the goal, not crash recovery. The OS page cache is "the file" from the perspective of `tail -f`.
+- **Part 2 — Time-based emission throttling:** New `MetricEmissionThrottle` helper class in `src/Mercury/Diagnostics/MetricEmissionThrottle.cs` (7 unit tests in `MetricEmissionThrottleTests`). Atomic `Interlocked.CompareExchange` on the last-emit timestamp resolves concurrent callers to exactly one true per interval. Applied at `SortedAtomStoreExternalBuilder.MergeAndWrite` (merge progress, paired with the existing records-based gate at `MergeProgressEmissionInterval = 100M records`). The drain + rebuild emit sites already had time-based gating via `QuadStore.ProgressEmissionMinInterval` — lowered from 30s → 5s to match the ADR default.
+- **Part 3 — Runbook:** New file `docs/operations/runbook-metrics-disk-separation.md`. Operator-facing surface explaining when + how to route `--metrics-out` to a separate disk for runs > 1 hour. Both Parts 1+2 (5-second bound on shared disk) and Part 3 (sub-second on separate disk) covered with verification procedure.
+
+The pre-existing `MetricsListenerTests` (2 tests using `ProgressEmissionMinInterval = TimeSpan.Zero` to bypass time gating) continue to pass — the only suite-wide behavioral change from the 30s → 5s default is that previously-untested intermediate-cadence emissions would now fire more frequently, but no test asserted on the exact 30s value. Validation: 4,522 / 0 failed / 6 skipped (was 4,515 + 7 new throttle tests; zero regressions from the default change or the new flush timer).
 
 ## Context
 

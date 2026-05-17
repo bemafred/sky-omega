@@ -1,8 +1,10 @@
 # Limit: metric emission backpressures on the same disk as the workload it instruments
 
-**Status:**        Triggered (cycle 9 trigram drain, observed 2026-05-08 01:34 → 03:38 UTC: 2+ hour visible gap in `rebuild.jsonl` while the process is healthy and progressing at ~25 MB/min on `trigram.posts`)
+**Status:**        **Resolved** by [ADR-043](../adrs/mercury/ADR-043-metric-emission-decoupling.md) shipped in Mercury 1.7.74 (2026-05-17)
 **Surfaced:**      2026-05-08, via cycle 9 trigram drain phase
-**Last reviewed:** 2026-05-08
+**Last reviewed:** 2026-05-17 (post-ADR-043)
+
+> **Resolution (2026-05-17, Mercury 1.7.74):** ADR-043's three-part fix is shipped. Part 1 added a periodic explicit `FileStream.Flush()` timer to `JsonlMetricsListener` (default 5s, configurable). Part 2 added a `MetricEmissionThrottle` helper applied at the merge emit site, and lowered the existing `ProgressEmissionMinInterval` default 30s → 5s to match (drain + rebuild emit sites already used time-based gating). Part 3 published an operator runbook (`docs/operations/runbook-metrics-disk-separation.md`) for the separate-disk pattern when sub-5s staleness matters. Cycle-9-style 2-hour staleness is structurally bounded to ~5s on shared-disk configurations; sub-second on separate-disk configurations.
 
 ## Description
 

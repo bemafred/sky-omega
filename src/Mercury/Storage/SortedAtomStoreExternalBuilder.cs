@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using SkyOmega.Mercury.Abstractions;
+using SkyOmega.Mercury.Diagnostics;
 
 namespace SkyOmega.Mercury.Storage;
 
@@ -420,6 +421,15 @@ internal static class SortedAtomStoreExternalBuilder
     public const long MergeProgressEmissionInterval = 100_000_000L;
 
     /// <summary>
+    /// ADR-043 Part 2: time-based emission throttle (default 5s). Combined with the
+    /// records-based interval above as: emit every <see cref="MergeProgressEmissionInterval"/>
+    /// records OR every <see cref="MergeProgressTimeInterval"/> seconds, whichever fires
+    /// first. At high throughput the time gate wins (bounded bytes/sec on the metric channel);
+    /// at low throughput the records gate wins (so a slow phase still emits eventually).
+    /// </summary>
+    public static readonly TimeSpan MergeProgressTimeInterval = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// ADR-038 Part 1: anchor every N records in the chunk file. Anchors carry full
     /// bytes (prefix_len = 0); non-anchor records carry only the differing suffix
     /// vs the previous record's reconstructed bytes. N = 64 chosen to bound
@@ -453,6 +463,9 @@ internal static class SortedAtomStoreExternalBuilder
         long recordsProcessed = 0;       // every record dequeued from the priority queue
         long resolverRecordsSpilled = 0; // every record handed to the resolveSorter
         long mergeStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        // ADR-043 Part 2: time-based emission throttle paired with the records-based
+        // gate below. Caps metric channel bytes/sec independent of merge throughput.
+        var mergeProgressThrottle = new MetricEmissionThrottle(MergeProgressTimeInterval);
         var dataPath = baseFilePath + ".atoms";
         var offsetsPath = baseFilePath + ".offsets";
 
@@ -620,7 +633,13 @@ internal static class SortedAtomStoreExternalBuilder
                         pq.Enqueue(readerIdx, new ChunkPriorityKey(readers[readerIdx].Current.Bytes, readerIdx));
 
                     recordsProcessed++;
-                    if (listener is not null && recordsProcessed % MergeProgressEmissionInterval == 0)
+                    // ADR-043 Part 2: emit on either records-based OR time-based gate,
+                    // whichever fires first. Records gate bounds the upper rate (e.g. 100M
+                    // records per emit at any throughput); time gate bounds the lower rate
+                    // (e.g. at least once per 5s even if a slow phase). The two together
+                    // cap metric channel bytes/sec independent of workload throughput.
+                    if (listener is not null &&
+                        (recordsProcessed % MergeProgressEmissionInterval == 0 || mergeProgressThrottle.ShouldEmit()))
                     {
                         listener.OnMergeProgress(new MergeProgressEvent(
                             Timestamp: DateTimeOffset.UtcNow,
@@ -631,6 +650,7 @@ internal static class SortedAtomStoreExternalBuilder
                             CurrentPoolHits: streamPool.Hits,
                             CurrentPoolMisses: streamPool.Misses,
                             DataBytesWritten: fileBytes));
+                        mergeProgressThrottle.Reset();
                     }
                 }
 
