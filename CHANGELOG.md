@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.74](#1774---2026-05-17)** — released 2026-05-17; **[ADR-043](docs/adrs/mercury/ADR-043-metric-emission-decoupling.md) Metric Emission Decoupling shipped. Three-part fix bounds JSONL artefact staleness on shared-disk configurations: periodic `FileStream.Flush()` (5s default, configurable), `MetricEmissionThrottle` helper applied at merge emit site, `ProgressEmissionMinInterval` default 30s → 5s for rebuild/drain emit sites, and a new operator runbook for the separate-disk `--metrics-out` pattern. Cycle 9 trigram drain's 2-hour staleness symptom is structurally bounded. Also: `observability-discipline-systematic-not-reactive` limit Resolved at the 1.8.0 boundary (structural cure lives in James; Martin mitigates manually until cognitive layer is active).** Previous: [Mercury 1.7.73](#1773---2026-05-17) — released 2026-05-17; **[ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) SPARQL literal canonicalization shipped: SPARQL `INSERT/DELETE DATA`, `INSERT/DELETE WHERE`, FILTER, BIND, and pattern literals now canonicalize to the same wrapped-decoded form Turtle/N-Triples/N-Quads/TriG already produce. Cross-format ingestion of the same logical RDF triple now produces byte-identical atoms. Pre-existing `FilterEvaluator.CompareEqual` wrap-vs-unwrap equality bug brought into ADR scope and fixed; `FILTER(?o = "literal")` now normalizes lexical form + lang tag + datatype per SPARQL spec. 14 cross-form tests in `CrossFormCanonicalizationTests` + 38 unit tests in `LiteralFormTests` validate H1-H4. Full suite 4,515 / 0 failed / 6 skipped.** Previous: [Mercury 1.7.72](#1772---2026-05-17) — **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Sky Omega 1.8.0](#180---2026-05-17)** — released 2026-05-17; **cognitive-layers entry point.** The 1.7.x substrate-hardening line closes here. 1.8.0 is the boundary between substrate work and cognitive work — no new substrate features in this release, only the *closure* of the substrate-hardening arc and the *framing* for what cognitive-layer work begins next (Lucy → James → Mira → Sky over 1.8.x). All 18 Mercury ADRs through ADR-044 are Completed or explicitly Deferred. Substrate posture at 1.8.0 cutover: **W3C SPARQL 1.1 100/100 + Turtle/N-Triples/N-Quads/TriG/RDF-XML 100% + JSON-LD 100% of in-scope**, **4,522 / 0 failed / 6 skipped** Mercury tests, **0 substrate failures across 8,564 unique query × substrate executions** on the 1.7.x line, three paired production runs (21.3 B full + 8.17 B truthy + 150 M WGPB) on a single M5 Max laptop. See [docs/releases/1.8.0.md](docs/releases/1.8.0.md) for the substrate completion arc and [docs/roadmap/cognitive-layers.md](docs/roadmap/cognitive-layers.md) for what 1.8.x begins. Previous: [Mercury 1.7.74](#1774---2026-05-17) — released 2026-05-17; **[ADR-043](docs/adrs/mercury/ADR-043-metric-emission-decoupling.md) Metric Emission Decoupling shipped. Three-part fix bounds JSONL artefact staleness on shared-disk configurations: periodic `FileStream.Flush()` (5s default, configurable), `MetricEmissionThrottle` helper applied at merge emit site, `ProgressEmissionMinInterval` default 30s → 5s for rebuild/drain emit sites, and a new operator runbook for the separate-disk `--metrics-out` pattern. Cycle 9 trigram drain's 2-hour staleness symptom is structurally bounded. Also: `observability-discipline-systematic-not-reactive` limit Resolved at the 1.8.0 boundary (structural cure lives in James; Martin mitigates manually until cognitive layer is active).** Previous: [Mercury 1.7.73](#1773---2026-05-17) — released 2026-05-17; **[ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) SPARQL literal canonicalization shipped: SPARQL `INSERT/DELETE DATA`, `INSERT/DELETE WHERE`, FILTER, BIND, and pattern literals now canonicalize to the same wrapped-decoded form Turtle/N-Triples/N-Quads/TriG already produce. Cross-format ingestion of the same logical RDF triple now produces byte-identical atoms. Pre-existing `FilterEvaluator.CompareEqual` wrap-vs-unwrap equality bug brought into ADR scope and fixed; `FILTER(?o = "literal")` now normalizes lexical form + lang tag + datatype per SPARQL spec. 14 cross-form tests in `CrossFormCanonicalizationTests` + 38 unit tests in `LiteralFormTests` validate H1-H4. Full suite 4,515 / 0 failed / 6 skipped.** Previous: [Mercury 1.7.72](#1772---2026-05-17) — **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -27,6 +27,55 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 1.8.0** — **cognitive-layers entry point** per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26). Substrate hardening closes within 1.7.x: Phases 1-6 (ADR-028/029/030/031/032/033) complete 2026-04-26; Phase 7c performance rounds shipped through 1.7.57 (ADR-037 pipelined spill, ADR-038 merge-phase read-side, ADR-039 BBHash MPHF); Phase 8 Tier 1+2 close-out shipped 1.7.58-1.7.64 on 2026-05-16 (ADR-040 readahead adaptive, ADR-041 cleanup-on-exception, ADR-042 MPHF construction adaptive, WDBench aggregate distribution, N-Triples parser characterization). 1.8.0 marks the substrate-complete / cognitive-layers-begin boundary, not a production-hardening release.
 
 **Sky Omega 1.8.0+** introduces cognitive layers on top of the three substrates: **Lucy** (deep semantic memory), **James** (orchestration with pedagogical guidance), **Mira** (surface/interaction layer), and **Sky** (agent surface integrating all three). The three substrates — **Mercury** (RDF storage), **Minerva** (LLM inference, BCL-only, in 1.7.x development), and **DrHook** (runtime observation; engine BCL-only rewrite queued as the first 1.8.x substrate-discipline task post-cognitive-entry) — carry the cognitive layers.
+
+---
+
+## [1.8.0] - 2026-05-17
+
+**Headline:** Cognitive-layers entry point. The 1.7.x substrate-hardening line closes here. **1.8.0 is the boundary between substrate work and cognitive work** — not a production-hardening release. No new substrate features. The version bump marks the milestone explicitly: substrate-complete; cognitive-layers begin.
+
+### What 1.8.0 carries
+
+Full substrate-hardening arc through 1.7.x (cycle 6 → cycle 10 r4 + truthy r1 + WGPB step C). All 18 Mercury ADRs through ADR-044 are Completed or explicitly Deferred. Cumulative substrate-failure discipline: **0 substrate failures across 8,564 unique query × substrate executions** on the 1.7.x line.
+
+Three paired production validations on the same 1.7.57 substrate generation:
+- Cycle 10 r4 — 21.3 B full Wikidata in **23 h 57 m** on a single M5 Max (2026-05-13)
+- Truthy r1 — 8.17 B truthy Wikidata in **14 h 13 m** (apples-to-apples vs WDBench / QLever / Virtuoso published numbers, 2026-05-14)
+- WGPB step C — ~150 M reduced-truthy Wikidata + 849/850 WGPB queries in **4 m 30 s + 4 m 43 s** (paired vs MillenniumDB-published, 2026-05-16)
+
+Plus the post-cycle-10 close-out arc (1.7.65 → 1.7.74) shipping ADR-029 (four-profile matrix), ADR-040/041/042 (substrate host-portability), ADR-043 (metric emission decoupling), ADR-044 (SPARQL literal canonicalization), and the 1.7.70 → 1.7.72 dogfood-discovered correctness fixes.
+
+### Substrate posture at 1.8.0 cutover
+
+- W3C SPARQL 1.1 Query: 421 / 421 (100 %)
+- W3C SPARQL 1.1 Update: 94 / 94 (100 %)
+- W3C SPARQL 1.1 Syntax: 103 / 103 (100 %)
+- W3C Turtle / TriG / N-Triples / N-Quads / RDF-XML: 984 / 984 (100 %)
+- W3C JSON-LD 1.1: 461 / 461 + 6 intentional skips (100 % of in-scope)
+- Mercury test suite: **4,522 passed / 0 failed / 6 skipped**
+
+### What 1.8.x begins
+
+See `docs/roadmap/cognitive-layers.md`. Per-layer summary:
+
+- **Lucy** — deep semantic memory layered on Mercury (replaces ad-hoc `mercury-mcp` patterns with structured EEE-disciplined semantic-memory layer).
+- **James** — orchestration with pedagogical guidance; structurally closes the `observability-discipline-systematic-not-reactive` meta-pattern via periodic substrate audits as behavior.
+- **Mira** — surface/interaction layer across CLI / chat / IDE extensions.
+- **Sky** — integrated agent surface, persistent cognitive-partner identity across sessions.
+
+And parallel substrate work:
+- **DrHook engine BCL-only rewrite** — first 1.8.x substrate-discipline task. Restores substrate-independence by replacing netcoredbg + Microsoft.Diagnostics.NETCore.Client with pure BCL.
+- **Minerva** — LLM inference substrate continues BCL-only development.
+
+### References
+
+- [`docs/releases/1.8.0.md`](docs/releases/1.8.0.md) — full release narrative with the ADR completion table and substrate-completion arc
+- [`docs/roadmap/cognitive-layers.md`](docs/roadmap/cognitive-layers.md) — what 1.8.x cognitive-layer work sequences toward Sky Omega 2.0
+- [`docs/roadmap/production-hardening-1.8.md`](docs/roadmap/production-hardening-1.8.md) — the roadmap that sequenced 1.7.x; closes here
+
+### Migration
+
+No code-level migration from 1.7.74 → 1.8.0 — this is a version-marker release. All 1.7.74 functionality is present and unchanged. ADR-044's legacy-store migration runbook (export → bulk-load for stores written under 1.7.69 → 1.7.72 with escape-containing literals) remains the only outstanding operator-side migration; that's documented in [`MERCURY.md`](MERCURY.md) "Upgrade notes" section.
 
 ---
 
