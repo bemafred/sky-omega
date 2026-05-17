@@ -271,9 +271,11 @@ SELECT ?decision ?rationale ?when WHERE {
     sky:about ?topic ;
     sky:rationale ?rationale .
   OPTIONAL { ?decision sky:timestamp ?when }
-  FILTER(CONTAINS(LCASE(STR(?topic)), "search-term"))
+  FILTER(text:match(?topic, "search-term"))
 }
 ```
+
+> `text:match(?var, "term")` is Mercury's substrate-level full-text search — case-insensitive substring matching, trigram-index-accelerated. Prefer it over `CONTAINS(LCASE(STR(?var)), "term")` when querying labels, comments, or stored literals. The trigram index pre-filters candidates; `CONTAINS` forces a scan. Reserve `CONTAINS` / `REGEX` / `STRSTARTS` for patterns `text:match` doesn't cover (regex, case-sensitive, anchored, multi-pattern boolean combinations). `text:match` expects `(?var, "constant")` shape — other shapes don't trigger the index path.
 
 ### Finding what's known about a concept
 ```sparql
