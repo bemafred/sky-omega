@@ -44,6 +44,29 @@ Rev 3 changes from rev 2:
 - Hypothesis H1 reframed to match the chosen mechanism (helper, not parser change).
 - Scratch-buffer aliasing question addressed explicitly in Decision Part 1.
 
+### Discovery during Part 4 (2026-05-17)
+
+Cross-form FILTER equality tests written for Validation plan item 3 failed not because of the canonicalization wiring but because of an unrelated pre-existing bug in `FilterEvaluator.CompareEqual` at line 1919: String equality used raw `StringValue.SequenceEqual` without normalizing the wrap-vs-unwrap asymmetry between bound values (wrapped, from store: `"abc"`) and filter-side parsed literals (unwrapped content: `abc`). Probe verified: `FILTER(?o = "abc")` returned zero rows against any stored literal "abc", even with no escapes involved. The bug pre-dated ADR-044.
+
+The bug blocked H4 closure for the direct `?o = "literal"` equality shape (CONTAINS / STRSTARTS / STRENDS / REGEX / pattern-match / DELETE-WHERE were unaffected because they call `GetLexicalForm` internally). Rather than file as a separate limit, the fix was brought into ADR-044's scope:
+
+```csharp
+// Before (pre-existing bug):
+ValueType.String => left.StringValue.SequenceEqual(right.StringValue),
+
+// After (rev 3 Part 4):
+ValueType.String =>
+    left.GetLexicalForm().SequenceEqual(right.GetLexicalForm()) &&
+    left.GetLangTagOrDatatype().SequenceEqual(right.GetLangTagOrDatatype()),
+```
+
+The fix:
+- Compares lexical forms via `GetLexicalForm` (normalizes wrap-vs-unwrap).
+- Compares lang tag / datatype suffix via `GetLangTagOrDatatype` (keeps `@en` ≠ `@de` and `xsd:integer` ≠ `xsd:double` distinguishable per SPARQL spec).
+- Validated against the full Mercury suite: 4,515 passed, 0 failed, 6 skipped. No existing test relied on the buggy behavior.
+
+H4 fully closed. The 3 cross-form equality tests that motivated the discovery now pass alongside the 7 cross-form tests that pass on canonicalization wiring alone.
+
 ## Context
 
 Mercury has two RDF ingestion paths and they disagree on the stored form of any literal containing escape sequences. The asymmetry was characterized in [`docs/limits/sparql-update-literal-escape-canonicalization.md`](../../limits/sparql-update-literal-escape-canonicalization.md) on 2026-05-17 by code reading; it surfaced from the 1.7.72 `GetLexicalForm` fix (commit `0a2f8f9`), which patched the downstream symptom but not the underlying root cause.
@@ -176,9 +199,9 @@ The filter consumers (sites 10-11) illustrate the cross-form failure mode that d
 
 **Falsified if:** the N-Triples writer emits any literal in a form that differs from what `NTriplesStreamParser` would store on re-read, OR if existing Cognitive stores contain bitemporal data that the export → reload round-trip drops.
 
-**H4 — Centralized canonicalization closes cross-form FILTER mismatch.** *Added in rev 2.* Routing every SPARQL source-literal materialization through `LiteralForm.Canonicalize` means FILTER literal arguments and pattern literal positions match canonical stored atoms exactly, regardless of whether the original SPARQL source used `\"`, `"`, or `"""..."""` syntax.
+**H4 — Centralized canonicalization closes cross-form FILTER mismatch.** *Added in rev 2; further qualified in rev 3 Part 4.* Routing every SPARQL source-literal materialization through `LiteralForm.Canonicalize` means FILTER literal arguments and pattern literal positions match canonical stored atoms exactly, regardless of whether the original SPARQL source used `\"`, `"`, or `"""..."""` syntax. **Rev 3 Part 4 found that closing the equality shape additionally requires the wrap-vs-unwrap fix in `FilterEvaluator.CompareEqual`** (see Scope revision → "Discovery during Part 4"). With both the canonicalization wiring AND the equality fix in place, all 14 cross-form tests pass.
 
-**Falsified if:** a paired test of the form *(insert via Turtle) → FILTER(?o = "a\"b")* returns zero rows when canonicalization is enabled, OR if any literal-consuming operator was missed and its bound spans remain non-canonical, OR if `Value.GetLexicalForm`'s slice-from-quotes logic produces different output on the canonicalized SPARQL filter literal than on the canonical stored atom for the same logical value.
+**Falsified if:** a paired test of the form *(insert via Turtle) → FILTER(?o = "a\"b")* returns zero rows when both canonicalization and the equality fix are enabled, OR if any literal-consuming operator was missed and its bound spans remain non-canonical, OR if `Value.GetLexicalForm`'s slice-from-quotes logic produces different output on the canonicalized SPARQL filter literal than on the canonical stored atom for the same logical value.
 
 ## Decision
 
@@ -380,17 +403,18 @@ The three storage-representation options (verbatim source, wrapped-decoded, tagg
 
 *Rev 3: now decomposed with Phase 0 consolidation. Total similar to rev 2 (~10-13h), but distributed across a more honest set of phases.*
 
-- Part 1 (`LiteralForm.Canonicalize` helper): ~2 hours. Single static method, fast path + slow path, decode loop ported from `TurtleStreamParser.ParseAndAppendEscapeToSb`. Direct unit tests in `SkyOmega.Bcl.Tests` or a new `LiteralFormTests`.
+- Part 1 (`LiteralForm.Canonicalize` + `CanonicalizeContent` helpers): ~2 hours actual. Single static class, fast path + slow path, decode loop ported from `TurtleStreamParser.ParseAndAppendEscapeToSb`, shared via `DecodeEscapeAppend`. 38 direct unit tests in `LiteralFormTests`.
 - Part 2 (Phase 0 consolidation refactor): ~1 hour actual. Phase 0b only: `InstantiateTermFromSpan` (byte-identical with `InstantiateTerm`) deleted, callers redirected. Phase 0a deferred — `ResolveTerm`-family duplication held in `docs/limits/sparql-resolve-term-family-duplication.md`. Full Mercury test suite green post-Phase-0b (4,463 / 0 failed / 6 skipped, baseline-identical).
-- Part 3 (canonicalization call-site edits): ~3 hours. 9 edits post-Phase-0b (3 write + 4 read-match + 2 filter/BIND). Each needs a position-specific scratch field + the `LiteralForm.Canonicalize` call.
-- Part 4 (tests — paired ingestion + cross-form FILTER + pattern + DELETE WHERE + BIND + uncertainty-surface): ~2-3 hours. ~8-10 tests across Validation plan categories.
+- Part 3 (canonicalization call-site edits): ~3 hours actual. 8 edits post-Phase-0b (1 write-side via `ExpandPrefixedName` covering Context sites 1-5 + 4 read-match + 2 filter/BIND). Write side collapsed from 3 to 1 because `ExpandPrefixedName` is the shared hub — discovery from implementation read.
+- Part 4 (tests + equality-bug fix): ~3 hours actual. 14 cross-form tests in `CrossFormCanonicalizationTests` covering paired-ingestion atom identity (H1), 6 FILTER shapes (`=`, CONTAINS, STRSTARTS, STRENDS, REGEX, unicode-escape-equivalent), pattern match, DELETE WHERE, BIND, and 4 uncertainty-surface tests (subquery × 2, ASK, CONSTRUCT). Discovered + fixed pre-existing wrap-vs-unwrap equality bug in `FilterEvaluator.CompareEqual` (see Scope revision → Discovery during Part 4).
 - Part 5A (migration runbook): ~30 min. CHANGELOG note + one-paragraph addition to MERCURY.md.
-- Validation pass (full Mercury suite + W3C SPARQL + small WDBench + uncertainty-surface tests): ~1-2 hours.
-- Total: ~10-13 hours implementation + validation.
+- Total actual: ~10 hours implementation + validation. Full suite end state: **4,515 / 0 failed / 6 skipped** (was 4,463 baseline; +52 net additions: 38 LiteralForm tests + 14 cross-form tests).
 
-If Phase 0 consolidation turns out non-trivial (the discriminator differences between the duplicated methods are more substantive than they look at a glance), Part 2 grows. The fallback is documented in Decision Part 2: skip Phase 0, keep 11 mechanical edits, accept the duplication as separate debt.
+Post-implementation outcome (2026-05-17):
 
-If a missed materialization site shows up during validation (a literal arriving at the atom store comparison via a code path not in the Context enumeration — most likely sub-queries, property paths, or SPARQL-star per "Remaining uncertainty"), Part 3 grows by the time to find + plumb that site. Validation plan item 11 is designed to surface these.
+- Phase 0a was non-trivial as anticipated; fallback engaged (per-site edits + new limits-register entry for the ResolveTerm-family duplication).
+- One bonus discovery during Part 4 — a pre-existing wrap-vs-unwrap equality bug in `FilterEvaluator.CompareEqual` was blocking H4 closure for the `?o = "literal"` shape. Fix brought into scope; documented in Scope revision → Discovery during Part 4.
+- Uncertainty-surface tests (Validation plan item 11) all passed without follow-up work — subqueries, ASK, and CONSTRUCT all route through the canonicalized pattern operators transparently. Property-path and SPARQL-star coverage deferred (out of test scope; can be added when concrete query shapes need them).
 
 ## References
 

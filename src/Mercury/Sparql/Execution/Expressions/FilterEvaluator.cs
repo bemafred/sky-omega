@@ -1916,7 +1916,15 @@ internal ref partial struct FilterEvaluator
                 ValueType.Integer => left.IntegerValue == right.IntegerValue,
                 ValueType.Double => Math.Abs(left.DoubleValue - right.DoubleValue) < 1e-10,
                 ValueType.Boolean => left.BooleanValue == right.BooleanValue,
-                ValueType.String => left.StringValue.SequenceEqual(right.StringValue),
+                // ADR-044 Part 4: SPARQL literal equality is defined on (lexical form,
+                // datatype, language tag), not on the raw stored bytes. Comparing
+                // GetLexicalForm normalizes the wrap-vs-unwrap asymmetry between bound
+                // values (wrapped, from store) and filter-side parsed literals
+                // (unwrapped content). Comparing GetLangTagOrDatatype keeps `@en` ≠
+                // `@de` and `xsd:integer` ≠ `xsd:double` distinguishable.
+                ValueType.String =>
+                    left.GetLexicalForm().SequenceEqual(right.GetLexicalForm()) &&
+                    left.GetLangTagOrDatatype().SequenceEqual(right.GetLangTagOrDatatype()),
                 ValueType.Uri => left.StringValue.SequenceEqual(right.StringValue),
                 _ => false
             };
