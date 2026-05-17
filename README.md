@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** · production-validated by **three paired measurements** on the same substrate generation:
+**Production-validated substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** (current development substrate: [1.7.69](CHANGELOG.md#1769---2026-05-16)) · **three paired measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
@@ -39,7 +39,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 
 ---
 
-> **v1.7.57 — Three paired measurements: cycle 10 Phase 3 r4 + truthy r1 + WGPB step C complete. Substrate at 23 h 57 m / 14 h 13 m / 4 m 30 s end-to-end at 21.3 B full / 8.17 B truthy / ~150 M WGPB-filtered** (with full-text trigram index). Like-for-like (no trigram, comparing vs published QLever / Virtuoso / WDBench / MillenniumDB numbers): **15 h 26 m / 6 h 49 m / 4 m 30 s**. WGPB queries: 849/850 in 4 m 43 s (99.88 % completion, 0 timeouts).
+> **Measurements on v1.7.57 — Three paired measurements: cycle 10 Phase 3 r4 + truthy r1 + WGPB step C complete. Substrate at 23 h 57 m / 14 h 13 m / 4 m 30 s end-to-end at 21.3 B full / 8.17 B truthy / ~150 M WGPB-filtered** (with full-text trigram index). Like-for-like (no trigram, comparing vs published QLever / Virtuoso / WDBench / MillenniumDB numbers): **15 h 26 m / 6 h 49 m / 4 m 30 s**. WGPB queries: 849/850 in 4 m 43 s (99.88 % completion, 0 timeouts).
 > Four measured 21.3 B Wikidata production runs across the trajectory; substrate now **3.5× faster** than its first incarnation, all on a single laptop, BCL-only .NET.
 >
 > **Cumulative trajectory** *(measured-vs-measured, four completed full-Wikidata runs)*
@@ -56,7 +56,7 @@ Sky Omega is what becomes possible when you stop building better travelers and s
 > - *Dataset note: every Mercury measurement runs against full Wikidata, not the truthy subset (`latest-truthy.nt.bz2`) that most published QLever/Virtuoso/WDBench numbers use. Truthy is ~1.5–1.8× smaller and excludes statement-level qualifiers, references, and sitelinks. See [the comparison-plane memo](docs/memos/2026-04-30-latent-assumptions-from-qlever-comparison.md) for the honest-comparison framing.*
 > - **MPHF construction characterized at production scale (4.005 B atoms):** 25 levels, 0 dense fallback engaged, placement_ratio held at **0.6065** across all levels — exact match to BBHash theoretical `1 − e^(−1/γ)` for γ=2.0. Total 54 m 29 s, within 1 % of the cycle 10 plan's "+~55 min MPHF" budget.
 > - Substrate output identity: 4,005,235,528 atoms, 17,029,283,265 GPOS entries, 7,472,855,623 trigram entries — bit-for-bit identical to cycle 9's measurements (same input, deterministic substrate). MPHF surface is purely additive: 1.75 GB `atoms.mphf` blob + 16.0 GB `atoms.idx` translation table.
-> - FD trajectory peaked at 8,325 during trigram rebuild (8,192 simultaneously-open chunks) vs the launchd ~10K effective ceiling = 17 % headroom held for 8 h+ — `ExternalSorter` k-way merge bypasses `BoundedFileStreamPool`; class-fix follow-up for cycle 11.
+> - FD trajectory peaked at 8,325 during trigram rebuild (8,192 simultaneously-open chunks) vs the launchd ~10K effective ceiling = 17 % headroom held for 8 h+. *Initial framing as `ExternalSorter` pool-bypass retracted 2026-05-16 as false alarm — code review confirms the pool IS engaged on the trigram-drain path via `ExternalSorter.ChunkReader.RefillBuffer → _pool.Get(_path)`; 8,192 was the pool running at its 8K cap with LRU eviction as designed. Eviction-overhead concern tracked in [`docs/limits/trigram-drain-cap-eviction.md`](docs/limits/trigram-drain-cap-eviction.md).*
 >
 > **Substrate components shipped** *(cumulative)*
 > - **ADR-034** SortedAtomStore for Reference — *Completed* (1.7.30 → 1.7.48)
@@ -131,7 +131,7 @@ The broader Sky Omega vision is a **stand-alone cognitive agent** built on this 
 
 - **Structured memory** via a temporal RDF knowledge substrate (Mercury — built)
 - **Grammar-driven reasoning** (syntax, behavior, and intent grammars)
-- **Local LLM inference** (Minerva — planned)
+- **Local LLM inference** (Minerva — BCL-only, in development)
 - **Explainable, traceable logic** — a foundation for hybrid AGI
 
 ---
@@ -186,7 +186,7 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 | 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --filter "W3C.JsonLd"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 4,335 Mercury tests passing      | Test suite            | `dotnet test`                                |
+| 4,454 Mercury tests passing      | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
@@ -214,7 +214,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 ## 🔭 Architectural Vision
 
-The agent architecture that Mercury is being built to support. These components are planned for Sky Omega 2.0.
+The agent architecture that Mercury is being built to support. These components begin in **Sky Omega 1.8.0** — the cognitive-layers entry point — per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26).
 
 | Component                      | Role                                                                                        |
 |--------------------------------|---------------------------------------------------------------------------------------------|
