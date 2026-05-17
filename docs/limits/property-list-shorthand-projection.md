@@ -63,21 +63,31 @@ The bug affects both **literal** and **URI** projections — tested with `?rule 
 
 ## Current state
 
-Surface unconfirmed. The bug was observed via the **MCP `mercury_query` tool** (global Release 1.7.70). It has not yet been verified whether the same query shape renders correctly via:
+**Surface localized 2026-05-17: the bug is in the SPARQL executor, NOT in any surface layer.** All three Mercury query surfaces reproduce the same drop:
 
-- The Mercury CLI REPL (`:query` command)
-- The SPARQL HTTP endpoint (`http://localhost:3031/sparql`)
-- The embeddable .NET API (`SparqlEngine.Execute`)
+- **MCP `mercury_query`** (global Release 1.7.70): result row has `rule` populated, `label` empty.
+- **Mercury CLI REPL** (`mercury -m`, in-memory store with the same query shape): same drop — the rendered table shows `<urn:test:s>` and `"first-literal"` but the `o2` column is empty.
+- **SPARQL HTTP endpoint** (`http://localhost:3030/sparql`, the MCP server's HTTP surface): JSON response is conclusive:
+  ```json
+  {"head":{"vars":["rule","label"]},"results":{"bindings":[{"rule":{"type":"uri","value":"urn:sky-omega:data:text-match-over-contains"}}]}}
+  ```
+  The `head.vars` lists both columns, but the row contains only the `rule` binding. The `label` binding is missing from the SPARQL Results JSON — not stripped during rendering, never emitted by the executor.
 
-If only `mercury_query` is affected, the bug is in `Mercury.Mcp` result serialization. If all surfaces are affected, the bug is in the SPARQL executor's BGP binding propagation or in the `QueryResults.Patterns` enumerator that backs the projection pipeline.
+The workaround (`.`-terminated patterns) renders correctly via HTTP:
+```json
+{"head":{"vars":["rule","label"]},"results":{"bindings":[{"rule":{"type":"uri","value":"urn:sky-omega:data:text-match-over-contains"},"label":{"type":"literal","value":"Use text:match for substring recall, not CONTAINS"}}]}}
+```
 
-The fact that:
+Same data, same store, same surface — only the BGP shape differs. The surfaces honestly serialize what the executor produces; the executor is producing a row missing the non-first-predicate bindings.
 
-- The row count is correct,
-- The first predicate's object renders,
-- FILTER on the missing variable behaves correctly (verified during initial repro on the `text:match(?comment, "trigram")` query — the filter matched, returning the row),
+**Investigation target narrowed to** the SPARQL execution path:
+- BGP parsing into `TriplePattern` objects (property-list shorthand → multiple patterns sharing a subject)
+- The operator that executes property-list-shorthand patterns — likely `MultiPatternScan` or whichever stage joins multiple TriplePatternScans on a shared subject
+- Result-row assembly in `QueryResults` / projection layer
 
-suggests the binding IS internally correct and the bug is downstream of execution — most likely in the result-projection layer or the MCP serialization.
+Most likely root cause: either the property-list shorthand expansion in the parser is losing the variable name for non-first-predicate objects, OR the multi-pattern execution operator is only emitting the first scan's bindings into the result row.
+
+The fact that the row count is correct (1 result), `rule` projects, and FILTER on the missing variable behaves correctly (during initial repro on `text:match(?comment, "trigram")` — the filter matched, returning the row) tells us the binding IS being computed during execution and IS visible to the FILTER. The bug is between "binding visible to FILTER" and "binding emitted to result row."
 
 ## Severity
 
@@ -87,13 +97,15 @@ W3C SPARQL conformance suites likely don't trigger this — the W3C tests use ca
 
 ## Candidate mitigations
 
-1. **Localize the surface.** Run the same reproducer query through `mercury -m` CLI REPL and through the SPARQL HTTP endpoint. If both render correctly, the bug is in `Mercury.Mcp.MercuryTools.Query` or the MCP result-formatting code path. If both also drop the values, the bug is in the SPARQL executor.
+Surface-localization complete (see Current state above) — the bug is in the SPARQL executor. Remaining investigation:
 
-2. **Inspect `QueryExecutor` BGP execution** for property-list shorthand. The SPARQL parser expands `?s pred1 ?o1 ; pred2 ?o2` into two TriplePatternScans on the same subject; the executor should propagate bindings across both scans into the result row. Check whether the second scan's object binding is being overwritten or skipped when the result row is assembled.
+1. **Inspect property-list-shorthand parser expansion.** The SPARQL parser expands `?s pred1 ?o1 ; pred2 ?o2` into two `TriplePattern` objects sharing the same subject. Verify both patterns retain their distinct object variable names through parsing. Check `SparqlParser.Parsing` for the `;` continuation handler.
 
-3. **Inspect `MercuryTools.Query` result serialization** in `Mercury.Mcp`. If the executor produces correct bindings but the MCP serializer reads the wrong column index for non-first-predicate variables, the bug is here.
+2. **Inspect `MultiPatternScan` (or whichever operator joins multiple TriplePatternScans on a shared subject).** The operator should emit a result row where every scan's binding contributes. The bug may be that the operator emits a single row with only the first scan's binding for the object variable. Check `src/Mercury/Sparql/Execution/Operators/MultiPatternScan.cs` for the row-assembly logic.
 
-4. **Add a regression test.** A direct test against the property-list shorthand projection shape — `?s p1 ?o1 ; p2 ?o2` with SELECT projecting both `?o1` and `?o2` — should be added to `tests/Mercury.Tests/Sparql/` once the bug is fixed, to prevent recurrence.
+3. **Inspect `QueryResults` / projection layer.** Even if the operator binds correctly, the SELECT projection may be reading column indexes wrong for non-first-predicate variables. Check `src/Mercury/Sparql/Execution/QueryResults.cs` for the column-to-variable mapping.
+
+4. **Add a regression test.** A direct test against the property-list shorthand projection shape — `?s p1 ?o1 ; p2 ?o2` with SELECT projecting both `?o1` and `?o2` — should be added to `tests/Mercury.Tests/Sparql/` once the bug is fixed, to prevent recurrence. The fact that W3C SPARQL 1.1 Query conformance (421/421 passing per STATISTICS.md) doesn't catch this is itself evidence that the W3C tests don't exercise property-list shorthand chained beyond two predicates with all objects projected.
 
 ## Workaround
 
