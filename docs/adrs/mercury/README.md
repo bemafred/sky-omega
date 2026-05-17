@@ -46,4 +46,4 @@
 | [ADR-041](ADR-041-cleanup-on-finalize-exception.md) | Cleanup-on-Exception for Bulk-Tmp Intermediates | Completed (1.7.58, 2026-05-16) |
 | [ADR-042](ADR-042-mphf-construction-memory-adaptive-sizing.md) | MPHF Construction Memory Adaptive Sizing — Substrate-Correct Data Shapes | Completed (1.7.60 Parts 1+4, 1.7.62 Parts 2+3, 1.7.64 Part 5, 2026-05-16) |
 | [ADR-043](ADR-043-metric-emission-decoupling.md) | Metric Emission Decoupling — Bounded Staleness for Live Observability under Shared-Disk Pressure | Accepted (2026-05-16) |
-| [ADR-044](ADR-044-sparql-update-literal-canonicalization.md) | SPARQL UPDATE Literal Escape Canonicalization — Atom-Store Identity Across Ingestion Paths | Proposed rev 3 (2026-05-17) |
+| [ADR-044](ADR-044-sparql-update-literal-canonicalization.md) | SPARQL UPDATE Literal Escape Canonicalization — Atom-Store Identity Across Ingestion Paths | Accepted (2026-05-17) |

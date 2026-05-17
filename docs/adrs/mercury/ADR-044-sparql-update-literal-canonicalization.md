@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Proposed (rev 3) — 2026-05-17 (Proposed 2026-05-17 [rev 1]; Accepted 2026-05-17; reverted to Proposed [rev 2] 2026-05-17 after surface scope was found inadequate; revised to rev 3 same day after a verification pass corrected the surface enumeration and identified a code-duplication finding — see "Scope revision" below).
+**Status:** Accepted — 2026-05-17 (Proposed 2026-05-17 [rev 1]; briefly Accepted 2026-05-17; reverted to Proposed [rev 2] same day after surface scope was found inadequate; revised to Proposed [rev 3] same day after a verification pass corrected the surface enumeration and identified a code-duplication finding; cleanup pass fixed internal contradictions; re-Accepted 2026-05-17 after rev 3 review confirmed the decision direction, surface accuracy, and aliasing-safe helper signature — see "Scope revision" for the iteration trail).
 
 ## Scope revision
 

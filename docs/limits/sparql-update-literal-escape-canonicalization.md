@@ -1,9 +1,9 @@
 # Limit: SPARQL UPDATE stores literals verbatim; streaming parsers canonicalize
 
-Status:        **Promoted** — see [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) (Proposed rev 3, 2026-05-17)
+Status:        **Promoted** — see [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) (Accepted, 2026-05-17)
 Surfaced:      2026-05-17, while investigating whether parser storage should canonicalize escaped literals at insert time (follow-up to 1.7.72 `GetLexicalForm` fix in commit `0a2f8f9`)
 Last reviewed: 2026-05-17
-Promoted to:   [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) on 2026-05-17. Iterated through rev 1 (briefly Accepted) → rev 2 (wider consumer surface) → rev 3 (verified surface enumeration + duplication finding) on the same day. The substrate-level decision was confirmed at rev 1 (Option 2 wrapped-decoded canonicalization); the rework was about Decision mechanism (helper + per-site materialization) and implementation decomposition (Phase 0 consolidation pre-work).
+Promoted to:   [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) on 2026-05-17. Iterated through rev 1 (briefly Accepted) → rev 2 (wider consumer surface) → rev 3 (verified surface enumeration + duplication finding) → cleanup pass → Accepted on the same day. The substrate-level decision was confirmed at rev 1 (Option 2 wrapped-decoded canonicalization); the rework was about Decision mechanism (helper + per-site materialization) and implementation decomposition (Phase 0 consolidation pre-work).
 
 ## Description
 
