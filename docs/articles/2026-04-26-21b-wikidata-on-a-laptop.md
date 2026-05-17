@@ -18,7 +18,7 @@ Rebuild:      11.65 h    (41,922 s — GPOS + trigram secondary indexes)
 ─────────────────────────────────────
 COMBINED:     85.58 h    (3 days, 13 hours, 35 minutes)
 
-Hardware: M5 Max, 18 cores, 128 GB unified memory, internal NVMe.
+Hardware: MacBook Pro M5 Max, 18 cores, 128 GB unified memory, 8 TB SSD.
           No RAID. No add-in cards. Consumer laptop.
 Software: .NET 10, Mercury 1.7.44, BCL-only core.
           78,878 lines of C# (Mercury core). Zero third-party runtime deps.
@@ -33,7 +33,7 @@ This is also Round 1.
 
 It’s that almost every claim someone might want to make about why this *shouldn’t* work was something we measured, verified, or sometimes inverted along the way.
 
-**“You’d need a server-class machine.”** No — 128 GB RAM and a single internal NVMe. A high-end consumer laptop, but a laptop, not a rack.
+**“You’d need a server-class machine.”** No — a MacBook Pro with 128 GB unified memory and an 8 TB SSD. A high-end consumer laptop, but a laptop, not a rack.
 
 **“Java/C++ infrastructure. .NET can’t compete on this kind of work.”** Mercury is BCL-only .NET, used with native-language discipline (`ref struct` everywhere, `Span<T>`, `stackalloc`, direct unsafe pointer arithmetic, `System.Runtime.Intrinsics` for SIMD where it pays). On the hot paths the JIT-emitted machine code is within ~10-15% of equivalent C++ — and the surprise isn’t that managed code can match native, it’s that *disciplined* managed code can match native within that margin.
 
@@ -57,7 +57,7 @@ Phase 5 of the production-hardening roadmap targeted parallel rebuild and sort-i
 
 Wall-clock-neutral could mean either “the architectures are wash” (no harm, no benefit) or “the architectures shifted cost from somewhere visible to somewhere hidden.” Phase 5.2 ran a `dotnet-trace` and `iostat` capture to find out.
 
-The trace told a precise story: **the parallel + sort-insert architecture was paying 453 seconds of `GC.RunFinalizers` per 100M rebuild, plus 552 seconds of `Monitor.Enter_Slowpath`, plus 14 extra threads — all of which the sequential 1.7.34 baseline had zero of.** Wall-clock equality at 100M was hardware luck on an M5 Max with 128 GB RAM, not architectural neutrality. At 21.3 B (working set well past RAM), those costs would dominate.
+The trace told a precise story: **the parallel + sort-insert architecture was paying 453 seconds of `GC.RunFinalizers` per 100M rebuild, plus 552 seconds of `Monitor.Enter_Slowpath`, plus 14 extra threads — all of which the sequential 1.7.34 baseline had zero of.** Wall-clock equality at 100M was hardware luck on a MacBook Pro M5 Max with 128 GB unified memory, not architectural neutrality. At 21.3 B (working set well past RAM), those costs would dominate.
 
 Worse — Phase 5.2 also revealed the *actual* binding constraint: write amplification. The B+Tree random-insert pattern was touching each leaf page ~3× more than necessary. The SSD was at 7% of bandwidth and 2% of IOPS. The bottleneck was access pattern, not CPU and not raw bandwidth.
 
