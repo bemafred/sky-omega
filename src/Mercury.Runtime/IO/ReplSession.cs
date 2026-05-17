@@ -795,6 +795,7 @@ public sealed class ReplSession : IDisposable
         var sb = new System.Text.StringBuilder();
 
         sb.AppendLine("Store Statistics:");
+        sb.AppendLine($"  Profile:         {stats.Profile}");
         sb.AppendLine($"  Quads:           {stats.QuadCount:N0}");
         sb.AppendLine($"  Atoms:           {stats.AtomCount:N0}");
         sb.AppendLine($"  Storage:         {ByteFormatter.FormatCompact(stats.TotalBytes)}");

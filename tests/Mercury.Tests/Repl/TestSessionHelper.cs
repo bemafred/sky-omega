@@ -237,6 +237,7 @@ internal static class TestSessionHelper
         var (walTxId, walCheckpoint, walSize) = store.GetWalStatistics();
         return new StoreStatistics
         {
+            Profile = store.Schema.Profile,
             QuadCount = quadCount,
             AtomCount = atomCount,
             TotalBytes = totalBytes,

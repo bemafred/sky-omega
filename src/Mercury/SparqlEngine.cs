@@ -270,6 +270,7 @@ public static class SparqlEngine
         var (walTxId, walCheckpoint, walSize) = store.GetWalStatistics();
         return new StoreStatistics
         {
+            Profile = store.Schema.Profile,
             QuadCount = quadCount,
             AtomCount = atomCount,
             TotalBytes = totalBytes,

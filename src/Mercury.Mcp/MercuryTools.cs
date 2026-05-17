@@ -115,13 +115,14 @@ public sealed class MercuryTools
         }
     }
 
-    [McpServerTool(Name = "mercury_stats"), Description("Get Mercury store statistics (quad count, atoms, storage size, WAL status)")]
+    [McpServerTool(Name = "mercury_stats"), Description("Get Mercury store statistics (storage profile, quad count, atoms, storage size, WAL status)")]
     public string Stats()
     {
         var stats = SparqlEngine.GetStatistics(_pool.Active);
 
         var sb = new StringBuilder();
         sb.AppendLine("Mercury Store Statistics:");
+        sb.AppendLine($"  Profile: {stats.Profile}");
         sb.AppendLine($"  Quads: {stats.QuadCount:N0}");
         sb.AppendLine($"  Atoms: {stats.AtomCount:N0}");
         sb.AppendLine($"  Storage: {ByteFormatter.FormatCompact(stats.TotalBytes)}");

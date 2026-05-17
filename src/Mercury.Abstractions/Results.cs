@@ -86,6 +86,7 @@ public sealed class PruneResult
 /// </summary>
 public sealed class StoreStatistics
 {
+    public StoreProfile Profile { get; init; }
     public long QuadCount { get; init; }
     public long AtomCount { get; init; }
     public long TotalBytes { get; init; }
