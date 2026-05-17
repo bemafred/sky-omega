@@ -1,8 +1,10 @@
 # Limit: URI atom corruption from pre-1.7.72 INSERT with `\"` literal
 
-Status:        **Triggered** (URI-specific; workaround: use a fresh URI)
+Status:        **Triggered for legacy stores; trigger closed for fresh stores by [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) (Mercury 1.7.73, 2026-05-17)**
 Surfaced:      2026-05-17, while inserting the validation-discipline rule into Mercury (third teaching mechanism for the conformance-vs-dogfood observation)
-Last reviewed: 2026-05-17
+Last reviewed: 2026-05-17 (post-ADR-044)
+
+> **Update 2026-05-17 (Mercury 1.7.73 / ADR-044):** the trigger condition — INSERT DATA storing a `\"`-containing literal in verbatim form — no longer occurs on fresh stores. ADR-044 routes every SPARQL source-literal materialization through `LiteralForm.Canonicalize`, producing canonical wrapped-decoded atoms identical to what Turtle/N-Triples/N-Quads/TriG produce. URIs touched by escape-literal INSERTs on Mercury 1.7.73+ won't enter the corrupted state. Legacy stores written under 1.7.69 → 1.7.72 may still hold URIs in the corrupted state; the workaround (use a fresh URI, or migrate via `mercury export | bulk-load` per the [ADR-044 migration runbook](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md)) remains in effect for those.
 
 ## Description
 

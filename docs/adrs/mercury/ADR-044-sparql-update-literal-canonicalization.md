@@ -2,7 +2,7 @@
 
 ## Status
 
-**Status:** Accepted — 2026-05-17 (Proposed 2026-05-17 [rev 1]; briefly Accepted 2026-05-17; reverted to Proposed [rev 2] same day after surface scope was found inadequate; revised to Proposed [rev 3] same day after a verification pass corrected the surface enumeration and identified a code-duplication finding; cleanup pass fixed internal contradictions; re-Accepted 2026-05-17 after rev 3 review confirmed the decision direction, surface accuracy, and aliasing-safe helper signature — see "Scope revision" for the iteration trail).
+**Status:** Completed — 2026-05-17 (Proposed 2026-05-17 [rev 1] → briefly Accepted → reverted to Proposed [rev 2] → Proposed [rev 3] → Accepted → Completed all same-day; implementation shipped Mercury 1.7.73 in Parts 1+2+3+4+5A; full Mercury test suite 4,515 / 0 failed / 6 skipped; dogfood validation passed end-to-end via mercury CLI; see "Scope revision" for the iteration trail and Validation plan for the test matrix).
 
 ## Scope revision
 

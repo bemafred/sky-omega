@@ -1,9 +1,9 @@
 # Limit: SPARQL UPDATE stores literals verbatim; streaming parsers canonicalize
 
-Status:        **Promoted** — see [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) (Accepted, 2026-05-17)
+Status:        **Resolved** by [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) (Completed in Mercury 1.7.73, 2026-05-17)
 Surfaced:      2026-05-17, while investigating whether parser storage should canonicalize escaped literals at insert time (follow-up to 1.7.72 `GetLexicalForm` fix in commit `0a2f8f9`)
 Last reviewed: 2026-05-17
-Promoted to:   [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) on 2026-05-17. Iterated through rev 1 (briefly Accepted) → rev 2 (wider consumer surface) → rev 3 (verified surface enumeration + duplication finding) → cleanup pass → Accepted on the same day. The substrate-level decision was confirmed at rev 1 (Option 2 wrapped-decoded canonicalization); the rework was about Decision mechanism (helper + per-site materialization) and implementation decomposition (Phase 0 consolidation pre-work).
+Resolved by:   [ADR-044](../adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) shipped 2026-05-17 in Mercury 1.7.73. Iteration trail: rev 1 (briefly Accepted) → rev 2 (wider consumer surface) → rev 3 (verified surface enumeration + duplication finding) → cleanup pass → Accepted → Parts 1+2+3+4+5A implemented → Completed, all same day. Substrate-level decision (Option 2 wrapped-decoded canonicalization) was confirmed at rev 1; reworks were about Decision mechanism (helper + per-site materialization) and implementation decomposition (Phase 0 consolidation pre-work). Validation: 4,515 / 0 failed / 6 skipped + end-to-end dogfood via mercury CLI.
 
 ## Description
 
