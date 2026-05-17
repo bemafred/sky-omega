@@ -29,7 +29,7 @@ A single Mercury store is owned by a single agent at a time. There is no shared 
 
 ### Workload Profiles (the two faces of Mercury)
 
-Mercury has two storage profiles per ADR-029 and two workloads per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). The semantic-memory use case is **Cognitive**.
+Mercury has four storage profiles per ADR-029 (Cognitive, Graph, Reference, Minimal) and two workloads per [ADR-008](docs/adrs/ADR-008-workload-profiles-and-validation-attribution.md). The semantic-memory use case is **Cognitive**; **Reference** (sealed canonical snapshots) is the other commonly-encountered profile and is contrasted below. Graph and Minimal are specialized and don't bear on the semantic-memory discipline this document covers.
 
 | | Cognitive (semantic memory) | Reference (sealed knowledge graph) |
 |---|---|---|
