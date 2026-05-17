@@ -84,7 +84,9 @@ All tools support `-v`/`--version`.
 
 ### MCP Integration
 
-**Dev-time** (this repo): `.mcp.json` at repo root auto-configures Claude Code.
+**Mercury** runs from the **global Release tool** (`mercury-mcp`) by default — substrate hardening closed at 1.7.69, so version skew is no longer the dev-iteration concern it was during the cycle 8 → cycle 10 arc. **DrHook** still runs from the **local source build** (`dotnet run --project src/DrHook.Mcp`) because the DrHook engine BCL-only rewrite is the active substrate-development target (deferred from 1.7.x to 1.8.x per the amended roadmap). To iterate on Mercury MCP code itself, manually edit `.mcp.json` to point at `dotnet run --project src/Mercury.Mcp`.
+
+**Dev-time** (this repo): `.mcp.json` at repo root auto-configures Claude Code. After `tools/install-tools.sh` updates the Mercury global tool, restart Claude Code to spawn a fresh MCP process against the new version.
 
 **Production** (any repo):
 ```bash

@@ -2,8 +2,7 @@
   "mcpServers": {
     "mercury": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--project", "src/Mercury.Mcp"]
+      "command": "mercury-mcp"
     },
     "drhook": {
       "type": "stdio",
