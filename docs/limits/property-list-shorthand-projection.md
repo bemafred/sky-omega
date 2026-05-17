@@ -1,9 +1,63 @@
-# Limit: Property-list shorthand drops non-first-predicate object projections
+# Limit: GRAPH-clause parser drops property-list shorthand continuations
 
-Status:        **Triggered** (reproducible on 1.7.70 via `mercury_query` MCP)
+Status:        **Triggered → Ready-to-fix** (root cause located 2026-05-17; one-place mechanical fix)
 Surfaced:      2026-05-17, during dogfood verification of the new `<urn:sky-omega:discipline:recall>` triple inserted to teach `text:match` over `CONTAINS`
 Last reviewed: 2026-05-17
-Promotes to:   ADR when the surface (SPARQL executor binding propagation vs MCP result serialization) is localized. Triggered status warrants an investigation, not a deferral.
+Promotes to:   No ADR needed — bug fix in `SparqlParser.Clauses.cs ParseGraph` to mirror the existing `;` handler in `SparqlParser.cs TryParseTriplePattern`.
+
+## Root cause (located 2026-05-17)
+
+**`ParseGraph` in `src/Mercury/Sparql/Parsing/SparqlParser.Clauses.cs` (lines 3805-3987) lacks `;` continuation handling.** The parsing loop inside `GRAPH { ... }` blocks only handles `.`-terminated triple patterns:
+
+```csharp
+// Lines 3948-3979 (current, missing the ';' handler)
+var subject = ParseTerm();
+...
+var (predicate, path) = ParsePredicateOrPath();
+...
+var obj = ParseTerm();
+graphClause.AddPattern(new TriplePattern { Subject = subject, ... });
+
+SkipWhitespace();
+if (Peek() == '.')
+    Advance();
+// loop continues
+```
+
+When the parser encounters `;` after a triple, the next loop iteration calls `ParseTerm()` on `;`, which returns a default Term (Variable with Length == 0), which triggers the `break` clause on line 3949:
+
+```csharp
+if (subject.Type == TermType.Variable && subject.Length == 0)
+    break;
+```
+
+So the second pattern is silently dropped. The same applies to the nested-group inline loop at lines 3901-3936.
+
+The main BGP parser (`TryParseTriplePattern` in `SparqlParser.cs` lines 629-657) has the correct `while (Peek() == ';')` handler. The fix is to copy that block into `ParseGraph` after each `graphClause.AddPattern` call.
+
+## Symptom (recap)
+
+SELECT against property-list shorthand inside a GRAPH clause:
+
+```sparql
+SELECT ?s ?o1 ?o2 WHERE {
+  GRAPH <urn:test:g> {
+    ?s <urn:p1> ?o1 ;
+       <urn:p2> ?o2 .
+  }
+}
+```
+
+Returns a row with `?s` and `?o1` populated; `?o2` is empty. The non-GRAPH'd version of the same query returns both bindings correctly — verified by `mercury -m` against the default graph.
+
+Diagnostic tests in `tests/Mercury.Tests/Sparql/SparqlParserTests.cs`:
+
+- `Select_PropertyListShorthand_ProducesTwoTriplePatternsWithDistinctObjects` — passes. Confirms the main BGP parser handles `;` correctly.
+- `Select_PropertyListShorthandInGraphClause_ProducesTwoTriplePatterns` — **fails with `Expected: 2, Actual: 1`**. Confirms the GRAPH-clause parser drops the second pattern.
+
+## Trigger condition
+
+Any SELECT query against any Mercury 1.7.70 substrate that uses property-list shorthand inside a `GRAPH { ... }` block.
 
 ## Description
 

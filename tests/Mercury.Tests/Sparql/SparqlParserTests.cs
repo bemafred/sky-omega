@@ -654,6 +654,32 @@ public class SparqlParserTests
         Assert.True(p1.Object.Length > 0, "Second pattern's object should have non-zero length");
     }
 
+    // Diagnostic 2026-05-17: property-list shorthand INSIDE a GRAPH clause.
+    // Bug: ParseGraph in SparqlParser.Clauses.cs only handles .-terminated patterns
+    // and lacks a ; continuation block — second pattern is silently dropped.
+    [Fact]
+    public void Select_PropertyListShorthandInGraphClause_ProducesTwoTriplePatterns()
+    {
+        var query = @"SELECT ?s ?o1 ?o2 WHERE {
+                        GRAPH <urn:test:g> {
+                          ?s <urn:p1> ?o1 ;
+                             <urn:p2> ?o2 .
+                        }
+                      }";
+        var parser = new SparqlParser(query.AsSpan());
+        var result = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Select, result.Type);
+        var bgp = result.WhereClause.Pattern;
+
+        Assert.Equal(1, bgp.GraphClauseCount);
+        var graphClause = bgp.GetGraphClause(0);
+
+        // Expect TWO patterns inside the GRAPH (?s p1 ?o1 AND ?s p2 ?o2)
+        // Without the fix, the parser drops the second pattern and reports 1.
+        Assert.Equal(2, graphClause.PatternCount);
+    }
+
     [Fact]
     public void InsertData_PrefixedDatatypeFollowedBySemicolon_DefaultGraph()
     {
