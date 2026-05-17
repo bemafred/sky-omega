@@ -141,7 +141,7 @@ See **[STATISTICS.md](STATISTICS.md)** for line counts, benchmark summaries, and
 
 ## Project Overview
 
-Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only). Mercury exposes **21 public types** (3 facades, 2 protocol, 11 storage, 3 diagnostics, 2 delegates); all ~140 other types are internal.
+Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only). Mercury exposes **26 public types** (3 facades, 2 protocol, 10 storage, 7 diagnostics, 2 compression, 2 delegates); all ~140 other types are internal.
 
 ### Solution Structure
 
@@ -159,12 +159,19 @@ SkyOmega.sln
 │   │   ├── mercury/         # Mercury-specific ADRs
 │   │   ├── minerva/         # Minerva-specific ADRs
 │   │   └── drhook/          # DrHook-specific ADRs
+│   ├── api/                 # API documentation
+│   ├── architecture/        # Conceptual documentation
+│   ├── articles/            # Publication arc (LinkedIn, talk-pages, narratives)
+│   ├── knowledge/           # Shared semantic knowledge (Turtle files, see MERCURY.md)
+│   ├── limits/              # Limits register — characterized-but-deferred items
+│   ├── memos/               # Long-form analysis (comparison-plane memo, etc.)
+│   ├── releases/            # Release notes
+│   ├── roadmap/             # Version-line model + production hardening roadmap
 │   ├── specs/               # External format specifications
 │   │   ├── rdf/             # RDF specs (future: SPARQL, Turtle, etc.)
 │   │   └── llm/             # LLM specs (GGUF, SafeTensors, Tokenizers)
-│   ├── architecture/        # Conceptual documentation
-│   ├── knowledge/           # Shared semantic knowledge (Turtle files, see MERCURY.md)
-│   └── api/                 # API documentation
+│   ├── tutorials/           # Getting started + per-tool tutorials
+│   └── validations/         # Measurement records (substrate-grade evidence)
 ├── src/
 │   ├── Mercury/             # Knowledge substrate - RDF storage and SPARQL (BCL only)
 │   │   ├── NTriples/        # Streaming N-Triples parser
@@ -181,7 +188,7 @@ SkyOmega.sln
 │   │   ├── Storage/         # B+Tree indexes, atom storage, WAL
 │   │   └── Turtle/          # Streaming RDF Turtle parser
 │   ├── Mercury.Abstractions/ # Shared interfaces and types (RdfFormat, Results)
-│   ├── Mercury.Runtime/     # Runtime utilities (CrossProcessStoreGate, TempPath, buffers)
+│   ├── Mercury.Runtime/     # Runtime utilities (BTreeFile, CrossProcessStoreGate, DiskSpaceGuard, PageCache, ProcessMemoryProbe, TempPath)
 │   ├── Mercury.Cli/         # Mercury CLI tool (persistent store)
 │   ├── Mercury.Cli.Sparql/  # SPARQL engine CLI (thin shim over Mercury.Sparql.Tool)
 │   ├── Mercury.Cli.Turtle/  # Turtle parser CLI (thin shim over Mercury.Turtle.Tool)
