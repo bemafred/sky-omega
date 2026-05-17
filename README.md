@@ -11,7 +11,7 @@
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
 
-Truthy is the apples-to-apples companion vs published WDBench / QLever / Virtuoso numbers. WGPB enables comparison vs MillenniumDB's published systematic-graph-pattern benchmarks. **Cumulative discipline: 0 substrate failures across ~9,763 measured queries.** Note Mercury Reference includes a built-in full-text trigram index — like-for-like vs systems without text indexes: **15 h 26 m / 6 h 49 m / n/a** (trigram is a +8 h 30 m / +7 h 24 m / ~negligible feature cost that buys SPARQL `text:match` out of the box).
+Truthy is the apples-to-apples companion vs published WDBench / QLever / Virtuoso numbers. WGPB enables comparison vs MillenniumDB's published systematic-graph-pattern benchmarks. **Cumulative discipline: 0 substrate failures across 8,564 unique query × substrate executions** (cycle 8 + cycle 9 + cycle 10 r4 + truthy r1 + WGPB step C). Note Mercury Reference includes a built-in full-text trigram index — like-for-like vs systems without text indexes: **15 h 26 m / 6 h 49 m / n/a** (trigram is a +8 h 30 m / +7 h 24 m / ~negligible feature cost that buys SPARQL `text:match` out of the box).
 
 Your AI assistants are brilliant and homeless. Every conversation starts from nothing. Every insight evaporates when the window closes. They can reason, but they can't remember. They can help, but they can't grow.
 

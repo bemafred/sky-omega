@@ -4,7 +4,7 @@ date: 2026-05-16
 status: draft
 ---
 
-*We built three Mercury substrates over Wikidata-derived data — full (21.3 B triples, 23 h 57 m), truthy (8.17 B, 14 h 13 m), and WGPB-filtered (~150 M, 4 m 30 s) — on the same M5 Max laptop, the same BCL-only .NET substrate version, and ran 9,763 SPARQL queries across them with 0 substrate failures. This is the paired-record write-up of what that took, what it shows, and the comparison plane that lets external readers map our numbers onto theirs without us bending the framing.*
+*We built three Mercury substrates over Wikidata-derived data — full (21.3 B triples, 23 h 57 m), truthy (8.17 B, 14 h 13 m), and WGPB-filtered (~150 M, 4 m 30 s) — on the same M5 Max laptop, the same BCL-only .NET substrate version, and ran 8,564 unique query × substrate executions across them with 0 substrate failures. This is the paired-record write-up of what that took, what it shows, and the comparison plane that lets external readers map our numbers onto theirs without us bending the framing.*
 
 ---
 
@@ -21,7 +21,7 @@ Across the three substrates we ran:
 - **The full WDBench query set** — all 5 categories (single_bgps, multiple_bgps, paths, c2rpqs, opts), 2,658 queries — against both the full and truthy substrates. That's 5,316 query executions on this substrate generation alone. 0 substrate failures.
 - **The full WGPB query set** — 17 abstract graph patterns × 50 instances each, 850 queries — against the WGPB substrate. **849 completed in 4 m 43 s cumulative wall-clock; 0 timeouts; 0 substrate failures. 1 query rejected as malformed SPARQL** — a defect in the published WGPB source data that our parser correctly caught.
 
-Including the prior cycle 8 + cycle 9 WDBench measurements on earlier 1.7.x substrates: **0 substrate failures across roughly 9,763 measured SPARQL queries on the 1.7.x line.**
+Including the prior cycle 8 + cycle 9 WDBench measurements on earlier 1.7.x substrates: **0 substrate failures across 8,564 unique query × substrate executions on the 1.7.x line** — cycle 8 (1,199 paths+c2rpqs) + cycle 9 (1,199) + cycle 10 r4 full matrix (2,658) + truthy r1 full matrix (2,658) + WGPB step C (850).
 
 All metric records — every load progress tick, every spill event, every merge progress, every MPHF level, every query elapsed time + result row count — are committed to the public repository as JSONL artifacts. Anyone can re-derive any number we publish.
 
@@ -74,7 +74,7 @@ In the WGPB run, query J4/00038 failed with `"Incomplete triple pattern - expect
 
 The single number we're most proud of from the cumulative measurement:
 
-> **0 substrate failures across ~9,763 measured SPARQL queries on the Mercury 1.7.x substrate line** — cycle 8 (2026-04-29), cycle 9 (2026-05-08), cycle 10 r4 (2026-05-13), truthy r1 (2026-05-14), and WGPB step C (2026-05-16) combined. 0 timeout-cap violations. 0 parser-state corruption. 0 substrate crashes mid-query. 1 query rejected as malformed source data (correct behavior).
+> **0 substrate failures across 8,564 unique query × substrate executions on the Mercury 1.7.x substrate line** — cycle 8 (2026-04-29), cycle 9 (2026-05-08), cycle 10 r4 (2026-05-13), truthy r1 (2026-05-14), and WGPB step C (2026-05-16) combined. 0 timeout-cap violations. 0 parser-state corruption. 0 substrate crashes mid-query. 1 query rejected as malformed source data (correct behavior).
 
 This holds across:
 - Three Wikidata datasets at three different scales (21.3 B / 8.17 B / 150 M)

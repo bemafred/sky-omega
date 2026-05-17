@@ -224,7 +224,7 @@ Cumulative across all 1.7.57 measurements on the three substrates:
 | WGPB × wgpb-r1 | 0 (1 query rejected as malformed source data) |
 | Cumulative across all 6,166 unique-substrate queries | **0** |
 
-Including the prior cycle 8 + cycle 9 WDBench runs (paths + c2rpqs only): **0 substrate failures across ~9,763 measured queries on the 1.7.57 substrate line.**
+Including the prior cycle 8 + cycle 9 WDBench runs (paths + c2rpqs only, 1,199 each = 2,398 prior): **0 substrate failures across 8,564 unique query × substrate executions on the cumulative 1.7.x substrate line** (5,316 paired matrix + 2,398 cycle 8+9 prior + 850 WGPB step C).
 
 ## References
 
