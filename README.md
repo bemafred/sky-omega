@@ -186,7 +186,7 @@ Mercury is a full SPARQL 1.1 + RDF stack. Every standard listed below is impleme
 | 100% W3C JSON-LD 1.1             | 461 passing tests (6 intentional skips: legacy 1.0, generalized RDF) | `dotnet test --filter "W3C.JsonLd"` |
 | SPARQL HTTP endpoint             | `mercury` CLI         | `mercury -m` then visit `http://localhost:3031/sparql` |
 | Zero external runtime deps       | Mercury.csproj        | `grep PackageReference src/Mercury/*.csproj` |
-| 4,454 Mercury tests passing      | Test suite            | `dotnet test`                                |
+| 4,463 Mercury tests passing      | Test suite            | `dotnet test`                                |
 | AI-assisted development          | Git history           | `git log --oneline \| grep "Co-Authored-By"` |
 | Development velocity             | ~197K lines           | See [STATISTICS.md](STATISTICS.md)           |
 
@@ -204,7 +204,7 @@ Everything below has code in `src/`, tests, and benchmarks.
 
 | Component              | Description                                                                                |
 |------------------------|--------------------------------------------------------------------------------------------|
-| **Mercury**            | Temporal RDF substrate — 88,534 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Two storage profiles: Cognitive (bitemporal, versioned) and Reference (immutable, Wikidata-shaped). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
+| **Mercury**            | Temporal RDF substrate — 88,534 lines, BCL-only. SPARQL 1.1 Query + Update + Syntax (100% W3C). RDF parsing/writing for Turtle, TriG, N-Triples, N-Quads, RDF/XML, JSON-LD. Built-in SPARQL HTTP endpoint (`http://localhost:3031/sparql`) with standard content negotiation. Four storage profiles per the no-behavior-flags rule (ADR-029, closed 1.7.69): Cognitive (bitemporal, versioned), Graph (versioned with soft-delete + un-delete-on-add), Reference (immutable, Wikidata-shaped), Minimal (single P→S→T sort order). Bitemporal extensions for time-travel queries. Zero-GC hot paths. |
 | **Mercury.Solid**      | W3C Solid Protocol server — WAC + ACP access control, N3 Patch updates, full HTTP surface |
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |

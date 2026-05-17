@@ -254,4 +254,101 @@ public class SparqlEngineTests : PooledStoreTestBase
         Assert.True(result.Rows[0].ContainsKey("n"),
             "Count result should be keyed by the aggregate alias 'n'");
     }
+
+    #region Regression: escaped quote in stored literal (1.7.72)
+
+    // Regression for commit 0a2f8f9 (fix(filter): GetLexicalForm / GetLangTagOrDatatype
+    // skip escaped quotes). Pre-fix, Value.GetLexicalForm() used IndexOf('"') which
+    // stopped at the first escaped \" inside the literal, truncating the lexical form.
+    // Any substring after the first \" was unreachable via CONTAINS / STRSTARTS /
+    // STRENDS / REGEX / UCASE / LCASE.
+    //
+    // Surfaced during dogfood — the recall-discipline rule's rdfs:comment contained
+    // \"term\" and was unfindable via FILTER(CONTAINS(?c, "trigram")). W3C SPARQL 1.1
+    // Query conformance (421/421) does not exercise CONTAINS against literals with
+    // escape sequences; this regression set closes that coverage gap.
+
+    [Fact]
+    public void Update_InsertLiteralWithEscapedQuote_FilterContainsAfterEscape_Finds()
+    {
+        var update = "INSERT DATA { <http://ex/s> <http://ex/p> " +
+                     "\"prefix \\\"escaped\\\" after-needle\" }";
+        var insert = SparqlEngine.Update(Store, update);
+        Assert.True(insert.Success, insert.ErrorMessage);
+
+        var query = SparqlEngine.Query(Store,
+            "SELECT ?c WHERE { <http://ex/s> <http://ex/p> ?c " +
+            "FILTER(CONTAINS(STR(?c), \"after-needle\")) }");
+
+        Assert.True(query.Success, query.ErrorMessage);
+        Assert.NotNull(query.Rows);
+        Assert.Single(query.Rows);
+    }
+
+    [Fact]
+    public void Update_InsertLiteralWithEscapedQuote_FilterContainsWithoutStr_Finds()
+    {
+        var update = "INSERT DATA { <http://ex/s2> <http://ex/p> " +
+                     "\"head \\\"mid\\\" tail-needle\" }";
+        var insert = SparqlEngine.Update(Store, update);
+        Assert.True(insert.Success, insert.ErrorMessage);
+
+        var query = SparqlEngine.Query(Store,
+            "SELECT ?c WHERE { <http://ex/s2> <http://ex/p> ?c " +
+            "FILTER(CONTAINS(?c, \"tail-needle\")) }");
+
+        Assert.True(query.Success, query.ErrorMessage);
+        Assert.NotNull(query.Rows);
+        Assert.Single(query.Rows);
+    }
+
+    [Fact]
+    public void Update_InsertLiteralWithEscapedQuote_InGraph_FilterContainsInGraph_Finds()
+    {
+        var update = "INSERT DATA { GRAPH <http://ex/g> { " +
+                     "<http://ex/s> <http://ex/p> \"prefix \\\"escaped\\\" after-needle\" } }";
+        var insert = SparqlEngine.Update(Store, update);
+        Assert.True(insert.Success, insert.ErrorMessage);
+
+        var query = SparqlEngine.Query(Store,
+            "SELECT ?c WHERE { GRAPH <http://ex/g> { <http://ex/s> <http://ex/p> ?c " +
+            "FILTER(CONTAINS(STR(?c), \"after-needle\")) } }");
+
+        Assert.True(query.Success, query.ErrorMessage);
+        Assert.NotNull(query.Rows);
+        Assert.Single(query.Rows);
+    }
+
+    [Fact]
+    public void Update_InsertLiteralWithEscapedQuote_FilterStrStartsStrEndsRegex_Works()
+    {
+        var update = "INSERT DATA { <http://ex/s3> <http://ex/p> " +
+                     "\"head \\\"middle\\\" tail\" }";
+        var insert = SparqlEngine.Update(Store, update);
+        Assert.True(insert.Success, insert.ErrorMessage);
+
+        // STRENDS targets text after the escape — the failure path pre-fix.
+        var endsQuery = SparqlEngine.Query(Store,
+            "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
+            "FILTER(STRENDS(STR(?c), \"tail\")) }");
+        Assert.True(endsQuery.Success, endsQuery.ErrorMessage);
+        Assert.Single(endsQuery.Rows!);
+
+        // STRSTARTS targets text before any escape — already worked pre-fix but
+        // we pin it here so a future GetLexicalForm regression in either direction trips.
+        var startsQuery = SparqlEngine.Query(Store,
+            "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
+            "FILTER(STRSTARTS(STR(?c), \"head\")) }");
+        Assert.True(startsQuery.Success, startsQuery.ErrorMessage);
+        Assert.Single(startsQuery.Rows!);
+
+        // REGEX hits the same GetLexicalForm path.
+        var regexQuery = SparqlEngine.Query(Store,
+            "SELECT ?c WHERE { <http://ex/s3> <http://ex/p> ?c " +
+            "FILTER(REGEX(STR(?c), \"tail$\")) }");
+        Assert.True(regexQuery.Success, regexQuery.ErrorMessage);
+        Assert.Single(regexQuery.Rows!);
+    }
+
+    #endregion
 }
