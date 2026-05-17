@@ -66,4 +66,4 @@ If you build AI systems that need to remember, or you care about semantic sovere
 
 ---
 
-*Numbers anchored in cycle 10 r4 validation, truthy r1 validation, WGPB step C validation, and the aggregate distribution doc — all under `docs/validations/`. Current substrate: Mercury 1.7.57, BCL-only .NET 10.*
+*Numbers anchored in cycle 10 r4 validation, truthy r1 validation, WGPB step C validation, and the aggregate distribution doc — all under `docs/validations/`. Measurements taken on Mercury 1.7.55–1.7.57; current substrate version is further along.*
