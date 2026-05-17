@@ -2,7 +2,27 @@
 
 ## Status
 
-**Status:** Proposed — 2026-05-17
+**Status:** Proposed (rev 2) — 2026-05-17 (Proposed 2026-05-17; Accepted 2026-05-17; reverted to Proposed 2026-05-17 after implementation-stage read surfaced wider scope — see "Scope revision" below).
+
+## Scope revision (2026-05-17)
+
+The rev 1 framing treated this as a UPDATE-path issue ("SPARQL UPDATE stores literals verbatim; streaming parsers canonicalize") and proposed canonicalizing in `SparqlParser.ParseLiteral`. Implementation-stage read of the parser found two problems with that framing:
+
+1. **The ref-struct constraint.** `SparqlParser` is declared `internal ref partial struct` and holds `_source` as `ReadOnlySpan<char>`. It cannot hold managed scratch (`StringBuilder`, `string`, `char[]` fields) without changing its storage class. The clean "decode into parser scratch" pattern the streaming parsers use isn't directly portable.
+
+2. **The literal-consumer surface is wider than the UPDATE path.** SPARQL source literals flow to the atom store (and to atom-store-match comparisons) via *every* consumer that materializes a `Term`. Canonicalizing only the UpdateExecutor write path opens a NEW asymmetry: stored atoms become canonical (`"a"b"`, 5 bytes) but FILTER literal arguments stay verbatim (`"a\"b"`, 6 bytes) — `FILTER(?o = "a\"b")` against a canonical-stored atom returns zero rows. The bug moves; it doesn't close.
+
+The full surface (enumerated in revised Context below):
+
+- `UpdateExecutor.GetTermValue` — write path. (rev 1 target.)
+- `DELETE WHERE` / `INSERT WHERE` pattern literal positions — atom-store-match path.
+- `FILTER(?o = "...")`, `FILTER(CONTAINS(?o, "..."))`, `FILTER(STRSTARTS/STRENDS/REGEX(?o, "..."))` — filter-literal arguments compared against bound values.
+- `BIND("..." AS ?x)` — expression-literal arguments.
+- `SELECT/ASK/CONSTRUCT/DESCRIBE` pattern object positions — atom-store-match path.
+
+Revision direction: this ADR rev 2 reframes the Decision around the centralized hub (parser-extended-buffer OR shared materialization helper) so every literal consumer sees the canonical form, not just the UPDATE path. Engineering effort estimate revised from 4-6h to ~10-12h. Validation plan extended to include cross-form FILTER paired-ingestion tests.
+
+A staged delivery (write-path now, parser-side later as ADR-045) was explicitly considered and rejected — see Alternatives. The architectural reasoning: a half-canonicalized substrate creates new bug shapes during the gap window; better to ship the coherent unit even at higher cost.
 
 ## Context
 
@@ -53,6 +73,28 @@ Before deciding what the canonical form should be, three substrate representatio
 
 **This ADR adopts Option 2.** The SPARQL parser converges on the streaming parsers' wrapped-decoded form. Option 3 stays open as a future ADR if the substrate-wide refactor becomes justified by other pressures (e.g., a JSON-LD path that needs richer datatype handling, or a typed-literal performance push).
 
+### Full literal-consumer surface
+
+Every place a SPARQL source literal materializes into a `ReadOnlySpan<char>` that flows to atom storage OR to atom-store-matching comparison. The rev 1 framing covered only the first row.
+
+| Consumer | Path | What happens to a literal with `\"` |
+|---|---|---|
+| `UpdateExecutor.GetTermValue` (line 1214) | `INSERT DATA / DELETE DATA` | Verbatim span → `Store.AddCurrentBatched` → interned as verbatim atom. |
+| `UpdateExecutor` DELETE WHERE single-pattern fast path (line 206-211) | `DELETE WHERE { <s> <p> "lit" }` (no variables) | Verbatim span → `Store.DeleteCurrent` — must match the stored atom byte-for-byte to delete. |
+| `MultiPatternScan` literal positions (`src/Mercury/Sparql/Execution/Operators/MultiPatternScan.cs:957`, `1195`, `1210`, `1226`) | Pattern object in `SELECT/ASK/CONSTRUCT/DESCRIBE` | Verbatim span → numeric / boolean / string literal extraction → compared against bound values from store. |
+| `TriplePatternScan` literal positions (`src/Mercury/Sparql/Execution/Operators/TriplePatternScan.cs:1527`, `1600`) | Single triple-pattern scan | Verbatim span → atom-store key lookup. |
+| `CrossGraphMultiPatternScan` (`src/Mercury/Sparql/Execution/Operators/CrossGraphMultiPatternScan.cs:365`) | Pattern under `GRAPH` clause | Verbatim span → cross-graph atom lookup. |
+| `FilterEvaluator` literal arguments | `FILTER(?o = "lit")`, `FILTER(CONTAINS(?o, "lit"))`, `FILTER(STRSTARTS/STRENDS/REGEX(?o, "lit"))` | Verbatim source → `Value.StringValue` → `GetLexicalForm` returns slice including `\"` for verbatim, raw `"` for canonical. **Cross-form mismatch.** |
+| `FilterEvaluator.STRDT` / `STRLANG` / `STRUUID` etc. | Computed literal results | Output form follows internal representation chosen by this ADR. |
+| `BindExecutor` literal arguments | `BIND("lit" AS ?x)` | Verbatim source → bound value → flows to downstream consumers. |
+
+The atom-store-match consumers (rows 2-5) are the critical insight. They take a SPARQL source literal and compare it to a stored atom for equality. If stored atoms are canonical but pattern literals are verbatim, the comparison fails for any literal containing `\`. The rev 1 framing missed this entirely — it focused on the storage side (write path) without tracing where stored atoms get compared *back* against source literals.
+
+The filter consumers (rows 6-8) compound the asymmetry. `FILTER(?o = "a\"b")` against a canonical atom `"a"b"`:
+- Bound `?o` → `Value.GetLexicalForm()` → `a"b` (3 chars).
+- Filter literal `"a\"b"` → `Value.GetLexicalForm()` → `a\"b` (4 chars).
+- Equality returns false. The substrate has the right triple stored; the user's query can't find it.
+
 ### Evidence of real-workload cost
 
 - Commit `0a2f8f9` (1.7.72, 2026-05-17) was triggered by the recall-discipline rule's `rdfs:comment` containing `\"term\"` and being unfindable via `FILTER(CONTAINS(?c, "trigram"))`. The lesson about how to recall efficiently was itself unfindable via recall.
@@ -72,6 +114,10 @@ Before deciding what the canonical form should be, three substrate representatio
 **H3 — Legacy stores can be migrated via existing export → reload tooling.** A Cognitive-profile store created before this ADR ships can be made canonical-compatible by `mercury` export to N-Triples (uses canonical lexical forms) + bulk-load from that N-Triples file into a fresh store. No bespoke migration tool required.
 
 **Falsified if:** the N-Triples writer emits any literal in a form that differs from what `NTriplesStreamParser` would store on re-read, OR if existing Cognitive stores contain bitemporal data that the export → reload round-trip drops.
+
+**H4 — Centralized canonicalization closes cross-form FILTER mismatch.** *Added in rev 2.* Routing every SPARQL source-literal materialization through `LiteralForm.Canonicalize` means FILTER literal arguments and pattern literal positions match canonical stored atoms exactly, regardless of whether the original SPARQL source used `\"`, `"`, or `"""..."""` syntax.
+
+**Falsified if:** a paired test of the form *(insert via Turtle) → FILTER(?o = "a\"b")* returns zero rows when canonicalization is enabled, OR if any literal-consuming operator was missed and its bound spans remain non-canonical, OR if `Value.GetLexicalForm`'s slice-from-quotes logic produces different output on the canonicalized SPARQL filter literal than on the canonical stored atom for the same logical value.
 
 ## Decision
 
@@ -120,39 +166,76 @@ The last row is a quiet positive: two source forms collapse to one stored atom. 
 
 **What Option 2 gives up:** lossless source-encoding preservation. The substrate cannot tell whether the operator typed `\"` or `"` or used `"""..."""` long-literal syntax. Per RDF abstract syntax these are the same triple; per "what did the user actually type" they aren't. For a semantic-memory substrate this is the right trade — if lossless source preservation matters for a future use case (forensic, audit, replay), it lives in a separate provenance layer, not the atom store.
 
-### Part 1 — Canonicalize in `SparqlParser.ParseLiteral`
+### Part 1 — Introduce a `LiteralCanonicalizer` helper, call it at every materialization site
 
-Replace the verbatim span return with an unescape-into-buffer path that mirrors `TurtleStreamParser.ParseShortStringLiteral`:
+The ref-struct parser cannot directly hold managed scratch (rev 2 Scope revision, point 1). Two architectures were considered for getting around this:
+
+**A. Parser-extended-buffer.** Caller pre-allocates a span larger than the SPARQL source; parser copies source to leading portion, writes decoded literals to trailing portion, emits Terms with sentinel-encoded offsets distinguishing source from scratch. Pros: zero call-site changes downstream. Cons: changes parser API (new `Span<char>` argument), requires size estimation by callers, Term layout encoding rule for consumers to know.
+
+**B. Materialization-site helper.** Introduce a static `LiteralCanonicalizer` (or `LiteralForm.Canonicalize`) that takes a verbatim source-literal span and returns the canonical form. Fast path: no `\` in literal → return verbatim span unchanged (zero allocation). Slow path: decode into caller-owned `char[]` scratch or a new `string`. Each materialization site changes from `_source.Slice(term.Start, term.Length)` to `LiteralForm.Canonicalize(_source.Slice(term.Start, term.Length), ref _scratch)`. Pros: parser stays untouched (preserves ref-struct discipline); changes are mechanical and localized; one canonical implementation. Cons: ~10+ call sites change (enumerated in Context).
+
+**Chosen: B.** The mechanical multi-site change is preferable to the API shape change. Each call site is a one-line edit; the canonicalizer itself is a single function with a fast-path / slow-path split.
+
+The canonicalizer signature:
 
 ```csharp
-// Today (SparqlParser.cs:2259-2326):
-return Term.Literal(start, _position - start);   // verbatim source span
+internal static class LiteralForm
+{
+    /// Returns canonical wrapped-decoded form of a SPARQL source literal.
+    /// Fast path (no '\\' in literal): returns the verbatim span unchanged.
+    /// Slow path: decodes \", \\, \n, \r, \t, \b, \f, \', \uXXXX, \UXXXXXXXX
+    /// into the caller's scratch and returns a span over the decoded result.
+    public static ReadOnlySpan<char> Canonicalize(ReadOnlySpan<char> sourceLiteral, ref char[] scratch);
 
-// Proposed: when the literal contains a '\', accumulate decoded chars
-// into a scratch buffer and return a Term that points at the decoded form.
-// When the literal contains no '\', keep the zero-allocation source span.
+    /// Helper variant for callers that don't want to manage scratch.
+    /// Allocates a new string for the slow path; fast path returns verbatim.
+    public static ReadOnlySpan<char> Canonicalize(ReadOnlySpan<char> sourceLiteral, out string? scratchOwner);
+}
 ```
 
-Implementation outline:
+The decode loop is a copy of `TurtleStreamParser.ParseAndAppendEscapeToSb` (43 lines, well-tested via the W3C Turtle conformance suite). Only literal positions (`sourceLiteral[0] == '"'`) need canonicalization; URIs, blank nodes, numerics, booleans pass through unchanged.
 
-- Scan the literal during boundary detection. If no `\` is seen, return the verbatim span as today (zero-allocation fast path).
-- If `\` is seen, restart parsing into a per-parser scratch `StringBuilder` (or pooled `char[]` if the streaming parsers' pattern is the right model), decode `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, `\'`, `\uXXXX`, `\UXXXXXXXX` as the streaming parsers already do, then emit a `Term.Literal` that references the scratch.
-- The `Term` representation must distinguish "span into source" from "span into scratch" — either via a flag on `Term` or via a per-parser convention that scratch lifetime exceeds the executor's batch boundary.
+### Part 2 — Update every literal-materialization site
 
-The cost is a per-literal-containing-escapes allocation. The fast path (no escapes) stays zero-allocation. Substrate-discipline tradeoff: parsing performance regression for INSERT DATA of literals with escapes, in exchange for correctness across ingestion paths.
+The Context section enumerates the full surface. Each site changes mechanically:
 
-### Part 2 — Tests must close the conformance-coverage gap
+```csharp
+// Before:
+var obj = GetTermValue(quad.ObjectStart, quad.ObjectLength);
+// or:
+var literal = _source.Slice(term.Start, term.Length);
 
-Two paired-ingestion tests in `Mercury.Tests`:
+// After:
+var obj = LiteralForm.Canonicalize(GetTermValue(quad.ObjectStart, quad.ObjectLength), ref _literalScratch);
+// or:
+var literal = LiteralForm.Canonicalize(_source.Slice(term.Start, term.Length), ref _literalScratch);
+```
 
-1. **Atom identity after paired ingestion.** Load `<s> <p> "a\"b"` via Turtle and via SPARQL `INSERT DATA` into the same store. Assert: `mercury_stats` reports exactly one atom for the object position, not two. Asserts H1 directly.
-2. **Lexical-form convergence.** Same paired ingestion, then `SELECT ?o WHERE { <s> <p> ?o } FILTER(CONTAINS(STR(?o), "a\"b"))` matches both rows from both ingestion paths. Asserts H1 + H2 jointly.
+Sites (ordered by complexity, simpler first):
 
-The existing 1.7.72 regression set at `tests/Mercury.Tests/Sparql/SparqlEngineTests.cs` ("Regression: escaped quote in stored literal (1.7.72)") covers the SPARQL → SPARQL roundtrip; that suite stays as-is and continues to pass under the canonicalized path because the SPARQL filter literal would canonicalize the same way as the SPARQL INSERT literal.
+1. `UpdateExecutor.GetTermValue` — write path. Add a per-call scratch via existing `_expandedTerm` field pattern or new `_literalScratch`.
+2. `UpdateExecutor` DELETE WHERE single-pattern fast path (line 206-211).
+3. `MultiPatternScan` literal positions (lines 957, 1195, 1210, 1226).
+4. `TriplePatternScan` literal positions (lines 1527, 1600).
+5. `CrossGraphMultiPatternScan` (line 365).
+6. `FilterEvaluator` — the trickier site. `Value.StringValue` is currently a `ReadOnlySpan<char>` slice; callers like CONTAINS, STRSTARTS, etc. operate on it. Two sub-choices: (a) canonicalize at the point the literal source becomes a `Value`, or (b) canonicalize on-demand inside each FilterEvaluator built-in. Sub-option (a) preferred; the cost is paid once per literal, not once per filter call.
+7. `BindExecutor` literal arguments — same shape as filter literals.
 
-### Part 3 — Migration for legacy stores
+### Part 3 — Tests must close the cross-form conformance gap
 
-Three options, preferred order:
+Three categories of paired-ingestion tests in `Mercury.Tests`:
+
+1. **Atom identity after paired ingestion.** Load `<s> <p> "a\"b"` via Turtle and via SPARQL `INSERT DATA` into the same store. Assert: `Store.AtomCount` reports the same number after both inserts as after just one (semantic dedupe). Asserts H1 directly.
+2. **Cross-form FILTER equality.** Insert canonical atoms via Turtle. Run `SELECT ?o WHERE { ?s ?p ?o FILTER(?o = "a\"b") }`. Assert: returns the row. Asserts H4 (new — see below).
+3. **Cross-form FILTER substring.** Same setup. Run `FILTER(CONTAINS(?o, "a\"b"))`. Assert: returns the row. Asserts H4.
+
+A new falsifiable hypothesis H4 should be added to the Hypothesis section: "Canonicalizing at every materialization site means SPARQL source literals match canonical stored atoms regardless of which path (write or filter) they entered through."
+
+The existing 1.7.72 regression set at `tests/Mercury.Tests/Sparql/SparqlEngineTests.cs` covers the SPARQL → SPARQL roundtrip. Under the canonicalized path, both sides (INSERT literal and FILTER literal) canonicalize identically, so the existing tests continue to pass.
+
+### Part 4 — Migration for legacy stores
+
+(was Part 3 in rev 1; renumbered after Part 2 expansion above.) Three options, preferred order:
 
 **A. Document the export → reload migration.** `mercury export <store> --format=nt > out.nt` then `mercury bulk-load <new-store> out.nt`. The N-Triples writer emits canonical lexical forms (verified pre-change by inspecting `NTriplesStreamWriter`); the bulk-load path uses the streaming parser, which already produces canonical atoms. Result: the new store has canonical atoms for every triple, including literals previously inserted via SPARQL with escapes. Operator effort: one CLI invocation per direction. No bespoke tooling.
 
@@ -174,24 +257,31 @@ Recommend (A) for the documented migration path. (B) is in place by construction
 
 ### Negative / risks
 
-- **Performance regression on INSERT DATA with escaped literals.** The zero-allocation fast path (verbatim source span) becomes an allocate-into-scratch path for any literal containing `\`. For substrates that bulk-INSERT via SPARQL with escaped literals at scale, this matters. Mitigation: most bulk-load goes through the streaming parsers (which already canonicalize); SPARQL INSERT is the cognitive-write path, not the bulk path; volume is low.
-- **Term representation change.** If `Term` today implies "span into source," changing it to optionally point at a scratch buffer ripples through `UpdateExecutor`, the parser, and any caller that materializes term spans. Scope to characterize before committing.
-- **Legacy-store atom duplication under tolerant read.** Until a Cognitive store is migrated via export → reload, the atom store may contain both `\"` and `"` forms of the same logical literal. Indexes route to one or the other depending on which path interned it. Query results stay consistent (LastIndexOf handles both) but storage is non-optimal. Mitigation: documented in the migration runbook.
-- **`STR()` semantic change for SPARQL-INSERT-loaded data on upgrade.** A query that previously got `a\"b` from `STR(?o)` will get `a"b` after migration. SPARQL specification says the latter is correct; users relying on the literal-text-of-the-source-form behavior have a workaround (`REPLACE(STR(?o), "\"", "\\\\\"")` or similar). Acknowledge in the CHANGELOG.
+- **Performance regression on escape-containing literals.** The zero-allocation fast path (verbatim source span) becomes an allocate-into-scratch path for any literal containing `\`. Affects both write-path (INSERT DATA) and read-path (FILTER literal arguments, pattern literal positions). Mitigation: most bulk-load goes through the streaming parsers (which already canonicalize); SPARQL INSERT is the cognitive-write path, not the bulk path; volume is low. Hot SPARQL queries with many escape-containing filter literals would see a slight regression; profiling would tell if it matters.
+- **~10 materialization sites change.** The Context-enumerated surface is the change blast radius. Each site needs a scratch field plus the `LiteralForm.Canonicalize` call. Risk: missing a site means cross-form FILTER returns empty rows for that path. The Validation plan tests (Parts 3-6) are designed to surface this; categorize each test failure as "missed site to fix" or "legitimate canonicalization side-effect."
+- **Legacy-store atom duplication under tolerant read.** Until a Cognitive store is migrated via export → reload, the atom store may contain both `\"` and `"` forms of the same logical literal. Indexes route to one or the other depending on which path interned it. Query results stay consistent (LastIndexOf handles both) but storage is non-optimal. Mitigation: documented in the migration runbook (Part 4A).
+- **`STR()` semantic change for legacy SPARQL-INSERT data on upgrade.** A query that previously got `a\"b` from `STR(?o)` on legacy-stored data will get `a"b` after the store is migrated via export → reload. SPARQL specification says the latter is correct; users relying on the literal-text-of-the-source-form behavior have a workaround (`REPLACE(STR(?o), "\"", "\\\\\"")` or similar). Acknowledge in the CHANGELOG.
 
 ### Neutral
 
-- **Parser code path becomes uniform across formats.** SPARQL `ParseLiteral` adopts the same StringBuilder-based decoded-form pattern that Turtle / N-Triples / N-Quads / TriG already use. One fewer asymmetry between substrate ingestion paths.
-- **No effect on serialization writers.** N-Triples / Turtle / SPARQL-result writers already emit canonical lexical forms; they consume `GetLexicalForm` output and re-escape on emit. The change to canonicalize on input does not require changes on output.
+- **Substrate code path becomes uniform across SPARQL consumers.** Every literal materialization site adopts the same canonicalization gate. One canonical implementation; no per-consumer drift risk going forward.
+- **No effect on serialization writers.** N-Triples / Turtle / SPARQL-result writers already emit canonical lexical forms; they consume `GetLexicalForm` output and re-escape on emit. The change to canonicalize at input boundaries does not require changes on output.
+- **Streaming parsers (Turtle/N-Triples/N-Quads/TriG) unchanged.** They already canonicalize. Their interaction with FilterEvaluator is what becomes consistent: a literal loaded via Turtle now matches an identical filter literal authored in SPARQL.
 
 ## Validation plan
 
-1. **Existing regression suite remains green.** All 4,463 Mercury tests, including the 1.7.72 escaped-quote regression set at `tests/Mercury.Tests/Sparql/SparqlEngineTests.cs`, pass under the canonicalized path. This is the H2 falsification surface — if the LastIndexOf logic breaks on canonical atoms, the existing tests trip.
-2. **New paired-ingestion tests** (Part 2 above) cover H1 + H2 jointly. Two tests; both must pass.
-3. **`mercury_stats` paired-ingestion smoke test.** Manual scripted verification: empty Cognitive store → load `escaped-literals.ttl` via Turtle → INSERT DATA the same triples via SPARQL → assert `Store.AtomCount` equals the Turtle-only baseline (no doubling).
-4. **Round-trip migration smoke test for Part 3 option A.** Build a Cognitive store via SPARQL INSERT DATA with escaped literals → export to N-Triples → bulk-load into a fresh store → query both stores with the same SPARQL → assert identical row sets (modulo the canonical-vs-verbatim divergence on STR output for the unmigrated store).
-5. **W3C SPARQL 1.1 Query conformance** stays at 421/421 (no regression). W3C SPARQL 1.1 Update stays at 94/94.
-6. **WDBench / WGPB benchmark suites unchanged.** Wikidata data flows in via N-Triples; the SPARQL parser change does not touch its ingestion path. Smoke-verify by running a small WDBench subset against `wiki-21b-ref` post-change and asserting result-set identity to the pre-change baseline.
+*Expanded in rev 2 to cover the full literal-consumer surface.*
+
+1. **Existing regression suite remains green.** All 4,463 Mercury tests, including the 1.7.72 escaped-quote regression set at `tests/Mercury.Tests/Sparql/SparqlEngineTests.cs`, pass under the canonicalized path. This is the H2 falsification surface — if the `LastIndexOf` logic breaks on canonical atoms, the existing tests trip.
+2. **Paired-ingestion atom-identity test** (H1). Turtle + SPARQL insert of the same logical triple → `Store.AtomCount` after both inserts equals count after one (semantic dedupe).
+3. **Cross-form FILTER tests** (H4). Insert via Turtle, query via SPARQL with FILTER literal that uses `\"` escapes — all of `?o = ...`, `CONTAINS`, `STRSTARTS`, `STRENDS`, `REGEX` must return the expected rows. Run the matrix in reverse too (SPARQL insert, FILTER via Turtle? — not realistic; FILTER literals are always SPARQL source).
+4. **Cross-form pattern test.** Insert via Turtle, query via SPARQL pattern with literal in object position: `SELECT ?s WHERE { ?s ?p "a\"b" }` — should return the row.
+5. **Cross-form DELETE WHERE test.** Insert via Turtle, then `DELETE WHERE { <s> <p> "a\"b" }` — should delete the row.
+6. **BIND canonical-form test.** `BIND("a\"b" AS ?x) FILTER(?x = ?o)` where `?o` is bound to a canonical stored atom.
+7. **Round-trip migration smoke test for Part 4A.** Build a Cognitive store via SPARQL INSERT DATA with escaped literals (under pre-canonicalization release) → export to N-Triples → bulk-load into a fresh store on the new release → query both stores with the same SPARQL → assert identical row sets.
+8. **W3C SPARQL 1.1 Query conformance** stays at 421/421 (no regression). W3C SPARQL 1.1 Update stays at 94/94.
+9. **W3C Turtle / N-Triples / N-Quads / TriG / RDF-XML** all stay at their respective passing counts — these parsers don't change but their interaction with FilterEvaluator does (canonicalized comparisons).
+10. **WDBench / WGPB benchmark suites unchanged.** Wikidata data flows in via N-Triples; canonicalization at filter-side may change result identity for queries that exercise escape-containing filter literals. Run a small WDBench subset against `wiki-21b-ref` post-change and assert result-set identity to the pre-change baseline; investigate any divergence as either (a) a pre-change bug now fixed, or (b) a regression to address.
 
 Validation document: `docs/validations/adr-044-canonical-literals-{date}.md`.
 
@@ -199,19 +289,25 @@ Validation document: `docs/validations/adr-044-canonical-literals-{date}.md`.
 
 The three storage-representation options (verbatim source, wrapped-decoded, tagged abstract) are analyzed in **Context → Storage representation**. The remaining alternatives sit at the implementation-mechanism layer:
 
-- **Canonicalize in `UpdateExecutor` instead of `SparqlParser`.** Same correctness outcome with a narrower blast radius (the Term shape stays "span into source"; UpdateExecutor decodes before handing off to the store). Pros: smaller diff, parser stays unchanged. Cons: leaves the `Term` API non-canonical — any future consumer of parsed terms (e.g., a SPARQL planner that materializes literals for optimization) sees the verbatim form and has to know to decode. The parser-side fix is the more substrate-correct location. Reconsider if the parser-side change ripples beyond expectations.
+- **Parser-extended-buffer (Option A from Decision Part 1).** Caller pre-allocates an oversized buffer; parser writes decoded literals to the trailing scratch region and emits Terms with sentinel-encoded offsets. Pros: consumers see canonical Terms without per-call decoding. Cons: parser API change (extra `Span<char>` argument), caller size-estimation burden, sentinel-encoding rule for downstream consumers. **Rejected in favor of the materialization-site helper (Option B).** Reconsider if Option B's performance turns out to matter at scale (the per-materialization-site call is a cheap check + occasional decode; profiling would tell).
+- **Stage as write-path-only now, parser-side later as ADR-045.** *Explicitly considered and rejected in rev 2.* Sticks to rev 1's 4-6h effort by canonicalizing only `UpdateExecutor.GetTermValue`; defers FILTER/pattern canonicalization to a future ADR. Rejected because: (a) opens a NEW cross-form FILTER asymmetry that doesn't exist today (literal stored verbatim matches verbatim filter), (b) creates a transition window where the substrate has BOTH inconsistencies present (legacy verbatim atoms + new canonical atoms + verbatim filters), (c) the substrate-discipline rule of "ship the minimum coherent unit" interprets coherence at the user-visible behavior level, not the lines-of-code level — a half-canonicalized substrate isn't coherent.
+- **Canonicalize in `UpdateExecutor` only (rev 1 alternative).** Subsumed by the staging rejection above. Removed from this list because it's the same proposal under a different name.
 - **Tolerant writes via dual-storage.** At INSERT time, store both the canonical and verbatim atoms; at query time, match either form. Strictly more compatible with legacy data — no migration required. Rejected: doubles the atom count for any literal with escapes, wastes storage, adds a query-time UNION. Papers over the divergence rather than fixing it.
 - **Schema-version bump that refuses to open pre-canonical stores.** Cleanest separation; legacy stores require explicit migration. Rejected as too aggressive — Cognitive stores hold session memory the operator may not want to migrate on a substrate upgrade. The tolerant-read property of the 1.7.72 LastIndexOf logic (H2) lets old and new coexist; that's better.
 - **Do nothing and document the divergence.** Tell users "SPARQL INSERT and Turtle LOAD produce semantically distinct triples for literals with escapes." Rejected: violates RDF specification (escape sequences are syntactic, the abstract value is the decoded string); inconsistent with the substrate-discipline rule that surface semantics match the W3C model.
 
 ## Engineering effort estimate
 
-- Part 1 (parser canonicalization): ~3-4 hours. Most of the work is identifying the right `Term` representation change and the per-parser scratch lifetime. The decode logic itself is a straightforward copy of `TurtleStreamParser.ParseAndAppendEscapeToSb` (43 lines).
-- Part 2 (paired-ingestion tests): ~1 hour. Two tests, both straightforward extensions of the existing `SparqlEngineTests` shape.
-- Part 3A (migration runbook): ~30 min. CHANGELOG note + one-paragraph addition to MERCURY.md upgrade notes pointing at `mercury export` + `bulk-load`.
-- Total: ~4-6 hours implementation + validation.
+*Revised in rev 2 to reflect the full literal-consumer surface.*
 
-If the `Term` change ripples wider than expected, Part 1 grows; the UpdateExecutor-only alternative (alternatives above) bounds the blast radius at the cost of substrate purity.
+- Part 1 (`LiteralForm.Canonicalize` helper): ~2 hours. Single static method, fast path + slow path, decode loop ported from `TurtleStreamParser.ParseAndAppendEscapeToSb`. Direct unit tests in `SkyOmega.Bcl.Tests` or a new `LiteralFormTests`.
+- Part 2 (update each materialization site): ~3-4 hours. ~10 call sites enumerated in Context. Mechanical edits but each needs a scratch field on its owning class + verification that the spans returned outlive their consumers (the same span-aliasing analysis the existing `_expandedTerm` field already navigates).
+- Part 3 (tests — paired ingestion + cross-form FILTER + DELETE WHERE + BIND): ~2-3 hours. ~6-8 tests across the categories in Validation plan.
+- Part 4A (migration runbook): ~30 min. CHANGELOG note + one-paragraph addition to MERCURY.md.
+- Validation pass (full Mercury suite + W3C SPARQL + small WDBench): ~1-2 hours. Identify any benchmark divergence as bug-fix vs regression.
+- Total: ~10-12 hours implementation + validation.
+
+If a missed materialization site shows up during validation (a literal arriving at the atom store comparison via a code path not in the Context enumeration), Part 2 grows by the time to find + plumb that site. The validation tests are designed to surface this: cross-form FILTER returning unexpected zero rows = missed site.
 
 ## References
 
