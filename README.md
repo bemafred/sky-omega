@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Production-validated substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** (current development substrate: [1.7.69](CHANGELOG.md#1769---2026-05-16)) · **three paired measurements** on the same substrate generation:
+**Production-validated substrate: [Mercury 1.7.57](CHANGELOG.md#1757---2026-05-11)** (current development substrate: [1.7.70](CHANGELOG.md#1770---2026-05-17)) · **three paired measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)

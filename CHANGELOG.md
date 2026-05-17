@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.69](#1769---2026-05-16)** — released 2026-05-16; **ADR-029 post-completion refactor**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.70](#1770---2026-05-17)** — released 2026-05-17; **storage profile surfaced in `:stats` and `mercury_stats`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,27 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 1.8.0+** introduces cognitive layers on top of the three substrates: **Lucy** (deep semantic memory), **James** (orchestration with pedagogical guidance), **Mira** (surface/interaction layer), and **Sky** (agent surface integrating all three). The three substrates — **Mercury** (RDF storage), **Minerva** (LLM inference, BCL-only, in 1.7.x development), and **DrHook** (runtime observation; engine BCL-only rewrite queued as the first 1.8.x substrate-discipline task post-cognitive-entry) — carry the cognitive layers.
 
 ---
+
+## [1.7.70] - 2026-05-17
+
+**Headline:** Storage profile surfaced in `:stats` and `mercury_stats`. After the ADR-029 matrix-completion arc (1.7.65 → 1.7.69) shipped four distinct storage profiles, knowing the active profile during a long REPL or MCP session has real value — different mutation semantics, temporal capabilities, and acceptable operations per profile. The profile was already printed at REPL startup but never resurfaced.
+
+### Added
+
+- **`StoreStatistics.Profile`** (`Mercury.Abstractions/Results.cs`) — new `StoreProfile` property on the public statistics record.
+- **`:stats` REPL command** now reports `Profile: <name>` at the top of the Store Statistics section, aligned with the existing 19-character labels.
+- **`mercury_stats` MCP tool** reports the same `Profile: <name>` field at the top of its output; tool description updated to mention profile.
+
+### Changed
+
+- **`SparqlEngine.GetStatistics`** populates `Profile` from `store.Schema.Profile`.
+- **`MercuryTools.Stats`** (MCP) prepends `Profile: <name>` to the existing output.
+- **`TestSessionHelper.GetStatistics`** mirrors the `SparqlEngine` update so REPL-test fixtures see the profile too.
+
+### Validation
+
+- 93 REPL + Stats-filtered tests green; full solution build clean (0 warnings, 0 errors).
+- No existing tests reference `:stats` output format, so no test updates required.
 
 ## [1.7.69] - 2026-05-16
 
