@@ -91,6 +91,7 @@ internal ref partial struct QueryResults
     private string? _expandedSubject;
     private string? _expandedPredicate;
     private string? _expandedObject;
+    private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
     // Graph context for EXISTS/MINUS evaluation inside GRAPH clauses
     private string? _graphContext;

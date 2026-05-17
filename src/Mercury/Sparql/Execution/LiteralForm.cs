@@ -64,46 +64,7 @@ internal static class LiteralForm
             }
 
             if (ch == '\\')
-            {
-                if (i + 1 >= sourceLiteral.Length)
-                    throw new InvalidOperationException(
-                        "Truncated escape sequence at end of literal: a SPARQL source literal " +
-                        "with a trailing '\\' should have been rejected at parse time.");
-
-                var esc = sourceLiteral[i + 1];
-                switch (esc)
-                {
-                    case 't':  sb.Append('\t'); i += 2; break;
-                    case 'b':  sb.Append('\b'); i += 2; break;
-                    case 'n':  sb.Append('\n'); i += 2; break;
-                    case 'r':  sb.Append('\r'); i += 2; break;
-                    case 'f':  sb.Append('\f'); i += 2; break;
-                    case '"':  sb.Append('"'); i += 2; break;
-                    case '\'': sb.Append('\''); i += 2; break;
-                    case '\\': sb.Append('\\'); i += 2; break;
-
-                    case 'u':
-                        if (i + 6 > sourceLiteral.Length)
-                            throw new InvalidOperationException(
-                                "Truncated \\u escape: needs 4 hex digits.");
-                        AppendCodePoint(sb, ParseHex(sourceLiteral.Slice(i + 2, 4)));
-                        i += 6;
-                        break;
-
-                    case 'U':
-                        if (i + 10 > sourceLiteral.Length)
-                            throw new InvalidOperationException(
-                                "Truncated \\U escape: needs 8 hex digits.");
-                        AppendCodePoint(sb, ParseHex(sourceLiteral.Slice(i + 2, 8)));
-                        i += 10;
-                        break;
-
-                    default:
-                        throw new InvalidOperationException(
-                            $"Invalid escape sequence '\\{esc}' in literal: should have been " +
-                            "rejected at parse time.");
-                }
-            }
+                i = DecodeEscapeAppend(sourceLiteral, i, sb);
             else
             {
                 sb.Append(ch);
@@ -121,6 +82,87 @@ internal static class LiteralForm
 
         scratchOwner = sb.ToString();
         return scratchOwner.AsSpan();
+    }
+
+    /// <summary>
+    /// Canonicalize the unwrapped content of a SPARQL literal — i.e., the bytes
+    /// between the opening and closing wrapper quotes, with no surrounding `"`,
+    /// no `@lang`, no `^^<iri>` suffix. Used by FilterEvaluator and
+    /// BindExpressionEvaluator, which parse literal content directly from filter /
+    /// BIND expression text and need the decoded form to compare against the
+    /// canonical-stored atoms' lexical forms.
+    ///
+    /// Fast path: no `\` → return verbatim span unchanged.
+    /// Slow path: decode escapes into a new immutable string.
+    /// </summary>
+    public static ReadOnlySpan<char> CanonicalizeContent(
+        ReadOnlySpan<char> sourceContent,
+        out string? scratchOwner)
+    {
+        scratchOwner = null;
+
+        if (sourceContent.IndexOf('\\') < 0)
+            return sourceContent;
+
+        var sb = new StringBuilder(sourceContent.Length);
+        int i = 0;
+
+        while (i < sourceContent.Length)
+        {
+            var ch = sourceContent[i];
+            if (ch == '\\')
+                i = DecodeEscapeAppend(sourceContent, i, sb);
+            else
+            {
+                sb.Append(ch);
+                i++;
+            }
+        }
+
+        scratchOwner = sb.ToString();
+        return scratchOwner.AsSpan();
+    }
+
+    /// <summary>
+    /// Decode a single escape sequence at <paramref name="i"/> (the '\') and append
+    /// the decoded char(s) to <paramref name="sb"/>. Returns the index immediately
+    /// past the consumed escape sequence (so caller can continue scanning).
+    /// </summary>
+    private static int DecodeEscapeAppend(ReadOnlySpan<char> source, int i, StringBuilder sb)
+    {
+        if (i + 1 >= source.Length)
+            throw new InvalidOperationException(
+                "Truncated escape sequence at end of literal: a SPARQL source literal " +
+                "with a trailing '\\' should have been rejected at parse time.");
+
+        var esc = source[i + 1];
+        switch (esc)
+        {
+            case 't':  sb.Append('\t'); return i + 2;
+            case 'b':  sb.Append('\b'); return i + 2;
+            case 'n':  sb.Append('\n'); return i + 2;
+            case 'r':  sb.Append('\r'); return i + 2;
+            case 'f':  sb.Append('\f'); return i + 2;
+            case '"':  sb.Append('"'); return i + 2;
+            case '\'': sb.Append('\''); return i + 2;
+            case '\\': sb.Append('\\'); return i + 2;
+
+            case 'u':
+                if (i + 6 > source.Length)
+                    throw new InvalidOperationException("Truncated \\u escape: needs 4 hex digits.");
+                AppendCodePoint(sb, ParseHex(source.Slice(i + 2, 4)));
+                return i + 6;
+
+            case 'U':
+                if (i + 10 > source.Length)
+                    throw new InvalidOperationException("Truncated \\U escape: needs 8 hex digits.");
+                AppendCodePoint(sb, ParseHex(source.Slice(i + 2, 8)));
+                return i + 10;
+
+            default:
+                throw new InvalidOperationException(
+                    $"Invalid escape sequence '\\{esc}' in literal: should have been rejected at parse time.");
+        }
     }
 
     private static int ParseHex(ReadOnlySpan<char> hex)

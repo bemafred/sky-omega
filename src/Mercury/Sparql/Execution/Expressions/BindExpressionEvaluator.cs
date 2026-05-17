@@ -396,15 +396,20 @@ internal ref struct BindExpressionEvaluator
 
         Advance(); // Skip '"'
         var contentStart = _position;
+        var contentEnd = _position;
 
         while (!IsAtEnd() && Peek() != '"')
         {
             if (Peek() == '\\') Advance();
             Advance();
         }
+        contentEnd = _position;
 
-        // Capture string content before moving past closing quote
-        var str = _expression.Slice(contentStart, _position - contentStart);
+        // ADR-044: canonicalize the literal content so bound values match canonical
+        // stored atoms when participating in subsequent pattern matches.
+        var str = LiteralForm.CanonicalizeContent(
+            _expression.Slice(contentStart, contentEnd - contentStart),
+            out _literalScratch);
 
         if (!IsAtEnd()) Advance(); // Skip closing '"'
 
@@ -415,13 +420,17 @@ internal ref struct BindExpressionEvaluator
             if (Peek() == '@')
             {
                 // Skip language tag: @en, @en-US, etc.
+                var langTagStart = _position; // position of '@'
                 Advance(); // Skip '@'
                 while (!IsAtEnd() && (IsLetter(Peek()) || Peek() == '-'))
                     Advance();
 
-                // Capture full literal with language tag for preservation
-                var fullLiteral = _expression.Slice(literalStart, _position - literalStart);
-                return new Value { Type = ValueType.String, StringValue = fullLiteral };
+                // ADR-044: build wrapped canonical form `"<decoded>"<@lang>` so that
+                // GetLexicalForm + GetLangTagOrDatatype see the decoded content.
+                // Cannot use the verbatim source slice because content was canonicalized.
+                var langTag = _expression.Slice(langTagStart, _position - langTagStart);
+                _stringResult = $"\"{str.ToString()}\"{langTag.ToString()}";
+                return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
             }
             else if (Peek() == '^' && _position + 1 < _expression.Length &&
                      _expression[_position + 1] == '^')
@@ -433,14 +442,16 @@ internal ref struct BindExpressionEvaluator
                 if (!IsAtEnd() && Peek() == '<')
                 {
                     // Full IRI datatype: <http://...>
+                    var dtypeStart = _position; // position of '<'
                     Advance(); // Skip '<'
                     while (!IsAtEnd() && Peek() != '>')
                         Advance();
                     if (!IsAtEnd()) Advance(); // Skip '>'
 
-                    // Capture full literal with datatype for preservation
-                    var fullLiteral = _expression.Slice(literalStart, _position - literalStart);
-                    return new Value { Type = ValueType.String, StringValue = fullLiteral };
+                    // ADR-044: build wrapped canonical form with decoded content + datatype.
+                    var datatypeIri = _expression.Slice(dtypeStart, _position - dtypeStart);
+                    _stringResult = $"\"{str.ToString()}\"^^{datatypeIri.ToString()}";
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
                 }
                 else
                 {
@@ -467,14 +478,16 @@ internal ref struct BindExpressionEvaluator
                         return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
                     }
 
-                    // Unknown prefix - return full literal as-is
-                    var fullLiteral = _expression.Slice(literalStart, _position - literalStart);
-                    return new Value { Type = ValueType.String, StringValue = fullLiteral };
+                    // Unknown prefix - build wrapped canonical form with decoded content + raw prefix.
+                    // ADR-044: cannot return the verbatim source slice because content was canonicalized.
+                    _stringResult = $"\"{str.ToString()}\"^^{prefixedName.ToString()}";
+                    return new Value { Type = ValueType.String, StringValue = _stringResult.AsSpan() };
                 }
             }
         }
 
-        // Return the string content (without quotes) as the value for plain literals
+        // Return the string content (without quotes) as the value for plain literals.
+        // str is already canonicalized.
         return new Value { Type = ValueType.String, StringValue = str };
     }
 
@@ -2117,6 +2130,7 @@ internal ref struct BindExpressionEvaluator
 
     // Field to hold string results to prevent GC of span backing memory
     private string _stringResult = "";
+    private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
     // Static counter for generating unique blank node identifiers across all evaluations
     // Uses Interlocked for thread-safety

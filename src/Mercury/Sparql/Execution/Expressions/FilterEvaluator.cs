@@ -26,6 +26,7 @@ internal ref partial struct FilterEvaluator
     private PrefixMapping[]? _prefixes;
     private ReadOnlySpan<char> _source;
     private string? _expandedPrefixBuffer;
+    private string? _literalScratch; // ADR-044: scratch owner for canonicalized filter literals
 
     // BIND scope depth filtering (for nested group scoping)
     // When >= 0, exclude bindings from BINDs with BindScopeDepth < this value
@@ -41,6 +42,7 @@ internal ref partial struct FilterEvaluator
         _prefixes = null;
         _source = ReadOnlySpan<char>.Empty;
         _expandedPrefixBuffer = null;
+        _literalScratch = null;
         _filterScopeDepth = -1; // Disabled by default
     }
 
@@ -485,7 +487,12 @@ internal ref partial struct FilterEvaluator
             Advance();
         }
 
-        var str = _expression.Slice(start, _position - start);
+        // ADR-044: canonicalize literal content so filter-side equality / CONTAINS /
+        // STRSTARTS / STRENDS / REGEX compare against the decoded form, matching
+        // canonical stored atoms. Fast path (no '\\') returns the verbatim span.
+        var str = LiteralForm.CanonicalizeContent(
+            _expression.Slice(start, _position - start),
+            out _literalScratch);
 
         if (!IsAtEnd())
             Advance(); // Skip closing '"'

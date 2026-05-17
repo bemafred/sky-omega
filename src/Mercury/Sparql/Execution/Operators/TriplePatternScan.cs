@@ -104,6 +104,7 @@ internal ref struct TriplePatternScan
     private string? _expandedSubject;
     private string? _expandedPredicate;
     private string? _expandedObject;
+    private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
@@ -1572,7 +1573,10 @@ internal ref struct TriplePatternScan
             }
         }
 
-        return termSpan;
+        // ADR-044: canonicalize literal source spans before atom-store match.
+        return termSpan.Length > 0 && termSpan[0] == '"'
+            ? LiteralForm.Canonicalize(termSpan, out _literalScratch)
+            : termSpan;
     }
 
     /// <summary>
@@ -1649,7 +1653,10 @@ internal ref struct TriplePatternScan
             }
         }
 
-        return termSpan;
+        // ADR-044: canonicalize literal source spans before atom-store match.
+        return termSpan.Length > 0 && termSpan[0] == '"'
+            ? LiteralForm.Canonicalize(termSpan, out _literalScratch)
+            : termSpan;
     }
 
     /// <summary>

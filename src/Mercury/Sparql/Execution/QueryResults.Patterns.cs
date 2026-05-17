@@ -143,7 +143,11 @@ internal ref partial struct QueryResults
                 }
             }
 
-            return termSpan;
+            // ADR-044: canonicalize literal source spans before atom-store match.
+            // Fast path (no '\\') returns the verbatim span.
+            return termSpan.Length > 0 && termSpan[0] == '"'
+                ? LiteralForm.Canonicalize(termSpan, out _literalScratch)
+                : termSpan;
         }
 
         // Check if variable is already bound

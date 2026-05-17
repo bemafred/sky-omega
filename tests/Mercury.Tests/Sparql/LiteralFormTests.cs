@@ -286,6 +286,49 @@ public class LiteralFormTests
         Assert.NotSame(owner1, owner2);
     }
 
+    // ---- CanonicalizeContent (unwrapped form, used by FilterEvaluator and BindExpressionEvaluator) ----
+
+    [Fact]
+    public void CanonicalizeContent_NoEscapes_FastPath_VerbatimSpan()
+    {
+        var input = "hello";
+        var span = LiteralForm.CanonicalizeContent(input.AsSpan(), out var scratch);
+        Assert.Null(scratch);
+        Assert.True(span == input.AsSpan());
+    }
+
+    [Fact]
+    public void CanonicalizeContent_EmptySpan_FastPath()
+    {
+        var span = LiteralForm.CanonicalizeContent("".AsSpan(), out var scratch);
+        Assert.Null(scratch);
+        Assert.Equal(0, span.Length);
+    }
+
+    [Fact]
+    public void CanonicalizeContent_EscapedQuote_DecodesToRawQuote()
+    {
+        var span = LiteralForm.CanonicalizeContent("a\\\"b".AsSpan(), out var scratch);
+        Assert.NotNull(scratch);
+        Assert.Equal("a\"b", span.ToString());
+        Assert.Equal(3, span.Length);
+    }
+
+    [Fact]
+    public void CanonicalizeContent_AllEscapes_Decoded()
+    {
+        // Input: a \" b \\ c \n d A → decoded: a " b \ c <LF> d A
+        var span = LiteralForm.CanonicalizeContent("a\\\"b\\\\c\\nd\\u0041".AsSpan(), out _);
+        Assert.Equal("a\"b\\c\ndA", span.ToString());
+    }
+
+    [Fact]
+    public void CanonicalizeContent_UnicodeEscape_AboveBMP_SurrogatePair()
+    {
+        var span = LiteralForm.CanonicalizeContent("x\\U0001F600y".AsSpan(), out _);
+        Assert.Equal("x😀y", span.ToString());
+    }
+
     [Fact]
     public void IriWithBackslashEscape_NotCanonicalized()
     {

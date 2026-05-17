@@ -37,6 +37,7 @@ internal class UpdateExecutor
     private readonly UpdateOperation _update;
     private readonly LoadExecutor? _loadExecutor;
     private string? _expandedTerm; // Buffer for expanded prefixed names
+    private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
 
     // Blank node scope tracking - per-statement bnode identity (W3C spec)
     // Same bnode label within one statement = same node
@@ -1239,9 +1240,15 @@ internal class UpdateExecutor
     /// </summary>
     private ReadOnlySpan<char> ExpandPrefixedName(ReadOnlySpan<char> term)
     {
-        // Skip if already a full IRI, literal, or blank node
-        if (term.Length == 0 || term[0] == '<' || term[0] == '"' || term[0] == '_')
+        // Skip if already a full IRI or blank node
+        if (term.Length == 0 || term[0] == '<' || term[0] == '_')
             return term;
+
+        // ADR-044: literals are canonicalized to the wrapped-decoded form so SPARQL
+        // INSERT produces the same atom bytes as Turtle/N-Triples ingestion of the
+        // same logical triple. Fast path (no '\\') returns the verbatim span.
+        if (term[0] == '"')
+            return LiteralForm.Canonicalize(term, out _literalScratch);
 
         // Handle 'a' shorthand for rdf:type (SPARQL keyword)
         if (term.Length == 1 && term[0] == 'a')
