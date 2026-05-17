@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.71](#1771---2026-05-17)** — released 2026-05-17; **fix: GRAPH-clause parser now handles property-list shorthand `;` continuations**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.72](#1772---2026-05-17)** — released 2026-05-17; **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,30 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 1.8.0+** introduces cognitive layers on top of the three substrates: **Lucy** (deep semantic memory), **James** (orchestration with pedagogical guidance), **Mira** (surface/interaction layer), and **Sky** (agent surface integrating all three). The three substrates — **Mercury** (RDF storage), **Minerva** (LLM inference, BCL-only, in 1.7.x development), and **DrHook** (runtime observation; engine BCL-only rewrite queued as the first 1.8.x substrate-discipline task post-cognitive-entry) — carry the cognitive layers.
 
 ---
+
+## [1.7.72] - 2026-05-17
+
+**Headline:** Fix — `Value.GetLexicalForm()` and `Value.GetLangTagOrDatatype()` now use `LastIndexOf('"')` to skip escaped quotes inside literals. The previous `IndexOf('"')` stopped at the first escaped `\"`, returning a truncated lexical form. This silently broke CONTAINS, STRSTARTS, STRENDS, UCASE, LCASE, REGEX (and any FILTER predicate using `GetLexicalForm`) for any literal containing `\"` — including the recall-discipline rule's `rdfs:comment` inserted earlier this session to teach `text:match` over `CONTAINS`. The deeper irony: the lesson about how to recall efficiently was itself unfindable via recall, because the test data contained `\"term\"` escape sequences. Surfaced during dogfood verification immediately after 1.7.71 (property-list shorthand fix) shipped.
+
+### Fixed
+
+- **`src/Mercury/Sparql/Execution/Expressions/FilterEvaluator.cs Value.GetLexicalForm()`** — replaced `StringValue.Slice(1).IndexOf('"')` with `StringValue.LastIndexOf('"')`. The legitimate closing quote of an RDF literal is always the *last* `"` before any language tag or datatype suffix; escaped `\"` inside the literal must not be mistaken for the closing quote.
+- **`Value.GetLangTagOrDatatype()`** — same fix, same rationale (finds `@en` / `^^<type>` after the actual closing quote).
+
+### Approach
+
+The peer implementation `GetLexicalForm` in `QueryResults.Modifiers.cs:916` was already using `LastIndexOf` correctly — this was a divergence between two parallel implementations where one had the escape-handling logic and the other didn't. Brought the FilterEvaluator path in line with the QueryResults.Modifiers path.
+
+### Validation
+
+- Full Sparql test suite: **1,591 passed, 0 failed**.
+- End-to-end repro confirmed: `INSERT DATA { ... "before \"escape\" after-needle" ... }` followed by `FILTER(CONTAINS(STR(?c), "after-needle"))` now returns the matching row. Before the fix, the same query returned no results because `GetLexicalForm` truncated at the first `\"`.
+- W3C SPARQL 1.1 Query conformance unchanged at 421/421. The suite does not exercise CONTAINS/STRSTARTS against literals containing escape sequences — another coverage gap (companion to the property-list-shorthand-in-GRAPH gap noted in 1.7.71).
+
+### Open follow-ups (Tier 2, not blocking release)
+
+- Computed-projection rendering bug: `SELECT (STRLEN(?c) as ?n) ...` and similar SUBSTR / aggregate forms render empty bindings via both MCP and HTTP surfaces. Separate from this fix; needs investigation.
+- MCP result truncation: long `SELECT ?s ?c` queries appear to truncate at ~6 rows in the MCP rendering layer even when the underlying result set is larger (verified via COUNT(*) returning 223 vs SELECT returning 6). Separate from this fix; needs investigation.
 
 ## [1.7.71] - 2026-05-17
 

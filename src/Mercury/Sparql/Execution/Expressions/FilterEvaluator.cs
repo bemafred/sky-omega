@@ -2154,9 +2154,15 @@ internal ref struct Value
         // Check for quoted literal: "value" or "value"@lang or "value"^^<type>
         if (StringValue[0] == '"')
         {
-            var closeQuote = StringValue.Slice(1).IndexOf('"');
-            if (closeQuote >= 0)
-                return StringValue.Slice(1, closeQuote);
+            // Use LastIndexOf to skip escaped quotes (\") inside the literal — the
+            // legitimate closing quote is always the last unescaped " before any
+            // language tag (@en) or datatype suffix (^^<type>). Bug fixed 2026-05-17:
+            // IndexOf('"') would stop at the first escaped quote and truncate the
+            // lexical form, breaking CONTAINS/STRSTARTS/UCASE/LCASE for any literal
+            // containing \" — including the recall-discipline rule's rdfs:comment.
+            var closeQuote = StringValue.LastIndexOf('"');
+            if (closeQuote > 0)
+                return StringValue.Slice(1, closeQuote - 1);
         }
 
         return StringValue;
@@ -2175,10 +2181,11 @@ internal ref struct Value
         // Check for quoted literal: "value" or "value"@lang or "value"^^<type>
         if (StringValue[0] == '"')
         {
-            var closeQuote = StringValue.Slice(1).IndexOf('"');
+            // Use LastIndexOf to skip escaped quotes — see GetLexicalForm above for rationale.
+            var closeQuote = StringValue.LastIndexOf('"');
             if (closeQuote > 0)
             {
-                var afterQuote = 1 + closeQuote + 1; // position after closing quote
+                var afterQuote = closeQuote + 1; // position after closing quote
                 if (afterQuote < StringValue.Length)
                     return StringValue.Slice(afterQuote);
             }
