@@ -3931,6 +3931,38 @@ internal ref partial struct SparqlParser
                         }
 
                         SkipWhitespace();
+
+                        // Property-list shorthand: handle ';'-chained predicate-object pairs with same subject
+                        while (Peek() == ';')
+                        {
+                            Advance(); // Skip ';'
+                            SkipWhitespace();
+
+                            if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                                break;
+
+                            var (continuedPredicate, continuedPath) = ParsePredicateOrPath();
+                            SkipWhitespace();
+                            var continuedObj = ParseTerm();
+
+                            if (continuedPath.Type == PathType.Sequence)
+                            {
+                                ExpandSequencePathIntoGraphClause(ref graphClause, nestedSubject, continuedObj, continuedPath);
+                            }
+                            else
+                            {
+                                graphClause.AddPattern(new TriplePattern
+                                {
+                                    Subject = nestedSubject,
+                                    Predicate = continuedPredicate,
+                                    Object = continuedObj,
+                                    Path = continuedPath
+                                });
+                            }
+
+                            SkipWhitespace();
+                        }
+
                         if (Peek() == '.')
                             Advance();
                     }
@@ -3973,6 +4005,50 @@ internal ref partial struct SparqlParser
             }
 
             SkipWhitespace();
+
+            // Property-list shorthand: handle ';'-chained predicate-object pairs with same subject
+            // Grammar: PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
+            while (Peek() == ';')
+            {
+                Advance(); // Skip ';'
+                SkipWhitespace();
+
+                // Empty predicate-object after semicolon is legal: "?s :p ?o ;"
+                if (IsAtEnd() || Peek() == '}' || Peek() == '.')
+                    break;
+
+                // Keywords that indicate end of property list
+                var nextSpan = PeekSpan(8);
+                if ((nextSpan.Length >= 6 && nextSpan[..6].Equals("FILTER", StringComparison.OrdinalIgnoreCase)) ||
+                    (nextSpan.Length >= 8 && nextSpan[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase)) ||
+                    (nextSpan.Length >= 5 && nextSpan[..5].Equals("MINUS", StringComparison.OrdinalIgnoreCase)) ||
+                    (nextSpan.Length >= 4 && nextSpan[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase)) ||
+                    (nextSpan.Length >= 6 && nextSpan[..6].Equals("VALUES", StringComparison.OrdinalIgnoreCase)) ||
+                    (nextSpan.Length >= 7 && nextSpan[..7].Equals("SERVICE", StringComparison.OrdinalIgnoreCase)) ||
+                    (nextSpan.Length >= 5 && nextSpan[..5].Equals("GRAPH", StringComparison.OrdinalIgnoreCase)))
+                    break;
+
+                var (nextPredicate, nextPath) = ParsePredicateOrPath();
+                SkipWhitespace();
+                var nextObj = ParseTerm();
+
+                if (nextPath.Type == PathType.Sequence)
+                {
+                    ExpandSequencePathIntoGraphClause(ref graphClause, subject, nextObj, nextPath);
+                }
+                else
+                {
+                    graphClause.AddPattern(new TriplePattern
+                    {
+                        Subject = subject,
+                        Predicate = nextPredicate,
+                        Object = nextObj,
+                        Path = nextPath
+                    });
+                }
+
+                SkipWhitespace();
+            }
 
             // Optional dot after triple pattern
             if (Peek() == '.')

@@ -1,9 +1,25 @@
 # Limit: GRAPH-clause parser drops property-list shorthand continuations
 
-Status:        **Triggered → Ready-to-fix** (root cause located 2026-05-17; one-place mechanical fix)
+Status:        **Resolved** (fixed 2026-05-17 in 1.7.71 — added `;` continuation handler to `ParseGraph` mirroring the existing handler in `TryParseTriplePattern`)
 Surfaced:      2026-05-17, during dogfood verification of the new `<urn:sky-omega:discipline:recall>` triple inserted to teach `text:match` over `CONTAINS`
 Last reviewed: 2026-05-17
-Promotes to:   No ADR needed — bug fix in `SparqlParser.Clauses.cs ParseGraph` to mirror the existing `;` handler in `SparqlParser.cs TryParseTriplePattern`.
+Promotes to:   N/A — resolved by bug fix, no ADR required.
+
+## Resolution
+
+Added `while (Peek() == ';')` continuation handlers to both pattern-parsing loops inside `ParseGraph` (`src/Mercury/Sparql/Parsing/SparqlParser.Clauses.cs`):
+
+- **Main loop (after line 3973):** handles the canonical `GRAPH <g> { ?s p1 ?o1 ; p2 ?o2 }` shape.
+- **Nested-group inline loop (after line 3931):** handles `GRAPH <g> { { ?s p1 ?o1 ; p2 ?o2 } }`.
+
+Both new handlers mirror the existing one in `SparqlParser.cs TryParseTriplePattern` (lines 629-657): skip `;`, check for empty continuation / end-of-list keywords, parse next predicate-object pair with same subject, expand sequence paths if needed.
+
+**Validation:**
+
+- `Select_PropertyListShorthandInGraphClause_ProducesTwoTriplePatterns` — now passes (was the failing test that proved the bug).
+- `Select_PropertyListShorthand_ProducesTwoTriplePatternsWithDistinctObjects` — still passes (non-GRAPH case unaffected).
+- Full Mercury test suite: 4,459 passed, 0 failed (no regressions).
+- End-to-end CLI repro via fresh source build: both `?o1` and `?o2` bindings render correctly.
 
 ## Root cause (located 2026-05-17)
 

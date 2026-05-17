@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Mercury 1.7.70](#1770---2026-05-17)** — released 2026-05-17; **storage profile surfaced in `:stats` and `mercury_stats`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Mercury 1.7.71](#1771---2026-05-17)** — released 2026-05-17; **fix: GRAPH-clause parser now handles property-list shorthand `;` continuations**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -29,6 +29,27 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 1.8.0+** introduces cognitive layers on top of the three substrates: **Lucy** (deep semantic memory), **James** (orchestration with pedagogical guidance), **Mira** (surface/interaction layer), and **Sky** (agent surface integrating all three). The three substrates — **Mercury** (RDF storage), **Minerva** (LLM inference, BCL-only, in 1.7.x development), and **DrHook** (runtime observation; engine BCL-only rewrite queued as the first 1.8.x substrate-discipline task post-cognitive-entry) — carry the cognitive layers.
 
 ---
+
+## [1.7.71] - 2026-05-17
+
+**Headline:** Fix — GRAPH-clause parser now handles property-list shorthand `;` continuations. The non-GRAPH parser (`TryParseTriplePattern`) handled `;` correctly all along, but the GRAPH-clause parser (`ParseGraph` in `SparqlParser.Clauses.cs`) is a separate code path that silently dropped second-and-subsequent `;`-chained patterns. Bug surfaced 2026-05-17 during dogfood verification of the new `<urn:sky-omega:discipline:recall>` triple inserted to teach `text:match` over `CONTAINS`; root cause located by three-surface localization (MCP / CLI REPL / HTTP all dropping the binding identically) followed by a parser diagnostic test that counted `GraphClause.PatternCount`.
+
+### Fixed
+
+- **`SparqlParser.Clauses.cs ParseGraph`** — added `while (Peek() == ';')` continuation handler to both pattern-parsing loops (the main loop and the nested-group inline loop), mirroring the existing handler in `SparqlParser.cs TryParseTriplePattern` lines 629-657. Inside `GRAPH { ... }`, the parser now correctly emits a `TriplePattern` for each predicate-object pair when `;` shorthand is used, with the shared subject preserved.
+
+### Added
+
+- **`tests/Mercury.Tests/Sparql/SparqlParserTests.cs`** — two diagnostic / regression tests:
+  - `Select_PropertyListShorthand_ProducesTwoTriplePatternsWithDistinctObjects` (parser-only, non-GRAPH case). Confirms the main BGP parser handles `;` correctly — passing both before and after the fix.
+  - `Select_PropertyListShorthandInGraphClause_ProducesTwoTriplePatterns` (parser-only, GRAPH case). Was failing before the fix (Expected: 2, Actual: 1), now passes.
+
+### Validation
+
+- Full Mercury test suite: **4,459 passed, 6 W3C-corner skipped (pre-existing), 0 failed**.
+- Sparql-filtered suite: 1,591 passed, 0 failed.
+- End-to-end CLI repro via fresh source build: `?o1` and `?o2` both render in result table.
+- W3C SPARQL 1.1 Query conformance unchanged at 421/421. The W3C suite does not exercise property-list shorthand inside `GRAPH` blocks chained beyond a single triple — observation worth filing for future conformance-coverage review.
 
 ## [1.7.70] - 2026-05-17
 
