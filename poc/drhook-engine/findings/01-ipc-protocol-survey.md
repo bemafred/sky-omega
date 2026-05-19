@@ -1,5 +1,7 @@
 # Finding 01: .NET Diagnostics IPC Protocol — Spec Survey (Epistemics)
 
+> **Reframing note (2026-05-19, post-[ADR-009](../../../docs/adrs/ADR-009-substrate-dependency-policy.md) amendment cascade):** This document characterizes the wire protocol of `Microsoft.Diagnostics.NETCore.Client`, which became a **substrate-admitted dependency** under ADR-009. It is **reference material** — what the admitted dependency does under the hood, useful as axis-4 walk-back evidence if the engine ever needs to reimplement Layer 1 natively. It is **not** implementation prep for a native Layer 1 rewrite. The substrate work narrows to Layer 3 (native ICorDebug interop) per [ADR-006 amended 2026-05-19](../../../docs/adrs/drhook/ADR-006-drhook-engine.md). Probe 01 (a BCL-only Diagnostic IPC round-trip) is no longer load-bearing for the PoC; the equivalent operation is `DiagnosticsClient.GetProcessInfo()` from the admitted NuGet. The protocol survey below stands as substrate-grade reference for the Diagnostic IPC layer.
+
 **Status:**   Epistemics complete — protocol read end-to-end. Probe 01 pending.
 **Date:**     2026-05-18
 **Hypothesis under study:** A BCL-only client can connect to the .NET Diagnostic IPC socket of a running `dotnet` process and round-trip a `ProcessInfo` message without `Microsoft.Diagnostics.NETCore.Client`, without netcoredbg, without any NuGet.

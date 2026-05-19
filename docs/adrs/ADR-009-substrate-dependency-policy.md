@@ -1,6 +1,6 @@
 # ADR-009: Substrate Dependency Policy — Four-Axis Admission Rule
 
-**Status:** Proposed — 2026-05-19
+**Status:** Accepted — 2026-05-19
 
 ## Context
 

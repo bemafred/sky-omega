@@ -17,7 +17,7 @@ Foundational decisions affecting the entire repository:
 | [ADR-006](ADR-006-mcp-surface-discipline.md) | MCP Surface Discipline — Destructive Operations Excluded | Completed |
 | [ADR-007](ADR-007-sealed-substrate-immutability.md) | Sealed Substrate Immutability — Re-create, Don't Modify | Completed |
 | [ADR-008](ADR-008-workload-profiles-and-validation-attribution.md) | Workload Profiles and Validation Attribution | Completed |
-| [ADR-009](ADR-009-substrate-dependency-policy.md) | Substrate Dependency Policy — Four-Axis Admission Rule | Proposed |
+| [ADR-009](ADR-009-substrate-dependency-policy.md) | Substrate Dependency Policy — Four-Axis Admission Rule | Accepted |
 
 ## Substrate-Specific ADRs
 
