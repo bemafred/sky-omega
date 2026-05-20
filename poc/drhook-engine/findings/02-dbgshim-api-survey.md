@@ -6,6 +6,8 @@
 **Spec read:** `dotnet/diagnostics/src/dbgshim/dbgshim.h`
 **Exports verified:** `dotnet/diagnostics/src/dbgshim/dbgshim_unixexports.src`
 
+> **Correction note (2026-05-20, after [finding 04](04-netcoredbg-reference.md) netcoredbg reference reading):** The **Probe 02 design and the attach-flow assumptions in this document are partly wrong** and are superseded by finding 04. Two errors the IDL/header reading produced: (1) `EnumerateCLRs` returns coreclr **module paths**, not version strings — an intermediate `CreateVersionStringFromModule(pid, modulePath, ...)` step is required before `CreateDebuggingInterfaceFromVersion*`. (2) `EnumerateCLRs` needs a **retry loop** (100 ms × 30) to handle the coreclr-mid-load race (`INVALID_HANDLE_VALUE` handles). Also: netcoredbg uses `CreateDebuggingInterfaceFromVersionEx` with `CorDebugVersion_4_0 = 4`, not the basic variant. The `LPWSTR`-width open question is **resolved** (16-bit UTF-16 on Unix, confirmed by netcoredbg's `to_utf16`/`to_utf8` boundary conversions). Read finding 04 for the corrected attach flow. The dbgshim symbol enumeration and ABI notes below remain accurate.
+
 ## What is now known
 
 ### Surface
