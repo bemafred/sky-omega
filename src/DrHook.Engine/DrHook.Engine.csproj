@@ -15,6 +15,10 @@
         <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.*" />
     </ItemGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="SkyOmega.DrHook.Engine.Tests" />
+    </ItemGroup>
+
     <!--
       libdbgshim (the native shim to ICorDebug) is a native runtime-substrate asset per the
       ADR-009 clarification, NOT a managed dependency. It is resolved at runtime by

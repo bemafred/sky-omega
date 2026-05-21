@@ -115,7 +115,7 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 - [x] source-gen COM RCW interfaces — `Interop/CorDebug.cs` (`ICorDebug`, `ICorDebugController`; `ICorDebugProcess` deferred to Phase 2 when its methods are needed)
 - [x] `ICorDebugManagedCallback`(+2/3/4) `[UnmanagedCallersOnly]` vtable with **instance dispatch** (GCHandle recovery from the COM block) — `Interop/ManagedCallbackHost.cs`. Validated end-to-end via a `DebugSession` smoke test: attach → `CreateProcess` callback delivered → detach.
 - [ ] `ProcessAttacher`/observation tools wired through the admitted NuGet facade
-- [ ] in-process synthetic test target + callback-fixture replay (testability-first)
+- [x] in-process layer tests (testability-first, primary surface per `docs/limits/drhook-testability.md`) — `tests/DrHook.Engine.Tests` drives the callback vtable *in-process*, the test playing the native caller: QI multi-interface dispatch, V-table slot layout (`CreateProcess`@9, `FunctionRemapOpportunity`@v2-3), and GCHandle instance recovery (two hosts route to their own sinks). 5 tests, deterministic, no debuggee/dbgshim. (Live-debuggee integration smoke + recorded callback-fixture replay remain as on-top follow-ups.)
 
 `DebugSession`/`IDebugEventSink` (`DebugSession.cs`, `IDebugEventSink.cs`) compose the validated pieces into the attach/detach lifecycle.
 
