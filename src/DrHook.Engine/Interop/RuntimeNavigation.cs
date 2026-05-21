@@ -45,6 +45,41 @@ internal static unsafe class RuntimeNavigation
         return names;
     }
 
+    /// <summary>The first loaded module whose name contains <paramref name="nameSubstring"/>
+    /// (case-insensitive), as an OWNED reference the caller must Release via <see cref="Release"/>.
+    /// Returns 0 if none match. All other enumerated pointers are released here.</summary>
+    public static nint FindModule(nint pProcess, string nameSubstring)
+    {
+        nint match = 0;
+        foreach (nint appDomain in Drain(pProcess, ProcessEnumerateAppDomains))
+        {
+            foreach (nint assembly in Drain(appDomain, AppDomainEnumerateAssemblies))
+            {
+                foreach (nint module in Drain(assembly, AssemblyEnumerateModules))
+                {
+                    if (match == 0 && ModuleName(module).Contains(nameSubstring, StringComparison.OrdinalIgnoreCase))
+                        match = module;  // keep — owned by the caller
+                    else
+                        Release(module);
+                }
+                Release(assembly);
+            }
+            Release(appDomain);
+        }
+        return match;
+    }
+
+    /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
+    /// matching <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token (0 if not
+    /// found). Process must be synchronized.</summary>
+    public static uint ResolveMethodToken(nint pProcess, string moduleNameSubstring, string typeName, string methodName)
+    {
+        nint pModule = FindModule(pProcess, moduleNameSubstring);
+        if (pModule == 0) return 0;
+        try { return MetadataResolver.ResolveMethodToken(pModule, typeName, methodName); }
+        finally { Release(pModule); }
+    }
+
     /// <summary>Call an <c>EnumerateX(out ICorDebug*Enum)</c> at <paramref name="enumerateSlot"/>,
     /// then drain it one element at a time. Returns owned references (caller releases each);
     /// the enumerator itself is released here. Not an iterator — function-pointer locals can't

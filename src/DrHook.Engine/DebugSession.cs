@@ -98,6 +98,13 @@ public sealed class DebugSession : IDisposable
     /// ICorDebug enumeration requires the process to be synchronized.</summary>
     public IReadOnlyList<string> EnumerateModules() => RuntimeNavigation.ModuleNames(_pProcess);
 
+    /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
+    /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
+    /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint
+    /// creation (<c>GetFunctionFromToken</c>).</summary>
+    public uint ResolveMethodToken(string moduleNameSubstring, string typeName, string methodName)
+        => RuntimeNavigation.ResolveMethodToken(_pProcess, moduleNameSubstring, typeName, methodName);
+
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {
