@@ -25,10 +25,17 @@ public sealed unsafe class ManagedCallbackHostTests
     private static readonly Guid IID_Callback4 = new("322911AE-16A5-49BA-84A3-ED69678138A3");
     private static readonly Guid IID_Bogus = new("11111111-2222-3333-4444-555555555555");
 
-    private sealed class RecordingSink : IDebugEventSink
+    private sealed class RecordingSink : IManagedCallbackSink
     {
         public List<string> Events { get; } = new();
-        public void OnEvent(string name) => Events.Add(name);
+        public List<CallbackKind> Kinds { get; } = new();
+        public List<nint> Threads { get; } = new();
+        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread)
+        {
+            Events.Add(name);
+            Kinds.Add(kind);
+            Threads.Add(thread);
+        }
     }
 
     private static nint Slot(nint subObject, int index) => ((nint*)*(nint*)subObject)[index];
@@ -80,6 +87,24 @@ public sealed unsafe class ManagedCallbackHostTests
 
         Assert.Equal(S_OK, hr);
         Assert.Equal(new[] { "CreateProcess" }, sink.Events.ToArray());
+        Assert.Equal(new[] { CallbackKind.Informational }, sink.Kinds.ToArray());
+    }
+
+    [Fact]
+    public void BreakpointThunk_ClassifiesAsStopping_AndForwardsThreadPointer()
+    {
+        var sink = new RecordingSink();
+        using var host = new ManagedCallbackHost(sink);
+        nint p = host.NativePointer;
+
+        // ICorDebugManagedCallback slot 3 = Breakpoint(pThis, pAppDomain, pThread, pBreakpoint).
+        var breakpoint = (delegate* unmanaged[Cdecl]<nint, nint, nint, nint, int>)Slot(p, 3);
+        int hr = breakpoint(p, 0xAA, 0xBB, 0xCC);
+
+        Assert.Equal(S_OK, hr);
+        Assert.Equal(new[] { "Breakpoint" }, sink.Events.ToArray());
+        Assert.Equal(new[] { CallbackKind.BreakpointHit }, sink.Kinds.ToArray()); // not auto-continued downstream
+        Assert.Equal(new nint[] { 0xBB }, sink.Threads.ToArray());                // pThread forwarded for stepping
     }
 
     [Fact]

@@ -1,14 +1,16 @@
-// In-process tests for the continue-loop (ADR-006 Phase 2). The pump's contract is pure
-// producer/consumer plumbing — independent of mscordbi — so the test plays both roles in
-// process: it enqueues events the way the callback thunks would (on the "event thread") and
-// supplies the Continue delegate the way DebugSession wires controller.Continue. This is the
-// Phase 2 advance over Phase 1: many events flow, and each one is matched by exactly one
-// Continue, instead of a single callback that then wedges on a reentrant resume.
+// In-process tests for the continue-loop with stopping control (ADR-006 Phase 2). The pump's
+// contract is producer/consumer plumbing independent of mscordbi, so the test plays both
+// roles: it enqueues callbacks the way the host thunks would (via IManagedCallbackSink) and
+// supplies the Continue delegate the way DebugSession wires controller.Continue.
 //
-// Determinism: Dispose() calls CompleteAdding then Joins the worker, and
-// GetConsumingEnumerable drains every buffered item before it ends — so once Dispose returns,
-// the worker has provably processed the whole queue and the Join barrier publishes its writes
-// to the asserting thread. No sleeps, no polling.
+// Two behaviors are covered: INFORMATIONAL callbacks drain + auto-continue one-for-one (the
+// increment-1 firehose), and STOPPING callbacks (breakpoint/step/break) suppress the Continue,
+// surface a StopInfo via WaitForStop, and resume only on Resume — the increment-2 keystone.
+//
+// Determinism: Dispose() completes both queues and Joins the worker, and GetConsumingEnumerable
+// drains every buffered item before ending, so once Dispose returns the worker has provably
+// processed the queue and the Join barrier publishes its writes. No sleeps for the drain tests;
+// the stopping tests SpinUntil on a bounded deadline for the cross-thread resume.
 
 using System.Threading;
 using SkyOmega.DrHook.Engine;
@@ -30,13 +32,12 @@ public sealed class CallbackPumpTests
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
 
-        // Callbacks can arrive between SetManagedHandler and pump.Start — they queue up.
-        pump.OnEvent("CreateProcess");
-        pump.OnEvent("CreateAppDomain");
-        pump.OnEvent("LoadModule");
+        pump.OnCallback(CallbackKind.Informational, "CreateProcess", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateAppDomain", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
 
         pump.Start(() => 0);
-        pump.Dispose(); // CompleteAdding + Join: the backlog is fully drained on return.
+        pump.Dispose();
 
         Assert.Equal(new[] { "CreateProcess", "CreateAppDomain", "LoadModule" }, sink.Events.ToArray());
     }
@@ -48,37 +49,83 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
 
         pump.Start(() => 0);
-
-        // Steady state: events arrive on the event thread while the worker is already draining.
-        pump.OnEvent("LoadModule");
-        pump.OnEvent("LoadClass");
-
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadClass", 0, 0);
         pump.Dispose();
 
         Assert.Equal(new[] { "LoadModule", "LoadClass" }, sink.Events.ToArray());
     }
 
     [Fact]
-    public void Pump_CallsContinue_OncePerEvent()
+    public void Pump_AutoContinues_InformationalEvents_OncePerEvent()
     {
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
 
         int continues = 0;
-        pump.OnEvent("CreateProcess");
-        pump.OnEvent("CreateThread");
-        pump.OnEvent("LoadModule");
+        pump.OnCallback(CallbackKind.Informational, "CreateProcess", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
 
         pump.Start(() => { Interlocked.Increment(ref continues); return 0; });
         pump.Dispose();
 
-        // Each non-stopping callback must be released so the next one can fire — exactly once.
         Assert.Equal(3, continues);
         Assert.Equal(3, sink.Events.Count);
     }
 
     [Fact]
-    public void OnEvent_AfterDispose_IsDroppedWithoutThrowing()
+    public void StoppingCallback_SuppressesContinue_AndSurfacesStop_UntilResume()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+
+        int continues = 0;
+        pump.Start(() => { Interlocked.Increment(ref continues); return 0; });
+
+        // A breakpoint hit must NOT be auto-continued — the worker parks at the stop.
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234);
+
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        Assert.NotNull(stop);
+        Assert.Equal(StopReason.Breakpoint, stop!.Reason);
+        Assert.Equal(0, Volatile.Read(ref continues));      // parked — not resumed
+        Assert.DoesNotContain("Breakpoint", sink.Events);   // a stop, not part of the informational firehose
+
+        pump.Resume();
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref continues) == 1, TimeSpan.FromSeconds(2)),
+            "worker should Continue exactly once after Resume");
+    }
+
+    [Fact]
+    public void ExitProcess_WakesAWaiter_WithProcessExited()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+
+        pump.Start(() => 0);
+        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0);
+
+        StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
+        Assert.NotNull(stop);
+        Assert.Equal(StopReason.ProcessExited, stop!.Reason);
+    }
+
+    [Fact]
+    public void WaitForStop_ReturnsNull_WhenNothingStops()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+        pump.Start(() => 0);
+
+        // Only informational traffic — no stop should ever surface.
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
+
+        Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(200)));
+    }
+
+    [Fact]
+    public void OnCallback_AfterDispose_IsDroppedWithoutThrowing()
     {
         var sink = new RecordingSink();
         var pump = new CallbackPump(sink);
@@ -86,9 +133,7 @@ public sealed class CallbackPumpTests
         pump.Start(() => 0);
         pump.Dispose();
 
-        // A late callback arriving after shutdown (process detaches from its stopped state)
-        // must not throw back into the native event thread.
-        pump.OnEvent("ExitProcess");
+        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0);
 
         Assert.DoesNotContain("ExitProcess", sink.Events);
     }

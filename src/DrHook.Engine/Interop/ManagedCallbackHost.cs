@@ -6,8 +6,10 @@
 // hand-rolled, not ComWrappers. This generalizes probe 06's static thunks to INSTANCE
 // dispatch: a native COM object holds, per interface, { vtable-ptr, gchandle }; every thunk
 // recovers its ManagedCallbackHost from the GCHandle (at pThis + sizeof(nint)) and forwards
-// to the IDebugEventSink. The 38 callback methods are declared in exact IDL order — a
-// misordered slot crashes when the runtime calls it.
+// to the IManagedCallbackSink, tagging the three STOPPING callbacks (Breakpoint, StepComplete,
+// Break) with their CallbackKind + the thread/appDomain pointers so the pump can suppress the
+// auto-Continue. The 38 callback methods are declared in exact IDL order — a misordered slot
+// crashes when the runtime calls it.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -25,13 +27,13 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     private static readonly Guid IID_Callback3 = new("264EA0FC-2591-49AA-868E-835E6515323F");
     private static readonly Guid IID_Callback4 = new("322911AE-16A5-49BA-84A3-ED69678138A3");
 
-    private readonly IDebugEventSink _sink;
+    private readonly IManagedCallbackSink _sink;
     private GCHandle _self;
     private nint _block;                   // 4 sub-objects, each { vtable-ptr, gchandle }
     private nint _v1, _v2, _v3, _v4;       // the four interface vtables
     private int _refCount;
 
-    public ManagedCallbackHost(IDebugEventSink sink)
+    public ManagedCallbackHost(IManagedCallbackSink sink)
     {
         _sink = sink;
         Build();
@@ -47,8 +49,11 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
         => GCHandle.FromIntPtr(*(nint*)(pThis + sizeof(nint))).Target as ManagedCallbackHost;
 
     private static int Fire(nint pThis, string name)
+        => Fire(pThis, CallbackKind.Informational, name, 0, 0);
+
+    private static int Fire(nint pThis, CallbackKind kind, string name, nint appDomain, nint thread)
     {
-        HostOf(pThis)?._sink.OnEvent(name);
+        HostOf(pThis)?._sink.OnCallback(kind, name, appDomain, thread);
         return S_OK;
     }
 
@@ -160,9 +165,9 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     private static uint Release(nint pThis) => HostOf(pThis)?.ReleaseImpl() ?? 0;
 
     // ============================ ICorDebugManagedCallback (26) ============================
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Breakpoint(nint p, nint a, nint t, nint b) => Fire(p, "Breakpoint");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int StepComplete(nint p, nint a, nint t, nint s, int r) => Fire(p, "StepComplete");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Break(nint p, nint a, nint t) => Fire(p, "Break");
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Breakpoint(nint p, nint a, nint t, nint b) => Fire(p, CallbackKind.BreakpointHit, "Breakpoint", a, t);
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int StepComplete(nint p, nint a, nint t, nint s, int r) => Fire(p, CallbackKind.StepComplete, "StepComplete", a, t);
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Break(nint p, nint a, nint t) => Fire(p, CallbackKind.Break, "Break", a, t);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Exception1(nint p, nint a, nint t, int u) => Fire(p, "Exception");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EvalComplete(nint p, nint a, nint t, nint e) => Fire(p, "EvalComplete");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EvalException(nint p, nint a, nint t, nint e) => Fire(p, "EvalException");

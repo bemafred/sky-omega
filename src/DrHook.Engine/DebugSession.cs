@@ -84,6 +84,15 @@ public sealed class DebugSession : IDisposable
         }
     }
 
+    /// <summary>Block until the debuggee next stops (breakpoint, step complete, or
+    /// <c>Debugger.Break</c>), up to <paramref name="timeout"/>. Returns null on timeout (still
+    /// running); a <see cref="StopReason.ProcessExited"/> result means the session is over.
+    /// While stopped the debuggee is frozen — inspect, then <see cref="Resume"/>.</summary>
+    public StopInfo? WaitForStop(TimeSpan timeout) => _pump.WaitForStop(timeout);
+
+    /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
+    public void Resume() => _pump.Resume();
+
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {
