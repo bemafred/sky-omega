@@ -19,8 +19,13 @@
 // that all 38 signatures are expressible in source-gen COM. Slot-dispatch correctness
 // (does calling slot N invoke the right method) is probe 05's job, when callbacks fire.
 //
-// Interface-pointer params -> nint (no marshalling on the callback path, finding 05).
-// BOOL/LONG/HRESULT/enums -> int; DWORD/ULONG/ULONG32/CONNID -> uint. [PreserveSig] int.
+// Type mapping VERIFIED against the CoreCLR PAL (finding 08, pal_mstypes.h): the PAL
+// locks LONG/ULONG/DWORD to 32-bit (int/unsigned int) under LP64 — "diff from
+// windows.h, for LP64 compat" — so they stay 32-bit on every CoreCLR platform.
+// Hence BOOL/LONG/HRESULT/enums -> int; DWORD/ULONG/ULONG32/CONNID -> uint.
+// NEVER map LONG -> C# long (that is 64-bit; the PAL forces 32-bit for ABI parity).
+// Interface-pointer / WCHAR* / BYTE* / IStream* params -> nint (raw; no callback-path
+// marshalling, finding 05). [PreserveSig] int return on every method.
 //
 // Falsification ladder (exit codes): 2 usage; 3 dbgshim; 4 EnumerateCLRs;
 //   5 version; 6 create-interface; 8 ComWrappers RCW; 9 Initialize;
