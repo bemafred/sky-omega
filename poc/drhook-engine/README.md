@@ -77,6 +77,16 @@ The PoC and the Layer 3 substrate work are built under the inverse discipline:
 
 A substrate that observes other .NET processes deterministically must itself be observable deterministically. That's the bar.
 
+## dbgshim baseline
+
+The Layer 3 probes need `libdbgshim` (the native shim to `ICorDebug`), which left the .NET runtime install at .NET 7+. The adopted baseline is the official **`Microsoft.Diagnostics.DbgShim.osx-arm64` 9.0.661903** NuGet native asset (see [`findings/11-dbgshim-baseline.md`](findings/11-dbgshim-baseline.md) for the obtain command + provenance). Extract it to `.local-dbgshim/` (gitignored) and point the probes at it:
+
+```bash
+export DBGSHIM_PATH="$PWD/.local-dbgshim/libdbgshim.dylib"
+```
+
+The engine bundles this NuGet's `runtimes/<rid>/native/` payload; it is a native runtime-substrate asset per [ADR-009](../../docs/adrs/ADR-009-substrate-dependency-policy.md), not a managed dependency.
+
 ## How to run a probe
 
 Each probe is a file-based `.cs` script per [CLAUDE.md File-Based Apps](../../CLAUDE.md#file-based-apps-net-10). Shebang line, no `.csproj`, not part of `SkyOmega.sln`. Run with `./<probe>.cs` or `dotnet <probe>.cs`.

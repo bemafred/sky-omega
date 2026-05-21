@@ -46,6 +46,8 @@ The engine P/Invokes `libdbgshim` — the native shim that bridges to `ICorDebug
 
 **Deployment (probe 02 finding, 2026-05-21).** `libdbgshim` is not in the .NET runtime install for .NET 7+. The engine must obtain it via the `Microsoft.Diagnostics.DbgShim[.<rid>]` NuGet — which carries only the native binary under `runtimes/<rid>/native/` — and bundle it as a native asset, or locate a host-provided copy. Probe 02 validated the attach flow using a VS Code-bundled `libdbgshim.dylib`; the version-independent shim debugged a .NET 10 target without exact version-matching. The engine references no managed surface from that NuGet.
 
+**Baseline adopted (2026-05-21, finding 11).** `Microsoft.Diagnostics.DbgShim` is the canonical dbgshim — current baseline `Microsoft.Diagnostics.DbgShim.osx-arm64` **9.0.661903** (the `9.0.x` tooling line is forward-compatible and independent of the runtime version it debugs; bump when a `10.0.x` ships). The borrowed VS Code copy is no longer the reference. Probes run against the official lib via `DBGSHIM_PATH`; the engine bundles the NuGet's `runtimes/<rid>/native/` payload.
+
 ### Substrate work — Layer 3: native ICorDebug interop
 
 The substrate work concentrates on replacing netcoredbg with our own ICorDebug-via-P/Invoke implementation:

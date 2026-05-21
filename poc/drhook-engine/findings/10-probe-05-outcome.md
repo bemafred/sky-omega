@@ -36,7 +36,7 @@
 
 1. **Event-transport / threading model (most likely).** ICorDebug on Unix is out-of-process: `mscordbi` (loaded by dbgshim) talks to the debuggee's runtime over a transport and dispatches callbacks on a thread it manages. Delivery may require the debugger to run a proper **event loop** / service the transport in a way our single-thread `Wait()` probe does not. netcoredbg has a full event loop and a runtime-controller thread; our probe just attaches and blocks one thread. This is the first thing to read.
 
-2. **dbgshim / mscordbi version mismatch.** We used VS Code's `csharp-2.130.5` `libdbgshim.dylib`. Enumerate/create/attach proved version-independent, but the **event transport** may be version-sensitive against .NET 10's DBI. Worth trying the `Microsoft.Diagnostics.DbgShim[.osx-arm64]` NuGet matched to 10.0.
+2. **dbgshim / mscordbi version mismatch.** ~~We used VS Code's `csharp-2.130.5` `libdbgshim.dylib`; the event transport may be version-sensitive against .NET 10's DBI.~~ **RULED OUT (finding 11):** re-ran probe 05 against the official `Microsoft.Diagnostics.DbgShim.osx-arm64` 9.0.661903 — identical result (attach S_OK, 0 callbacks in 15s). The blocker is library-independent.
 
 3. **macOS event-transport setup.** The attach (ptrace-class) succeeded without entitlement, but the debuggee↔debugger **event channel** may need additional setup or a separate capability that a plain process lacks.
 
