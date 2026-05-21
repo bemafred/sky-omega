@@ -1,0 +1,9 @@
+# DrHook.Engine probe 08 fixture — quiescent detach under flood (ADR-006 Phase 2 increment 2)
+timestamp            = 2026-05-21T22:22:13.2152630Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+target-pid           = 94582
+events-at-2s         = 311
+clean-dispose        = true
+target-alive-detach  = True
+verdict              = PASSED

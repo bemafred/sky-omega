@@ -1,9 +1,9 @@
 # Limit: DrHook.Engine detach races mscordbi's queued-callback flush under load
 
-**Status:**        Triggered (root cause confirmed; quiescence-protocol fix deferred to ADR-006 Phase 2 increment 2)
+**Status:**        **Resolved** (2026-05-21, ADR-006 Phase 2 increment 2) — `ICorDebugController::Stop` before `Detach` synchronizes the process so no callback flush is in flight when the shim is torn down. Validated by probe 08 (3/3 clean detach under continuous flood; finding 15). The minimal fix sufficed — the proposed `SetAllThreadsDebugState`/`HasQueuedCallbacks` escalation was not needed.
 **Surfaced:**      2026-05-21, by probe 07 (continue-loop live smoke). The continue-loop PASSED (591 callbacks drained); teardown segfaulted under a continuous event flood.
 **Last reviewed:** 2026-05-21
-**Promotes to:**   ADR-006 Phase 2 increment 2 — clean-detach quiescence protocol, alongside breakpoints/stepping.
+**Promotes to:**   ADR-006 Phase 2 increment 2 — clean-detach quiescence (done: `DebugSession.Quiesce()` → `Stop`).
 
 ## Description
 
@@ -24,11 +24,11 @@ Retaining our resources only moved the fault from our vtable into mscordbi's own
 
 `DebugSession.Dispose` (or an explicit `Detach`) while the target is actively generating managed events fast enough that mscordbi has queued callbacks pending. Quiet targets (the common DrHook case — inspect a process, occasional breakpoints) are unaffected: probe 05 detached from a 0-queued-callback state with hr=0 and no crash.
 
-## Current state
+## Resolution
 
-- `DebugSession.Dispose` uses the quiet-detach teardown (Detach → Terminate → Release → free callback → unload dbgshim). Correct when the queue is empty; documented inline as a known limit with a pointer here.
-- The continue-loop itself (`CallbackPump`) is validated and unaffected — this is purely a teardown-ordering limit.
-- No guard in `Dispose` against the busy case yet; under a flood it will crash. Acceptable for the current PoC-to-engine stage because the validated use is quiet-target inspection, but it must be closed before DrHook.Engine replaces netcoredbg in `DrHook.Core`.
+`DebugSession.Dispose` now calls `Quiesce()` — `_controller.Stop(0)` — before `Detach()`. `Stop` is synchronous: it returns only once dispatch is quiet and the debuggee is halted, so `Detach` no longer races mscordbi's RC-event-thread flush. Probe 08 (`08-quiesce-detach-smoke.cs`) disposes the engine while the target is *still flooding* — the exact probe-07 crash scenario — and detaches cleanly 3/3, leaving the target running. Continue-loop (`CallbackPump`) was always unaffected; this was purely a teardown-ordering bug.
+
+Empirically, only `Stop` was needed — the `SetAllThreadsDebugState(SUSPEND)` + `HasQueuedCallbacks`-drain escalation in mitigation (1) below proved unnecessary on CoreCLR 10 / macOS-arm64. See finding 15.
 
 ## Candidate mitigations
 

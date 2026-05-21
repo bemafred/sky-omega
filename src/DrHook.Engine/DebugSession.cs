@@ -92,24 +92,28 @@ public sealed class DebugSession : IDisposable
         _detached = true;
     }
 
+    /// <summary>Synchronize the target before Detach so mscordbi's RC event thread is not
+    /// mid-flush of queued callbacks when Detach tears down the shim (finding 14). Stop blocks
+    /// until the process is synchronized; best-effort (a failing HRESULT falls through to
+    /// Detach rather than throwing on the dispose path).</summary>
+    private void Quiesce() => _controller.Stop(0);
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
         // Stop our worker first: it drives controller.Continue, so it must be joined before
-        // we touch the controller.
+        // we touch the controller for the quiescent detach.
         _pump.Dispose();
 
-        // KNOWN LIMIT (probe 07 / finding 14 / docs/limits/drhook-clean-detach.md): Detach is
-        // safe only when mscordbi's callback queue is quiet. Against a target that floods
-        // managed events (continuous thread/exception churn), the RC event thread is still
-        // flushing queued callbacks when Detach tears down the shim, and it segfaults mid-flush
-        // (EXC_BAD_ACCESS on CordbRCEventThread → ShimProxyCallback::CreateThread::Dispatch) —
-        // independent of our callback's lifetime (retaining it only moves the fault into
-        // mscordbi's own shim). The fix is a quiescence protocol (Stop → suspend threads →
-        // drain HasQueuedCallbacks → Detach), tracked as ADR-006 Phase 2 increment 2. This
-        // teardown is correct for a quiet detach (probe 05: 0 queued events, clean hr=0).
+        // Quiescent detach (ADR-006 Phase 2 increment 2; finding 14 / docs/limits/drhook-clean-detach.md).
+        // Detach must not race mscordbi's RC event thread flushing queued callbacks — that
+        // segfaults the shim mid-flush under load (probe 07). Stop() synchronizes the process:
+        // it blocks until any in-flight dispatch completes and the debuggee is halted, so no
+        // flush is in progress when Detach tears down the shim. Detach from the synchronized
+        // state is the probe-05-validated safe path.
+        Quiesce();
         Detach();
         _cordbg.Terminate();
 
