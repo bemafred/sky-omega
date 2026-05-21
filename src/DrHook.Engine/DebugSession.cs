@@ -18,6 +18,7 @@ public sealed class DebugSession : IDisposable
     private static readonly ComWrappers Wrappers = new StrategyBasedComWrappers();
 
     private readonly DbgShim _dbgShim;
+    private readonly CallbackPump _pump;
     private readonly ManagedCallbackHost _callback;
     private readonly ICorDebug _cordbg;
     private readonly ICorDebugController _controller;
@@ -26,11 +27,12 @@ public sealed class DebugSession : IDisposable
     private bool _detached;
     private bool _disposed;
 
-    private DebugSession(int processId, DbgShim dbgShim, ManagedCallbackHost callback,
+    private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, nint pUnknown, nint pProcess)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
+        _pump = pump;
         _callback = callback;
         _cordbg = cordbg;
         _controller = controller;
@@ -49,6 +51,7 @@ public sealed class DebugSession : IDisposable
         ArgumentNullException.ThrowIfNull(sink);
 
         DbgShim dbgShim = DbgShim.Load();
+        CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
         nint pUnknown = 0;
         try
@@ -58,16 +61,22 @@ public sealed class DebugSession : IDisposable
             var cordbg = (ICorDebug)Wrappers.GetOrCreateObjectForComInstance(pUnknown, CreateObjectFlags.None);
             ThrowIfFailed(cordbg.Initialize(), "ICorDebug.Initialize");
 
-            callback = new ManagedCallbackHost(sink);
+            pump = new CallbackPump(sink);
+            callback = new ManagedCallbackHost(pump);
             ThrowIfFailed(cordbg.SetManagedHandler(callback.NativePointer), "ICorDebug.SetManagedHandler");
 
             ThrowIfFailed(cordbg.DebugActiveProcess((uint)processId, 0, out nint pProcess), "ICorDebug.DebugActiveProcess");
             var controller = (ICorDebugController)Wrappers.GetOrCreateObjectForComInstance(pProcess, CreateObjectFlags.None);
 
-            return new DebugSession(processId, dbgShim, callback, cordbg, controller, pUnknown, pProcess);
+            // Drive the continue-loop now that the process controller exists. Callbacks
+            // enqueued since SetManagedHandler (if any) drain immediately.
+            pump.Start(() => controller.Continue(0));
+
+            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, pUnknown, pProcess);
         }
         catch
         {
+            pump?.Dispose();
             callback?.Dispose();
             if (pUnknown != 0) Marshal.Release(pUnknown);
             dbgShim.Dispose();
@@ -87,6 +96,10 @@ public sealed class DebugSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        // Stop the worker first: it calls controller.Continue, so it must be joined before
+        // we Detach/Terminate and release the controller (otherwise it races teardown).
+        _pump.Dispose();
 
         Detach();
         _cordbg.Terminate();

@@ -120,8 +120,9 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 `DebugSession`/`IDebugEventSink` (`DebugSession.cs`, `IDebugEventSink.cs`) compose the validated pieces into the attach/detach lifecycle.
 
 ### Phase 2 — Stepping primitives
-- [ ] continue-loop / CallbacksQueue (finding 12 pattern)
+- [x] continue-loop / CallbacksQueue (finding 12 pattern) — `CallbackPump.cs`. The callback thunks enqueue + return S_OK on mscordbi's event thread; a background worker drains, surfaces each event to the user sink, then `Continue`s for the next. `DebugSession.Attach` constructs the pump, hands it to `ManagedCallbackHost` as the sink, and calls `pump.Start(() => controller.Continue(0))` once the controller exists; `Dispose` joins the worker before Detach (it drives `Continue`). 4 in-process drain tests (backlog-before-start, post-start steady state, one-Continue-per-event, late-event-after-dispose dropped). The tests surfaced + fixed two production defects: non-idempotent `Dispose` and an `OnEvent` swallow clause too narrow for the disposed-queue shutdown state. (Live multi-callback flow against a real debuggee — the empirical "unsticks the single-event-then-stuck Phase-1 behavior" claim — remains the on-top smoke, per the testability limits doc.)
 - [ ] breakpoints (`ICorDebugFunctionBreakpoint`), stepping (over/into/out), stack frames + variables (direct inspection, no func-eval v1)
+- [ ] "stopping" event handling in the pump (breakpoint hit / step complete skip the auto-Continue and surface a stop to the caller)
 - [ ] regression: DrHook stepping tools pass without netcoredbg
 
 ### Phase 3 — Switchover
