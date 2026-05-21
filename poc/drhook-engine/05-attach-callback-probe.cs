@@ -262,7 +262,8 @@ static unsafe class Probe05
         try { iCorDebug = (ICorDebug)cw.GetOrCreateObjectForComInstance(pUnknown, CreateObjectFlags.None); }
         catch (Exception ex) { Console.Error.WriteLine($"FALSIFIED (RCW): {ex.Message}"); Marshal.Release(pUnknown); closeCLREnumeration(handleArray, stringArray, count); NativeLibrary.Free(lib); return 8; }
 
-        if (iCorDebug.Initialize() is int hi && hi < 0) { Console.Error.WriteLine($"FALSIFIED (Initialize): 0x{hi:X8}"); Marshal.Release(pUnknown); closeCLREnumeration(handleArray, stringArray, count); NativeLibrary.Free(lib); return 9; }
+        int hi = iCorDebug.Initialize();
+        if (hi < 0) { Console.Error.WriteLine($"FALSIFIED (Initialize): 0x{hi:X8}"); Marshal.Release(pUnknown); closeCLREnumeration(handleArray, stringArray, count); NativeLibrary.Free(lib); return 9; }
         Console.WriteLine("Initialize : S_OK");
 
         var stub = new AttachCallback();
@@ -270,7 +271,8 @@ static unsafe class Probe05
         try { pCallback = cw.GetOrCreateComInterfaceForObject(stub, CreateComInterfaceFlags.None); }
         catch (Exception ex) { Console.Error.WriteLine($"FALSIFIED (callback CCW): {ex.Message}"); iCorDebug.Terminate(); Marshal.Release(pUnknown); closeCLREnumeration(handleArray, stringArray, count); NativeLibrary.Free(lib); return 11; }
 
-        if (iCorDebug.SetManagedHandler(pCallback) is int hs && hs < 0) { Console.Error.WriteLine($"FALSIFIED (SetManagedHandler): 0x{hs:X8}"); Marshal.Release(pCallback); iCorDebug.Terminate(); Marshal.Release(pUnknown); closeCLREnumeration(handleArray, stringArray, count); NativeLibrary.Free(lib); GC.KeepAlive(stub); return 12; }
+        int hs = iCorDebug.SetManagedHandler(pCallback);
+        if (hs < 0) { Console.Error.WriteLine($"FALSIFIED (SetManagedHandler): 0x{hs:X8}"); Marshal.Release(pCallback); iCorDebug.Terminate(); Marshal.Release(pUnknown); closeCLREnumeration(handleArray, stringArray, count); NativeLibrary.Free(lib); GC.KeepAlive(stub); return 12; }
         Console.WriteLine("SetHandler : S_OK");
 
         // ---- THE INVASIVE STEP: attach ----
@@ -291,15 +293,23 @@ static unsafe class Probe05
 
         var controller = (ICorDebugController)cw.GetOrCreateObjectForComInstance(pProcess, CreateObjectFlags.None);
 
+        // FINDING (run 1+2): after DebugActiveProcess the process is RUNNING, not stopped —
+        // an explicit Continue here returns CORDBG_E_SUPERFLOUS_CONTINUE (0x8013132F). And
+        // modern CoreCLR does NOT replay catch-up Create/Load events on attach the way
+        // desktop .NET Framework did, so a PARKED target generates no callbacks. The target
+        // must produce a LIVE managed event post-attach (thread start / module load /
+        // exception); each such event is a synchronized stop. The stub records the first one
+        // (no Continue) and the main thread Detaches from that stopped state.
+
         bool fired;
         int hrDetach;
         try
         {
-            fired = stub.Fired.Wait(TimeSpan.FromSeconds(5));
+            fired = stub.Fired.Wait(TimeSpan.FromSeconds(15));
             if (fired)
                 Console.WriteLine($"callback   : FIRED  first='{stub.FirstEvent}'  count={stub.Count}  <-- SLOT DISPATCH VALIDATED");
             else
-                Console.WriteLine("callback   : none within 5s (attached but no dispatch — finding)");
+                Console.WriteLine("callback   : none within 15s (attached but no dispatch — see finding 10)");
         }
         finally
         {
