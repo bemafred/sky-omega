@@ -1,6 +1,6 @@
 # ADR-009: Substrate Dependency Policy — Four-Axis Admission Rule
 
-**Status:** Accepted — 2026-05-19
+**Status:** Accepted — 2026-05-19 (clarified 2026-05-21 — native runtime-substrate assets, see Clarification section)
 
 ## Context
 
@@ -31,6 +31,16 @@ Out of scope (permissive policies apply):
 - **Tools and dev infrastructure** (`tools/`, `scripts/`) — operational tooling, separate from substrate sovereignty.
 
 The reason for the substrate / cognitive-component scope is that those components are what Sky Omega *ships*. Dev-time infrastructure can use whatever serves the discipline of building and validating the shipping substrate.
+
+## Clarification (2026-05-21): native runtime-substrate assets are not managed dependencies
+
+The four-axis test governs **managed NuGet dependencies** — packages whose managed API surface the substrate binds to, carrying their own versioning, naming, and package semantics. It does **not** govern **native runtime-substrate assets**: the .NET runtime's own native components (`libcoreclr`, `libdbgshim`, `libmscordbi`, the apphost), the operating system, and the hardware. These are the platform Sky Omega *executes on*, reached via P/Invoke — the same category as Minerva's direct hardware access. They are depended-upon the way the OS kernel and the CPU are: not "admitted" through any test, because there is no alternative and no meaningful "walk away." They are below the dependency line — they are the substrate itself.
+
+**Surfaced by DrHook.Engine probe 02 (2026-05-21).** `dbgshim` — the native shim that bridges to `ICorDebug` — is absent from the .NET runtime install for .NET 7+; it moved to `dotnet/diagnostics` and now ships via the `Microsoft.Diagnostics.DbgShim[.<rid>]` NuGet. But that NuGet is a **redistribution vehicle for a native binary** (`runtimes/<rid>/native/libdbgshim.dylib`), not a managed API the substrate references. The engine `dlopen`s / P/Invokes `libdbgshim`; it binds to no managed surface. dbgshim is therefore part of the .NET debugging substrate — the same category as `libcoreclr` — and is relied upon as platform, not admitted via the four axes. As put during the 2026-05-21 review: *we have no choice but to rely on it; it must be viewed as very much a part of .NET itself.*
+
+**Why axis 4 (replaceability) does not apply.** Replaceability tests whether a *dependency* can hold us hostage. A runtime-substrate asset cannot be meaningfully reimplemented — you cannot rewrite `libcoreclr`, the kernel, or the debugging shim — and that impossibility is exactly what marks it as platform rather than dependency. Substrate independence was never about avoiding the platform (that would mean writing our own runtime — the Context #2 reductio); it was about avoiding application-framework dependencies with their own semantics.
+
+**The distinction in one line:** bind to a *managed API* → it faces the four axes; P/Invoke a *native binary that is part of the runtime / OS / hardware* → it is platform substrate and faces none.
 
 ## Decision
 

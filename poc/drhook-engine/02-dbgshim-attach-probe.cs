@@ -35,8 +35,12 @@
 //             5 CreateVersionStringFromModule; 6 CreateDebuggingInterface;
 //             7 QueryInterface(ICorDebug).
 
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 return Probe02.Run(args);
 
@@ -142,7 +146,7 @@ static unsafe class Probe02
 
         // ---- step 4: QueryInterface(IID_ICorDebug) — the confirmation ----
         Guid iid = IID_ICorDebug;
-        hr = Marshal.QueryInterface(pUnknown, ref iid, out nint pCordb);
+        hr = Marshal.QueryInterface(pUnknown, in iid, out nint pCordb);
         if (hr < 0 || pCordb == 0)
         {
             Console.Error.WriteLine($"FALSIFIED (QueryInterface ICorDebug): hr=0x{hr:X8} pCordb=0x{pCordb:X}");

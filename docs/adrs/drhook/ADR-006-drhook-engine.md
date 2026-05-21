@@ -1,6 +1,6 @@
 # ADR-006: DrHook.Engine — Native ICorDebug Replacement for netcoredbg
 
-**Status:** Proposed — 2026-04-17 (substantially amended 2026-05-19 per [ADR-009 Substrate Dependency Policy](../ADR-009-substrate-dependency-policy.md); scope narrowed from "BCL-only across all three protocol layers" to "BCL-only Layer 3 ICorDebug only; Layers 1–2 use the substrate-admitted dependency `Microsoft.Diagnostics.NETCore.Client`")
+**Status:** Proposed — 2026-04-17 (substantially amended 2026-05-19 per [ADR-009 Substrate Dependency Policy](../ADR-009-substrate-dependency-policy.md); scope narrowed from "BCL-only across all three protocol layers" to "BCL-only Layer 3 ICorDebug only; Layers 1–2 use the substrate-admitted dependency `Microsoft.Diagnostics.NETCore.Client`"; **noted 2026-05-21** after probe 02 — the engine also relies on the native runtime-substrate asset `libdbgshim`, classified as platform per the [ADR-009 clarification](../ADR-009-substrate-dependency-policy.md), not as a managed dependency)
 
 **Context:** Emergence during parser-fix session (2026-04-17) — raised as a substrate-independence follow-up after the netcoredbg func-eval limitation made clear that wrapping an external debugger is architecturally fragile. **Amended 2026-05-19** after [ADR-009](../ADR-009-substrate-dependency-policy.md) introduced the four-axis admission rule. Under that rule, `Microsoft.Diagnostics.NETCore.Client` passes all four axes and is admitted as a substrate-admitted dependency; netcoredbg fails on three of four axes and remains excluded. This amendment narrows the engine work to the layer that actually fails the policy — Layer 3 ICorDebug — rather than reimplementing layers that pass it. The substrate-independence claim now reads "zero spawns of netcoredbg" rather than "zero external diagnostic-protocol dependencies of any kind."
 
@@ -40,11 +40,17 @@ Build **DrHook.Engine** as a new project under `src/DrHook.Engine/` that replace
 
 Both layers are characterized in [`poc/drhook-engine/findings/01-ipc-protocol-survey.md`](../../../poc/drhook-engine/findings/01-ipc-protocol-survey.md) — axis-4 reference material documenting what the admitted dependency does under the hood, for v2 walk-back if a substrate-driven reason ever surfaces.
 
+### Native runtime-substrate asset: `libdbgshim` (per ADR-009 clarification, 2026-05-21)
+
+The engine P/Invokes `libdbgshim` — the native shim that bridges to `ICorDebug`. Per the [ADR-009 clarification (2026-05-21)](../ADR-009-substrate-dependency-policy.md), this is a **native runtime-substrate asset**, not a managed dependency: it is part of the .NET debugging substrate (the same category as `libcoreclr`), relied upon as platform and faced by none of the four axes. We have no choice but to rely on it; it is part of .NET itself.
+
+**Deployment (probe 02 finding, 2026-05-21).** `libdbgshim` is not in the .NET runtime install for .NET 7+. The engine must obtain it via the `Microsoft.Diagnostics.DbgShim[.<rid>]` NuGet — which carries only the native binary under `runtimes/<rid>/native/` — and bundle it as a native asset, or locate a host-provided copy. Probe 02 validated the attach flow using a VS Code-bundled `libdbgshim.dylib`; the version-independent shim debugged a .NET 10 target without exact version-matching. The engine references no managed surface from that NuGet.
+
 ### Substrate work — Layer 3: native ICorDebug interop
 
 The substrate work concentrates on replacing netcoredbg with our own ICorDebug-via-P/Invoke implementation:
 
-- **dbgshim discovery + attach.** `dbgshim` ships with .NET runtime; provides the documented entry point to `ICorDebug` for a target process. BCL + P/Invoke only.
+- **dbgshim discovery + attach.** `dbgshim` is the native shim that bridges to `ICorDebug`; provides the documented entry point for a target process. BCL + P/Invoke only. **Correction (probe 02, 2026-05-21):** `libdbgshim` is NOT in the .NET runtime install for .NET 7+ — it moved to `dotnet/diagnostics` and ships via the `Microsoft.Diagnostics.DbgShim[.<rid>]` native-asset NuGet. See the native runtime-substrate asset subsection below.
 - **COM interop scaffolding.** `[ComImport]` interfaces for `ICorDebug` and its children; V-table thunks for the managed callback interface (`ICorDebugManagedCallback`); managed/unmanaged lifetime management. `ComWrappers` (.NET 5+) is the substrate-aligned interop surface; legacy COM RCWs are not used.
 - **Process attach / launch.**
 - **Breakpoint set / hit / clear** via `ICorDebugBreakpoint`.
