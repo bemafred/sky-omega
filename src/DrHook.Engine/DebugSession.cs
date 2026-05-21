@@ -93,6 +93,11 @@ public sealed class DebugSession : IDisposable
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
     public void Resume() => _pump.Resume();
 
+    /// <summary>Names of the modules loaded in the target (process → app domains → assemblies →
+    /// modules). Valid only while the debuggee is stopped (after <see cref="WaitForStop"/>) —
+    /// ICorDebug enumeration requires the process to be synchronized.</summary>
+    public IReadOnlyList<string> EnumerateModules() => RuntimeNavigation.ModuleNames(_pProcess);
+
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {

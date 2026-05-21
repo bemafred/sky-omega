@@ -1,0 +1,17 @@
+# DrHook.Engine probe 10 fixture — process→module navigation (ADR-006 Phase 2, 4a)
+timestamp        = 2026-05-21T23:22:09.5338350Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 99785
+module-count     = 8
+corelib-present  = True
+verdict          = PASSED
+modules:
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/System.Runtime.InteropServices.dll
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/System.Threading.Thread.dll
+  /Users/bemafred/Library/Application Support/dotnet/runfile/09-break-target-c25afe8fd7e10dabaadecb230b9c88b8e4e1c4cd85fa93d6928c57e6554fbfa4/bin/debug/09-break-target.dll
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/System.Console.dll
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/System.Private.CoreLib.dll
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/Microsoft.Win32.Primitives.dll
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/System.Threading.dll
+  /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/System.Runtime.dll
