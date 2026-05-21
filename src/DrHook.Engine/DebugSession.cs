@@ -97,10 +97,19 @@ public sealed class DebugSession : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // Stop the worker first: it calls controller.Continue, so it must be joined before
-        // we Detach/Terminate and release the controller (otherwise it races teardown).
+        // Stop our worker first: it drives controller.Continue, so it must be joined before
+        // we touch the controller.
         _pump.Dispose();
 
+        // KNOWN LIMIT (probe 07 / finding 14 / docs/limits/drhook-clean-detach.md): Detach is
+        // safe only when mscordbi's callback queue is quiet. Against a target that floods
+        // managed events (continuous thread/exception churn), the RC event thread is still
+        // flushing queued callbacks when Detach tears down the shim, and it segfaults mid-flush
+        // (EXC_BAD_ACCESS on CordbRCEventThread → ShimProxyCallback::CreateThread::Dispatch) —
+        // independent of our callback's lifetime (retaining it only moves the fault into
+        // mscordbi's own shim). The fix is a quiescence protocol (Stop → suspend threads →
+        // drain HasQueuedCallbacks → Detach), tracked as ADR-006 Phase 2 increment 2. This
+        // teardown is correct for a quiet detach (probe 05: 0 queued events, clean hr=0).
         Detach();
         _cordbg.Terminate();
 
