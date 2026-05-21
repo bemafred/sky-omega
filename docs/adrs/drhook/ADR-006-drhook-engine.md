@@ -109,12 +109,12 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 ### Phase 0 — PoC validation ✅ COMPLETE (2026-05-18 → 2026-05-21)
 `poc/drhook-engine/`, findings 01–13. Probe 02 (dbgshim attach + QI), 03 (source-gen COM consume + lifecycle), 04 (callback V-table registration), 05 (attach + detach, no entitlement; CCW delivery blocked), 06 (`[UnmanagedCallersOnly]` vtable receives callbacks — A2). The interop model is proven.
 
-### Phase 1 — Engine project scaffolding (core interop ✅ 2026-05-21; facade + tests remain)
+### Phase 1 — Engine project scaffolding ✅ COMPLETE (2026-05-21)
 - [x] `src/DrHook.Engine/` project, in `SkyOmega.sln`, refs admitted `Microsoft.Diagnostics.NETCore.Client`. Builds warning-clean under `TreatWarningsAsErrors`. (`libdbgshim` native-asset *bundling* deferred — `DbgShim.cs` uses a resilient resolver: `DBGSHIM_PATH` → app base → runtime dir → NuGet cache.)
 - [x] dbgshim load + corrected attach flow — `Interop/DbgShim.cs`
 - [x] source-gen COM RCW interfaces — `Interop/CorDebug.cs` (`ICorDebug`, `ICorDebugController`; `ICorDebugProcess` deferred to Phase 2 when its methods are needed)
 - [x] `ICorDebugManagedCallback`(+2/3/4) `[UnmanagedCallersOnly]` vtable with **instance dispatch** (GCHandle recovery from the COM block) — `Interop/ManagedCallbackHost.cs`. Validated end-to-end via a `DebugSession` smoke test: attach → `CreateProcess` callback delivered → detach.
-- [ ] `ProcessAttacher`/observation tools wired through the admitted NuGet facade
+- [x] observation facade — `Observation/ProcessInspector.cs` wraps the admitted `DiagnosticsClient` (Layer-1 .NET-process discovery via `GetPublishedProcesses`) + BCL `System.Diagnostics.Process` (Tier-1 metrics: working set, threads, CPU time, native module count). 3 self-inspection tests. Managed-assembly enumeration via EventPipe (Layer 2 / TraceEvent — a separate ADR-009 admission) is a follow-up.
 - [x] in-process layer tests (testability-first, primary surface per `docs/limits/drhook-testability.md`) — `tests/DrHook.Engine.Tests` drives the callback vtable *in-process*, the test playing the native caller: QI multi-interface dispatch, V-table slot layout (`CreateProcess`@9, `FunctionRemapOpportunity`@v2-3), and GCHandle instance recovery (two hosts route to their own sinks). 5 tests, deterministic, no debuggee/dbgshim. (Live-debuggee integration smoke + recorded callback-fixture replay remain as on-top follow-ups.)
 
 `DebugSession`/`IDebugEventSink` (`DebugSession.cs`, `IDebugEventSink.cs`) compose the validated pieces into the attach/detach lifecycle.
