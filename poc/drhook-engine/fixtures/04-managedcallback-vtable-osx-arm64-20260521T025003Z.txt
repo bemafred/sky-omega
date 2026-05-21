@@ -1,0 +1,13 @@
+# DrHook.Engine probe 04 fixture — ICorDebugManagedCallback V-table via [GeneratedComClass]
+timestamp        = 2026-05-21T02:50:03.3828040Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 9600
+coreclr-path     = /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/libcoreclr.dylib
+version-string   = 00000004;00002580;0000000105CA4000
+callback-ifaces  = ICorDebugManagedCallback + 2 + 3 + 4 (38 methods)
+ccw-create       = OK ([GeneratedComClass] + GetOrCreateComInterfaceForObject)
+initialize-hr    = 0x00000000
+setmanagedhandler-hr = 0x00000000
+terminate-hr     = 0x00000000
+unexpected-dispatches = 0  (expected 0 — probe 04 does not attach)
