@@ -109,13 +109,15 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 ### Phase 0 — PoC validation ✅ COMPLETE (2026-05-18 → 2026-05-21)
 `poc/drhook-engine/`, findings 01–13. Probe 02 (dbgshim attach + QI), 03 (source-gen COM consume + lifecycle), 04 (callback V-table registration), 05 (attach + detach, no entitlement; CCW delivery blocked), 06 (`[UnmanagedCallersOnly]` vtable receives callbacks — A2). The interop model is proven.
 
-### Phase 1 — Engine project scaffolding
-- [ ] `src/DrHook.Engine/` (BCL + admitted `Microsoft.Diagnostics.NETCore.Client`; bundles `libdbgshim` native asset)
-- [ ] dbgshim load + corrected attach flow (port the probe-02/06 code)
-- [ ] source-gen COM RCW interfaces (`ICorDebug`, `ICorDebugController`, `ICorDebugProcess`, …)
-- [ ] `ICorDebugManagedCallback`(+2/3/4) `[UnmanagedCallersOnly]` vtable with instance state
+### Phase 1 — Engine project scaffolding (core interop ✅ 2026-05-21; facade + tests remain)
+- [x] `src/DrHook.Engine/` project, in `SkyOmega.sln`, refs admitted `Microsoft.Diagnostics.NETCore.Client`. Builds warning-clean under `TreatWarningsAsErrors`. (`libdbgshim` native-asset *bundling* deferred — `DbgShim.cs` uses a resilient resolver: `DBGSHIM_PATH` → app base → runtime dir → NuGet cache.)
+- [x] dbgshim load + corrected attach flow — `Interop/DbgShim.cs`
+- [x] source-gen COM RCW interfaces — `Interop/CorDebug.cs` (`ICorDebug`, `ICorDebugController`; `ICorDebugProcess` deferred to Phase 2 when its methods are needed)
+- [x] `ICorDebugManagedCallback`(+2/3/4) `[UnmanagedCallersOnly]` vtable with **instance dispatch** (GCHandle recovery from the COM block) — `Interop/ManagedCallbackHost.cs`. Validated end-to-end via a `DebugSession` smoke test: attach → `CreateProcess` callback delivered → detach.
 - [ ] `ProcessAttacher`/observation tools wired through the admitted NuGet facade
 - [ ] in-process synthetic test target + callback-fixture replay (testability-first)
+
+`DebugSession`/`IDebugEventSink` (`DebugSession.cs`, `IDebugEventSink.cs`) compose the validated pieces into the attach/detach lifecycle.
 
 ### Phase 2 — Stepping primitives
 - [ ] continue-loop / CallbacksQueue (finding 12 pattern)

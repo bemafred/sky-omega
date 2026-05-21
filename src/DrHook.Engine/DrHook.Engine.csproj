@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+        <RootNamespace>SkyOmega.DrHook.Engine</RootNamespace>
+        <AssemblyName>SkyOmega.DrHook.Engine</AssemblyName>
+        <Description>DrHook.Engine — native ICorDebug runtime inspection (BCL + P/Invoke + source-gen COM), replacing netcoredbg. See docs/adrs/drhook/ADR-006.</Description>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Layers 1-2 (Diagnostic IPC + EventPipe) — substrate-admitted managed dependency per ADR-009. -->
+        <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.*" />
+    </ItemGroup>
+
+    <!--
+      libdbgshim (the native shim to ICorDebug) is a native runtime-substrate asset per the
+      ADR-009 clarification, NOT a managed dependency. It is resolved at runtime by
+      Interop/DbgShim.cs (DBGSHIM_PATH override → runtime dir → NuGet cache). Bundling it from
+      the Microsoft.Diagnostics.DbgShim native-asset NuGet is a packaging refinement (Phase 1
+      follow-up); the resilient resolver covers dev/test in the meantime. Baseline:
+      Microsoft.Diagnostics.DbgShim.osx-arm64 9.0.661903 (finding 11).
+    -->
+
+</Project>
