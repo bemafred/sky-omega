@@ -1,6 +1,6 @@
 # Finding 12: netcoredbg Event Loop — the callback must (likely) be native, not a managed CCW
 
-**Status:**   Epistemics — root-cause hypothesis for probe 05's callback-delivery blocker, grounded in netcoredbg's source. The decisive confirmation is probe 06 (an `[UnmanagedCallersOnly]` raw-vtable callback).
+**Status:**   Epistemics — root-cause hypothesis for probe 05's callback-delivery blocker, grounded in netcoredbg's source. **CONFIRMED A2 by [finding 13](13-probe-06-outcome.md):** a raw `[UnmanagedCallersOnly]` vtable receives delivery; the cause was ComWrappers object-CCW dispatch (candidate #3), not the managed transition (#1/#2 ruled out — the transition works). BCL-only callback layer is viable.
 **Date:**     2026-05-21
 **Read:**     `Samsung/netcoredbg` `src/debugger/manageddebugger.cpp`, `managedcallback.cpp`, `managedcallback.h`.
 

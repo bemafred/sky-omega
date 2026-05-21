@@ -1,6 +1,6 @@
 # Finding 10: Probe 05 Outcome — PARTIAL (attach works; callback delivery BLOCKED)
 
-**Status:**   PARTIAL / BLOCKED. The attach → detach → terminate lifecycle works end-to-end with **no macOS entitlement wall** (a major positive). But managed callbacks never reach our CCW, so **slot dispatch is NOT validated**. Root cause is non-obvious and needs an Epistemics step — not more guess-iteration.
+**Status:**   PARTIAL / BLOCKED → **RESOLVED by probe 06 ([finding 13](13-probe-06-outcome.md)).** The attach → detach → terminate lifecycle works end-to-end with **no macOS entitlement wall** (a major positive). Managed callbacks never reached our *ComWrappers CCW* — root cause: ComWrappers object-CCW dispatch (not the managed transition). **Resolution:** use a hand-rolled `[UnmanagedCallersOnly]` vtable for the callback (probe 06) — slot dispatch then validated (`CreateProcess` fired). The notes below are the original investigation; the library was ruled out by finding 11 and the mechanism by finding 13.
 **Date:**     2026-05-21
 **Probe:**    `poc/drhook-engine/05-attach-callback-probe.cs`
 **Runs:**     three, against two disposable targets (a parked sleeper, then a thread-generating worker).
