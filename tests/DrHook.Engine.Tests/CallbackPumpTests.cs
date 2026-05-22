@@ -32,9 +32,9 @@ public sealed class CallbackPumpTests
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
 
-        pump.OnCallback(CallbackKind.Informational, "CreateProcess", 0, 0);
-        pump.OnCallback(CallbackKind.Informational, "CreateAppDomain", 0, 0);
-        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateProcess", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateAppDomain", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
 
         pump.Start((_, _) => 0);
         pump.Dispose();
@@ -49,8 +49,8 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
 
         pump.Start((_, _) => 0);
-        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
-        pump.OnCallback(CallbackKind.Informational, "LoadClass", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadClass", 0, 0, 0);
         pump.Dispose();
 
         Assert.Equal(new[] { "LoadModule", "LoadClass" }, sink.Events.ToArray());
@@ -63,9 +63,9 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
 
         int continues = 0;
-        pump.OnCallback(CallbackKind.Informational, "CreateProcess", 0, 0);
-        pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0);
-        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateProcess", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
 
         pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; });
         pump.Dispose();
@@ -84,7 +84,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; });
 
         // A breakpoint hit must NOT be auto-continued — the worker parks at the stop.
-        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234);
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234, 0);
 
         StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
         Assert.NotNull(stop);
@@ -108,7 +108,7 @@ public sealed class CallbackPumpTests
         pump.Start((kind, thread) => { seenKind = kind; Volatile.Write(ref seenThread, thread); return 0; });
 
         // Park at a stop carrying a specific thread pointer, then step.
-        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD);
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD, 0);
         Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
 
         pump.StepOver();
@@ -125,7 +125,7 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
 
         pump.Start((_, _) => 0);
-        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0, 0);
 
         StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
         Assert.NotNull(stop);
@@ -140,7 +140,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => 0);
 
         // Only informational traffic — no stop should ever surface.
-        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0, 0);
 
         Assert.Null(pump.WaitForStop(TimeSpan.FromMilliseconds(200)));
     }
@@ -154,7 +154,7 @@ public sealed class CallbackPumpTests
         pump.Start((_, _) => 0);
         pump.Dispose();
 
-        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0);
+        pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0, 0);
 
         Assert.DoesNotContain("ExitProcess", sink.Events);
     }

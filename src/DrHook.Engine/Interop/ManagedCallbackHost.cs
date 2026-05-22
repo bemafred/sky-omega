@@ -49,11 +49,11 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
         => GCHandle.FromIntPtr(*(nint*)(pThis + sizeof(nint))).Target as ManagedCallbackHost;
 
     private static int Fire(nint pThis, string name)
-        => Fire(pThis, CallbackKind.Informational, name, 0, 0);
+        => Fire(pThis, CallbackKind.Informational, name, 0, 0, 0);
 
-    private static int Fire(nint pThis, CallbackKind kind, string name, nint appDomain, nint thread)
+    private static int Fire(nint pThis, CallbackKind kind, string name, nint appDomain, nint thread, int detail = 0)
     {
-        HostOf(pThis)?._sink.OnCallback(kind, name, appDomain, thread);
+        HostOf(pThis)?._sink.OnCallback(kind, name, appDomain, thread, detail);
         return S_OK;
     }
 
@@ -197,7 +197,7 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int CreateConnection(nint p, nint proc, uint id, nint name) => Fire(p, "CreateConnection");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ChangeConnection(nint p, nint proc, uint id) => Fire(p, "ChangeConnection");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int DestroyConnection(nint p, nint proc, uint id) => Fire(p, "DestroyConnection");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Exception2(nint p, nint a, nint t, nint f, uint off, int evt, uint flags) => Fire(p, "Exception2");
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Exception2(nint p, nint a, nint t, nint f, uint off, int evt, uint flags) => Fire(p, CallbackKind.Exception, "Exception", a, t, evt);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ExceptionUnwind(nint p, nint a, nint t, int evt, uint flags) => Fire(p, "ExceptionUnwind");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int FunctionRemapComplete(nint p, nint a, nint t, nint f) => Fire(p, "FunctionRemapComplete");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int MDANotification(nint p, nint ctrl, nint t, nint mda) => Fire(p, "MDANotification");

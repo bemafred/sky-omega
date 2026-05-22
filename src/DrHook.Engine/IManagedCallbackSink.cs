@@ -12,6 +12,7 @@ internal enum CallbackKind
     Break,
     EvalComplete,
     EvalException,
+    Exception,
 }
 
 /// <summary>The RECEIVE-direction contract from <see cref="Interop.ManagedCallbackHost"/> (the
@@ -19,10 +20,12 @@ internal enum CallbackKind
 /// implementation must enqueue and return promptly — it must never block that thread.</summary>
 internal interface IManagedCallbackSink
 {
-    void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread);
+    void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail);
 }
 
 /// <summary>A delivered callback queued for the worker. <paramref name="Thread"/> /
 /// <paramref name="AppDomain"/> are raw <c>ICorDebugThread</c>/<c>ICorDebugAppDomain</c>
-/// pointers, captured for stopping events (used by stepping in a later increment).</summary>
-internal readonly record struct CallbackEvent(CallbackKind Kind, string Name, nint AppDomain, nint Thread);
+/// pointers, captured for stopping events (used by stepping in a later increment).
+/// <paramref name="Detail"/> carries a callback-specific scalar — the
+/// <c>CorDebugExceptionCallbackType</c> for <see cref="CallbackKind.Exception"/>, else 0.</summary>
+internal readonly record struct CallbackEvent(CallbackKind Kind, string Name, nint AppDomain, nint Thread, int Detail);

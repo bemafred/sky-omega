@@ -87,6 +87,17 @@ internal static unsafe class MetadataResolver
         finally { Release(pImport); }
     }
 
+    /// <summary>The fully-qualified name (e.g. "System.InvalidOperationException") of the type given
+    /// by <paramref name="typeToken"/> (an <c>mdTypeDef</c> from <c>ICorDebugClass.GetToken</c>) in
+    /// <paramref name="pModule"/>'s metadata; empty string if unavailable. Opens its own import.</summary>
+    public static string TypeNameFromToken(nint pModule, uint typeToken)
+    {
+        nint pImport = GetMetaDataImport(pModule);
+        if (pImport == 0) return "";
+        try { return TypeName(pImport, typeToken); }
+        finally { Release(pImport); }
+    }
+
     private static string TypeName(nint pImport, uint typeToken)
     {
         if (typeToken == 0) return ""; // global/module-level method

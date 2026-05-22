@@ -15,10 +15,31 @@ public enum StopReason
     EvalComplete,
     /// <summary>A function evaluation threw (<c>ICorDebugManagedCallback.EvalException</c>).</summary>
     EvalException,
+    /// <summary>A managed exception was raised (<c>ICorDebugManagedCallback2.Exception</c>). The
+    /// phase (first-chance / unhandled / …) is in <see cref="StopInfo.ExceptionKind"/>.</summary>
+    Exception,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
 }
 
+/// <summary>The phase at which an exception stop was raised — the
+/// <c>CorDebugExceptionCallbackType</c> from <c>ICorDebugManagedCallback2.Exception</c> (values
+/// per cordebug.idl). <see cref="None"/> for non-exception stops.</summary>
+public enum ExceptionStopKind
+{
+    /// <summary>Not an exception stop.</summary>
+    None = 0,
+    /// <summary><c>DEBUG_EXCEPTION_FIRST_CHANCE</c> — fired when the exception is thrown.</summary>
+    FirstChance = 1,
+    /// <summary><c>DEBUG_EXCEPTION_USER_FIRST_CHANCE</c> — fired when the search reaches first user code.</summary>
+    UserFirstChance = 2,
+    /// <summary><c>DEBUG_EXCEPTION_CATCH_HANDLER_FOUND</c> — fired if & when the search finds a handler.</summary>
+    CatchHandlerFound = 3,
+    /// <summary><c>DEBUG_EXCEPTION_UNHANDLED</c> — fired if the search doesn't find a handler.</summary>
+    Unhandled = 4,
+}
+
 /// <summary>A synchronized stop surfaced to the caller. While stopped, the debuggee is frozen;
-/// call <see cref="DebugSession.Resume"/> to continue it.</summary>
-public sealed record StopInfo(StopReason Reason);
+/// call <see cref="DebugSession.Resume"/> to continue it. <see cref="ExceptionKind"/> is meaningful
+/// only when <see cref="Reason"/> is <see cref="StopReason.Exception"/>.</summary>
+public sealed record StopInfo(StopReason Reason, ExceptionStopKind ExceptionKind = ExceptionStopKind.None);

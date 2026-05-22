@@ -30,11 +30,13 @@ public sealed unsafe class ManagedCallbackHostTests
         public List<string> Events { get; } = new();
         public List<CallbackKind> Kinds { get; } = new();
         public List<nint> Threads { get; } = new();
-        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread)
+        public List<int> Details { get; } = new();
+        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail)
         {
             Events.Add(name);
             Kinds.Add(kind);
             Threads.Add(thread);
+            Details.Add(detail);
         }
     }
 
@@ -125,6 +127,32 @@ public sealed unsafe class ManagedCallbackHostTests
 
         Assert.Equal(S_OK, hr);
         Assert.Equal(new[] { "FunctionRemapOpportunity" }, sink.Events.ToArray());
+    }
+
+    [Fact]
+    public void Exception2Thunk_ClassifiesAsStopping_AndForwardsCallbackType()
+    {
+        var sink = new RecordingSink();
+        using var host = new ManagedCallbackHost(sink);
+        nint p = host.NativePointer;
+
+        var qi = (delegate* unmanaged[Cdecl]<nint, Guid*, nint*, int>)Slot(p, 0);
+        Guid id = IID_Callback2;
+        nint pV2;
+        Assert.Equal(S_OK, qi(p, &id, &pV2));
+
+        // ICorDebugManagedCallback2: IUnknown(0-2), FunctionRemapOpportunity(3), CreateConnection(4),
+        // ChangeConnection(5), DestroyConnection(6), Exception(7) — the rich exception callback.
+        // Signature: Exception(pThis, pAppDomain, pThread, pFrame, nOffset, dwEventType, dwFlags).
+        var exception = (delegate* unmanaged[Cdecl]<nint, nint, nint, nint, uint, int, uint, int>)Slot(pV2, 7);
+        const int DEBUG_EXCEPTION_FIRST_CHANCE = 1;
+        int hr = exception(pV2, 0xAA, 0xBB, 0, 0, DEBUG_EXCEPTION_FIRST_CHANCE, 0);
+
+        Assert.Equal(S_OK, hr);
+        Assert.Equal(new[] { "Exception" }, sink.Events.ToArray());
+        Assert.Equal(new[] { CallbackKind.Exception }, sink.Kinds.ToArray());          // stopping, not auto-continued
+        Assert.Equal(new nint[] { 0xBB }, sink.Threads.ToArray());                      // pThread forwarded
+        Assert.Equal(new[] { DEBUG_EXCEPTION_FIRST_CHANCE }, sink.Details.ToArray());   // CorDebugExceptionCallbackType forwarded
     }
 
     [Fact]

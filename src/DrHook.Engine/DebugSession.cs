@@ -191,6 +191,12 @@ public sealed class DebugSession : IDisposable
         return Variables.ReadActiveFrameLocals(_pump.StopThread, names);
     }
 
+    /// <summary>The fully-qualified type name of the exception in flight at the current stop (e.g.
+    /// "System.InvalidOperationException"), or null if none. Meaningful at a
+    /// <see cref="StopReason.Exception"/> stop; reads <c>ICorDebugThread.GetCurrentException</c> on
+    /// the stop thread. Valid only while stopped.</summary>
+    public string? GetCurrentExceptionTypeName() => ExceptionInspector.CurrentExceptionTypeName(_pump.StopThread);
+
     /// <summary>EXPERIMENT (func-eval): evaluate a static, parameterless method in the debuggee at
     /// the current stop and return its value. Creates an eval on the stopped thread, calls the
     /// function, resumes to run it, and waits up to <paramref name="timeout"/> for the

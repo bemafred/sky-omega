@@ -45,11 +45,11 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     /// <summary>Enqueue side — invoked by the callback thunks on mscordbi's event thread.
     /// Returns immediately so the event thread is never blocked.</summary>
-    public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread)
+    public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail)
     {
         try
         {
-            _events.Add(new CallbackEvent(kind, name, appDomain, thread));
+            _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail));
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
@@ -126,7 +126,9 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 // the caller resumes. The process produces no new callbacks while stopped, so
                 // the queue behind this event is empty until we resume.
                 _stopThread = e.Thread;
-                _stops.Add(new StopInfo(MapReason(e.Kind)));
+                _stops.Add(e.Kind == CallbackKind.Exception
+                    ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
+                    : new StopInfo(MapReason(e.Kind)));
                 ResumeKind kind;
                 try { kind = _resume.Take(); }
                 catch (InvalidOperationException) { break; } // disposed while parked at a stop
