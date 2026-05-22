@@ -103,6 +103,28 @@ internal static unsafe class Variables
         return locals;
     }
 
+    /// <summary>The active frame's local at <paramref name="slot"/> as an OWNED value pointer the
+    /// caller releases — for passing as a func-eval argument (e.g. <c>this</c>). 0 if unavailable.</summary>
+    public static nint GetActiveFrameLocalValue(nint pThread, int slot)
+    {
+        if (pThread == 0) return 0;
+        nint frame = OutPtr(pThread, ThreadGetActiveFrame);
+        if (frame == 0) return 0;
+        try
+        {
+            nint ilFrame = QueryInterface(frame, IID_ICorDebugILFrame);
+            if (ilFrame == 0) return 0;
+            try
+            {
+                var getLocal = (delegate* unmanaged[Cdecl]<nint, uint, nint*, int>)Slot(ilFrame, ILFrameGetLocalVariable);
+                nint value;
+                return getLocal(ilFrame, (uint)slot, &value) < 0 ? 0 : value; // kept — caller releases
+            }
+            finally { RuntimeNavigation.Release(ilFrame); }
+        }
+        finally { RuntimeNavigation.Release(frame); }
+    }
+
     internal static ArgumentValue ReadValue(nint pValue)
     {
         int elementType = OutInt(pValue, ValueGetType);

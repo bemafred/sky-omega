@@ -147,7 +147,8 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 ### Phase 4 — Func-eval (Open Question 2)
 - [x] **viability decided — func-eval WORKS** (probe 19, finding 27): `ICorDebugEval.CallFunction` of a static method completed with the right result, 4/4, no deadlock on macOS/ARM64. The netcoredbg deadlock was netcoredbg-specific. Decision: **option A (func-eval) + Roslyn front end** for full C# expressions.
 - [x] **breadth: arguments** — `Eval.CreateInt32` (`CreateValue`@12 + `GenericValue.SetValue`@8) + `CallFunction`@3 with `ppArgs`. **Probe 20** (finding 28): `Probe.Doubled(21) = 42`, 2/2. Instance methods now reduce to `args[0] = this` (a read value, finding 26) — composition, not a new unknown.
-- [ ] breadth: instance methods / properties (`this` from a read local; resolve on the declaring module, e.g. CoreLib `String.get_Length`), reference-typed results, `CallParameterizedFunction` for generics.
+- [x] **breadth: instance methods / properties** — `this` from a read local (`Variables.GetActiveFrameLocalValue`), method resolved on its declaring module, `CallWithOneArg(func, this)`. **Probe 21** (finding 29): `s.Length` (`String.get_Length` on the local `s="hello"`) = 5, 2/2 — including cross-module (CoreLib) resolution. The realistic conditional case (`s.Length`, `list.Count`) is covered.
+- [ ] breadth: reference-typed *results* (dereference a returned string/object to render it — the *call* works, rendering the returned ref is the gap), `CallParameterizedFunction` for generics.
 - [~] safety: `ICorDebugEval::Abort` wired into the eval timeout path (probe 20); validation under a *real* target-side hang is still to do.
 - [ ] Roslyn integration: parse a C# expression → drive func-eval calls + local reads → boolean result for conditional breakpoints.
 

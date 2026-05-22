@@ -240,7 +240,7 @@ public sealed class DebugSession : IDisposable
                 {
                     arg = Eval.CreateInt32(eval, argument);
                     if (arg == 0) return EvalStatus.SetupFailed;
-                    if (!Eval.CallStaticOneArg(eval, function, arg)) return EvalStatus.SetupFailed;
+                    if (!Eval.CallWithOneArg(eval, function, arg)) return EvalStatus.SetupFailed;
 
                     _pump.Resume();
                     StopInfo? stop = _pump.WaitForStop(timeout);
@@ -260,6 +260,68 @@ public sealed class DebugSession : IDisposable
             finally { RuntimeNavigation.Release(function); }
         }
         finally { RuntimeNavigation.Release(pModule); }
+    }
+
+    /// <summary>EXPERIMENT (func-eval breadth): call an instance method/property
+    /// <paramref name="declaringTypeName"/>.<paramref name="methodName"/> (resolved in the module
+    /// matching <paramref name="declaringModuleSubstring"/>) on the local named
+    /// <paramref name="thisLocalName"/> as <c>this</c>. E.g. <c>s.Length</c> = String.get_Length on
+    /// the local <c>s</c>. Valid only while stopped.</summary>
+    public EvalStatus TryEvalInstanceCall(string thisLocalName, string declaringModuleSubstring,
+                                          string declaringTypeName, string methodName,
+                                          TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+
+        // 1. Resolve `this`: find the named local's slot (top frame's PDB) and read its value.
+        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
+        if (frames.Count == 0) return EvalStatus.SetupFailed;
+        Interop.FrameInfo top = frames[0];
+        if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return EvalStatus.SetupFailed;
+
+        SymbolReader? symbols = SymbolsFor(top.ModulePath);
+        if (symbols is null) return EvalStatus.SetupFailed;
+        int slot = -1;
+        foreach (LocalName local in symbols.GetLocalNames(top.Token))
+            if (local.Name == thisLocalName) { slot = local.Slot; break; }
+        if (slot < 0) return EvalStatus.SetupFailed;
+
+        nint thisValue = Variables.GetActiveFrameLocalValue(_pump.StopThread, slot);
+        if (thisValue == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            // 2. Resolve the method on its declaring module (may differ from the frame's module).
+            nint declModule = RuntimeNavigation.FindModule(_pProcess, declaringModuleSubstring);
+            if (declModule == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                uint token = MetadataResolver.ResolveMethodToken(declModule, declaringTypeName, methodName);
+                if (token == 0) return EvalStatus.SetupFailed;
+                nint function = Eval.GetFunction(declModule, token);
+                if (function == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    nint eval = Eval.CreateEval(_pump.StopThread);
+                    if (eval == 0) return EvalStatus.SetupFailed;
+                    try
+                    {
+                        if (!Eval.CallWithOneArg(eval, function, thisValue)) return EvalStatus.SetupFailed; // args[0] = this
+                        _pump.Resume();
+                        StopInfo? stop = _pump.WaitForStop(timeout);
+                        if (stop is null) { Eval.Abort(eval); return EvalStatus.TimedOut; }
+                        if (stop.Reason == StopReason.EvalException) return EvalStatus.ThrewException;
+                        if (stop.Reason != StopReason.EvalComplete) return EvalStatus.SetupFailed;
+
+                        result = Eval.GetResultValue(eval);
+                        return EvalStatus.Completed;
+                    }
+                    finally { RuntimeNavigation.Release(eval); }
+                }
+                finally { RuntimeNavigation.Release(function); }
+            }
+            finally { RuntimeNavigation.Release(declModule); }
+        }
+        finally { RuntimeNavigation.Release(thisValue); }
     }
 
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module

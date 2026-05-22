@@ -74,9 +74,10 @@ internal static unsafe class Eval
         return pValue;
     }
 
-    /// <summary>Set up a call to a static <paramref name="pFunction"/> with one argument. Runs on
-    /// the next Continue; completion arrives as EvalComplete/EvalException.</summary>
-    public static bool CallStaticOneArg(nint pEval, nint pFunction, nint pArg)
+    /// <summary>Set up a call to <paramref name="pFunction"/> with one argument value (for an
+    /// instance method, that single argument is <c>this</c>). Runs on the next Continue; completion
+    /// arrives as EvalComplete/EvalException.</summary>
+    public static bool CallWithOneArg(nint pEval, nint pFunction, nint pArg)
     {
         var call = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(pEval, EvalCallFunction);
         nint args = pArg; // single-element ICorDebugValue*[]
