@@ -124,6 +124,11 @@ public sealed class DebugSession : IDisposable
     /// stopped (after <see cref="WaitForStop"/>).</summary>
     public IReadOnlyList<string> GetStackFrames() => Frames.WalkManagedFrames(_pump.StopThread);
 
+    /// <summary>Argument values of the active (top) frame at the current stop. Arg 0 is
+    /// <c>this</c> for an instance method; <see cref="ArgumentValue.RawValue"/> holds the
+    /// primitive bits for generic values, null for object references. Valid only while stopped.</summary>
+    public IReadOnlyList<ArgumentValue> GetArguments() => Variables.ReadActiveFrameArguments(_pump.StopThread, 16);
+
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint
