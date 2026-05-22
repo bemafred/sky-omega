@@ -9,9 +9,9 @@
 //     auto-continued — the firehose the continue-loop validated in increment 1.
 //   - STOPPING callbacks (breakpoint hit, step complete, Debugger.Break) are NOT auto-continued.
 //     The worker publishes a StopInfo, leaves the debuggee SYNCHRONIZED (frozen for inspection),
-//     and blocks until the caller resumes via DebugSession.Resume. This is the keystone for
-//     breakpoints and stepping: stepping setup (creating an ICorDebugStepper on _stopThread
-//     before the resume-Continue) lands in the next increment.
+//     and blocks until the caller resumes. Resume carries a ResumeKind: plain Continue, or a
+//     step — for which the resume handler creates an ICorDebugStepper on _stopThread (captured
+//     here) before the Continue, and the step's completion arrives as a StepComplete stop.
 //
 // CallbackPump is the IManagedCallbackSink the host enqueues into; the user's IDebugEventSink
 // receives the informational stream from the worker thread. Stop/resume form a rendezvous over
@@ -21,17 +21,19 @@ using System.Collections.Concurrent;
 
 namespace SkyOmega.DrHook.Engine;
 
+/// <summary>How the caller resumes a stopped debuggee: a plain continue, or a step (whose
+/// completion arrives as a <see cref="StopReason.Step"/> stop).</summary>
+internal enum ResumeKind { Continue, StepInto, StepOver, StepOut }
+
 internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 {
-    private enum ResumeAction { Continue }
-
     private readonly BlockingCollection<CallbackEvent> _events = new();
-    private readonly BlockingCollection<ResumeAction> _resume = new();
+    private readonly BlockingCollection<ResumeKind> _resume = new();
     private readonly BlockingCollection<StopInfo> _stops = new();
     private readonly IDebugEventSink _userSink;
-    private Func<int>? _continue;
+    private Func<ResumeKind, nint, int>? _resumeHandler;
     private Thread? _worker;
-    private nint _stopThread;     // ICorDebugThread at the current stop — for stepping (next increment)
+    private nint _stopThread;     // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
     private bool _disposed;
 
     public CallbackPump(IDebugEventSink userSink) => _userSink = userSink;
@@ -52,10 +54,12 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     }
 
     /// <summary>Begin draining. Call once the process controller exists (after
-    /// DebugActiveProcess). <paramref name="continueProcess"/> resumes the debuggee.</summary>
-    public void Start(Func<int> continueProcess)
+    /// DebugActiveProcess). <paramref name="resume"/> resumes the debuggee for a given
+    /// <see cref="ResumeKind"/> and stop thread — for a step it sets up the stepper, then
+    /// Continues — and returns the Continue HRESULT.</summary>
+    public void Start(Func<ResumeKind, nint, int> resume)
     {
-        _continue = continueProcess;
+        _resumeHandler = resume;
         _worker = new Thread(Pump) { IsBackground = true, Name = "DrHook.CallbackPump" };
         _worker.Start();
     }
@@ -77,11 +81,22 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     /// <summary>Resume a stopped debuggee. The command is consumed by the worker parked at the
     /// current stop; harmless if called when not stopped (it queues for the next park).</summary>
-    public void Resume()
+    public void Resume() => Enqueue(ResumeKind.Continue);
+
+    /// <summary>Step into calls; completion surfaces as a <see cref="StopReason.Step"/> stop.</summary>
+    public void StepInto() => Enqueue(ResumeKind.StepInto);
+
+    /// <summary>Step over calls; completion surfaces as a <see cref="StopReason.Step"/> stop.</summary>
+    public void StepOver() => Enqueue(ResumeKind.StepOver);
+
+    /// <summary>Step out of the current frame; completion surfaces as a <see cref="StopReason.Step"/> stop.</summary>
+    public void StepOut() => Enqueue(ResumeKind.StepOut);
+
+    private void Enqueue(ResumeKind kind)
     {
         try
         {
-            _resume.Add(ResumeAction.Continue);
+            _resume.Add(kind);
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
@@ -98,20 +113,21 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 _userSink.OnEvent(e.Name);
                 if (e.Name == "ExitProcess")
                     _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
-                _continue!();
+                _resumeHandler!(ResumeKind.Continue, 0);
             }
             else
             {
                 // STOPPING: leave the debuggee synchronized, surface the stop, and block until
                 // the caller resumes. The process produces no new callbacks while stopped, so
-                // the queue behind this event is empty until we Continue.
+                // the queue behind this event is empty until we resume.
                 _stopThread = e.Thread;
                 _stops.Add(new StopInfo(MapReason(e.Kind)));
-                ResumeAction action;
-                try { action = _resume.Take(); }
+                ResumeKind kind;
+                try { kind = _resume.Take(); }
                 catch (InvalidOperationException) { break; } // disposed while parked at a stop
-                _ = action; // only Continue today; stepping actions added next increment
-                _continue!();
+                // For a step, the handler creates the stepper on _stopThread before Continuing;
+                // its completion arrives as a StepComplete stop.
+                _resumeHandler!(kind, _stopThread);
             }
         }
     }

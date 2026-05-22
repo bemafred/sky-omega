@@ -72,9 +72,14 @@ public sealed class DebugSession : IDisposable
             ThrowIfFailed(cordbg.DebugActiveProcess((uint)processId, 0, out nint pProcess), "ICorDebug.DebugActiveProcess");
             var controller = (ICorDebugController)Wrappers.GetOrCreateObjectForComInstance(pProcess, CreateObjectFlags.None);
 
-            // Drive the continue-loop now that the process controller exists. Callbacks
-            // enqueued since SetManagedHandler (if any) drain immediately.
-            pump.Start(() => controller.Continue(0));
+            // Drive the continue-loop now that the process controller exists. The resume handler
+            // arms a stepper on the stopped thread for step resumes (no-op for a plain continue),
+            // then Continues. Callbacks enqueued since SetManagedHandler (if any) drain immediately.
+            pump.Start((kind, thread) =>
+            {
+                Stepping.Arm(thread, kind);
+                return controller.Continue(0);
+            });
 
             return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, pUnknown, pProcess);
         }
@@ -96,6 +101,18 @@ public sealed class DebugSession : IDisposable
 
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
     public void Resume() => _pump.Resume();
+
+    /// <summary>Step into calls from the current stop. Completion surfaces as a
+    /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
+    public void StepInto() => _pump.StepInto();
+
+    /// <summary>Step over calls from the current stop. Completion surfaces as a
+    /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
+    public void StepOver() => _pump.StepOver();
+
+    /// <summary>Step out of the current frame. Completion surfaces as a
+    /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
+    public void StepOut() => _pump.StepOut();
 
     /// <summary>Names of the modules loaded in the target (process → app domains → assemblies →
     /// modules). Valid only while the debuggee is stopped (after <see cref="WaitForStop"/>) —

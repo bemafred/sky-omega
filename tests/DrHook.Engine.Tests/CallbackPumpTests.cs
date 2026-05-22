@@ -36,7 +36,7 @@ public sealed class CallbackPumpTests
         pump.OnCallback(CallbackKind.Informational, "CreateAppDomain", 0, 0);
         pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
 
-        pump.Start(() => 0);
+        pump.Start((_, _) => 0);
         pump.Dispose();
 
         Assert.Equal(new[] { "CreateProcess", "CreateAppDomain", "LoadModule" }, sink.Events.ToArray());
@@ -48,7 +48,7 @@ public sealed class CallbackPumpTests
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
 
-        pump.Start(() => 0);
+        pump.Start((_, _) => 0);
         pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
         pump.OnCallback(CallbackKind.Informational, "LoadClass", 0, 0);
         pump.Dispose();
@@ -67,7 +67,7 @@ public sealed class CallbackPumpTests
         pump.OnCallback(CallbackKind.Informational, "CreateThread", 0, 0);
         pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
 
-        pump.Start(() => { Interlocked.Increment(ref continues); return 0; });
+        pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; });
         pump.Dispose();
 
         Assert.Equal(3, continues);
@@ -81,7 +81,7 @@ public sealed class CallbackPumpTests
         using var pump = new CallbackPump(sink);
 
         int continues = 0;
-        pump.Start(() => { Interlocked.Increment(ref continues); return 0; });
+        pump.Start((_, _) => { Interlocked.Increment(ref continues); return 0; });
 
         // A breakpoint hit must NOT be auto-continued — the worker parks at the stop.
         pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0x1234);
@@ -98,12 +98,33 @@ public sealed class CallbackPumpTests
     }
 
     [Fact]
+    public void StepResume_RoutesKindAndStopThread_ToTheResumeHandler()
+    {
+        var sink = new RecordingSink();
+        using var pump = new CallbackPump(sink);
+
+        ResumeKind seenKind = ResumeKind.Continue;
+        nint seenThread = 0;
+        pump.Start((kind, thread) => { seenKind = kind; Volatile.Write(ref seenThread, thread); return 0; });
+
+        // Park at a stop carrying a specific thread pointer, then step.
+        pump.OnCallback(CallbackKind.BreakpointHit, "Breakpoint", 0, 0xABCD);
+        Assert.NotNull(pump.WaitForStop(TimeSpan.FromSeconds(2)));
+
+        pump.StepOver();
+
+        Assert.True(SpinWait.SpinUntil(() => seenKind == ResumeKind.StepOver, TimeSpan.FromSeconds(2)),
+            "the step kind should reach the resume handler");
+        Assert.Equal((nint)0xABCD, Volatile.Read(ref seenThread)); // the stop thread is handed to the handler (for the stepper)
+    }
+
+    [Fact]
     public void ExitProcess_WakesAWaiter_WithProcessExited()
     {
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
 
-        pump.Start(() => 0);
+        pump.Start((_, _) => 0);
         pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0);
 
         StopInfo? stop = pump.WaitForStop(TimeSpan.FromSeconds(2));
@@ -116,7 +137,7 @@ public sealed class CallbackPumpTests
     {
         var sink = new RecordingSink();
         using var pump = new CallbackPump(sink);
-        pump.Start(() => 0);
+        pump.Start((_, _) => 0);
 
         // Only informational traffic — no stop should ever surface.
         pump.OnCallback(CallbackKind.Informational, "LoadModule", 0, 0);
@@ -130,7 +151,7 @@ public sealed class CallbackPumpTests
         var sink = new RecordingSink();
         var pump = new CallbackPump(sink);
 
-        pump.Start(() => 0);
+        pump.Start((_, _) => 0);
         pump.Dispose();
 
         pump.OnCallback(CallbackKind.Informational, "ExitProcess", 0, 0);
