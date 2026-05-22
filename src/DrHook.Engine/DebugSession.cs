@@ -213,6 +213,55 @@ public sealed class DebugSession : IDisposable
         finally { RuntimeNavigation.Release(pModule); }
     }
 
+    /// <summary>EXPERIMENT (func-eval breadth): evaluate a static, single-<c>int</c>-argument method
+    /// in the debuggee at the current stop. The argument is built as an eval value
+    /// (<c>CreateValue</c> + <c>SetValue</c>). On a timeout the eval is aborted
+    /// (<c>ICorDebugEval.Abort</c>) before returning. Valid only while stopped.</summary>
+    public EvalStatus TryEvalStaticCallInt(string moduleNameSubstring, string typeName, string methodName,
+                                           int argument, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            uint token = MetadataResolver.ResolveMethodToken(pModule, typeName, methodName);
+            if (token == 0) return EvalStatus.SetupFailed;
+
+            nint function = Eval.GetFunction(pModule, token);
+            if (function == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                nint eval = Eval.CreateEval(_pump.StopThread);
+                if (eval == 0) return EvalStatus.SetupFailed;
+
+                nint arg = 0;
+                try
+                {
+                    arg = Eval.CreateInt32(eval, argument);
+                    if (arg == 0) return EvalStatus.SetupFailed;
+                    if (!Eval.CallStaticOneArg(eval, function, arg)) return EvalStatus.SetupFailed;
+
+                    _pump.Resume();
+                    StopInfo? stop = _pump.WaitForStop(timeout);
+                    if (stop is null) { Eval.Abort(eval); return EvalStatus.TimedOut; } // hung eval — abort it
+                    if (stop.Reason == StopReason.EvalException) return EvalStatus.ThrewException;
+                    if (stop.Reason != StopReason.EvalComplete) return EvalStatus.SetupFailed;
+
+                    result = Eval.GetResultValue(eval);
+                    return EvalStatus.Completed;
+                }
+                finally
+                {
+                    if (arg != 0) RuntimeNavigation.Release(arg);
+                    RuntimeNavigation.Release(eval);
+                }
+            }
+            finally { RuntimeNavigation.Release(function); }
+        }
+        finally { RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint

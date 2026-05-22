@@ -146,8 +146,9 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 
 ### Phase 4 — Func-eval (Open Question 2)
 - [x] **viability decided — func-eval WORKS** (probe 19, finding 27): `ICorDebugEval.CallFunction` of a static method completed with the right result, 4/4, no deadlock on macOS/ARM64. The netcoredbg deadlock was netcoredbg-specific. Decision: **option A (func-eval) + Roslyn front end** for full C# expressions.
-- [ ] breadth: func-eval with arguments + instance methods (`CallParameterizedFunction` for generics), reference-typed results.
-- [ ] safety: `ICorDebugEval::Abort` + timeout policy for an eval that hangs on a target-side lock.
+- [x] **breadth: arguments** — `Eval.CreateInt32` (`CreateValue`@12 + `GenericValue.SetValue`@8) + `CallFunction`@3 with `ppArgs`. **Probe 20** (finding 28): `Probe.Doubled(21) = 42`, 2/2. Instance methods now reduce to `args[0] = this` (a read value, finding 26) — composition, not a new unknown.
+- [ ] breadth: instance methods / properties (`this` from a read local; resolve on the declaring module, e.g. CoreLib `String.get_Length`), reference-typed results, `CallParameterizedFunction` for generics.
+- [~] safety: `ICorDebugEval::Abort` wired into the eval timeout path (probe 20); validation under a *real* target-side hang is still to do.
 - [ ] Roslyn integration: parse a C# expression → drive func-eval calls + local reads → boolean result for conditional breakpoints.
 
 ## Validation

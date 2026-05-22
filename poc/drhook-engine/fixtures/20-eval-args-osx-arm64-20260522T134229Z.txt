@@ -1,0 +1,7 @@
+# DrHook.Engine probe 20 fixture — func-eval with arguments
+timestamp        = 2026-05-22T13:42:29.8329910Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 65640
+eval             = Probe.Doubled(21) expected 42
+verdict          = PASSED

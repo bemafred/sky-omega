@@ -15,9 +15,15 @@ namespace SkyOmega.DrHook.Engine.Interop;
 internal static unsafe class Eval
 {
     private const int ThreadCreateEval = 17;          // ICorDebugThread (… CreateStepper12 … CreateEval17)
-    private const int EvalCallFunction = 3;           // ICorDebugEval (CallFunction3, …, GetResult10)
+    private const int EvalCallFunction = 3;           // ICorDebugEval (CallFunction3, …, IsActive8, Abort9, GetResult10, …, CreateValue12)
+    private const int EvalAbort = 9;
     private const int EvalGetResult = 10;
+    private const int EvalCreateValue = 12;
+    private const int GenericValueSetValue = 8;       // ICorDebugGenericValue (after ICorDebugValue 3-6, GetValue7, SetValue8)
     private const int ModuleGetFunctionFromToken = 9; // ICorDebugModule
+
+    private static readonly Guid IID_ICorDebugGenericValue = new("CC7BCAF8-8A68-11D2-983C-0000F808342D");
+    private const int ELEMENT_TYPE_I4 = 0x08;
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -45,6 +51,42 @@ internal static unsafe class Eval
         var call = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint, int>)Slot(pEval, EvalCallFunction);
         return call(pEval, pFunction, 0, 0) >= 0;
     }
+
+    /// <summary>Create an I4 eval value set to <paramref name="value"/> (an owned arg the caller
+    /// passes to a call and releases). 0 on failure.</summary>
+    public static nint CreateInt32(nint pEval, int value)
+    {
+        var createValue = (delegate* unmanaged[Cdecl]<nint, int, nint, nint*, int>)Slot(pEval, EvalCreateValue);
+        nint pValue;
+        if (createValue(pEval, ELEMENT_TYPE_I4, 0, &pValue) < 0 || pValue == 0) return 0;
+
+        var qi = (delegate* unmanaged[Cdecl]<nint, Guid*, nint*, int>)Slot(pValue, 0);
+        Guid iid = IID_ICorDebugGenericValue;
+        nint generic;
+        if (qi(pValue, &iid, &generic) < 0 || generic == 0) { RuntimeNavigation.Release(pValue); return 0; }
+        try
+        {
+            int local = value;
+            var setValue = (delegate* unmanaged[Cdecl]<nint, void*, int>)Slot(generic, GenericValueSetValue);
+            if (setValue(generic, &local) < 0) { RuntimeNavigation.Release(pValue); return 0; }
+        }
+        finally { RuntimeNavigation.Release(generic); }
+        return pValue;
+    }
+
+    /// <summary>Set up a call to a static <paramref name="pFunction"/> with one argument. Runs on
+    /// the next Continue; completion arrives as EvalComplete/EvalException.</summary>
+    public static bool CallStaticOneArg(nint pEval, nint pFunction, nint pArg)
+    {
+        var call = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(pEval, EvalCallFunction);
+        nint args = pArg; // single-element ICorDebugValue*[]
+        return call(pEval, pFunction, 1, &args) >= 0;
+    }
+
+    /// <summary>Abort a running/hung evaluation (ICorDebugEval.Abort) — the safety net for an eval
+    /// that deadlocks on a target-side lock. Best-effort.</summary>
+    public static void Abort(nint pEval)
+        => ((delegate* unmanaged[Cdecl]<nint, int>)Slot(pEval, EvalAbort))(pEval);
 
     /// <summary>Read the eval's result value (after EvalComplete) as an <see cref="ArgumentValue"/>.</summary>
     public static ArgumentValue GetResultValue(nint pEval)
