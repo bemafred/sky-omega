@@ -102,6 +102,33 @@ internal static unsafe class MetadataResolver
     private static string ToName(char* buffer, uint countWithNul)
         => new string(buffer, 0, countWithNul > 0 ? (int)countWithNul - 1 : 0);
 
+    /// <summary>Find a method named <paramref name="methodName"/> on the type given by
+    /// <paramref name="typeToken"/> (an <c>mdTypeDef</c> from <c>ICorDebugClass.GetToken</c>) →
+    /// <c>mdMethodDef</c>; 0 if not found. Unlike <see cref="ResolveMethodToken"/> this takes the
+    /// type token directly (for runtime-class member resolution), skipping <c>FindTypeDefByName</c>.</summary>
+    public static uint FindMethodInType(nint pModule, uint typeToken, string methodName)
+    {
+        nint pImport = GetMetaDataImport(pModule);
+        if (pImport == 0) return 0;
+        try
+        {
+            var enumWithName = (delegate* unmanaged[Cdecl]<nint, nint*, uint, char*, uint*, uint, uint*, int>)Slot(pImport, EnumMethodsWithName);
+            var closeEnum = (delegate* unmanaged[Cdecl]<nint, nint, void>)Slot(pImport, CloseEnum);
+
+            nint hEnum = 0;
+            uint token = 0;
+            uint fetched = 0;
+            fixed (char* pName = methodName)
+            {
+                if (enumWithName(pImport, &hEnum, typeToken, pName, &token, 1, &fetched) < 0 || fetched == 0)
+                    token = 0;
+            }
+            closeEnum(pImport, hEnum);
+            return token;
+        }
+        finally { Release(pImport); }
+    }
+
     private static nint GetMetaDataImport(nint pModule)
     {
         // ICorDebugModule.GetMetaDataInterface(REFIID riid, IUnknown** ppObj)

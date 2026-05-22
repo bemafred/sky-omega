@@ -343,6 +343,62 @@ public sealed class DebugSession : IDisposable
         finally { RuntimeNavigation.Release(thisValue); }
     }
 
+    /// <summary>EXPERIMENT (general member resolution): call the property getter
+    /// <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c> on the local's RUNTIME type —
+    /// no hardcoded declaring type/module — and func-evaluating it. Works for plain reference
+    /// objects; strings/non-object kinds return SetupFailed (the ICorDebugType path is a follow-on).
+    /// Valid only while stopped.</summary>
+    public EvalStatus TryEvalMemberCall(string thisLocalName, string memberName, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        int slot = ResolveLocalSlot(thisLocalName);
+        if (slot < 0) return EvalStatus.SetupFailed;
+
+        nint thisValue = Variables.GetActiveFrameLocalValue(_pump.StopThread, slot);
+        if (thisValue == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            nint function = MemberResolver.ResolveGetter(thisValue, memberName);
+            if (function == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                nint eval = Eval.CreateEval(_pump.StopThread);
+                if (eval == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    if (!Eval.CallWithOneArg(eval, function, thisValue)) return EvalStatus.SetupFailed;
+                    _pump.Resume();
+                    StopInfo? stop = _pump.WaitForStop(timeout);
+                    if (stop is null) { Eval.Abort(eval); return EvalStatus.TimedOut; }
+                    if (stop.Reason == StopReason.EvalException) return EvalStatus.ThrewException;
+                    if (stop.Reason != StopReason.EvalComplete) return EvalStatus.SetupFailed;
+
+                    result = Eval.GetResultValue(eval);
+                    return EvalStatus.Completed;
+                }
+                finally { RuntimeNavigation.Release(eval); }
+            }
+            finally { RuntimeNavigation.Release(function); }
+        }
+        finally { RuntimeNavigation.Release(thisValue); }
+    }
+
+    /// <summary>PDB slot of the named local in the active (top) frame, or -1 if not found.</summary>
+    private int ResolveLocalSlot(string localName)
+    {
+        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
+        if (frames.Count == 0) return -1;
+
+        Interop.FrameInfo top = frames[0];
+        if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return -1;
+
+        SymbolReader? symbols = SymbolsFor(top.ModulePath);
+        if (symbols is null) return -1;
+        foreach (LocalName local in symbols.GetLocalNames(top.Token))
+            if (local.Name == localName) return local.Slot;
+        return -1;
+    }
+
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint
