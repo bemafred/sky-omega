@@ -33,6 +33,13 @@ internal static unsafe class ExceptionInspector
         return ((delegate* unmanaged[Cdecl]<nint, nint*, int>)Slot(pUnk, slot))(pUnk, &outPtr) < 0 ? 0 : outPtr;
     }
 
+    /// <summary>The raw <c>ICorDebugValue</c> (an object reference) for the exception currently in
+    /// flight on <paramref name="pThread"/>, or 0 if none. OWNED — the caller releases it via
+    /// <see cref="RuntimeNavigation.Release"/>. Caller must be at a stop. Suitable as the <c>this</c>
+    /// of a func-eval (the runtime preserves the exception across the eval per cordebug.idl).</summary>
+    public static nint CurrentExceptionValue(nint pThread)
+        => pThread == 0 ? 0 : Out(pThread, ThreadGetCurrentException);
+
     /// <summary>The fully-qualified type name of the exception currently being thrown on
     /// <paramref name="pThread"/> (e.g. "System.InvalidOperationException"), or null if there is no
     /// current exception or its type can't be resolved. Caller must be at a stop.</summary>

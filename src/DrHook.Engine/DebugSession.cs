@@ -389,6 +389,45 @@ public sealed class DebugSession : IDisposable
         finally { RuntimeNavigation.Release(thisValue); }
     }
 
+    /// <summary>EXPERIMENT (func-eval at an exception stop): at a <see cref="StopReason.Exception"/>
+    /// stop, call the property getter <c>&lt;member&gt;</c> on the in-flight exception object — its
+    /// value comes from <c>ICorDebugThread.GetCurrentException</c>, not a local — by resolving
+    /// <c>get_&lt;member&gt;</c> on the exception's RUNTIME type and func-evaluating it. This composes
+    /// the exception stop (probe 26) with general member resolution (probe 24); the runtime preserves
+    /// the exception across the eval (cordebug.idl). Powers conditional exception breakpoints
+    /// (<c>ex.Code == 42</c>). Valid only at an exception stop.</summary>
+    public EvalStatus TryEvalCurrentExceptionMember(string memberName, TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint thisValue = Interop.ExceptionInspector.CurrentExceptionValue(_pump.StopThread);
+        if (thisValue == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            nint function = MemberResolver.ResolveGetter(thisValue, memberName);
+            if (function == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                nint eval = Eval.CreateEval(_pump.StopThread);
+                if (eval == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    if (!Eval.CallWithOneArg(eval, function, thisValue)) return EvalStatus.SetupFailed;
+                    _pump.Resume();
+                    StopInfo? stop = _pump.WaitForStop(timeout);
+                    if (stop is null) { Eval.Abort(eval); return EvalStatus.TimedOut; }
+                    if (stop.Reason == StopReason.EvalException) return EvalStatus.ThrewException;
+                    if (stop.Reason != StopReason.EvalComplete) return EvalStatus.SetupFailed;
+
+                    result = Eval.GetResultValue(eval);
+                    return EvalStatus.Completed;
+                }
+                finally { RuntimeNavigation.Release(eval); }
+            }
+            finally { RuntimeNavigation.Release(function); }
+        }
+        finally { RuntimeNavigation.Release(thisValue); }
+    }
+
     /// <summary>PDB slot of the named local in the active (top) frame, or -1 if not found.</summary>
     private int ResolveLocalSlot(string localName)
     {
