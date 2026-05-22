@@ -19,7 +19,9 @@ internal static unsafe class MetadataResolver
     // EnumMethodsWithName(19), …, GetMethodProps(30), …
     private const int CloseEnum = 3;
     private const int FindTypeDefByName = 9;
+    private const int GetTypeDefProps = 12;
     private const int EnumMethodsWithName = 19;
+    private const int GetMethodProps = 30;
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -60,6 +62,45 @@ internal static unsafe class MetadataResolver
         }
         finally { Release(pImport); }
     }
+
+    /// <summary>Reverse of <see cref="ResolveMethodToken"/>: an <c>mdMethodDef</c> token →
+    /// "Type.Method" (or the token hex if metadata is unavailable). Used to name stack frames.</summary>
+    public static string MethodName(nint pModule, uint methodToken)
+    {
+        nint pImport = GetMetaDataImport(pModule);
+        if (pImport == 0) return $"0x{methodToken:X8}";
+        try
+        {
+            // IMetaDataImport.GetMethodProps(mb, mdTypeDef* pClass, LPWSTR szMethod, ULONG cch,
+            //   ULONG* pch, DWORD* pdwAttr, PCCOR_SIGNATURE* ppvSig, ULONG* pcbSig, ULONG* pulRVA, DWORD* pdwImpl)
+            var getMethodProps = (delegate* unmanaged[Cdecl]<nint, uint, uint*, char*, uint, uint*, uint*, nint*, uint*, uint*, uint*, int>)Slot(pImport, GetMethodProps);
+            uint classToken = 0, chName = 0, attr = 0, cbSig = 0, rva = 0, impl = 0;
+            nint sig = 0;
+            char* nameBuf = stackalloc char[512];
+            if (getMethodProps(pImport, methodToken, &classToken, nameBuf, 512, &chName, &attr, &sig, &cbSig, &rva, &impl) < 0)
+                return $"0x{methodToken:X8}";
+
+            string method = ToName(nameBuf, chName);
+            string type = TypeName(pImport, classToken);
+            return type.Length == 0 ? method : $"{type}.{method}";
+        }
+        finally { Release(pImport); }
+    }
+
+    private static string TypeName(nint pImport, uint typeToken)
+    {
+        if (typeToken == 0) return ""; // global/module-level method
+        // IMetaDataImport.GetTypeDefProps(td, LPWSTR szTypeDef, ULONG cch, ULONG* pch, DWORD* pFlags, mdToken* ptkExtends)
+        var getTypeDefProps = (delegate* unmanaged[Cdecl]<nint, uint, char*, uint, uint*, uint*, uint*, int>)Slot(pImport, GetTypeDefProps);
+        uint chName = 0, flags = 0, extends = 0;
+        char* nameBuf = stackalloc char[512];
+        return getTypeDefProps(pImport, typeToken, nameBuf, 512, &chName, &flags, &extends) < 0
+            ? ""
+            : ToName(nameBuf, chName);
+    }
+
+    private static string ToName(char* buffer, uint countWithNul)
+        => new string(buffer, 0, countWithNul > 0 ? (int)countWithNul - 1 : 0);
 
     private static nint GetMetaDataImport(nint pModule)
     {

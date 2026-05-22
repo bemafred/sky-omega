@@ -38,6 +38,11 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     public CallbackPump(IDebugEventSink userSink) => _userSink = userSink;
 
+    /// <summary>The ICorDebugThread at the current stop (0 if never stopped). Set by the worker
+    /// before it publishes the stop; visible to a caller after <see cref="WaitForStop"/> returns
+    /// (the stop-queue hand-off establishes the happens-before). For inspection (frames/vars).</summary>
+    public nint StopThread => _stopThread;
+
     /// <summary>Enqueue side — invoked by the callback thunks on mscordbi's event thread.
     /// Returns immediately so the event thread is never blocked.</summary>
     public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread)

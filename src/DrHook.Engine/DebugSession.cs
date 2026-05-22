@@ -119,6 +119,11 @@ public sealed class DebugSession : IDisposable
     /// ICorDebug enumeration requires the process to be synchronized.</summary>
     public IReadOnlyList<string> EnumerateModules() => RuntimeNavigation.ModuleNames(_pProcess);
 
+    /// <summary>Method names of the managed call stack at the current stop, top frame first, as
+    /// "Type.Method" ("[external]" for native/internal frames). Valid only while the debuggee is
+    /// stopped (after <see cref="WaitForStop"/>).</summary>
+    public IReadOnlyList<string> GetStackFrames() => Frames.WalkManagedFrames(_pump.StopThread);
+
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint
