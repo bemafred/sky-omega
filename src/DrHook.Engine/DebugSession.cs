@@ -185,6 +185,31 @@ public sealed class DebugSession : IDisposable
         finally { if (pModule != 0) RuntimeNavigation.Release(pModule); }
     }
 
+    /// <summary>Set an active breakpoint at a source <paramref name="line"/> in a document whose
+    /// name contains <paramref name="fileHint"/>, within the module matching
+    /// <paramref name="moduleNameSubstring"/>. Binds via the module's Portable PDB to the nearest
+    /// sequence point at or after the line. Returns false if no PDB, no matching line, or the
+    /// breakpoint can't be created. Valid only while stopped; a hit surfaces as
+    /// <see cref="StopReason.Breakpoint"/>.</summary>
+    public bool SetBreakpointAtLine(string moduleNameSubstring, string fileHint, int line)
+    {
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
+        if (pModule == 0) return false;
+        try
+        {
+            SymbolReader? symbols = SymbolsFor(RuntimeNavigation.ModuleName(pModule));
+            if (symbols is null || !symbols.TryFindLine(fileHint, line, out int token, out int ilOffset))
+                return false;
+            if (!Breakpoints.TryCreateAtOffset(pModule, (uint)token, (uint)ilOffset, out nint function, out nint breakpoint))
+                return false;
+
+            _breakpoints.Add((pModule, function, breakpoint));
+            pModule = 0; // ownership moved into _breakpoints
+            return true;
+        }
+        finally { if (pModule != 0) RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {

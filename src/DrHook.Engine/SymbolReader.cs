@@ -96,6 +96,34 @@ public sealed class SymbolReader : IDisposable
         }
     }
 
+    /// <summary>Reverse of <see cref="TryGetLine"/>: find the method + IL offset for a source
+    /// <paramref name="line"/> in a document whose name contains <paramref name="fileHint"/>. Binds
+    /// to the nearest sequence point at or after the line (debugger convention). False if none.</summary>
+    public bool TryFindLine(string fileHint, int line, out int methodToken, out int ilOffset)
+    {
+        methodToken = 0;
+        ilOffset = 0;
+        int bestLine = int.MaxValue;
+        foreach (MethodDebugInformationHandle handle in _pdb.MethodDebugInformation)
+        {
+            MethodDebugInformation info;
+            try { info = _pdb.GetMethodDebugInformation(handle); }
+            catch (BadImageFormatException) { continue; }
+            if (info.SequencePointsBlob.IsNil) continue;
+
+            foreach (SequencePoint sp in info.GetSequencePoints())
+            {
+                if (sp.IsHidden || sp.StartLine < line || sp.StartLine >= bestLine) continue;
+                string doc = _pdb.GetString(_pdb.GetDocument(sp.Document).Name);
+                if (!doc.Contains(fileHint, StringComparison.OrdinalIgnoreCase)) continue;
+                bestLine = sp.StartLine;
+                methodToken = MetadataTokens.GetToken(handle.ToDefinitionHandle());
+                ilOffset = sp.Offset;
+            }
+        }
+        return methodToken != 0;
+    }
+
     /// <summary>Local variable names (slot → name) for an <c>mdMethodDef</c> token. Empty if the
     /// method has no PDB local scopes.</summary>
     public IReadOnlyList<LocalName> GetLocalNames(int methodToken)
