@@ -23,6 +23,7 @@ public sealed class DebugSession : IDisposable
     private readonly ManagedCallbackHost _callback;
     private readonly ICorDebug _cordbg;
     private readonly ICorDebugController _controller;
+    private readonly IDebugEventSink _sink;
     private nint _pUnknown;
     private nint _pProcess;
     private bool _detached;
@@ -36,7 +37,8 @@ public sealed class DebugSession : IDisposable
     private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
 
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
-                         ICorDebug cordbg, ICorDebugController controller, nint pUnknown, nint pProcess)
+                         ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
+                         nint pUnknown, nint pProcess)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -44,6 +46,7 @@ public sealed class DebugSession : IDisposable
         _callback = callback;
         _cordbg = cordbg;
         _controller = controller;
+        _sink = sink;
         _pUnknown = pUnknown;
         _pProcess = pProcess;
     }
@@ -85,7 +88,7 @@ public sealed class DebugSession : IDisposable
                 return controller.Continue(0);
             });
 
-            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, pUnknown, pProcess);
+            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess);
         }
         catch
         {
@@ -114,14 +117,81 @@ public sealed class DebugSession : IDisposable
     /// (Roslyn) lives above the engine. Returns null on timeout.</summary>
     public StopInfo? WaitForConditionalStop(Func<IEvalContext, bool> condition, TimeSpan timeout)
     {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
         while (true)
         {
-            StopInfo? stop = _pump.WaitForStop(timeout);
+            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+            StopInfo? stop = _pump.WaitForStop(remaining);
             if (stop is null) return null;
             if (stop.Reason != StopReason.Breakpoint) return stop; // non-breakpoint stops surface as-is
             IEvalContext context = new EvalContext(GetLocals(), GetArguments());
             if (condition(context)) return stop;
-            _pump.Resume(); // condition false — keep running to the next hit
+            _pump.Resume(); // condition false — keep running to the next hit (within the deadline)
+        }
+    }
+
+    /// <summary>Drive a breakpoint with a <see cref="BreakpointPolicy"/> — the unified surface from
+    /// findings 33/35. At each breakpoint hit: increment a hit counter, evaluate the gates
+    /// (<see cref="BreakpointPolicy.HitCount"/>, then <see cref="BreakpointPolicy.Condition"/>), run
+    /// the <see cref="BreakpointPolicy.LogMessage"/> action if present (rendered + emitted as a
+    /// <see cref="LogRecord"/> via <see cref="IDebugEventSink.OnLog"/>), and surface or auto-resume per
+    /// <see cref="BreakpointPolicy.Suspend"/>. Conditional breakpoint, logpoint, hit-count gate, and
+    /// log-and-break all fall out as configurations of the same policy. A condition that THROWS is a
+    /// FAULT — never silently false — and surfaces as <see cref="StopReason.ConditionError"/> with a
+    /// fault <see cref="LogRecord"/>. Non-breakpoint stops surface as-is. Returns null on timeout (a
+    /// pure logpoint, by design, never returns a non-null value — call with a bounded timeout to
+    /// drain logs).</summary>
+    public StopInfo? WaitForPolicyStop(BreakpointPolicy policy, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        int hitCount = 0;
+        while (true)
+        {
+            // Deadline-based: total wall-clock budget, not per-stop. A pure logpoint (Suspend.None,
+            // no condition that ever returns) only terminates via this deadline; without it a
+            // fast-hitting breakpoint resets the per-call timeout each iteration and the loop
+            // never exits.
+            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+            StopInfo? stop = _pump.WaitForStop(remaining);
+            if (stop is null) return null;
+            if (stop.Reason != StopReason.Breakpoint) return stop;
+
+            hitCount++;
+            IEvalContext context = new EvalContext(GetLocals(), GetArguments());
+
+            // Gate: hit count (cheap, evaluated first).
+            if (policy.HitCount is { } gate && !gate.Admits(hitCount)) { _pump.Resume(); continue; }
+
+            // Gate: condition — tri-state. A throw means "couldn't evaluate" → ConditionError +
+            // fault log; never silently treat as false. (Finding 35.)
+            if (policy.Condition is { } condition)
+            {
+                bool holds;
+                try { holds = condition(context); }
+                catch (Exception ex)
+                {
+                    _sink.OnLog(new LogRecord(DateTimeOffset.UtcNow, $"condition fault: {ex.Message}", IsFault: true));
+                    return new StopInfo(StopReason.ConditionError);
+                }
+                if (!holds) { _pump.Resume(); continue; }
+            }
+
+            // Action: log — best-effort. A faulting render fragment must not lose the line or the
+            // gate result; the log is annotated and emission continues.
+            if (policy.LogMessage is { } render)
+            {
+                string message;
+                try { message = render(context); }
+                catch (Exception ex) { message = $"<log fault: {ex.Message}>"; }
+                _sink.OnLog(new LogRecord(DateTimeOffset.UtcNow, message));
+            }
+
+            // Suspend decision: surface (All) vs auto-resume (None — the logpoint corner).
+            if (policy.Suspend == SuspendPolicy.None) { _pump.Resume(); continue; }
+            return stop;
         }
     }
 

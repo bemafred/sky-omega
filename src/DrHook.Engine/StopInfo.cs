@@ -18,6 +18,11 @@ public enum StopReason
     /// <summary>A managed exception was raised (<c>ICorDebugManagedCallback2.Exception</c>). The
     /// phase (first-chance / unhandled / …) is in <see cref="StopInfo.ExceptionKind"/>.</summary>
     Exception,
+    /// <summary>A <see cref="BreakpointPolicy"/>'s condition delegate threw — the engine could not
+    /// evaluate the condition. Surfaced as a distinct stop (finding 35): a broken condition must
+    /// never silently behave like a never-true condition. The diagnostic is emitted to the sink as a
+    /// <see cref="LogRecord"/> with <see cref="LogRecord.IsFault"/> = <c>true</c>.</summary>
+    ConditionError,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
 }
