@@ -108,7 +108,7 @@ internal static unsafe class RuntimeNavigation
 
     /// <summary>ICorDebugModule.GetName(ULONG32 cchName, ULONG32* pcchName, WCHAR szName[]).
     /// Two-call buffer pattern: size, then fill. <paramref name="pcchName"/> includes the NUL.</summary>
-    private static string ModuleName(nint pModule)
+    internal static string ModuleName(nint pModule)
     {
         var getName = (delegate* unmanaged[Cdecl]<nint, uint, uint*, char*, int>)Slot(pModule, ModuleGetName);
 

@@ -5,6 +5,7 @@
 // singleton (finding 13). Phase 1 validates attach + callback delivery + clean teardown;
 // the continue-loop and stepping are Phase 2 (ADR-006).
 
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using SkyOmega.DrHook.Engine.Interop;
@@ -30,6 +31,9 @@ public sealed class DebugSession : IDisposable
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound; released on Dispose.
     private readonly List<(nint Module, nint Function, nint Breakpoint)> _breakpoints = new();
+
+    // Per-module Portable PDB readers, opened on demand for source mapping; disposed on Dispose.
+    private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
 
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, nint pUnknown, nint pProcess)
@@ -119,10 +123,33 @@ public sealed class DebugSession : IDisposable
     /// ICorDebug enumeration requires the process to be synchronized.</summary>
     public IReadOnlyList<string> EnumerateModules() => RuntimeNavigation.ModuleNames(_pProcess);
 
-    /// <summary>Method names of the managed call stack at the current stop, top frame first, as
-    /// "Type.Method" ("[external]" for native/internal frames). Valid only while the debuggee is
-    /// stopped (after <see cref="WaitForStop"/>).</summary>
-    public IReadOnlyList<string> GetStackFrames() => Frames.WalkManagedFrames(_pump.StopThread);
+    /// <summary>The managed call stack at the current stop, top frame first, as
+    /// "Type.Method @ file:line" when a Portable PDB is available (else "Type.Method";
+    /// "[external]" for native/internal frames). Valid only while the debuggee is stopped
+    /// (after <see cref="WaitForStop"/>).</summary>
+    public IReadOnlyList<string> GetStackFrames()
+    {
+        List<string> result = new();
+        foreach (Interop.FrameInfo frame in Frames.WalkManagedFrames(_pump.StopThread))
+        {
+            SourceLocation? loc = frame.IlOffset >= 0 && frame.ModulePath.Length > 0
+                ? SymbolsFor(frame.ModulePath)?.TryGetLine(frame.Token, frame.IlOffset)
+                : null;
+            result.Add(loc is { } l ? $"{frame.Method} @ {Path.GetFileName(l.File)}:{l.Line}" : frame.Method);
+        }
+        return result;
+    }
+
+    /// <summary>Cached <see cref="SymbolReader"/> for a module (opened once; null if no PDB).</summary>
+    private SymbolReader? SymbolsFor(string modulePath)
+    {
+        if (!_symbols.TryGetValue(modulePath, out SymbolReader? reader))
+        {
+            reader = SymbolReader.TryOpen(modulePath);
+            _symbols[modulePath] = reader;
+        }
+        return reader;
+    }
 
     /// <summary>Argument values of the active (top) frame at the current stop. Arg 0 is
     /// <c>this</c> for an instance method; <see cref="ArgumentValue.RawValue"/> holds the
@@ -199,6 +226,9 @@ public sealed class DebugSession : IDisposable
             RuntimeNavigation.Release(module);
         }
         _breakpoints.Clear();
+
+        foreach (SymbolReader? reader in _symbols.Values) reader?.Dispose();
+        _symbols.Clear();
 
         if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
         if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
