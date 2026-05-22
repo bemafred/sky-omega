@@ -10,6 +10,11 @@ public enum StopReason
     Step,
     /// <summary>The debuggee executed <c>Debugger.Break()</c> (<c>ICorDebugManagedCallback.Break</c>).</summary>
     Break,
+    /// <summary>A function evaluation completed (<c>ICorDebugManagedCallback.EvalComplete</c>) — the
+    /// result is available via the eval that initiated it.</summary>
+    EvalComplete,
+    /// <summary>A function evaluation threw (<c>ICorDebugManagedCallback.EvalException</c>).</summary>
+    EvalException,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
 }

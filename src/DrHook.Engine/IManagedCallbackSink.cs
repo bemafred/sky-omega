@@ -10,6 +10,8 @@ internal enum CallbackKind
     BreakpointHit,
     StepComplete,
     Break,
+    EvalComplete,
+    EvalException,
 }
 
 /// <summary>The RECEIVE-direction contract from <see cref="Interop.ManagedCallbackHost"/> (the

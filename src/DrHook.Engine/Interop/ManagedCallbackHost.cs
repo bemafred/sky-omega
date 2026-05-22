@@ -169,8 +169,8 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int StepComplete(nint p, nint a, nint t, nint s, int r) => Fire(p, CallbackKind.StepComplete, "StepComplete", a, t);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Break(nint p, nint a, nint t) => Fire(p, CallbackKind.Break, "Break", a, t);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Exception1(nint p, nint a, nint t, int u) => Fire(p, "Exception");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EvalComplete(nint p, nint a, nint t, nint e) => Fire(p, "EvalComplete");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EvalException(nint p, nint a, nint t, nint e) => Fire(p, "EvalException");
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EvalComplete(nint p, nint a, nint t, nint e) => Fire(p, CallbackKind.EvalComplete, "EvalComplete", a, t);
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int EvalException(nint p, nint a, nint t, nint e) => Fire(p, CallbackKind.EvalException, "EvalException", a, t);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int CreateProcess(nint p, nint proc) => Fire(p, "CreateProcess");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ExitProcess(nint p, nint proc) => Fire(p, "ExitProcess");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int CreateThread(nint p, nint a, nint t) => Fire(p, "CreateThread");

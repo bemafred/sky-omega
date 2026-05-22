@@ -172,6 +172,47 @@ public sealed class DebugSession : IDisposable
         return Variables.ReadActiveFrameLocals(_pump.StopThread, names);
     }
 
+    /// <summary>EXPERIMENT (func-eval): evaluate a static, parameterless method in the debuggee at
+    /// the current stop and return its value. Creates an eval on the stopped thread, calls the
+    /// function, resumes to run it, and waits up to <paramref name="timeout"/> for the
+    /// EvalComplete stop. A timeout is the func-eval-deadlock signal. Valid only while stopped.</summary>
+    public EvalStatus TryEvalStaticCall(string moduleNameSubstring, string typeName, string methodName,
+                                        TimeSpan timeout, out ArgumentValue result)
+    {
+        result = default;
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
+        if (pModule == 0) return EvalStatus.SetupFailed;
+        try
+        {
+            uint token = MetadataResolver.ResolveMethodToken(pModule, typeName, methodName);
+            if (token == 0) return EvalStatus.SetupFailed;
+
+            nint function = Eval.GetFunction(pModule, token);
+            if (function == 0) return EvalStatus.SetupFailed;
+            try
+            {
+                nint eval = Eval.CreateEval(_pump.StopThread);
+                if (eval == 0) return EvalStatus.SetupFailed;
+                try
+                {
+                    if (!Eval.CallStaticNoArgs(eval, function)) return EvalStatus.SetupFailed;
+
+                    _pump.Resume(); // worker Continues → the eval runs managed code in the debuggee
+                    StopInfo? stop = _pump.WaitForStop(timeout);
+                    if (stop is null) return EvalStatus.TimedOut; // func-eval deadlock (the netcoredbg failure)
+                    if (stop.Reason == StopReason.EvalException) return EvalStatus.ThrewException;
+                    if (stop.Reason != StopReason.EvalComplete) return EvalStatus.SetupFailed;
+
+                    result = Eval.GetResultValue(eval);
+                    return EvalStatus.Completed;
+                }
+                finally { RuntimeNavigation.Release(eval); }
+            }
+            finally { RuntimeNavigation.Release(function); }
+        }
+        finally { RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint
@@ -293,4 +334,17 @@ public sealed class DebugEngineException : Exception
     public DebugEngineException(string operation, int hresult)
         : base($"{operation} failed (HRESULT 0x{hresult:X8}).")
         => HResult = hresult;
+}
+
+/// <summary>Outcome of a function evaluation.</summary>
+public enum EvalStatus
+{
+    /// <summary>The eval completed; the result value was returned.</summary>
+    Completed,
+    /// <summary>The evaluated code threw an exception.</summary>
+    ThrewException,
+    /// <summary>No EvalComplete arrived within the timeout — the func-eval deadlocked.</summary>
+    TimedOut,
+    /// <summary>The eval could not be set up (method unresolved, no stop thread, etc.).</summary>
+    SetupFailed,
 }

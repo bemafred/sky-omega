@@ -1,0 +1,58 @@
+// Function evaluation (func-eval) via ICorDebugEval — execute managed code IN the debuggee at a
+// stop. Raw V-table (slots from cordebug.idl, verified). This is the EXPERIMENT path: netcoredbg's
+// func-eval deadlocks on macOS/ARM64, but that was characterized in netcoredbg, not the platform —
+// vsdbg/Rider eval fine, so the surface is reachable. Whether OUR ICorDebug usage deadlocks is the
+// open question probe 19 answers. If it works, this is the foundation for conditional breakpoints
+// and expression evaluation (the netcoredbg gap); if it deadlocks, this scaffold is reverted.
+//
+// Protocol: CreateEval on the stopped thread → CallFunction (sets up the call) → the caller
+// Continues (runs the eval) → an EvalComplete (or EvalException) callback fires → GetResult reads
+// the return value while still synchronized. A Continue that never produces EvalComplete is the
+// deadlock signal (detected as a WaitForStop timeout in DebugSession).
+
+namespace SkyOmega.DrHook.Engine.Interop;
+
+internal static unsafe class Eval
+{
+    private const int ThreadCreateEval = 17;          // ICorDebugThread (… CreateStepper12 … CreateEval17)
+    private const int EvalCallFunction = 3;           // ICorDebugEval (CallFunction3, …, GetResult10)
+    private const int EvalGetResult = 10;
+    private const int ModuleGetFunctionFromToken = 9; // ICorDebugModule
+
+    private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
+
+    /// <summary>Resolve an <c>mdMethodDef</c> to an <c>ICorDebugFunction</c> (owned; caller releases).</summary>
+    public static nint GetFunction(nint pModule, uint methodToken)
+    {
+        var get = (delegate* unmanaged[Cdecl]<nint, uint, nint*, int>)Slot(pModule, ModuleGetFunctionFromToken);
+        nint function;
+        return get(pModule, methodToken, &function) < 0 ? 0 : function;
+    }
+
+    /// <summary>Create an evaluation on the (stopped) thread. Owned; caller releases.</summary>
+    public static nint CreateEval(nint pThread)
+    {
+        var create = (delegate* unmanaged[Cdecl]<nint, nint*, int>)Slot(pThread, ThreadCreateEval);
+        nint eval;
+        return create(pThread, &eval) < 0 ? 0 : eval;
+    }
+
+    /// <summary>Set up a call to a static, parameterless <paramref name="pFunction"/>. The eval
+    /// runs when the caller Continues; completion arrives as an EvalComplete/EvalException callback.</summary>
+    public static bool CallStaticNoArgs(nint pEval, nint pFunction)
+    {
+        // ICorDebugEval.CallFunction(ICorDebugFunction*, ULONG32 nArgs, ICorDebugValue* ppArgs[])
+        var call = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint, int>)Slot(pEval, EvalCallFunction);
+        return call(pEval, pFunction, 0, 0) >= 0;
+    }
+
+    /// <summary>Read the eval's result value (after EvalComplete) as an <see cref="ArgumentValue"/>.</summary>
+    public static ArgumentValue GetResultValue(nint pEval)
+    {
+        var getResult = (delegate* unmanaged[Cdecl]<nint, nint*, int>)Slot(pEval, EvalGetResult);
+        nint value;
+        if (getResult(pEval, &value) < 0 || value == 0) return new ArgumentValue(0, null);
+        try { return Variables.ReadValue(value); }
+        finally { RuntimeNavigation.Release(value); }
+    }
+}

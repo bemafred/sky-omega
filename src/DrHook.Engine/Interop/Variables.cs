@@ -103,7 +103,7 @@ internal static unsafe class Variables
         return locals;
     }
 
-    private static ArgumentValue ReadValue(nint pValue)
+    internal static ArgumentValue ReadValue(nint pValue)
     {
         int elementType = OutInt(pValue, ValueGetType);
 

@@ -142,6 +142,8 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
         CallbackKind.BreakpointHit => StopReason.Breakpoint,
         CallbackKind.StepComplete => StopReason.Step,
         CallbackKind.Break => StopReason.Break,
+        CallbackKind.EvalComplete => StopReason.EvalComplete,
+        CallbackKind.EvalException => StopReason.EvalException,
         _ => StopReason.Break,
     };
 
