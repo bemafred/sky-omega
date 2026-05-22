@@ -19,6 +19,7 @@ internal static unsafe class Variables
     private static readonly Guid IID_ICorDebugGenericValue = new("CC7BCAF8-8A68-11D2-983C-0000F808342D");
 
     private const int ThreadGetActiveFrame = 15; // ICorDebugThread
+    private const int ILFrameGetLocalVariable = 14; // ICorDebugILFrame (GetIP11, SetIP12, EnumLocals13, GetLocalVariable14)
     private const int ILFrameGetArgument = 16;   // ICorDebugILFrame (ILFrame methods after ICorDebugFrame 3-10: GetIP11..GetArgument16)
     private const int ValueGetType = 3;          // ICorDebugValue
     private const int GenericValueGetValue = 7;  // ICorDebugGenericValue (after ICorDebugValue 3-6)
@@ -60,6 +61,46 @@ internal static unsafe class Variables
         }
         finally { RuntimeNavigation.Release(frame); }
         return args;
+    }
+
+    /// <summary>Read the named locals of the stopped thread's active frame. <paramref name="names"/>
+    /// (slot → name, from the PDB) drives which slots are read; each is fetched via
+    /// <c>ICorDebugILFrame.GetLocalVariable</c>@14 and its value decoded like an argument. A local
+    /// not available at the current IL offset surfaces with a null raw value.</summary>
+    public static List<LocalValue> ReadActiveFrameLocals(nint pThread, IReadOnlyList<LocalName> names)
+    {
+        List<LocalValue> locals = new();
+        if (pThread == 0 || names.Count == 0) return locals;
+
+        nint frame = OutPtr(pThread, ThreadGetActiveFrame);
+        if (frame == 0) return locals;
+        try
+        {
+            nint ilFrame = QueryInterface(frame, IID_ICorDebugILFrame);
+            if (ilFrame == 0) return locals;
+            try
+            {
+                var getLocal = (delegate* unmanaged[Cdecl]<nint, uint, nint*, int>)Slot(ilFrame, ILFrameGetLocalVariable);
+                foreach (LocalName name in names)
+                {
+                    nint value;
+                    if (getLocal(ilFrame, (uint)name.Slot, &value) < 0 || value == 0)
+                    {
+                        locals.Add(new LocalValue(name.Name, 0, null)); // not available at this offset
+                        continue;
+                    }
+                    try
+                    {
+                        ArgumentValue v = ReadValue(value);
+                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue));
+                    }
+                    finally { RuntimeNavigation.Release(value); }
+                }
+            }
+            finally { RuntimeNavigation.Release(ilFrame); }
+        }
+        finally { RuntimeNavigation.Release(frame); }
+        return locals;
     }
 
     private static ArgumentValue ReadValue(nint pValue)

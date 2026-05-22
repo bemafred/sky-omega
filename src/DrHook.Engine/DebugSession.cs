@@ -156,6 +156,22 @@ public sealed class DebugSession : IDisposable
     /// primitive bits for generic values, null for object references. Valid only while stopped.</summary>
     public IReadOnlyList<ArgumentValue> GetArguments() => Variables.ReadActiveFrameArguments(_pump.StopThread, 16);
 
+    /// <summary>Named local variables of the active (top) frame at the current stop — PDB names
+    /// (via the module's Portable PDB) paired with values read from the frame. Empty if no PDB.
+    /// A local not yet in scope/assigned at the current line surfaces with a null
+    /// <see cref="LocalValue.RawValue"/>. Valid only while stopped.</summary>
+    public IReadOnlyList<LocalValue> GetLocals()
+    {
+        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
+        if (frames.Count == 0) return Array.Empty<LocalValue>();
+
+        Interop.FrameInfo top = frames[0];
+        if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return Array.Empty<LocalValue>();
+
+        IReadOnlyList<LocalName> names = SymbolsFor(top.ModulePath)?.GetLocalNames(top.Token) ?? Array.Empty<LocalName>();
+        return Variables.ReadActiveFrameLocals(_pump.StopThread, names);
+    }
+
     /// <summary>Resolve <paramref name="typeName"/>.<paramref name="methodName"/> in the module
     /// whose name contains <paramref name="moduleNameSubstring"/> to an <c>mdMethodDef</c> token
     /// (0 if not found). Valid only while the debuggee is stopped. The token feeds breakpoint

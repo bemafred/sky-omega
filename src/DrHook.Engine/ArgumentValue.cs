@@ -5,3 +5,8 @@ namespace SkyOmega.DrHook.Engine;
 /// bits for a generic (primitive) value, and is null for object references and other non-generic
 /// values. A typed/named value API is a later refinement (local names need PDBs).</summary>
 public readonly record struct ArgumentValue(int ElementType, long? RawValue);
+
+/// <summary>A named local variable at a stop: its source name (from the PDB) plus the same
+/// CorElementType + raw primitive bits as <see cref="ArgumentValue"/>. <see cref="RawValue"/> is
+/// null for object references and locals not available at the current IL offset.</summary>
+public readonly record struct LocalValue(string Name, int ElementType, long? RawValue);
