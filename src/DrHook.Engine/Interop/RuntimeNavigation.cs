@@ -21,7 +21,9 @@ internal static unsafe class RuntimeNavigation
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
-    private static uint Release(nint pUnk)
+    /// <summary>IUnknown::Release (slot 2). Shared by the consume-direction interop helpers
+    /// that hold owned ICorDebug pointers.</summary>
+    internal static uint Release(nint pUnk)
         => ((delegate* unmanaged[Cdecl]<nint, uint>)Slot(pUnk, 2))(pUnk);
 
     /// <summary>Names of all modules loaded in the (stopped) target, walking

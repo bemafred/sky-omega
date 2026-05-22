@@ -27,6 +27,10 @@ public sealed class DebugSession : IDisposable
     private bool _detached;
     private bool _disposed;
 
+    // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
+    // the breakpoint stays bound; released on Dispose.
+    private readonly List<(nint Module, nint Function, nint Breakpoint)> _breakpoints = new();
+
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, nint pUnknown, nint pProcess)
     {
@@ -105,6 +109,28 @@ public sealed class DebugSession : IDisposable
     public uint ResolveMethodToken(string moduleNameSubstring, string typeName, string methodName)
         => RuntimeNavigation.ResolveMethodToken(_pProcess, moduleNameSubstring, typeName, methodName);
 
+    /// <summary>Set an active breakpoint at the entry of
+    /// <paramref name="typeName"/>.<paramref name="methodName"/> in the module whose name
+    /// contains <paramref name="moduleNameSubstring"/>. Returns false if the method can't be
+    /// resolved or the breakpoint can't be created. Valid only while the debuggee is stopped; a
+    /// hit later surfaces as <see cref="StopReason.Breakpoint"/> from <see cref="WaitForStop"/>.</summary>
+    public bool SetBreakpoint(string moduleNameSubstring, string typeName, string methodName)
+    {
+        nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
+        if (pModule == 0) return false;
+        try
+        {
+            uint token = MetadataResolver.ResolveMethodToken(pModule, typeName, methodName);
+            if (token == 0) return false;
+            if (!Breakpoints.TryCreate(pModule, token, out nint function, out nint breakpoint)) return false;
+
+            _breakpoints.Add((pModule, function, breakpoint));
+            pModule = 0; // ownership moved into _breakpoints — don't release below
+            return true;
+        }
+        finally { if (pModule != 0) RuntimeNavigation.Release(pModule); }
+    }
+
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {
@@ -137,6 +163,15 @@ public sealed class DebugSession : IDisposable
         Quiesce();
         Detach();
         _cordbg.Terminate();
+
+        // Release our breakpoint refs now that the runtime has dropped the breakpoints.
+        foreach ((nint module, nint function, nint breakpoint) in _breakpoints)
+        {
+            RuntimeNavigation.Release(breakpoint);
+            RuntimeNavigation.Release(function);
+            RuntimeNavigation.Release(module);
+        }
+        _breakpoints.Clear();
 
         if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
         if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
