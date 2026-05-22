@@ -106,6 +106,25 @@ public sealed class DebugSession : IDisposable
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
     public void Resume() => _pump.Resume();
 
+    /// <summary>Run until a breakpoint hit where <paramref name="condition"/> holds (or a
+    /// non-breakpoint stop, or timeout). At each breakpoint hit the condition is evaluated against
+    /// a snapshot of the frame's locals/arguments; if false, the debuggee is resumed and the wait
+    /// continues. This is the conditional-breakpoint mechanism: the breakpoint marks WHERE, the
+    /// predicate decides WHETHER. The predicate is a plain delegate — the C#-expression front end
+    /// (Roslyn) lives above the engine. Returns null on timeout.</summary>
+    public StopInfo? WaitForConditionalStop(Func<IEvalContext, bool> condition, TimeSpan timeout)
+    {
+        while (true)
+        {
+            StopInfo? stop = _pump.WaitForStop(timeout);
+            if (stop is null) return null;
+            if (stop.Reason != StopReason.Breakpoint) return stop; // non-breakpoint stops surface as-is
+            IEvalContext context = new EvalContext(GetLocals(), GetArguments());
+            if (condition(context)) return stop;
+            _pump.Resume(); // condition false — keep running to the next hit
+        }
+    }
+
     /// <summary>Step into calls from the current stop. Completion surfaces as a
     /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
     public void StepInto() => _pump.StepInto();
@@ -458,4 +477,17 @@ public enum EvalStatus
     TimedOut,
     /// <summary>The eval could not be set up (method unresolved, no stop thread, etc.).</summary>
     SetupFailed,
+}
+
+/// <summary>Immutable snapshot of a stop's locals/arguments for a conditional-breakpoint predicate.</summary>
+internal sealed class EvalContext : IEvalContext
+{
+    public EvalContext(IReadOnlyList<LocalValue> locals, IReadOnlyList<ArgumentValue> arguments)
+    {
+        Locals = locals;
+        Arguments = arguments;
+    }
+
+    public IReadOnlyList<LocalValue> Locals { get; }
+    public IReadOnlyList<ArgumentValue> Arguments { get; }
 }

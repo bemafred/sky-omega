@@ -10,3 +10,14 @@ public readonly record struct ArgumentValue(int ElementType, long? RawValue);
 /// CorElementType + raw primitive bits as <see cref="ArgumentValue"/>. <see cref="RawValue"/> is
 /// null for object references and locals not available at the current IL offset.</summary>
 public readonly record struct LocalValue(string Name, int ElementType, long? RawValue);
+
+/// <summary>Read-only snapshot of a stop's inspectable state, passed to a conditional-breakpoint
+/// predicate. A C#-expression front end (e.g. a Roslyn walker) resolves identifiers against this.</summary>
+public interface IEvalContext
+{
+    /// <summary>Named local variables of the active frame at the stop.</summary>
+    IReadOnlyList<LocalValue> Locals { get; }
+
+    /// <summary>Argument values of the active frame at the stop (arg 0 is <c>this</c> for instance methods).</summary>
+    IReadOnlyList<ArgumentValue> Arguments { get; }
+}
