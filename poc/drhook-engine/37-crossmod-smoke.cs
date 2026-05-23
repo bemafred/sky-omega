@@ -1,26 +1,24 @@
 #!/usr/bin/env -S dotnet
 #:project ../../src/DrHook.Engine/DrHook.Engine.csproj
 //
-// DrHook.Engine probe 36 — SUBCLASS-WALK in member resolution (within-module extends chain) ====
+// DrHook.Engine probe 37 — CROSS-MODULE member resolution via ICorDebugType.GetBase ============
 //
-// Object inspection slice 2. MetadataResolver.FindMethodInType now walks the extends chain of the
-// runtime type so a member declared on a base class is findable. Within-module only this slice
-// (extends == mdTypeDef, high byte 0x02); cross-module (mdTypeRef → CoreLib) is the next slice.
+// Object inspection slice 3. MemberResolver.ResolveGetter now walks inheritance via
+// ICorDebugValue2.GetExactType@3 → ICorDebugType.GetBase@7. The runtime handles mdTypeRef
+// resolution across module boundaries — no manual GetTypeRefProps + module-enumeration dance
+// required. At each Type level, MetadataResolver.FindMethodInType (within-module walker from
+// probe 36) still handles same-module extends; GetBase crosses to the parent's actual module.
 //
-// Target: ProbeException : TitledException : Exception, with Title declared on TitledException.
-// Phase A: func-eval ex.Title — succeeds via the within-module walk in MetadataResolver
-//   .FindMethodInType (ProbeException → TitledException, both in the target module), returning
-//   the string "hello title" via the probe-35 reference-string path.
-// Phase B: func-eval ex.Message — also succeeds NOW. Originally (probe 36 as committed) this
-//   was a SetupFailed boundary-lock; finding 46 / probe 37 generalized the walker via
-//   ICorDebugType.GetBase so cross-module inheritance resolves automatically. Phase B is now a
-//   POSITIVE cross-module assertion: ex.Message comes back with the right text.
+// Target: ProbeException : System.Exception directly (NO same-module intermediate). ex.Message
+// can ONLY be resolved by crossing into CoreLib. The probe arms a filter, waits for the
+// ProbeException stop, func-evals get_Message, and expects the rendered string content to come
+// back via probe 35's reference-string path.
 //
 // Falsification: 2 usage; 3 no READY; 4 attach; 5 no setup Break; 6 ArmExceptionFilter;
-//   7 no exception stop; 8 phase A eval not Completed or wrong StringValue;
-//   9 phase B eval not Completed (cross-module now expected to resolve — finding 46); 0 PASS.
+//   7 no exception stop; 8 eval status != Completed (cross-module walk failed);
+//   9 StringValue null or mismatch; 0 PASS.
 //
-// Usage:  DBGSHIM_PATH=<libdbgshim> dotnet 36-subclass-smoke.cs <path-to-36-subclass-target.cs>
+// Usage:  DBGSHIM_PATH=<libdbgshim> dotnet 37-crossmod-smoke.cs <path-to-37-crossmod-target.cs>
 
 using System;
 using System.Diagnostics;
@@ -31,31 +29,30 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using SkyOmega.DrHook.Engine;
 
-return Subclass36.Run(args);
+return CrossMod37.Run(args);
 
 sealed class NullSink : IDebugEventSink
 {
     public void OnEvent(string name) { }
 }
 
-static class Subclass36
+static class CrossMod37
 {
     const string ExpectedType   = "ProbeException";
-    const string InheritedMember = "Title";    // declared on TitledException (target module)
-    const string CrossModuleMember = "Message"; // declared on System.Exception (CoreLib)
-    const string ExpectedString = "hello title";
+    const string Member         = "Message";     // declared on System.Exception in CoreLib — cross-module
+    const string ExpectedString = "hello message";
 
     public static int Run(string[] args)
     {
         if (args.Length < 1 || !File.Exists(args[0]))
         {
-            Console.Error.WriteLine("Usage: dotnet 36-subclass-smoke.cs <path-to-36-subclass-target.cs>");
+            Console.Error.WriteLine("Usage: dotnet 37-crossmod-smoke.cs <path-to-37-crossmod-target.cs>");
             return 2;
         }
 
         Console.WriteLine($"runtime    : {RuntimeInformation.FrameworkDescription}");
         Console.WriteLine($"dbgshim    : {Environment.GetEnvironmentVariable("DBGSHIM_PATH") ?? "(resolver default)"}");
-        Console.WriteLine($"plan       : at a ProbeException stop, eval ex.{InheritedMember} (within-module, expect \"{ExpectedString}\") AND ex.{CrossModuleMember} (cross-module via GetBase, expect \"{ExpectedString}\").");
+        Console.WriteLine($"plan       : at a ProbeException stop, func-eval ex.{Member} via cross-module ICorDebugType.GetBase walk; expect StringValue == \"{ExpectedString}\".");
 
         using Process proc = new()
         {
@@ -138,26 +135,21 @@ static class Subclass36
         }
         Console.WriteLine($"stopped    : Exception {type} @ {stop.ExceptionKind}");
 
-        // --- Phase A: inherited Title (declared on TitledException — same module) -----------------
-        EvalStatus statusA = session.TryEvalCurrentExceptionMember(InheritedMember, TimeSpan.FromSeconds(10), out ArgumentValue resultA);
-        Console.WriteLine($"phase A    : eval ex.{InheritedMember} -> {statusA}  StringValue=\"{resultA.StringValue ?? "(null)"}\"");
-        if (statusA != EvalStatus.Completed || resultA.StringValue != ExpectedString)
+        EvalStatus status = session.TryEvalCurrentExceptionMember(Member, TimeSpan.FromSeconds(10), out ArgumentValue result);
+        Console.WriteLine($"eval status: {status}  StringValue=\"{result.StringValue ?? "(null)"}\"");
+        if (status != EvalStatus.Completed)
         {
-            Console.Error.WriteLine($"FALSIFIED (phase A): expected Completed with StringValue=\"{ExpectedString}\", got {statusA} / \"{resultA.StringValue ?? "(null)"}\".");
+            Console.Error.WriteLine($"FALSIFIED: cross-module eval did not complete ({status}).");
             return 8;
         }
-
-        // --- Phase B: cross-module Message (declared on System.Exception in CoreLib) --------------
-        EvalStatus statusB = session.TryEvalCurrentExceptionMember(CrossModuleMember, TimeSpan.FromSeconds(10), out ArgumentValue resultB);
-        Console.WriteLine($"phase B    : eval ex.{CrossModuleMember} -> {statusB}  StringValue=\"{resultB.StringValue ?? "(null)"}\" (cross-module via ICorDebugType.GetBase — finding 46)");
-        if (statusB != EvalStatus.Completed || resultB.StringValue != ExpectedString)
+        if (result.StringValue != ExpectedString)
         {
-            Console.Error.WriteLine($"FALSIFIED (phase B): expected cross-module Completed with StringValue=\"{ExpectedString}\", got {statusB} / \"{resultB.StringValue ?? "(null)"}\".");
+            Console.Error.WriteLine($"FALSIFIED: StringValue mismatch — expected \"{ExpectedString}\", got \"{result.StringValue ?? "(null)"}\".");
             return 9;
         }
 
         session.Resume();
-        Console.WriteLine($"\nPROBE 36 PASSED — subclass-walk in member resolution: ex.{InheritedMember} resolves within-module (MetadataResolver extends chain) AND ex.{CrossModuleMember} resolves cross-module (ICorDebugType.GetBase).");
+        Console.WriteLine($"\nPROBE 37 PASSED — cross-module member resolution via ICorDebugType.GetBase: ex.{Member} (declared on System.Exception in CoreLib) func-eval'd from a ProbeException in user code, returning the rendered string content.");
         return 0;
     }
 
@@ -173,14 +165,14 @@ static class Subclass36
         Directory.CreateDirectory(dir);
         string rid = RuntimeInformation.RuntimeIdentifier;
         string ts = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
-        string path = Path.Combine(dir, $"36-subclass-{rid}-{ts}.txt");
+        string path = Path.Combine(dir, $"37-crossmod-{rid}-{ts}.txt");
         string body =
-            "# DrHook.Engine probe 36 fixture — subclass-walk in member resolution (within-module)\n" +
+            "# DrHook.Engine probe 37 fixture — cross-module member resolution (ICorDebugType.GetBase)\n" +
             $"timestamp        = {DateTime.UtcNow:O}\n" +
             $"runtime          = {RuntimeInformation.FrameworkDescription}\n" +
             $"os-arch          = {rid}\n" +
             $"target-pid       = {pid}\n" +
-            $"phases           = A within-module inherited member resolves; B cross-module member correctly does not\n" +
+            $"plan             = func-eval ex.{Member} on a ProbeException : Exception (direct cross-module); expect StringValue == \"{ExpectedString}\"\n" +
             $"verdict          = {(code == 0 ? "PASSED" : $"FALSIFIED-{code}")}\n";
         File.WriteAllText(path, body);
         Console.WriteLine($"fixture    : {path}");

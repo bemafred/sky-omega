@@ -1,24 +1,33 @@
-// Resolve a member (property getter) on the RUNTIME TYPE of a value — so a C# expression like
-// `box.Size` resolves `get_Size` on box's actual class with no hardcoded type/module. Chain:
-// value → ICorDebugReferenceValue.Dereference → ICorDebugObjectValue.GetClass → ICorDebugClass
-// .GetModule/.GetToken → metadata FindMethodInType("get_<member>") → ICorDebugFunction. Raw V-table
-// (slots + IIDs from cordebug.idl), validated by probe 24.
+// Resolve a member (property getter) on the RUNTIME TYPE of a value, walking inheritance
+// across MODULES — so an expression like `box.Size` resolves `get_Size` on box's actual class,
+// and `ex.Message` resolves `get_Message` on System.Exception in CoreLib even though the runtime
+// type lives in the user's module.
 //
-// SCOPE: plain reference objects. Strings (ICorDebugStringValue) and other non-ICorDebugObjectValue
-// kinds aren't reachable via ObjectValue.GetClass — they need ICorDebugValue2.GetExactType /
-// ICorDebugType (a follow-on). Returns 0 for those, so the caller can fall back / report.
+// Chain: value → ICorDebugValue2.GetExactType@3 → ICorDebugType; then a loop:
+//   GetClass@4 → ICorDebugClass → GetModule@3 / GetToken@4 → (module, mdTypeDef);
+//   MetadataResolver.FindMethodInType (handles same-module extends walking, probe 36) →
+//     if found, get an ICorDebugFunction and return;
+//   else ICorDebugType.GetBase@7 → next Type (may live in a DIFFERENT module, handled by the
+//     runtime — no manual mdTypeRef resolution needed); loop.
+//
+// Slots + IIDs verified from cordebug.idl (probes 36, 37). This GetExactType-based approach
+// supersedes the previous Reference→Dereference→ObjectValue chain (which couldn't reach strings
+// or arrays and didn't cross module boundaries). Probes 24/25/27/30/35 still pass through this
+// path — GetExactType returns the same Class for plain-object cases.
+//
+// PRECONDITION: process synchronized (called at a stop).
 
 namespace SkyOmega.DrHook.Engine.Interop;
 
 internal static unsafe class MemberResolver
 {
-    private static readonly Guid IID_ICorDebugReferenceValue = new("CC7BCAF9-8A68-11D2-983C-0000F808342D");
-    private static readonly Guid IID_ICorDebugObjectValue = new("18AD3D6E-B7D2-11D2-BD04-0000F80849BD");
+    private static readonly Guid IID_ICorDebugValue2 = new("5E0B54E7-D88A-4626-9420-A691E0A78B49");
 
-    private const int ReferenceValueDereference = 10; // ICorDebugReferenceValue
-    private const int ObjectValueGetClass = 7;        // ICorDebugObjectValue
-    private const int ClassGetModule = 3;             // ICorDebugClass
-    private const int ClassGetToken = 4;
+    private const int Value2GetExactType = 3;   // ICorDebugValue2
+    private const int TypeGetClass       = 4;   // ICorDebugType
+    private const int TypeGetBase        = 7;
+    private const int ClassGetModule     = 3;   // ICorDebugClass
+    private const int ClassGetToken      = 4;
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -36,46 +45,65 @@ internal static unsafe class MemberResolver
     }
 
     /// <summary>Resolve the property getter <c>get_<paramref name="memberName"/></c> on the runtime
-    /// type of <paramref name="pThisValue"/>, as an owned <c>ICorDebugFunction</c> (caller releases).
-    /// 0 if the value isn't a resolvable reference object or the member isn't found.</summary>
+    /// type of <paramref name="pThisValue"/> (walking inherited members across modules), as an owned
+    /// <c>ICorDebugFunction</c> (caller releases). Returns 0 if the value has no exact type or no
+    /// ancestor declares the member.</summary>
     public static nint ResolveGetter(nint pThisValue, string memberName)
     {
-        nint reference = QueryInterface(pThisValue, IID_ICorDebugReferenceValue);
-        if (reference == 0) return 0; // not a reference value
-        nint obj;
-        try { obj = Out(reference, ReferenceValueDereference); }
-        finally { RuntimeNavigation.Release(reference); }
-        if (obj == 0) return 0;
+        if (pThisValue == 0) return 0;
+        string getterName = "get_" + memberName;
+
+        nint value2 = QueryInterface(pThisValue, IID_ICorDebugValue2);
+        if (value2 == 0) return 0;
+        nint type;
+        try { type = Out(value2, Value2GetExactType); }
+        finally { RuntimeNavigation.Release(value2); }
+        if (type == 0) return 0;
 
         try
         {
-            nint objectValue = QueryInterface(obj, IID_ICorDebugObjectValue);
-            if (objectValue == 0) return 0; // not a plain object (e.g. string) — needs ICorDebugType
+            while (type != 0)
+            {
+                nint function = TryFindOnTypeLevel(type, getterName);
+                if (function != 0) return function;
+
+                nint baseType = Out(type, TypeGetBase);
+                RuntimeNavigation.Release(type);
+                type = baseType;
+            }
+            return 0;
+        }
+        finally
+        {
+            if (type != 0) RuntimeNavigation.Release(type);
+        }
+    }
+
+    /// <summary>One level of the GetBase walk: get the ICorDebugClass for this type, find the
+    /// (module, mdTypeDef) it lives in, search via <see cref="MetadataResolver.FindMethodInType"/>
+    /// (which itself walks same-module extends). Returns an owned <c>ICorDebugFunction</c> on hit,
+    /// 0 on miss.</summary>
+    private static nint TryFindOnTypeLevel(nint type, string getterName)
+    {
+        nint klass = Out(type, TypeGetClass);
+        if (klass == 0) return 0;
+        try
+        {
+            nint module = Out(klass, ClassGetModule);
+            if (module == 0) return 0;
             try
             {
-                nint klass = Out(objectValue, ObjectValueGetClass);
-                if (klass == 0) return 0;
-                try
-                {
-                    nint module = Out(klass, ClassGetModule);
-                    if (module == 0) return 0;
-                    try
-                    {
-                        uint typeToken;
-                        if (((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(klass, ClassGetToken))(klass, &typeToken) < 0)
-                            return 0;
+                uint typeToken;
+                if (((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(klass, ClassGetToken))(klass, &typeToken) < 0)
+                    return 0;
 
-                        uint methodToken = MetadataResolver.FindMethodInType(module, typeToken, "get_" + memberName);
-                        if (methodToken == 0) return 0;
+                uint methodToken = MetadataResolver.FindMethodInType(module, typeToken, getterName);
+                if (methodToken == 0) return 0;
 
-                        return Eval.GetFunction(module, methodToken); // owned ICorDebugFunction
-                    }
-                    finally { RuntimeNavigation.Release(module); }
-                }
-                finally { RuntimeNavigation.Release(klass); }
+                return Eval.GetFunction(module, methodToken); // owned ICorDebugFunction
             }
-            finally { RuntimeNavigation.Release(objectValue); }
+            finally { RuntimeNavigation.Release(module); }
         }
-        finally { RuntimeNavigation.Release(obj); }
+        finally { RuntimeNavigation.Release(klass); }
     }
 }
