@@ -1,0 +1,9 @@
+# DrHook.Engine probe 11 fixture — metadata resolution (ADR-006 Phase 2, 4b)
+timestamp        = 2026-05-23T14:48:15.5227780Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 83355
+resolved         = Worker.Tick
+token            = 0x06000003
+is-mdMethodDef   = True
+verdict          = PASSED

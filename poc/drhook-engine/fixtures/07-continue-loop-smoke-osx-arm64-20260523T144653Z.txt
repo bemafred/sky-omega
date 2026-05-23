@@ -1,0 +1,9 @@
+# DrHook.Engine probe 07 fixture — continue-loop live smoke (ADR-006 Phase 2)
+timestamp        = 2026-05-23T14:46:53.3984700Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 82993
+events-at-1s     = 24
+events-at-4s     = 24
+histogram        = CreateAppDomain=1, CreateProcess=1, CreateThread=4, Exception=1, ExitThread=1, LoadAssembly=8, LoadModule=8
+verdict          = PASSED

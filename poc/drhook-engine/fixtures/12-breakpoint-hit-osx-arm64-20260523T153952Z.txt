@@ -1,0 +1,8 @@
+# DrHook.Engine probe 12 fixture — breakpoint hit (ADR-006 Phase 2, 4c)
+timestamp        = 2026-05-23T15:39:52.6044320Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 87920
+breakpoint       = Worker.Tick
+hits-required    = 5
+verdict          = PASSED

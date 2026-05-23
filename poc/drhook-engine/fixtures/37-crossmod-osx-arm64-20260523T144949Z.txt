@@ -1,0 +1,7 @@
+# DrHook.Engine probe 37 fixture — cross-module member resolution (ICorDebugType.GetBase)
+timestamp        = 2026-05-23T14:49:49.5727270Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 83854
+plan             = func-eval ex.Message on a ProbeException : Exception (direct cross-module); expect StringValue == "hello message"
+verdict          = PASSED

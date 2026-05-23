@@ -1,0 +1,7 @@
+# DrHook.Engine probe 39 fixture — object field walking (GetFieldValue@8 + EnumFields@20, depth >= 2)
+timestamp        = 2026-05-23T15:40:19.8357040Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 88399
+phases           = A depth=1 populates counter.Fields; B depth=2 recurses into Nested
+verdict          = PASSED

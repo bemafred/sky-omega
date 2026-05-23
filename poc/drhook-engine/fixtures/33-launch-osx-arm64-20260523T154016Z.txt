@@ -1,0 +1,6 @@
+# DrHook.Engine probe 33 fixture — DebugSession.Launch (attach before main)
+timestamp        = 2026-05-23T15:40:16.0244020Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+launched-pid     = 88298
+verdict          = PASSED

@@ -1,0 +1,8 @@
+# DrHook.Engine probe 13 fixture — stepping (ADR-006 Phase 2)
+timestamp        = 2026-05-23T14:48:21.0695120Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 83390
+breakpoint       = Worker.Tick
+steps-required   = 3
+verdict          = PASSED

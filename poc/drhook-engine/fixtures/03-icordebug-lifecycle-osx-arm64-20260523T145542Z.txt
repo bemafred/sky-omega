@@ -1,0 +1,10 @@
+# DrHook.Engine probe 03 fixture — ICorDebug Initialize/Terminate via source-gen COM
+timestamp        = 2026-05-23T14:55:42.1710180Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 84459
+coreclr-path     = /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/libcoreclr.dylib
+version-string   = 00000004;000149eb;0000000109B90000
+comwrappers-wrap = OK (StrategyBasedComWrappers + [GeneratedComInterface])
+initialize-hr    = 0x00000000
+terminate-hr     = 0x00000000

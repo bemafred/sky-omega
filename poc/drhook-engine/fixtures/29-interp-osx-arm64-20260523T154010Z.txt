@@ -1,0 +1,7 @@
+# DrHook.Engine probe 29 fixture — Roslyn interpolation walker (one front end, two consumers)
+timestamp        = 2026-05-23T15:40:10.3134480Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 88220
+configs          = A interpolation-logpoint, B condition + interpolation from same walker
+verdict          = PASSED

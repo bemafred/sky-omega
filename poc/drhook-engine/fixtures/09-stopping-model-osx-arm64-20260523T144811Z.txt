@@ -1,0 +1,8 @@
+# DrHook.Engine probe 09 fixture — stopping-event model (ADR-006 Phase 2 stepping keystone)
+timestamp          = 2026-05-23T14:48:11.6507130Z
+runtime            = .NET 10.0.0
+os-arch            = osx-arm64
+target-pid         = 83314
+stops-controlled   = 5 / 5
+frozen-while-held  = true
+verdict            = PASSED

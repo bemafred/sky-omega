@@ -1,0 +1,13 @@
+# DrHook.Engine probe 05 fixture — DebugActiveProcess + first callback + Detach
+timestamp        = 2026-05-23T15:39:39.5180900Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 87742
+coreclr-path     = /usr/local/share/dotnet/shared/Microsoft.NETCore.App/10.0.0/libcoreclr.dylib
+version-string   = 00000004;000156be;0000000105FDC000
+debugactiveprocess-hr = 0x00000000
+callback-fired   = False
+first-event      = (none)
+callback-count   = 0
+detach-hr        = 0x00000000
+terminate-hr     = 0x00000000

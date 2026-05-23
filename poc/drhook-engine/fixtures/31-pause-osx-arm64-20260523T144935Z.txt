@@ -1,0 +1,7 @@
+# DrHook.Engine probe 31 fixture — AsyncBreak / DebugSession.Pause
+timestamp        = 2026-05-23T14:49:35.3798800Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 83750
+cycles           = two Pause/Resume cycles to prove the rendezvous repeats
+verdict          = PASSED

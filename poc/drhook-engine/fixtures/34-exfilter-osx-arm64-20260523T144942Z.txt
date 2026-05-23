@@ -1,0 +1,7 @@
+# DrHook.Engine probe 34 fixture — persistent exception filter (Arm/List/Remove/Clear)
+timestamp        = 2026-05-23T14:49:42.3203170Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 83801
+phases           = A 3 cycles filtered to ProbeException; B 8 cycles unfiltered observing both types
+verdict          = PASSED

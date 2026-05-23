@@ -1,0 +1,6 @@
+# DrHook.Engine probe 32 fixture — breakpoint registry (List/Remove/Clear + ids)
+timestamp        = 2026-05-23T15:40:14.7298300Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 88283
+verdict          = PASSED
