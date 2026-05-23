@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Substrate: [Mercury 1.8](CHANGELOG.md)** · production-validated across the 1.7 line · **three paired measurements** on the same substrate generation:
+**Current release: [Sky Omega 1.8.2](CHANGELOG.md)** · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired) · **three paired Mercury measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
@@ -125,7 +125,7 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 
 **Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core), zero-GC hot paths, and 100% W3C conformance across all core specifications. It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
 
-> *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 21-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), DrHook (depends on `Microsoft.Diagnostics.NETCore.Client` until ADR-006/drhook engine ships) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
+> *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 21-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), `DrHook.Engine` (admitted: `Microsoft.Diagnostics.NETCore.Client` managed + `Microsoft.Diagnostics.DbgShim.<rid>` native per-RID + `Microsoft.Diagnostics.Tracing.TraceEvent` for EventPipe parsing, all per ADR-009; **netcoredbg retired at 1.8.2**) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
 
 The broader Sky Omega vision is a **stand-alone cognitive agent** built on this foundation, combining:
 
@@ -209,8 +209,8 @@ Everything below has code in `src/`, tests, and benchmarks.
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
 | **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
-| **DrHook**             | Runtime observation substrate — EventPipe profiling and DAP stepping for AI coding agents   |
-| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP)                               |
+| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots. Substrate-independence reached at 1.8.2 (netcoredbg retired). Forty PoC probes validating each capability on macOS/arm64; production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Proposed 2026-05-23). |
+| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP) — 17 stepping tools (attach, launch, breakpoints + conditions, exception filters, locals + field/array inspection, step, continue, pause) + processes + snapshot, all backed by DrHook.Engine. |
 
 ## 🔭 Architectural Vision
 

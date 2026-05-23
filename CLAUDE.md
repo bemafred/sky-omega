@@ -78,13 +78,13 @@ dotnet tool install -g SkyOmega.Mercury.Mcp --add-source ./nupkg
 | `mercury-mcp` | MCP server for Claude with persistent store at `~/Library/SkyOmega/stores/mcp/` |
 | `mercury-sparql` | SPARQL query engine demo |
 | `mercury-turtle` | Turtle parser demo |
-| `drhook-mcp` | MCP server for .NET runtime inspection (EventPipe + DAP) |
+| `drhook-mcp` | MCP server for .NET runtime inspection (EventPipe + ICorDebug via `DrHook.Engine`, BCL + P/Invoke + per-RID `libdbgshim`) |
 
 All tools support `-v`/`--version`.
 
 ### MCP Integration
 
-**Mercury** runs from the **global Release tool** (`mercury-mcp`) by default — substrate hardening closed at 1.7.69, so version skew is no longer the dev-iteration concern it was during the cycle 8 → cycle 10 arc. **DrHook** still runs from the **local source build** (`dotnet run --project src/DrHook.Mcp`) because the DrHook engine BCL-only rewrite is the active substrate-development target (deferred from 1.7.x to 1.8.x per the amended roadmap). To iterate on Mercury MCP code itself, manually edit `.mcp.json` to point at `dotnet run --project src/Mercury.Mcp`.
+**Mercury** runs from the **global Release tool** (`mercury-mcp`) by default — substrate hardening closed at 1.7.69, so version skew is no longer the dev-iteration concern it was during the cycle 8 → cycle 10 arc. **DrHook** still runs from the **local source build** (`dotnet run --project src/DrHook.Mcp`) because the DrHook substrate is the active 1.8.x development target — ADR-006 Phase 3 closed at 1.8.2 (substrate-independence reached), and [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Proposed 2026-05-23) sequences production-suitability work (teardown + concurrency hardening, test-runner debugging substrate, integration-test mechanism, cross-platform validation). Iteration speed matters here; the global tool would lag. To iterate on Mercury MCP code itself, manually edit `.mcp.json` to point at `dotnet run --project src/Mercury.Mcp`.
 
 **Dev-time** (this repo): `.mcp.json` at repo root auto-configures Claude Code. After `tools/install-tools.sh` updates the Mercury global tool, restart Claude Code to spawn a fresh MCP process against the new version.
 
@@ -208,10 +208,11 @@ SkyOmega.sln
 │   ├── Minerva.Cli/         # (placeholder dir, no csproj yet)
 │   ├── Minerva.Mcp/         # (placeholder dir, no csproj yet)
 │   │
-│   ├── DrHook/              # Runtime observation substrate (EventPipe + DAP)
+│   ├── DrHook.Engine/       # Runtime observation substrate — BCL + P/Invoke + source-gen COM; ICorDebug via per-RID libdbgshim; EventPipe for processes/snapshot. Replaced netcoredbg-DAP src/DrHook/ at 1.8.2.
+│   │   ├── Interop/         # CorDebug COM surface, MetadataResolver, Eval, Variables, Frames, Breakpoints, Stepping, DbgShim, ManagedCallbackHost
 │   │   ├── Diagnostics/     # ProcessAttacher, StackInspector (EventPipe)
-│   │   └── Stepping/        # DapClient, SteppingSessionManager, NetCoreDbgLocator
-│   ├── DrHook.Mcp/          # MCP server for .NET runtime inspection
+│   │   └── Observation/     # ProcessInspector
+│   ├── DrHook.Mcp/          # MCP server for .NET runtime inspection — 17 stepping tools + processes + snapshot, all backed by DrHook.Engine
 │   │
 │   └── SkyOmega.Bcl/        # BCL extensions (ChunkedList/ChunkedArray, BitVector, SplitMix64Hash)
 ├── tests/

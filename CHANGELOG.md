@@ -5,7 +5,7 @@ All notable changes to Sky Omega will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Current release: [Sky Omega 1.8.0](#180---2026-05-17)** — released 2026-05-17; **cognitive-layers entry point.** The 1.7.x substrate-hardening line closes here. 1.8.0 is the boundary between substrate work and cognitive work — no new substrate features in this release, only the *closure* of the substrate-hardening arc and the *framing* for what cognitive-layer work begins next (Lucy → James → Mira → Sky over 1.8.x). All 18 Mercury ADRs through ADR-044 are Completed or explicitly Deferred. Substrate posture at 1.8.0 cutover: **W3C SPARQL 1.1 100/100 + Turtle/N-Triples/N-Quads/TriG/RDF-XML 100% + JSON-LD 100% of in-scope**, **4,522 / 0 failed / 6 skipped** Mercury tests, **0 substrate failures across 8,564 unique query × substrate executions** on the 1.7.x line, three paired production runs (21.3 B full + 8.17 B truthy + 150 M WGPB) on a single M5 Max laptop. See [docs/releases/1.8.0.md](docs/releases/1.8.0.md) for the substrate completion arc and [docs/roadmap/cognitive-layers.md](docs/roadmap/cognitive-layers.md) for what 1.8.x begins. Previous: [Mercury 1.7.74](#1774---2026-05-17) — released 2026-05-17; **[ADR-043](docs/adrs/mercury/ADR-043-metric-emission-decoupling.md) Metric Emission Decoupling shipped. Three-part fix bounds JSONL artefact staleness on shared-disk configurations: periodic `FileStream.Flush()` (5s default, configurable), `MetricEmissionThrottle` helper applied at merge emit site, `ProgressEmissionMinInterval` default 30s → 5s for rebuild/drain emit sites, and a new operator runbook for the separate-disk `--metrics-out` pattern. Cycle 9 trigram drain's 2-hour staleness symptom is structurally bounded. Also: `observability-discipline-systematic-not-reactive` limit Resolved at the 1.8.0 boundary (structural cure lives in James; Martin mitigates manually until cognitive layer is active).** Previous: [Mercury 1.7.73](#1773---2026-05-17) — released 2026-05-17; **[ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) SPARQL literal canonicalization shipped: SPARQL `INSERT/DELETE DATA`, `INSERT/DELETE WHERE`, FILTER, BIND, and pattern literals now canonicalize to the same wrapped-decoded form Turtle/N-Triples/N-Quads/TriG already produce. Cross-format ingestion of the same logical RDF triple now produces byte-identical atoms. Pre-existing `FilterEvaluator.CompareEqual` wrap-vs-unwrap equality bug brought into ADR scope and fixed; `FILTER(?o = "literal")` now normalizes lexical form + lang tag + datatype per SPARQL spec. 14 cross-form tests in `CrossFormCanonicalizationTests` + 38 unit tests in `LiteralFormTests` validate H1-H4. Full suite 4,515 / 0 failed / 6 skipped.** Previous: [Mercury 1.7.72](#1772---2026-05-17) — **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
+**Current release: [Sky Omega 1.8.2](#182---2026-05-23)** — released 2026-05-23; **DrHook substrate-independence reached.** `src/DrHook/` retired entirely; `DrHook.Engine` (BCL + P/Invoke + source-gen COM) is now Sky Omega's sole .NET runtime-observation substrate. The Phase 3 substrate arc named in ADR-006 closes here — every load-bearing capability validated by probes 02–40 (39 PASS + 1 documented PARTIAL on macOS/arm64). `libdbgshim` bundled per-RID via NuGet; no consumer relies on `DBGSHIM_PATH`. The successor [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Proposed 2026-05-23) sequences the production-suitability work (teardown + concurrency hardening; substrate-aligned test-runner debugging; integration-test mechanism characterization; cross-platform validation campaign). See [docs/releases/1.8.2.md](docs/releases/1.8.2.md). Previous: [Sky Omega 1.8.1](#181---2026-05-22) — `DrHook.Mcp` stepping path switched from netcoredbg-DAP to `DrHook.Engine`; substrate work that enabled the switchover (BreakpointPolicy unification, exception breakpoints with subclass filtering, func-eval at exception stops, Roslyn-walker-driven conditional/interpolated expressions, `DebugSession.Pause`/`Launch`, persistent exception filter) shipped across probes 23–32. See [docs/releases/1.8.1.md](docs/releases/1.8.1.md). Previous: [Sky Omega 1.8.0](#180---2026-05-17) — released 2026-05-17; **cognitive-layers entry point.** The 1.7.x substrate-hardening line closes here. 1.8.0 is the boundary between substrate work and cognitive work — no new substrate features in this release, only the *closure* of the substrate-hardening arc and the *framing* for what cognitive-layer work begins next (Lucy → James → Mira → Sky over 1.8.x). All 18 Mercury ADRs through ADR-044 are Completed or explicitly Deferred. Substrate posture at 1.8.0 cutover: **W3C SPARQL 1.1 100/100 + Turtle/N-Triples/N-Quads/TriG/RDF-XML 100% + JSON-LD 100% of in-scope**, **4,522 / 0 failed / 6 skipped** Mercury tests, **0 substrate failures across 8,564 unique query × substrate executions** on the 1.7.x line, three paired production runs (21.3 B full + 8.17 B truthy + 150 M WGPB) on a single M5 Max laptop. See [docs/releases/1.8.0.md](docs/releases/1.8.0.md) for the substrate completion arc and [docs/roadmap/cognitive-layers.md](docs/roadmap/cognitive-layers.md) for what 1.8.x begins. Previous: [Mercury 1.7.74](#1774---2026-05-17) — released 2026-05-17; **[ADR-043](docs/adrs/mercury/ADR-043-metric-emission-decoupling.md) Metric Emission Decoupling shipped. Three-part fix bounds JSONL artefact staleness on shared-disk configurations: periodic `FileStream.Flush()` (5s default, configurable), `MetricEmissionThrottle` helper applied at merge emit site, `ProgressEmissionMinInterval` default 30s → 5s for rebuild/drain emit sites, and a new operator runbook for the separate-disk `--metrics-out` pattern. Cycle 9 trigram drain's 2-hour staleness symptom is structurally bounded. Also: `observability-discipline-systematic-not-reactive` limit Resolved at the 1.8.0 boundary (structural cure lives in James; Martin mitigates manually until cognitive layer is active).** Previous: [Mercury 1.7.73](#1773---2026-05-17) — released 2026-05-17; **[ADR-044](docs/adrs/mercury/ADR-044-sparql-update-literal-canonicalization.md) SPARQL literal canonicalization shipped: SPARQL `INSERT/DELETE DATA`, `INSERT/DELETE WHERE`, FILTER, BIND, and pattern literals now canonicalize to the same wrapped-decoded form Turtle/N-Triples/N-Quads/TriG already produce. Cross-format ingestion of the same logical RDF triple now produces byte-identical atoms. Pre-existing `FilterEvaluator.CompareEqual` wrap-vs-unwrap equality bug brought into ADR scope and fixed; `FILTER(?o = "literal")` now normalizes lexical form + lang tag + datatype per SPARQL spec. 14 cross-form tests in `CrossFormCanonicalizationTests` + 38 unit tests in `LiteralFormTests` validate H1-H4. Full suite 4,515 / 0 failed / 6 skipped.** Previous: [Mercury 1.7.72](#1772---2026-05-17) — **fix: `GetLexicalForm` skips escaped quotes; CONTAINS/STRSTARTS/UCASE/LCASE no longer truncate literals at `\"`**. `BTreeFile` extracted to `Mercury.Runtime` alongside `PageCache` (relocated, namespace `SkyOmega.Mercury.Runtime`, visibility `public`). The four concrete index classes (`TemporalQuadIndex`, `VersionedQuadIndex`, `ReferenceQuadIndex`, `MinimalQuadIndex`) now own only the B+Tree algorithm + key/entry layouts; FileStream + mmap + page allocation + metadata header are delegated. ~600 lines of boilerplate eliminated. 592 Storage tests + 4454 total Mercury tests green. Production substrate continues to be validated by 1.7.57's **three paired measurements on the same substrate generation**:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) at 21.3 B **full** Wikidata in 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) at 8.17 B **truthy** Wikidata in 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) at ~150 M **2018 reduced-truthy** Wikidata in 4 m 30 s end-to-end + 849/850 WGPB queries in 4 m 43 s (2026-05-16) — the apples-to-apples measurement vs published WGPB/MillenniumDB numbers
@@ -27,6 +27,76 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 **Sky Omega 1.8.0** — **cognitive-layers entry point** per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26). Substrate hardening closes within 1.7.x: Phases 1-6 (ADR-028/029/030/031/032/033) complete 2026-04-26; Phase 7c performance rounds shipped through 1.7.57 (ADR-037 pipelined spill, ADR-038 merge-phase read-side, ADR-039 BBHash MPHF); Phase 8 Tier 1+2 close-out shipped 1.7.58-1.7.64 on 2026-05-16 (ADR-040 readahead adaptive, ADR-041 cleanup-on-exception, ADR-042 MPHF construction adaptive, WDBench aggregate distribution, N-Triples parser characterization). 1.8.0 marks the substrate-complete / cognitive-layers-begin boundary, not a production-hardening release.
 
 **Sky Omega 1.8.0+** introduces cognitive layers on top of the three substrates: **Lucy** (deep semantic memory), **James** (orchestration with pedagogical guidance), **Mira** (surface/interaction layer), and **Sky** (agent surface integrating all three). The three substrates — **Mercury** (RDF storage), **Minerva** (LLM inference, BCL-only, in 1.7.x development), and **DrHook** (runtime observation; engine BCL-only rewrite queued as the first 1.8.x substrate-discipline task post-cognitive-entry) — carry the cognitive layers.
+
+---
+
+## [1.8.2] - 2026-05-23
+
+**Headline:** DrHook substrate-independence reached. `src/DrHook/` retired entirely; `DrHook.Engine` is the sole .NET runtime-observation substrate. Phase 3 substrate arc complete.
+
+### What 1.8.2 carries
+
+- **Object-inspection substrate complete:** reference-string rendering via `ICorDebugStringValue.Dereference` (probe 35); subclass walk in member resolution (probe 36 within-module, probe 37 cross-module via `ICorDebugType.GetBase`); subclass-aware exception filter (probe 38); object field walking depth ≥ 2 (probe 39); array rendering for SZARRAY depth ≥ 2 (probe 40 — Phase 3 substrate COMPLETE).
+- **`libdbgshim` bundled per-RID** via `Microsoft.Diagnostics.DbgShim.<rid>` `<PackageReference>`. `DbgShim.cs` resolver primary lookup at `AppContext.BaseDirectory/runtimes/<rid>/native/`; `DBGSHIM_PATH` retained as the explicit-override knob. See finding 50.
+- **Structural retirement:** `src/DrHook/` directory deleted; `DrHook.Mcp` references `DrHook.Engine` exclusively; `Microsoft.Diagnostics.Tracing.TraceEvent` (EventPipe parsing) moved into `DrHook.Engine`.
+- **`Microsoft.Diagnostics.NETCore.Client` (managed) + `libdbgshim` (native asset)** remain as the only diagnostics dependencies, both admitted per ADR-009. No `netcoredbg`.
+
+### What 1.8.2 does NOT carry
+
+- `drhook_step_test` still wired (engine path returns "not yet ported"). ADR-007 Phase 7 removes it entirely.
+- Stale `[Description]` strings on some MCP tools still reference netcoredbg. ADR-007 Phase 7 cleans these.
+- Cross-platform validation: only macOS/arm64 has been validated. `DrHook.Mcp` bundles all 7 RIDs; per-platform probe runs are ADR-007 Phase 9.
+
+### Substrate posture at 1.8.2
+
+- `DrHook.Engine` substrate: 4,071 LOC (BCL + P/Invoke + source-gen COM, single managed dep, per-RID native NuGet).
+- `DrHook.Mcp`: 972 LOC (17-method stepping + processes/snapshot tools).
+- 47 `DrHook.Engine.Tests` unit tests pass.
+- 40 PoC probes (02–40) in `poc/drhook-engine/`: 39 PASS + 1 documented PARTIAL (probe 05 — RESOLVED by probe 06).
+- 52 finding documents in `poc/drhook-engine/findings/` recording substrate-validation history.
+- 85 fixture files in `poc/drhook-engine/fixtures/` — evidence archive established.
+- Mercury substrate posture unchanged from 1.8.0.
+
+### What's next
+
+[ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Proposed 2026-05-23) sequences production-suitability: teardown + concurrency hardening, test-runner debugging without env-flag tricks, integration-test mechanism characterization, cross-platform validation campaign. Nine phases, four stress dimensions, Rider as macOS reference oracle, `EngineAnomaly` infrastructure for surprise capture.
+
+### References
+
+- [docs/releases/1.8.2.md](docs/releases/1.8.2.md) — full release narrative
+- [docs/adrs/drhook/ADR-006-drhook-engine.md](docs/adrs/drhook/ADR-006-drhook-engine.md) — Accepted; Phase 3 substrate closes at this release
+- [docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) — Proposed
+- [poc/drhook-engine/findings/](poc/drhook-engine/findings/) — substrate-validation findings 11 + 50 also corrected in this release (false-provenance audit retired `.local-dbgshim/`)
+
+---
+
+## [1.8.1] - 2026-05-22
+
+**Headline:** `DrHook.Mcp` stepping path switched from netcoredbg-DAP to `DrHook.Engine`. First 1.8.x substrate-discipline release.
+
+### What 1.8.1 carries
+
+- All 17 stepping MCP tools now drive ICorDebug directly via `DrHook.Engine.DebugSession`. No `netcoredbg` subprocess, no DAP over stdio.
+- Substrate work that enabled the switchover (validated by probes 02–32 at write time, all green on macOS/arm64):
+  - Continue-loop + stopping-event model + clean detach (probes 02–10)
+  - Metadata + breakpoints + stepping + stack frames + variables (probes 11–18)
+  - Func-eval — the netcoredbg deadlock isn't a platform limit (probes 19–21)
+  - Conditional breakpoints + general member resolution via Roslyn walker (probes 22–25)
+  - Exception breakpoints + func-eval at exception stops (probes 26–27)
+  - `BreakpointPolicy` unifying conditional / logpoint / hit-count / fault as four configs of one type (probes 28–30)
+  - `DebugSession.Pause` + persistent exception filter (probes 31–32)
+
+### What 1.8.1 does NOT carry
+
+- `src/DrHook/` (the netcoredbg-DAP project) still on disk in 1.8.1 — retired in 1.8.2.
+- `drhook_step_test`: engine path returns "not yet ported" (the `VSTEST_HOST_DEBUG` testhost-PID-discovery dance from the netcoredbg version is not in `DrHook.Engine`).
+- Object-inspection substrate beyond primitive locals — lands in 1.8.2 (probes 35–40).
+
+### References
+
+- [docs/releases/1.8.1.md](docs/releases/1.8.1.md)
+- Commit `ba9d8ca` — the switchover commit
+- [poc/drhook-engine/findings/](poc/drhook-engine/findings/) — probe outcomes 02–32
 
 ---
 
