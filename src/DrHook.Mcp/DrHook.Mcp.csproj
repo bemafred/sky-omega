@@ -19,6 +19,27 @@
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     </ItemGroup>
 
+    <!--
+      libdbgshim for the GLOBAL TOOL — all RIDs referenced unconditionally so
+      `dotnet tool install -g drhook-mcp` works on any platform. Each PackageReference deploys
+      its native asset under runtimes/<rid>/native/ in the tool's install dir; the .NET host
+      picks the right one at runtime per the host's RID. ~10 MB total across six RIDs.
+
+      Pre-staged for the Phase 3 SessionManager rewrite that switches DrHook.Mcp from
+      netcoredbg-based DrHook to BCL-only DrHook.Engine. Until then, the native assets are
+      dead weight in the package (the netcoredbg path used today doesn't need them) — accepted
+      cost so the tool is ready the moment the rewrite lands; no user-facing churn.
+    -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-arm64"      Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-x64"        Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-x64"      Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-arm64"    Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-musl-x64" Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-x64"        Version="9.0.*" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-arm64"      Version="9.0.*" />
+    </ItemGroup>
+
     <ItemGroup>
         <ProjectReference Include="..\DrHook\DrHook.csproj" />
     </ItemGroup>

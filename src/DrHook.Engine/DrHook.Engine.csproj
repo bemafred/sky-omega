@@ -15,17 +15,35 @@
         <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.*" />
     </ItemGroup>
 
+    <!--
+      libdbgshim (the native shim to ICorDebug) is a native runtime-substrate asset per the
+      ADR-009 clarification, NOT a managed dependency. We bundle it via per-RID NuGet packages
+      (Microsoft.Diagnostics.DbgShim.<rid>), referenced CONDITIONALLY on the dev's SDK RID so
+      local builds stay lean (one ~1.5 MB native asset, not all six). The native asset deploys
+      to bin/<config>/<tfm>/runtimes/<rid>/native/libdbgshim.dylib and is found at runtime by
+      Interop/DbgShim.cs via AppContext.BaseDirectory.
+
+      DBGSHIM_PATH env var remains as the explicit override (e.g. testing a custom dbgshim
+      build), but no consumer relies on it for default operation.
+
+      For the global TOOL (DrHook.Mcp), all RIDs are referenced unconditionally so
+      `dotnet tool install -g drhook-mcp` works on any platform — see DrHook.Mcp.csproj.
+
+      Per-RID packages, not the master Microsoft.Diagnostics.DbgShim meta-package: avoids the
+      coarse all-RIDs fetch (the meta pulls every platform's asset, ~10 MB total).
+    -->
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-arm64"      Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'osx-arm64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.osx-x64"        Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'osx-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-x64"      Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'linux-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-arm64"    Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'linux-arm64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.linux-musl-x64" Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'linux-musl-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-x64"        Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'win-x64'" />
+        <PackageReference Include="Microsoft.Diagnostics.DbgShim.win-arm64"      Version="9.0.*" Condition="'$(NETCoreSdkRuntimeIdentifier)' == 'win-arm64'" />
+    </ItemGroup>
+
     <ItemGroup>
         <InternalsVisibleTo Include="SkyOmega.DrHook.Engine.Tests" />
     </ItemGroup>
-
-    <!--
-      libdbgshim (the native shim to ICorDebug) is a native runtime-substrate asset per the
-      ADR-009 clarification, NOT a managed dependency. It is resolved at runtime by
-      Interop/DbgShim.cs (DBGSHIM_PATH override → runtime dir → NuGet cache). Bundling it from
-      the Microsoft.Diagnostics.DbgShim native-asset NuGet is a packaging refinement (Phase 1
-      follow-up); the resilient resolver covers dev/test in the meantime. Baseline:
-      Microsoft.Diagnostics.DbgShim.osx-arm64 9.0.661903 (finding 11).
-    -->
 
 </Project>

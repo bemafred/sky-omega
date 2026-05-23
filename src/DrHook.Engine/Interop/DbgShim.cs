@@ -151,6 +151,8 @@ internal sealed unsafe class DbgShim : IDisposable
     {
         List<string> tried = new();
 
+        // 1. Explicit override — DBGSHIM_PATH for testing a custom build. No consumer relies
+        //    on this for default operation; it's the "ssh into the engine room" knob.
         string? env = Environment.GetEnvironmentVariable("DBGSHIM_PATH");
         if (!string.IsNullOrEmpty(env))
         {
@@ -162,18 +164,29 @@ internal sealed unsafe class DbgShim : IDisposable
             OperatingSystem.IsWindows() ? "dbgshim.dll" :
             OperatingSystem.IsMacOS() ? "libdbgshim.dylib" :
                                         "libdbgshim.so";
+        string rid = RuntimeInformation.RuntimeIdentifier;
 
-        // Bundled alongside the engine (once the native asset is packaged).
-        string bundled = Path.Combine(AppContext.BaseDirectory, libName);
-        tried.Add(bundled + "  (app base)");
-        if (File.Exists(bundled)) { searched = string.Join('\n', tried); return bundled; }
+        // 2. Bundled via per-RID Microsoft.Diagnostics.DbgShim.<rid> package — the package's
+        //    native asset deploys to bin/<config>/<tfm>/runtimes/<rid>/native/. PRIMARY path for
+        //    production and dev once the engine is referenced as a PackageReference.
+        string runtimesNative = Path.Combine(AppContext.BaseDirectory, "runtimes", rid, "native", libName);
+        tried.Add(runtimesNative + "  (app base — runtimes/<rid>/native)");
+        if (File.Exists(runtimesNative)) { searched = string.Join('\n', tried); return runtimesNative; }
 
-        // Pre-.NET-7 runtimes shipped it in the runtime directory.
+        // 3. Bundled directly at AppContext.BaseDirectory — rare layout (some packaging
+        //    strategies flatten native assets next to the assembly), kept as a safety net.
+        string flat = Path.Combine(AppContext.BaseDirectory, libName);
+        tried.Add(flat + "  (app base — flat)");
+        if (File.Exists(flat)) { searched = string.Join('\n', tried); return flat; }
+
+        // 4. Pre-.NET-7 runtimes shipped it in the runtime directory (defunct on .NET 7+).
         string runtimeDir = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), libName);
         tried.Add(runtimeDir + "  (runtime dir)");
         if (File.Exists(runtimeDir)) { searched = string.Join('\n', tried); return runtimeDir; }
 
-        // NuGet cache: microsoft.diagnostics.dbgshim.<rid>/<version>/runtimes/<rid>/native/.
+        // 5. NuGet cache — found if a Microsoft.Diagnostics.DbgShim.<rid> happens to be
+        //    restored locally but not deployed (e.g. a naked `dotnet build` against an older
+        //    csproj that didn't bundle). Fallback for legacy / external scenarios.
         string? cached = FindInNuGetCache(libName, tried);
         if (cached is not null) { searched = string.Join('\n', tried); return cached; }
 
