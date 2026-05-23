@@ -38,10 +38,6 @@ internal static unsafe class FieldEnumerator
     private const int EnumFields    = 20;
     private const int GetFieldProps = 57;
 
-    private const int E_T_STRING = 0x0E;
-    private const int E_T_CLASS  = 0x12;
-    private const int E_T_OBJECT = 0x1C;
-
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
     private static nint QueryInterface(nint pUnk, Guid iid)
@@ -175,9 +171,11 @@ internal static unsafe class FieldEnumerator
                     try
                     {
                         ArgumentValue v = Variables.ReadValue(fieldValue);
-                        IReadOnlyList<FieldValue>? nested = null;
-                        if (depth > 1 && IsObjectReference(v.ElementType))
-                            nested = GetFields(fieldValue, depth - 1);
+                        // Recurse via the shared dispatcher so a field whose value is itself an
+                        // ARRAY (not just an object) gets expanded too — composes probe 39 + 40.
+                        IReadOnlyList<FieldValue>? nested = depth > 1
+                            ? Variables.GetChildren(fieldValue, v.ElementType, depth - 1)
+                            : null;
                         output.Add(new FieldValue(name, v.ElementType, v.RawValue, v.StringValue, nested));
                     }
                     finally { RuntimeNavigation.Release(fieldValue); }
@@ -186,10 +184,6 @@ internal static unsafe class FieldEnumerator
         }
         finally { closeEnum(pImport, hEnum); }
     }
-
-    private static bool IsObjectReference(int elementType)
-        => elementType == E_T_CLASS || elementType == E_T_OBJECT;
-        // E_T_STRING is rendered via StringValue (finding 44); arrays are a separate slice.
 
     private static string GetFieldName(nint pImport, uint fieldToken)
     {

@@ -58,10 +58,8 @@ internal static unsafe class Variables
                     try
                     {
                         ArgumentValue v = ReadValue(value);
-                        IReadOnlyList<FieldValue>? fields = (depth > 0 && IsObjectReference(v.ElementType))
-                            ? FieldEnumerator.GetFields(value, depth)
-                            : null;
-                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, fields));
+                        IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
+                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -103,10 +101,8 @@ internal static unsafe class Variables
                     try
                     {
                         ArgumentValue v = ReadValue(value);
-                        IReadOnlyList<FieldValue>? fields = (depth > 0 && IsObjectReference(v.ElementType))
-                            ? FieldEnumerator.GetFields(value, depth)
-                            : null;
-                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, fields));
+                        IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
+                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, children));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -117,9 +113,20 @@ internal static unsafe class Variables
         return locals;
     }
 
-    private static bool IsObjectReference(int elementType)
-        => elementType == 0x12 /* CLASS */ || elementType == 0x1C /* OBJECT */;
-        // E_T_STRING is rendered via StringValue; arrays are a separate slice.
+    /// <summary>Dispatch by element type to the right child-rendering inspector:
+    /// CLASS/OBJECT → <see cref="FieldEnumerator"/>; SZARRAY/ARRAY → <see cref="ArrayInspector"/>;
+    /// strings render via <c>StringValue</c> (no children); other kinds return null.
+    /// Centralizes recursion so a field whose value is an array (or an element whose value is an
+    /// object) Just Works without each inspector knowing about the others.</summary>
+    internal static IReadOnlyList<FieldValue>? GetChildren(nint pValue, int elementType, int depth)
+    {
+        if (pValue == 0 || depth <= 0) return null;
+        if (elementType == 0x12 /* CLASS */ || elementType == 0x1C /* OBJECT */)
+            return FieldEnumerator.GetFields(pValue, depth);
+        if (elementType == 0x14 /* ARRAY */ || elementType == 0x1D /* SZARRAY */)
+            return ArrayInspector.TryReadElements(pValue, depth);
+        return null;
+    }
 
     /// <summary>The active frame's local at <paramref name="slot"/> as an OWNED value pointer the
     /// caller releases — for passing as a func-eval argument (e.g. <c>this</c>). 0 if unavailable.</summary>
