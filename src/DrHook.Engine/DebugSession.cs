@@ -151,48 +151,89 @@ public sealed class DebugSession : IDisposable
         {
             // Deadline-based: total wall-clock budget, not per-stop. A pure logpoint (Suspend.None,
             // no condition that ever returns) only terminates via this deadline; without it a
-            // fast-hitting breakpoint resets the per-call timeout each iteration and the loop
-            // never exits.
+            // fast-hitting breakpoint resets the per-call timeout each iteration and the loop never exits.
             TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
             if (remaining <= TimeSpan.Zero) return null;
             StopInfo? stop = _pump.WaitForStop(remaining);
             if (stop is null) return null;
             if (stop.Reason != StopReason.Breakpoint) return stop;
 
-            hitCount++;
-            IEvalContext context = new EvalContext(GetLocals(), GetArguments());
-
-            // Gate: hit count (cheap, evaluated first).
-            if (policy.HitCount is { } gate && !gate.Admits(hitCount)) { _pump.Resume(); continue; }
-
-            // Gate: condition — tri-state. A throw means "couldn't evaluate" → ConditionError +
-            // fault log; never silently treat as false. (Finding 35.)
-            if (policy.Condition is { } condition)
+            switch (EvaluatePolicy(policy, ref hitCount))
             {
-                bool holds;
-                try { holds = condition(context); }
-                catch (Exception ex)
-                {
-                    _sink.OnLog(new LogRecord(DateTimeOffset.UtcNow, $"condition fault: {ex.Message}", IsFault: true));
-                    return new StopInfo(StopReason.ConditionError);
-                }
-                if (!holds) { _pump.Resume(); continue; }
+                case PolicyOutcome.Resume: _pump.Resume(); continue;
+                case PolicyOutcome.ConditionFault: return new StopInfo(StopReason.ConditionError);
+                default: return stop; // Surface
             }
-
-            // Action: log — best-effort. A faulting render fragment must not lose the line or the
-            // gate result; the log is annotated and emission continues.
-            if (policy.LogMessage is { } render)
-            {
-                string message;
-                try { message = render(context); }
-                catch (Exception ex) { message = $"<log fault: {ex.Message}>"; }
-                _sink.OnLog(new LogRecord(DateTimeOffset.UtcNow, message));
-            }
-
-            // Suspend decision: surface (All) vs auto-resume (None — the logpoint corner).
-            if (policy.Suspend == SuspendPolicy.None) { _pump.Resume(); continue; }
-            return stop;
         }
+    }
+
+    /// <summary>Drive an exception "breakpoint" with a <see cref="BreakpointPolicy"/> — the
+    /// exception-location surface from findings 33/35. Exception stops whose type does not match
+    /// <paramref name="exceptionTypeName"/> are auto-resumed; matching stops run the policy
+    /// (gates, log action, suspend decision), reusing the SAME policy evaluation as
+    /// <see cref="WaitForPolicyStop"/>. A condition like <c>"ex.Code == 42"</c> uses the in-flight
+    /// exception object (resolve via <see cref="TryEvalCurrentExceptionMember"/>) — the walker
+    /// special-cases the <c>ex</c> operand. Returns null on timeout; non-exception stops surface
+    /// as-is. The hit counter only counts matching exceptions, not stray first-chance noise.</summary>
+    public StopInfo? WaitForExceptionPolicyStop(string exceptionTypeName, BreakpointPolicy policy, TimeSpan timeout)
+    {
+        ArgumentNullException.ThrowIfNull(exceptionTypeName);
+        ArgumentNullException.ThrowIfNull(policy);
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        int hitCount = 0;
+        while (true)
+        {
+            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+            StopInfo? stop = _pump.WaitForStop(remaining);
+            if (stop is null) return null;
+            if (stop.Reason != StopReason.Exception) return stop;
+
+            // Type filter — non-matching exceptions auto-resume without polluting the hit counter.
+            if (GetCurrentExceptionTypeName() != exceptionTypeName) { _pump.Resume(); continue; }
+
+            switch (EvaluatePolicy(policy, ref hitCount))
+            {
+                case PolicyOutcome.Resume: _pump.Resume(); continue;
+                case PolicyOutcome.ConditionFault: return new StopInfo(StopReason.ConditionError);
+                default: return stop;
+            }
+        }
+    }
+
+    private enum PolicyOutcome { Resume, Surface, ConditionFault }
+
+    /// <summary>Run a stop's policy: gates (hit count + condition) → action (log) → suspend decision.
+    /// Shared by <see cref="WaitForPolicyStop"/> and <see cref="WaitForExceptionPolicyStop"/> so the
+    /// fault path and best-effort logging behave identically across location kinds.</summary>
+    private PolicyOutcome EvaluatePolicy(BreakpointPolicy policy, ref int hitCount)
+    {
+        hitCount++;
+        IEvalContext context = new EvalContext(GetLocals(), GetArguments());
+
+        if (policy.HitCount is { } gate && !gate.Admits(hitCount)) return PolicyOutcome.Resume;
+
+        if (policy.Condition is { } condition)
+        {
+            bool holds;
+            try { holds = condition(context); }
+            catch (Exception ex)
+            {
+                _sink.OnLog(new LogRecord(DateTimeOffset.UtcNow, $"condition fault: {ex.Message}", IsFault: true));
+                return PolicyOutcome.ConditionFault;
+            }
+            if (!holds) return PolicyOutcome.Resume;
+        }
+
+        if (policy.LogMessage is { } render)
+        {
+            string message;
+            try { message = render(context); }
+            catch (Exception ex) { message = $"<log fault: {ex.Message}>"; }
+            _sink.OnLog(new LogRecord(DateTimeOffset.UtcNow, message));
+        }
+
+        return policy.Suspend == SuspendPolicy.None ? PolicyOutcome.Resume : PolicyOutcome.Surface;
     }
 
     /// <summary>Step into calls from the current stop. Completion surfaces as a
