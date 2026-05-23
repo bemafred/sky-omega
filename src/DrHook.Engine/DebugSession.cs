@@ -36,6 +36,11 @@ public sealed class DebugSession : IDisposable
     private readonly List<BreakpointEntry> _breakpoints = new();
     private int _nextBreakpointId;
 
+    // Armed exception filters: consulted by WaitForStop on Exception stops. No native resources to
+    // release; purely consumer-side state.
+    private readonly List<ExceptionFilterInfo> _exceptionFilters = new();
+    private int _nextExceptionFilterId;
+
     // Per-module Portable PDB readers, opened on demand for source mapping; disposed on Dispose.
     private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
 
@@ -165,11 +170,40 @@ public sealed class DebugSession : IDisposable
             ? "\"" + s.Replace("\"", "\\\"") + "\""
             : s;
 
-    /// <summary>Block until the debuggee next stops (breakpoint, step complete, or
+    /// <summary>Block until the debuggee next stops (breakpoint, step complete, exception, or
     /// <c>Debugger.Break</c>), up to <paramref name="timeout"/>. Returns null on timeout (still
     /// running); a <see cref="StopReason.ProcessExited"/> result means the session is over.
-    /// While stopped the debuggee is frozen — inspect, then <see cref="Resume"/>.</summary>
-    public StopInfo? WaitForStop(TimeSpan timeout) => _pump.WaitForStop(timeout);
+    /// While stopped the debuggee is frozen — inspect, then <see cref="Resume"/>.
+    ///
+    /// When at least one exception filter has been armed via <see cref="ArmExceptionFilter"/>,
+    /// non-matching <see cref="StopReason.Exception"/> stops are auto-resumed inside the wait
+    /// (the deadline budget is preserved across resumes). With no filters armed every stop surfaces
+    /// — the legacy behavior probes 26/27 rely on.</summary>
+    public StopInfo? WaitForStop(TimeSpan timeout)
+    {
+        if (_exceptionFilters.Count == 0) return _pump.WaitForStop(timeout);
+
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
+        while (true)
+        {
+            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) return null;
+            StopInfo? stop = _pump.WaitForStop(remaining);
+            if (stop is null) return null;
+            if (stop.Reason != StopReason.Exception) return stop;
+            if (ExceptionMatchesAnyFilter(stop.ExceptionKind)) return stop;
+            _pump.Resume();
+        }
+    }
+
+    private bool ExceptionMatchesAnyFilter(ExceptionStopKind actualPhase)
+    {
+        string? actualType = GetCurrentExceptionTypeName();
+        string type = actualType ?? string.Empty;
+        foreach (ExceptionFilterInfo f in _exceptionFilters)
+            if (f.Matches(type, actualPhase)) return true;
+        return false;
+    }
 
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
     public void Resume() => _pump.Resume();
@@ -738,6 +772,53 @@ public sealed class DebugSession : IDisposable
             RuntimeNavigation.Release(e.Module);
         }
         _breakpoints.Clear();
+        return count;
+    }
+
+    /// <summary>Arm a persistent exception filter. Once armed, <see cref="WaitForStop"/> only
+    /// surfaces matching exception stops; non-matching ones are auto-resumed. <paramref name="typeName"/>
+    /// is an exact match (or <see cref="ExceptionFilterInfo.AnyType"/> <c>"*"</c> for any type;
+    /// subclass walking is a future refinement). <paramref name="phaseFilter"/> defaults to
+    /// <see cref="ExceptionStopKind.None"/> meaning "any phase". Returns a positive id; pass to
+    /// <see cref="RemoveExceptionFilter"/>.</summary>
+    public int ArmExceptionFilter(string typeName, ExceptionStopKind phaseFilter = ExceptionStopKind.None)
+    {
+        ArgumentNullException.ThrowIfNull(typeName);
+        int id = ++_nextExceptionFilterId;
+        _exceptionFilters.Add(new ExceptionFilterInfo(id, typeName, phaseFilter));
+        return id;
+    }
+
+    /// <summary>The armed exception filters in registration order. With at least one armed,
+    /// <see cref="WaitForStop"/> auto-resumes non-matching exception stops.</summary>
+    public IReadOnlyList<ExceptionFilterInfo> ListExceptionFilters()
+    {
+        ExceptionFilterInfo[] result = new ExceptionFilterInfo[_exceptionFilters.Count];
+        for (int i = 0; i < _exceptionFilters.Count; i++) result[i] = _exceptionFilters[i];
+        return result;
+    }
+
+    /// <summary>Remove the exception filter with <paramref name="id"/>. Returns <c>true</c> if a
+    /// matching entry was found.</summary>
+    public bool RemoveExceptionFilter(int id)
+    {
+        for (int i = 0; i < _exceptionFilters.Count; i++)
+        {
+            if (_exceptionFilters[i].Id == id)
+            {
+                _exceptionFilters.RemoveAt(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Remove all armed exception filters; returns how many were cleared. After this,
+    /// <see cref="WaitForStop"/> reverts to the no-filter behavior (every exception stop surfaces).</summary>
+    public int ClearExceptionFilters()
+    {
+        int count = _exceptionFilters.Count;
+        _exceptionFilters.Clear();
         return count;
     }
 
