@@ -1,0 +1,7 @@
+# DrHook.Engine probe 35 fixture — reference-string rendering (ICorDebugStringValue via Dereference)
+timestamp        = 2026-05-23T05:07:49.6873290Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 35510
+plan             = func-eval ProbeException.Description; expect StringValue == "hello string"
+verdict          = PASSED

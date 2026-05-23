@@ -92,7 +92,7 @@ internal static unsafe class Variables
                     try
                     {
                         ArgumentValue v = ReadValue(value);
-                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue));
+                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -141,7 +141,11 @@ internal static unsafe class Variables
             }
             finally { RuntimeNavigation.Release(generic); }
         }
-        return new ArgumentValue(elementType, raw);
+
+        // Reference-string rendering (finding 44 / probe 35) — cheap on misses (one or two QIs).
+        string? stringValue = StringInspector.TryRead(pValue, out string? text) ? text : null;
+
+        return new ArgumentValue(elementType, raw, stringValue);
     }
 
     private static nint OutPtr(nint pUnk, int slot)
