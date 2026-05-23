@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Diagnostics.NETCore.Client;
 
-namespace SkyOmega.DrHook.Diagnostics;
+namespace SkyOmega.DrHook.Engine.Diagnostics;
 
 /// <summary>
 /// Discovers running .NET processes available for diagnostic attachment.

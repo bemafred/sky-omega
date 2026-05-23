@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
-using SkyOmega.DrHook.Diagnostics;
+using SkyOmega.DrHook.Engine.Diagnostics;
 
 namespace SkyOmega.DrHook.Mcp;
 

@@ -5,7 +5,7 @@ using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
 
-namespace SkyOmega.DrHook.Diagnostics;
+namespace SkyOmega.DrHook.Engine.Diagnostics;
 
 /// <summary>
 /// Captures and SUMMARIZES live observations from a running .NET process via EventPipe.

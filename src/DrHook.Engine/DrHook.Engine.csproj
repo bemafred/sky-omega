@@ -11,8 +11,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <!-- Layers 1-2 (Diagnostic IPC + EventPipe) — substrate-admitted managed dependency per ADR-009. -->
+        <!-- Layers 1-2 (Diagnostic IPC + EventPipe) — substrate-admitted managed dependencies per ADR-009. -->
         <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.*" />
+        <!-- EventPipe trace parsing (used by Diagnostics/StackInspector — moved here as part of
+             the netcoredbg retirement, finding 52). -->
+        <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.30" />
     </ItemGroup>
 
     <!--
