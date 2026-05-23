@@ -350,8 +350,26 @@ static unsafe class Probe04
         string candidate = Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), libName);
         tried.Add(candidate + "  (runtime dir)");
         if (File.Exists(candidate)) { searched = string.Join("\n", tried); return candidate; }
+
+        string rid = RuntimeInformation.RuntimeIdentifier;
+        string pkgRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".nuget", "packages", $"microsoft.diagnostics.dbgshim.{rid}");
+        tried.Add(pkgRoot + "/*/runtimes/" + rid + "/native/  (nuget cache)");
+        if (Directory.Exists(pkgRoot))
+        {
+            string? best = null;
+            foreach (string versionDir in Directory.EnumerateDirectories(pkgRoot))
+            {
+                string c = Path.Combine(versionDir, "runtimes", rid, "native", libName);
+                if (File.Exists(c) && (best is null || string.CompareOrdinal(versionDir, best) > 0))
+                    best = c;
+            }
+            if (best is not null) { searched = string.Join("\n", tried); return best; }
+        }
+
         searched = string.Join("\n", tried) +
-                   "\n(note: dbgshim is not in the .NET 7+ runtime — set DBGSHIM_PATH to a Microsoft.Diagnostics.DbgShim or VS Code .debugger copy)";
+                   "\n(note: dbgshim left the runtime at .NET 7+; set DBGSHIM_PATH or `dotnet add package Microsoft.Diagnostics.DbgShim." + rid + "` to populate the NuGet cache)";
         return null;
     }
 

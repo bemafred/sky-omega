@@ -12,10 +12,12 @@ explicit override. Probes 18/26/36/39/40 + the 47-test unit suite all pass witho
 ## The gap
 
 Before this slice, no `Microsoft.Diagnostics.DbgShim*` package was referenced anywhere. Probes
-relied on `DBGSHIM_PATH` pointing at a manually-downloaded `.local-dbgshim/libdbgshim.dylib`;
-the global `drhook-mcp` install had **no shim at all** and would die at runtime on first attach.
-`DrHook.Engine.csproj` carried a comment acknowledging this as a "packaging refinement (Phase 1
-follow-up)" — landing now, before the Phase 3 SessionManager rewrite makes the gap user-visible.
+relied on `DBGSHIM_PATH` pointing at a `.local-dbgshim/libdbgshim.dylib` that had been scavenged
+from a VS Code C# extension install on the dev machine (mis-documented at the time as a NuGet
+download — see [finding 11 Correction](11-dbgshim-baseline.md)). The global `drhook-mcp` install
+had **no shim at all** and would die at runtime on first attach. `DrHook.Engine.csproj` carried
+a comment acknowledging this as a "packaging refinement (Phase 1 follow-up)" — landing now,
+before the Phase 3 SessionManager rewrite makes the gap user-visible.
 
 ## Per-RID, not the meta package
 
@@ -72,16 +74,15 @@ After the fix, the resolver's order is:
 
 ## What this changes for dev
 
-Before: every command needed `DBGSHIM_PATH=$PWD/.local-dbgshim/libdbgshim.dylib dotnet …`, and
-`.local-dbgshim/libdbgshim.dylib` had to be manually placed there (it was — but new contributors
-would hit `DllNotFoundException` until they sorted it out).
+Before: every command needed `DBGSHIM_PATH=$PWD/.local-dbgshim/libdbgshim.dylib dotnet …`,
+pointing at a file that had been scavenged from a VS Code install — new contributors had no
+substrate-aligned path to that file and would hit `DllNotFoundException` until they sorted it out.
 
 After: just `dotnet 40-arrays-smoke.cs …`. The shim deploys automatically with the engine
 PackageReference; the resolver finds it.
 
-`.local-dbgshim/` is untracked in git and now redundant — kept on disk as a manual override
-target for `DBGSHIM_PATH` if anyone needs to test a custom build of dbgshim, but no longer the
-default path.
+`.local-dbgshim/` was deleted 2026-05-23 — see [finding 11 Correction](11-dbgshim-baseline.md).
+`DBGSHIM_PATH` remains as the explicit-override knob for testing a custom build of dbgshim.
 
 ## Verified
 
@@ -91,24 +92,24 @@ default path.
 - `DrHook.Mcp` build deploys all seven RIDs' native assets to `bin/Debug/net10.0/runtimes/…/native/`
   (the package's runtime-targets metadata handles it; nothing custom needed).
 
-## Pre-staging in `DrHook.Mcp` (note)
+## Pre-staging in `DrHook.Mcp` — delivered
 
-`DrHook.Mcp` currently references the netcoredbg-based `..\DrHook\DrHook.csproj`, NOT
-`DrHook.Engine`. The dbgshim native assets it ships are **dead weight** until the Phase 3
-SessionManager rewrite switches the MCP backend to `DrHook.Engine`. Accepted cost: ~10 MB of
-unused binaries in the global tool now, in exchange for zero packaging churn at switchover. If
-the SessionManager rewrite slips significantly, revisit (split the tool package, or move the
-multi-RID refs into a separate tool that only ships post-switchover).
+At write-time, `DrHook.Mcp` still referenced the netcoredbg-based `..\DrHook\DrHook.csproj`, so
+the bundled dbgshim native assets were dead weight pending the Phase 3 SessionManager rewrite.
+That rewrite landed in **1.8.1** (`ba9d8ca DrHook.Mcp stepping path switched to DrHook.Engine`)
+and the netcoredbg-based `src/DrHook/` was retired entirely in **1.8.2** (`432e4c8`). The native
+assets are live consumers now; the "zero packaging churn at switchover" bet paid out.
 
 ## Scope / next
 
-ADR-006 Phase 3 work remaining:
+ADR-006 Phase 3 work remaining as of 2026-05-23:
 
-- `SteppingSessionManager` rewrite backed by `DebugSession` — the slice that actually consumes
-  the dbgshim bundling on the MCP side.
-- Per-MCP-tool regression suite + netcoredbg retirement.
-- Polish: Launch Terminate-on-dispose, stdout/stderr capture, multi-dim arrays,
-  generic-type-parameter naming.
+- ~~`SteppingSessionManager` rewrite backed by `DebugSession`~~ — **DONE in 1.8.1** (`ba9d8ca`).
+- ~~netcoredbg retirement~~ — **DONE in 1.8.2** (`432e4c8`).
+- **Per-MCP-tool regression suite** — still open; the explicit ADR-006 Validation gate
+  ("All DrHook MCP tools pass integration tests against the engine") has no coverage yet.
+- Polish: Launch Terminate-on-dispose, stdout/stderr capture, generic-type-parameter naming.
+  (Multi-dim arrays delivered as part of probe 40 / Phase 3 substrate close.)
 
 ## References
 

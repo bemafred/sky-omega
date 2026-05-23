@@ -79,13 +79,11 @@ A substrate that observes other .NET processes deterministically must itself be 
 
 ## dbgshim baseline
 
-The Layer 3 probes need `libdbgshim` (the native shim to `ICorDebug`), which left the .NET runtime install at .NET 7+. The adopted baseline is the official **`Microsoft.Diagnostics.DbgShim.osx-arm64` 9.0.661903** NuGet native asset (see [`findings/11-dbgshim-baseline.md`](findings/11-dbgshim-baseline.md) for the obtain command + provenance). Extract it to `.local-dbgshim/` (gitignored) and point the probes at it:
+The probes need `libdbgshim` (the native shim to `ICorDebug`), which left the .NET runtime install at .NET 7+. The adopted baseline is the official **`Microsoft.Diagnostics.DbgShim.<rid>` 9.0.661903** NuGet native asset (see [`findings/11-dbgshim-baseline.md`](findings/11-dbgshim-baseline.md) for the obtain command + provenance).
 
-```bash
-export DBGSHIM_PATH="$PWD/.local-dbgshim/libdbgshim.dylib"
-```
+Discovery is automatic. Both `DrHook.Engine.DbgShim.Resolve` (used by probes 07+) and the local `ResolveDbgShim` in probes 02–06 walk the NuGet cache (`~/.nuget/packages/microsoft.diagnostics.dbgshim.<rid>/*/runtimes/<rid>/native/`) and pick the newest version. Building `DrHook.Engine` once populates the cache; from then on the probes run without `DBGSHIM_PATH`. The env var remains as an explicit override for testing a custom build.
 
-The engine bundles this NuGet's `runtimes/<rid>/native/` payload; it is a native runtime-substrate asset per [ADR-009](../../docs/adrs/ADR-009-substrate-dependency-policy.md), not a managed dependency.
+The engine bundles this NuGet's `runtimes/<rid>/native/` payload at build time; it is a native runtime-substrate asset per [ADR-009](../../docs/adrs/ADR-009-substrate-dependency-policy.md), not a managed dependency.
 
 ## How to run a probe
 

@@ -262,14 +262,32 @@ static unsafe class Probe02
             OperatingSystem.IsMacOS()   ? "libdbgshim.dylib" :
                                           "libdbgshim.so";
 
-        // dbgshim ships with the runtime; look in this process's runtime directory.
+        // dbgshim shipped with the runtime pre-.NET 7; look there as a defunct-but-cheap probe.
         string runtimeDir = RuntimeEnvironment.GetRuntimeDirectory();
         string candidate = Path.Combine(runtimeDir, libName);
         tried.Add(candidate + "  (runtime dir)");
         if (File.Exists(candidate)) { searched = string.Join("\n", tried); return candidate; }
 
+        // NuGet cache — restored Microsoft.Diagnostics.DbgShim.<rid> (newest version wins).
+        string rid = RuntimeInformation.RuntimeIdentifier;
+        string pkgRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".nuget", "packages", $"microsoft.diagnostics.dbgshim.{rid}");
+        tried.Add(pkgRoot + "/*/runtimes/" + rid + "/native/  (nuget cache)");
+        if (Directory.Exists(pkgRoot))
+        {
+            string? best = null;
+            foreach (string versionDir in Directory.EnumerateDirectories(pkgRoot))
+            {
+                string c = Path.Combine(versionDir, "runtimes", rid, "native", libName);
+                if (File.Exists(c) && (best is null || string.CompareOrdinal(versionDir, best) > 0))
+                    best = c;
+            }
+            if (best is not null) { searched = string.Join("\n", tried); return best; }
+        }
+
         searched = string.Join("\n", tried) +
-                   "\n(hint: set DBGSHIM_PATH, or `find $(dirname $(which dotnet)) -name '" + libName + "'`)";
+                   "\n(hint: set DBGSHIM_PATH, or `dotnet add package Microsoft.Diagnostics.DbgShim." + rid + "` to populate the NuGet cache)";
         return null;
     }
 
