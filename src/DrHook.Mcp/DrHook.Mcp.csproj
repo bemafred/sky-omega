@@ -41,6 +41,10 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- DrHook.Engine — BCL-only stepping substrate (finding 51 switchover). -->
+        <ProjectReference Include="..\DrHook.Engine\DrHook.Engine.csproj" />
+        <!-- DrHook — kept for drhook_processes + drhook_snapshot (EventPipe; independent of
+             netcoredbg DAP). Retiring this dependency entirely is a follow-on cleanup. -->
         <ProjectReference Include="..\DrHook\DrHook.csproj" />
     </ItemGroup>
 

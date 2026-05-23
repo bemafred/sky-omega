@@ -161,7 +161,7 @@ Substrate gaps to back the MCP `drhook_step_*` tools on DrHook.Engine (per the "
 
 Integration:
 
-- [ ] `SteppingSessionManager` rewrite (~1173 lines today; new version ~400 LOC since DAP wire-protocol plumbing disappears) backed by `DebugSession`. Preserve JSON response shapes so consumers don't break.
+- [x] **`SteppingSessionManager` rewrite — DONE** (finding 51): new `src/DrHook.Mcp/EngineSteppingSession.cs` (~500 LOC, BCL-only) replaces the 1173-line DAP-via-netcoredbg `SteppingSessionManager`. All 17 MCP `drhook_step_*` tools wired through; JSON top-level shapes preserved. `Directory.Build.props` bumped 1.8.0 → 1.8.1; `dotnet tool update -g SkyOmega.DrHook.Mcp` succeeded (`drhook-mcp 1.8.1+ca51f03…`). Deferred polish (named): `drhook_step_test` (VSTEST_HOST_DEBUG dance), conditional breakpoints (Roslyn walker extraction to `DrHook.Engine.Expressions`), real metrics merge, `drhook_step_run` stdout/stderr capture, smarter module disambiguation for `step_breakpoint`. Old `src/DrHook/Stepping/SteppingSessionManager.cs` + the DAP client + netcoredbg locator are now dormant — they go away with the netcoredbg retirement slice.
 - [ ] regression: DrHook stepping tools pass without netcoredbg — per-tool integration suite (the existing probe targets cover most). Optional `DRHOOK_BACKEND=engine|netcoredbg` fallback flag during convergence (the ADR's "opt-in fallback") for side-by-side parity runs.
 - [ ] retire netcoredbg + remove `Microsoft.Diagnostics.NETCore.Client` if `ProcessAttacher` can use dbgshim's process enumeration (likely yes — same native asset the engine already loads). Update CLAUDE.md / README to reflect engine-only.
 

@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using SkyOmega.DrHook.Mcp;
-using SkyOmega.DrHook.Stepping;
 
 // Parse command line arguments before building host
 bool showHelp = false;
@@ -51,11 +50,12 @@ if (showHelp)
 
         DrHook provides .NET runtime inspection for AI coding agents:
           - Passive observation via EventPipe (thread sampling, GC, exceptions)
-          - Controlled stepping via DAP/netcoredbg (breakpoints, step-through, variables)
+          - Controlled stepping via DrHook.Engine — BCL-only ICorDebug interop
+            (no netcoredbg dependency; libdbgshim bundled per-RID via NuGet).
 
-        Requires netcoredbg for stepping operations:
-          https://github.com/Samsung/netcoredbg (MIT license)
-          Set DRHOOK_NETCOREDBG_PATH if not in standard locations.
+        Optional override:
+          Set DBGSHIM_PATH to a custom libdbgshim build (testing only;
+          the bundled per-RID shim is the default).
 
         The MCP server communicates via stdin/stdout (JSON-RPC 2.0).
         """);
@@ -71,8 +71,10 @@ builder.Logging.AddConsole(options =>
     options.LogToStandardErrorThreshold = LogLevel.Trace;
 });
 
-// Register SteppingSessionManager as singleton (stateful — one session at a time)
-builder.Services.AddSingleton<SteppingSessionManager>();
+// Register EngineSteppingSession as singleton (stateful — one session at a time, BCL-only via
+// DrHook.Engine's ICorDebug interop; replaces the netcoredbg-DAP-backed SteppingSessionManager
+// per finding 51).
+builder.Services.AddSingleton<EngineSteppingSession>();
 
 // Register MCP server with stdio transport and tools
 builder.Services

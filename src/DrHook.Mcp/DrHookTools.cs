@@ -1,16 +1,15 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
 using SkyOmega.DrHook.Diagnostics;
-using SkyOmega.DrHook.Stepping;
 
 namespace SkyOmega.DrHook.Mcp;
 
 [McpServerToolType]
 public sealed class DrHookTools
 {
-    private readonly SteppingSessionManager _session;
+    private readonly EngineSteppingSession _session;
 
-    public DrHookTools(SteppingSessionManager session)
+    public DrHookTools(EngineSteppingSession session)
     {
         _session = session;
     }
