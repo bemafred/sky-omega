@@ -12,11 +12,25 @@ public sealed record ExceptionFilterInfo(int Id, string TypeName, ExceptionStopK
     public const string AnyType = "*";
 
     /// <summary>Whether this filter admits an exception whose runtime type is
-    /// <paramref name="actualType"/> and was raised at phase <paramref name="actualPhase"/>. Type
-    /// match is exact (no subclass walk yet — a future refinement); phase matches when the filter's
-    /// <see cref="PhaseFilter"/> is <see cref="ExceptionStopKind.None"/> (wildcard) or equals the
-    /// actual phase.</summary>
+    /// <paramref name="actualType"/> and was raised at phase <paramref name="actualPhase"/>. Exact
+    /// type match (no subclass walk). Use <see cref="MatchesChain"/> for subclass-aware matching.
+    /// Phase matches when the filter's <see cref="PhaseFilter"/> is <see cref="ExceptionStopKind.None"/>
+    /// (wildcard) or equals the actual phase.</summary>
     public bool Matches(string actualType, ExceptionStopKind actualPhase)
         => (TypeName == AnyType || TypeName == actualType)
         && (PhaseFilter == ExceptionStopKind.None || PhaseFilter == actualPhase);
+
+    /// <summary>Whether this filter admits an exception whose inheritance chain of type names is
+    /// <paramref name="actualTypeChain"/> (index 0 = runtime type, then each base; from
+    /// <c>ExceptionInspector.CurrentExceptionTypeChain</c>) and was raised at phase
+    /// <paramref name="actualPhase"/>. Subclass-aware: a filter on <c>"System.Exception"</c> matches
+    /// any subclass anywhere in the chain. Phase matching is unchanged.</summary>
+    public bool MatchesChain(IReadOnlyList<string> actualTypeChain, ExceptionStopKind actualPhase)
+    {
+        if (PhaseFilter != ExceptionStopKind.None && PhaseFilter != actualPhase) return false;
+        if (TypeName == AnyType) return true;
+        for (int i = 0; i < actualTypeChain.Count; i++)
+            if (actualTypeChain[i] == TypeName) return true;
+        return false;
+    }
 }

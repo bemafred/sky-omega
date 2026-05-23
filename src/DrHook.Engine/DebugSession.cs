@@ -198,10 +198,12 @@ public sealed class DebugSession : IDisposable
 
     private bool ExceptionMatchesAnyFilter(ExceptionStopKind actualPhase)
     {
-        string? actualType = GetCurrentExceptionTypeName();
-        string type = actualType ?? string.Empty;
+        // Walk the exception's full type chain (across modules via ICorDebugType.GetBase, probe 37)
+        // so a filter on a base class (e.g. "System.Exception") matches any subclass — finding 47.
+        IReadOnlyList<string> chain = Interop.ExceptionInspector.CurrentExceptionTypeChain(_pump.StopThread);
+        if (chain.Count == 0) return false;
         foreach (ExceptionFilterInfo f in _exceptionFilters)
-            if (f.Matches(type, actualPhase)) return true;
+            if (f.MatchesChain(chain, actualPhase)) return true;
         return false;
     }
 

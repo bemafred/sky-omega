@@ -1,22 +1,25 @@
-// Read the RUNTIME TYPE NAME of the exception currently in flight on a thread — so an exception
-// stop (ICorDebugManagedCallback2.Exception) can report "System.InvalidOperationException" without
-// any hardcoding. Chain: ICorDebugThread.GetCurrentException → ICorDebugReferenceValue.Dereference
-// → ICorDebugObjectValue.GetClass → ICorDebugClass.GetModule/.GetToken → metadata type name. Raw
-// V-table (slots + IIDs from cordebug.idl). Exceptions are always reference objects, so the
-// ObjectValue path applies (no ICorDebugType needed). PRECONDITION: process synchronized (a stop).
+// Inspect the exception currently in flight on a thread — raw value (for func-eval as `this`),
+// runtime type name, and the full inheritance chain of type names (across modules).
+//
+// The chain walk uses ICorDebugValue2.GetExactType@3 → ICorDebugType.GetBase@7 (same primitive as
+// MemberResolver after the probe-37 refactor): the runtime handles mdTypeRef resolution so the
+// chain spans modules without manual typeref work. CurrentExceptionTypeName is a thin convenience
+// over chain[0] (the runtime type).
+//
+// Slots + IIDs verified from cordebug.idl. PRECONDITION: process synchronized (called at a stop).
 
 namespace SkyOmega.DrHook.Engine.Interop;
 
 internal static unsafe class ExceptionInspector
 {
-    private static readonly Guid IID_ICorDebugReferenceValue = new("CC7BCAF9-8A68-11D2-983C-0000F808342D");
-    private static readonly Guid IID_ICorDebugObjectValue = new("18AD3D6E-B7D2-11D2-BD04-0000F80849BD");
+    private static readonly Guid IID_ICorDebugValue2 = new("5E0B54E7-D88A-4626-9420-A691E0A78B49");
 
-    private const int ThreadGetCurrentException = 10;  // ICorDebugThread (IUnknown 0-2, own 3-)
-    private const int ReferenceValueDereference = 10;  // ICorDebugReferenceValue
-    private const int ObjectValueGetClass = 7;         // ICorDebugObjectValue
-    private const int ClassGetModule = 3;              // ICorDebugClass
-    private const int ClassGetToken = 4;
+    private const int ThreadGetCurrentException = 10;  // ICorDebugThread
+    private const int Value2GetExactType        = 3;   // ICorDebugValue2
+    private const int TypeGetClass              = 4;   // ICorDebugType
+    private const int TypeGetBase               = 7;
+    private const int ClassGetModule            = 3;   // ICorDebugClass
+    private const int ClassGetToken             = 4;
 
     private static nint Slot(nint pUnk, int index) => ((nint*)*(nint*)pUnk)[index];
 
@@ -35,56 +38,77 @@ internal static unsafe class ExceptionInspector
 
     /// <summary>The raw <c>ICorDebugValue</c> (an object reference) for the exception currently in
     /// flight on <paramref name="pThread"/>, or 0 if none. OWNED — the caller releases it via
-    /// <see cref="RuntimeNavigation.Release"/>. Caller must be at a stop. Suitable as the <c>this</c>
-    /// of a func-eval (the runtime preserves the exception across the eval per cordebug.idl).</summary>
+    /// <see cref="RuntimeNavigation.Release"/>. Suitable as the <c>this</c> of a func-eval (the
+    /// runtime preserves the exception across the eval per cordebug.idl).</summary>
     public static nint CurrentExceptionValue(nint pThread)
         => pThread == 0 ? 0 : Out(pThread, ThreadGetCurrentException);
 
     /// <summary>The fully-qualified type name of the exception currently being thrown on
     /// <paramref name="pThread"/> (e.g. "System.InvalidOperationException"), or null if there is no
-    /// current exception or its type can't be resolved. Caller must be at a stop.</summary>
+    /// current exception. The runtime type — equivalent to <c>CurrentExceptionTypeChain[0]</c>.</summary>
     public static string? CurrentExceptionTypeName(nint pThread)
     {
-        if (pThread == 0) return null;
+        IReadOnlyList<string> chain = CurrentExceptionTypeChain(pThread);
+        return chain.Count > 0 ? chain[0] : null;
+    }
+
+    /// <summary>The full inheritance chain of type names for the exception currently in flight on
+    /// <paramref name="pThread"/>: index 0 is the runtime type, then each base in order up to (but
+    /// not always including) <c>System.Object</c>. Walks via <c>ICorDebugType.GetBase</c>, so the
+    /// chain spans modules (probe 37). Empty if there is no exception or the value isn't reachable.
+    /// Used by subclass-aware exception filters (probe 38).</summary>
+    public static IReadOnlyList<string> CurrentExceptionTypeChain(nint pThread)
+    {
+        if (pThread == 0) return Array.Empty<string>();
         nint value = Out(pThread, ThreadGetCurrentException);
-        if (value == 0) return null; // no exception in flight
+        if (value == 0) return Array.Empty<string>();
+
+        List<string> chain = new();
         try
         {
-            nint reference = QueryInterface(value, IID_ICorDebugReferenceValue);
-            if (reference == 0) return null;
-            nint obj;
-            try { obj = Out(reference, ReferenceValueDereference); }
-            finally { RuntimeNavigation.Release(reference); }
-            if (obj == 0) return null;
+            nint value2 = QueryInterface(value, IID_ICorDebugValue2);
+            if (value2 == 0) return chain;
+            nint type;
+            try { type = Out(value2, Value2GetExactType); }
+            finally { RuntimeNavigation.Release(value2); }
 
             try
             {
-                nint objectValue = QueryInterface(obj, IID_ICorDebugObjectValue);
-                if (objectValue == 0) return null;
-                try
+                while (type != 0)
                 {
-                    nint klass = Out(objectValue, ObjectValueGetClass);
-                    if (klass == 0) return null;
-                    try
-                    {
-                        nint module = Out(klass, ClassGetModule);
-                        if (module == 0) return null;
-                        try
-                        {
-                            uint typeToken;
-                            if (((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(klass, ClassGetToken))(klass, &typeToken) < 0)
-                                return null;
-                            string name = MetadataResolver.TypeNameFromToken(module, typeToken);
-                            return name.Length == 0 ? null : name;
-                        }
-                        finally { RuntimeNavigation.Release(module); }
-                    }
-                    finally { RuntimeNavigation.Release(klass); }
+                    string? name = NameOfType(type);
+                    if (name is not null) chain.Add(name);
+
+                    nint baseType = Out(type, TypeGetBase);
+                    RuntimeNavigation.Release(type);
+                    type = baseType;
                 }
-                finally { RuntimeNavigation.Release(objectValue); }
             }
-            finally { RuntimeNavigation.Release(obj); }
+            finally { if (type != 0) RuntimeNavigation.Release(type); }
         }
         finally { RuntimeNavigation.Release(value); }
+
+        return chain;
+    }
+
+    private static string? NameOfType(nint type)
+    {
+        nint klass = Out(type, TypeGetClass);
+        if (klass == 0) return null;
+        try
+        {
+            nint module = Out(klass, ClassGetModule);
+            if (module == 0) return null;
+            try
+            {
+                uint typeToken;
+                if (((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(klass, ClassGetToken))(klass, &typeToken) < 0)
+                    return null;
+                string name = MetadataResolver.TypeNameFromToken(module, typeToken);
+                return name.Length == 0 ? null : name;
+            }
+            finally { RuntimeNavigation.Release(module); }
+        }
+        finally { RuntimeNavigation.Release(klass); }
     }
 }
