@@ -142,7 +142,20 @@ DrHook today is request/response. Activity Monitor raises the adjacent question:
 - [ ] regression: DrHook stepping tools pass without netcoredbg
 
 ### Phase 3 — Switchover
-- [ ] default to DrHook.Engine; netcoredbg opt-in fallback during convergence; retire once parity verified
+
+Substrate gaps to back the MCP `drhook_step_*` tools on DrHook.Engine (per the "what's left" assessment after finding 39):
+
+- [x] **AsyncBreak / `DebugSession.Pause`** (probe 31, finding 40): `ICorDebugController.Stop(0)` routed through the pump as a synthetic `CallbackKind.PauseRequest` stopping event so the existing `_resume.Take` rendezvous handles it uniformly — the worker stays the sole caller of `Stop` and `Continue`. `StopReason.Pause` surfaces via `WaitForStop`. Two cycles validated; one in-process unit test added (47 pass). Backs `drhook_step_pause`.
+- [ ] **Launch** — `DebugSession.Launch(program, args, …)` via `ICorDebug::CreateProcess`. Backs `drhook_step_run` and (via VSTEST_HOST_DEBUG PID discovery + Attach) `drhook_step_test`.
+- [ ] **Breakpoint registry** — `ListBreakpoints` / `RemoveBreakpoint(id)` / `ClearBreakpoints(category?)` accessors over the existing internal list. Backs `drhook_step_breakpoint_list`/`_remove`/`_clear`.
+- [ ] **Persistent exception filter** — `ArmExceptionFilter(typeName, kind)` so subsequent `WaitForStop`/`WaitForPolicyStop` surfaces matching exceptions; generalizes the per-call `WaitForExceptionPolicyStop`. Backs `drhook_step_break_exception`.
+- [ ] **Object inspection (depth ≥ 1 with reference fields)** — `ICorDebugValue2::GetExactType`@3 + `ObjectValue::GetFieldValue`@8 + string/array rendering. The recurring reference-typed-results gap (findings 32/37 scope notes). Unlocks `ex.Message`, real `drhook_step_vars` output, and depth-walked inspection. Longest pole.
+
+Integration:
+
+- [ ] `SteppingSessionManager` rewrite (~1173 lines today; new version ~400 LOC since DAP wire-protocol plumbing disappears) backed by `DebugSession`. Preserve JSON response shapes so consumers don't break.
+- [ ] regression: DrHook stepping tools pass without netcoredbg — per-tool integration suite (the existing probe targets cover most). Optional `DRHOOK_BACKEND=engine|netcoredbg` fallback flag during convergence (the ADR's "opt-in fallback") for side-by-side parity runs.
+- [ ] retire netcoredbg + remove `Microsoft.Diagnostics.NETCore.Client` if `ProcessAttacher` can use dbgshim's process enumeration (likely yes — same native asset the engine already loads). Update CLAUDE.md / README to reflect engine-only.
 
 ### Phase 4 — Func-eval (Open Question 2)
 - [x] **viability decided — func-eval WORKS** (probe 19, finding 27): `ICorDebugEval.CallFunction` of a static method completed with the right result, 4/4, no deadlock on macOS/ARM64. The netcoredbg deadlock was netcoredbg-specific. Decision: **option A (func-eval) + Roslyn front end** for full C# expressions.

@@ -81,12 +81,16 @@ public sealed class DebugSession : IDisposable
 
             // Drive the continue-loop now that the process controller exists. The resume handler
             // arms a stepper on the stopped thread for step resumes (no-op for a plain continue),
-            // then Continues. Callbacks enqueued since SetManagedHandler (if any) drain immediately.
-            pump.Start((kind, thread) =>
-            {
-                Stepping.Arm(thread, kind);
-                return controller.Continue(0);
-            });
+            // then Continues. The pause handler synchronizes the running debuggee for an AsyncBreak
+            // (DebugSession.Pause). Both are routed through the worker so the controller has a single
+            // caller. Callbacks enqueued since SetManagedHandler (if any) drain immediately.
+            pump.Start(
+                (kind, thread) =>
+                {
+                    Stepping.Arm(thread, kind);
+                    return controller.Continue(0);
+                },
+                () => controller.Stop(0));
 
             return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess);
         }
@@ -108,6 +112,13 @@ public sealed class DebugSession : IDisposable
 
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
     public void Resume() => _pump.Resume();
+
+    /// <summary>Interrupt a RUNNING debuggee (AsyncBreak). Synchronizes the process via
+    /// <c>ICorDebugController.Stop</c>; the next <see cref="WaitForStop"/> returns a
+    /// <see cref="StopReason.Pause"/> stop. Resume via <see cref="Resume"/> like any other stop.
+    /// If a callback-driven stop is already in flight, that stop surfaces first and the requested
+    /// pause queues behind it (will fire after the user resumes the prior stop).</summary>
+    public void Pause() => _pump.RequestPause();
 
     /// <summary>Run until a breakpoint hit where <paramref name="condition"/> holds (or a
     /// non-breakpoint stop, or timeout). At each breakpoint hit the condition is evaluated against

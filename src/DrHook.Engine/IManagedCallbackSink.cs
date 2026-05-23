@@ -13,6 +13,10 @@ internal enum CallbackKind
     EvalComplete,
     EvalException,
     Exception,
+    /// <summary>Synthetic — added by <see cref="CallbackPump.RequestPause"/>, not delivered by
+    /// ICorDebug. The pump worker calls <c>ICorDebugController.Stop</c> to synchronize the process,
+    /// then publishes a <see cref="StopReason.Pause"/> stop and parks like any other stop.</summary>
+    PauseRequest,
 }
 
 /// <summary>The RECEIVE-direction contract from <see cref="Interop.ManagedCallbackHost"/> (the

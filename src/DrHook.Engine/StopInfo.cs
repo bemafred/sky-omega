@@ -23,6 +23,9 @@ public enum StopReason
     /// never silently behave like a never-true condition. The diagnostic is emitted to the sink as a
     /// <see cref="LogRecord"/> with <see cref="LogRecord.IsFault"/> = <c>true</c>.</summary>
     ConditionError,
+    /// <summary>The caller invoked <see cref="DebugSession.Pause"/> — an async-break that
+    /// synchronized the running debuggee. There is no specific thread associated with the stop.</summary>
+    Pause,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
 }

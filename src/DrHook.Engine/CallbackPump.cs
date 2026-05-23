@@ -32,6 +32,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private readonly BlockingCollection<StopInfo> _stops = new();
     private readonly IDebugEventSink _userSink;
     private Func<ResumeKind, nint, int>? _resumeHandler;
+    private Action? _pauseHandler;
     private Thread? _worker;
     private nint _stopThread;     // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
     private bool _disposed;
@@ -61,10 +62,14 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// <summary>Begin draining. Call once the process controller exists (after
     /// DebugActiveProcess). <paramref name="resume"/> resumes the debuggee for a given
     /// <see cref="ResumeKind"/> and stop thread — for a step it sets up the stepper, then
-    /// Continues — and returns the Continue HRESULT.</summary>
-    public void Start(Func<ResumeKind, nint, int> resume)
+    /// Continues — and returns the Continue HRESULT. <paramref name="pause"/> synchronizes the
+    /// running debuggee (calls <c>ICorDebugController.Stop(0)</c>) when the worker receives a
+    /// <see cref="CallbackKind.PauseRequest"/>; both controller operations are owned by this
+    /// single worker thread.</summary>
+    public void Start(Func<ResumeKind, nint, int> resume, Action pause)
     {
         _resumeHandler = resume;
+        _pauseHandler = pause;
         _worker = new Thread(Pump) { IsBackground = true, Name = "DrHook.CallbackPump" };
         _worker.Start();
     }
@@ -97,6 +102,22 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// <summary>Step out of the current frame; completion surfaces as a <see cref="StopReason.Step"/> stop.</summary>
     public void StepOut() => Enqueue(ResumeKind.StepOut);
 
+    /// <summary>Request a caller-initiated synchronization (AsyncBreak). The worker calls the
+    /// pause handler (<c>ICorDebugController.Stop</c>) and publishes a <see cref="StopReason.Pause"/>
+    /// stop; the caller pulls it via <see cref="WaitForStop"/> and resumes via <see cref="Resume"/>
+    /// like any other stop.</summary>
+    public void RequestPause()
+    {
+        try
+        {
+            _events.Add(new CallbackEvent(CallbackKind.PauseRequest, "Pause", 0, 0, 0));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // Shutdown race — pause request dropped.
+        }
+    }
+
     private void Enqueue(ResumeKind kind)
     {
         try
@@ -119,6 +140,19 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 if (e.Name == "ExitProcess")
                     _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
                 _resumeHandler!(ResumeKind.Continue, 0);
+            }
+            else if (e.Kind == CallbackKind.PauseRequest)
+            {
+                // Caller-initiated synchronization. We synchronize the running debuggee here
+                // (the controller's Stop is the sole counterpart of Continue, both owned by this
+                // worker), then surface a Pause stop and park at _resume.Take like any other stop.
+                _pauseHandler!();
+                _stopThread = 0;
+                _stops.Add(new StopInfo(StopReason.Pause));
+                ResumeKind kind;
+                try { kind = _resume.Take(); }
+                catch (InvalidOperationException) { break; }
+                _resumeHandler!(kind, _stopThread);
             }
             else
             {
