@@ -116,28 +116,61 @@ internal static unsafe class MetadataResolver
     /// <summary>Find a method named <paramref name="methodName"/> on the type given by
     /// <paramref name="typeToken"/> (an <c>mdTypeDef</c> from <c>ICorDebugClass.GetToken</c>) →
     /// <c>mdMethodDef</c>; 0 if not found. Unlike <see cref="ResolveMethodToken"/> this takes the
-    /// type token directly (for runtime-class member resolution), skipping <c>FindTypeDefByName</c>.</summary>
+    /// type token directly (for runtime-class member resolution), skipping <c>FindTypeDefByName</c>.
+    ///
+    /// Walks the <c>extends</c> chain WITHIN the same module so inherited members on a base class
+    /// declared in the same assembly are findable (finding 45). Cross-module bases (<c>mdTypeRef</c>
+    /// → another assembly, e.g. <c>System.Exception</c> in CoreLib) are NOT followed — that's the
+    /// next object-inspection slice. The walk stops at the first match or when the chain leaves
+    /// the module.</summary>
     public static uint FindMethodInType(nint pModule, uint typeToken, string methodName)
     {
         nint pImport = GetMetaDataImport(pModule);
         if (pImport == 0) return 0;
         try
         {
-            var enumWithName = (delegate* unmanaged[Cdecl]<nint, nint*, uint, char*, uint*, uint, uint*, int>)Slot(pImport, EnumMethodsWithName);
-            var closeEnum = (delegate* unmanaged[Cdecl]<nint, nint, void>)Slot(pImport, CloseEnum);
-
-            nint hEnum = 0;
-            uint token = 0;
-            uint fetched = 0;
-            fixed (char* pName = methodName)
+            uint currentType = typeToken;
+            while (currentType != 0)
             {
-                if (enumWithName(pImport, &hEnum, typeToken, pName, &token, 1, &fetched) < 0 || fetched == 0)
-                    token = 0;
+                uint methodToken = FindMethodInTypeDirectly(pImport, currentType, methodName);
+                if (methodToken != 0) return methodToken;
+                currentType = GetBaseTypeDef(pImport, currentType);
             }
-            closeEnum(pImport, hEnum);
-            return token;
+            return 0;
         }
         finally { Release(pImport); }
+    }
+
+    private static uint FindMethodInTypeDirectly(nint pImport, uint typeToken, string methodName)
+    {
+        var enumWithName = (delegate* unmanaged[Cdecl]<nint, nint*, uint, char*, uint*, uint, uint*, int>)Slot(pImport, EnumMethodsWithName);
+        var closeEnum = (delegate* unmanaged[Cdecl]<nint, nint, void>)Slot(pImport, CloseEnum);
+
+        nint hEnum = 0;
+        uint token = 0;
+        uint fetched = 0;
+        fixed (char* pName = methodName)
+        {
+            if (enumWithName(pImport, &hEnum, typeToken, pName, &token, 1, &fetched) < 0 || fetched == 0)
+                token = 0;
+        }
+        closeEnum(pImport, hEnum);
+        return token;
+    }
+
+    /// <summary>Within-module base typedef token of <paramref name="typeToken"/>, or 0 when the
+    /// type has no base, when the base is cross-module (<c>mdTypeRef</c>), or when it is a generic
+    /// instantiation (<c>mdTypeSpec</c>). <c>System.Object</c>'s extends is nil; user-defined types
+    /// whose parent lives in CoreLib bottom out here too in this slice.</summary>
+    private static uint GetBaseTypeDef(nint pImport, uint typeToken)
+    {
+        // GetTypeDefProps with szTypeDef = null + cchTypeDef = 0 — we only want ptkExtends.
+        var getTypeDefProps = (delegate* unmanaged[Cdecl]<nint, uint, char*, uint, uint*, uint*, uint*, int>)Slot(pImport, GetTypeDefProps);
+        uint chName = 0, flags = 0, extends = 0;
+        if (getTypeDefProps(pImport, typeToken, null, 0, &chName, &flags, &extends) < 0) return 0;
+        // Walk only if the base is an mdTypeDef (high byte 0x02) — same module. mdTypeRef (0x01)
+        // and mdTypeSpec (0x1B) are deferred to the cross-module / generic slices.
+        return (extends >> 24) == 0x02 ? extends : 0;
     }
 
     private static nint GetMetaDataImport(nint pModule)

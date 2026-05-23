@@ -1,0 +1,7 @@
+# DrHook.Engine probe 36 fixture — subclass-walk in member resolution (within-module)
+timestamp        = 2026-05-23T05:36:27.4361130Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 37901
+phases           = A within-module inherited member resolves; B cross-module member correctly does not
+verdict          = PASSED
