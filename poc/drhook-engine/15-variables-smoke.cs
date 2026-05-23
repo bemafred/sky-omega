@@ -120,7 +120,7 @@ static class Variables15
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (!session.SetBreakpoint(ModuleSubstr, TypeName, MethodName))
+        if (session.SetBreakpoint(ModuleSubstr, TypeName, MethodName) == 0)
         {
             Console.Error.WriteLine("FALSIFIED (SetBreakpoint).");
             return 6;

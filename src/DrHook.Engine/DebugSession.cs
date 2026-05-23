@@ -30,8 +30,11 @@ public sealed class DebugSession : IDisposable
     private bool _disposed;
 
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
-    // the breakpoint stays bound; released on Dispose.
-    private readonly List<(nint Module, nint Function, nint Breakpoint)> _breakpoints = new();
+    // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
+    // descriptor for listing/removal. Released on Dispose or via Remove/ClearBreakpoints.
+    private sealed record BreakpointEntry(BreakpointInfo Info, nint Module, nint Function, nint Breakpoint);
+    private readonly List<BreakpointEntry> _breakpoints = new();
+    private int _nextBreakpointId;
 
     // Per-module Portable PDB readers, opened on demand for source mapping; disposed on Dispose.
     private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
@@ -575,22 +578,28 @@ public sealed class DebugSession : IDisposable
 
     /// <summary>Set an active breakpoint at the entry of
     /// <paramref name="typeName"/>.<paramref name="methodName"/> in the module whose name
-    /// contains <paramref name="moduleNameSubstring"/>. Returns false if the method can't be
-    /// resolved or the breakpoint can't be created. Valid only while the debuggee is stopped; a
-    /// hit later surfaces as <see cref="StopReason.Breakpoint"/> from <see cref="WaitForStop"/>.</summary>
-    public bool SetBreakpoint(string moduleNameSubstring, string typeName, string methodName)
+    /// contains <paramref name="moduleNameSubstring"/>. Returns the new breakpoint's id (positive)
+    /// on success, <c>0</c> if the method can't be resolved or the breakpoint can't be created.
+    /// Pass the id to <see cref="RemoveBreakpoint"/>; <see cref="ListBreakpoints"/> returns it
+    /// alongside the <see cref="FunctionBreakpointInfo"/> descriptor. Valid only while the debuggee
+    /// is stopped; a hit later surfaces as <see cref="StopReason.Breakpoint"/> from
+    /// <see cref="WaitForStop"/>.</summary>
+    public int SetBreakpoint(string moduleNameSubstring, string typeName, string methodName)
     {
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
-        if (pModule == 0) return false;
+        if (pModule == 0) return 0;
         try
         {
             uint token = MetadataResolver.ResolveMethodToken(pModule, typeName, methodName);
-            if (token == 0) return false;
-            if (!Breakpoints.TryCreate(pModule, token, out nint function, out nint breakpoint)) return false;
+            if (token == 0) return 0;
+            if (!Breakpoints.TryCreate(pModule, token, out nint function, out nint breakpoint)) return 0;
 
-            _breakpoints.Add((pModule, function, breakpoint));
+            int id = ++_nextBreakpointId;
+            _breakpoints.Add(new BreakpointEntry(
+                new FunctionBreakpointInfo(id, moduleNameSubstring, typeName, methodName),
+                pModule, function, breakpoint));
             pModule = 0; // ownership moved into _breakpoints — don't release below
-            return true;
+            return id;
         }
         finally { if (pModule != 0) RuntimeNavigation.Release(pModule); }
     }
@@ -598,26 +607,80 @@ public sealed class DebugSession : IDisposable
     /// <summary>Set an active breakpoint at a source <paramref name="line"/> in a document whose
     /// name contains <paramref name="fileHint"/>, within the module matching
     /// <paramref name="moduleNameSubstring"/>. Binds via the module's Portable PDB to the nearest
-    /// sequence point at or after the line. Returns false if no PDB, no matching line, or the
-    /// breakpoint can't be created. Valid only while stopped; a hit surfaces as
+    /// sequence point at or after the line. Returns the new breakpoint's id (positive) on success,
+    /// <c>0</c> if no PDB, no matching line, or the breakpoint can't be created. Pass the id to
+    /// <see cref="RemoveBreakpoint"/>; <see cref="ListBreakpoints"/> returns it alongside the
+    /// <see cref="LineBreakpointInfo"/> descriptor. Valid only while stopped; a hit surfaces as
     /// <see cref="StopReason.Breakpoint"/>.</summary>
-    public bool SetBreakpointAtLine(string moduleNameSubstring, string fileHint, int line)
+    public int SetBreakpointAtLine(string moduleNameSubstring, string fileHint, int line)
     {
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
-        if (pModule == 0) return false;
+        if (pModule == 0) return 0;
         try
         {
             SymbolReader? symbols = SymbolsFor(RuntimeNavigation.ModuleName(pModule));
             if (symbols is null || !symbols.TryFindLine(fileHint, line, out int token, out int ilOffset))
-                return false;
+                return 0;
             if (!Breakpoints.TryCreateAtOffset(pModule, (uint)token, (uint)ilOffset, out nint function, out nint breakpoint))
-                return false;
+                return 0;
 
-            _breakpoints.Add((pModule, function, breakpoint));
+            int id = ++_nextBreakpointId;
+            _breakpoints.Add(new BreakpointEntry(
+                new LineBreakpointInfo(id, moduleNameSubstring, fileHint, line),
+                pModule, function, breakpoint));
             pModule = 0; // ownership moved into _breakpoints
-            return true;
+            return id;
         }
         finally { if (pModule != 0) RuntimeNavigation.Release(pModule); }
+    }
+
+    /// <summary>The active breakpoints in registration order — id + descriptor (a
+    /// <see cref="LineBreakpointInfo"/> or <see cref="FunctionBreakpointInfo"/>). The MCP list /
+    /// remove-by-natural-key flows pattern-match on the concrete subtype to recover file/line or
+    /// type/method.</summary>
+    public IReadOnlyList<BreakpointInfo> ListBreakpoints()
+    {
+        BreakpointInfo[] result = new BreakpointInfo[_breakpoints.Count];
+        for (int i = 0; i < _breakpoints.Count; i++) result[i] = _breakpoints[i].Info;
+        return result;
+    }
+
+    /// <summary>Deactivate (via <c>ICorDebugBreakpoint.Activate(FALSE)</c>) and release the
+    /// breakpoint with <paramref name="id"/>. Returns <c>true</c> if a matching entry was found;
+    /// <c>false</c> otherwise. Valid only while stopped.</summary>
+    public bool RemoveBreakpoint(int id)
+    {
+        for (int i = 0; i < _breakpoints.Count; i++)
+        {
+            if (_breakpoints[i].Info.Id == id)
+            {
+                BreakpointEntry e = _breakpoints[i];
+                Breakpoints.Deactivate(e.Breakpoint);
+                RuntimeNavigation.Release(e.Breakpoint);
+                RuntimeNavigation.Release(e.Function);
+                RuntimeNavigation.Release(e.Module);
+                _breakpoints.RemoveAt(i);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Deactivate and release ALL active breakpoints; returns how many were cleared. Valid
+    /// only while stopped. <see cref="Dispose"/> releases the refs separately (after the runtime
+    /// has been terminated, so deactivation is moot).</summary>
+    public int ClearBreakpoints()
+    {
+        int count = _breakpoints.Count;
+        foreach (BreakpointEntry e in _breakpoints)
+        {
+            Breakpoints.Deactivate(e.Breakpoint);
+            RuntimeNavigation.Release(e.Breakpoint);
+            RuntimeNavigation.Release(e.Function);
+            RuntimeNavigation.Release(e.Module);
+        }
+        _breakpoints.Clear();
+        return count;
     }
 
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
@@ -653,12 +716,13 @@ public sealed class DebugSession : IDisposable
         Detach();
         _cordbg.Terminate();
 
-        // Release our breakpoint refs now that the runtime has dropped the breakpoints.
-        foreach ((nint module, nint function, nint breakpoint) in _breakpoints)
+        // Release our breakpoint refs now that the runtime has dropped the breakpoints. No need to
+        // deactivate first — Terminate already invalidated them; ClearBreakpoints is for live removal.
+        foreach (BreakpointEntry e in _breakpoints)
         {
-            RuntimeNavigation.Release(breakpoint);
-            RuntimeNavigation.Release(function);
-            RuntimeNavigation.Release(module);
+            RuntimeNavigation.Release(e.Breakpoint);
+            RuntimeNavigation.Release(e.Function);
+            RuntimeNavigation.Release(e.Module);
         }
         _breakpoints.Clear();
 

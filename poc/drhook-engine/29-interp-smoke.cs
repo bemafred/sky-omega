@@ -245,7 +245,7 @@ static class Interp29
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (!session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine))
+        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine) == 0)
         {
             Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
             return 6;

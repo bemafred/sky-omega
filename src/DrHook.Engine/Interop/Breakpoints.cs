@@ -56,6 +56,16 @@ internal static unsafe class Breakpoints
         return true;
     }
 
+    /// <summary>Deactivate an active breakpoint via <c>ICorDebugBreakpoint.Activate(FALSE)</c>.
+    /// Best-effort — ignores the HRESULT, since the breakpoint may already be gone (e.g. the module
+    /// was unloaded). Caller still owns the reference and must <c>Release</c> after.</summary>
+    public static void Deactivate(nint pBreakpoint)
+    {
+        if (pBreakpoint == 0) return;
+        var activate = (delegate* unmanaged[Cdecl]<nint, int, int>)Slot(pBreakpoint, BreakpointActivate);
+        activate(pBreakpoint, 0);
+    }
+
     /// <summary>Like <see cref="TryCreate"/> but bind at a specific IL <paramref name="ilOffset"/>
     /// (for source-line breakpoints) via <c>ICorDebugCode.CreateBreakpoint(offset)</c> instead of
     /// the function-entry overload.</summary>

@@ -125,7 +125,7 @@ static class Breakpoint12
         }
         Console.WriteLine($"stopped    : {setup.Reason} (setup) — setting breakpoint on {TypeName}.{MethodName}");
 
-        if (!session.SetBreakpoint(ModuleSubstr, TypeName, MethodName))
+        if (session.SetBreakpoint(ModuleSubstr, TypeName, MethodName) == 0)
         {
             Console.Error.WriteLine("FALSIFIED (SetBreakpoint): could not set the breakpoint.");
             return 6;
