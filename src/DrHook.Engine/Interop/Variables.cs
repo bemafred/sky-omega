@@ -34,8 +34,10 @@ internal static unsafe class Variables
     }
 
     /// <summary>Read up to <paramref name="maxArgs"/> arguments of the stopped thread's active
-    /// frame (arg 0 is <c>this</c> for an instance method).</summary>
-    public static List<ArgumentValue> ReadActiveFrameArguments(nint pThread, int maxArgs)
+    /// frame (arg 0 is <c>this</c> for an instance method). When <paramref name="depth"/> &gt; 0,
+    /// object-typed args have their <see cref="ArgumentValue.Fields"/> populated by walking
+    /// instance fields (finding 48 / probe 39).</summary>
+    public static List<ArgumentValue> ReadActiveFrameArguments(nint pThread, int maxArgs, int depth = 0)
     {
         List<ArgumentValue> args = new();
         if (pThread == 0) return args;
@@ -53,7 +55,14 @@ internal static unsafe class Variables
                 {
                     nint value;
                     if (getArgument(ilFrame, i, &value) < 0 || value == 0) break; // past the last argument
-                    try { args.Add(ReadValue(value)); }
+                    try
+                    {
+                        ArgumentValue v = ReadValue(value);
+                        IReadOnlyList<FieldValue>? fields = (depth > 0 && IsObjectReference(v.ElementType))
+                            ? FieldEnumerator.GetFields(value, depth)
+                            : null;
+                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, fields));
+                    }
                     finally { RuntimeNavigation.Release(value); }
                 }
             }
@@ -66,8 +75,10 @@ internal static unsafe class Variables
     /// <summary>Read the named locals of the stopped thread's active frame. <paramref name="names"/>
     /// (slot → name, from the PDB) drives which slots are read; each is fetched via
     /// <c>ICorDebugILFrame.GetLocalVariable</c>@14 and its value decoded like an argument. A local
-    /// not available at the current IL offset surfaces with a null raw value.</summary>
-    public static List<LocalValue> ReadActiveFrameLocals(nint pThread, IReadOnlyList<LocalName> names)
+    /// not available at the current IL offset surfaces with a null raw value. When
+    /// <paramref name="depth"/> &gt; 0, object-typed locals have their <see cref="LocalValue.Fields"/>
+    /// populated by walking instance fields (finding 48 / probe 39).</summary>
+    public static List<LocalValue> ReadActiveFrameLocals(nint pThread, IReadOnlyList<LocalName> names, int depth = 0)
     {
         List<LocalValue> locals = new();
         if (pThread == 0 || names.Count == 0) return locals;
@@ -92,7 +103,10 @@ internal static unsafe class Variables
                     try
                     {
                         ArgumentValue v = ReadValue(value);
-                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue));
+                        IReadOnlyList<FieldValue>? fields = (depth > 0 && IsObjectReference(v.ElementType))
+                            ? FieldEnumerator.GetFields(value, depth)
+                            : null;
+                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, fields));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -102,6 +116,10 @@ internal static unsafe class Variables
         finally { RuntimeNavigation.Release(frame); }
         return locals;
     }
+
+    private static bool IsObjectReference(int elementType)
+        => elementType == 0x12 /* CLASS */ || elementType == 0x1C /* OBJECT */;
+        // E_T_STRING is rendered via StringValue; arrays are a separate slice.
 
     /// <summary>The active frame's local at <paramref name="slot"/> as an OWNED value pointer the
     /// caller releases — for passing as a func-eval argument (e.g. <c>this</c>). 0 if unavailable.</summary>

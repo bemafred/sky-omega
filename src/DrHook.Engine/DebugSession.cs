@@ -391,14 +391,20 @@ public sealed class DebugSession : IDisposable
 
     /// <summary>Argument values of the active (top) frame at the current stop. Arg 0 is
     /// <c>this</c> for an instance method; <see cref="ArgumentValue.RawValue"/> holds the
-    /// primitive bits for generic values, null for object references. Valid only while stopped.</summary>
-    public IReadOnlyList<ArgumentValue> GetArguments() => Variables.ReadActiveFrameArguments(_pump.StopThread, 16);
+    /// primitive bits for generic values, null for object references. When <paramref name="depth"/>
+    /// &gt; 0, object args have their <see cref="ArgumentValue.Fields"/> populated by walking
+    /// instance fields up the type chain (finding 48); recursive into object-typed fields when
+    /// depth &gt; 1. Valid only while stopped.</summary>
+    public IReadOnlyList<ArgumentValue> GetArguments(int depth = 0) => Variables.ReadActiveFrameArguments(_pump.StopThread, 16, depth);
 
     /// <summary>Named local variables of the active (top) frame at the current stop — PDB names
     /// (via the module's Portable PDB) paired with values read from the frame. Empty if no PDB.
     /// A local not yet in scope/assigned at the current line surfaces with a null
-    /// <see cref="LocalValue.RawValue"/>. Valid only while stopped.</summary>
-    public IReadOnlyList<LocalValue> GetLocals()
+    /// <see cref="LocalValue.RawValue"/>. When <paramref name="depth"/> &gt; 0, object locals have
+    /// their <see cref="LocalValue.Fields"/> populated by walking instance fields up the type
+    /// chain (finding 48); recursive into object-typed fields when depth &gt; 1. Valid only while
+    /// stopped.</summary>
+    public IReadOnlyList<LocalValue> GetLocals(int depth = 0)
     {
         List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
         if (frames.Count == 0) return Array.Empty<LocalValue>();
@@ -407,7 +413,7 @@ public sealed class DebugSession : IDisposable
         if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return Array.Empty<LocalValue>();
 
         IReadOnlyList<LocalName> names = SymbolsFor(top.ModulePath)?.GetLocalNames(top.Token) ?? Array.Empty<LocalName>();
-        return Variables.ReadActiveFrameLocals(_pump.StopThread, names);
+        return Variables.ReadActiveFrameLocals(_pump.StopThread, names, depth);
     }
 
     /// <summary>The fully-qualified type name of the exception in flight at the current stop (e.g.
