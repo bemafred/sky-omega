@@ -6,6 +6,7 @@
 // version token; CreateDebuggingInterfaceFromVersionEx(CorDebugVersion_4_0) yields IUnknown.
 
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace SkyOmega.DrHook.Engine.Interop;
@@ -23,6 +24,12 @@ internal sealed unsafe class DbgShim : IDisposable
     private readonly delegate* unmanaged[Cdecl]<nint, nint, uint, int> _closeCLREnumeration;
     private readonly delegate* unmanaged[Cdecl]<uint, char*, char*, uint, uint*, int> _createVersionStringFromModule;
     private readonly delegate* unmanaged[Cdecl]<int, char*, nint*, int> _createDebuggingInterfaceFromVersionEx;
+    // Launch path (RegisterForRuntimeStartup flow).
+    private readonly delegate* unmanaged[Cdecl]<char*, int, nint, char*, uint*, nint*, int> _createProcessForLaunch;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> _resumeProcess;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> _closeResumeHandle;
+    private readonly delegate* unmanaged[Cdecl]<uint, nint, nint, nint*, int> _registerForRuntimeStartup;
+    private readonly delegate* unmanaged[Cdecl]<nint, int> _unregisterForRuntimeStartup;
 
     private DbgShim(nint lib)
     {
@@ -31,6 +38,11 @@ internal sealed unsafe class DbgShim : IDisposable
         _closeCLREnumeration = (delegate* unmanaged[Cdecl]<nint, nint, uint, int>)NativeLibrary.GetExport(lib, "CloseCLREnumeration");
         _createVersionStringFromModule = (delegate* unmanaged[Cdecl]<uint, char*, char*, uint, uint*, int>)NativeLibrary.GetExport(lib, "CreateVersionStringFromModule");
         _createDebuggingInterfaceFromVersionEx = (delegate* unmanaged[Cdecl]<int, char*, nint*, int>)NativeLibrary.GetExport(lib, "CreateDebuggingInterfaceFromVersionEx");
+        _createProcessForLaunch = (delegate* unmanaged[Cdecl]<char*, int, nint, char*, uint*, nint*, int>)NativeLibrary.GetExport(lib, "CreateProcessForLaunch");
+        _resumeProcess = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(lib, "ResumeProcess");
+        _closeResumeHandle = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(lib, "CloseResumeHandle");
+        _registerForRuntimeStartup = (delegate* unmanaged[Cdecl]<uint, nint, nint, nint*, int>)NativeLibrary.GetExport(lib, "RegisterForRuntimeStartup");
+        _unregisterForRuntimeStartup = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(lib, "UnregisterForRuntimeStartup");
     }
 
     /// <summary>Locate and load libdbgshim. Throws if it cannot be found or loaded.</summary>
@@ -186,6 +198,91 @@ internal sealed unsafe class DbgShim : IDisposable
                 best = candidate;
         }
         return best;
+    }
+
+    /// <summary>Launch a process under debug control using dbgshim's RegisterForRuntimeStartup flow:
+    /// (1) <c>CreateProcessForLaunch</c> spawns the process SUSPENDED so it can't run before we
+    /// register; (2) <c>RegisterForRuntimeStartup</c> installs the static callback that delivers an
+    /// <c>ICorDebug</c> <c>IUnknown*</c> once the runtime has initialized; (3) <c>ResumeProcess</c>
+    /// + <c>CloseResumeHandle</c> let the process run; (4) we wait on the startup event. On success
+    /// <paramref name="pid"/> + <paramref name="pUnknown"/> are non-zero; the caller still calls
+    /// <c>DebugActiveProcess</c> on the cordbg to complete the attach (same as the Attach path from
+    /// <see cref="CreateCordbForProcess"/>'s output onward).</summary>
+    public int LaunchWithDebugger(string commandLine, string? workingDirectory, TimeSpan startupTimeout,
+        out uint pid, out nint pUnknown)
+    {
+        pid = 0;
+        pUnknown = 0;
+
+        nint resumeHandle = 0;
+        uint launchedPid = 0;
+        int hr;
+        fixed (char* pCmd = commandLine)
+        fixed (char* pCwd = workingDirectory)
+        {
+            // CreateProcessForLaunch(cmdLine, suspend=TRUE, env=null/inherit, cwd, &pid, &resumeHandle)
+            hr = _createProcessForLaunch(pCmd, 1, 0, pCwd, &launchedPid, &resumeHandle);
+            if (hr < 0) return hr;
+        }
+        pid = launchedPid;
+
+        var ctx = new StartupContext();
+        GCHandle handle = GCHandle.Alloc(ctx);
+        nint pContext = GCHandle.ToIntPtr(handle);
+
+        nint unregisterToken = 0;
+        try
+        {
+            nint pCallback = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int, void>)&StartupCallbackThunk;
+            hr = _registerForRuntimeStartup(launchedPid, pCallback, pContext, &unregisterToken);
+            if (hr < 0)
+            {
+                _closeResumeHandle(resumeHandle);
+                return hr;
+            }
+
+            // The process is still suspended — release it now that the callback is armed.
+            _resumeProcess(resumeHandle);
+            _closeResumeHandle(resumeHandle);
+
+            if (!ctx.Signaled.Wait(startupTimeout))
+                return E_FAIL; // runtime didn't initialize within the budget
+
+            if (ctx.HResult < 0) return ctx.HResult;
+            pUnknown = ctx.PCordb;
+            return 0;
+        }
+        finally
+        {
+            if (unregisterToken != 0) _unregisterForRuntimeStartup(unregisterToken);
+            handle.Free();
+            ctx.Signaled.Dispose();
+        }
+    }
+
+    /// <summary>The startup callback parameter — a <c>GCHandle.ToIntPtr</c> of one of these is passed
+    /// to <c>RegisterForRuntimeStartup</c>, and the static thunk publishes the result here. Reference
+    /// type so the GCHandle keeps it pinned for the dbgshim's native thread to write into.</summary>
+    private sealed class StartupContext
+    {
+        public nint PCordb;
+        public int HResult;
+        public readonly ManualResetEventSlim Signaled = new(false);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void StartupCallbackThunk(nint pCordb, nint parameter, int hr)
+    {
+        // dbgshim fires this from its internal thread once the runtime has initialized. Recover
+        // the context via the GCHandle and signal the waiter.
+        if (parameter == 0) return;
+        GCHandle h = GCHandle.FromIntPtr(parameter);
+        if (h.Target is StartupContext ctx)
+        {
+            ctx.PCordb = pCordb;
+            ctx.HResult = hr;
+            ctx.Signaled.Set();
+        }
     }
 
     public void Dispose()

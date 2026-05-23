@@ -63,15 +63,60 @@ public sealed class DebugSession : IDisposable
     public static DebugSession Attach(int processId, IDebugEventSink sink)
     {
         ArgumentNullException.ThrowIfNull(sink);
-
         DbgShim dbgShim = DbgShim.Load();
-        CallbackPump? pump = null;
-        ManagedCallbackHost? callback = null;
         nint pUnknown = 0;
         try
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
+            return FromCordbg(dbgShim, sink, processId, pUnknown);
+        }
+        catch
+        {
+            if (pUnknown != 0) Marshal.Release(pUnknown);
+            dbgShim.Dispose();
+            throw;
+        }
+    }
 
+    /// <summary>Launch a .NET process under debug control via dbgshim's RegisterForRuntimeStartup
+    /// flow: spawn suspended → register a startup callback → resume → await the callback. On return,
+    /// the debugger is attached BEFORE managed code has run, so a <c>Debugger.Break()</c> at the top
+    /// of <c>Main</c> surfaces as the first stop (finding 42). Backs <c>drhook_step_run</c> in the
+    /// MCP rewrite. <paramref name="program"/> is typically the <c>dotnet</c> host with the target
+    /// DLL as an argument.</summary>
+    /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
+    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(sink);
+        string commandLine = BuildCommandLine(program, args);
+        DbgShim dbgShim = DbgShim.Load();
+        nint pUnknown = 0;
+        try
+        {
+            ThrowIfFailed(
+                dbgShim.LaunchWithDebugger(commandLine, workingDirectory, TimeSpan.FromSeconds(30), out uint pid, out pUnknown),
+                "DbgShim.LaunchWithDebugger");
+            return FromCordbg(dbgShim, sink, (int)pid, pUnknown);
+        }
+        catch
+        {
+            if (pUnknown != 0) Marshal.Release(pUnknown);
+            dbgShim.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
+    /// callback vtable, register the handler, <c>DebugActiveProcess</c>, start the continue-loop.
+    /// Same shape used by Attach and Launch.</summary>
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown)
+    {
+        CallbackPump? pump = null;
+        ManagedCallbackHost? callback = null;
+        try
+        {
             var cordbg = (ICorDebug)Wrappers.GetOrCreateObjectForComInstance(pUnknown, CreateObjectFlags.None);
             ThrowIfFailed(cordbg.Initialize(), "ICorDebug.Initialize");
 
@@ -101,11 +146,24 @@ public sealed class DebugSession : IDisposable
         {
             pump?.Dispose();
             callback?.Dispose();
-            if (pUnknown != 0) Marshal.Release(pUnknown);
-            dbgShim.Dispose();
             throw;
         }
     }
+
+    /// <summary>Quote a token if it contains spaces/quotes; dbgshim's command-line parser splits on
+    /// whitespace with shell-style quoting.</summary>
+    private static string BuildCommandLine(string program, IReadOnlyList<string> args)
+    {
+        System.Text.StringBuilder sb = new();
+        sb.Append(Quote(program));
+        foreach (string arg in args) { sb.Append(' '); sb.Append(Quote(arg)); }
+        return sb.ToString();
+    }
+
+    private static string Quote(string s)
+        => s.Length == 0 || s.IndexOfAny(new[] { ' ', '"', '\t' }) >= 0
+            ? "\"" + s.Replace("\"", "\\\"") + "\""
+            : s;
 
     /// <summary>Block until the debuggee next stops (breakpoint, step complete, or
     /// <c>Debugger.Break</c>), up to <paramref name="timeout"/>. Returns null on timeout (still
