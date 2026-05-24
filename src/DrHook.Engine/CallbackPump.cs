@@ -35,7 +35,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private Action? _pauseHandler;
     private Thread? _worker;
     private nint _stopThread;     // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
-    private bool _disposed;
+    private int _disposed;        // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
 
     public CallbackPump(IDebugEventSink userSink) => _userSink = userSink;
 
@@ -70,7 +70,11 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     {
         _resumeHandler = resume;
         _pauseHandler = pause;
-        _worker = new Thread(Pump) { IsBackground = true, Name = "DrHook.CallbackPump" };
+        // Explicit 1 MB maxStackSize — cross-platform substrate consistency (ENG-STK-2).
+        // Defends against platform-default variance (Windows 1 MB / macOS secondary 512 KB /
+        // Linux 8 MB) and future JIT/inlining variance across CoreCLR releases. Pump work is
+        // ~5 KB worst case; the headroom is for user-sink growth.
+        _worker = new Thread(Pump, maxStackSize: 1024 * 1024) { IsBackground = true, Name = "DrHook.CallbackPump" };
         _worker.Start();
     }
 
@@ -185,8 +189,9 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        // Atomic idempotence gate (ENG-CP-1) — concurrent Dispose calls return without
+        // racing BlockingCollection.Dispose to an ObjectDisposedException.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _events.CompleteAdding();
         _resume.CompleteAdding(); // unblock a worker parked at a stop (Take throws → loop breaks)
         _worker?.Join(TimeSpan.FromSeconds(2));

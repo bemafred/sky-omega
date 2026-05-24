@@ -16,6 +16,16 @@ namespace SkyOmega.DrHook.Engine;
 /// and releases all native resources.</summary>
 public sealed class DebugSession : IDisposable
 {
+    /// <summary>Maximum recursion depth for object/array inspection (ENG-STK-1).
+    /// Mercury-aligned with <c>SparqlParser.DefaultMaxDepth</c>. At ~2 KB per level across
+    /// mutually-recursive <c>FieldEnumerator</c> / <c>ArrayInspector</c> / <c>Variables.GetChildren</c>,
+    /// 10 levels = ~20 KB stack — well under macOS-secondary 512 KB and Windows 1 MB defaults.
+    /// Callers requesting deeper are clamped to this value. (Future: emit <c>EngineAnomaly</c>
+    /// when clamping — pending the anomaly-capture infrastructure landing in Phase 1.)
+    /// Inheritance-chain walking (<c>GetBase</c> within one level) is iterative and does NOT
+    /// count against this budget. See finding 55.</summary>
+    public const int MaxInspectionDepth = 10;
+
     private static readonly ComWrappers Wrappers = new StrategyBasedComWrappers();
 
     private readonly DbgShim _dbgShim;
@@ -26,8 +36,8 @@ public sealed class DebugSession : IDisposable
     private readonly IDebugEventSink _sink;
     private nint _pUnknown;
     private nint _pProcess;
-    private bool _detached;
-    private bool _disposed;
+    private int _detached;  // 0 = attached, 1 = detached; atomic via Interlocked.Exchange (ENG-DS-1)
+    private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
 
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
@@ -395,7 +405,11 @@ public sealed class DebugSession : IDisposable
     /// &gt; 0, object args have their <see cref="ArgumentValue.Fields"/> populated by walking
     /// instance fields up the type chain (finding 48); recursive into object-typed fields when
     /// depth &gt; 1. Valid only while stopped.</summary>
-    public IReadOnlyList<ArgumentValue> GetArguments(int depth = 0) => Variables.ReadActiveFrameArguments(_pump.StopThread, 16, depth);
+    public IReadOnlyList<ArgumentValue> GetArguments(int depth = 0)
+    {
+        if (depth > MaxInspectionDepth) depth = MaxInspectionDepth; // ENG-STK-1
+        return Variables.ReadActiveFrameArguments(_pump.StopThread, 16, depth);
+    }
 
     /// <summary>Named local variables of the active (top) frame at the current stop — PDB names
     /// (via the module's Portable PDB) paired with values read from the frame. Empty if no PDB.
@@ -406,6 +420,7 @@ public sealed class DebugSession : IDisposable
     /// stopped.</summary>
     public IReadOnlyList<LocalValue> GetLocals(int depth = 0)
     {
+        if (depth > MaxInspectionDepth) depth = MaxInspectionDepth; // ENG-STK-1
         List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
         if (frames.Count == 0) return Array.Empty<LocalValue>();
 
@@ -833,9 +848,10 @@ public sealed class DebugSession : IDisposable
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {
-        if (_detached) return;
+        // Atomic idempotence gate (ENG-DS-1) — concurrent Detach calls don't double-invoke
+        // ICorDebugController.Detach (whose behavior on already-detached is undefined per docs).
+        if (Interlocked.Exchange(ref _detached, 1) != 0) return;
         _controller.Detach();
-        _detached = true;
     }
 
     /// <summary>Synchronize the target before Detach so mscordbi's RC event thread is not
@@ -846,8 +862,9 @@ public sealed class DebugSession : IDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        // Atomic idempotence gate (ENG-DS-1) — concurrent Dispose calls return without
+        // double-Terminate, double-Marshal.Release, or racing _breakpoints iteration.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
         // Stop our worker first: it drives controller.Continue, so it must be joined before
         // we touch the controller for the quiescent detach.

@@ -10,6 +10,14 @@
 // Break) with their CallbackKind + the thread/appDomain pointers so the pump can suppress the
 // auto-Continue. The 38 callback methods are declared in exact IDL order — a misordered slot
 // crashes when the runtime calls it.
+//
+// SUBSTRATE RULE 1 — O(1)-stack thunks (ENG-STK-3, finding 55):
+// Every [UnmanagedCallersOnly] thunk below runs on mscordbi's RC event thread, whose stack
+// budget we do NOT own. The contract is: thunks must do O(1) stack work — recover the host
+// via HostOf, dispatch to _sink.OnCallback (which BlockingCollection.Adds and returns), and
+// return S_OK. NO stackalloc, NO recursion, NO synchronous user code. Future growth of any
+// thunk requires re-validating against mscordbi's actual stack budget. Phase 8 will add an
+// IL-size unit test asserting each thunk's IL stays under a threshold.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

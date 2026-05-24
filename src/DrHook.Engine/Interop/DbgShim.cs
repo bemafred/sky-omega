@@ -19,7 +19,7 @@ internal sealed unsafe class DbgShim : IDisposable
     private const int E_FAIL = unchecked((int)0x80004005);
     private const int E_INSUFFICIENT_BUFFER = unchecked((int)0x8007007A);
 
-    private readonly nint _lib;
+    private nint _lib;  // not readonly — Dispose zeros it after Free (ENG-DBG-D)
     private readonly delegate* unmanaged[Cdecl]<uint, nint*, nint*, uint*, int> _enumerateCLRs;
     private readonly delegate* unmanaged[Cdecl]<nint, nint, uint, int> _closeCLREnumeration;
     private readonly delegate* unmanaged[Cdecl]<uint, char*, char*, uint, uint*, int> _createVersionStringFromModule;
@@ -283,6 +283,10 @@ internal sealed unsafe class DbgShim : IDisposable
         public readonly ManualResetEventSlim Signaled = new(false);
     }
 
+    // SUBSTRATE RULE 1 — O(1)-stack thunk (ENG-STK-3, finding 55):
+    // Runs on libdbgshim's internal startup thread, whose stack budget we do NOT own. Must
+    // stay O(1) stack: GCHandle.FromIntPtr + field writes + Signaled.Set. NO stackalloc,
+    // NO recursion, NO synchronous user code. Phase 8 IL-size test guards against drift.
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
     private static void StartupCallbackThunk(nint pCordb, nint parameter, int hr)
     {
@@ -300,7 +304,12 @@ internal sealed unsafe class DbgShim : IDisposable
 
     public void Dispose()
     {
+        // Zero _lib after Free so a concurrent Dispose can't double-dlclose
+        // (T7 in finding 54; macOS dlclose-on-already-freed is undefined).
         if (_lib != 0)
+        {
             NativeLibrary.Free(_lib);
+            _lib = 0;
+        }
     }
 }
