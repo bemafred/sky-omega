@@ -5,6 +5,7 @@
 // singleton (finding 13). Phase 1 validates attach + callback delivery + clean teardown;
 // the continue-loop and stepping are Phase 2 (ADR-006).
 
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
@@ -38,7 +39,12 @@ public sealed class DebugSession : IDisposable
     private nint _pProcess;
     private int _detached;  // 0 = attached, 1 = detached; atomic via Interlocked.Exchange (ENG-DS-1)
     private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
-    private readonly bool _ownsTarget;  // true = Launched (caller handles kill-first); false = Attached (substrate does detach-leave-running). Probe 44.
+    private readonly bool _ownsTarget;  // true = Owned (substrate kills target on Dispose); false = Borrowed (detach-leave-running). Probe 44 + finding 64.
+    private readonly Process? _targetProcess;  // non-null when _ownsTarget — substrate holds Process handle, kills internally on Dispose. Closes MCH-RE-2 (finding 63).
+
+    /// <summary>Settle window between Process.Kill and Quiesce/Detach. Empirically ~50–100 ms
+    /// on macOS-arm64 lets mscordbi's RC event thread notice the exit before substrate teardown.</summary>
+    private const int KillSettleMs = 100;
 
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
@@ -57,7 +63,7 @@ public sealed class DebugSession : IDisposable
 
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
-                         nint pUnknown, nint pProcess, bool ownsTarget)
+                         nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -69,6 +75,7 @@ public sealed class DebugSession : IDisposable
         _pUnknown = pUnknown;
         _pProcess = pProcess;
         _ownsTarget = ownsTarget;
+        _targetProcess = targetProcess;
     }
 
     /// <summary>OS process id of the attached target.</summary>
@@ -82,6 +89,11 @@ public sealed class DebugSession : IDisposable
     /// <summary>Attach the native ICorDebug engine to a running .NET process and register the
     /// managed callback. On macOS/ARM64 this needs no debug entitlement (finding 13).</summary>
     /// <exception cref="DebugEngineException">An ICorDebug step failed.</exception>
+    /// <summary>Attach to an existing process as a BORROWED session — substrate does not
+    /// own the target's lifecycle. Dispose detaches and leaves the target running. Use case:
+    /// production observation, attaching to processes spawned by external orchestration
+    /// (NCrunch, IDE test runners, user-launched apps). The substrate never calls
+    /// Process.Kill — that's the owner's prerogative.</summary>
     public static DebugSession Attach(int processId, IDebugEventSink sink)
     {
         ArgumentNullException.ThrowIfNull(sink);
@@ -90,13 +102,44 @@ public sealed class DebugSession : IDisposable
         try
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
-            // Attached: substrate does not own the target. Dispose will detach-leave-running.
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false);
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: null);
         }
         catch
         {
             if (pUnknown != 0) Marshal.Release(pUnknown);
             dbgShim.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Attach to an existing process as an OWNED session — substrate takes
+    /// lifecycle ownership of the target. Substrate acquires the Process handle via
+    /// <see cref="Process.GetProcessById(int)"/> and kills the target before Dispose's
+    /// substrate teardown. Use case: integration tests that needed to spawn the target
+    /// externally for orchestration reasons (MTP <c>--debug</c> attach handshake, VSTest
+    /// VSTEST_HOST_DEBUG stdout parsing) — once they have the PID, they hand ownership
+    /// here and the substrate enforces the kill-first protocol on Dispose. The caller's
+    /// spawn-time Process handle (if held) can be Disposed immediately after this call
+    /// — substrate holds its own. Finding 64.</summary>
+    /// <exception cref="ArgumentException">No process with that id is running.</exception>
+    public static DebugSession AttachAndOwn(int processId, IDebugEventSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        // Acquire Process handle BEFORE dbgshim attach — if the target exited between
+        // caller's spawn and now, fail fast with ArgumentException rather than mid-attach.
+        Process targetProcess = Process.GetProcessById(processId);
+        DbgShim dbgShim = DbgShim.Load();
+        nint pUnknown = 0;
+        try
+        {
+            ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess);
+        }
+        catch
+        {
+            if (pUnknown != 0) Marshal.Release(pUnknown);
+            dbgShim.Dispose();
+            targetProcess.Dispose();
             throw;
         }
     }
@@ -108,6 +151,12 @@ public sealed class DebugSession : IDisposable
     /// MCP rewrite. <paramref name="program"/> is typically the <c>dotnet</c> host with the target
     /// DLL as an argument.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
+    /// <summary>Launch a .NET process under debug control via dbgshim's RegisterForRuntimeStartup
+    /// flow as an OWNED session. Substrate spawns the target, acquires its <see cref="Process"/>
+    /// handle, and kills the target before Dispose's substrate teardown. Use case: drhook_step_run
+    /// MCP tool, file-based probes that launch their target. Finding 64 (substrate-owned
+    /// lifecycle); callers no longer manage kill-first themselves.</summary>
+    /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
     public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink)
     {
         ArgumentNullException.ThrowIfNull(program);
@@ -116,19 +165,23 @@ public sealed class DebugSession : IDisposable
         string commandLine = BuildCommandLine(program, args);
         DbgShim dbgShim = DbgShim.Load();
         nint pUnknown = 0;
+        Process? targetProcess = null;
         try
         {
             ThrowIfFailed(
                 dbgShim.LaunchWithDebugger(commandLine, workingDirectory, TimeSpan.FromSeconds(30), out uint pid, out pUnknown),
                 "DbgShim.LaunchWithDebugger");
-            // Launched: substrate owns the target. Caller (typically EngineSteppingSession)
-            // handles kill-first before Dispose; substrate's Dispose keeps the current path.
-            return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true);
+            // Acquire Process handle for the just-launched target so Dispose can kill-first
+            // internally. If the target somehow exited between LaunchWithDebugger and now,
+            // we proceed with targetProcess=null — Dispose's kill is best-effort.
+            try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
+            return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess);
         }
         catch
         {
             if (pUnknown != 0) Marshal.Release(pUnknown);
             dbgShim.Dispose();
+            targetProcess?.Dispose();
             throw;
         }
     }
@@ -136,7 +189,7 @@ public sealed class DebugSession : IDisposable
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
     /// callback vtable, register the handler, <c>DebugActiveProcess</c>, start the continue-loop.
     /// Same shape used by Attach and Launch.</summary>
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget)
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -165,7 +218,7 @@ public sealed class DebugSession : IDisposable
                 },
                 () => controller.Stop(0));
 
-            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget);
+            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess);
         }
         catch
         {
@@ -890,6 +943,36 @@ public sealed class DebugSession : IDisposable
         }
     }
 
+    /// <summary>Kill the target process before substrate teardown for OWNED sessions
+    /// (finding 64). Closes the dispose-then-kill race (drhook-detach-exit-race /
+    /// MCH-RE-2) structurally by enforcing the kill-first protocol inside Dispose.
+    /// Best-effort: failures to kill (target already exited, permission denied,
+    /// orphan-to-init) emit an UnexpectedHResult anomaly but don't block teardown.
+    /// Settle window of <see cref="KillSettleMs"/> after Kill gives mscordbi's RC event
+    /// thread time to notice the exit before Quiesce/Detach run.</summary>
+    private void TryKillTargetAndSettle()
+    {
+        try
+        {
+            if (_targetProcess is not null && !_targetProcess.HasExited)
+            {
+                _targetProcess.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
+                "TryKillTargetAndSettle",
+                Observed: $"{ex.GetType().Name}: {ex.Message}",
+                Expected: "target Process.Kill succeeds or target already exited",
+                Context: new Dictionary<string, string> { ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name }));
+        }
+        // Settle: let mscordbi's RC event thread process the exit work item before
+        // we tear down our own state. Empirically ~50–100 ms on macOS-arm64.
+        Thread.Sleep(KillSettleMs);
+    }
+
     /// <summary>Resume the debuggee before Detach (Attached path; Probe 44 / finding 59).
     /// After Quiesce the target is synchronized; mscordbi's Detach for a synchronized target
     /// performs an implicit resume that has been observed to race the exit work item when the
@@ -962,6 +1045,17 @@ public sealed class DebugSession : IDisposable
         // we touch the controller for the quiescent detach.
         _pump.Dispose();
 
+        // Finding 64 — substrate-enforced lifecycle: for OWNED sessions, kill the target
+        // BEFORE substrate teardown (kill-first protocol, single source of truth). This
+        // closes the dispose-then-kill race (drhook-detach-exit-race / MCH-RE-2 / finding 63)
+        // structurally — callers can't get the ordering wrong because they don't have the
+        // kill code anymore. For BORROWED sessions the substrate just detaches and leaves
+        // the target running (Probe 44 / finding 59).
+        if (_ownsTarget)
+        {
+            TryKillTargetAndSettle();
+        }
+
         // Quiescent detach (ADR-006 Phase 2 increment 2; finding 14 / docs/limits/drhook-clean-detach.md).
         // Detach must not race mscordbi's RC event thread flushing queued callbacks — that
         // segfaults the shim mid-flush under load (probe 07). Stop() synchronizes the process:
@@ -972,13 +1066,10 @@ public sealed class DebugSession : IDisposable
 
         if (!_ownsTarget)
         {
-            // Attached: detach-leave-running (Probe 44 / docs/limits/drhook-detach-exit-race.md).
-            // For Owned sessions the caller (typically EngineSteppingSession for Launched) has
-            // already killed the target before reaching Dispose — Detach happens against a dead
-            // target, no exit-race. For Attached sessions the target is live and the user did
-            // NOT intend to terminate it: explicitly resume the target so it's RUNNING when
-            // mscordbi's Detach unwinds (avoids the stopped-at-breakpoint state that widens
-            // the exit-race window per probe 12), then Detach. Target keeps running un-debugged.
+            // Borrowed: detach-leave-running (Probe 44 / docs/limits/drhook-detach-exit-race.md).
+            // Substrate explicitly resumes the target so it's RUNNING when mscordbi's Detach
+            // unwinds (avoids the stopped-at-breakpoint state that widens the exit-race
+            // window per probe 12). Target keeps running un-debugged.
             TryResumeForDetach();
         }
         Detach();
@@ -1014,6 +1105,11 @@ public sealed class DebugSession : IDisposable
         _dbgShim.Dispose();
         GC.KeepAlive(_cordbg);
         GC.KeepAlive(_controller);
+
+        // Release substrate's Process handle (finding 64). The OS process is already
+        // dead (TryKillTargetAndSettle handled it for Owned) or was never substrate's
+        // to kill (Borrowed). Dispose just releases the managed handle.
+        _targetProcess?.Dispose();
     }
 
     private static void ThrowIfFailed(int hr, string operation)

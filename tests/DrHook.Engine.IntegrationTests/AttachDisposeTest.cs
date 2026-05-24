@@ -1,22 +1,13 @@
-// Layer 1 — INTEGRATION TEST (finding 61 vocabulary).
+// Layer 1 — INTEGRATION TEST (finding 61 vocabulary, refactored finding 64).
 //
-// First integration test. Substrate validation lifted from probe 42's shape
-// (attach + Dispose → target survives) using MTP's --debug as the attach-handshake
-// mechanism (cleaner than the file-based-probe READY-PID handshake; MTP-native).
+// Substrate validation lifted from probe 42's shape (attach + Dispose → substrate
+// teardown clean) using MTP's --debug as the attach-handshake mechanism.
 //
-// Sequence:
-//   1. Launch the MTP integration target exe with `--debug` arg.
-//   2. MTP prints "Process Id: NNNN, Name: ..." and waits for Debugger.IsAttached.
-//   3. Integration test parses PID, calls DebugSession.Attach.
-//   4. mscordbi attaches; MTP's --debug-waiter sees Debugger.IsAttached=true;
-//      MTP proceeds to run the [TestMethod]s in the target.
-//   5. Brief observation window (200ms — pump initializes, drains setup callbacks).
-//   6. DebugSession.Dispose (substrate's detach-leave-running per finding 59).
-//   7. Assert target still alive (target's [TestMethod] is mid-sleep).
-//
-// Falsification → MSTest Assert.* throws; the test fails with structured message.
-// Phase 2 / Probe 46 exemplar: if this passes, the integration-test promotion
-// mechanism works and Phase 8 has a rail for promoting probes 41-45.
+// Lifecycle (finding 64): substrate OWNS the target Process via AttachAndOwn(pid).
+// Caller's bootstrap Process is just for spawn + stdout-parse to extract the PID,
+// then released. Substrate's Dispose handles kill-first internally — there is no
+// way for the caller to misorder. The dispose-then-kill race that surfaced as
+// MCH-RE-2 (finding 63) is structurally impossible from this API surface.
 
 using System;
 using System.Diagnostics;
@@ -40,14 +31,47 @@ public sealed class AttachDisposeTest
     }
 
     [TestMethod]
-    public void AttachToMtpTarget_BriefIdle_Dispose_TargetSurvives()
+    public void AttachAndOwn_MtpTarget_BriefIdle_DisposeCleanly()
     {
         string targetExe = ResolveMtpIntegrationTargetExe();
-        Assert.IsTrue(File.Exists(targetExe), $"MTP integration target exe not found at {targetExe}. Run 'dotnet build' against DrHook.Engine.IntegrationTargets.Mtp first.");
+        Assert.IsTrue(File.Exists(targetExe), $"MTP integration target exe not found at {targetExe}.");
 
-        using Process proc = new()
+        int pid = SpawnAndExtractPid(targetExe);
+
+        // Substrate takes lifecycle ownership. From this point on, the substrate
+        // is responsible for killing the target on Dispose (kill-first protocol,
+        // finding 64). Caller does NOT touch Process.Kill anywhere — substrate
+        // forbids the bad ordering by not exposing a kill API.
+        using DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink());
+
+        // Brief observation window — substrate's CallbackPump initializes, may
+        // drain setup callbacks. Target's [TestMethod] begins running (MTP
+        // --debug-waiter saw Debugger.IsAttached become true).
+        Thread.Sleep(TimeSpan.FromMilliseconds(200));
+
+        // session.Dispose() runs at end of using block:
+        //   1. pump.Dispose() — joins worker, drains queues
+        //   2. TryKillTargetAndSettle() — kills target (Owned), 100ms settle
+        //   3. Quiesce — drains mscordbi queued callbacks (against dying/dead target)
+        //   4. Detach — releases debugger registration
+        //   5. Terminate — tears down ICorDebug
+        //   6. Release breakpoint refs / symbols / pProcess / pUnknown
+        //   7. _callback.Dispose() — frees CCW memory
+        //   8. _dbgShim.Dispose() — releases libdbgshim handle
+        //   9. _targetProcess.Dispose() — releases substrate's Process handle
+        //
+        // The kill-first ordering (step 2 before step 4) is what closes
+        // drhook-detach-exit-race for the Owned path — substrate's responsibility,
+        // not caller's.
+    }
+
+    private static int SpawnAndExtractPid(string targetExe)
+    {
+        // The caller's Process handle is bootstrap-only — used to spawn, read stdout,
+        // and extract the PID that MTP's --debug printed. After that, substrate
+        // takes over via AttachAndOwn. We release the bootstrap handle immediately.
+        using Process bootstrap = new()
         {
-            // --debug = MTP-native attach handshake: target prints PID + waits for Debugger.IsAttached.
             StartInfo = new ProcessStartInfo(targetExe, "--debug")
             {
                 RedirectStandardOutput = true,
@@ -55,71 +79,43 @@ public sealed class AttachDisposeTest
                 UseShellExecute = false,
             }
         };
-        proc.Start();
+        bootstrap.Start();
 
-        int realPid = -1;
+        int pid = -1;
         ManualResetEventSlim ready = new(false);
         Thread reader = new(() =>
         {
             string? line;
-            while ((line = proc.StandardOutput.ReadLine()) is not null)
+            while ((line = bootstrap.StandardOutput.ReadLine()) is not null)
             {
                 // MTP --debug output: "Waiting for debugger to attach... Process Id: NNNN, Name: ..."
                 Match m = Regex.Match(line, @"Process Id:\s*(\d+)");
-                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int pid))
+                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPid))
                 {
-                    Volatile.Write(ref realPid, pid);
+                    Volatile.Write(ref pid, parsedPid);
                     ready.Set();
                 }
             }
         }) { IsBackground = true, Name = "target-stdout" };
         reader.Start();
-        Thread errDrain = new(() => { while (proc.StandardError.ReadLine() is not null) { } })
+        Thread errDrain = new(() => { while (bootstrap.StandardError.ReadLine() is not null) { } })
         { IsBackground = true, Name = "target-stderr" };
         errDrain.Start();
 
-        try
-        {
-            Assert.IsTrue(ready.Wait(TimeSpan.FromSeconds(30)), "MTP integration target did not print 'Process Id: NNNN' within 30s — MTP --debug handshake failed.");
-            realPid = Volatile.Read(ref realPid);
+        Assert.IsTrue(ready.Wait(TimeSpan.FromSeconds(30)),
+            "MTP integration target did not print 'Process Id: NNNN' within 30s — MTP --debug handshake failed.");
 
-            DebugSession session;
-            try
-            {
-                session = DebugSession.Attach(realPid, new NullSink());
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail($"DebugSession.Attach failed against MTP integration target (pid {realPid}): {ex.GetType().Name}: {ex.Message}");
-                return; // unreachable, satisfies nullable flow
-            }
-
-            // Brief observation window — substrate's CallbackPump initializes, drains setup
-            // callbacks (CreateProcess, CreateAppDomain, LoadModule, etc.). Target's [TestMethod]
-            // begins running (MTP --debug-waiter saw Debugger.IsAttached become true).
-            Thread.Sleep(TimeSpan.FromMilliseconds(200));
-
-            session.Dispose();
-
-            // Brief settle for mscordbi state after Detach (finding 59: mscordbi takes time).
-            Thread.Sleep(TimeSpan.FromMilliseconds(200));
-
-            Assert.IsFalse(proc.HasExited, "Target died after Dispose — substrate's detach-leave-running (finding 59) should keep the MTP integration target alive while its [TestMethod] is still sleeping.");
-        }
-        finally
-        {
-            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-        }
+        return Volatile.Read(ref pid);
+        // bootstrap.Dispose() runs at end of using — releases caller's Process handle.
+        // The OS process keeps running until substrate kills it via AttachAndOwn's lifecycle.
     }
 
-    /// <summary>Resolve the MTP integration target's executable path.
-    ///
-    /// On Unix-like systems (macOS, Linux), MTP test projects compile to an apphost
-    /// binary with no .exe extension. On Windows it has .exe. Probe both shapes.</summary>
+    /// <summary>Resolve the MTP integration target's executable path. On Unix-like systems
+    /// MTP test projects compile to an apphost binary with no .exe extension; Windows has
+    /// .exe. Probe both shapes so the test is cross-platform.</summary>
     private static string ResolveMtpIntegrationTargetExe()
     {
         string testBin = AppContext.BaseDirectory;
-        // Walk up from tests/DrHook.Engine.IntegrationTests/bin/{config}/{tfm}/ to tests/.
         DirectoryInfo? dir = new(testBin);
         for (int up = 0; up < 4 && dir is not null; up++) dir = dir.Parent;
         Assert.IsNotNull(dir, $"Couldn't walk up from {testBin} to find tests/ directory.");
@@ -133,7 +129,6 @@ public sealed class AttachDisposeTest
         string targetName = "DrHook.Engine.IntegrationTargets.Mtp";
         string exeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? targetName + ".exe" : targetName;
 
-        // Prefer matching configuration with the integration-test exe's, fall back to first.
         string currentConfig = new DirectoryInfo(testBin).Parent?.Parent?.Name ?? "Release";
         string candidateConfigDir = configDirs.FirstOrDefault(d => Path.GetFileName(d) == currentConfig) ?? configDirs[0];
 

@@ -35,7 +35,9 @@ public sealed class EngineSteppingSession : IDisposable
     private string _targetVersion = "unknown";
     private int _stepCount;
     private int _targetPid;
-    private Process? _launchedProcess;           // owned when step_run launched it
+    // _launchedProcess removed (finding 64) — DebugSession.Launch now acquires its own
+    // Process handle and kill-firsts internally on Dispose. EngineSteppingSession no
+    // longer manages target lifecycle directly.
     // breakpoint id maps (so remove-by-natural-key resolves to engine ids)
     private readonly Dictionary<string, int> _lineBreakpoints = new();       // key = "file:line"
     private readonly Dictionary<string, int> _functionBreakpoints = new();   // key = "Type.Method"
@@ -156,11 +158,10 @@ public sealed class EngineSteppingSession : IDisposable
             // our env, which covers the common cases (no per-launch override required).
             _session = DebugSession.Launch(program, args, cwd, _anomalies);
 
-            // Capture the launched PID so step_stop can terminate the target (finding 42 polish —
-            // DebugSession owns the lifecycle for Launched sessions; Dispose's Detach leaves it
-            // synchronized otherwise).
+            // Capture the launched PID for status reporting. DebugSession.Launch (finding 64)
+            // now owns the Process handle internally and kill-firsts on Dispose — no separate
+            // _launchedProcess management here.
             _targetPid = _session.ProcessId;
-            try { _launchedProcess = Process.GetProcessById(_targetPid); } catch { _launchedProcess = null; }
 
             // Setup stop (Debugger.Break() in user code or the attach break).
             _session.WaitForStop(TimeSpan.FromSeconds(10));
@@ -633,29 +634,10 @@ public sealed class EngineSteppingSession : IDisposable
     {
         if (_session is not null)
         {
-            // For Launched sessions we own the target's lifecycle (finding 42 polish — Dispose's
-            // Detach leaves a stopped process synchronized otherwise). Kill the launched tree
-            // before disposing so the engine teardown isn't blocked on a still-stopped target.
-            if (_launchedProcess is not null)
-            {
-                try
-                {
-                    if (!_launchedProcess.HasExited) _launchedProcess.Kill(entireProcessTree: true);
-                }
-                catch (Exception ex)
-                {
-                    // EA capture (UnexpectedCleanupException): Kill failed — target already gone,
-                    // permission denied, or process tree race. Continue teardown either way.
-                    _anomalies.OnAnomaly(new EngineAnomaly(
-                        DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
-                        "CleanupSession.Kill",
-                        Observed: $"{ex.GetType().Name}: {ex.Message}",
-                        Expected: "Kill succeeds or process already exited",
-                        Context: new Dictionary<string, string> { ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name }));
-                }
-                _launchedProcess.Dispose();
-                _launchedProcess = null;
-            }
+            // Finding 64 — substrate-enforced lifecycle: DebugSession.Dispose handles the
+            // kill-first protocol internally for Owned (Launched) sessions. Was previously
+            // a manual Kill-then-Dispose dance in this method; substrate now owns the
+            // ordering. CleanupSession is just a Dispose + bookkeeping reset.
             try
             {
                 _session.Dispose();

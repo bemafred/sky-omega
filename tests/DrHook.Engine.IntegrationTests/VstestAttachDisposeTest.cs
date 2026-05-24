@@ -1,31 +1,14 @@
-// Layer 1 — INTEGRATION TEST for the Legacy VSTest path (Probe 46b, finding 62).
+// Layer 1 — INTEGRATION TEST for Legacy VSTest path (finding 62, refactored finding 64).
 //
 // Validates substrate's Attach against a testhost halted by VSTEST_HOST_DEBUG=1.
-// The orchestration is more layered than MTP (which only needs --debug):
 //
-//   AttachDisposeTest (Layer 1)                       (this integration test)
-//        │
-//        └── dotnet test  (intermediate orchestrator; we spawn this)
-//                 │
-//                 └── vstest.console  (intermediate runner)
-//                          │
-//                          └── testhost (Layer 3 — DrHook attaches HERE)
-//                                  │
-//                                  └── xUnit adapter executes [Fact]
+// Lifecycle (finding 64): substrate OWNS the testhost target via AttachAndOwn(pid).
+// The dotnet test orchestration process is the bootstrap that gives us the testhost
+// PID; once we have it, substrate takes over and kill-firsts testhost on Dispose.
+// The dotnet test parent is then cleaned up separately (it's not the debug target).
 //
-// VSTEST_HOST_DEBUG=1 env var on `dotnet test` halts testhost at startup BEFORE
-// any [Fact] runs and prints "Process Id: NNNN, Name: dotnet" on stdout (testhost
-// runs as `dotnet exec testhost.dll`). Integration test parses PID, attaches via
-// DrHook.Engine, brief observe, Dispose. After Detach, testhost continues, runs
-// the [Fact] (which sleeps 30s), then exits cleanly. We Kill the dotnet test
-// process tree on test exit to avoid lingering processes.
-//
-// Phase 2 / Probe 46b exemplar. If this passes, the Legacy VSTest community-utility
-// path is substrate-validated and Phase 8 mass promotion can begin.
-//
-// Discoveries to capture in finding 62: actual stdout format (already captured —
-// identical to MTP's --debug regex), process tree depth (3 intermediates), kill
-// propagation behavior, any unknown unknowns from the multi-process attach.
+// The dispose-then-kill race (MCH-RE-2, finding 63) is structurally impossible from
+// this API surface — substrate enforces ordering inside Dispose.
 
 using System;
 using System.Diagnostics;
@@ -48,12 +31,15 @@ public sealed class VstestAttachDisposeTest
     }
 
     [TestMethod]
-    public void AttachToVstestTestHost_BriefIdle_Dispose_TestHostSurvives()
+    public void AttachAndOwn_VstestTestHost_BriefIdle_DisposeCleanly()
     {
         string targetProject = ResolveLegacyTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"Legacy VSTest integration target csproj not found at {targetProject}.");
 
-        using Process proc = new()
+        // Spawn dotnet test with VSTEST_HOST_DEBUG=1; capture testhost PID from stdout.
+        // The dotnet-test process is a transient bootstrap — it will die naturally
+        // when testhost (its grandchild) is killed by the substrate.
+        Process dotnetTest = new()
         {
             StartInfo = new ProcessStartInfo("dotnet", $"test \"{targetProject}\" -c Release --no-build --nologo")
             {
@@ -63,71 +49,64 @@ public sealed class VstestAttachDisposeTest
                 Environment = { ["VSTEST_HOST_DEBUG"] = "1" },
             }
         };
-        proc.Start();
+        dotnetTest.Start();
 
-        int testHostPid = -1;
+        try
+        {
+            int testHostPid = ExtractTestHostPid(dotnetTest);
+
+            // Substrate owns testhost lifecycle from here. AttachAndOwn does
+            // Process.GetProcessById(testHostPid) internally; on Dispose it
+            // kill-firsts then tears down. The dotnet-test process and
+            // vstest.console will exit when testhost dies.
+            using DebugSession session = DebugSession.AttachAndOwn(testHostPid, new NullSink());
+
+            // Brief observation window — substrate's CallbackPump initializes;
+            // testhost's VSTEST_HOST_DEBUG=1 waiter detects Debugger.IsAttached
+            // and continues; the [Fact] begins running (30s sleep).
+            Thread.Sleep(TimeSpan.FromMilliseconds(500));
+
+            // session.Dispose() at end of using — kill-first protocol internal
+            // to substrate. testhost dies; dotnet-test + vstest.console cascade.
+        }
+        finally
+        {
+            // Defensive cleanup of the dotnet-test bootstrap. Substrate killed
+            // testhost (Owned via AttachAndOwn); dotnet-test typically exits
+            // shortly after, but ensure no orphan if anything went sideways.
+            try { if (!dotnetTest.HasExited) dotnetTest.Kill(entireProcessTree: true); } catch { }
+            dotnetTest.Dispose();
+        }
+    }
+
+    private static int ExtractTestHostPid(Process dotnetTest)
+    {
+        int pid = -1;
         ManualResetEventSlim ready = new(false);
         Thread reader = new(() =>
         {
             string? line;
-            while ((line = proc.StandardOutput.ReadLine()) is not null)
+            while ((line = dotnetTest.StandardOutput.ReadLine()) is not null)
             {
-                // VSTest output (captured 2026-05-24 on .NET 10.0.100 SDK):
+                // VSTest output (.NET 10.0.100, finding 62 D6):
                 //   "Host debugging is enabled. Please attach debugger to testhost process to continue."
                 //   "Process Id: NNNN, Name: dotnet"
                 Match m = Regex.Match(line, @"Process Id:\s*(\d+)");
-                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int pid))
+                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPid))
                 {
-                    Volatile.Write(ref testHostPid, pid);
+                    Volatile.Write(ref pid, parsedPid);
                     ready.Set();
                 }
             }
         }) { IsBackground = true, Name = "vstest-stdout" };
         reader.Start();
-        Thread errDrain = new(() => { while (proc.StandardError.ReadLine() is not null) { } })
+        Thread errDrain = new(() => { while (dotnetTest.StandardError.ReadLine() is not null) { } })
         { IsBackground = true, Name = "vstest-stderr" };
         errDrain.Start();
 
-        try
-        {
-            Assert.IsTrue(ready.Wait(TimeSpan.FromSeconds(60)),
-                "VSTest didn't print 'Process Id: NNNN' within 60s — VSTEST_HOST_DEBUG=1 stdout format may have shifted, or dotnet test failed to spawn testhost.");
-            testHostPid = Volatile.Read(ref testHostPid);
-
-            DebugSession session;
-            try
-            {
-                session = DebugSession.Attach(testHostPid, new NullSink());
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail($"DebugSession.Attach failed against VSTest testhost (pid {testHostPid}): {ex.GetType().Name}: {ex.Message}");
-                return; // unreachable, satisfies nullable flow
-            }
-
-            // Brief observation window — pump initializes, drains setup callbacks;
-            // testhost's VSTEST_HOST_DEBUG wait detects debugger and continues, [Fact]
-            // begins running (30s sleep).
-            Thread.Sleep(TimeSpan.FromMilliseconds(500));
-
-            session.Dispose();
-
-            // Brief settle for mscordbi state after Detach (finding 59).
-            Thread.Sleep(TimeSpan.FromMilliseconds(200));
-
-            // Check testhost is still alive by PID lookup. Process.GetProcessById will
-            // throw ArgumentException if the process has exited.
-            bool testHostAlive = false;
-            try { using var th = Process.GetProcessById(testHostPid); testHostAlive = !th.HasExited; }
-            catch (ArgumentException) { testHostAlive = false; }
-            Assert.IsTrue(testHostAlive,
-                "Testhost died after Dispose — substrate's detach-leave-running (finding 59) should keep testhost alive (it's mid-[Fact]-sleep).");
-        }
-        finally
-        {
-            // Kill the entire dotnet-test process tree — cascades to vstest.console + testhost.
-            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* already gone */ }
-        }
+        Assert.IsTrue(ready.Wait(TimeSpan.FromSeconds(60)),
+            "VSTest didn't print 'Process Id: NNNN' within 60s — VSTEST_HOST_DEBUG=1 stdout format may have shifted, or dotnet test failed to spawn testhost.");
+        return Volatile.Read(ref pid);
     }
 
     /// <summary>Resolve the Legacy VSTest integration target's csproj path. Walks
