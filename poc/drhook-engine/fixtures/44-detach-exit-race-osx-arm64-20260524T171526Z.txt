@@ -1,0 +1,16 @@
+# DrHook.Engine probe 44 fixture — drhook-detach-exit-race resolution (Attached path)
+timestamp                = 2026-05-24T17:15:26.0354280Z
+runtime                  = .NET 10.0.0
+os-arch                  = osx-arm64
+phase-B-cycles           = 1
+phase-B-target-survived  = true
+phase-C-cycles           = 10
+phase-C-clean-dispose    = 10
+phase-C-dispose-threw    = 0
+phase-C-elapsed-ms       = 7602
+anomaly-count            = 30
+anomalies-by-kind        =
+  WorkerSilentBreak                : 10
+  LateCallback                     : 10
+  UnexpectedHResult                : 10
+verdict                  = PASSED
