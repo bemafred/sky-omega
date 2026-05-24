@@ -75,7 +75,7 @@ Completion: all probes (41–45) pass; `drhook-detach-exit-race` Resolved (not M
 The previous spiral happened here. Its purpose is to characterise the failure mode of probe-to-integration-test promotion before any scaling. Output is a substrate decision recorded as a finding, plus a single experimental exemplar.
 
 - [ ] **Probe 46** — take an already-passing legacy probe (e.g., probe 39 fields) and characterise what it takes to promote it into `tests/DrHook.Engine.IntegrationTests/` cleanly. Identify every implicit assumption legacy probes make about manual invocation (fixture file output, sequential single-target spawn, `Environment.CurrentDirectory` assumptions, console redirection, etc.).
-- [ ] Output: `findings/58-promotion-meta-probe.md` recording: *"DrHook integration tests are shaped like X, prove Y, explicitly do not try to prove Z."* This is the substrate decision Phase 8 fills in against; without this finding, Phase 8 doesn't begin. (Findings 56–57 are taken by Probe 41 / Probe 42 outcomes — see Phase 1.)
+- [ ] Output: `findings/59-promotion-meta-probe.md` recording: *"DrHook integration tests are shaped like X, prove Y, explicitly do not try to prove Z."* This is the substrate decision Phase 8 fills in against; without this finding, Phase 8 doesn't begin. (Findings 56–58 are taken by Probe 41 / Probe 42 / Probe 43 outcomes — see Phase 1.)
 
 Completion: one finding + one exemplar test. **No mass promotion in this phase** — that's Phase 8.
 
