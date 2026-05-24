@@ -1,9 +1,10 @@
 # Limit: DrHook.Engine detach races mscordbi's process-exit handler
 
-**Status:**        Triggered (intermittent; working mitigation = quiesce/kill the target before detach). Sibling of [drhook-clean-detach](drhook-clean-detach.md).
+**Status:**        **Resolved 2026-05-24** by [finding 66](../../poc/drhook-engine/findings/66-target-death-detection.md) — target-death detection in `DebugSession.Dispose` short-circuits Quiesce + TryResumeForDetach when target has exited; explicit ExitWorkSettleMs (200 ms) before Detach lets mscordbi exit-work-item complete; Detach preserved (releases CCW from mscordbi, required before `_callback.Dispose` frees CCW memory). Sibling of [drhook-clean-detach](drhook-clean-detach.md). Sibling resolution: [finding 65](../../poc/drhook-engine/findings/65-probe42-redesign-regression.md) dispatch-settle in TryResumeForDetach (informational-flood class). Sibling resolution: [finding 64](../../poc/drhook-engine/findings/64-substrate-owned-lifecycle.md) `AttachAndOwn` kill-first for Owned.
 **Surfaced:**      2026-05-22, by probe 12 (breakpoint hit). The breakpoint path passed every run; teardown segfaulted intermittently.
-**Last reviewed:** 2026-05-22
-**Promotes to:**   a teardown-quiescence ADR if/when DrHook.Engine drives long-lived sessions where targets exit mid-session, OR Phase 3 switchover.
+**Resolved:**      2026-05-24 by Probe 47 + finding 66 substrate change. Probe 47: 10/10 clean Dispose against externally-killed Borrowed targets. Probe 44 phase C (previously latent under stale-cache amplifier): 10/10 PASS post-fix.
+**Last reviewed:** 2026-05-24
+**Promotes to:**   N/A — Resolved.
 
 ## Description
 

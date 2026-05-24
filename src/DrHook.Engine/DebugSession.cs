@@ -46,6 +46,19 @@ public sealed class DebugSession : IDisposable
     /// on macOS-arm64 lets mscordbi's RC event thread notice the exit before substrate teardown.</summary>
     private const int KillSettleMs = 100;
 
+    /// <summary>Settle window when target died externally — between death detection and Detach.
+    /// Empirically ~200 ms on macOS-arm64 lets mscordbi's RC event thread complete exit-work-item
+    /// processing (ExitProcess delivery, RC state teardown) so Detach unwinds against a fully-
+    /// quiesced mscordbi rather than racing it. Finding 66 / Probe 47.</summary>
+    private const int ExitWorkSettleMs = 200;
+
+    /// <summary>Settle window for Borrowed sessions before HasExited death check. The target
+    /// may have been killed externally microseconds before Dispose ran (Probe 44 phase C kill-
+    /// coincident scenario); Process.HasExited can lag the actual exit by tens of milliseconds
+    /// (OS reaping / waitpid). 50 ms gives HasExited time to propagate before the death-detection
+    /// routing decision. Finding 66 / Probe 47.</summary>
+    private const int BorrowedDeathCheckSettleMs = 50;
+
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
     // descriptor for listing/removal. Released on Dispose or via Remove/ClearBreakpoints.
@@ -90,24 +103,33 @@ public sealed class DebugSession : IDisposable
     /// managed callback. On macOS/ARM64 this needs no debug entitlement (finding 13).</summary>
     /// <exception cref="DebugEngineException">An ICorDebug step failed.</exception>
     /// <summary>Attach to an existing process as a BORROWED session — substrate does not
-    /// own the target's lifecycle. Dispose detaches and leaves the target running. Use case:
+    /// own the target's lifecycle (no kill on Dispose). Dispose detaches and leaves the target
+    /// running, OR — if the target died externally between Attach and Dispose (OS kill, user
+    /// force-quit, OOM, crash, container shutdown) — short-circuits mscordbi protocol
+    /// operations to avoid racing exit-work-item processing (Probe 47 / finding 66). Use case:
     /// production observation, attaching to processes spawned by external orchestration
-    /// (NCrunch, IDE test runners, user-launched apps). The substrate never calls
-    /// Process.Kill — that's the owner's prerogative.</summary>
+    /// (NCrunch, IDE test runners, user-launched apps). The Process handle is acquired for
+    /// death-detection ONLY — substrate never calls Process.Kill on it.</summary>
+    /// <exception cref="ArgumentException">No process with that id is running.</exception>
     public static DebugSession Attach(int processId, IDebugEventSink sink)
     {
         ArgumentNullException.ThrowIfNull(sink);
+        // Acquire Process handle for DEATH-DETECTION (Probe 47 / finding 66).
+        // Substrate does NOT take ownership of kill for Borrowed — the handle is consulted
+        // in Dispose to short-circuit mscordbi protocol ops when the target has died externally.
+        Process targetProcess = Process.GetProcessById(processId);
         DbgShim dbgShim = DbgShim.Load();
         nint pUnknown = 0;
         try
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: null);
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess);
         }
         catch
         {
             if (pUnknown != 0) Marshal.Release(pUnknown);
             dbgShim.Dispose();
+            targetProcess.Dispose();
             throw;
         }
     }
@@ -1072,30 +1094,68 @@ public sealed class DebugSession : IDisposable
         // BEFORE substrate teardown (kill-first protocol, single source of truth). This
         // closes the dispose-then-kill race (drhook-detach-exit-race / MCH-RE-2 / finding 63)
         // structurally — callers can't get the ordering wrong because they don't have the
-        // kill code anymore. For BORROWED sessions the substrate just detaches and leaves
-        // the target running (Probe 44 / finding 59).
+        // kill code anymore. For BORROWED sessions the substrate does death-detection
+        // (finding 66) and either detaches-leave-running or short-circuits.
         if (_ownsTarget)
         {
             TryKillTargetAndSettle();
         }
-
-        // Quiescent detach (ADR-006 Phase 2 increment 2; finding 14 / docs/limits/drhook-clean-detach.md).
-        // Detach must not race mscordbi's RC event thread flushing queued callbacks — that
-        // segfaults the shim mid-flush under load (probe 07). Stop() synchronizes the process:
-        // it blocks until any in-flight dispatch completes and the debuggee is halted, so no
-        // flush is in progress when Detach tears down the shim. Detach from the synchronized
-        // state is the probe-05-validated safe path.
-        Quiesce();
-
-        if (!_ownsTarget)
+        else
         {
-            // Borrowed: detach-leave-running (Probe 44 / docs/limits/drhook-detach-exit-race.md).
-            // Substrate explicitly resumes the target so it's RUNNING when mscordbi's Detach
-            // unwinds (avoids the stopped-at-breakpoint state that widens the exit-race
-            // window per probe 12). Target keeps running un-debugged.
-            TryResumeForDetach();
+            // FINDING 66 follow-up: for Borrowed sessions, the target may have been killed
+            // externally microseconds before this Dispose ran. Process.HasExited can lag the
+            // actual death by tens of milliseconds (OS hasn't reaped yet / waitpid not
+            // collected). A small pre-check settle lets HasExited propagate so the death-
+            // detection below makes the correct routing decision. For Owned, KillSettleMs
+            // already covered this window in TryKillTargetAndSettle above.
+            Thread.Sleep(BorrowedDeathCheckSettleMs);
         }
-        Detach();
+
+        // FINDING 66 — target-death detection: if the target has exited (external Kill,
+        // user force-quit, OOM killer, target crash, container shutdown; OR substrate's own
+        // kill-first above for OWNED), mscordbi's RC event thread is mid-processing the
+        // exit-work-item (delivering ExitProcess, dispatching final callbacks, releasing RC
+        // state). The substrate's Quiesce/Continue calls from the main thread would race
+        // that exit-work and SIGSEGV mscordbi on macOS-arm64 (Probe 44 phase C / Probe 47
+        // evidence). Skip the active protocol pushes (Quiesce + TryResumeForDetach) and
+        // add an explicit exit-work-completion settle before Detach. Detach itself is still
+        // necessary: it releases the CCW reference from mscordbi's side, which is the
+        // safety precondition for the later _callback.Dispose (which frees the CCW's
+        // native vtable + GCHandle backing memory). Without Detach, a dispatch in flight
+        // when _callback.Dispose runs would UAF the freed CCW memory.
+        bool targetDead = _targetProcess?.HasExited == true;
+
+        if (targetDead)
+        {
+            // Dead-target path: let mscordbi's RC event thread complete exit-work-item
+            // processing before our Detach unwinds the same internal state. 200 ms is
+            // empirically comfortable on macOS-arm64; well above mscordbi's exit-work
+            // duration (sub-millisecond for typical processes) and well inside Dispose
+            // budget. The KillSettleMs for OWNED above already covered 100 ms of this
+            // window; this is additive belt-and-braces for external-death scenarios that
+            // bypass that path.
+            Thread.Sleep(ExitWorkSettleMs);
+            Detach();
+        }
+        else
+        {
+            // Live-target path: synchronize before Detach so mscordbi's RC event thread is
+            // not mid-flush of queued callbacks when Detach tears down the shim (finding 14).
+            // Stop() synchronizes the process: it blocks until any in-flight dispatch
+            // completes and the debuggee is halted; Detach from the synchronized state is
+            // the probe-05-validated safe path.
+            Quiesce();
+
+            if (!_ownsTarget)
+            {
+                // Borrowed alive: detach-leave-running (Probe 44 / finding 59 / dispatch-settle
+                // finding 65). Substrate explicitly resumes so target is RUNNING when mscordbi's
+                // Detach unwinds (avoids stopped-at-breakpoint state that widens the exit-race
+                // window per probe 12). Target keeps running un-debugged.
+                TryResumeForDetach();
+            }
+            Detach();
+        }
         int terminateHr = _cordbg.Terminate();
         if (terminateHr < 0)
         {
