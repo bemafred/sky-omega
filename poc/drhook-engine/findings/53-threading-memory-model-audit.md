@@ -5,7 +5,7 @@ The substrate prerequisite for everything downstream in Phase 1: a substrate wit
 teardown bugs makes every subsequent test ambiguous. This finding records the cross-thread
 contracts the engine relies on, the primitives that enforce them, and the race windows still
 uncovered. Output is consumed by 1b (teardown audit, [finding 54](54-teardown-audit.md))
-and 1c (stack-budget audit, [finding 55](55-stack-budget-audit.md)), and by probes 41–44 plus
+and 1c (stack-budget audit, [finding 55](55-stack-budget-audit.md)), and by probes 42–45 plus
 the new probes this audit surfaces.
 **Date:**     2026-05-23
 **Method:**   Bottom-up audit (every field, then writers/readers) as primary; top-down (every
@@ -233,7 +233,7 @@ The substrate relies on five distinct memory-model primitives. Each is documente
 
 External contracts the substrate inherits (one each per external-thread entry):
 
-6. **ICorDebug detach contract.** `ICorDebugController.Stop` synchronizes the process; `ICorDebugController.Detach` releases the debugger; `ICorDebug.Terminate` ends the session. The engine's `DebugSession.Dispose` orders these as `_pump.Dispose()` (joins worker) → `Quiesce` (Stop) → `Detach` → `Terminate` → `_callback.Dispose()`. **Assumption:** no further mscordbi callbacks fire on our `ManagedCallbackHost` after `Terminate` returns. **Validation status:** assumed by ADR-006 Phase 2 increment 2 (`finding 14`); the `drhook-detach-exit-race` limit ([docs/limits/drhook-detach-exit-race.md](../../../docs/limits/drhook-detach-exit-race.md)) is the historic counter-evidence that this contract has been violated under load. Phase 1b owns the deeper teardown audit; Phase 1 probe 43 owns the resolution.
+6. **ICorDebug detach contract.** `ICorDebugController.Stop` synchronizes the process; `ICorDebugController.Detach` releases the debugger; `ICorDebug.Terminate` ends the session. The engine's `DebugSession.Dispose` orders these as `_pump.Dispose()` (joins worker) → `Quiesce` (Stop) → `Detach` → `Terminate` → `_callback.Dispose()`. **Assumption:** no further mscordbi callbacks fire on our `ManagedCallbackHost` after `Terminate` returns. **Validation status:** assumed by ADR-006 Phase 2 increment 2 (`finding 14`); the `drhook-detach-exit-race` limit ([docs/limits/drhook-detach-exit-race.md](../../../docs/limits/drhook-detach-exit-race.md)) is the historic counter-evidence that this contract has been violated under load. Phase 1b owns the deeper teardown audit; Phase 1 probe 44 owns the resolution.
 
 7. **libdbgshim `UnregisterForRuntimeStartup` synchronization.** Assumed to block until any in-flight startup callback completes. **Validation status:** UNVALIDATED — libdbgshim documentation does not specify this. **See race window DBG-1 below.**
 
@@ -253,7 +253,7 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 **Mitigation in code today:** `DebugSession.Dispose` calls `_pump.Dispose()` (joins worker) → `Quiesce` → `Detach` → `Terminate` BEFORE `_callback.Dispose()`. The intent is that mscordbi delivers no further callbacks after `Terminate`, so `_callback.Dispose` is safe. **The intent is exactly the ICorDebug detach contract — see contract #6 above.**
 
-**Status:** **Maps to probe 43** (drhook-detach-exit-race resolution). Probe 43 must validate the contract under kill-coincident-with-Dispose load (the 50/sec NCrunch rate-envelope per ADR-007 Phase 1).
+**Status:** **Maps to probe 44** (drhook-detach-exit-race resolution). Probe 44 must validate the contract under kill-coincident-with-Dispose load (the 50/sec NCrunch rate-envelope per ADR-007 Phase 1).
 
 ### CP-1 — Idempotent CallbackPump.Dispose
 
@@ -263,7 +263,7 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 **Mitigation in code today:** none.
 
-**Status:** **Not covered by probes 41–44.** Standard fix: replace the boolean with `Interlocked.Exchange(ref _disposed, 1) != 0` early-return, OR take a lock. Either is a one-line change. **New work item:** ENG-CP-1, fix in Phase 1 alongside probes 41–44; no probe needed (deterministic; unit test in Phase 8).
+**Status:** **Not covered by probes 42–45.** Standard fix: replace the boolean with `Interlocked.Exchange(ref _disposed, 1) != 0` early-return, OR take a lock. Either is a one-line change. **New work item:** ENG-CP-1, fix in Phase 1 alongside probes 42–45; no probe needed (deterministic; unit test in Phase 8).
 
 ### DS-1 — Idempotent DebugSession.Dispose + lifecycle field reads racing with Dispose
 
@@ -276,7 +276,7 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 **Mitigation in code today:** none.
 
-**Status:** **Not covered by probes 41–44.** Fix: same as CP-1 (Interlocked or lock for the gate); the field-zeroing-during-call race is more nuanced — needs Dispose to wait for in-flight requests OR a per-method gate ("session is being disposed; refuse new operations"). **New work item:** ENG-DS-1, structural fix coupled with the EngineAnomaly infrastructure (refuse-with-structured-error rather than crash).
+**Status:** **Not covered by probes 42–45.** Fix: same as CP-1 (Interlocked or lock for the gate); the field-zeroing-during-call race is more nuanced — needs Dispose to wait for in-flight requests OR a per-method gate ("session is being disposed; refuse new operations"). **New work item:** ENG-DS-1, structural fix coupled with the EngineAnomaly infrastructure (refuse-with-structured-error rather than crash).
 
 ### DS-2 — Concurrent MCP requests against the singleton DebugSession
 
@@ -286,9 +286,9 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 **Mitigation in code today:** Unwritten contract — "callers serialize." If the MCP SDK serializes per-server, the contract holds incidentally. If not, the contract is violated by construction.
 
-**Status:** **Not covered by probes 41–44.** Resolution depends on contract #9 (MCP SDK serialization). **Queue new probe — Probe 45-pre / Phase 1 extension:** *MCP SDK request-serialization characterization* — instrument `DrHookTools` to record entry/exit thread IDs across concurrent tool calls; observe whether the SDK serializes. This is a one-off measurement, not a substrate change. Outcome dictates whether DS-2 is a real race or a contract-upheld non-issue.
+**Status:** **Not covered by probes 42–45.** Resolution depends on contract #9 (MCP SDK serialization). **Queue new probe — Probe 45-pre / Phase 1 extension:** *MCP SDK request-serialization characterization* — instrument `DrHookTools` to record entry/exit thread IDs across concurrent tool calls; observe whether the SDK serializes. This is a one-off measurement, not a substrate change. Outcome dictates whether DS-2 is a real race or a contract-upheld non-issue.
 
-> Note on probe numbering: this probe slot is reserved within Phase 1; if it's needed it becomes "Probe 41-charac" or similar — assigned at the time the work is done, not pre-numbered into ADR-007's 41–44 scope. The discipline rule is *each phase isolates one unsolved thing*; this characterization probe is upstream of fixing DS-2.
+> Note on probe numbering: this probe slot is reserved within Phase 1; if it's needed it becomes "Probe 42-charac" or similar — assigned at the time the work is done, not pre-numbered into ADR-007's 42–45 scope. The discipline rule is *each phase isolates one unsolved thing*; this characterization probe is upstream of fixing DS-2.
 
 ### ESS-1 — Concurrent MCP requests against the singleton EngineSteppingSession
 
@@ -298,7 +298,7 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 **Mitigation in code today:** none; same unwritten contract.
 
-**Status:** **Not covered by probes 41–44.** Same resolution dependency on contract #9. **Same characterization probe as DS-2.** If the SDK does not serialize, both DS-2 and ESS-1 need explicit serialization — the natural primitive is a `SemaphoreSlim(1, 1)` at the `EngineSteppingSession` layer enclosing every public method, OR a per-operation lock. **New work item:** ENG-ESS-1, contingent on characterization.
+**Status:** **Not covered by probes 42–45.** Same resolution dependency on contract #9. **Same characterization probe as DS-2.** If the SDK does not serialize, both DS-2 and ESS-1 need explicit serialization — the natural primitive is a `SemaphoreSlim(1, 1)` at the `EngineSteppingSession` layer enclosing every public method, OR a per-operation lock. **New work item:** ENG-ESS-1, contingent on characterization.
 
 ### DBG-1 — libdbgshim callback after UnregisterForRuntimeStartup
 
@@ -308,7 +308,7 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 **Mitigation in code today:** none.
 
-**Status:** **Not covered by probes 41–44.** Documentation gap. **New work item:** PROBE-DBG-1, characterize libdbgshim's Unregister synchronization semantics — read the libdbgshim source ([dotnet/runtime](https://github.com/dotnet/runtime/tree/main/src/coreclr/debug/dbgshim)) OR write a small probe that registers, intentionally delays the callback, calls Unregister, and observes whether the callback fires after Unregister returns. Findings feed back into the substrate's launch-path safety contract.
+**Status:** **Not covered by probes 42–45.** Documentation gap. **New work item:** PROBE-DBG-1, characterize libdbgshim's Unregister synchronization semantics — read the libdbgshim source ([dotnet/runtime](https://github.com/dotnet/runtime/tree/main/src/coreclr/debug/dbgshim)) OR write a small probe that registers, intentionally delays the callback, calls Unregister, and observes whether the callback fires after Unregister returns. Findings feed back into the substrate's launch-path safety contract.
 
 ### SI-1 — StackInspector closure synchronization inconsistency
 
@@ -322,11 +322,11 @@ Each entry has a tag, the failure mode, and a mapping to a Phase 1 probe (or que
 
 - **Finding 54 (Phase 1b, teardown audit):** owns the per-Dispose-path matrix and the validation of contract #6 (ICorDebug detach). MCH-1 + DS-1 + CP-1 all converge there.
 - **Finding 55 (Phase 1c, stack-budget audit):** owns the per-thread stack-budget records — including the per-platform defaults (Windows 1 MB, macOS secondary 512 KB) that affect `_worker` and the EventPipe processing thread. The explicit `new Thread(Pump, maxStackSize)` declarations ADR-007 Phase 1 requires land in finding 55.
-- **`docs/limits/drhook-detach-exit-race.md`:** the historical evidence that contract #6 has been violated; Phase 1 probe 43 owns the resolution.
-- **ADR-007 Probe 41:** Dispose during the worker's `_resumeHandler` call. Covered by MCH-1 (worker calls `controller.Continue` inside `_resumeHandler`; if Dispose races, the controller may already be tearing down).
-- **ADR-007 Probe 42:** Concurrent PauseRequest + STOPPING callback. The pump's `_events` queue serializes these by construction (single consumer); the probe validates that no callback can interleave between `_stopThread` assignment (line 162) and `_stops.Add` (line 163). The audit shows the assignment-then-Add ordering and the `BlockingCollection` release barrier — but only **the probe under load** demonstrates the contract holds against mscordbi's actual delivery pattern.
-- **ADR-007 Probe 43:** drhook-detach-exit-race. Covered by MCH-1 / contract #6.
-- **ADR-007 Probe 44:** Worker-thread exception path. The audit identifies this gap: `Pump` calls `_resumeHandler!(ResumeKind.Continue, 0)` at line 142 and `_resumeHandler!(kind, _stopThread)` at lines 155 / 171 without any try/catch. If `Stepping.Arm` throws (e.g., a malformed stepper call) or `controller.Continue` throws (e.g., HRESULT thrown across the COM boundary), the worker thread dies. Future `WaitForStop` calls then block until the BlockingCollection times out. The probe validates the recovery design (per ADR-007: *"worker survives + surfaces, or fails session cleanly with deterministic error"*).
+- **`docs/limits/drhook-detach-exit-race.md`:** the historical evidence that contract #6 has been violated; Phase 1 probe 44 owns the resolution.
+- **ADR-007 Probe 42:** Dispose during the worker's `_resumeHandler` call. Covered by MCH-1 (worker calls `controller.Continue` inside `_resumeHandler`; if Dispose races, the controller may already be tearing down).
+- **ADR-007 Probe 43:** Concurrent PauseRequest + STOPPING callback. The pump's `_events` queue serializes these by construction (single consumer); the probe validates that no callback can interleave between `_stopThread` assignment (line 162) and `_stops.Add` (line 163). The audit shows the assignment-then-Add ordering and the `BlockingCollection` release barrier — but only **the probe under load** demonstrates the contract holds against mscordbi's actual delivery pattern.
+- **ADR-007 Probe 44:** drhook-detach-exit-race. Covered by MCH-1 / contract #6.
+- **ADR-007 Probe 45:** Worker-thread exception path. The audit identifies this gap: `Pump` calls `_resumeHandler!(ResumeKind.Continue, 0)` at line 142 and `_resumeHandler!(kind, _stopThread)` at lines 155 / 171 without any try/catch. If `Stepping.Arm` throws (e.g., a malformed stepper call) or `controller.Continue` throws (e.g., HRESULT thrown across the COM boundary), the worker thread dies. Future `WaitForStop` calls then block until the BlockingCollection times out. The probe validates the recovery design (per ADR-007: *"worker survives + surfaces, or fails session cleanly with deterministic error"*).
 
 ## EngineAnomaly surfaces identified
 
@@ -336,7 +336,7 @@ ADR-007 Phase 1 requires `EngineAnomaly` typed-record infrastructure — *"threa
 2. **`CallbackPump.Pump` catch** (lines 154, 168): currently breaks the loop silently when `_resume.Take()` throws (queue completed during stop). With anomaly infra: distinguish *expected teardown* from *unexpected interruption mid-stop* — the latter is anomalous.
 3. **`ManagedCallbackHost.HostOf` returns null** (line 49): currently the callback returns S_OK without invoking `_sink.OnCallback`. With anomaly infra: this is exactly MCH-1's silent failure path — record it.
 4. **`DbgShim.StartupCallbackThunk` early-returns** (line 291): if `parameter == 0` or `h.Target` is not `StartupContext`. The first should never happen; the second can if the GCHandle was freed. Anomaly-record it.
-5. **`Pump` worker-thread death** (probe 44 target): if `_resumeHandler` throws, the worker exits the `foreach` and dies. With anomaly infra: catch at the `Pump` boundary, record `EngineAnomaly{kind:WorkerThreadException, thread:Worker, op:ResumeHandler, exception:ex}`, and either restart-on-recoverable or terminate-cleanly-with-anomaly-flag.
+5. **`Pump` worker-thread death** (probe 45 target): if `_resumeHandler` throws, the worker exits the `foreach` and dies. With anomaly infra: catch at the `Pump` boundary, record `EngineAnomaly{kind:WorkerThreadException, thread:Worker, op:ResumeHandler, exception:ex}`, and either restart-on-recoverable or terminate-cleanly-with-anomaly-flag.
 
 These five sites are the seed for Phase 1's anomaly-injection probe (per ADR-007 Validation: *"capture mechanism is validated by a designed probe (intentional anomaly injection)"*).
 
@@ -354,7 +354,7 @@ These five sites are the seed for Phase 1's anomaly-injection probe (per ADR-007
 **Cross-thread contracts (9):** five internal (BlockingCollection, Thread.Start, ManualResetEventSlim, lock, Interlocked) and four external (ICorDebug detach, libdbgshim Unregister, TraceEvent dispatch, MCP SDK serialization). Two of the four external contracts are unvalidated (libdbgshim Unregister, MCP SDK serialization).
 
 **Uncovered race windows (six):**
-- MCH-1 (Dispose during in-flight callback) → maps to probe 43.
+- MCH-1 (Dispose during in-flight callback) → maps to probe 44.
 - CP-1 (idempotent CallbackPump.Dispose) → fix work item, no probe.
 - DS-1 (idempotent DebugSession.Dispose + field-zeroing-during-call) → fix work item + structural EngineAnomaly response.
 - DS-2 (concurrent MCP requests against DebugSession) → new characterization probe + contingent fix.
@@ -362,6 +362,6 @@ These five sites are the seed for Phase 1's anomaly-injection probe (per ADR-007
 - DBG-1 (libdbgshim callback after Unregister) → new probe.
 - SI-1 (inconsistent synchronization in StackInspector closures) → clarity cleanup, not a real race.
 
-**The biggest finding** is that two foundational external contracts (ICorDebug detach drainage; MCP SDK serialization) are load-bearing for substrate correctness and **neither has substrate-grade evidence in this code base yet**. The detach contract has Phase 1 probe 43 queued; the MCP serialization contract is queued by this audit.
+**The biggest finding** is that two foundational external contracts (ICorDebug detach drainage; MCP SDK serialization) are load-bearing for substrate correctness and **neither has substrate-grade evidence in this code base yet**. The detach contract has Phase 1 probe 44 queued; the MCP serialization contract is queued by this audit.
 
 Phase 1a is complete.

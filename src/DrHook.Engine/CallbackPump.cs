@@ -147,7 +147,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     private void Pump()
     {
-        // EA capture (WorkerException, Probe 44 target): wrap the entire pump loop so an
+        // EA capture (WorkerException, Probe 45 target): wrap the entire pump loop so an
         // exception out of _resumeHandler / _pauseHandler doesn't kill the worker silently.
         // Worker still exits on unhandled exception (session is non-recoverable per finding 53)
         // but the substrate's signal goes out first.

@@ -2,7 +2,7 @@
 
 **Status:**   Audit (Phase 1b of [ADR-007](../../../docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md)).
 Walks every Dispose path end-to-end across eight session states and produces the reproducer
-matrix for ADR-007 Probes 41–44. Resolves the ICorDebug detach drainage contract from
+matrix for ADR-007 Probes 42–45. Resolves the ICorDebug detach drainage contract from
 [finding 53](53-threading-memory-model-audit.md) into two distinct sub-contracts (queued-callback-flush
 and exit-work-item) and maps the engine's current evidence against each.
 **Date:**     2026-05-23
@@ -149,7 +149,7 @@ State at the moment `DebugSession.Dispose` enters. Each scenario walks the Dispo
 4. `Detach()`: the debuggee is synchronized at the stop. `Detach` releases the debugger; mscordbi's documented contract has Detach internally resuming the target to release it. **The drhook-detach-exit-race observation:** *the stopped-at-breakpoint state widens the race window.* If the target's code about-to-run-on-resume causes immediate exit (e.g., a `throw` in finally on top of stack), the exit work item fires during Detach's internal resume. Probe 12 reproduced this intermittently.
 5. Terminate, releases, _callback.Dispose, _dbgShim.Dispose — same MCH-1 hazard as T1.
 
-**Hazard summary T2:** the breakpoint-stopped state widens the C-DRAIN-EXIT window beyond T1. ADR-007 Probe 43's bar (single-shot 10/10 → rate-envelope 50/sec) must validate this state, not just clean T1.
+**Hazard summary T2:** the breakpoint-stopped state widens the C-DRAIN-EXIT window beyond T1. ADR-007 Probe 44's bar (single-shot 10/10 → rate-envelope 50/sec) must validate this state, not just clean T1.
 
 ### T3 — Dispose while EVAL in flight (TryEvalStaticCall et al.)
 
@@ -187,7 +187,7 @@ State at the moment `DebugSession.Dispose` enters. Each scenario walks the Dispo
 
 **Walk for T4b:** identical to T2 from step 2c onward.
 
-**Hazard summary T4:** T4a's TR-2 — the 2s Join timeout is a workaround for an unknown-duration `controller.Stop`. If Stop can hang on a wedged debuggee, the worker outlives Dispose with disposed collections. Phase 1 Probe 42 (Concurrent PauseRequest + STOPPING callback) is adjacent; this sub-case needs an explicit T4a reproducer to confirm or refute hang behavior of Stop.
+**Hazard summary T4:** T4a's TR-2 — the 2s Join timeout is a workaround for an unknown-duration `controller.Stop`. If Stop can hang on a wedged debuggee, the worker outlives Dispose with disposed collections. Phase 1 Probe 43 (Concurrent PauseRequest + STOPPING callback) is adjacent; this sub-case needs an explicit T4a reproducer to confirm or refute hang behavior of Stop.
 
 ### T5 — Dispose during CHILD-PROCESS EXIT in flight
 
@@ -198,7 +198,7 @@ State at the moment `DebugSession.Dispose` enters. Each scenario walks the Dispo
 - **T5a:** ExitProcess callback already dispatched to OnCallback BEFORE Dispose entered. Worker dequeued it, surfaced `_userSink.OnEvent("ExitProcess")`, added `StopReason.ProcessExited` to `_stops`, called `_resumeHandler!(ResumeKind.Continue, 0)` which ran `Stepping.Arm(0, Continue)` (no-op) and `controller.Continue(0)` (HRESULT on exited process is implementation-defined). Worker is back at MoveNext. THEN Dispose runs: behaves as T1 with the additional concern that step 4's Detach happens against an already-exited target.
 - **T5b:** ExitProcess callback has NOT yet been dispatched; mscordbi is mid-ExitProcessWorkItem when Dispose starts. **This is exactly the drhook-detach-exit-race trigger condition.** CompleteAdding catches any incoming OnCallback. Worker exits. Quiesce attempts Stop on exiting process — HRESULT impl-defined. Detach races mscordbi's still-running ExitProcessWorkItem → segfault.
 
-**Hazard summary T5:** T5b is the original drhook-detach-exit-race. Mitigations are (per limit doc): kill-first (validated), detach-and-leave-running for unstopped target (proposed), RC-thread join handshake (no API). Probe 43 designs the engine-side resolution. T5a is essentially safe — the exit was already observed.
+**Hazard summary T5:** T5b is the original drhook-detach-exit-race. Mitigations are (per limit doc): kill-first (validated), detach-and-leave-running for unstopped target (proposed), RC-thread join handshake (no API). Probe 44 designs the engine-side resolution. T5a is essentially safe — the exit was already observed.
 
 ### T6 — Dispose during ATTACH MID-FLIGHT (FromCordbg's catch block)
 
@@ -219,7 +219,7 @@ State at the moment `DebugSession.Dispose` enters. Each scenario walks the Dispo
 
 **Reproducer:** force DebugActiveProcess to fail (invalid PID, or kill the target between the `dbgShim.CreateCordbForProcess` return and DebugActiveProcess). The probe target ships with an attach-then-die child to force the timing.
 
-**Status:** **Not covered by ADR-007 Probes 41–44.** **New probe candidate.** This is the partial-construction teardown that ADR-007 Phase 1's "audit before fix" discipline surfaces.
+**Status:** **Not covered by ADR-007 Probes 42–45.** **New probe candidate.** This is the partial-construction teardown that ADR-007 Phase 1's "audit before fix" discipline surfaces.
 
 ### T7 — CONCURRENT Dispose from two threads (DS-1a + DBG-D + MCH-D)
 
@@ -246,7 +246,7 @@ State at the moment `DebugSession.Dispose` enters. Each scenario walks the Dispo
 - `_breakpoints` foreach + Clear race — corruption.
 - DBG-D (double NativeLibrary.Free) — **undefined; potentially fatal.**
 
-**Resolution:** all races resolved by a single change — replace the `_disposed`-bool gates in DebugSession AND CallbackPump with `Interlocked.Exchange(ref _disposed, 1) != 0` early-return. Fix `_lib` zeroing in DbgShim.Dispose. ENG-CP-1 + ENG-DS-1 + ENG-DBG-D in Phase 1 alongside probe 41–44 work.
+**Resolution:** all races resolved by a single change — replace the `_disposed`-bool gates in DebugSession AND CallbackPump with `Interlocked.Exchange(ref _disposed, 1) != 0` early-return. Fix `_lib` zeroing in DbgShim.Dispose. ENG-CP-1 + ENG-DS-1 + ENG-DBG-D in Phase 1 alongside probe 42–45 work.
 
 ### T8 — KILL of target COINCIDENT with Dispose
 
@@ -254,10 +254,10 @@ State at the moment `DebugSession.Dispose` enters. Each scenario walks the Dispo
 
 **Sub-cases:**
 
-- **T8a (Launched):** Kill-first compresses but does not close the race window. Between `_launchedProcess.Kill` returning (kernel accepted the signal) and `_session.Dispose` starting, the kernel may or may not have completed the reap, mscordbi may or may not have noticed. Probe 12's 6/6 clean validates that the window is narrow enough on macOS for the test rate; ADR-007 Probe 43's rate-envelope (50/sec sustained) is the real validation.
+- **T8a (Launched):** Kill-first compresses but does not close the race window. Between `_launchedProcess.Kill` returning (kernel accepted the signal) and `_session.Dispose` starting, the kernel may or may not have completed the reap, mscordbi may or may not have noticed. Probe 12's 6/6 clean validates that the window is narrow enough on macOS for the test rate; ADR-007 Probe 44's rate-envelope (50/sec sustained) is the real validation.
 - **T8b (Attached):** `CleanupSession` does NOT kill — there is no `_launchedProcess`. The user externally kills the target. `step_stop` is invoked, `CleanupSession` skips the kill block, calls `_session.Dispose()` directly. If the user's kill was a microsecond ago, T5b's exact race is exposed.
 
-**Hazard summary T8:** Launched sessions have one validated mitigation (kill-first); Attached sessions are exposed to the full drhook-detach-exit-race window. Probe 43 must cover both — and the engine resolution likely requires *both* kill-first (for Launched) AND detach-and-leave-running (for Attached, when the user doesn't intend to terminate the target).
+**Hazard summary T8:** Launched sessions have one validated mitigation (kill-first); Attached sessions are exposed to the full drhook-detach-exit-race window. Probe 44 must cover both — and the engine resolution likely requires *both* kill-first (for Launched) AND detach-and-leave-running (for Attached, when the user doesn't intend to terminate the target).
 
 ## Reproducer matrix
 
@@ -265,25 +265,25 @@ Each scenario, the probe that owns its resolution, and the reproducer shape.
 
 | # | Scenario | State at Dispose | Reproducer shape | Owns |
 |---|---|---|---|---|
-| T1 | Running, no stop | Worker at `_events.MoveNext` | Attach to long-running target, no breakpoints, Dispose | Probe 43b (detach-leave-running clean case) |
-| T2 | Stopped at breakpoint | Worker at `_resume.Take()` post-stop | Attach, set bp, hit bp, Dispose without Resume | Probe 43 (the original drhook-detach-exit-race target) |
+| T1 | Running, no stop | Worker at `_events.MoveNext` | Attach to long-running target, no breakpoints, Dispose | Probe 44b (detach-leave-running clean case) |
+| T2 | Stopped at breakpoint | Worker at `_resume.Take()` post-stop | Attach, set bp, hit bp, Dispose without Resume | Probe 44 (the original drhook-detach-exit-race target) |
 | T3 | Eval in flight | Worker at MoveNext post-eval-Resume | Attach, hit bp, call TryEvalStaticCall with a long-running eval, Dispose mid-eval | **New probe candidate** — *eval-during-Dispose; runtime orphaning behavior* |
-| T4a | Pause mid-handler | Worker inside `controller.Stop(0)` | Attach, RequestPause, wedge the debuggee so Stop hangs, Dispose; observe worker.Join timeout | **New sub-probe under Probe 42** — *TR-2 worker-Join timeout exposure* |
-| T4b | Pause stop parked | Worker at Take post-Pause stop | Same as T2 with Pause origin | Probe 42 (existing) |
-| T5a | ExitProcess processed pre-Dispose | Worker at MoveNext post-exit-resume | Launch short-lived target, await ExitProcess, Dispose | Implicit in Probe 43 (safe baseline) |
-| T5b | ExitProcess mid-flight at Dispose | mscordbi RC thread inside ExitProcessWorkItem | Launch, no kill, target exits at random time, Dispose race | Probe 43 (the original) |
+| T4a | Pause mid-handler | Worker inside `controller.Stop(0)` | Attach, RequestPause, wedge the debuggee so Stop hangs, Dispose; observe worker.Join timeout | **New sub-probe under Probe 43** — *TR-2 worker-Join timeout exposure* |
+| T4b | Pause stop parked | Worker at Take post-Pause stop | Same as T2 with Pause origin | Probe 43 (existing) |
+| T5a | ExitProcess processed pre-Dispose | Worker at MoveNext post-exit-resume | Launch short-lived target, await ExitProcess, Dispose | Implicit in Probe 44 (safe baseline) |
+| T5b | ExitProcess mid-flight at Dispose | mscordbi RC thread inside ExitProcessWorkItem | Launch, no kill, target exits at random time, Dispose race | Probe 44 (the original) |
 | T6 | Attach mid-flight failure | `FromCordbg` catch after SetManagedHandler | Custom target that exits between Initialize and DebugActiveProcess; force the race | **New probe candidate** — *partial-construction teardown; MCH-1 maximally exposed* |
 | T7 | Concurrent Dispose | Two threads in DebugSession.Dispose | Spawn two threads calling Dispose simultaneously | **Engineering fix** ENG-CP-1 + ENG-DS-1 + ENG-DBG-D; no probe needed (deterministic; unit test in Phase 8) |
-| T8a | Kill-coincident Launched | Kill-then-Dispose, rate-envelope | NCrunch-like 50/sec attach-kill-dispose cycle | Probe 43a (rate envelope) |
-| T8b | Kill-coincident Attached | External-kill-then-step-stop | User kills target, then triggers step_stop | Probe 43 — *Attached path needs explicit design (detach-leave-running OR refuse-without-target-confirmation)* |
+| T8a | Kill-coincident Launched | Kill-then-Dispose, rate-envelope | NCrunch-like 50/sec attach-kill-dispose cycle | Probe 44a (rate envelope) |
+| T8b | Kill-coincident Attached | External-kill-then-step-stop | User kills target, then triggers step_stop | Probe 44 — *Attached path needs explicit design (detach-leave-running OR refuse-without-target-confirmation)* |
 
-**New probe candidates from this audit (not in ADR-007 41–44):**
+**New probe candidates from this audit (not in ADR-007 42–45):**
 
-1. **Probe T3-eval** — eval-during-Dispose; runtime orphaning behavior. Small probe; could fold into Probe 44 (worker exception path) since EvalComplete delivery during Dispose is the worker's failure case.
+1. **Probe T3-eval** — eval-during-Dispose; runtime orphaning behavior. Small probe; could fold into Probe 45 (worker exception path) since EvalComplete delivery during Dispose is the worker's failure case.
 2. **Probe T6-attach** — partial-construction teardown via FromCordbg catch. Standalone; targets the MCH-1 attach-mid-flight exposure.
-3. **Probe T4a-pause** — `controller.Stop(0)` hang behavior under wedged debuggee. Sub-probe of Probe 42.
+3. **Probe T4a-pause** — `controller.Stop(0)` hang behavior under wedged debuggee. Sub-probe of Probe 43.
 
-The discipline rule (per ADR-007: *"A revealed unknown unknown becomes a probe; the phase doesn't proceed until the probe records a finding."*) — these three queue into Phase 1's probe sequence. Recommendation: schedule T3-eval and T6-attach explicitly; absorb T4a into Probe 42's design.
+The discipline rule (per ADR-007: *"A revealed unknown unknown becomes a probe; the phase doesn't proceed until the probe records a finding."*) — these three queue into Phase 1's probe sequence. Recommendation: schedule T3-eval and T6-attach explicitly; absorb T4a into Probe 43's design.
 
 ## The ICorDebug detach drainage contract — synthesized truth
 
@@ -300,7 +300,7 @@ Combining finding 53's external-contract list with this audit's scenarios:
 - *Statement:* `ICorDebugController.Detach` is safe with respect to the exit work item iff either (a) the target has already exited and the work item has completed before Detach starts, OR (b) the target is not exiting (or about to exit) at Detach time. Quiesce/Stop does NOT cover this — Stop drains queued callbacks but does not synchronize with the exit work item.
 - *Code today:* For Launched sessions, `EngineSteppingSession.CleanupSession` kills the target via `_launchedProcess.Kill(entireProcessTree: true)` before invoking `Dispose`. This achieves (a) probabilistically but not deterministically (no API to confirm exit work item completion). For Attached sessions, **no mitigation in code today**.
 - *Evidence:* [`drhook-detach-exit-race`](../../../docs/limits/drhook-detach-exit-race.md) Triggered; probe 12 single-shot 6/6 with kill-first but no rate-envelope evidence; Attached path has no probe coverage.
-- *Resolution path (ADR-007 Probe 43):*
+- *Resolution path (ADR-007 Probe 44):*
   - **For Launched:** keep kill-first; validate the rate envelope at 50/sec sustained.
   - **For Attached:** design detach-and-leave-running as the default for sessions the user did not intend to terminate. The engine's API needs a distinction (probably an explicit "terminate before detach" opt-in vs. the default "leave running").
   - **Cross-cutting:** investigate whether ICorDebugProcess exposes any "wait for RC thread to drain all dispatches" primitive that ICorDebug 4.0 didn't surface; this would be the substrate-clean solution if it exists.
@@ -368,15 +368,15 @@ Five additional sites where the substrate today swallows or undefines during tea
 ## What this finding does NOT cover
 
 - **Per-thread stack-budget audit** — Phase 1c ([finding 55](55-stack-budget-audit.md)) records the per-platform thread stack defaults and the explicit `new Thread(…, maxStackSize)` declarations ADR-007 Phase 1 requires.
-- **Probe 41–44 implementation** — this finding sequences the work and identifies new probes (T3-eval, T6-attach, T4a-pause) that join the queue; implementation is downstream.
+- **Probe 42–45 implementation** — this finding sequences the work and identifies new probes (T3-eval, T6-attach, T4a-pause) that join the queue; implementation is downstream.
 - **MCP SDK request serialization characterization** — surfaced by finding 53; not re-litigated here; remains a Phase 1 prerequisite for DS-2 / ESS-1 fix work.
-- **The ICorDebugProcess "drain all RC dispatches" API search** — recommended in C-DRAIN-EXIT resolution above; implementation is part of Probe 43's design search.
+- **The ICorDebugProcess "drain all RC dispatches" API search** — recommended in C-DRAIN-EXIT resolution above; implementation is part of Probe 44's design search.
 
 ## Summary
 
-**Eight teardown scenarios analyzed; three new probe candidates surface (T3-eval, T6-attach, T4a-pause)** — none of these are in ADR-007's 41–44 list. T6-attach is the most exposed (MCH-1 maximally hot during partial construction).
+**Eight teardown scenarios analyzed; three new probe candidates surface (T3-eval, T6-attach, T4a-pause)** — none of these are in ADR-007's 42–45 list. T6-attach is the most exposed (MCH-1 maximally hot during partial construction).
 
-**The ICorDebug detach drainage contract splits cleanly into two:** C-DRAIN-CB is robustly enforced today (Quiesce); C-DRAIN-EXIT is partially mitigated for Launched (kill-first) and unmitigated for Attached. Probe 43's resolution must design the Attached path as well as validate the Launched rate envelope.
+**The ICorDebug detach drainage contract splits cleanly into two:** C-DRAIN-CB is robustly enforced today (Quiesce); C-DRAIN-EXIT is partially mitigated for Launched (kill-first) and unmitigated for Attached. Probe 44's resolution must design the Attached path as well as validate the Launched rate envelope.
 
 **Four engineering fixes (no probe required):**
 - ENG-CP-1: Interlocked gate for CallbackPump.Dispose.
@@ -386,4 +386,4 @@ Five additional sites where the substrate today swallows or undefines during tea
 
 **Five additional EngineAnomaly seed sites** — Quiesce / Detach / Terminate HRESULT discards, breakpoint-release HRESULT discards, CleanupSession blanket-catch — augment finding 53's five.
 
-Phase 1b is complete. Phase 1c (stack-budget audit) is next; then the audit-informed probes 41–44 + the three new candidates execute, and Phase 1 closes with the resolutions consolidated into engine substrate.
+Phase 1b is complete. Phase 1c (stack-budget audit) is next; then the audit-informed probes 42–45 + the three new candidates execute, and Phase 1 closes with the resolutions consolidated into engine substrate.

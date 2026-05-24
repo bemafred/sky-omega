@@ -42,7 +42,7 @@ public enum AnomalyKind
     /// disposed without resuming).</summary>
     WorkerSilentBreak,
 
-    /// <summary>The pump worker's <c>_resumeHandler</c> threw an unhandled exception. Probe 44
+    /// <summary>The pump worker's <c>_resumeHandler</c> threw an unhandled exception. Probe 45
     /// target. Worker dies and future WaitForStop blocks indefinitely; the anomaly is the
     /// substrate's signal that the session is non-recoverable.</summary>
     WorkerException,

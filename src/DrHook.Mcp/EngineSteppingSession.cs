@@ -47,8 +47,9 @@ public sealed class EngineSteppingSession : IDisposable
 
     /// <summary>Drain the substrate-anomaly buffer as a structured JSON envelope. Anomalies
     /// array is newest-last; dropped count reports records lost to capacity since last drain
-    /// (the substrate's honesty marker — no silent loss). Backing for drhook_drain_anomalies.</summary>
-    internal string DrainAnomaliesAsJson()
+    /// (the substrate's honesty marker — no silent loss). Backing for drhook_drain_anomalies.
+    /// Public to allow direct invocation from validation probes (e.g. Probe 41).</summary>
+    public string DrainAnomaliesAsJson()
     {
         AnomalyDrainResult drain = _anomalies.Drain();
         JsonArray records = new();
@@ -623,7 +624,10 @@ public sealed class EngineSteppingSession : IDisposable
     private static string Error(string message)
         => Render(new JsonObject { ["status"] = "error", ["message"] = message });
 
-    private static string Render(JsonObject obj) => JsonSerializer.Serialize(obj, Indented);
+    // ToJsonString on the JsonNode tree avoids the reflection-based serializer (which is
+    // disabled when the host runs trimmed/AOT — e.g., the .NET 10 file-based-app context used
+    // by Probe 41). Equivalent output for the JsonObject inputs we use.
+    private static string Render(JsonObject obj) => obj.ToJsonString(Indented);
 
     private void CleanupSession()
     {
