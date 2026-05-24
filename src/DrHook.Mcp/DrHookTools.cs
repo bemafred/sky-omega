@@ -252,4 +252,20 @@ public sealed class DrHookTools
     {
         return await _session.StopAsync(ct);
     }
+
+    // ─── Substrate diagnostics ──────────────────────────────────────────────
+
+    [McpServerTool(Name = "drhook_drain_anomalies"), Description(
+        "Drain the substrate-anomaly buffer (ADR-007 Phase 1). Returns structured evidence " +
+        "of substrate-correctness invariants the engine detected but did not raise as exceptions " +
+        "— e.g. late mscordbi callbacks, depth-clamped inspections, unexpected HRESULTs from " +
+        "Quiesce/Detach/Terminate, worker-thread exceptions. Each anomaly carries Kind, Thread, " +
+        "Operation, Observed, Expected, plus kind-specific Context. The buffer is bounded " +
+        "(capacity 256, newest-last); dropped count reports records lost to capacity since " +
+        "previous drain. Anomalies are NOT errors — they are the substrate's signal that " +
+        "something unexpected happened, surfaced so AI consumers can decide whether to escalate.")]
+    public string DrainAnomalies()
+    {
+        return _session.DrainAnomaliesAsJson();
+    }
 }

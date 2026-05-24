@@ -407,7 +407,15 @@ public sealed class DebugSession : IDisposable
     /// depth &gt; 1. Valid only while stopped.</summary>
     public IReadOnlyList<ArgumentValue> GetArguments(int depth = 0)
     {
-        if (depth > MaxInspectionDepth) depth = MaxInspectionDepth; // ENG-STK-1
+        if (depth > MaxInspectionDepth)
+        {
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.DepthClamped, "mcp-request", "GetArguments",
+                Observed: $"depth={depth} requested",
+                Expected: $"depth <= {MaxInspectionDepth}",
+                Context: new Dictionary<string, string> { ["requested"] = depth.ToString(System.Globalization.CultureInfo.InvariantCulture), ["clamped"] = MaxInspectionDepth.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+            depth = MaxInspectionDepth;
+        }
         return Variables.ReadActiveFrameArguments(_pump.StopThread, 16, depth);
     }
 
@@ -420,7 +428,15 @@ public sealed class DebugSession : IDisposable
     /// stopped.</summary>
     public IReadOnlyList<LocalValue> GetLocals(int depth = 0)
     {
-        if (depth > MaxInspectionDepth) depth = MaxInspectionDepth; // ENG-STK-1
+        if (depth > MaxInspectionDepth)
+        {
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.DepthClamped, "mcp-request", "GetLocals",
+                Observed: $"depth={depth} requested",
+                Expected: $"depth <= {MaxInspectionDepth}",
+                Context: new Dictionary<string, string> { ["requested"] = depth.ToString(System.Globalization.CultureInfo.InvariantCulture), ["clamped"] = MaxInspectionDepth.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+            depth = MaxInspectionDepth;
+        }
         List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
         if (frames.Count == 0) return Array.Empty<LocalValue>();
 
@@ -851,14 +867,38 @@ public sealed class DebugSession : IDisposable
         // Atomic idempotence gate (ENG-DS-1) — concurrent Detach calls don't double-invoke
         // ICorDebugController.Detach (whose behavior on already-detached is undefined per docs).
         if (Interlocked.Exchange(ref _detached, 1) != 0) return;
-        _controller.Detach();
+        int hr = _controller.Detach();
+        if (hr < 0)
+        {
+            // EA capture (UnexpectedHResult): Detach failed. Engine continues teardown — failure
+            // here usually means the target already exited or mscordbi is in an inconsistent state.
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Detach",
+                Observed: $"HRESULT 0x{hr:X8}",
+                Expected: "S_OK",
+                Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}" }));
+        }
     }
 
     /// <summary>Synchronize the target before Detach so mscordbi's RC event thread is not
     /// mid-flush of queued callbacks when Detach tears down the shim (finding 14). Stop blocks
     /// until the process is synchronized; best-effort (a failing HRESULT falls through to
     /// Detach rather than throwing on the dispose path).</summary>
-    private void Quiesce() => _controller.Stop(0);
+    private void Quiesce()
+    {
+        int hr = _controller.Stop(0);
+        if (hr < 0)
+        {
+            // EA capture (UnexpectedHResult): Stop failed. Engine continues to Detach as designed
+            // (best-effort per the method's existing contract); the anomaly is the substrate
+            // signal that the C-DRAIN-CB enforcement may be incomplete.
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Quiesce (Stop)",
+                Observed: $"HRESULT 0x{hr:X8}",
+                Expected: "S_OK (debuggee synchronized for clean Detach)",
+                Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}" }));
+        }
+    }
 
     public void Dispose()
     {
@@ -878,7 +918,17 @@ public sealed class DebugSession : IDisposable
         // state is the probe-05-validated safe path.
         Quiesce();
         Detach();
-        _cordbg.Terminate();
+        int terminateHr = _cordbg.Terminate();
+        if (terminateHr < 0)
+        {
+            // EA capture (UnexpectedHResult): Terminate failed. Continuing teardown — refs still
+            // get released, but the anomaly signals mscordbi state may be inconsistent post-Dispose.
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Terminate",
+                Observed: $"HRESULT 0x{terminateHr:X8}",
+                Expected: "S_OK (ICorDebug fully torn down)",
+                Context: new Dictionary<string, string> { ["hresult"] = $"0x{terminateHr:X8}" }));
+        }
 
         // Release our breakpoint refs now that the runtime has dropped the breakpoints. No need to
         // deactivate first — Terminate already invalidated them; ClearBreakpoints is for live removal.

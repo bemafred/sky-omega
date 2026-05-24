@@ -21,4 +21,16 @@ public interface IDebugEventSink
     /// <see cref="DebugSession.WaitForPolicyStop"/> (not the callback worker), so implementations
     /// must be thread-safe if they also handle <see cref="OnEvent"/>.</summary>
     void OnLog(LogRecord record) { }
+
+    /// <summary>Invoked when the engine detects a substrate-correctness anomaly — the typed
+    /// surprise-capture mechanism per ADR-007 Phase 1. Each <see cref="EngineAnomaly.Kind"/> is
+    /// a named substrate concept (see <see cref="AnomalyKind"/>); the host buffers them via
+    /// <see cref="BoundedAnomalySink"/> (or equivalent) and surfaces through a drain tool.
+    /// Default no-op so existing sinks compile without change; diagnostic-aware sinks override.
+    /// May be called from the pump worker, the MCP request thread, OR mscordbi's event thread
+    /// (per <see cref="EngineAnomaly.Thread"/>), so implementations must be thread-safe.
+    /// The contract (per Rule 1, finding 55) is the same as <see cref="OnEvent"/>: the
+    /// implementation must do O(1) stack work since some call sites are on threads with stack
+    /// budgets we don't own.</summary>
+    void OnAnomaly(EngineAnomaly anomaly) { }
 }

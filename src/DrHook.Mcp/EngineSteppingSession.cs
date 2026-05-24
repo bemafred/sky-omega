@@ -41,6 +41,50 @@ public sealed class EngineSteppingSession : IDisposable
     private readonly Dictionary<string, int> _functionBreakpoints = new();   // key = "Type.Method"
     private readonly Dictionary<string, int> _exceptionFilters = new();      // key = "all" / "user-unhandled"
 
+    // EA-5: substrate-anomaly buffer drained by drhook_drain_anomalies (per ADR-007 Phase 1).
+    // Cross-session — anomalies accumulate until the consumer drains; capacity 256 (~128 KB max).
+    private readonly BoundedAnomalySink _anomalies = new(capacity: 256);
+
+    /// <summary>Drain the substrate-anomaly buffer as a structured JSON envelope. Anomalies
+    /// array is newest-last; dropped count reports records lost to capacity since last drain
+    /// (the substrate's honesty marker — no silent loss). Backing for drhook_drain_anomalies.</summary>
+    internal string DrainAnomaliesAsJson()
+    {
+        AnomalyDrainResult drain = _anomalies.Drain();
+        JsonArray records = new();
+        foreach (EngineAnomaly a in drain.Anomalies)
+        {
+            JsonObject record = new()
+            {
+                ["capturedAt"] = a.CapturedAt.ToString("O", CultureInfo.InvariantCulture),
+                ["kind"]       = a.Kind.ToString(),
+                ["thread"]     = a.Thread,
+                ["operation"]  = a.Operation,
+                ["observed"]   = a.Observed,
+                ["expected"]   = a.Expected,
+            };
+            if (a.Context is { Count: > 0 } ctx)
+            {
+                JsonObject contextNode = new();
+                foreach ((string k, string v) in ctx) contextNode[k] = v;
+                record["context"] = contextNode;
+            }
+            records.Add(record);
+        }
+
+        return Render(new JsonObject
+        {
+            ["status"]   = "ok",
+            ["count"]    = drain.Anomalies.Count,
+            ["dropped"]  = drain.Dropped,
+            ["capacity"] = _anomalies.Capacity,
+            ["anomalies"] = records,
+            ["prompt"] = drain.Anomalies.Count == 0 && drain.Dropped == 0
+                ? "No anomalies captured since previous drain."
+                : $"{drain.Anomalies.Count} anomalies surfaced ({drain.Dropped} dropped to capacity since previous drain). Each is structured evidence of a substrate-correctness invariant that wasn't upheld — review the Kind and observed-vs-expected delta to decide whether to escalate.",
+        });
+    }
+
     public bool IsActive => _session is not null;
 
     // ─── Session lifecycle ────────────────────────────────────────────────────────────────────
@@ -58,7 +102,7 @@ public sealed class EngineSteppingSession : IDisposable
             _stepCount = 0;
             _targetPid = pid;
 
-            _session = DebugSession.Attach(pid, new NullSink());
+            _session = DebugSession.Attach(pid, _anomalies);
             // Setup stop: the engine breaks on attach (Debugger.IsAttached transition). Drain it.
             _session.WaitForStop(TimeSpan.FromSeconds(10));
 
@@ -109,7 +153,7 @@ public sealed class EngineSteppingSession : IDisposable
             // env override is not yet plumbed through DebugSession.Launch (Phase 3 polish item —
             // dedicated env block via CreateProcessForLaunch). For now the launched child inherits
             // our env, which covers the common cases (no per-launch override required).
-            _session = DebugSession.Launch(program, args, cwd, new NullSink());
+            _session = DebugSession.Launch(program, args, cwd, _anomalies);
 
             // Capture the launched PID so step_stop can terminate the target (finding 42 polish —
             // DebugSession owns the lifecycle for Launched sessions; Dispose's Detach leaves it
@@ -590,11 +634,41 @@ public sealed class EngineSteppingSession : IDisposable
             // before disposing so the engine teardown isn't blocked on a still-stopped target.
             if (_launchedProcess is not null)
             {
-                try { if (!_launchedProcess.HasExited) _launchedProcess.Kill(entireProcessTree: true); } catch { }
+                try
+                {
+                    if (!_launchedProcess.HasExited) _launchedProcess.Kill(entireProcessTree: true);
+                }
+                catch (Exception ex)
+                {
+                    // EA capture (UnexpectedCleanupException): Kill failed — target already gone,
+                    // permission denied, or process tree race. Continue teardown either way.
+                    _anomalies.OnAnomaly(new EngineAnomaly(
+                        DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
+                        "CleanupSession.Kill",
+                        Observed: $"{ex.GetType().Name}: {ex.Message}",
+                        Expected: "Kill succeeds or process already exited",
+                        Context: new Dictionary<string, string> { ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name }));
+                }
                 _launchedProcess.Dispose();
                 _launchedProcess = null;
             }
-            try { _session.Dispose(); } catch { }
+            try
+            {
+                _session.Dispose();
+            }
+            catch (Exception ex)
+            {
+                // EA capture (UnexpectedCleanupException): DebugSession.Dispose threw.
+                // The substrate's Interlocked gates (ENG-DS-1) and idempotent native frees mean
+                // most exception paths are now structurally avoided, but anything that escapes
+                // surfaces here rather than silently disappearing.
+                _anomalies.OnAnomaly(new EngineAnomaly(
+                    DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
+                    "CleanupSession.SessionDispose",
+                    Observed: $"{ex.GetType().Name}: {ex.Message}",
+                    Expected: "DebugSession.Dispose completes cleanly",
+                    Context: new Dictionary<string, string> { ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name }));
+            }
             _session = null;
         }
         _lineBreakpoints.Clear();
@@ -607,9 +681,4 @@ public sealed class EngineSteppingSession : IDisposable
     }
 
     public void Dispose() => CleanupSession();
-
-    private sealed class NullSink : IDebugEventSink
-    {
-        public void OnEvent(string name) { }
-    }
 }

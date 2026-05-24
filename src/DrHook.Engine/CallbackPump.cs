@@ -56,6 +56,13 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
         {
             // Shutdown race: the queue stopped accepting or was disposed while a late callback
             // was still arriving. Drop it — the session is tearing down.
+            // EA capture (LateCallback): surface the rate/kind so detach-contract violations
+            // (C-DRAIN-CB / C-DRAIN-EXIT per finding 54) become visible rather than silent.
+            _userSink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.LateCallback, "mscordbi", "OnCallback",
+                Observed: $"{ex.GetType().Name} after queue {(ex is ObjectDisposedException ? "disposed" : "completed")}",
+                Expected: "queue accepting Adds (session live)",
+                Context: new Dictionary<string, string> { ["callbackKind"] = kind.ToString(), ["callbackName"] = name }));
         }
     }
 
@@ -119,6 +126,10 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {
             // Shutdown race — pause request dropped.
+            _userSink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.LateCallback, "mcp-request", "RequestPause",
+                Observed: $"{ex.GetType().Name} after queue {(ex is ObjectDisposedException ? "disposed" : "completed")}",
+                Expected: "queue accepting Adds (session live)"));
         }
     }
 
@@ -136,44 +147,81 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     private void Pump()
     {
-        foreach (CallbackEvent e in _events.GetConsumingEnumerable())
+        // EA capture (WorkerException, Probe 44 target): wrap the entire pump loop so an
+        // exception out of _resumeHandler / _pauseHandler doesn't kill the worker silently.
+        // Worker still exits on unhandled exception (session is non-recoverable per finding 53)
+        // but the substrate's signal goes out first.
+        try
         {
-            if (e.Kind == CallbackKind.Informational)
+            foreach (CallbackEvent e in _events.GetConsumingEnumerable())
             {
-                _userSink.OnEvent(e.Name);
-                if (e.Name == "ExitProcess")
-                    _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
-                _resumeHandler!(ResumeKind.Continue, 0);
+                if (e.Kind == CallbackKind.Informational)
+                {
+                    _userSink.OnEvent(e.Name);
+                    if (e.Name == "ExitProcess")
+                        _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
+                    _resumeHandler!(ResumeKind.Continue, 0);
+                }
+                else if (e.Kind == CallbackKind.PauseRequest)
+                {
+                    // Caller-initiated synchronization. We synchronize the running debuggee here
+                    // (the controller's Stop is the sole counterpart of Continue, both owned by this
+                    // worker), then surface a Pause stop and park at _resume.Take like any other stop.
+                    _pauseHandler!();
+                    _stopThread = 0;
+                    _stops.Add(new StopInfo(StopReason.Pause));
+                    ResumeKind kind;
+                    try { kind = _resume.Take(); }
+                    catch (InvalidOperationException)
+                    {
+                        // EA capture (WorkerSilentBreak): a Pause stop was published but the
+                        // caller disposed before consuming it. The stop is lost.
+                        _userSink.OnAnomaly(new EngineAnomaly(
+                            DateTimeOffset.UtcNow, AnomalyKind.WorkerSilentBreak, "pump-worker",
+                            "Pump (PauseRequest branch)",
+                            Observed: "_resume.Take threw InvalidOperationException with Pause stop pending",
+                            Expected: "caller consumes Pause stop and Resumes"));
+                        break;
+                    }
+                    _resumeHandler!(kind, _stopThread);
+                }
+                else
+                {
+                    // STOPPING: leave the debuggee synchronized, surface the stop, and block until
+                    // the caller resumes. The process produces no new callbacks while stopped, so
+                    // the queue behind this event is empty until we resume.
+                    _stopThread = e.Thread;
+                    _stops.Add(e.Kind == CallbackKind.Exception
+                        ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
+                        : new StopInfo(MapReason(e.Kind)));
+                    ResumeKind kind;
+                    try { kind = _resume.Take(); }
+                    catch (InvalidOperationException)
+                    {
+                        // EA capture (WorkerSilentBreak): a STOPPING stop was published but the
+                        // caller disposed before consuming it. The stop is lost.
+                        _userSink.OnAnomaly(new EngineAnomaly(
+                            DateTimeOffset.UtcNow, AnomalyKind.WorkerSilentBreak, "pump-worker",
+                            "Pump (STOPPING branch)",
+                            Observed: "_resume.Take threw InvalidOperationException with stop pending",
+                            Expected: "caller consumes stop and Resumes",
+                            Context: new Dictionary<string, string> { ["stopReason"] = MapReason(e.Kind).ToString() }));
+                        break;
+                    }
+                    // For a step, the handler creates the stepper on _stopThread before Continuing;
+                    // its completion arrives as a StepComplete stop.
+                    _resumeHandler!(kind, _stopThread);
+                }
             }
-            else if (e.Kind == CallbackKind.PauseRequest)
-            {
-                // Caller-initiated synchronization. We synchronize the running debuggee here
-                // (the controller's Stop is the sole counterpart of Continue, both owned by this
-                // worker), then surface a Pause stop and park at _resume.Take like any other stop.
-                _pauseHandler!();
-                _stopThread = 0;
-                _stops.Add(new StopInfo(StopReason.Pause));
-                ResumeKind kind;
-                try { kind = _resume.Take(); }
-                catch (InvalidOperationException) { break; }
-                _resumeHandler!(kind, _stopThread);
-            }
-            else
-            {
-                // STOPPING: leave the debuggee synchronized, surface the stop, and block until
-                // the caller resumes. The process produces no new callbacks while stopped, so
-                // the queue behind this event is empty until we resume.
-                _stopThread = e.Thread;
-                _stops.Add(e.Kind == CallbackKind.Exception
-                    ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
-                    : new StopInfo(MapReason(e.Kind)));
-                ResumeKind kind;
-                try { kind = _resume.Take(); }
-                catch (InvalidOperationException) { break; } // disposed while parked at a stop
-                // For a step, the handler creates the stepper on _stopThread before Continuing;
-                // its completion arrives as a StepComplete stop.
-                _resumeHandler!(kind, _stopThread);
-            }
+        }
+        catch (Exception ex)
+        {
+            _userSink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.WorkerException, "pump-worker", "Pump",
+                Observed: $"{ex.GetType().Name}: {ex.Message}",
+                Expected: "loop exits cleanly via CompleteAdding or break",
+                Context: new Dictionary<string, string> { ["exceptionType"] = ex.GetType().FullName ?? ex.GetType().Name }));
+            // Worker dies; future WaitForStop will time out. Session is non-recoverable.
         }
     }
 
