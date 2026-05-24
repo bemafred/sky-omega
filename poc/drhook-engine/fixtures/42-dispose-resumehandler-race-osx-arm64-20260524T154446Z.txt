@@ -1,0 +1,14 @@
+# DrHook.Engine probe 42 fixture — Dispose during _resumeHandler race characterisation
+timestamp            = 2026-05-24T15:44:46.7106790Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+target-pid           = 95551
+sentinel-events-1s   = 2934
+cycles               = 50
+clean-dispose-count  = 50
+target-alive-after   = True
+elapsed-ms           = 17406
+anomaly-count        = 10
+anomalies-by-kind    =
+  LateCallback                     : 10
+verdict              = PASSED
