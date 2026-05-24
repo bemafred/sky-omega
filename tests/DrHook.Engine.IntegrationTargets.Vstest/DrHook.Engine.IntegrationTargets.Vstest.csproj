@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Layer 3 — LEGACY VSTEST INTEGRATION TARGET (finding 62 vocabulary).
+
+    A real-shaped classic VSTest test project (NOT MSTest.Sdk / NOT MTP). This is
+    the long-tail community-utility shape: NuGet PackageReferences (deliberate —
+    classic test projects use PackageReference for the test framework + adapter),
+    invoked via `dotnet test` with VSTEST_HOST_DEBUG=1 for debugger attach.
+
+    xUnit chosen as the most common community VSTest test framework. The shape
+    holds for NUnit + MSTest classic — only the [Fact] attribute differs.
+
+    NOTE on packaging: this project intentionally uses non-BCL NuGet references
+    (xUnit, the VSTest runner adapter) because that IS the classic VSTest world.
+    DrHook.Engine substrate itself remains BCL-clean; the Legacy integration
+    TARGET simulates the consumer-side packaging that DrHook must work with.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.1" />
+  </ItemGroup>
+
+</Project>

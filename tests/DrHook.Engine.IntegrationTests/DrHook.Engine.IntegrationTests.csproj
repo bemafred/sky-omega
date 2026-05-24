@@ -32,6 +32,11 @@
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
     </ProjectReference>
+    <!-- Build dependency on the Legacy VSTest integration target so its assembly is available at test time. -->
+    <ProjectReference Include="..\DrHook.Engine.IntegrationTargets.Vstest\DrHook.Engine.IntegrationTargets.Vstest.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>
