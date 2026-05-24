@@ -1,4 +1,12 @@
-# Finding 57: Probe 42 outcome — Dispose during the worker's `_resumeHandler` (race characterisation)
+# Finding 57: Probe 42 outcome — Dispose during the worker's `_resumeHandler` (race characterisation) — **SUPERSEDED**
+
+**Status:**   **Superseded by [finding 65](65-probe42-redesign-regression.md) 2026-05-24.** The original probe 42 used `07-target.cs`, whose `throw/catch` loop produced **STOPPING (Exception) callbacks** that parked the pump worker at `_resume.Take()` — NOT inside `_resumeHandler` as the stated hypothesis required. The 20/20 PASS was real for what the probe actually tested, but the probe did not test what its name / docstring / ADR-007 entry claimed. The construction was a `WorkerSilentBreak`-flooded corner-case pattern, not the Dispose-during-`_resumeHandler` race. The replacement probe (finding 65) uses an **informational-only target** (Thread.Start/Join, no exceptions) so the worker is genuinely inside `_resumeHandler`'s `controller.Continue(0)` COM call. With that proper construction: 50/50 PASS at the 824e642 baseline (real validation), **SIGSEGV at HEAD** — a real substrate regression introduced by `TryResumeForDetach` at commit 44d76aa. See finding 65 for the corrected characterisation.
+
+Below preserved for historical reference; do not act on it as substrate truth.
+
+---
+
+(original content)
 
 **Status:**   PASSED on macOS-arm64 2026-05-24. Probe 42 (`42-dispose-resumehandler-race-smoke.cs`, target `07-target.cs`) characterises the substrate-correctness behavior of Dispose-during-`_resumeHandler` under continuous mscordbi callback flood. 20/20 clean Dispose cycles, 0 crashes, 0 `WorkerException`, target alive after each cycle. The post-Phase-1 substrate (Quiesce + ENG-CP-1 + ENG-DS-1 + EngineAnomaly) holds — no new engine-side fix needed.
 **Date:**     2026-05-24

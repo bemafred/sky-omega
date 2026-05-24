@@ -3,34 +3,48 @@
 //
 // DrHook.Engine probe 42 — DISPOSE DURING THE WORKER'S _resumeHandler call ===================
 //
-// ADR-007 Phase 1, Probe 42 (post-renumber). The CallbackPump worker drains _events and, for
-// each event, invokes _resumeHandler which does Stepping.Arm(thread, kind) + controller.Continue.
-// The race window characterised in finding 53 (MCH-1) + finding 54 (T1/T2 walks): another thread
-// calls DebugSession.Dispose while the worker is INSIDE _resumeHandler's COM call to
-// controller.Continue. The previous substrate work resolved the queued-callback-flush race
-// (drhook-clean-detach, probe 08 — Quiesce-before-Detach). Phase 1's engineering fixes added
-// atomic idempotence gates (ENG-CP-1, ENG-DS-1) and the EngineAnomaly surface (EA-1..6).
+// ADR-007 Phase 1, Probe 42 (replacement design 2026-05-24).
 //
-// This probe characterises the race-under-load behavior of the post-fix substrate. The target is
-// the continuous-event-flood program from probe 07: each iteration creates a Thread + throws-and-
-// catches, generating mscordbi CreateThread/ExitThread/Exception callbacks. The worker is
-// effectively ALWAYS inside _resumeHandler (or just about to enter it) when Dispose races.
+// HYPOTHESIS: "Dispose during the worker's _resumeHandler(...) call."
 //
-// N attach/Dispose cycles against ONE long-lived flood target. Across cycles:
-//   - 0 crashes (target process or test process) — substrate handles the race
-//   - 0 WorkerException anomalies (would indicate Stepping.Arm or controller.Continue threw
-//     through the pump boundary — a substrate bug)
-//   - Optional LateCallback / WorkerSilentBreak anomalies are EXPECTED under flooding (they're
-//     evidence of the substrate catching the race, not crashing it)
+// The CallbackPump worker (CallbackPump.cs:148–215) processes events. For each
+// CallbackKind.Informational event it calls _resumeHandler!(Continue, 0), which performs
+// a synchronous controller.Continue(0) COM call into mscordbi. The substrate race
+// characterised in finding 53 MCH-1 + finding 54 T1/T2: the worker is mid-Continue
+// when another thread calls DebugSession.Dispose. Phase 1's engineering work (Quiesce-
+// before-Detach, ENG-CP-1/DS-1 Interlocked gates, EngineAnomaly substrate) is supposed
+// to make this race teardown-safe.
+//
+// CONSTRUCTION: spawn 42-target.cs (Thread.Start/Join in a tight loop, no exceptions).
+// Only Informational callbacks are generated, so the worker is ALWAYS either consuming
+// the next event from _events or inside _resumeHandler's controller.Continue. It never
+// parks at _resume.Take (no STOPPING events exist on this target). Randomized Dispose
+// timing in [20, 500] ms samples the race window across the controller.Continue duration
+// distribution.
+//
+// N=50 attach/Dispose cycles against ONE long-lived informational-flood target.
+// Across cycles:
+//   - 0 process crashes (substrate or target)
+//   - 0 WorkerException anomalies (would mean controller.Continue threw through pump)
+//   - 0 WorkerSilentBreak anomalies (would mean a stop fired against a no-stops target —
+//     substrate bug)
+//   - LateCallback anomalies under flood are EXPECTED (callbacks dispatched after
+//     _events.CompleteAdding hit the LateCallback path — that IS the substrate catching
+//     the race correctly)
 //   - Target process must survive every cycle (detach must leave it running)
 //
-// Falsification: 2 usage; 3 no READY; 4 first Attach failed; 5 no flood detected;
-//   6 target process died mid-loop (Dispose killed target — substrate bug);
-//   7 WorkerException anomaly observed (Stepping/Continue threw through pump);
-//   8 Dispose threw outside the expected path; 9 attach failed mid-loop (target unstable);
-//   0 PASS.
+// Falsification:
+//   2 usage; 3 no READY; 4 sentinel Attach failed; 5 flood not flowing (<24 events in 1s);
+//   6 target died mid-loop; 7 WorkerException anomaly; 8 WorkerSilentBreak anomaly
+//     (stop on a no-stops target — substrate semantics violated); 9 attach failed mid-loop;
+//     10 Dispose threw; 0 PASS.
 //
-// Usage:  DBGSHIM_PATH=<libdbgshim> dotnet 42-dispose-resumehandler-race-smoke.cs <path-to-07-target.cs>
+// Replaces the original probe 42 (which constructed a STOPPING-Exception-unconsumed
+// scenario against 07-target.cs that parked the worker at _resume.Take — testing a
+// different race than the hypothesis names). Original probe + finding 57 retired
+// concurrently.
+//
+// Usage:  DBGSHIM_PATH=<libdbgshim> dotnet 42-dispose-resumehandler-race-smoke.cs <path-to-42-target.cs>
 
 using System;
 using System.Diagnostics;
@@ -58,20 +72,25 @@ sealed class CountingAnomalySink : IDebugEventSink
 
 static class DisposeRaceP42
 {
-    const int Cycles = 20;
-    const int FloodWindowMs = 200; // give the worker time to enter _resumeHandler under flood
+    const int Cycles = 50;
+    const int MinDisposeDelayMs = 20;
+    const int MaxDisposeDelayMs = 500;
+    const int InterCycleSettleMs = 50;
+    const int MinSentinelEvents = 10; // 1s of CreateThread+ExitThread @ ~2/iter should yield well above this
 
     public static int Run(string[] args)
     {
         if (args.Length < 1 || !File.Exists(args[0]))
         {
-            Console.Error.WriteLine("Usage: dotnet 42-dispose-resumehandler-race-smoke.cs <path-to-07-target.cs>");
+            Console.Error.WriteLine("Usage: dotnet 42-dispose-resumehandler-race-smoke.cs <path-to-42-target.cs>");
             return 2;
         }
 
         Console.WriteLine($"runtime    : {RuntimeInformation.FrameworkDescription}");
         Console.WriteLine($"dbgshim    : {Environment.GetEnvironmentVariable("DBGSHIM_PATH") ?? "(resolver default)"}");
-        Console.WriteLine($"plan       : {Cycles} attach/Dispose cycles against continuous-flood target; expect 0 crashes, 0 WorkerException anomalies, target alive after each cycle");
+        Console.WriteLine($"plan       : {Cycles} attach/Dispose cycles against informational-only flood (Thread.Start/Join, no exceptions);");
+        Console.WriteLine($"             randomized Dispose delay in [{MinDisposeDelayMs}, {MaxDisposeDelayMs}] ms;");
+        Console.WriteLine($"             expect 0 crashes, 0 WorkerException, 0 WorkerSilentBreak, target alive each cycle");
 
         using Process proc = new()
         {
@@ -113,7 +132,7 @@ static class DisposeRaceP42
         realPid = Volatile.Read(ref realPid);
         Console.WriteLine($"target pid : {realPid}");
 
-        // Sentinel attach + drain to confirm flood is live before starting the cycle loop.
+        // Sentinel attach + drain to confirm informational flood is live before starting the cycle loop.
         var floodSink = new CountingAnomalySink();
         DebugSession floodSession;
         try { floodSession = DebugSession.Attach(realPid, floodSink); }
@@ -127,9 +146,9 @@ static class DisposeRaceP42
         int sentinelEvents = floodSink.EventCount;
         floodSession.Dispose();
         Console.WriteLine($"flood @1s  : {sentinelEvents} events (sentinel run before cycle loop)");
-        if (sentinelEvents <= 1)
+        if (sentinelEvents < MinSentinelEvents)
         {
-            Console.Error.WriteLine("FALSIFIED (no flood): target isn't generating a callback stream; the race window can't be tested.");
+            Console.Error.WriteLine($"FALSIFIED (no flood): target isn't generating ≥{MinSentinelEvents} callbacks/sec; the race window can't be tested.");
             KillTree(proc);
             return 5;
         }
@@ -138,7 +157,7 @@ static class DisposeRaceP42
         var cycleSink = new CountingAnomalySink();
         int cleanCount = 0;
         int disposeExceptionCount = 0;
-        int attachFailedCount = 0;
+        var rng = new Random(42); // deterministic seed for repeatable timing distribution
         Stopwatch sw = Stopwatch.StartNew();
 
         for (int i = 0; i < Cycles; i++)
@@ -154,11 +173,11 @@ static class DisposeRaceP42
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"FALSIFIED (Attach cycle {i + 1}): {ex.GetType().Name}: {ex.Message}");
-                attachFailedCount++;
                 return 9;
             }
 
-            Thread.Sleep(FloodWindowMs); // worker is now inside _resumeHandler
+            int delayMs = rng.Next(MinDisposeDelayMs, MaxDisposeDelayMs + 1);
+            Thread.Sleep(delayMs);
 
             try
             {
@@ -167,12 +186,11 @@ static class DisposeRaceP42
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"warn (cycle {i + 1}): Dispose threw {ex.GetType().Name}: {ex.Message}");
+                Console.Error.WriteLine($"warn (cycle {i + 1}, delay {delayMs}ms): Dispose threw {ex.GetType().Name}: {ex.Message}");
                 disposeExceptionCount++;
             }
 
-            // Brief pause between cycles so mscordbi state settles.
-            Thread.Sleep(50);
+            Thread.Sleep(InterCycleSettleMs);
         }
 
         sw.Stop();
@@ -197,22 +215,31 @@ static class DisposeRaceP42
         int workerExceptions = byKind.GetValueOrDefault(AnomalyKind.WorkerException, 0);
         if (workerExceptions > 0)
         {
-            Console.Error.WriteLine($"FALSIFIED (WorkerException): pump worker hit {workerExceptions} unhandled exceptions across the loop — substrate bug in _resumeHandler (Stepping.Arm or controller.Continue threw across the boundary).");
+            Console.Error.WriteLine($"FALSIFIED (WorkerException): pump worker hit {workerExceptions} unhandled exceptions across the loop — substrate bug in _resumeHandler (controller.Continue threw through the pump boundary).");
             foreach (EngineAnomaly we in drain.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerException))
                 Console.Error.WriteLine($"  {we.Observed} (Context: {(we.Context is null ? "(none)" : string.Join(", ", we.Context.Select(kv => kv.Key + "=" + kv.Value)))})");
             return 7;
         }
 
+        int workerSilentBreaks = byKind.GetValueOrDefault(AnomalyKind.WorkerSilentBreak, 0);
+        if (workerSilentBreaks > 0)
+        {
+            Console.Error.WriteLine($"FALSIFIED (WorkerSilentBreak): {workerSilentBreaks} stops surfaced against a no-stops target — substrate produced a STOPPING event from CreateThread/ExitThread, which violates the pump's classification contract.");
+            foreach (EngineAnomaly wsb in drain.Anomalies.Where(a => a.Kind == AnomalyKind.WorkerSilentBreak))
+                Console.Error.WriteLine($"  {wsb.Observed} (Context: {(wsb.Context is null ? "(none)" : string.Join(", ", wsb.Context.Select(kv => kv.Key + "=" + kv.Value)))})");
+            return 8;
+        }
+
         if (disposeExceptionCount > 0)
         {
             Console.Error.WriteLine($"FALSIFIED (Dispose threw {disposeExceptionCount}x): Dispose path raised exceptions — investigate stack traces above.");
-            return 8;
+            return 10;
         }
 
         WriteFixture(realPid, sentinelEvents, Cycles, cleanCount, alive, sw.ElapsedMilliseconds, drain.Anomalies.Count, byKind);
         KillTree(proc);
 
-        Console.WriteLine($"\nPROBE 42 PASSED — {cleanCount}/{Cycles} clean Dispose cycles under continuous flood; substrate's Quiesce + Interlocked gates (ENG-CP-1/DS-1) + EngineAnomaly path handle Dispose-during-_resumeHandler without crashes, without WorkerException, and without killing the target. Surfaced anomalies are evidence of the substrate catching late callbacks / silent breaks — not failures.");
+        Console.WriteLine($"\nPROBE 42 PASSED — {cleanCount}/{Cycles} clean Dispose cycles under continuous informational flood; substrate's Quiesce + Interlocked gates (ENG-CP-1/DS-1) + EngineAnomaly path handle Dispose-during-_resumeHandler without crashes, without WorkerException, without WorkerSilentBreak, and without killing the target. LateCallback anomalies (if any) are evidence of the substrate catching post-CompleteAdding callbacks correctly.");
         return 0;
     }
 
