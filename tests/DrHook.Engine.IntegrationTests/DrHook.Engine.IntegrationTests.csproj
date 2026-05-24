@@ -1,0 +1,37 @@
+<Project Sdk="MSTest.Sdk/4.2.3">
+
+  <!--
+    Layer 1 — INTEGRATION-TEST HOST (finding 61 vocabulary).
+
+    MSTest.Sdk + MTP (BCL-clean per the assessment doc — finding 61's MTP-first
+    decision). The integration tests in this project exercise the DrHook.Engine
+    substrate (Layer 2) against integration targets (Layer 3) — currently the
+    MTP target only; the Legacy VSTest target is deferred to Probe 46b.
+
+    Project reference to DrHook.Engine.Mtp gives us the path to the integration
+    target's binary at test time; the integration target is built as a sibling
+    artifact, located via known relative paths from the test bin dir.
+
+    Probes (poc/drhook-engine/NN-smoke.cs) remain authoritative for substrate
+    discovery; integration tests promote validated probe shapes for CI repeatability.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <!-- Route `dotnet test` through MTP (not the legacy VSTest bridge). Required on .NET 10
+         SDK per the assessment doc; the legacy bridge was removed. -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DrHook.Engine\DrHook.Engine.csproj" />
+    <!-- Build dependency on the MTP integration target so its exe is available at test time. -->
+    <ProjectReference Include="..\DrHook.Engine.IntegrationTargets.Mtp\DrHook.Engine.IntegrationTargets.Mtp.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

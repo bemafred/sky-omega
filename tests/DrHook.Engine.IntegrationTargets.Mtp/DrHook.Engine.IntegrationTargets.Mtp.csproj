@@ -1,0 +1,27 @@
+<Project Sdk="MSTest.Sdk/4.2.3">
+
+  <!--
+    Layer 3 — MTP INTEGRATION TARGET (finding 61 vocabulary).
+
+    A real-shaped Microsoft.Testing.Platform test executable that DrHook.Engine
+    substrate validates against. MSTest.Sdk reference is the cleanest signal that
+    a test project uses MTP (per the assessment doc — finding 61's "MTP detection"
+    section): with this SDK, the project compiles to an executable whose entry
+    point IS the MTP test runner, no vstest.console plumbing required.
+
+    DrHook.Engine.IntegrationTests (Layer 1) launches the built exe of this project
+    and attaches via DebugSession. The [TestMethod] in this project signals READY,
+    hits Debugger.Break for a setup stop, then idles long enough for the
+    integration test's substrate-validation work to complete.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <!-- Route `dotnet test` through MTP (not the legacy VSTest bridge). Required on .NET 10
+         SDK per the assessment doc; the legacy bridge was removed. -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+</Project>

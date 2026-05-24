@@ -74,10 +74,10 @@ Completion: all probes (41–45) pass; `drhook-detach-exit-race` **Resolved** (A
 
 The previous spiral happened here. Its purpose is to characterise the failure mode of probe-to-integration-test promotion before any scaling. Output is a substrate decision recorded as a finding, plus a single experimental exemplar.
 
-- [ ] **Probe 46** — take an already-passing legacy probe (e.g., probe 39 fields) and characterise what it takes to promote it into `tests/DrHook.Engine.IntegrationTests/` cleanly. Identify every implicit assumption legacy probes make about manual invocation (fixture file output, sequential single-target spawn, `Environment.CurrentDirectory` assumptions, console redirection, etc.).
-- [ ] Output: `findings/61-promotion-meta-probe.md` recording: *"DrHook integration tests are shaped like X, prove Y, explicitly do not try to prove Z."* This is the substrate decision Phase 8 fills in against; without this finding, Phase 8 doesn't begin. (Findings 56–60 are taken by Probe 41 / Probe 42 / Probe 43 / Probe 44 / Probe 45 outcomes — see Phase 1.)
+- [x] **Probe 46 — MTP integration-test promotion exemplar.** Stand up `tests/DrHook.Engine.IntegrationTests/` (MSTest.Sdk, MTP-native) + `tests/DrHook.Engine.IntegrationTargets.Mtp/` (real-shaped MTP test project). Lift probe 42's attach+Dispose substrate-validation shape into ONE `[TestMethod]`. Establish the 4-layer vocabulary (integration test / DrHook substrate / integration target / target test code). Output: `findings/61-promotion-meta-probe.md`. *(Done 2026-05-24, finding 61 — 982 ms test passes; surfaced 5 discoveries including MTP's documented `--debug` attach-handshake superseding the assessment doc's recommendation.)*
+- [ ] **Probe 46b — Legacy VSTest integration-test promotion exemplar.** Stand up `tests/DrHook.Engine.IntegrationTargets.Vstest/` (classic VSTest test project, not MSTest.Sdk). Build the first piece of `DrHook.Testing` orchestration: spawn `dotnet test` with `VSTEST_HOST_DEBUG=1`, capture stdout, parse `Process Id: NNNN` from VSTest's undocumented format, attach to testhost. ONE integration test against the Legacy target. Output: `findings/62-legacy-vstest-promotion.md`. **Phase 8 does NOT begin until both 46 and 46b have passed** — Legacy-platform community-utility is load-bearing for DrHook's reach.
 
-Completion: one finding + one exemplar test. **No mass promotion in this phase** — that's Phase 8.
+Completion: both Probe 46 (MTP — DONE) and Probe 46b (Legacy VSTest — PENDING) pass; the integration-test promotion shape is documented for both platforms. **No mass promotion in this phase** — that's Phase 8.
 
 ### Phase 3 — Child-process attach substrate
 
