@@ -1,0 +1,10 @@
+# DrHook.Engine probe 45 fixture — Worker-thread exception path validation
+timestamp            = 2026-05-24T09:34:12.0094940Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+target-pid           = 66141
+on-event-calls       = 1
+worker-exception-cnt = 1
+wait-elapsed-ms      = 2007
+dispose-elapsed-ms   = 10
+verdict              = PASSED
