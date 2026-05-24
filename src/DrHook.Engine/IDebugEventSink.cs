@@ -31,6 +31,16 @@ public interface IDebugEventSink
     /// (per <see cref="EngineAnomaly.Thread"/>), so implementations must be thread-safe.
     /// The contract (per Rule 1, finding 55) is the same as <see cref="OnEvent"/>: the
     /// implementation must do O(1) stack work since some call sites are on threads with stack
-    /// budgets we don't own.</summary>
+    /// budgets we don't own.
+    ///
+    /// <para><b>MUST NOT throw.</b> <c>OnAnomaly</c> is the substrate's last-resort surface —
+    /// it is called from inside the pump worker's outer try/catch (EA-4) when another part of
+    /// the substrate (or a user callback) has already thrown. The catch around OnAnomaly itself
+    /// is intentionally absent: if this method throws, the pump worker dies with an unhandled
+    /// exception, and because the worker is <c>IsBackground=true</c>, the .NET runtime
+    /// terminates the process. Implementations that buffer anomalies should swallow their own
+    /// failures (e.g. allocation failure → drop the record + count it); throwing here trades
+    /// substrate diagnostic state for process death and is never the right answer. WE-OA-1
+    /// (finding 60).</para></summary>
     void OnAnomaly(EngineAnomaly anomaly) { }
 }
