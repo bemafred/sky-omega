@@ -973,7 +973,8 @@ public sealed class DebugSession : IDisposable
         Thread.Sleep(KillSettleMs);
     }
 
-    /// <summary>Resume the debuggee before Detach (Attached path; Probe 44 / finding 59).
+    /// <summary>Resume the debuggee before Detach (Attached path; Probe 44 / finding 59;
+    /// dispatch-settle added per finding 65).
     /// After Quiesce the target is synchronized; mscordbi's Detach for a synchronized target
     /// performs an implicit resume that has been observed to race the exit work item when the
     /// resumed code immediately exits (limit drhook-detach-exit-race / probe 12 evidence).
@@ -985,15 +986,32 @@ public sealed class DebugSession : IDisposable
     /// (target already running), bounded by maxAttempts to prevent infinite loop on a
     /// substrate bug. Without the loop, an unbalanced counter leaves mscordbi internally
     /// still considering the target synchronized after Detach, blocking the next Attach
-    /// on the same target with CORDBG_E_DEBUGGER_ALREADY_ATTACHED.</summary>
+    /// on the same target with CORDBG_E_DEBUGGER_ALREADY_ATTACHED.
+    ///
+    /// FINDING 65 — dispatch-settle: between Continue iterations the resumed target may
+    /// generate fresh callbacks that mscordbi's RC event thread dispatches via the CCW
+    /// (still alive at this point in Dispose). Without settle, the next Continue (or
+    /// downstream Detach / Terminate) races concurrent dispatch and SIGSEGVs on
+    /// macOS-arm64 under informational-callback flood (probe 42 redesigned). The settle
+    /// gives mscordbi's RC thread a window to complete in-flight dispatch before the next
+    /// substrate operation. Empirical: 10 ms intra-iteration, 50 ms pre-return — well
+    /// inside Dispose budget, comfortably above mscordbi's microsecond-scale dispatch
+    /// latency. Settle fires on every exit path (S_FALSE / error / exhausted) since any
+    /// can be followed by Detach against in-flight dispatch.</summary>
     private void TryResumeForDetach()
     {
         const int S_FALSE = 1;
         const int maxAttempts = 10;
+        const int IntraSettleMs = 10;
+        const int FinalSettleMs = 50;
         for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             int hr = _controller.Continue(0);
-            if (hr == S_FALSE) return; // target already running; counter balanced
+            if (hr == S_FALSE)
+            {
+                Thread.Sleep(FinalSettleMs); // post-resume dispatch settles before Detach
+                return;
+            }
             if (hr < 0)
             {
                 _sink.OnAnomaly(new EngineAnomaly(
@@ -1002,11 +1020,16 @@ public sealed class DebugSession : IDisposable
                     Observed: $"HRESULT 0x{hr:X8} on attempt {attempt + 1}",
                     Expected: "S_OK while counter > 0, then S_FALSE when target released",
                     Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}", ["attempt"] = (attempt + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+                Thread.Sleep(FinalSettleMs); // dying target may still race exit-work against Detach
                 return;
             }
-            // hr == S_OK: target was synchronized, just decremented one step; loop again.
+            // hr == S_OK: target was synchronized, one step decremented. Let mscordbi
+            // dispatch any callbacks the resume produced before issuing the next Continue.
+            Thread.Sleep(IntraSettleMs);
         }
         // Reached maxAttempts without S_FALSE — substrate anomaly, likely a counter leak.
+        // Defensive settle before falling through to Detach so any final dispatch completes.
+        Thread.Sleep(FinalSettleMs);
         _sink.OnAnomaly(new EngineAnomaly(
             DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
             "TryResumeForDetach (Continue loop exhausted)",

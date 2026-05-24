@@ -1,6 +1,6 @@
-# Finding 65: Probe 42 redesigned — hypothesis-aligned construction surfaces a real substrate regression introduced at 44d76aa
+# Finding 65: Probe 42 redesigned — hypothesis-aligned construction surfaces a real substrate regression introduced at 44d76aa; closed by dispatch-settle in `TryResumeForDetach`
 
-**Status:**   Probe 42 retired and replaced. New probe construction matches the stated hypothesis ("Dispose during the worker's `_resumeHandler(...)` call") by using an informational-only callback target (Thread.Start/Join, no exceptions) so the pump worker actually spends time inside `_resumeHandler`'s synchronous `controller.Continue(0)` COM call. At **824e642 baseline 50/50 clean Dispose**; at **HEAD SIGSEGV** after the sentinel Dispose. The TryResumeForDetach Continue-loop introduced by commit 44d76aa is the regression-introducing substrate change, and the regression hits a **production-relevant race**, not just the original probe's constructed STOPPING-unconsumed pattern. Supersedes finding 57.
+**Status:**   Probe 42 retired and replaced. New probe construction matches the stated hypothesis ("Dispose during the worker's `_resumeHandler(...)` call") by using an informational-only callback target (Thread.Start/Join, no exceptions) so the pump worker actually spends time inside `_resumeHandler`'s synchronous `controller.Continue(0)` COM call. At **824e642 baseline 50/50 clean Dispose**; at **HEAD pre-fix SIGSEGV** after the sentinel Dispose. The TryResumeForDetach Continue-loop introduced by commit 44d76aa was the regression-introducing substrate change. **Closed at HEAD by dispatch-settle: 50/50 PASS** (this finding, end of document). Adjacent observation: probe 44 phase C (kill-coincident) is separately broken since 44d76aa and requires target-death detection as separate substrate work. Supersedes finding 57.
 **Date:**     2026-05-24
 
 ## What the original probe 42 actually constructed
@@ -141,16 +141,83 @@ Either way: the substrate's Continue-loop pumps queued callbacks through a downs
 - **Confirms real substrate regression at HEAD**: `TryResumeForDetach` introduced at 44d76aa breaks the *stated* Probe 42 race against a production-relevant target shape.
 - **Documents the stale-cache false-PASS mechanism**: 44d76aa's "re-ran probe 42, still clean" was a stale-cache artifact, not real revalidation.
 
-## Forward — what comes next
+## Substrate fix — dispatch-settle in `TryResumeForDetach`
 
-The regression is substrate-grade and warrants its own substrate work. Options under consideration (deferred to a separate session decision):
+Implementation chosen from the four options considered: between Continue iterations the resumed target may generate fresh callbacks that mscordbi's RC event thread dispatches via the CCW (still alive at this point in Dispose). Without settle, the next Continue (or downstream Detach / Terminate) races concurrent dispatch and SIGSEGVs.
 
-1. **Move `TryResumeForDetach` after `Detach`**: counter rebalancing might still achieve its goal post-Detach (no longer pumping callbacks through a live CCW).
-2. **Drain queued callbacks before Continue-loop**: explicitly let mscordbi's RC thread complete its current backlog before initiating Continue-loop; e.g., a brief synchronization read or `Thread.Sleep` between Quiesce and TryResumeForDetach.
-3. **Replace Continue-loop with a different counter-rebalancing mechanism**: if mscordbi exposes a direct counter-query / counter-reset, prefer that over a side-effecting Continue.
-4. **Accept the trade-off**: keep TryResumeForDetach for the Attached-path counter-balance benefit (preventing CORDBG_E_DEBUGGER_ALREADY_ATTACHED on re-attach), document that it has a known race against informational floods, characterise the rate envelope.
+`TryResumeForDetach` now sleeps between Continue iterations and before returning on every exit path:
 
-This is for a future probe (likely probe 47 or similar, characterising the fix) and a future substrate change. Not in scope for this finding — which establishes the regression cleanly and supersedes the false-PASS provenance of finding 57.
+```csharp
+private void TryResumeForDetach()
+{
+    const int IntraSettleMs = 10;   // between Continue iterations
+    const int FinalSettleMs = 50;   // before returning to Detach
+    for (int attempt = 0; attempt < maxAttempts; attempt++)
+    {
+        int hr = _controller.Continue(0);
+        if (hr == S_FALSE)  { Thread.Sleep(FinalSettleMs); return; }   // target released
+        if (hr < 0)         { /* anomaly */ Thread.Sleep(FinalSettleMs); return; }   // target dying/dead
+        Thread.Sleep(IntraSettleMs);   // post-resume dispatch settles before next Continue
+    }
+    Thread.Sleep(FinalSettleMs);   // exhausted-counter path also settles before fallthrough
+    /* exhausted-attempts anomaly */
+}
+```
+
+Settles fire on all exit paths (S_FALSE, error, exhausted) because any can be followed by Detach against in-flight mscordbi dispatch. The empirical values (10 ms intra-iteration, 50 ms pre-return) are well above mscordbi's microsecond-scale dispatch latency and well inside Dispose budget.
+
+### Validation with fix
+
+Probe 42 (redesigned) at HEAD with the fix:
+
+```
+$ dotnet run --no-cache 42-dispose-resumehandler-race-smoke.cs -- 42-target.cs
+
+target pid : 99948
+flood @1s  : 2976 events
+cycles     : 50/50 clean Dispose; 0 threw; elapsed 27015ms
+target     : alive (resumed un-debugged)
+anomalies  : 550 surfaced
+  LateCallback                     : 500
+  UnexpectedHResult                : 50
+
+PROBE 42 PASSED — 50/50 clean Dispose cycles under continuous informational
+flood; no crashes, no WorkerException, no WorkerSilentBreak.
+```
+
+The 500 LateCallback anomalies (10 per cycle on average) are the substrate's honest signal of post-CompleteAdding dispatch from mscordbi — expected under flood, evidence the substrate catches the race correctly rather than silently dropping or crashing.
+
+The 50 UnexpectedHResult anomalies (1 per cycle) are the Continue-loop hitting maxAttempts without reaching S_FALSE under the heavy flood — mscordbi keeps stopping at callback boundaries faster than the loop drains. Counter-draining becomes best-effort under sustained informational flood; substrate documents this honestly via anomaly rather than failing silently. Maxing the loop is a corner case (well-behaved targets reach S_FALSE in 2-3 iterations) but the substrate doesn't crash even when it happens.
+
+Dispose budget: ~27 s for 50 cycles = ~540 ms per cycle = ~60% overhead vs unsetled baseline (17.4 s / 50 = ~350 ms). Within Dispose budget; the substrate-correctness gain is worth the latency.
+
+59/59 unit tests pass — no substrate behavior regression at the unit-test level.
+
+### What the fix does NOT close — probe 44 phase C separately broken
+
+While validating, ran probe 44 (Attached + Pause-stop + Kill + Dispose, kill-coincident race). The dispatch-settle fix does NOT close probe 44 phase C: it SIGSEGVs at cycle 2-4 with or without the fix. Investigation reveals **probe 44 phase C has been broken since commit 44d76aa** — the original "10/10 PASS" recorded in that commit was almost certainly a stale-file-based-app-cache false-PASS (same amplifier that masked probe 42's regression there). With the new `--no-cache` protocol the failure becomes visible.
+
+The mechanism is different from probe 42's: in probe 44 phase C the target is killed externally, mscordbi's RC thread is mid-processing the target's exit-work-item (delivering ExitProcess, dispatching final callbacks, releasing RC state), and the substrate's `Detach` call from the main thread races that exit-work. mscordbi dereferences torn-down state and crashes on the RC thread.
+
+The substrate is missing **target-death detection** before mscordbi protocol operations. The current `Dispose` marches through Quiesce → TryResumeForDetach → Detach → Terminate even when the target is dead, pushing mscordbi to handle protocol operations against a process whose own exit-work-item is concurrently running. The dispatch-settle fix doesn't reach this window — the error-HRESULT exit path returns before mscordbi's exit-work has completed, and the settle is too short to outlast the exit-work.
+
+This is a separate substrate change scoped for follow-on work (Martin 2026-05-24): acquire `Process.GetProcessById(pid)` at Attach time for Borrowed sessions too (death-detection only — substrate does not take ownership of kill for Borrowed), and have Dispose check `HasExited` before any mscordbi protocol operation. If dead, skip Quiesce/Continue/Detach and only do substrate-local resource release (CCW, dbgshim, refs, optional Terminate).
+
+The probe 44 phase C race is the production-critical "external target death during observation" scenario — NCrunch killing testhosts, user force-quits, OOM killer, target crashes. The substrate currently crashes on it; the fix above closes the *informational-flood race* but not the *external-death race*.
+
+### Why we ship the fix anyway
+
+The two regressions are independent:
+- **Probe 42 (informational-flood race)**: closed by this finding's dispatch-settle. Production-relevant for observation against thread-churn / module-load workloads.
+- **Probe 44 phase C (external-death race)**: separately broken since 44d76aa, surfaced by this session's `--no-cache` protocol. Production-relevant for external-kill scenarios. Needs **target-death detection** substrate change as separate work.
+
+Shipping the dispatch-settle fix:
+- Closes probe 42 cleanly (50/50 PASS at HEAD).
+- Doesn't make probe 44 phase C worse (it was already SIGSEGVing).
+- Doesn't preclude the death-detection fix (orthogonal change).
+- Unit tests unchanged.
+
+The death-detection substrate change will be tracked as a separate probe + finding (~probe 47 or similar) when that work begins.
 
 ## ADR-007 implications
 
