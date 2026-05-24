@@ -38,6 +38,7 @@ public sealed class DebugSession : IDisposable
     private nint _pProcess;
     private int _detached;  // 0 = attached, 1 = detached; atomic via Interlocked.Exchange (ENG-DS-1)
     private int _disposed;  // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-DS-1)
+    private readonly bool _ownsTarget;  // true = Launched (caller handles kill-first); false = Attached (substrate does detach-leave-running). Probe 44.
 
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
@@ -56,7 +57,7 @@ public sealed class DebugSession : IDisposable
 
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
-                         nint pUnknown, nint pProcess)
+                         nint pUnknown, nint pProcess, bool ownsTarget)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -67,10 +68,16 @@ public sealed class DebugSession : IDisposable
         _sink = sink;
         _pUnknown = pUnknown;
         _pProcess = pProcess;
+        _ownsTarget = ownsTarget;
     }
 
     /// <summary>OS process id of the attached target.</summary>
     public int ProcessId { get; }
+
+    /// <summary>True when the substrate launched the target (Owned — caller handles kill-first
+    /// before Dispose); false when the substrate attached to an existing target (Attached —
+    /// Dispose does detach-leave-running). Probe 44 design.</summary>
+    public bool OwnsTarget => _ownsTarget;
 
     /// <summary>Attach the native ICorDebug engine to a running .NET process and register the
     /// managed callback. On macOS/ARM64 this needs no debug entitlement (finding 13).</summary>
@@ -83,7 +90,8 @@ public sealed class DebugSession : IDisposable
         try
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
-            return FromCordbg(dbgShim, sink, processId, pUnknown);
+            // Attached: substrate does not own the target. Dispose will detach-leave-running.
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false);
         }
         catch
         {
@@ -113,7 +121,9 @@ public sealed class DebugSession : IDisposable
             ThrowIfFailed(
                 dbgShim.LaunchWithDebugger(commandLine, workingDirectory, TimeSpan.FromSeconds(30), out uint pid, out pUnknown),
                 "DbgShim.LaunchWithDebugger");
-            return FromCordbg(dbgShim, sink, (int)pid, pUnknown);
+            // Launched: substrate owns the target. Caller (typically EngineSteppingSession)
+            // handles kill-first before Dispose; substrate's Dispose keeps the current path.
+            return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true);
         }
         catch
         {
@@ -126,7 +136,7 @@ public sealed class DebugSession : IDisposable
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
     /// callback vtable, register the handler, <c>DebugActiveProcess</c>, start the continue-loop.
     /// Same shape used by Attach and Launch.</summary>
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown)
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -155,7 +165,7 @@ public sealed class DebugSession : IDisposable
                 },
                 () => controller.Stop(0));
 
-            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess);
+            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget);
         }
         catch
         {
@@ -880,6 +890,48 @@ public sealed class DebugSession : IDisposable
         }
     }
 
+    /// <summary>Resume the debuggee before Detach (Attached path; Probe 44 / finding 59).
+    /// After Quiesce the target is synchronized; mscordbi's Detach for a synchronized target
+    /// performs an implicit resume that has been observed to race the exit work item when the
+    /// resumed code immediately exits (limit drhook-detach-exit-race / probe 12 evidence).
+    /// Explicit Continue here moves the target back to a running state under our control, so
+    /// Detach's mscordbi unwind happens against a running (not stopped) target.
+    ///
+    /// mscordbi's Stop is a COUNTER, not a flag: each Stop call (pauseHandler + Quiesce) is
+    /// matched by a Continue. We loop Continue until controller.Continue returns S_FALSE
+    /// (target already running), bounded by maxAttempts to prevent infinite loop on a
+    /// substrate bug. Without the loop, an unbalanced counter leaves mscordbi internally
+    /// still considering the target synchronized after Detach, blocking the next Attach
+    /// on the same target with CORDBG_E_DEBUGGER_ALREADY_ATTACHED.</summary>
+    private void TryResumeForDetach()
+    {
+        const int S_FALSE = 1;
+        const int maxAttempts = 10;
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            int hr = _controller.Continue(0);
+            if (hr == S_FALSE) return; // target already running; counter balanced
+            if (hr < 0)
+            {
+                _sink.OnAnomaly(new EngineAnomaly(
+                    DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+                    "TryResumeForDetach (Continue loop)",
+                    Observed: $"HRESULT 0x{hr:X8} on attempt {attempt + 1}",
+                    Expected: "S_OK while counter > 0, then S_FALSE when target released",
+                    Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}", ["attempt"] = (attempt + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+                return;
+            }
+            // hr == S_OK: target was synchronized, just decremented one step; loop again.
+        }
+        // Reached maxAttempts without S_FALSE — substrate anomaly, likely a counter leak.
+        _sink.OnAnomaly(new EngineAnomaly(
+            DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+            "TryResumeForDetach (Continue loop exhausted)",
+            Observed: $"controller.Continue returned S_OK {maxAttempts} times without reaching S_FALSE",
+            Expected: "S_FALSE within bounded attempts (target running)",
+            Context: new Dictionary<string, string> { ["maxAttempts"] = maxAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+    }
+
     /// <summary>Synchronize the target before Detach so mscordbi's RC event thread is not
     /// mid-flush of queued callbacks when Detach tears down the shim (finding 14). Stop blocks
     /// until the process is synchronized; best-effort (a failing HRESULT falls through to
@@ -917,6 +969,18 @@ public sealed class DebugSession : IDisposable
         // flush is in progress when Detach tears down the shim. Detach from the synchronized
         // state is the probe-05-validated safe path.
         Quiesce();
+
+        if (!_ownsTarget)
+        {
+            // Attached: detach-leave-running (Probe 44 / docs/limits/drhook-detach-exit-race.md).
+            // For Owned sessions the caller (typically EngineSteppingSession for Launched) has
+            // already killed the target before reaching Dispose — Detach happens against a dead
+            // target, no exit-race. For Attached sessions the target is live and the user did
+            // NOT intend to terminate it: explicitly resume the target so it's RUNNING when
+            // mscordbi's Detach unwinds (avoids the stopped-at-breakpoint state that widens
+            // the exit-race window per probe 12), then Detach. Target keeps running un-debugged.
+            TryResumeForDetach();
+        }
         Detach();
         int terminateHr = _cordbg.Terminate();
         if (terminateHr < 0)
