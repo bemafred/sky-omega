@@ -1,0 +1,12 @@
+# DrHook.Engine probe 48b fixture — heavyweight (dotnet test) spawn pattern in file-based host
+timestamp            = 2026-05-25T02:44:18.2068770Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+cycles               = 10
+clean-dispose-count  = 10
+elapsed-ms           = 11074
+anomaly-count        = 20
+anomalies-by-kind    =
+  LateCallback                     : 10
+  UnexpectedHResult                : 10
+verdict              = PASSED

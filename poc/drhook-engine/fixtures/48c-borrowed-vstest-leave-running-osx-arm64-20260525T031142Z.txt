@@ -1,0 +1,13 @@
+# DrHook.Engine probe 48c fixture — Borrowed+VSTest+leave-running pattern in file-based host
+timestamp            = 2026-05-25T03:11:42.5707870Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+cycles               = 1
+clean-dispose-count  = 1
+elapsed-ms           = 1130
+anomaly-count        = 11
+anomalies-by-kind    =
+  LateCallback                     : 9
+  WorkerSilentBreak                : 1
+  UnexpectedHResult                : 1
+verdict              = PASSED
