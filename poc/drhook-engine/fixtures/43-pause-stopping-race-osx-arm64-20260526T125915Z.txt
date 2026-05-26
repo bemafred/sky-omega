@@ -1,0 +1,24 @@
+# DrHook.Engine probe 43 fixture — Concurrent PauseRequest + STOPPING callback serialisation
+timestamp            = 2026-05-26T12:59:15.8237760Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+target-pid           = 87684
+sentinel-events-0.5s = 24
+pause-cycles         = 10
+total-exception-stops = 10
+elapsed-ms           = 1595
+anomaly-count        = 0
+anomalies-by-kind    =
+  (none surfaced)
+per-cycle            =
+  cycle= 1  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    3ms
+  cycle= 2  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 3  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 4  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 5  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 6  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 7  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 8  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle= 9  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=    0ms
+  cycle=10  exception-backlog=  1  pause-stop-at-stop-# 2  elapsed=   27ms
+verdict              = PASSED
