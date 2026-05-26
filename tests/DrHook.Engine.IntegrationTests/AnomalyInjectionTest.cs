@@ -49,7 +49,7 @@ public sealed class AnomalyInjectionTest
         string targetExe = IntegrationTargetPaths.MtpTargetExe();
         Assert.IsTrue(File.Exists(targetExe), $"MTP target exe not found at {targetExe}.");
 
-        using Process bootstrap = TargetSpawn.Mtp(targetExe);
+        using Process bootstrap = TargetSpawn.Mtp(targetExe, methodFilter: "RunBriefObservableWork");
         try
         {
             int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
@@ -102,7 +102,7 @@ public sealed class AnomalyInjectionTest
         string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"VSTest target csproj not found at {targetProject}.");
 
-        using Process dotnetTest = TargetSpawn.Vstest(targetProject);
+        using Process dotnetTest = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));

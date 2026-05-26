@@ -58,7 +58,7 @@ public sealed class PauseDisposeTest
         // need extra time. If it times out, Stage 2 SIGKILL fires which is expected.
         TimeSpan naturalExitTimeout = TimeSpan.FromMilliseconds(1000);
 
-        using Process bootstrap = TargetSpawn.Mtp(targetExe);
+        using Process bootstrap = TargetSpawn.Mtp(targetExe, methodFilter: "RunBriefObservableWork");
         try
         {
             int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
@@ -107,7 +107,7 @@ public sealed class PauseDisposeTest
 
         TimeSpan naturalExitTimeout = TimeSpan.FromMilliseconds(1000);
 
-        using Process dotnetTest = TargetSpawn.Vstest(targetProject);
+        using Process dotnetTest = TargetSpawn.Vstest(targetProject, methodFilter: "RunBriefObservableWork");
         try
         {
             int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));

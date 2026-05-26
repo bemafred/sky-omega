@@ -19,13 +19,17 @@ namespace DrHook.Engine.IntegrationTests;
 
 internal static class TargetSpawn
 {
-    /// <summary>Spawn an MTP integration target with --debug. Returns the bootstrap Process;
-    /// caller is responsible for disposing it (typically via `using`).</summary>
-    public static Process Mtp(string targetExe)
+    /// <summary>Spawn an MTP integration target with --debug. Optionally filters which test
+    /// method(s) MTP runs via `--filter FullyQualifiedName~<methodFilter>`. Returns the bootstrap
+    /// Process; caller is responsible for disposing it (typically via `using`).</summary>
+    public static Process Mtp(string targetExe, string? methodFilter = null)
     {
+        string args = methodFilter is null
+            ? "--debug"
+            : $"--debug --filter \"FullyQualifiedName~{methodFilter}\"";
         Process bootstrap = new()
         {
-            StartInfo = new ProcessStartInfo(targetExe, "--debug")
+            StartInfo = new ProcessStartInfo(targetExe, args)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -36,12 +40,17 @@ internal static class TargetSpawn
         return bootstrap;
     }
 
-    /// <summary>Spawn `dotnet test` against a Legacy VSTest target with VSTEST_HOST_DEBUG=1.</summary>
-    public static Process Vstest(string targetProject)
+    /// <summary>Spawn `dotnet test` against a Legacy VSTest target with VSTEST_HOST_DEBUG=1.
+    /// Optionally filters which test method(s) VSTest runs via
+    /// `--filter "FullyQualifiedName~<methodFilter>"`.</summary>
+    public static Process Vstest(string targetProject, string? methodFilter = null)
     {
+        string filterArg = methodFilter is null
+            ? string.Empty
+            : $" --filter \"FullyQualifiedName~{methodFilter}\"";
         Process dotnetTest = new()
         {
-            StartInfo = new ProcessStartInfo("dotnet", $"test \"{targetProject}\" -c Release --no-build --nologo")
+            StartInfo = new ProcessStartInfo("dotnet", $"test \"{targetProject}\" -c Release --no-build --nologo{filterArg}")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

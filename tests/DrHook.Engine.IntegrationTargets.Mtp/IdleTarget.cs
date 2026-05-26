@@ -50,4 +50,25 @@ public sealed class IdleTarget
             Thread.Sleep(30);
         }
     }
+
+    // ADR-008 Increment 4c (probe 43 promotion): generates STOPPING (Exception) mscordbi
+    // callbacks via throw/catch in a tight loop. Pairs with ConcurrentPauseStopTest which
+    // attaches during this method's execution and tests substrate's pump serialization of
+    // concurrent PauseRequest + STOPPING events.
+    //
+    // Selected via MTP --filter "FullyQualifiedName~RunThrowCatchLoop" so existing
+    // Phase-8a tests (which assert zero WorkerSilentBreak — no STOPPING events) are
+    // unaffected.
+    [TestMethod]
+    public void RunThrowCatchLoop()
+    {
+        // Bounded throw/catch loop. Each iteration produces a STOPPING (Exception)
+        // callback. Total natural runtime ~500 ms.
+        for (int i = 0; i < 50; i++)
+        {
+            try { throw new InvalidOperationException("drhook-integration-stopping"); }
+            catch { /* first-chance Exception callback */ }
+            Thread.Sleep(10);
+        }
+    }
 }

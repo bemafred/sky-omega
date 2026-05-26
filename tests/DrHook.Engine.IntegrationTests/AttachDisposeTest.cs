@@ -41,7 +41,7 @@ public sealed class AttachDisposeTest
         string targetExe = IntegrationTargetPaths.MtpTargetExe();
         Assert.IsTrue(File.Exists(targetExe), $"MTP integration target exe not found at {targetExe}.");
 
-        using Process bootstrap = TargetSpawn.Mtp(targetExe);
+        using Process bootstrap = TargetSpawn.Mtp(targetExe, methodFilter: "RunBriefObservableWork");
         try
         {
             int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
