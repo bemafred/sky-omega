@@ -59,6 +59,26 @@ public sealed class DebugSession : IDisposable
     /// routing decision. Finding 66 / Probe 47.</summary>
     private const int BorrowedDeathCheckSettleMs = 50;
 
+    /// <summary>Default natural-exit wait for Owned-path Dispose (ADR-008 / finding 68 Stage 1).
+    /// 2000 ms is ~50× the empirically-observed worst case for well-behaved SIGTERM response on
+    /// macOS-arm64 (probes 49/50/52/53: 12-45 ms). Generous enough to absorb host-load variance
+    /// and longer-cleanup targets, tight enough that misbehaving targets surface quickly via the
+    /// TargetStuckAtDispose anomaly path. Configurable per-session via AttachAndOwn / Launch
+    /// overload; this is the fallback when caller doesn't specify.</summary>
+    public static readonly TimeSpan DefaultNaturalExitTimeout = TimeSpan.FromMilliseconds(2000);
+
+    /// <summary>Default brief grace for <see cref="Abandon"/> (ADR-008 / finding 68 Decision 3).
+    /// 200 ms catches even handler-equipped well-behaved targets per finding 68 probes 49/50,
+    /// while keeping Abandon's total budget sub-second. Callers override via the Abandon argument
+    /// if they want even less waiting (rare) or more (use the discipline-default Dispose path
+    /// instead).</summary>
+    public static readonly TimeSpan DefaultAbandonBriefGrace = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>Per-session natural-exit timeout for Owned Dispose. Defaults to
+    /// <see cref="DefaultNaturalExitTimeout"/>. Configurable via the AttachAndOwn / Launch
+    /// overload that accepts a TimeSpan.</summary>
+    private readonly TimeSpan _naturalExitTimeout;
+
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
     // descriptor for listing/removal. Released on Dispose or via Remove/ClearBreakpoints.
@@ -76,7 +96,8 @@ public sealed class DebugSession : IDisposable
 
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
-                         nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess)
+                         nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess,
+                         TimeSpan naturalExitTimeout)
     {
         ProcessId = processId;
         _dbgShim = dbgShim;
@@ -89,6 +110,7 @@ public sealed class DebugSession : IDisposable
         _pProcess = pProcess;
         _ownsTarget = ownsTarget;
         _targetProcess = targetProcess;
+        _naturalExitTimeout = naturalExitTimeout;
     }
 
     /// <summary>OS process id of the attached target.</summary>
@@ -123,7 +145,9 @@ public sealed class DebugSession : IDisposable
         try
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess);
+            // Borrowed sessions don't use naturalExitTimeout (substrate doesn't terminate them).
+            // Pass DefaultNaturalExitTimeout for field initialization symmetry only.
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: false, targetProcess: targetProcess, naturalExitTimeout: DefaultNaturalExitTimeout);
         }
         catch
         {
@@ -144,7 +168,12 @@ public sealed class DebugSession : IDisposable
     /// spawn-time Process handle (if held) can be Disposed immediately after this call
     /// — substrate holds its own. Finding 64.</summary>
     /// <exception cref="ArgumentException">No process with that id is running.</exception>
-    public static DebugSession AttachAndOwn(int processId, IDebugEventSink sink)
+    /// <param name="naturalExitTimeout">Optional per-session override for the natural-exit
+    /// wait in Dispose's Stage 1 SIGTERM (ADR-008 / finding 68). Default: 2000 ms
+    /// (<see cref="DefaultNaturalExitTimeout"/>). Set higher for targets with legitimate
+    /// long-cleanup needs; setting lower is rarely useful — use <see cref="Abandon"/> with
+    /// a custom briefGrace for the fast-escalation case.</param>
+    public static DebugSession AttachAndOwn(int processId, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(sink);
         // Acquire Process handle BEFORE dbgshim attach — if the target exited between
@@ -155,7 +184,8 @@ public sealed class DebugSession : IDisposable
         try
         {
             ThrowIfFailed(dbgShim.CreateCordbForProcess(processId, out pUnknown), "CreateDebuggingInterfaceFromVersion");
-            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess);
+            return FromCordbg(dbgShim, sink, processId, pUnknown, ownsTarget: true, targetProcess: targetProcess,
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
         }
         catch
         {
@@ -179,7 +209,8 @@ public sealed class DebugSession : IDisposable
     /// MCP tool, file-based probes that launch their target. Finding 64 (substrate-owned
     /// lifecycle); callers no longer manage kill-first themselves.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
-    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink)
+    /// <param name="naturalExitTimeout">See <see cref="AttachAndOwn"/>'s parameter doc.</param>
+    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(args);
@@ -197,7 +228,8 @@ public sealed class DebugSession : IDisposable
             // internally. If the target somehow exited between LaunchWithDebugger and now,
             // we proceed with targetProcess=null — Dispose's kill is best-effort.
             try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
-            return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess);
+            return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess,
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
         }
         catch
         {
@@ -211,7 +243,7 @@ public sealed class DebugSession : IDisposable
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
     /// callback vtable, register the handler, <c>DebugActiveProcess</c>, start the continue-loop.
     /// Same shape used by Attach and Launch.</summary>
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess)
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -240,7 +272,7 @@ public sealed class DebugSession : IDisposable
                 },
                 () => controller.Stop(0));
 
-            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess);
+            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout);
         }
         catch
         {
@@ -304,6 +336,116 @@ public sealed class DebugSession : IDisposable
 
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
     public void Resume() => _pump.Resume();
+
+    /// <summary>Send a graceful-termination request to the Owned target (SIGTERM on Unix;
+    /// Windows path is deferred to ADR-007 Phase 9 / GenerateConsoleCtrlEvent). Wait up to
+    /// <paramref name="timeout"/> for the target to exit naturally. Returns true if the target
+    /// exited within the window; false if still alive. Does NOT force-kill on timeout — caller
+    /// chooses the next action (call <see cref="Abandon"/> to escalate; retry; wait longer).
+    ///
+    /// <para>Layer 1 discipline primitive per ADR-008 / finding 68. Well-behaved targets respond
+    /// to SIGTERM in 12-45 ms on macOS-arm64 (per finding 68 probes 49/50/52/53). Tight CPU
+    /// loops with no explicit handler also exit cleanly via CoreCLR's default signal disposition.
+    /// Only targets that explicitly catch + ignore SIGTERM (or Cancel=true their handler) will
+    /// survive past timeout.</para>
+    ///
+    /// <para>Throws <see cref="InvalidOperationException"/> if called on a Borrowed (Attach)
+    /// session — substrate doesn't own the target's lifecycle for Borrowed sessions, so the
+    /// caller is not entitled to request its termination through the substrate.</para></summary>
+    /// <exception cref="InvalidOperationException">Called on a Borrowed session.</exception>
+    public bool RequestExit(TimeSpan timeout)
+    {
+        if (!_ownsTarget)
+        {
+            throw new InvalidOperationException(
+                "RequestExit is valid only for Owned sessions (AttachAndOwn / Launch). Borrowed Attach " +
+                "sessions don't own the target's lifecycle — the caller does. To terminate a Borrowed " +
+                "target, the caller (who owns it) should signal it via their own process-management path.");
+        }
+        if (_targetProcess is null || _targetProcess.HasExited) return true;
+
+        try
+        {
+            int rc = Interop.PosixSignals.Kill(_targetProcess.Id, Interop.PosixSignals.SIGTERM);
+            if (rc != 0)
+            {
+                int err = Marshal.GetLastWin32Error();
+                _sink.OnAnomaly(new EngineAnomaly(
+                    DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+                    "RequestExit (libc.kill SIGTERM)",
+                    Observed: $"kill returned {rc}, errno {err}",
+                    Expected: "0 (signal queued for delivery)",
+                    Context: new Dictionary<string, string> { ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture), ["errno"] = err.ToString(System.Globalization.CultureInfo.InvariantCulture) }));
+                return _targetProcess.HasExited;
+            }
+        }
+        catch (PlatformNotSupportedException)
+        {
+            // Windows: GenerateConsoleCtrlEvent path deferred to Phase 9.
+            // For now, the caller can fall back to Abandon (Process.Kill).
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request",
+                "RequestExit (platform not supported)",
+                Observed: $"PosixSignals.Kill threw PlatformNotSupportedException on {RuntimeInformation.OSDescription}",
+                Expected: "Unix: SIGTERM via libc.kill",
+                Context: new Dictionary<string, string> { ["platform"] = RuntimeInformation.OSDescription }));
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedCleanupException, "mcp-request",
+                "RequestExit (libc.kill)",
+                Observed: $"{ex.GetType().Name}: {ex.Message}",
+                Expected: "kill returns 0 on success or -1+errno on failure",
+                Context: null));
+            return _targetProcess.HasExited;
+        }
+
+        return _targetProcess.WaitForExit((int)timeout.TotalMilliseconds);
+    }
+
+    /// <summary>Forcibly terminate the Owned target after a brief grace period and tear down the
+    /// substrate session. Extraordinary measure for targets that violate process lifecycle rules
+    /// — eternal loops, missing graceful-shutdown handlers, deadlocks. Internally:
+    /// (1) sends SIGTERM, (2) waits <paramref name="briefGrace"/> (default 200 ms,
+    /// <see cref="DefaultAbandonBriefGrace"/>), (3) sends SIGKILL if target still alive,
+    /// (4) runs <see cref="Dispose"/>'s teardown.
+    ///
+    /// <para>The brief grace is a final courtesy — well-behaved targets exit in tens of ms on
+    /// SIGTERM per finding 68, so 200 ms catches them; misbehaving targets get the non-catchable
+    /// SIGKILL within sub-second total budget.</para>
+    ///
+    /// <para>Use <see cref="Dispose"/> for the discipline-default path — Dispose waits
+    /// <see cref="DefaultNaturalExitTimeout"/> (2 seconds) for natural exit. Use Abandon when you
+    /// know the target won't end on its own and you've chosen to terminate quickly.</para>
+    ///
+    /// <para>No-op on already-Disposed sessions. For Borrowed sessions: Abandon's kill semantics
+    /// don't apply (substrate doesn't own the target); the call falls through to Dispose's
+    /// Borrowed teardown path.</para></summary>
+    public void Abandon(TimeSpan? briefGrace = null)
+    {
+        if (Volatile.Read(ref _disposed) != 0) return;
+
+        TimeSpan grace = briefGrace ?? DefaultAbandonBriefGrace;
+        if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
+        {
+            // Stage 1: SIGTERM with brief grace — catches well-behaved targets.
+            bool exitedNaturally;
+            try { exitedNaturally = RequestExit(grace); }
+            catch { exitedNaturally = _targetProcess.HasExited; }
+
+            // Stage 2: SIGKILL fallback. The TargetStuckAtDispose anomaly is reserved for
+            // Dispose's default path (where the discipline-default 2s timeout was applied);
+            // Abandon's deliberate fast-escalation doesn't emit it — the caller opted in.
+            if (!exitedNaturally)
+            {
+                TryKillTargetAndSettle();
+            }
+        }
+
+        Dispose();
+    }
 
     /// <summary>Interrupt a RUNNING debuggee (AsyncBreak). Synchronizes the process via
     /// <c>ICorDebugController.Stop</c>; the next <see cref="WaitForStop"/> returns a
@@ -1090,17 +1232,41 @@ public sealed class DebugSession : IDisposable
         // we touch the controller for the quiescent detach.
         _pump.Dispose();
 
-        // Finding 64 — substrate-enforced lifecycle: for OWNED sessions, kill the target
-        // BEFORE substrate teardown (kill-first protocol, single source of truth). This
-        // closes the dispose-then-kill race (drhook-detach-exit-race / MCH-RE-2 / finding 63)
-        // structurally — callers can't get the ordering wrong because they don't have the
-        // kill code anymore. For BORROWED sessions the substrate does death-detection
-        // (finding 66) and either detaches-leave-running or short-circuits.
-        if (_ownsTarget)
+        // ADR-008 / finding 68: for OWNED sessions, two-stage discipline-aligned termination.
+        // Stage 1: SIGTERM (graceful request, catchable). Wait NaturalExitTimeout for natural
+        //          exit. Well-behaved targets exit in tens of ms; tight CPU loops in ~15 ms via
+        //          CoreCLR default disposition. Only targets that explicitly ignore SIGTERM
+        //          (Cancel=true handler) will survive to Stage 2.
+        // Stage 2: TargetStuckAtDispose anomaly + SIGKILL (non-catchable, via existing
+        //          TryKillTargetAndSettle / Process.Kill / kernel-mandated exit). The anomaly
+        //          surfaces the target's discipline violation as an actionable upstream signal.
+        //
+        // Finding 64 closed the structural dispose-then-kill race (MCH-RE-2) by making the
+        // substrate own the kill operation. Finding 68's empirical SIGTERM evidence motivates
+        // the two-stage discipline — substrate trusts well-implemented targets to exit
+        // naturally, and only forces the kernel-mandated kill against violators.
+        if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
         {
-            TryKillTargetAndSettle();
+            bool exitedNaturally = false;
+            try { exitedNaturally = RequestExit(_naturalExitTimeout); }
+            catch { exitedNaturally = _targetProcess.HasExited; }
+
+            if (!exitedNaturally)
+            {
+                _sink.OnAnomaly(new EngineAnomaly(
+                    DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
+                    "DebugSession.Dispose (Stage 1 SIGTERM timeout)",
+                    Observed: $"target {_targetProcess.Id} did not exit within NaturalExitTimeout={_naturalExitTimeout.TotalMilliseconds}ms after SIGTERM",
+                    Expected: "target completes its work and exits naturally on SIGTERM (well-implemented process lifecycle)",
+                    Context: new Dictionary<string, string>
+                    {
+                        ["pid"] = _targetProcess.Id.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["timeoutMs"] = _naturalExitTimeout.TotalMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    }));
+                TryKillTargetAndSettle();
+            }
         }
-        else
+        else if (!_ownsTarget)
         {
             // FINDING 66 follow-up: for Borrowed sessions, the target may have been killed
             // externally microseconds before this Dispose ran. Process.HasExited can lag the

@@ -76,6 +76,14 @@ public enum AnomalyKind
     /// With the anomaly surface, the cleanup-suppressed exception becomes diagnostic evidence
     /// rather than silent loss.</summary>
     UnexpectedCleanupException,
+
+    /// <summary>The Owned-target Dispose's Stage 1 SIGTERM (graceful-exit request) did not result
+    /// in target exit within <c>NaturalExitTimeout</c>; substrate escalated to Stage 2 SIGKILL
+    /// (Process.Kill). ADR-008 / finding 68 Layer 2 guard: the target violated process lifecycle
+    /// discipline (eternal loop, missing graceful-shutdown handler, deadlocked async work).
+    /// This is an actionable upstream signal — callers can investigate the target's
+    /// implementation rather than tolerate the kill as silent default.</summary>
+    TargetStuckAtDispose,
 }
 
 /// <summary>A structured record of a substrate-correctness anomaly. Surfaced through
