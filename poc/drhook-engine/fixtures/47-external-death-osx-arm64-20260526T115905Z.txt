@@ -1,0 +1,12 @@
+# DrHook.Engine probe 47 fixture — external target death during Borrowed observation
+timestamp            = 2026-05-26T11:59:05.5888130Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+cycles               = 10
+clean-dispose-count  = 10
+elapsed-ms           = 7714
+anomaly-count        = 20
+anomalies-by-kind    =
+  LateCallback                     : 10
+  UnexpectedHResult                : 10
+verdict              = PASSED
