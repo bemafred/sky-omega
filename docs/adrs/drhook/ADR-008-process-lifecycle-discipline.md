@@ -1,6 +1,6 @@
 # ADR-008: Process lifecycle discipline — natural exit by default; explicit `Abandon` for forced termination
 
-**Status:** Proposed — 2026-05-25
+**Status:** Accepted — 2026-05-26 (Phase 0 ground truth landed via finding 68; Decisions 1–3 revised against empirical evidence)
 
 ## Context
 
@@ -35,89 +35,102 @@ This ADR scopes the substrate-evolution work that follows. It does not re-litiga
 
 ## Decision
 
-Five settled positions. Each is open to amendment during Epistemics review.
+Five accepted positions. Decisions 1–3 were revised against empirical evidence from Phase 0 (finding 68); the original Proposed-state versions are visible in git history. Decisions 4–5 unchanged from the Proposed draft.
 
-### Decision 1 — Substrate API: change defaults, add `Abandon` (Option 1 from finding 67)
+### Decision 1 (Accepted) — Substrate API: SIGTERM-then-SIGKILL escalation; explicit `RequestExit` primitive; explicit `Abandon`
 
-Today's `DebugSession.AttachAndOwn` and `DebugSession.Launch` both *kill-first* on `Dispose` (finding 64). This ADR changes that default to **wait-for-natural-exit with timeout-fallback to kill**:
+Today's `DebugSession.AttachAndOwn` and `DebugSession.Launch` both *kill-first* on `Dispose` (finding 64) — sending SIGKILL via `Process.Kill`. Finding 68 establishes empirically that .NET CoreCLR delivers SIGTERM correctly to handler-less targets in ~12 ms and to handler-equipped targets in ~45 ms. The discipline-aligned default becomes **soft-signal first, hard kill as fallback**:
 
 ```csharp
-public void Dispose()  // unchanged signature; behavior change
+public void Dispose()  // signature unchanged; behavior change per finding 68
 {
     // ... (existing _pump.Dispose + _disposed gate unchanged) ...
 
     if (_ownsTarget && _targetProcess is not null)
     {
-        // NEW: wait for natural exit. Substrate trusts well-implemented targets to
-        // end on their own. Bounded by NaturalExitTimeoutMs (Decision 2).
-        bool exitedNaturally = _targetProcess.WaitForExit(NaturalExitTimeoutMs);
+        // Stage 1 — Request graceful exit via SIGTERM (Unix) /
+        // GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT) (Windows). Catchable by target;
+        // well-behaved CLIs exit cleanly within tens of milliseconds (finding 68).
+        bool exitedNaturally = RequestExit(NaturalExitTimeout);
 
         if (!exitedNaturally)
         {
-            // FALLBACK (extraordinary): target is stuck. Emit anomaly + kill.
-            // The anomaly is the substrate signal that callers should investigate
-            // target-side implementation (eternal loop, missing shutdown signal).
+            // Stage 2 — Target is stuck. Surface as substrate signal, then escalate
+            // to non-catchable kill (Process.Kill → SIGKILL / TerminateProcess).
+            // The anomaly tells callers "your target violates process lifecycle
+            // discipline" — actionable upstream signal, not a substrate excuse.
             _sink.OnAnomaly(new EngineAnomaly(
                 DateTimeOffset.UtcNow, AnomalyKind.TargetStuckAtDispose, "mcp-request",
                 "DebugSession.Dispose (natural-exit wait expired)",
-                Observed: $"target {_targetProcess.Id} did not exit within {NaturalExitTimeoutMs}ms",
-                Expected: "target completes its work and exits naturally",
+                Observed: $"target {_targetProcess.Id} did not respond to SIGTERM within {NaturalExitTimeout.TotalMilliseconds}ms",
+                Expected: "target completes its work and exits naturally on SIGTERM",
                 Context: ...));
-            TryKillTargetAndSettle();
+            TryKillTargetAndSettle();   // existing kill-first; SIGKILL fallback
         }
     }
 
-    // ... (existing Quiesce/Detach/Terminate cleanup, unchanged) ...
-    // Death-detection (finding 66) routes correctly whether target exited naturally
-    // or was killed by the fallback above.
+    // ... (existing Quiesce/Detach/Terminate cleanup, routes via finding 66
+    //      death-detection regardless of how target died) ...
 }
 ```
 
-A new explicit method `Abandon` lets callers force termination when they *know* the target is misbehaving:
+**New substrate primitive `RequestExit`** — exposes the Layer 1 discipline directly to substrate consumers:
 
 ```csharp
-/// <summary>Forcibly terminate the target and tear down the substrate session.
-/// Extraordinary measure for targets that violate process lifecycle rules (eternal
-/// loops, missing graceful-shutdown handlers, deadlocks). Use Dispose for the normal
-/// path — Dispose waits for natural exit and only kills as a timeout fallback. Use
-/// Abandon when you know the target won't end on its own and you've chosen to
-/// terminate without waiting.
-/// Equivalent to Process.Kill + Dispose, semantically aligned to the
-/// "extraordinary action" namespace per ADR-008 Layer 2 (debugger guards for
-/// lifecycle violators).</summary>
-public void Abandon()
-{
-    if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
-    {
-        TryKillTargetAndSettle();
-    }
-    Dispose();   // Death-detection (finding 66) handles the now-dead target.
-}
+/// <summary>Send a graceful-termination request to the Owned target — SIGTERM on Unix,
+/// CTRL_BREAK_EVENT on Windows. Wait up to <paramref name="timeout"/> for the target
+/// to exit naturally. Returns true if the target exited within the window; false if
+/// it's still alive. Does NOT force-kill on timeout — caller chooses the next action
+/// (call Abandon to force-kill; retry; wait longer; etc.).
+/// Layer 1 discipline primitive per ADR-008 / finding 68. The "ask nicely first"
+/// surface that complements the kill escape hatch.</summary>
+public bool RequestExit(TimeSpan timeout);
 ```
 
-`Attach` (Borrowed) is **unchanged**. Its existing semantics — substrate does NOT kill — were already discipline-correct. The contract becomes explicitly documented (caller MUST NOT terminate the target after Attach; if forced termination is needed, use `AttachAndOwn` + `Abandon`).
+**`Abandon` method (revised semantics)** — the explicit fast-escalation composition:
 
-**Why Option 1 over Option 2 (new API names)**: avoids API surface fork; preserves the `AttachAndOwn` / `Launch` names that match their semantic role (substrate owns the target's debug-session lifecycle); the behavior change is observable but backwards-compatible for callers that didn't depend on the kill-first timing (most don't — they Dispose at end-of-use, target dies as side effect).
+```csharp
+/// <summary>Forcibly terminate the target after a brief grace period and tear down
+/// the substrate session. Extraordinary measure for targets that violate process
+/// lifecycle rules — eternal loops, missing graceful-shutdown handlers, deadlocks.
+/// Internally: sends SIGTERM, waits <paramref name="briefGrace"/> (default 200 ms),
+/// then sends SIGKILL if target still alive, then runs Dispose. The brief grace is
+/// a final courtesy — well-behaved targets exit in tens of ms on SIGTERM per
+/// finding 68, so 200 ms catches them; misbehaving targets get the non-catchable
+/// SIGKILL within sub-second total budget.
+/// Use Dispose for the normal path (waits NaturalExitTimeout for natural exit).
+/// Use Abandon when you know the target won't end on its own and you've chosen
+/// to terminate quickly.</summary>
+public void Abandon(TimeSpan? briefGrace = null);
+```
 
-### Decision 2 — `NaturalExitTimeoutMs` default: 5000 ms, configurable per-session
+`Attach` (Borrowed) is **unchanged**. Its existing semantics — substrate does NOT kill — were already discipline-correct. The contract is now explicitly documented (caller MUST NOT terminate the target after Attach; if forced termination is needed, use `AttachAndOwn` + `Abandon`).
 
-The natural-exit wait needs a bound. Too short → kills well-behaved targets that take a beat to wind down (legitimate I/O drain, async cleanup, etc.). Too long → bad UX, slow tests, hung MCP tools.
+### Decision 2 (Accepted) — `NaturalExitTimeout` default: 2000 ms, configurable per-session
 
-**Default: 5000 ms** (5 seconds). Empirically generous for typical test-runner shutdown + brief CLI tools; not so long that misbehaving targets indefinitely hang Dispose.
+Finding 68's empirical observations: well-behaved targets exit within 12–45 ms of SIGTERM (probes 49, 50, 52, 53). 2000 ms is ~50× the observed worst-case for well-behaved targets — generous enough to absorb host-load variance and longer-cleanup targets, tight enough that misbehaving targets surface quickly.
 
-**Configurable per-session**: `AttachAndOwn(int processId, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null)` — overload accepts a timeout for callers that know their target's expected work duration (e.g., a probe running 1000-iteration target → 30s; a long-running debug session → 60s). `null` uses the 5000 ms default.
+(Original Proposed default was 5000 ms based on intuition; revised to 2000 ms based on evidence.)
 
-**On timeout**: emit `TargetStuckAtDispose` anomaly, fall back to kill via existing `TryKillTargetAndSettle`. Substrate's `Dispose` does not throw on timeout — it surfaces via the anomaly stream (consistent with substrate-correctness anomalies from findings 65/66).
+**Configurable per-session**: `AttachAndOwn(int processId, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null)` — overload accepts a timeout for callers that know their target's expected cleanup duration. `null` uses the 2000 ms default.
 
-**Cross-platform note**: 5000 ms is macOS-arm64 empirical default. Phase 9 may tune per-platform; the API stays the same.
+**On timeout**: emit `TargetStuckAtDispose` anomaly, fall back to `TryKillTargetAndSettle` (SIGKILL). Substrate's `Dispose` does not throw on timeout — surfaces via the anomaly stream (consistent with substrate-correctness anomalies from findings 65/66).
 
-### Decision 3 — `Abandon` semantics: synchronous, kill-then-Dispose
+**Cross-platform note**: 2000 ms is macOS-arm64 empirical default. Phase 9 may tune per-platform (e.g., Windows console-control-event signaling has higher overhead); API stays the same.
 
-`Abandon` is synchronous: it kills the target (with `KillSettleMs` settle as today's `TryKillTargetAndSettle`), then runs the rest of `Dispose` (death-detection routes through the dead-target path per finding 66).
+### Decision 3 (Accepted) — `Abandon` semantics: two-stage internally (SIGTERM-with-brief-grace then SIGKILL), single synchronous API call
 
-Rationale: an async `Abandon` would require the caller to track when teardown completes; the typical use case is "I'm done, force-quit, clean up" — a synchronous answer fits the caller's mental model. The settle inside `TryKillTargetAndSettle` (100 ms) plus `ExitWorkSettleMs` (200 ms in dead-target path) is sub-second total — well within a normal `Dispose`-equivalent cost.
+`Abandon` is synchronous and two-stage:
+1. Send SIGTERM (graceful request).
+2. Wait `briefGrace` (default 200 ms) — well-behaved targets exit in this window per finding 68.
+3. If target still alive: send SIGKILL via `TryKillTargetAndSettle` (existing 100 ms `KillSettleMs` for kernel reap).
+4. Run `Dispose` (death-detection routes through dead-target path per finding 66; ExitWorkSettleMs 200 ms before Detach).
 
-`Abandon` does NOT take a timeout parameter — it's explicitly the "I've chosen to kill, no waiting" semantic. Callers who want bounded waiting use the timeout-overload of `AttachAndOwn` and let `Dispose` time-out + fall back to kill.
+Total `Abandon` budget under worst case: 200 ms grace + 100 ms kill-settle + 200 ms exit-work-settle + teardown ≈ 600 ms. Well under a second.
+
+The 200 ms `briefGrace` default is the discipline answer to "I want fast termination but I'll still give the target a moment to clean up if it can" — orders of magnitude shorter than the 2000 ms `NaturalExitTimeout` default (which is for the normal-path Dispose), but still respects targets that genuinely respond fast.
+
+(Original Proposed Decision 3 said `Abandon` was kill-first with no grace. Revised based on finding 68's evidence that 200 ms catches even handler-equipped well-behaved targets, making the brief grace effectively free.)
 
 ### Decision 4 — Target design constraint: targets that exit naturally
 
