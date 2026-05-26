@@ -1,4 +1,4 @@
-// Layer 3 — MTP integration target test (finding 61 vocabulary).
+// Layer 3 — MTP integration target test (finding 61 vocabulary; ADR-008 Increment 3 redesign).
 //
 // One [TestMethod] that gives the integration-test layer a real-shaped MTP exe to
 // debug. The signaling mechanism is MTP-native:
@@ -6,16 +6,21 @@
 //   When the integration test launches this exe with `--debug`, MTP prints
 //   "Waiting for debugger to attach... Process Id: NNNN, Name: ..." on stdout and
 //   blocks until Debugger.IsAttached becomes true. The integration test parses the
-//   PID, calls DebugSession.Attach, and MTP then proceeds to run [TestMethod]s.
+//   PID, calls DebugSession.Attach/AttachAndOwn, and MTP then proceeds to run this
+//   [TestMethod].
 //
-// This is the cleanest MTP integration: no custom READY-PID handshake required;
-// MTP's --debug option does it. (Discovered during Phase 2 — the assessment doc
-// didn't cite it; documented in finding 61.)
+// LIFECYCLE DISCIPLINE (ADR-008 / finding 67 / Increment 3): finite observable work
+// then natural exit. Previously Thread.Sleep(30s) — Layer 1 violator (target required
+// substrate kill or caller kill to terminate within reasonable test budget). Now: brief
+// Thread.Start/Join work (~500 ms) generates a small handful of mscordbi callbacks for
+// substrate observation, then the [TestMethod] returns. MTP's test orchestration then
+// finishes naturally — testhost reports results, exits cleanly. Substrate's Dispose
+// observes the natural exit via Stage 1 SIGTERM and finding 66 death-detection (or
+// the target may already be on its way out by the time Dispose runs).
 //
-// The [TestMethod] body just sleeps long enough for the integration test to
-// complete its substrate-validation work (Attach → brief observe → Dispose →
-// assert target alive). 30s is generous; the integration test typically takes
-// < 1s after attach.
+// The integration test asserts natural exit via Process.WaitForExit(timeout) after
+// session.Dispose() — substrate-aligned discipline validation, not an arbitrary
+// timeout-and-kill pattern.
 
 using System;
 using System.Threading;
@@ -27,11 +32,22 @@ namespace DrHook.Engine.IntegrationTargets.Mtp;
 public sealed class IdleTarget
 {
     [TestMethod]
-    public void IdleForDebuggerObservation()
+    public void RunBriefObservableWork()
     {
         // MTP's --debug option handled the wait-for-debugger handshake before
         // this method was invoked. Debugger.IsAttached is true here (or the
-        // launcher chose not to use --debug, which still works — test just runs).
-        Thread.Sleep(TimeSpan.FromSeconds(30));
+        // launcher chose not to use --debug, which still works).
+        //
+        // Brief observable work: 10 Thread.Start/Join × ~50 ms = ~500 ms total.
+        // Generates CreateThread + ExitThread mscordbi callbacks per iteration
+        // for substrate observation, then this [TestMethod] returns naturally.
+        // MTP completes test reporting; testhost exits naturally.
+        for (int i = 0; i < 10; i++)
+        {
+            Thread t = new(static () => Thread.Sleep(20)) { IsBackground = true };
+            t.Start();
+            t.Join();
+            Thread.Sleep(30);
+        }
     }
 }

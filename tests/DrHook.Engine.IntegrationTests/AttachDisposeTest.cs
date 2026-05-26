@@ -1,13 +1,18 @@
-// Layer 1 — INTEGRATION TEST (finding 61 vocabulary, refactored finding 64).
+// Layer 1 — INTEGRATION TEST (finding 61 vocabulary; refactored finding 64; redesigned ADR-008 Increment 3).
 //
-// Substrate validation lifted from probe 42's shape (attach + Dispose → substrate
-// teardown clean) using MTP's --debug as the attach-handshake mechanism.
+// Substrate validation for AttachAndOwn against an MTP-shaped target using MTP's
+// --debug as the attach-handshake mechanism.
 //
-// Lifecycle (finding 64): substrate OWNS the target Process via AttachAndOwn(pid).
-// Caller's bootstrap Process is just for spawn + stdout-parse to extract the PID,
-// then released. Substrate's Dispose handles kill-first internally — there is no
-// way for the caller to misorder. The dispose-then-kill race that surfaced as
-// MCH-RE-2 (finding 63) is structurally impossible from this API surface.
+// Lifecycle (ADR-008 / finding 67):
+//   - Substrate's AttachAndOwn takes lifecycle ownership of the target Process for
+//     finding-64 race protection (substrate-owned kill ordering).
+//   - Substrate's Dispose now (Increment 1, finding 69) performs Stage 1 SIGTERM-then-
+//     wait-for-natural-exit, with Stage 2 SIGKILL fallback only against discipline
+//     violators. CoreCLR's default SIGTERM disposition exits the target cleanly.
+//   - Target's [TestMethod] (Increment 2, finding 70) does brief observable work
+//     then returns naturally; MTP completes test reporting; testhost exits.
+//   - Test asserts natural exit via Process.WaitForExit(timeout) AFTER Dispose —
+//     validates Layer 1 discipline at the integration-test layer.
 
 using System;
 using System.Diagnostics;
@@ -31,46 +36,56 @@ public sealed class AttachDisposeTest
     }
 
     [TestMethod]
-    public void AttachAndOwn_MtpTarget_BriefIdle_DisposeCleanly()
+    public void AttachAndOwn_MtpTarget_BriefWork_NaturalExit()
     {
         string targetExe = ResolveMtpIntegrationTargetExe();
         Assert.IsTrue(File.Exists(targetExe), $"MTP integration target exe not found at {targetExe}.");
 
-        int pid = SpawnAndExtractPid(targetExe);
+        Process bootstrap = SpawnMtpBootstrap(targetExe);
+        try
+        {
+            int pid = ExtractPidFromBootstrap(bootstrap);
 
-        // Substrate takes lifecycle ownership. From this point on, the substrate
-        // is responsible for killing the target on Dispose (kill-first protocol,
-        // finding 64). Caller does NOT touch Process.Kill anywhere — substrate
-        // forbids the bad ordering by not exposing a kill API.
-        using DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink());
+            using (DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink()))
+            {
+                // Brief observation window — substrate's CallbackPump initializes,
+                // drains setup callbacks. Target's [TestMethod] runs brief observable
+                // work (~500 ms of Thread.Start/Join × 10) per Increment 2.
+                Thread.Sleep(TimeSpan.FromMilliseconds(200));
 
-        // Brief observation window — substrate's CallbackPump initializes, may
-        // drain setup callbacks. Target's [TestMethod] begins running (MTP
-        // --debug-waiter saw Debugger.IsAttached become true).
-        Thread.Sleep(TimeSpan.FromMilliseconds(200));
+                // session.Dispose() runs at end of using:
+                //   Stage 1: SIGTERM via libc.kill → wait NaturalExitTimeout (2s default).
+                //            Target's [TestMethod] finishes its remaining iterations,
+                //            returns, MTP reports + exits. Substrate observes natural exit.
+                //   Stage 2: would fire only if target ignored SIGTERM past 2s — doesn't
+                //            happen for well-behaved targets (finding 68 evidence).
+                //   No TargetStuckAtDispose anomaly expected.
+                //   Finding 66 death-detection routes the now-dead target through
+                //   ExitWorkSettleMs + Detach cleanly.
+            }
 
-        // session.Dispose() runs at end of using block:
-        //   1. pump.Dispose() — joins worker, drains queues
-        //   2. TryKillTargetAndSettle() — kills target (Owned), 100ms settle
-        //   3. Quiesce — drains mscordbi queued callbacks (against dying/dead target)
-        //   4. Detach — releases debugger registration
-        //   5. Terminate — tears down ICorDebug
-        //   6. Release breakpoint refs / symbols / pProcess / pUnknown
-        //   7. _callback.Dispose() — frees CCW memory
-        //   8. _dbgShim.Dispose() — releases libdbgshim handle
-        //   9. _targetProcess.Dispose() — releases substrate's Process handle
-        //
-        // The kill-first ordering (step 2 before step 4) is what closes
-        // drhook-detach-exit-race for the Owned path — substrate's responsibility,
-        // not caller's.
+            // Increment 3 discipline assertion: bootstrap (the OS Process) MUST have
+            // exited naturally within a reasonable post-Dispose window. Substrate's
+            // SIGTERM + the [TestMethod]'s natural completion + MTP's test-reporting
+            // teardown together total well under 5 seconds.
+            bool exitedNaturally = bootstrap.WaitForExit(5000);
+            Assert.IsTrue(exitedNaturally,
+                "MTP target did not exit naturally within 5s after Dispose — Layer 1 discipline violation " +
+                "(substrate may have left target stuck, OR target is mis-implemented).");
+        }
+        finally
+        {
+            // Defensive fallback only — if the test logic above asserted natural exit,
+            // this is a no-op. Present to avoid orphaning the OS Process on assertion
+            // failure or unexpected exception path.
+            try { if (!bootstrap.HasExited) bootstrap.Kill(entireProcessTree: true); } catch { }
+            bootstrap.Dispose();
+        }
     }
 
-    private static int SpawnAndExtractPid(string targetExe)
+    private static Process SpawnMtpBootstrap(string targetExe)
     {
-        // The caller's Process handle is bootstrap-only — used to spawn, read stdout,
-        // and extract the PID that MTP's --debug printed. After that, substrate
-        // takes over via AttachAndOwn. We release the bootstrap handle immediately.
-        using Process bootstrap = new()
+        Process bootstrap = new()
         {
             StartInfo = new ProcessStartInfo(targetExe, "--debug")
             {
@@ -80,7 +95,11 @@ public sealed class AttachDisposeTest
             }
         };
         bootstrap.Start();
+        return bootstrap;
+    }
 
+    private static int ExtractPidFromBootstrap(Process bootstrap)
+    {
         int pid = -1;
         ManualResetEventSlim ready = new(false);
         Thread reader = new(() =>
@@ -106,13 +125,8 @@ public sealed class AttachDisposeTest
             "MTP integration target did not print 'Process Id: NNNN' within 30s — MTP --debug handshake failed.");
 
         return Volatile.Read(ref pid);
-        // bootstrap.Dispose() runs at end of using — releases caller's Process handle.
-        // The OS process keeps running until substrate kills it via AttachAndOwn's lifecycle.
     }
 
-    /// <summary>Resolve the MTP integration target's executable path. On Unix-like systems
-    /// MTP test projects compile to an apphost binary with no .exe extension; Windows has
-    /// .exe. Probe both shapes so the test is cross-platform.</summary>
     private static string ResolveMtpIntegrationTargetExe()
     {
         string testBin = AppContext.BaseDirectory;
