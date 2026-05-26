@@ -156,7 +156,53 @@ For probe 42's 50-cycle pattern specifically: the new model is 50 *spawn-fresh-t
 
 ## Phases
 
-Five engineering increments, in dependency order. Each is a probe + finding + commit unit.
+Six phases. Phase 0 is Epistemics work that MUST complete before the engineering decisions (1–5) are settled. Phase 0's ground-truth finding may revise Decisions 1–5 — they are explicitly *proposed positions subject to evidence*, not final. Engineering increments 1–5 (formerly the "phases" of the prior draft) follow once Phase 0 produces a finding doc with the empirical truth table.
+
+### Phase 0 — Process lifecycle ground truth (Epistemics)
+
+Before any substrate API change, establish empirical ground truth for process termination behavior across signal types, target shapes, and runtime platforms. The Decisions 1–5 below are written against my (Claude's) intuitions about process signals; for a "state of the art" substrate, intuitions are not enough — evidence is.
+
+Hypothesis space the probes must populate:
+
+- **Signal types and catchability**:
+  - SIGINT (Unix) / CTRL_C_EVENT (Windows) — catchable, ignorable; what's the .NET CoreCLR default behavior; what does `Console.CancelKeyPress` actually catch?
+  - SIGTERM (Unix) / no direct Windows equivalent — catchable; `AppDomain.ProcessExit` semantics; differences between platforms.
+  - SIGKILL (Unix) / TerminateProcess (Windows) — NOT catchable, by kernel design. Target has no opportunity to respond. `Process.Kill` in .NET defaults to this.
+  - Ctrl+C from terminal vs. programmatic signal — supposed correlation, real differences.
+- **Target shapes**:
+  - Well-behaved: explicit signal handler that gracefully exits.
+  - Ignoring: catches signal, marks `Cancel = true`, keeps running.
+  - Default: no handler at all — what's the CoreCLR baseline?
+  - Tight-loop: pure CPU-bound, no async safepoints — can the runtime even interrupt?
+- **Process tree**:
+  - Signal to leader vs. signal to process group.
+  - `Process.Kill(entireProcessTree:true)` semantics on Unix vs. Windows.
+  - Orphaned descendants — adopted by init on Unix; behavior on Windows.
+
+**Probes 49–54** (this phase's deliverables):
+
+| Probe | Target shape | Signal sent | Validates |
+|---|---|---|---|
+| 49 | `Console.CancelKeyPress` handler, graceful exit | SIGINT (Unix) / CTRL_C_EVENT (Windows) | Soft signal honored by well-behaved target |
+| 50 | `AppDomain.ProcessExit` handler | SIGTERM (Unix) / platform equivalent (Windows TBD) | Soft signal honored via different .NET surface |
+| 51 | Catches SIGINT, sets `Cancel = true` — ignores | SIGINT then SIGKILL | Soft signal can be ignored; hard kill cannot |
+| 52 | `while (true) { /* CPU-bound, no yield */ }` | SIGTERM then SIGKILL | CoreCLR's signal-checking frequency under tight CPU work |
+| 53 | No explicit handler | SIGINT, SIGTERM separately | CoreCLR default signal disposition |
+| 54 | Target + 2 spawned children | Signal-to-leader vs. signal-to-pgrp vs. `Process.Kill(entireProcessTree:true)` | Process-tree propagation semantics |
+
+Each probe outputs:
+- Target exit code (signal-related or clean 0)
+- Time-to-exit (how fast after signal arrival)
+- Observable side effects (did the handler run? did "graceful cleanup" complete?)
+- Cross-platform notes (probes 49–54 are macOS-arm64 initially; Phase 9 expands to Linux + Windows)
+
+**Phase 0 deliverable: finding 68 — "Process lifecycle ground truth (macOS-arm64 reference)."** Documents what was probed, what was empirically observed, what the substrate API design should commit to vs. what platform-specifics should be configurable.
+
+**Decisions 1–5 status after Phase 0**: each Decision is reviewed against the ground-truth finding. Amend where evidence diverges from current proposed positions. Move ADR-008 from Proposed → Accepted only after this review.
+
+### Phase 0.1 — Cross-platform expansion (deferred to ADR-007 Phase 9)
+
+Probes 49–54 on Linux/x64, Linux/arm64, Windows/x64, Windows/arm64. Substrate API may need per-platform-tuning constants; design Phase 0's substrate-API commitments to be platform-agnostic in shape, platform-specific in tuning.
 
 ### Increment 1 — Substrate API change
 
@@ -233,12 +279,13 @@ Plus the 2 from Increment 3: 14 integration tests total.
 ## Validation
 
 This ADR moves **Proposed → Accepted** when:
-- The 5 decisions are reviewed + confirmed (or amended) by Martin
-- The phase scope is agreed to be the right granularity (single ADR covers all 5 increments, vs splitting)
+- **Phase 0 is COMPLETE** — probes 49–54 implemented, executed on macOS-arm64, finding 68 published with empirical ground-truth table
+- The 5 decisions are reviewed against finding 68's evidence and confirmed (or amended) by Martin
+- The phase scope is agreed to be the right granularity (single ADR covers all phases, vs splitting)
 
 It moves **Accepted → Completed** when:
-- All 5 increments are done (each with probe + finding + commit)
-- Findings 68 / 69 / etc. document the engineering steps
+- All 5 engineering increments are done (each with probe + finding + commit)
+- Findings 68 (Phase 0 ground truth) + 69+ (Increments) document the work
 - 14 integration tests pass in CI on macOS-arm64
 - ADR-007 Phase 1 substrate-correctness arc is closed at the integration-enforcement level
 
