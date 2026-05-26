@@ -1,7 +1,17 @@
 #!/usr/bin/env -S dotnet
 //
-// DrHook.Engine probe 54 PARENT TARGET — spawns 2 children, then parks.
-// Children print CHILD_READY <pid>; parent prints PARENT_READY <pid> and CHILDREN_PID <p1> <p2>.
+// DrHook.Engine probe 54 PARENT TARGET — INTENTIONAL LAYER-1-VIOLATOR for process-tree testing
+// =================================================================================================
+//
+// Spawns 2 children, then parks. Children print CHILD_READY <pid>; parent prints
+// PARENT_READY <pid> + the forwarded child stdout.
+//
+// LIFECYCLE DISCIPLINE NOTE (ADR-008 / finding 67 / Increment 2):
+// This target INTENTIONALLY remains a Layer 1 violator (parked with Task.Delay). The
+// probe's hypothesis is "how do signals propagate across a parent-child process tree?"
+// — that scenario REQUIRES parent and children to be alive when the probe sends signals,
+// so propagation behavior can be observed. The "parked tree" shape IS the test variable.
+// See also 54-child-target.cs (same discipline note).
 
 using System;
 using System.Diagnostics;
