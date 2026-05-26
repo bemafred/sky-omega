@@ -1,6 +1,6 @@
 # ADR-008: Process lifecycle discipline — natural exit by default; explicit `Abandon` for forced termination
 
-**Status:** Accepted — 2026-05-26 (Phase 0 ground truth landed via finding 68; Decisions 1–3 revised against empirical evidence)
+**Status:** Completed — 2026-05-26 (Increments 1–4 shipped; Phase 8 mass promotion delivers 12/12 CI-enforced integration tests on macOS-arm64 across MTP + VSTest)
 
 ## Context
 
@@ -299,15 +299,24 @@ This ADR moves **Proposed → Accepted** when:
 It moves **Accepted → Completed** when:
 - All 5 engineering increments are done (each with probe + finding + commit)
 - Findings 68 (Phase 0 ground truth) + 69+ (Increments) document the work
-- 14 integration tests pass in CI on macOS-arm64
+- Integration tests pass in CI on macOS-arm64 (12/12 delivered; the planned probe 47 → integration test was dropped as redundant — substrate death-detection is structurally tested by the existing Dispose paths and the external-kill scenario doesn't compose naturally with the `WaitForExit` Layer-1 discipline assertion)
 - ADR-007 Phase 1 substrate-correctness arc is closed at the integration-enforcement level
+
+**Status as of 2026-05-26:**
+- Increment 1 — substrate API SIGTERM-then-SIGKILL escalation + `RequestExit` + `Abandon` + `TargetStuckAtDispose` anomaly ([finding 69](../../../poc/drhook-engine/findings/69-increment1-substrate-api.md))
+- Increment 1b — Owned-path Dispose invokes `TryResumeForDetach` before SIGTERM so substrate acts on its knowledge of target halt state ([finding 73](../../../poc/drhook-engine/findings/73-increment1b-release-pending-stops.md))
+- Increment 2 — probe target redesign for natural exit; 5 targets annotated as intentional-violator-by-design ([finding 70](../../../poc/drhook-engine/findings/70-increment2-target-redesign.md))
+- Increment 3 — integration target + existing integration test redesign; `WaitForExit` Layer-1 assertions added ([finding 71](../../../poc/drhook-engine/findings/71-increment3-integration-target-redesign.md))
+- Increment 4 — Phase 8 mass promotion; 12/12 integration tests across 6 substrate-correctness scenarios × {MTP, VSTest} ([finding 72](../../../poc/drhook-engine/findings/72-increment4a-mass-promotion.md) Phase 8a, [finding 73](../../../poc/drhook-engine/findings/73-increment1b-release-pending-stops.md) Phase 8b probe 41, [finding 74](../../../poc/drhook-engine/findings/74-increment4c-concurrent-pause-stop-promoted.md) Phase 8c probe 43)
+- Increment 5 — ADR-007 amendment + this ADR's closure (this Status transition)
 
 ## Consequences
 
 **For substrate code:**
-- `DebugSession` Owned-path Dispose behavior changes (kill-first → wait-then-kill-on-timeout). Backwards-compatible for callers that didn't depend on the kill-first timing; observable as longer Dispose time for well-behaved targets (up to 5s for natural exit instead of ~300 ms kill-first today, but with much cleaner semantics).
-- New `Abandon` method + new `AnomalyKind.TargetStuckAtDispose`. Surface expansion, no removal.
-- `Attach` (Borrowed) unchanged in behavior; contract documented explicitly.
+- `DebugSession` Owned-path Dispose behavior changes (kill-first → `TryResumeForDetach` → SIGTERM-with-`NaturalExitTimeout`(2000 ms default) → SIGKILL-on-timeout). Backwards-compatible for callers that didn't depend on the kill-first timing; observable as longer Dispose time for well-behaved targets (typically tens of ms for SIGTERM-honoring targets, up to 2 s budget for stuck targets, but with much cleaner semantics).
+- New `RequestExit(TimeSpan)` primitive (Layer 1 discipline) + new `Abandon(TimeSpan?)` method (fast-escalation composition) + new `AnomalyKind.TargetStuckAtDispose`. Surface expansion, no removal.
+- New `PosixSignals` interop helper P/Invokes `libc.kill` (Unix only; Windows path deferred to ADR-007 Phase 9).
+- `Attach` (Borrowed) unchanged in behavior; contract documented explicitly. `RequestExit` throws `InvalidOperationException` on Borrowed sessions.
 
 **For substrate-validation work:**
 - All probe targets exit naturally (no more `Timeout.Infinite` / `while(true)` patterns).
@@ -316,8 +325,8 @@ It moves **Accepted → Completed** when:
 - Phase 8 mass promotion delivers 14 CI-enforced integration tests.
 
 **For MCP tools (`drhook_step_run`, `drhook_step_launch`):**
-- Tool semantics unchanged at the surface. Internally, `EngineSteppingSession` uses substrate APIs that now wait-for-natural-exit. For typical interactive debug-and-quit usage, target processes will be given up to 5 s to exit cleanly after `Dispose` — usually invisible (typical interactive debug session ends with a `Quit` command that exits the target cleanly).
-- If a user's debug target hangs (eternal loop, etc.), `drhook_step_run` would now block up to 5 s on cleanup. Acceptable cost for the discipline improvement. Future: explicit "abandon session" MCP tool for hung-target cases.
+- Tool semantics unchanged at the surface. Internally, `EngineSteppingSession` uses substrate APIs that now wait-for-natural-exit. For typical interactive debug-and-quit usage, target processes will be given up to 2 s (default `NaturalExitTimeout`) to exit cleanly after `Dispose` — usually invisible (CoreCLR default SIGTERM disposition exits in tens of ms).
+- If a user's debug target hangs (eternal loop, etc.), `drhook_step_run` would now block up to 2 s on cleanup and surface a `TargetStuckAtDispose` anomaly. Acceptable cost for the discipline improvement. Future: explicit "abandon session" MCP tool for hung-target cases.
 
 **For the substrate's strategic position:**
 - The substrate becomes *documentably* discipline-respecting at the API surface. This is part of substrate-grade work — the substrate doesn't just behave correctly; it teaches callers what discipline looks like by enforcing it via API shape.
@@ -331,5 +340,12 @@ It moves **Accepted → Completed** when:
 - [finding 65](../../../poc/drhook-engine/findings/65-probe42-redesign-regression.md) — dispatch-settle in `TryResumeForDetach`; live-target informational flood race closed
 - [finding 66](../../../poc/drhook-engine/findings/66-target-death-detection.md) — target-death detection; Layer 2 guard for misbehaving / dying targets (preserved under new framing)
 - [finding 67](../../../poc/drhook-engine/findings/67-lifecycle-discipline.md) — discipline articulation that drives this ADR
+- [finding 68](../../../poc/drhook-engine/findings/68-process-lifecycle-ground-truth.md) — Phase 0 empirical ground truth on macOS-arm64 (probes 49–54); revised Decisions 1–3 against intuition-based originals
+- [finding 69](../../../poc/drhook-engine/findings/69-increment1-substrate-api.md) — Increment 1 substrate-API delivery
+- [finding 70](../../../poc/drhook-engine/findings/70-increment2-target-redesign.md) — Increment 2 probe target redesign
+- [finding 71](../../../poc/drhook-engine/findings/71-increment3-integration-target-redesign.md) — Increment 3 integration target redesign + existing-test natural-exit pattern
+- [finding 72](../../../poc/drhook-engine/findings/72-increment4a-mass-promotion.md) — Increment 4a Phase 8a mass promotion (8 tests)
+- [finding 73](../../../poc/drhook-engine/findings/73-increment1b-release-pending-stops.md) — Increment 1b Owned-Dispose releases pending stops before SIGTERM + Increment 4b probe 41 promoted (AnomalyInjectionTest)
+- [finding 74](../../../poc/drhook-engine/findings/74-increment4c-concurrent-pause-stop-promoted.md) — Increment 4c ConcurrentPauseStopTest promoted; Phase 8 COMPLETE (12/12)
 - [`feedback_process_lifecycle_discipline`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_process_lifecycle_discipline.md) — memory entry for the discipline; generalizable beyond DrHook.Engine
 - Martin's framing during 2026-05-25 session: "We should rely on natural process endings, but being a debugger — we should *guard* for misbehaving targets that *violates* process lifecycle rules." + the Claude Chat App lens for OS-level kill-required processes.
