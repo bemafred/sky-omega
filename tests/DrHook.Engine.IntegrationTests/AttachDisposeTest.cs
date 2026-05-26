@@ -38,13 +38,13 @@ public sealed class AttachDisposeTest
     [TestMethod]
     public void AttachAndOwn_MtpTarget_BriefWork_NaturalExit()
     {
-        string targetExe = ResolveMtpIntegrationTargetExe();
+        string targetExe = IntegrationTargetPaths.MtpTargetExe();
         Assert.IsTrue(File.Exists(targetExe), $"MTP integration target exe not found at {targetExe}.");
 
-        Process bootstrap = SpawnMtpBootstrap(targetExe);
+        using Process bootstrap = TargetSpawn.Mtp(targetExe);
         try
         {
-            int pid = ExtractPidFromBootstrap(bootstrap);
+            int pid = TargetSpawn.ExtractPid(bootstrap, TimeSpan.FromSeconds(30));
 
             using (DebugSession session = DebugSession.AttachAndOwn(pid, new NullSink()))
             {
@@ -75,81 +75,8 @@ public sealed class AttachDisposeTest
         }
         finally
         {
-            // Defensive fallback only — if the test logic above asserted natural exit,
-            // this is a no-op. Present to avoid orphaning the OS Process on assertion
-            // failure or unexpected exception path.
+            // Defensive fallback only — if natural-exit assertion succeeded, no-op.
             try { if (!bootstrap.HasExited) bootstrap.Kill(entireProcessTree: true); } catch { }
-            bootstrap.Dispose();
         }
-    }
-
-    private static Process SpawnMtpBootstrap(string targetExe)
-    {
-        Process bootstrap = new()
-        {
-            StartInfo = new ProcessStartInfo(targetExe, "--debug")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            }
-        };
-        bootstrap.Start();
-        return bootstrap;
-    }
-
-    private static int ExtractPidFromBootstrap(Process bootstrap)
-    {
-        int pid = -1;
-        ManualResetEventSlim ready = new(false);
-        Thread reader = new(() =>
-        {
-            string? line;
-            while ((line = bootstrap.StandardOutput.ReadLine()) is not null)
-            {
-                // MTP --debug output: "Waiting for debugger to attach... Process Id: NNNN, Name: ..."
-                Match m = Regex.Match(line, @"Process Id:\s*(\d+)");
-                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPid))
-                {
-                    Volatile.Write(ref pid, parsedPid);
-                    ready.Set();
-                }
-            }
-        }) { IsBackground = true, Name = "target-stdout" };
-        reader.Start();
-        Thread errDrain = new(() => { while (bootstrap.StandardError.ReadLine() is not null) { } })
-        { IsBackground = true, Name = "target-stderr" };
-        errDrain.Start();
-
-        Assert.IsTrue(ready.Wait(TimeSpan.FromSeconds(30)),
-            "MTP integration target did not print 'Process Id: NNNN' within 30s — MTP --debug handshake failed.");
-
-        return Volatile.Read(ref pid);
-    }
-
-    private static string ResolveMtpIntegrationTargetExe()
-    {
-        string testBin = AppContext.BaseDirectory;
-        DirectoryInfo? dir = new(testBin);
-        for (int up = 0; up < 4 && dir is not null; up++) dir = dir.Parent;
-        Assert.IsNotNull(dir, $"Couldn't walk up from {testBin} to find tests/ directory.");
-
-        string targetBaseDir = Path.Combine(dir!.FullName, "DrHook.Engine.IntegrationTargets.Mtp", "bin");
-        Assert.IsTrue(Directory.Exists(targetBaseDir), $"Integration target bin directory missing: {targetBaseDir}");
-
-        string[] configDirs = Directory.GetDirectories(targetBaseDir);
-        Assert.IsTrue(configDirs.Length > 0, $"No build configurations under {targetBaseDir}");
-
-        string targetName = "DrHook.Engine.IntegrationTargets.Mtp";
-        string exeName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? targetName + ".exe" : targetName;
-
-        string currentConfig = new DirectoryInfo(testBin).Parent?.Parent?.Name ?? "Release";
-        string candidateConfigDir = configDirs.FirstOrDefault(d => Path.GetFileName(d) == currentConfig) ?? configDirs[0];
-
-        string[] tfmDirs = Directory.GetDirectories(candidateConfigDir);
-        Assert.IsTrue(tfmDirs.Length > 0, $"No TFM directories under {candidateConfigDir}");
-        string tfmDir = tfmDirs[0];
-
-        return Path.Combine(tfmDir, exeName);
     }
 }

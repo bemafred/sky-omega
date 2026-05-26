@@ -38,27 +38,13 @@ public sealed class VstestAttachDisposeTest
     [TestMethod]
     public void AttachAndOwn_VstestTestHost_BriefWork_NaturalExit()
     {
-        string targetProject = ResolveLegacyTargetProjectPath();
+        string targetProject = IntegrationTargetPaths.VstestTargetProjectPath();
         Assert.IsTrue(File.Exists(targetProject), $"Legacy VSTest integration target csproj not found at {targetProject}.");
 
-        // Spawn dotnet test with VSTEST_HOST_DEBUG=1; capture testhost PID from stdout.
-        // dotnet-test process is a transient bootstrap that hosts vstest.console + testhost
-        // as descendants. When testhost exits naturally, the parents wind down too.
-        Process dotnetTest = new()
-        {
-            StartInfo = new ProcessStartInfo("dotnet", $"test \"{targetProject}\" -c Release --no-build --nologo")
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                Environment = { ["VSTEST_HOST_DEBUG"] = "1" },
-            }
-        };
-        dotnetTest.Start();
-
+        using Process dotnetTest = TargetSpawn.Vstest(targetProject);
         try
         {
-            int testHostPid = ExtractTestHostPid(dotnetTest);
+            int testHostPid = TargetSpawn.ExtractPid(dotnetTest, TimeSpan.FromSeconds(60));
 
             using (DebugSession session = DebugSession.AttachAndOwn(testHostPid, new NullSink()))
             {
@@ -87,52 +73,7 @@ public sealed class VstestAttachDisposeTest
         }
         finally
         {
-            // Defensive fallback only — if natural-exit assertion succeeded, no-op.
             try { if (!dotnetTest.HasExited) dotnetTest.Kill(entireProcessTree: true); } catch { }
-            dotnetTest.Dispose();
         }
-    }
-
-    private static int ExtractTestHostPid(Process dotnetTest)
-    {
-        int pid = -1;
-        ManualResetEventSlim ready = new(false);
-        Thread reader = new(() =>
-        {
-            string? line;
-            while ((line = dotnetTest.StandardOutput.ReadLine()) is not null)
-            {
-                // VSTest output (.NET 10.0.100, finding 62 D6):
-                //   "Host debugging is enabled. Please attach debugger to testhost process to continue."
-                //   "Process Id: NNNN, Name: dotnet"
-                Match m = Regex.Match(line, @"Process Id:\s*(\d+)");
-                if (m.Success && int.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPid))
-                {
-                    Volatile.Write(ref pid, parsedPid);
-                    ready.Set();
-                }
-            }
-        }) { IsBackground = true, Name = "vstest-stdout" };
-        reader.Start();
-        Thread errDrain = new(() => { while (dotnetTest.StandardError.ReadLine() is not null) { } })
-        { IsBackground = true, Name = "vstest-stderr" };
-        errDrain.Start();
-
-        Assert.IsTrue(ready.Wait(TimeSpan.FromSeconds(60)),
-            "VSTest didn't print 'Process Id: NNNN' within 60s — VSTEST_HOST_DEBUG=1 stdout format may have shifted, or dotnet test failed to spawn testhost.");
-        return Volatile.Read(ref pid);
-    }
-
-    /// <summary>Resolve the Legacy VSTest integration target's csproj path. Walks
-    /// up from the integration-test bin dir to tests/, then into the Legacy target
-    /// project directory.</summary>
-    private static string ResolveLegacyTargetProjectPath()
-    {
-        string testBin = AppContext.BaseDirectory;
-        DirectoryInfo? dir = new(testBin);
-        for (int up = 0; up < 4 && dir is not null; up++) dir = dir.Parent;
-        Assert.IsNotNull(dir, $"Couldn't walk up from {testBin} to find tests/ directory.");
-
-        return Path.Combine(dir!.FullName, "DrHook.Engine.IntegrationTargets.Vstest", "DrHook.Engine.IntegrationTargets.Vstest.csproj");
     }
 }
