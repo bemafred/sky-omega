@@ -1247,6 +1247,23 @@ public sealed class DebugSession : IDisposable
         // naturally, and only forces the kernel-mandated kill against violators.
         if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
         {
+            // ADR-008 Increment 1b: release any pending mscordbi stop before SIGTERM.
+            // The substrate KNOWS from session activity whether the target is currently
+            // halted by mscordbi (pump worker parked at _resume.Take until _pump.Dispose's
+            // CompleteAdding fired and unparked it via WorkerSilentBreak). Even after the
+            // pump worker exits, mscordbi continues to hold the target halted at the
+            // hit/break point. SIGTERM against a halted target may be queued but blocked
+            // by mscordbi's halt mechanism (probe 56 + Phase 8b AnomalyInjectionTest
+            // evidence). Releasing the stop via controller.Continue moves target back to
+            // running state — SIGTERM's signal-delivery thread then completes cleanly via
+            // CoreCLR default disposition.
+            //
+            // Reuses TryResumeForDetach (Borrowed-path helper from finding 59/65): if
+            // target is already running, first Continue returns S_FALSE — no-op (~50ms
+            // for final settle). If halted, Continue releases the stop, target runs, then
+            // SIGTERM lands cleanly. Substrate acts on its knowledge of target state.
+            TryResumeForDetach();
+
             bool exitedNaturally = false;
             try { exitedNaturally = RequestExit(_naturalExitTimeout); }
             catch { exitedNaturally = _targetProcess.HasExited; }
