@@ -1,6 +1,6 @@
 # ADR-009: Test-debugging MCP surface — MTP-first launch + universal attach + project-aware mode selection
 
-**Status:** Proposed — 2026-05-27
+**Status:** Superseded — 2026-05-27 by [ADR-010](ADR-010-mcp-tool-surface-redesign.md). The test-debugging-specific scope this ADR drafted is now a special case of `drhook_launch` accepting a `.csproj` target (ADR-010 Decision principle 3 + Tier 3). The "explicit per-runner modes" framing in this ADR's Decision 1 was correctly identified by Martin as contradicting the substrate-runner-agnosticism principle; ADR-010's surface redesign is API-runner-agnostic by construction.
 
 ## Context
 
