@@ -133,19 +133,18 @@ Completion: Both Probe 46 (MTP) and Probe 46b (Legacy VSTest) pass in isolation;
 
 **Probe numbers freed.** 64, 65, 66 — next-available per the temporal-allocation-order convention.
 
-### Phase 6 — Per-variant validation probes
+### Phase 6 — Per-variant validation probes — CLOSED 2026-05-27 (preconditions changed; substrate exceeded expectations)
 
-One probe per in-scope variant from Phase 4. Each composes existing `AttachAndOwn` / `Launch` substrate APIs (Phase 3 superseded, Phase 4 + 5 closed — substrate is runner-agnostic per their retirement notes); none invent new substrate.
+**Status: Closed.** Same insight that closed Phases 4 + 5, extended to its per-variant validation form: substrate generality + Phase 8's CI-enforced coverage make per-variant validation either redundant or future-conditional.
 
-- [ ] **Probe 67.** xUnit under `dotnet test`, sequential — runner spawn + `AttachAndOwn(testhost_pid)` + breakpoint hit + locals inspection + clean detach.
-- [ ] **Probe 68.** xUnit under `dotnet test`, parallel (intra-process) — same plus concurrent test threads.
-- [ ] **Probe 69.** MSTest under `dotnet test`.
-- [ ] **Probe 70.** NUnit under `dotnet test`.
-- [ ] **Probe 71.** xUnit under `xunit.console` (the non-vstest path — proves we're not accidentally vstest-coupled).
-- [ ] **Probe 72** (Phase 9 — Windows). xUnit under NCrunch, single test — manual attach via `EnumerateClrProcesses` filtering (per ADR-009 Decision 3).
-- [ ] **Probe 73** (Phase 9 — Windows). xUnit under NCrunch, degree>1 — multi-process attach validation; surfaces any genuine substrate-performance concern (Phase 5 probe 66 was closed as future-conditional, but Phase 9 may revisit if NCrunch live observation produces evidence).
+**Per drafted probe (all unstarted, all closed):**
 
-Rider as oracle for probes 67–71.
+- **Probes 67–71 (xUnit/MSTest/NUnit under `dotnet test` + `xunit.console`).** Phase 8's 12/12 integration tests prove substrate-correctness across two distinct runner shapes (MTP + legacy VSTest) at the substrate-callback / lifecycle / anomaly-surfacing level. Adding per-CLI variations of the same substrate scenarios is *adversarial-but-uninteresting* — no substrate hypothesis is being tested, only the user-test framework varies, which the substrate doesn't observe at its layer. The Phase 4 + Phase 5 closures already established this; Phase 6's per-variant form follows.
+- **Probes 72–73 (NCrunch on Windows).** Closed via deferral rather than dissolution. The preconditions Phase 6 was built against changed: the substrate turned out far better than expected, NCrunch's "deeper integration" never crystallized as a committed scope, and the assessment doc's "attach-mode initial" stance means NCrunch live observation isn't blocked on Phase 6 substrate work. **Reopened when a concrete NCrunch use case + Windows environment converge** — at that point, a new probe set is scoped against the actual NCrunch model and the substrate-as-it-then-stands, not against today's prospective design.
+
+**The shared closure principle (Phases 4 + 5 + 6).** All three phases were per-variant prospective substrate planning. Each closed under the same evidence chain: substrate is runner-agnostic at its layer; Phase 8 CI-enforces this across enough runner shapes that the runner-agnosticism is *demonstrated, not assumed*; orchestration-layer variance (which DOES matter per-runner) is ADR-009's territory. The "characterize each variant in advance" framing turned out to over-anticipate substrate variance that didn't exist.
+
+**Probe numbers freed.** 67, 68, 69, 70, 71, 72, 73 — next-available per the temporal-allocation-order convention.
 
 ### Phase 7 — MCP surface cleanup
 
@@ -169,12 +168,12 @@ The ADR-006 Validation gate closes here, not earlier. Phase 2's meta-probe is th
 
 ### Phase 9 — Cross-platform validation campaign
 
-Time-budgeted separately. Validates all prior phases on Linux + Windows; per-platform discoveries become new probes; NCrunch variants from Phase 6 (probes 72, 73) execute here for the first time. ADR-008's Phase 0.1 (probes 49–54 signal-disposition ground truth across platforms) is folded into this campaign.
+Time-budgeted separately. Validates the substrate-correctness probe corpus on Linux + Windows; per-platform discoveries become new probes. ADR-008's Phase 0.1 (probes 49–54 signal-disposition ground truth across platforms) is folded into this campaign. NCrunch validation deferred until concrete use case + Windows environment converge (Phase 6 closure note).
 
-- [ ] Probes 02–40 + 41–46 (Phase 1/2) + 47–56 (ADR-008 substrate behavior) + 67–71 (Phase 6 per-variant validation) on Linux/x64. Phase 3 superseded (probe numbers 57–59 freed); Phase 4 closed (probe numbers 60–63 freed); Phase 5 closed (probe numbers 64–66 freed).
+- [ ] Probes 02–40 + 41–46 (Phase 1/2) + 47–56 (ADR-008 substrate behavior) on Linux/x64. Phase 3 superseded (probe numbers 57–59 freed); Phases 4 + 5 + 6 closed (probe numbers 60–73 freed).
 - [ ] Same probe set on Linux/arm64.
-- [ ] Same probe set + probes 72, 73 (Phase 6 NCrunch variants) on Windows/x64.
-- [ ] Same probe set + probes 72, 73 on Windows/arm64.
+- [ ] Same probe set on Windows/x64.
+- [ ] Same probe set on Windows/arm64.
 - [ ] Per-platform findings documented; any new probes from discoveries integrated into the substrate.
 - [ ] Phase 8 CI extended to all four platforms.
 
@@ -188,7 +187,7 @@ It moves **Accepted → Completed** when:
 - The ADR-006 Validation gate — *"All DrHook MCP tools pass integration tests against the engine"* — is closed (Phase 8).
 - `drhook-detach-exit-race` is **Resolved** (not Mitigated) per Phase 1 probe 44.
 - No environment-flag trick anywhere in the test-debug path.
-- All allocated probes (41–46 Phase 1/2 + 47–56 ADR-008 + 67–73 Phase 6; Phase 3 superseded, Phases 4 + 5 closed without probes) pass on macOS/arm64 in CI; Phase 9 has completed validation on Linux/x64+arm64, Windows/x64+arm64.
+- All allocated probes (41–46 Phase 1/2 + 47–56 ADR-008; Phase 3 superseded, Phases 4 + 5 + 6 closed without probes) pass on macOS/arm64 in CI; Phase 9 has completed validation on Linux/x64+arm64, Windows/x64+arm64.
 - The `EngineAnomaly` infrastructure exists, its capture mechanism is validated by a designed probe (intentional anomaly injection exercising the surfacing path), and the surfacing reaches the log sink + MCP response as designed. Organic in-the-wild surfacing is *expected* during Phase 9 and any such surprise is promoted to a probe + finding when it occurs — but the absence of an organic surprise is not a completion blocker.
 
 ## Discipline notes
