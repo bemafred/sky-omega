@@ -81,17 +81,20 @@ The previous spiral happened here. Its purpose is to characterise the failure mo
 
 Completion: Both Probe 46 (MTP) and Probe 46b (Legacy VSTest) pass in isolation; the integration-test promotion shape is documented for both platforms. **MCH-RE-2 structurally eliminated** by finding 64's substrate-owned-lifecycle refactor — Phase 8 mass promotion unblocked. Adjacent discovery: probe 42 has a separate pre-existing regression at HEAD (independent of the refactor) queued for future substrate investigation; does not block Phase 8 since probe 42's pattern (20 sequential Borrowed sessions) is more extreme than what Phase 8 requires.
 
-### Phase 3 — Child-process attach substrate
+### Phase 3 — Child-process attach substrate — SUPERSEDED 2026-05-27
 
-The substrate capability test-runner debugging needs for variant J (`dotnet test` → testhost). One substrate capability among several; explicitly not *the* test-runner answer (NCrunch needs a different capability — Phase 5).
+**Status: Superseded.** Premise dissolved by the MTP-first strategic position (consolidated in [`docs/architecture/technical/drhook-test-debugging-assessment.md`](../../architecture/technical/drhook-test-debugging-assessment.md)) and the Phase 8 integration-test reality.
 
-> **Note on probe numbering.** Probe numbers are temporal (allocation-order), not phase markers. ADR-008's lifecycle-discipline work (2026-05-24 → 2026-05-26) consumed probes 47–56, so the forward-looking Phase 3–6 probe numbers below shift to start at the next-available slot (57). The original ADR-007 draft used 47–63 for Phases 3–6; that mapping is superseded.
+**What the original Phase 3 was solving.** "Variant J (`dotnet test` → testhost)" assumed the substrate would need OS-level process-tree observation to attach to a `testhost` descendant of `dotnet test`. The drafted probes (57 ICorDebug parent-fork behavior; 58 substrate-mediated handoff; 59 parent retained through child attach) addressed that premise.
 
-- [ ] **Probe 57.** ICorDebug semantics on child process spawn. Does `dbgshim` enumerate children of an already-debugged parent? Does CreateProcess callback fire on child spawn?
-- [ ] **Probe 58.** Launch parent, observe child spawn, detach parent, Attach child. Validate the handoff.
-- [ ] **Probe 59.** Same as 58 but parent kept alive (parent produces diagnostic output we want to keep observing).
+**Why the premise dissolved.**
+1. **MTP collapses the process tree.** Under Microsoft.Testing.Platform, the test project IS the testhost — a single executable. The substrate's existing `AttachAndOwn(pid)` is sufficient; no parent → child observation needed. MTP exposes a documented `--debug` switch that prints `Process Id: NNNN` and blocks until `Debugger.IsAttached` — this is the canonical attach handshake, not an env-flag trick.
+2. **VSTest legacy compat is explicitly accepted.** The assessment doc (§"Recommended DrHook 1.8.x strategy") classifies `VSTEST_HOST_DEBUG=1` + stdout PID parse as legacy compatibility, *not* as a substrate capability to develop further. Phase 8 integration tests demonstrate this works cleanly under the substrate's existing API surface.
+3. **Phase 8's integration tests demonstrate end-to-end coverage.** `tests/DrHook.Engine.IntegrationTests/` covers both MTP (`TargetSpawn.Mtp` using `--debug`) and VSTest legacy (`TargetSpawn.Vstest` using the env flag) end-to-end. 12/12 tests pass on macOS-arm64.
 
-Rider as oracle: for each probe, the same scenario in Rider gives the truth-reference. Discrepancies are findings.
+**What remains substrate work.** The assessment doc and the integration-test reality identify substrate APIs that are *spec'd but not implemented*: `LaunchTestExecutable(project, framework, filter)` for MTP direct-launch, `EnumerateClrProcesses()` for `--select` mode, multi-process handling, NCrunch process-tree attach. These are different work from "child-process attach substrate" — they are *MCP-tool / orchestration-layer* substrate additions, not engine-level ICorDebug primitives. Sequenced in a successor ADR (or rescoped Phase 3) — see Phase 5 + Phase 7 placeholders for now.
+
+**Probe numbers freed.** 57, 58, 59 — next-available for the successor scope. Per the temporal-allocation-order convention.
 
 ### Phase 4 — Test-runner characterization
 
@@ -106,7 +109,7 @@ For each in-scope variant from the stress-dimensions table, characterise what su
 
 **Expected scope-decision priors** (to be confirmed or revised by the probes, not pre-committed):
 - Variants A, F, G, J (dotnet test, single/parallel testhost) — *expected supported*.
-- Variants E, K (xunit.console) and L (nunit3-console) — *expected supported* once Phase 3 child-process attach lands; variant E (in-process) may surface as structured "not supported" if AssemblyLoadContext boundaries make stable observation unreliable.
+- Variants E, K (xunit.console) and L (nunit3-console) — *expected supported* via direct-attach to the test executable (Phase 3 superseded; the assessment doc's MTP-first model applies broadly — when the runner spawns a single CLR process, `AttachAndOwn(pid)` suffices); variant E (in-process) may surface as structured "not supported" if AssemblyLoadContext boundaries make stable observation unreliable.
 - Variants B, H, M (NCrunch) — *designed-for* (Phase 5 substrate); validation deferred to Phase 9.
 - Variant N (Rider / VS TestExplorer) — *structured "not supported"* (Rider is the oracle, not a target; VS TestExplorer deferred to Phase 9).
 - Variants O–V (resource contention + lifecycle pathology) — *substrate-orthogonal*: characterised in Phase 6 per-variant tests, not Phase 4. Pathologies like U (`Environment.Exit`) and V (infinite loop) are debugger scenarios the substrate must observe-and-report, not runner scenarios.
@@ -125,9 +128,9 @@ Concrete probes for substrate capabilities Phase 4's scope decisions require. Ea
 
 ### Phase 6 — Per-variant validation probes
 
-One probe per in-scope variant from Phase 4. Each composes Phase 3 + Phase 5 substrate capabilities; none invent new substrate.
+One probe per in-scope variant from Phase 4. Each composes Phase 5 substrate capabilities + existing `AttachAndOwn` / `Launch` substrate APIs (Phase 3 superseded — see its retirement note); none invent new substrate.
 
-- [ ] **Probe 67.** xUnit under `dotnet test`, sequential — child-process attach (Phase 3) + breakpoint hit + locals inspection + clean detach.
+- [ ] **Probe 67.** xUnit under `dotnet test`, sequential — runner spawn + `AttachAndOwn(testhost_pid)` + breakpoint hit + locals inspection + clean detach.
 - [ ] **Probe 68.** xUnit under `dotnet test`, parallel (intra-process) — same plus concurrent test threads.
 - [ ] **Probe 69.** MSTest under `dotnet test`.
 - [ ] **Probe 70.** NUnit under `dotnet test`.

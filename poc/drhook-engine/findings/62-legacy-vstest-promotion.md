@@ -118,7 +118,7 @@ When the integration test exe (Layer 1) crashes mid-spawn-chain (e.g., the SIGBU
 - [ADR-007](../../../docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) Phase 2, Probe 46b.
 - [finding 61](61-promotion-meta-probe.md) — Probe 46 outcome (MTP path); shared vocabulary + 5 prior discoveries.
 - [finding 59](59-detach-exit-race-outcome.md) — substrate's detach-leave-running (Attached); MCH-RE-1 (same-target re-attach mscordbi accumulation; MCH-RE-2 here is the same-host-process analogue).
-- Assessment doc `src/DrHook.Mcp/drhook-test-debigging-assessment.md` — MTP-first strategy + Legacy VSTest env-var fallback.
+- Assessment doc [`docs/architecture/technical/drhook-test-debugging-assessment.md`](../../../docs/architecture/technical/drhook-test-debugging-assessment.md) — MTP-first strategy + Legacy VSTest env-var fallback.
 
 ## Phase 2 status — CLOSED with caveat
 

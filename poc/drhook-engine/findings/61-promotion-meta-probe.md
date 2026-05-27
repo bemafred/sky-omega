@@ -73,7 +73,7 @@ The integration test:
 
 ## Discoveries (unknown unknowns surfaced)
 
-The two analysis docs (`drhook-test-debugging.md` + `drhook-test-debigging-assessment.md`) covered MTP-first strategy + VSTest env-var fallback + sovereignty + BCL-cleanliness. Probe 46's actual execution surfaced five additional concrete details that should land in the next revision of the docs.
+The two analysis docs (`docs/architecture/technical/drhook-test-debugging.md` + `docs/architecture/technical/drhook-test-debugging-assessment.md`) covered MTP-first strategy + VSTest env-var fallback + sovereignty + BCL-cleanliness. Probe 46's actual execution surfaced five additional concrete details that should land in the next revision of the docs.
 
 ### Discovery #1: MTP `--debug` is the documented attach-handshake — supersedes the assessment doc's recommendation
 
@@ -169,8 +169,8 @@ That's Phase 6+ work per ADR-007's existing sequence. Not Phase 2.
 ## Cross-references
 
 - [ADR-007](../../../docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) Phase 2, Probe 46.
-- `src/DrHook.Mcp/drhook-test-debugging.md` — first analysis doc (superseded).
-- `src/DrHook.Mcp/drhook-test-debigging-assessment.md` — second analysis doc, MTP-first strategy + sovereignty argument.
+- [`docs/architecture/technical/drhook-test-debugging.md`](../../../docs/architecture/technical/drhook-test-debugging.md) — first analysis doc (superseded).
+- [`docs/architecture/technical/drhook-test-debugging-assessment.md`](../../../docs/architecture/technical/drhook-test-debugging-assessment.md) — second analysis doc, MTP-first strategy + sovereignty argument.
 - [finding 59](59-detach-exit-race-outcome.md) — substrate's detach-leave-running for Attached (Phase 1); this integration test depends on it (asserts target alive after Dispose).
 - [Memory `feedback_dont_compound_unknowns`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_dont_compound_unknowns.md) — the discipline rule that justified splitting MTP and Legacy VSTest targets into Probe 46 and Probe 46b.
 

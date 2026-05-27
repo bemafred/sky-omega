@@ -12,3 +12,4 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-006](ADR-006-drhook-engine.md)                              | DrHook.Engine — Native ICorDebug Replacement for netcoredbg | Accepted |
 | [ADR-007](ADR-007-teardown-concurrency-test-debug.md)            | Teardown and Concurrency Hardening; Substrate-Aligned Test-Runner Debugging; Integration-Test Mechanism Characterization | Accepted |
 | [ADR-008](ADR-008-process-lifecycle-discipline.md)               | Process Lifecycle Discipline — Natural Exit by Default; Explicit `Abandon` for Forced Termination | Completed |
+| [ADR-009](ADR-009-test-debugging-mcp-surface.md)                 | Test-Debugging MCP Surface — MTP-First Launch + Universal Attach + Project-Aware Mode Selection | Proposed |
