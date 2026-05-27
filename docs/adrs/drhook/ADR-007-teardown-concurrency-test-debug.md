@@ -85,9 +85,11 @@ Completion: Both Probe 46 (MTP) and Probe 46b (Legacy VSTest) pass in isolation;
 
 The substrate capability test-runner debugging needs for variant J (`dotnet test` → testhost). One substrate capability among several; explicitly not *the* test-runner answer (NCrunch needs a different capability — Phase 5).
 
-- [ ] **Probe 47.** ICorDebug semantics on child process spawn. Does `dbgshim` enumerate children of an already-debugged parent? Does CreateProcess callback fire on child spawn?
-- [ ] **Probe 48.** Launch parent, observe child spawn, detach parent, Attach child. Validate the handoff.
-- [ ] **Probe 49.** Same as 48 but parent kept alive (parent produces diagnostic output we want to keep observing).
+> **Note on probe numbering.** Probe numbers are temporal (allocation-order), not phase markers. ADR-008's lifecycle-discipline work (2026-05-24 → 2026-05-26) consumed probes 47–56, so the forward-looking Phase 3–6 probe numbers below shift to start at the next-available slot (57). The original ADR-007 draft used 47–63 for Phases 3–6; that mapping is superseded.
+
+- [ ] **Probe 57.** ICorDebug semantics on child process spawn. Does `dbgshim` enumerate children of an already-debugged parent? Does CreateProcess callback fire on child spawn?
+- [ ] **Probe 58.** Launch parent, observe child spawn, detach parent, Attach child. Validate the handoff.
+- [ ] **Probe 59.** Same as 58 but parent kept alive (parent produces diagnostic output we want to keep observing).
 
 Rider as oracle: for each probe, the same scenario in Rider gives the truth-reference. Discrepancies are findings.
 
@@ -95,10 +97,10 @@ Rider as oracle: for each probe, the same scenario in Rider gives the truth-refe
 
 For each in-scope variant from the stress-dimensions table, characterise what substrate capability it requires. Output is **scope-decision finalisation** at the variant level, not probes-and-fixes.
 
-- [ ] **Probe 50** — `dotnet test`/vstest process tree (variants A, F, G, J). What's the testhost spawn timing? What env does the runner set? Where does user-test code load? What does ICorDebug see when we attach to testhost?
-- [ ] **Probe 51** — `xunit.console` (variant E, K). Single-process; what's different from variant A?
-- [ ] **Probe 52** — `nunit3-console` (variant L).
-- [ ] **Probe 53** — NCrunch process model characterisation (variants B, H, M) — *Windows; characterisation only, validation in Phase 9.* What's the process spawn rate? What's the test thread's stack like under NCrunch instrumentation? What env / pipe protocol does NCrunch use to coordinate? Sourced from NCrunch docs + observation, not validation.
+- [ ] **Probe 60** — `dotnet test`/vstest process tree (variants A, F, G, J). What's the testhost spawn timing? What env does the runner set? Where does user-test code load? What does ICorDebug see when we attach to testhost?
+- [ ] **Probe 61** — `xunit.console` (variant E, K). Single-process; what's different from variant A?
+- [ ] **Probe 62** — `nunit3-console` (variant L).
+- [ ] **Probe 63** — NCrunch process model characterisation (variants B, H, M) — *Windows; characterisation only, validation in Phase 9.* What's the process spawn rate? What's the test thread's stack like under NCrunch instrumentation? What env / pipe protocol does NCrunch use to coordinate? Sourced from NCrunch docs + observation, not validation.
 - [ ] **Static-state characterisation per runner:** what view of static state does each runner give the substrate? AssemblyLoadContext boundaries, fixture reuse, parallel-test reuse of static state.
 - [ ] **Stack-cost characterisation per runner:** baseline measurement of how much of the test thread's stack each runner consumes before the user's test runs.
 
@@ -115,25 +117,25 @@ Each probe validated against Rider on macOS where applicable. Output: one `findi
 
 Concrete probes for substrate capabilities Phase 4's scope decisions require. Each substrate capability is a substrate decision with its own probes, not a one-line feature.
 
-**Accepted risk — NCrunch substrate designed pre-validation.** Probes 54 and 55 design substrate capabilities (multi-session engine, process-tree observation + pattern-matched attach) against NCrunch's documented model + observation, not against a running NCrunch instance — that validation is Phase 9. This is an explicit asymmetry against the doc's general "validate before commit" discipline: the alternative (defer Phase 5 until a Windows + NCrunch environment is available) would block the macOS substrate work for an unbounded period. The bet is that NCrunch's process-spawn-and-coordinate model is well enough characterised in its docs to design against. If Phase 9 reveals the real model differs materially, that's substrate rework, accepted as the cost of not blocking. Pre-Phase-9 de-risking via a one-off Windows session is *encouraged but not gated* — if a Windows machine becomes available during Phases 5–8, run probe 53's characterisation pass and feed findings back.
+**Accepted risk — NCrunch substrate designed pre-validation.** Probes 64 and 65 design substrate capabilities (multi-session engine, process-tree observation + pattern-matched attach) against NCrunch's documented model + observation, not against a running NCrunch instance — that validation is Phase 9. This is an explicit asymmetry against the doc's general "validate before commit" discipline: the alternative (defer Phase 5 until a Windows + NCrunch environment is available) would block the macOS substrate work for an unbounded period. The bet is that NCrunch's process-spawn-and-coordinate model is well enough characterised in its docs to design against. If Phase 9 reveals the real model differs materially, that's substrate rework, accepted as the cost of not blocking. Pre-Phase-9 de-risking via a one-off Windows session is *encouraged but not gated* — if a Windows machine becomes available during Phases 5–8, run probe 63's characterisation pass and feed findings back.
 
-- [ ] **Probe 54 — Multi-session engine.** Required by NCrunch (variant H, inter-process parallel). Today's `EngineSteppingSession` is a DI singleton; multi-session is architectural. Probe characterises: concurrent session lifetimes, resource sharing, fairness, isolation guarantees.
-- [ ] **Probe 55 — Process-tree observation + pattern-matched attach.** Required by NCrunch (variants B, M) — processes are spawned by NCrunch's coordinator, not from a Launch'd parent we control. We need: observe the system process tree, match new .NET processes against a pattern, attach.
-- [ ] **Probe 56 — Attach-rate-envelope hardening.** If Phase 1 probe 44 characterised single-shot 10/10, this probe characterises 50/sec sustained under simulated NCrunch load. **Inherits the finding-66 performance scope**: the conservative defaults `KillSettleMs=100` / `BorrowedDeathCheckSettleMs=50` / `ExitWorkSettleMs=200` + `TryResumeForDetach` settles (finding 65) total ~300 ms per Owned Dispose and ~70–250 ms per Borrowed Dispose. At NCrunch's 50/sec attach-detach rate this exceeds the budget by ~15× and needs substrate work in this probe (options characterised in finding 66 § *Performance characterization — Dispose latency*): empirical tuning of settle durations, signal-based waits for HasExited propagation, possible `IAsyncDisposable` migration, or background-thread teardown. The settles are NOT on per-operation hot paths (`GetLocals`, `SetBreakpoint`, `Continue`, `Pause`, `Step*` all unaffected); the cost is on session teardown specifically.
+- [ ] **Probe 64 — Multi-session engine.** Required by NCrunch (variant H, inter-process parallel). Today's `EngineSteppingSession` is a DI singleton; multi-session is architectural. Probe characterises: concurrent session lifetimes, resource sharing, fairness, isolation guarantees.
+- [ ] **Probe 65 — Process-tree observation + pattern-matched attach.** Required by NCrunch (variants B, M) — processes are spawned by NCrunch's coordinator, not from a Launch'd parent we control. We need: observe the system process tree, match new .NET processes against a pattern, attach.
+- [ ] **Probe 66 — Attach-rate-envelope hardening.** If Phase 1 probe 44 characterised single-shot 10/10, this probe characterises 50/sec sustained under simulated NCrunch load. **Inherits the finding-66 performance scope**: the conservative defaults `KillSettleMs=100` / `BorrowedDeathCheckSettleMs=50` / `ExitWorkSettleMs=200` + `TryResumeForDetach` settles (finding 65) total ~300 ms per Owned Dispose and ~70–250 ms per Borrowed Dispose. At NCrunch's 50/sec attach-detach rate this exceeds the budget by ~15× and needs substrate work in this probe (options characterised in finding 66 § *Performance characterization — Dispose latency*): empirical tuning of settle durations, signal-based waits for HasExited propagation, possible `IAsyncDisposable` migration, or background-thread teardown. The settles are NOT on per-operation hot paths (`GetLocals`, `SetBreakpoint`, `Continue`, `Pause`, `Step*` all unaffected); the cost is on session teardown specifically.
 
 ### Phase 6 — Per-variant validation probes
 
 One probe per in-scope variant from Phase 4. Each composes Phase 3 + Phase 5 substrate capabilities; none invent new substrate.
 
-- [ ] **Probe 57.** xUnit under `dotnet test`, sequential — child-process attach (Phase 3) + breakpoint hit + locals inspection + clean detach.
-- [ ] **Probe 58.** xUnit under `dotnet test`, parallel (intra-process) — same plus concurrent test threads.
-- [ ] **Probe 59.** MSTest under `dotnet test`.
-- [ ] **Probe 60.** NUnit under `dotnet test`.
-- [ ] **Probe 61.** xUnit under `xunit.console` (the non-vstest path — proves we're not accidentally vstest-coupled).
-- [ ] **Probe 62** (Phase 9 — Windows). xUnit under NCrunch, single test — multi-session (Phase 5 probe 54) + process-tree observation (probe 55).
-- [ ] **Probe 63** (Phase 9 — Windows). xUnit under NCrunch, degree>1 — adds attach-rate envelope (probe 56).
+- [ ] **Probe 67.** xUnit under `dotnet test`, sequential — child-process attach (Phase 3) + breakpoint hit + locals inspection + clean detach.
+- [ ] **Probe 68.** xUnit under `dotnet test`, parallel (intra-process) — same plus concurrent test threads.
+- [ ] **Probe 69.** MSTest under `dotnet test`.
+- [ ] **Probe 70.** NUnit under `dotnet test`.
+- [ ] **Probe 71.** xUnit under `xunit.console` (the non-vstest path — proves we're not accidentally vstest-coupled).
+- [ ] **Probe 72** (Phase 9 — Windows). xUnit under NCrunch, single test — multi-session (Phase 5 probe 64) + process-tree observation (probe 65).
+- [ ] **Probe 73** (Phase 9 — Windows). xUnit under NCrunch, degree>1 — adds attach-rate envelope (probe 66).
 
-Rider as oracle for probes 57–61.
+Rider as oracle for probes 67–71.
 
 ### Phase 7 — MCP surface cleanup
 
@@ -157,12 +159,12 @@ The ADR-006 Validation gate closes here, not earlier. Phase 2's meta-probe is th
 
 ### Phase 9 — Cross-platform validation campaign
 
-Time-budgeted separately. Validates all prior phases on Linux + Windows; per-platform discoveries become new probes; NCrunch variants from Phase 6 (probes 62, 63) execute here for the first time.
+Time-budgeted separately. Validates all prior phases on Linux + Windows; per-platform discoveries become new probes; NCrunch variants from Phase 6 (probes 72, 73) execute here for the first time. ADR-008's Phase 0.1 (probes 49–54 signal-disposition ground truth across platforms) is folded into this campaign.
 
-- [ ] Probes 02–40 + 41–61 on Linux/x64.
-- [ ] Probes 02–40 + 41–61 on Linux/arm64.
-- [ ] Probes 02–40 + 41–61 + 62 + 63 on Windows/x64.
-- [ ] Probes 02–40 + 41–61 + 62 + 63 on Windows/arm64.
+- [ ] Probes 02–40 + 41–46 (Phase 1/2) + 47–56 (ADR-008 substrate behavior) + 57–71 (Phases 3–6 dotnet test / xunit.console / nunit3-console) on Linux/x64.
+- [ ] Same probe set on Linux/arm64.
+- [ ] Same probe set + probes 72, 73 (Phase 6 NCrunch variants) on Windows/x64.
+- [ ] Same probe set + probes 72, 73 on Windows/arm64.
 - [ ] Per-platform findings documented; any new probes from discoveries integrated into the substrate.
 - [ ] Phase 8 CI extended to all four platforms.
 
@@ -176,7 +178,7 @@ It moves **Accepted → Completed** when:
 - The ADR-006 Validation gate — *"All DrHook MCP tools pass integration tests against the engine"* — is closed (Phase 8).
 - `drhook-detach-exit-race` is **Resolved** (not Mitigated) per Phase 1 probe 44.
 - No environment-flag trick anywhere in the test-debug path.
-- Probes 41–63 pass on macOS/arm64 in CI; Phase 9 has completed validation on Linux/x64+arm64, Windows/x64+arm64.
+- All allocated probes (41–46 Phase 1/2 + 47–56 ADR-008 + 57–73 Phases 3–6) pass on macOS/arm64 in CI; Phase 9 has completed validation on Linux/x64+arm64, Windows/x64+arm64.
 - The `EngineAnomaly` infrastructure exists, its capture mechanism is validated by a designed probe (intentional anomaly injection exercising the surfacing path), and the surfacing reaches the log sink + MCP response as designed. Organic in-the-wild surfacing is *expected* during Phase 9 and any such surprise is promoted to a probe + finding when it occurs — but the absence of an organic surprise is not a completion blocker.
 
 ## Discipline notes
