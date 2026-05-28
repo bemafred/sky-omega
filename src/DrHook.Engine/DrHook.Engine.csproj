@@ -16,6 +16,11 @@
         <!-- EventPipe trace parsing (used by Diagnostics/StackInspector — moved here as part of
              the netcoredbg retirement, finding 52). -->
         <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.1.30" />
+        <!-- Roslyn — the .NET compiler. Substrate-admitted per ADR-009 (compiler is platform; the
+             distribution mechanism is NuGet but Roslyn IS the platform compiler chain, not an
+             external semantic dependency). Used by Expressions/CSharpCondition for parsing C#
+             expressions in BreakpointPolicy conditions and log-message templates (finding 34). -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.*" />
     </ItemGroup>
 
     <!--
