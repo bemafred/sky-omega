@@ -46,11 +46,11 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
 
     /// <summary>Enqueue side — invoked by the callback thunks on mscordbi's event thread.
     /// Returns immediately so the event thread is never blocked.</summary>
-    public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail)
+    public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0)
     {
         try
         {
-            _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail));
+            _events.Add(new CallbackEvent(kind, name, appDomain, thread, detail, breakpoint));
         }
         catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
         {

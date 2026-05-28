@@ -24,12 +24,16 @@ internal enum CallbackKind
 /// implementation must enqueue and return promptly — it must never block that thread.</summary>
 internal interface IManagedCallbackSink
 {
-    void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail);
+    void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0);
 }
 
 /// <summary>A delivered callback queued for the worker. <paramref name="Thread"/> /
 /// <paramref name="AppDomain"/> are raw <c>ICorDebugThread</c>/<c>ICorDebugAppDomain</c>
 /// pointers, captured for stopping events (used by stepping in a later increment).
 /// <paramref name="Detail"/> carries a callback-specific scalar — the
-/// <c>CorDebugExceptionCallbackType</c> for <see cref="CallbackKind.Exception"/>, else 0.</summary>
-internal readonly record struct CallbackEvent(CallbackKind Kind, string Name, nint AppDomain, nint Thread, int Detail);
+/// <c>CorDebugExceptionCallbackType</c> for <see cref="CallbackKind.Exception"/>, else 0.
+/// <paramref name="Breakpoint"/> is the raw <c>ICorDebugBreakpoint</c> pointer for
+/// <see cref="CallbackKind.BreakpointHit"/> (the specific breakpoint that fired); <c>0</c>
+/// for all other callback kinds. Captured so the substrate can resolve hits back to their
+/// stored <see cref="BreakpointPolicy"/> for evaluation (finding 34 + ADR-010 Increment 2).</summary>
+internal readonly record struct CallbackEvent(CallbackKind Kind, string Name, nint AppDomain, nint Thread, int Detail, nint Breakpoint = 0);

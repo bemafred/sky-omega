@@ -59,9 +59,9 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     private static int Fire(nint pThis, string name)
         => Fire(pThis, CallbackKind.Informational, name, 0, 0, 0);
 
-    private static int Fire(nint pThis, CallbackKind kind, string name, nint appDomain, nint thread, int detail = 0)
+    private static int Fire(nint pThis, CallbackKind kind, string name, nint appDomain, nint thread, int detail = 0, nint breakpoint = 0)
     {
-        HostOf(pThis)?._sink.OnCallback(kind, name, appDomain, thread, detail);
+        HostOf(pThis)?._sink.OnCallback(kind, name, appDomain, thread, detail, breakpoint);
         return S_OK;
     }
 
@@ -173,7 +173,7 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     private static uint Release(nint pThis) => HostOf(pThis)?.ReleaseImpl() ?? 0;
 
     // ============================ ICorDebugManagedCallback (26) ============================
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Breakpoint(nint p, nint a, nint t, nint b) => Fire(p, CallbackKind.BreakpointHit, "Breakpoint", a, t);
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Breakpoint(nint p, nint a, nint t, nint b) => Fire(p, CallbackKind.BreakpointHit, "Breakpoint", a, t, detail: 0, breakpoint: b);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int StepComplete(nint p, nint a, nint t, nint s, int r) => Fire(p, CallbackKind.StepComplete, "StepComplete", a, t);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Break(nint p, nint a, nint t) => Fire(p, CallbackKind.Break, "Break", a, t);
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int Exception1(nint p, nint a, nint t, int u) => Fire(p, "Exception");

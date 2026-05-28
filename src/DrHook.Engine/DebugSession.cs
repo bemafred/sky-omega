@@ -934,6 +934,23 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     public uint ResolveMethodToken(string moduleNameSubstring, string typeName, string methodName)
         => RuntimeNavigation.ResolveMethodToken(_pProcess, moduleNameSubstring, typeName, methodName);
 
+    /// <summary>Lift a <see cref="BreakpointPolicySpec"/> (string data) into a
+    /// <see cref="BreakpointPolicy"/> (engine domain form) by compiling its Condition expression
+    /// against this session's member resolver. The substrate's canonical compiler — external
+    /// callers (MCP layer, probes using string conditions, transport-form constructors) lift via
+    /// this method rather than invoking any parser directly. Compilation logic is substrate-only
+    /// (see <see cref="Expressions.CSharpCondition"/>, internal).
+    ///
+    /// <para><see cref="BreakpointPolicySpec.LogMessage"/> template compilation is not yet
+    /// implemented; passing a non-null LogMessage throws <see cref="NotImplementedException"/>
+    /// until the template compiler (with <c>{expr}</c> interpolation) lands as a follow-up
+    /// to Increment 1.</para></summary>
+    public BreakpointPolicy Compile(BreakpointPolicySpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        return spec.CompileWith(this);
+    }
+
     /// <summary>Set an active breakpoint at the entry of
     /// <paramref name="typeName"/>.<paramref name="methodName"/> in the module whose name
     /// contains <paramref name="moduleNameSubstring"/>. Returns the new breakpoint's id (positive)

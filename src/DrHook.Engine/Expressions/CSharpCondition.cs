@@ -27,7 +27,7 @@ namespace SkyOmega.DrHook.Engine.Expressions;
 /// (in <see cref="DebugSession.EvaluatePolicy"/>) catches these and surfaces them as
 /// <see cref="StopReason.ConditionError"/> with a fault <see cref="LogRecord"/> (finding 35) — a broken
 /// condition is never silently treated as false.</para></summary>
-public static class CSharpCondition
+internal static class CSharpCondition
 {
     /// <summary>Parse a C# expression into a predicate over <see cref="IEvalContext"/>. The
     /// <paramref name="memberResolver"/> is closed over for member-access resolution

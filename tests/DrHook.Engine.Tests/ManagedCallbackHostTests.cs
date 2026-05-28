@@ -31,12 +31,14 @@ public sealed unsafe class ManagedCallbackHostTests
         public List<CallbackKind> Kinds { get; } = new();
         public List<nint> Threads { get; } = new();
         public List<int> Details { get; } = new();
-        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail)
+        public List<nint> Breakpoints { get; } = new();
+        public void OnCallback(CallbackKind kind, string name, nint appDomain, nint thread, int detail, nint breakpoint = 0)
         {
             Events.Add(name);
             Kinds.Add(kind);
             Threads.Add(thread);
             Details.Add(detail);
+            Breakpoints.Add(breakpoint);
         }
     }
 

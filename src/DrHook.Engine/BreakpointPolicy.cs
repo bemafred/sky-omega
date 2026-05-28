@@ -62,3 +62,47 @@ public sealed record BreakpointPolicy(
     HitCountGate? HitCount = null,
     Func<IEvalContext, string>? LogMessage = null,
     SuspendPolicy Suspend = SuspendPolicy.All);
+
+/// <summary>Data form of <see cref="BreakpointPolicy"/> — the string-bearing transport encoding.
+/// Use this when the policy travels through an API edge (MCP protocol, serialization, cross-process
+/// IPC) or when a test/probe wants to validate the substrate's compilation path end-to-end.
+/// Lift to <see cref="BreakpointPolicy"/> via <see cref="DebugSession.Compile"/> — the substrate's
+/// canonical compiler. Compilation logic lives only in the substrate; external callers never
+/// invoke a parser directly.
+///
+/// <para>Both forms are first-class. Substrate-validation probes and tests that need to inject
+/// specific delegate behaviors (fault paths, custom renderers, edge-case predicates) construct
+/// <see cref="BreakpointPolicy"/> directly with delegates; everything else uses
+/// <see cref="BreakpointPolicySpec"/> + <see cref="DebugSession.Compile"/>.</para></summary>
+public sealed record BreakpointPolicySpec(
+    string? Condition = null,
+    HitCountGate? HitCount = null,
+    string? LogMessage = null,
+    SuspendPolicy Suspend = SuspendPolicy.All)
+{
+    /// <summary>Lift this spec into a delegate-bearing <see cref="BreakpointPolicy"/> using the
+    /// substrate's compiler. The <paramref name="memberResolver"/> is what
+    /// <see cref="Expressions.CSharpCondition"/> needs to resolve member access (a
+    /// <see cref="DebugSession"/> implements <see cref="IMemberResolver"/>).
+    ///
+    /// <para>Internal: external callers compile via <see cref="DebugSession.Compile"/>, which
+    /// passes <c>this</c> as the resolver. This method is the test/substrate-internal seam that
+    /// keeps the compiler exercise-able without a live debug session.</para>
+    ///
+    /// <para><see cref="LogMessage"/> compilation throws <see cref="NotImplementedException"/>
+    /// until the template compiler ({expr} interpolation) lands.</para></summary>
+    internal BreakpointPolicy CompileWith(IMemberResolver memberResolver)
+    {
+        ArgumentNullException.ThrowIfNull(memberResolver);
+        if (LogMessage is not null)
+            throw new NotImplementedException(
+                "BreakpointPolicySpec.LogMessage compilation is not yet implemented. " +
+                "Pending: template compiler with {expr} interpolation (follow-up to Increment 1). " +
+                "Construct a delegate-bearing BreakpointPolicy directly for logpoint scenarios in the meantime.");
+
+        Func<IEvalContext, bool>? condition = Condition is { } expr
+            ? Expressions.CSharpCondition.Compile(expr, memberResolver)
+            : null;
+        return new BreakpointPolicy(condition, HitCount, LogMessage: null, Suspend);
+    }
+}
