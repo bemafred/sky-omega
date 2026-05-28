@@ -82,7 +82,14 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     // Active breakpoints: owned (module, function, breakpoint) ICorDebug pointers kept alive so
     // the breakpoint stays bound, alongside a public BreakpointInfo carrying the assigned id and
     // descriptor for listing/removal. Released on Dispose or via Remove/ClearBreakpoints.
-    private sealed record BreakpointEntry(BreakpointInfo Info, nint Module, nint Function, nint Breakpoint);
+    private sealed record BreakpointEntry(
+        BreakpointInfo Info, nint Module, nint Function, nint Breakpoint,
+        BreakpointPolicy? Policy = null)
+    {
+        /// <summary>Running hit count, incremented on each callback for this breakpoint. Mutable;
+        /// only the pump's worker thread touches it (the worker is single-threaded — no lock needed).</summary>
+        public int HitCount { get; set; }
+    }
     private readonly List<BreakpointEntry> _breakpoints = new();
     private int _nextBreakpointId;
 
@@ -111,6 +118,11 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         _ownsTarget = ownsTarget;
         _targetProcess = targetProcess;
         _naturalExitTimeout = naturalExitTimeout;
+
+        // Register the substrate's per-breakpoint policy evaluator with the pump. The pump consults
+        // this on each BreakpointHit to decide between surfacing the stop or auto-resuming under the
+        // breakpoint's BreakpointPolicy gates. ADR-010 Increment 2c.
+        _pump.RegisterBreakpointEvaluator(EvaluateBreakpointHit);
     }
 
     /// <summary>OS process id of the attached target.</summary>
@@ -581,6 +593,45 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         return policy.Suspend == SuspendPolicy.None ? PolicyOutcome.Resume : PolicyOutcome.Surface;
     }
 
+    /// <summary>Invoked by <see cref="CallbackPump"/> on each <see cref="CallbackKind.BreakpointHit"/>
+    /// to decide whether the hit surfaces as a stop or auto-resumes. Looks up the
+    /// <see cref="BreakpointEntry"/> by its raw <c>ICorDebugBreakpoint</c> pointer (linear scan;
+    /// typical sessions have &lt;100 breakpoints), evaluates the entry's <see cref="BreakpointPolicy"/>
+    /// if any, and returns the <see cref="StopInfo"/> to publish — or <c>null</c> to auto-resume
+    /// the debuggee without surfacing.
+    ///
+    /// <para>No-policy entries (the common case for the substrate's existing callers) return a
+    /// plain <see cref="StopReason.Breakpoint"/> stop — backward-compatible behavior. Policy-bearing
+    /// entries route through <see cref="EvaluatePolicy"/>: hit-count gate, condition, log action,
+    /// suspend decision. A condition fault surfaces as <see cref="StopReason.ConditionError"/>
+    /// (finding 35 — broken conditions never silently behave like never-true).</para>
+    ///
+    /// <para>Runs on the pump worker thread, with <see cref="CallbackPump.StopThread"/> set to the
+    /// stop thread — so <see cref="GetLocals"/> / <see cref="GetArguments"/> inside
+    /// <see cref="EvaluatePolicy"/> read from the correct frame.</para></summary>
+    internal StopInfo? EvaluateBreakpointHit(nint breakpointPtr)
+    {
+        BreakpointEntry? entry = null;
+        for (int i = 0; i < _breakpoints.Count; i++)
+        {
+            if (_breakpoints[i].Breakpoint == breakpointPtr) { entry = _breakpoints[i]; break; }
+        }
+
+        if (entry is null || entry.Policy is null)
+            return new StopInfo(StopReason.Breakpoint);
+
+        int hitCount = entry.HitCount;
+        PolicyOutcome outcome = EvaluatePolicy(entry.Policy, ref hitCount);
+        entry.HitCount = hitCount;
+
+        return outcome switch
+        {
+            PolicyOutcome.Resume => null,
+            PolicyOutcome.ConditionFault => new StopInfo(StopReason.ConditionError),
+            _ => new StopInfo(StopReason.Breakpoint),
+        };
+    }
+
     /// <summary>Step into calls from the current stop. Completion surfaces as a
     /// <see cref="StopReason.Step"/> from <see cref="WaitForStop"/>. Valid only while stopped.</summary>
     public void StepInto() => _pump.StepInto();
@@ -959,7 +1010,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// alongside the <see cref="FunctionBreakpointInfo"/> descriptor. Valid only while the debuggee
     /// is stopped; a hit later surfaces as <see cref="StopReason.Breakpoint"/> from
     /// <see cref="WaitForStop"/>.</summary>
-    public int SetBreakpoint(string moduleNameSubstring, string typeName, string methodName)
+    public int SetBreakpoint(string moduleNameSubstring, string typeName, string methodName, BreakpointPolicy? policy = null)
     {
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
         if (pModule == 0) return 0;
@@ -972,7 +1023,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             int id = ++_nextBreakpointId;
             _breakpoints.Add(new BreakpointEntry(
                 new FunctionBreakpointInfo(id, moduleNameSubstring, typeName, methodName),
-                pModule, function, breakpoint));
+                pModule, function, breakpoint, policy));
             pModule = 0; // ownership moved into _breakpoints — don't release below
             return id;
         }
@@ -987,7 +1038,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <see cref="RemoveBreakpoint"/>; <see cref="ListBreakpoints"/> returns it alongside the
     /// <see cref="LineBreakpointInfo"/> descriptor. Valid only while stopped; a hit surfaces as
     /// <see cref="StopReason.Breakpoint"/>.</summary>
-    public int SetBreakpointAtLine(string moduleNameSubstring, string fileHint, int line)
+    public int SetBreakpointAtLine(string moduleNameSubstring, string fileHint, int line, BreakpointPolicy? policy = null)
     {
         nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleNameSubstring);
         if (pModule == 0) return 0;
@@ -1002,7 +1053,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             int id = ++_nextBreakpointId;
             _breakpoints.Add(new BreakpointEntry(
                 new LineBreakpointInfo(id, moduleNameSubstring, fileHint, line),
-                pModule, function, breakpoint));
+                pModule, function, breakpoint, policy));
             pModule = 0; // ownership moved into _breakpoints
             return id;
         }

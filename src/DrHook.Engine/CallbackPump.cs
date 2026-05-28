@@ -33,6 +33,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private readonly IDebugEventSink _userSink;
     private Func<ResumeKind, nint, int>? _resumeHandler;
     private Action? _pauseHandler;
+    private Func<nint, StopInfo?>? _evaluateBreakpoint;  // ADR-010 Increment 2c: substrate per-breakpoint policy
     private Thread? _worker;
     private nint _stopThread;     // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
     private int _disposed;        // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
@@ -65,6 +66,14 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 Context: new Dictionary<string, string> { ["callbackKind"] = kind.ToString(), ["callbackName"] = name }));
         }
     }
+
+    /// <summary>Register the per-breakpoint policy evaluator. The pump calls this on each
+    /// <see cref="CallbackKind.BreakpointHit"/>, passing the breakpoint pointer; the evaluator
+    /// returns the <see cref="StopInfo"/> to publish or <c>null</c> to auto-resume the debuggee
+    /// without surfacing. Called by <see cref="DebugSession"/>'s constructor after the pump is
+    /// assigned. ADR-010 Increment 2c — substrate owns policy storage + evaluation; pump owns
+    /// the stop/resume decision based on the evaluator's verdict.</summary>
+    internal void RegisterBreakpointEvaluator(Func<nint, StopInfo?> evaluate) => _evaluateBreakpoint = evaluate;
 
     /// <summary>Begin draining. Call once the process controller exists (after
     /// DebugActiveProcess). <paramref name="resume"/> resumes the debuggee for a given
@@ -187,13 +196,39 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 }
                 else
                 {
-                    // STOPPING: leave the debuggee synchronized, surface the stop, and block until
-                    // the caller resumes. The process produces no new callbacks while stopped, so
+                    // STOPPING: leave the debuggee synchronized, decide surface vs auto-resume, and
+                    // either publish + block until the caller resumes or skip the publish and
+                    // continue directly. The process produces no new callbacks while stopped, so
                     // the queue behind this event is empty until we resume.
                     _stopThread = e.Thread;
-                    _stops.Add(e.Kind == CallbackKind.Exception
-                        ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
-                        : new StopInfo(MapReason(e.Kind)));
+
+                    // BreakpointHit: consult the substrate's per-breakpoint policy evaluator. The
+                    // evaluator returns the StopInfo to publish or null to auto-resume under the
+                    // policy's gates (HitCount + Condition + LogMessage + Suspend). For breakpoints
+                    // with no policy, the evaluator returns a plain Breakpoint stop — backward
+                    // compatible with pre-policy callers. ADR-010 Increment 2c.
+                    StopInfo? toPublish;
+                    if (e.Kind == CallbackKind.BreakpointHit && _evaluateBreakpoint is { } evaluate)
+                    {
+                        toPublish = evaluate(e.Breakpoint);
+                    }
+                    else
+                    {
+                        toPublish = e.Kind == CallbackKind.Exception
+                            ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
+                            : new StopInfo(MapReason(e.Kind));
+                    }
+
+                    if (toPublish is null)
+                    {
+                        // Auto-resume: the policy gates failed (condition false / hit count not yet
+                        // reached) OR a Suspend.None logpoint fired its action and is continuing.
+                        // The caller never sees this hit; bypass _resume.Take and Continue directly.
+                        _resumeHandler!(ResumeKind.Continue, _stopThread);
+                        continue;
+                    }
+
+                    _stops.Add(toPublish);
                     ResumeKind kind;
                     try { kind = _resume.Take(); }
                     catch (InvalidOperationException)
@@ -205,7 +240,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                             "Pump (STOPPING branch)",
                             Observed: "_resume.Take threw InvalidOperationException with stop pending",
                             Expected: "caller consumes stop and Resumes",
-                            Context: new Dictionary<string, string> { ["stopReason"] = MapReason(e.Kind).ToString() }));
+                            Context: new Dictionary<string, string> { ["stopReason"] = toPublish.Reason.ToString() }));
                         break;
                     }
                     // For a step, the handler creates the stepper on _stopThread before Continuing;
