@@ -1,0 +1,8 @@
+# DrHook.Engine probe 57 fixture — target-defined exception hierarchy (subclass walk across target's own module)
+timestamp        = 2026-05-29T03:55:16.2589840Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 74546
+filter-base-type = MyApp.DomainException
+target-derived   = MyApp.OrderValidationException
+verdict          = PASSED
