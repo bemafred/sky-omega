@@ -54,11 +54,11 @@ The naming is in transition (see [ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-sur
 
 | Tool | What it does | Forthcoming name |
 |------|---------------|-------|
-| `drhook_step_breakpoint` | Set source breakpoint at file:line | `drhook_break_source` |
-| `drhook_step_break_function` | Set function breakpoint by method name | `drhook_break_function` |
-| `drhook_step_break_exception` | Set exception breakpoint with filter `"all"` (first-chance) or `"user-unhandled"`. Subclass-aware (`System.Exception` matches subclasses via `ICorDebugType.GetBase` chain). | `drhook_break_exception` |
-| `drhook_step_breakpoint_list` | List all breakpoints (source + function + exception) | `drhook_break_list` |
-| `drhook_step_breakpoint_remove` | Remove a specific breakpoint by `(file+line) | (functionName) | (filter)` (polymorphic — pick one). Forthcoming: by ID only. | `drhook_break_remove` |
+| `drhook_step_breakpoint` | Set source breakpoint at file:line. Optional policy: `condition` (C# expression evaluated each hit), `hitCount` (fire only on Nth matching hit), `suspend` (`"all"` to stop, `"none"` for future logpoint mode). | `drhook_break_source` |
+| `drhook_step_break_function` | Set function breakpoint by method name. Same optional policy parameters as `step_breakpoint`; `condition` has access to method arguments + locals at entry. | `drhook_break_function` |
+| `drhook_step_break_exception` | Set exception breakpoint by `typeName` (full CLR name, or `"*"` wildcard). Optional `phase` (`"any"`/`"first-chance"`/`"user-first-chance"`/`"catch-handler-found"`/`"unhandled"`), `condition`, `hitCount`, `suspend`. SUBCLASS-AWARE — a filter on a base type matches every subclass, including types defined in the target's own module (verified for target-defined hierarchies by probe 57). Multiple filters compose with OR. | `drhook_break_exception` |
+| `drhook_step_breakpoint_list` | List all breakpoints (source + function + exception) with full descriptors per entry — `id`, location, `hits` running count, and `policy` (when attached — `condition`/`hitCount`/`logMessage`/`suspend` as the agent supplied). | `drhook_break_list` |
+| `drhook_step_breakpoint_remove` | Remove a breakpoint or exception filter by its substrate-assigned `id`. Use `breakpoint_list` to discover ids; dispatches to the right substrate path automatically. | `drhook_break_remove` |
 | `drhook_step_breakpoint_clear` | Clear all breakpoints, or by category (`source` / `function` / `exception`) | `drhook_break_clear` |
 
 ### Inspection
@@ -86,9 +86,7 @@ The naming is in transition (see [ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-sur
 
 Substrate work is required before these surfaces become functional:
 
-- **Conditional breakpoints.** `step_breakpoint` and `step_break_function` accept a `condition` parameter on the substrate method signature, but the runtime path rejects non-empty conditions with an explicit error (`EngineSteppingSession.cs:326-328`). The Roslyn walker exists in the probe suite but has not been extracted into `DrHook.Engine.Expressions`. ADR-010 Tier 3.
-- **Hit-count breakpoints.** ADR-010 Tier 3.
-- **Logpoints (non-stopping breakpoints with structured log emission).** Substrate has `BoundedLogSink` and the logpoint plumbing internally, but no MCP-tool parameter exposes the mode. ADR-010 Tier 3.
+- **Logpoint `LogMessage` interpolation.** Substrate has the full logpoint mechanism (`BoundedLogSink`, `BreakpointPolicy.LogMessage`, `Suspend.None` flow) end-to-end; MCP exposes `suspend="none"` for the non-stopping evaluator hit, but the `{expr}` template compiler that turns a string like `"hit count = {count}"` into a renderer is still pending — `DebugSession.Compile` throws `NotImplementedException` if a `LogMessage` is supplied. Probes 28/29 validate the substrate flow against hand-built renderers. Pending as a follow-up to ADR-010 Increment 1.
 - **Watch expressions.** Substrate has narrow func-eval for parameterless and single-int-arg static methods (`DebugSession.TryEvalStaticCall`, `TryEvalStaticCallInt` — both marked `EXPERIMENT`). General Roslyn-based expression evaluation against locals/arguments/`this` is not surfaced. ADR-010 Tier 3.
 - **Call stack frame switching.** `GetStackFrames` returns frames as formatted strings; locals are read from the top frame only. Frame-selection state and rich frame records are ADR-010 Tier 2 (verify) / Tier 3 (substrate).
 - **Set next statement.** ICorDebug `SetIP` is not exposed at the substrate level. ADR-010 Tier 3.
@@ -115,9 +113,12 @@ drhook_step_run: program=dotnet, args=["exec", "tools/bin/Debug/net10.0/repro.dl
 drhook_processes              # find pid
 drhook_step_launch: pid=<pid>, sourceFile="...", line=...
 
-# 4. Add more breakpoints at decision points
+# 4. Add more breakpoints at decision points (with optional policy)
 drhook_step_breakpoint: file="src/Mercury/Turtle/Buffer.cs", line=17   # Peek
-drhook_step_breakpoint: file="src/Mercury/Turtle/Buffer.cs", line=240  # FillBufferSync
+drhook_step_breakpoint: file="src/Mercury/Turtle/Buffer.cs", line=240, # FillBufferSync, only when buffer is near empty
+                       condition="_bufferLength - _bufferPosition < 8"
+drhook_step_breakpoint: file="src/Mercury/Turtle/Buffer.cs", line=240, # FillBufferSync, sample every 5th hit
+                       hitCount=5
 
 # 5. Run to breakpoint; inspect state
 drhook_step_continue

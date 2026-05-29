@@ -205,7 +205,9 @@ public sealed class DrHookTools
         "Common idioms: typeName='*' phase='first-chance' = break on every throw (DAP 'all'); " +
         "typeName='*' phase='unhandled' = break only on unhandled exceptions (DAP 'user-unhandled'). " +
         "The optional condition is a C# expression evaluated at each matching exception; pair with " +
-        "suspend='none' for a non-stopping exception logpoint (when LogMessage support lands).")]
+        "suspend='none' for a non-stopping exception logpoint (when LogMessage support lands). " +
+        "Returns the substrate-assigned id; pass it to drhook_step_breakpoint_remove to disarm, or " +
+        "see drhook_step_breakpoint_list to inspect what's currently armed.")]
     public async Task<string> StepBreakException(
         [Description("Fully-qualified CLR type name (e.g. 'System.NullReferenceException', 'MyApp.DomainException'), or '*' for any type. Matching is subclass-aware via the substrate's cross-module ICorDebugType.GetBase walk — a filter on a base catches every derived throw, regardless of which module defines the derived type.")] string typeName,
         [Description("Exception phase: 'any' (default — match any phase), 'first-chance' (fired at the throw site), 'user-first-chance' (search reached first user code), 'catch-handler-found' (a handler has been resolved), or 'unhandled' (no handler found).")] string? phase = null,
