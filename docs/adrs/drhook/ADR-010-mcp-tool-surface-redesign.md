@@ -242,7 +242,22 @@ Each Tier 3 tool ships when its substrate dependency lands. Sequencing is not pr
 
 ### Increment 6 — Exception breakpoint MCP surface + breakpoint introspection alignment
 
-**Status:** Proposed — 2026-05-29.
+**Status:** Completed — 2026-05-29 (Proposed → Completed same day). All six deliverables shipped on `main`:
+
+| # | Deliverable | Commit |
+|---|---|---|
+| 1 | `drhook_step_break_exception` explicit parameters (`typeName` + `phase?` + `condition?` + `hitCount?` + `suspend?`) | `77d11b8` |
+| 2 | `drhook_step_breakpoint_list` full descriptors per entry (`id`, location, `hits`, `policy?`) — `DebugSession.GetBreakpointHits` + `GetExceptionFilterHits` added to substrate | `6170ec1` |
+| 3 | `drhook_step_breakpoint_remove` by-ID canonical (collapsed three kind-specific methods into one `RemoveByIdAsync`) | `b86d991` |
+| 4 | `drhook_step_breakpoint` + `drhook_step_break_function` accept `condition` / `hitCount` / `suspend` parameters; stale "Roslyn walker lives in the probes" rejection error removed | `8720335` |
+| 5 | Probe 57 — target-defined exception hierarchy validation (`MyApp.OrderValidationException : MyApp.DomainException`; filter on base, throw derived, substrate's `MatchesChain` admits via cross-module `ICorDebugType.GetBase` walk) | `59be9ce` |
+| 6 | Tool description audit: `step_break_exception` cross-references to list/remove; DEBUGGING.md tool tables + "What's NOT yet shipped" section updated; workflow example expanded with policy parameters | `82471a0` |
+
+Pre-deliverable substrate verification — code-read of `Interop/ExceptionInspector.cs:60-92` confirmed the chain walk is runtime-driven via `ICorDebugType.GetBase` with no BCL-specific path; target-defined types fall out of the same mechanism that handles BCL types. Probe 57 then validated this empirically against a target-defined two-level hierarchy.
+
+95/95 `DrHook.Engine` unit tests pass through every deliverable; probes 22, 23, 25, 28, 29, 30 all still pass (the migrated set), and probe 57 PASSED on macOS-arm64 with substrate's cross-module subclass walk admitting `MyApp.DomainException` to match a `MyApp.OrderValidationException` throw.
+
+The "deliberate out-of-scope" items remain out: enable/disable toggle independent of Arm/Remove (substrate uses Arm/Remove primitives; functionally equivalent); `{expr}` template compiler for `LogMessage` (pending as the Increment 1 follow-up — `DebugSession.Compile` still throws `NotImplementedException` when `BreakpointPolicySpec.LogMessage` is set).
 
 Increment 2 (closed 2026-05-29 by commits `8cce862` … `2d16923` + `824cc0b`) shipped the substrate work that makes per-breakpoint and per-exception-filter policies first-class: `BreakpointPolicy` (delegate) / `BreakpointPolicySpec` (string), `DebugSession.Compile`, `SetBreakpointAtLine(...policy)`, `SetBreakpoint(...policy)`, `ArmExceptionFilter(...policy)`, and caller-thread evaluation in `WaitForStop` for both breakpoint and exception-filter locations. The substrate also already supports subclass-aware exception matching via `ExceptionInspector.CurrentExceptionTypeChain` (runtime-driven `ICorDebugType.GetBase` walk; cross-module-safe per cordebug.idl — verified by `Interop/ExceptionInspector.cs:60-92`, probe 37, finding 47).
 
