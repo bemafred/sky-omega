@@ -207,23 +207,16 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint_remove"), Description(
-        "Remove a specific breakpoint. Specify source file + line to remove a source breakpoint, " +
-        "or functionName to remove a function breakpoint, or filter to remove an exception filter.")]
+        "Remove a breakpoint or exception filter by its substrate-assigned id. Use " +
+        "drhook_step_breakpoint_list first to discover ids. Dispatches to the right substrate path " +
+        "(source / function / exception) automatically based on the kind the id refers to. " +
+        "Returns status='removed' on success, 'stale' if MCP tracking knew about the id but the " +
+        "substrate had no matching entry (MCP-layer state is pruned either way).")]
     public async Task<string> StepBreakpointRemove(
-        [Description("Source file path (for source breakpoints)")] string? sourceFile = null,
-        [Description("Line number (for source breakpoints)")] int? line = null,
-        [Description("Function name (for function breakpoints)")] string? functionName = null,
-        [Description("Exception filter to remove ('all' or 'user-unhandled')")] string? filter = null,
+        [Description("Substrate-assigned breakpoint id, as returned by drhook_step_breakpoint, drhook_step_break_function, or drhook_step_break_exception, or as listed in drhook_step_breakpoint_list.")] int id,
         CancellationToken ct = default)
     {
-        if (sourceFile is not null && line is not null)
-            return await _session.RemoveBreakpointAsync(sourceFile, line.Value, ct);
-        if (functionName is not null)
-            return await _session.RemoveFunctionBreakpointAsync(functionName, ct);
-        if (filter is not null)
-            return await _session.RemoveExceptionBreakpointAsync(filter, ct);
-
-        return "{\"error\": \"Specify sourceFile+line, functionName, or filter to remove.\"}";
+        return await _session.RemoveByIdAsync(id, ct);
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint_list"), Description(

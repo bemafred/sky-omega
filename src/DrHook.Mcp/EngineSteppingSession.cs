@@ -49,6 +49,14 @@ public sealed class EngineSteppingSession : IDisposable
     // delegate references. ADR-010 Increment 6 deliverable 2.
     private readonly Dictionary<int, BreakpointPolicySpec> _policySpecs = new();
 
+    // Per-id discriminator so the by-ID remove tool can dispatch to the right substrate path
+    // (source/function breakpoints share the substrate's _breakpoints registry and RemoveBreakpoint;
+    // exception filters live in _exceptionFilters and use RemoveExceptionFilter). Substrate assigns
+    // separate id sequences for the two kinds, so an id alone is ambiguous — the MCP layer carries
+    // the kind. ADR-010 Increment 6 deliverable 3.
+    private enum BreakpointKind { Source, Function, Exception }
+    private readonly Dictionary<int, BreakpointKind> _breakpointKinds = new();
+
     // EA-5: substrate-anomaly buffer drained by drhook_drain_anomalies (per ADR-007 Phase 1).
     // Cross-session — anomalies accumulate until the consumer drains; capacity 256 (~128 KB max).
     private readonly BoundedAnomalySink _anomalies = new(capacity: 256);
@@ -336,6 +344,7 @@ public sealed class EngineSteppingSession : IDisposable
         int id = _session.SetBreakpointAtLine(ModuleSubstrForFile(sourceFile), sourceFile, line);
         if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line} — module/PDB unavailable or no sequence point at that line."));
         _lineBreakpoints[KeyLine(sourceFile, line)] = id;
+        _breakpointKinds[id] = BreakpointKind.Source;
 
         return Task.FromResult(Render(new JsonObject
         {
@@ -358,6 +367,7 @@ public sealed class EngineSteppingSession : IDisposable
         int id = _session.SetBreakpoint(moduleSubstr, typeName, methodName);
         if (id == 0) return Task.FromResult(Error($"Could not resolve function '{functionName}' (looked for type '{typeName}', method '{methodName}' in module '{moduleSubstr}')."));
         _functionBreakpoints[functionName] = id;
+        _breakpointKinds[id] = BreakpointKind.Function;
 
         return Task.FromResult(Render(new JsonObject
         {
@@ -403,6 +413,7 @@ public sealed class EngineSteppingSession : IDisposable
         // ID (surfaced in the prompt); Increment 6 deliverable 3 will switch the removal tool to
         // accept ID directly.
         _exceptionFilters[$"id={id}"] = id;
+        _breakpointKinds[id] = BreakpointKind.Exception;
         if (spec is not null) _policySpecs[id] = spec;
 
         JsonObject result = new()
@@ -449,35 +460,76 @@ public sealed class EngineSteppingSession : IDisposable
         _      => SuspendPolicy.All,
     };
 
-    public Task<string> RemoveBreakpointAsync(string sourceFile, int line, CancellationToken ct)
+    /// <summary>Remove a breakpoint or exception filter by its substrate-assigned id. Dispatches
+    /// to the correct substrate path (source/function via <see cref="DebugSession.RemoveBreakpoint"/>;
+    /// exception via <see cref="DebugSession.RemoveExceptionFilter"/>) based on the per-id kind
+    /// tracker, and prunes the matching MCP-layer dictionary entry alongside the policy spec.
+    /// ADR-010 Increment 6 deliverable 3 — by-ID canonical, replacing the polymorphic
+    /// <c>(file+line | functionName | filter)</c> dispatch.</summary>
+    public Task<string> RemoveByIdAsync(int id, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
-        string key = KeyLine(sourceFile, line);
-        if (!_lineBreakpoints.TryGetValue(key, out int id) || !_session.RemoveBreakpoint(id))
-            return Task.FromResult(Error($"No breakpoint registered at {sourceFile}:{line}."));
-        _lineBreakpoints.Remove(key);
+        if (!_breakpointKinds.TryGetValue(id, out BreakpointKind kind))
+            return Task.FromResult(Error($"No breakpoint with id={id} is tracked at the MCP layer. Use drhook_step_breakpoint_list to discover armed ids."));
+
+        bool removed;
+        string typeLabel;
+        JsonObject result;
+        switch (kind)
+        {
+            case BreakpointKind.Source:
+                removed = _session.RemoveBreakpoint(id);
+                typeLabel = "source";
+                string? sourceKey = FindKey(_lineBreakpoints, id);
+                if (sourceKey is not null) _lineBreakpoints.Remove(sourceKey);
+                result = new JsonObject { ["status"] = removed ? "removed" : "stale", ["type"] = typeLabel, ["id"] = id };
+                if (sourceKey is not null)
+                {
+                    int colon = sourceKey.LastIndexOf(':');
+                    if (colon > 0)
+                    {
+                        result["file"] = sourceKey[..colon];
+                        if (int.TryParse(sourceKey[(colon + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int ln)) result["line"] = ln;
+                    }
+                }
+                break;
+            case BreakpointKind.Function:
+                removed = _session.RemoveBreakpoint(id);
+                typeLabel = "function";
+                string? funcKey = FindKey(_functionBreakpoints, id);
+                if (funcKey is not null) _functionBreakpoints.Remove(funcKey);
+                result = new JsonObject { ["status"] = removed ? "removed" : "stale", ["type"] = typeLabel, ["id"] = id };
+                if (funcKey is not null) result["function"] = funcKey;
+                break;
+            case BreakpointKind.Exception:
+                removed = _session.RemoveExceptionFilter(id);
+                typeLabel = "exception";
+                string? excKey = FindKey(_exceptionFilters, id);
+                if (excKey is not null) _exceptionFilters.Remove(excKey);
+                result = new JsonObject { ["status"] = removed ? "removed" : "stale", ["type"] = typeLabel, ["id"] = id };
+                break;
+            default:
+                return Task.FromResult(Error($"Unknown breakpoint kind for id={id}."));
+        }
+
+        _breakpointKinds.Remove(id);
         _policySpecs.Remove(id);
-        return Task.FromResult(Render(new JsonObject { ["status"] = "removed", ["type"] = "source", ["file"] = sourceFile, ["line"] = line, ["id"] = id }));
+
+        if (!removed)
+        {
+            // The MCP layer thought we knew about this id but the substrate didn't have it. This
+            // is a stale-tracking situation (session was cleared at substrate level without going
+            // through the MCP path, or the kind tracker drifted). Report honestly.
+            result["prompt"] = $"id={id} was tracked at MCP layer but the substrate had no matching {typeLabel} entry. MCP-layer state pruned; verify with drhook_step_breakpoint_list.";
+        }
+        return Task.FromResult(Render(result));
     }
 
-    public Task<string> RemoveFunctionBreakpointAsync(string functionName, CancellationToken ct)
+    private static string? FindKey(Dictionary<string, int> map, int id)
     {
-        if (_session is null) return Task.FromResult(Error("No active stepping session."));
-        if (!_functionBreakpoints.TryGetValue(functionName, out int id) || !_session.RemoveBreakpoint(id))
-            return Task.FromResult(Error($"No function breakpoint registered for '{functionName}'."));
-        _functionBreakpoints.Remove(functionName);
-        _policySpecs.Remove(id);
-        return Task.FromResult(Render(new JsonObject { ["status"] = "removed", ["type"] = "function", ["function"] = functionName, ["id"] = id }));
-    }
-
-    public Task<string> RemoveExceptionBreakpointAsync(string filter, CancellationToken ct)
-    {
-        if (_session is null) return Task.FromResult(Error("No active stepping session."));
-        if (!_exceptionFilters.TryGetValue(filter, out int id) || !_session.RemoveExceptionFilter(id))
-            return Task.FromResult(Error($"No exception filter '{filter}' is armed."));
-        _exceptionFilters.Remove(filter);
-        _policySpecs.Remove(id);
-        return Task.FromResult(Render(new JsonObject { ["status"] = "removed", ["type"] = "exception", ["filter"] = filter, ["id"] = id }));
+        foreach ((string key, int value) in map)
+            if (value == id) return key;
+        return null;
     }
 
     public string ListBreakpoints()
