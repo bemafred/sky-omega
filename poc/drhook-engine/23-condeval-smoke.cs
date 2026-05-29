@@ -127,25 +127,25 @@ static class CondEval23
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine) == 0)
-        {
-            Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
-            return 6;
-        }
-
         // The condition func-evals s.Length and compares > 3 — exercising func-eval INSIDE the
-        // conditional-stop predicate.
+        // policy's condition delegate (ADR-010 Increment 2c: policy attached at SetBreakpoint time).
         long EvalLength()
         {
             EvalStatus st = session.TryEvalInstanceCall(ThisLocal, DeclModule, DeclType, Method, TimeSpan.FromSeconds(10), out ArgumentValue v);
             return st == EvalStatus.Completed && v.RawValue is { } len ? len : -1;
         }
         Func<IEvalContext, bool> predicate = _ => EvalLength() > Threshold;
+        var policy = new BreakpointPolicy(Condition: predicate);
+        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, policy) == 0)
+        {
+            Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
+            return 6;
+        }
 
-        Console.WriteLine($"running    : resuming until s.Length > {Threshold} (each hit func-evals the condition) …");
+        Console.WriteLine($"running    : breakpoint set with Condition policy; resuming until s.Length > {Threshold} (each hit func-evals the condition) …");
         session.Resume();
 
-        StopInfo? stop = session.WaitForConditionalStop(predicate, TimeSpan.FromSeconds(25));
+        StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(25));
         if (stop is null) { Console.Error.WriteLine("FALSIFIED: conditional stop timed out (func-eval-in-predicate may have re-entered)."); return 7; }
         if (stop.Reason != StopReason.Breakpoint) { Console.Error.WriteLine($"FALSIFIED: surfaced {stop.Reason}."); return 7; }
 

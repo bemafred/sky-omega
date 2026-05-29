@@ -179,18 +179,21 @@ static class Conditional22
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine) == 0)
+        // ADR-010 Increment 2c: policy attaches to the breakpoint at Set time; plain WaitForStop
+        // drives the wait, with the substrate auto-resuming non-matching hits internally.
+        Func<IEvalContext, bool> predicate = CSharpCondition.Compile(Condition);
+        var policy = new BreakpointPolicy(Condition: predicate);
+        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, policy) == 0)
         {
             Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
             return 6;
         }
 
-        Func<IEvalContext, bool> predicate = CSharpCondition.Compile(Condition);
-        Console.WriteLine($"running    : breakpoint set; resuming until \"{Condition}\" …");
+        Console.WriteLine($"running    : breakpoint set with Condition policy; resuming until \"{Condition}\" …");
         session.Resume();
 
         // The breakpoint hits every iteration (value cycles 0..6); only value==3 should surface.
-        StopInfo? stop = session.WaitForConditionalStop(predicate, TimeSpan.FromSeconds(20));
+        StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(20));
         if (stop is null) { Console.Error.WriteLine("FALSIFIED: conditional stop timed out."); return 7; }
         if (stop.Reason != StopReason.Breakpoint) { Console.Error.WriteLine($"FALSIFIED: surfaced {stop.Reason}, expected Breakpoint."); return 7; }
 

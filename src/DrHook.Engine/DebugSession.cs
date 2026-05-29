@@ -129,11 +129,6 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         _ownsTarget = ownsTarget;
         _targetProcess = targetProcess;
         _naturalExitTimeout = naturalExitTimeout;
-
-        // Register the substrate's per-breakpoint policy evaluator with the pump. The pump consults
-        // this on each BreakpointHit to decide between surfacing the stop or auto-resuming under the
-        // breakpoint's BreakpointPolicy gates. ADR-010 Increment 2c.
-        _pump.RegisterBreakpointEvaluator(EvaluateBreakpointHit);
     }
 
     /// <summary>OS process id of the attached target.</summary>
@@ -331,8 +326,6 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// — the legacy behavior probes 26/27 rely on.</summary>
     public StopInfo? WaitForStop(TimeSpan timeout)
     {
-        if (_exceptionFilters.Count == 0) return _pump.WaitForStop(timeout);
-
         DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
         while (true)
         {
@@ -340,19 +333,19 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             if (remaining <= TimeSpan.Zero) return null;
             StopInfo? stop = _pump.WaitForStop(remaining);
             if (stop is null) return null;
-            if (stop.Reason != StopReason.Exception) return stop;
 
-            ExceptionFilterInfo? match = FindMatchingExceptionFilter(stop.ExceptionKind);
-            if (match is null) { _pump.Resume(); continue; }
-
-            // Policy-bearing filter: run gates/action/suspend, decide surface/resume/fault.
-            // Filters without policies surface as before — backward compatible.
-            // ADR-010 Increment 2c (exception-filter side).
-            if (_exceptionFilterState.TryGetValue(match.Id, out ExceptionFilterState? state) && state.Policy is not null)
+            // Breakpoint stops: evaluate the entry's policy on the caller thread (where the pump is
+            // free to service func-eval Resume/WaitForStop cycles). Without a policy attached, surface
+            // directly — backward compatible. With a policy, the gates / action / suspend decision
+            // determines surface, auto-resume, or condition fault. ADR-010 Increment 2c.
+            if (stop.Reason == StopReason.Breakpoint)
             {
-                int hitCount = state.HitCount;
-                PolicyOutcome outcome = EvaluatePolicy(state.Policy, ref hitCount);
-                state.HitCount = hitCount;
+                BreakpointEntry? entry = FindBreakpointEntry(_pump.LastBreakpointPointer);
+                if (entry?.Policy is null) return stop;
+
+                int hits = entry.HitCount;
+                PolicyOutcome outcome = EvaluatePolicy(entry.Policy, ref hits);
+                entry.HitCount = hits;
                 switch (outcome)
                 {
                     case PolicyOutcome.Resume: _pump.Resume(); continue;
@@ -361,6 +354,31 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 }
             }
 
+            // Exception stops: type filter + per-filter policy. Same structure as the breakpoint path
+            // above. With no filters armed, every exception stop surfaces.
+            if (stop.Reason == StopReason.Exception)
+            {
+                if (_exceptionFilters.Count == 0) return stop;
+                ExceptionFilterInfo? match = FindMatchingExceptionFilter(stop.ExceptionKind);
+                if (match is null) { _pump.Resume(); continue; }
+
+                if (_exceptionFilterState.TryGetValue(match.Id, out ExceptionFilterState? state) && state.Policy is not null)
+                {
+                    int hits = state.HitCount;
+                    PolicyOutcome outcome = EvaluatePolicy(state.Policy, ref hits);
+                    state.HitCount = hits;
+                    switch (outcome)
+                    {
+                        case PolicyOutcome.Resume: _pump.Resume(); continue;
+                        case PolicyOutcome.ConditionFault: return new StopInfo(StopReason.ConditionError);
+                        default: return stop;
+                    }
+                }
+
+                return stop;
+            }
+
+            // Other stops (Step, Break, EvalComplete, EvalException, Pause, ProcessExited) surface as-is.
             return stop;
         }
     }
@@ -623,43 +641,16 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         return policy.Suspend == SuspendPolicy.None ? PolicyOutcome.Resume : PolicyOutcome.Surface;
     }
 
-    /// <summary>Invoked by <see cref="CallbackPump"/> on each <see cref="CallbackKind.BreakpointHit"/>
-    /// to decide whether the hit surfaces as a stop or auto-resumes. Looks up the
-    /// <see cref="BreakpointEntry"/> by its raw <c>ICorDebugBreakpoint</c> pointer (linear scan;
-    /// typical sessions have &lt;100 breakpoints), evaluates the entry's <see cref="BreakpointPolicy"/>
-    /// if any, and returns the <see cref="StopInfo"/> to publish — or <c>null</c> to auto-resume
-    /// the debuggee without surfacing.
-    ///
-    /// <para>No-policy entries (the common case for the substrate's existing callers) return a
-    /// plain <see cref="StopReason.Breakpoint"/> stop — backward-compatible behavior. Policy-bearing
-    /// entries route through <see cref="EvaluatePolicy"/>: hit-count gate, condition, log action,
-    /// suspend decision. A condition fault surfaces as <see cref="StopReason.ConditionError"/>
-    /// (finding 35 — broken conditions never silently behave like never-true).</para>
-    ///
-    /// <para>Runs on the pump worker thread, with <see cref="CallbackPump.StopThread"/> set to the
-    /// stop thread — so <see cref="GetLocals"/> / <see cref="GetArguments"/> inside
-    /// <see cref="EvaluatePolicy"/> read from the correct frame.</para></summary>
-    internal StopInfo? EvaluateBreakpointHit(nint breakpointPtr)
+    /// <summary>Linear-scan lookup of the <see cref="BreakpointEntry"/> whose
+    /// <c>ICorDebugBreakpoint</c> pointer matches <paramref name="breakpointPtr"/>. Returns null if
+    /// none — used by <see cref="WaitForStop"/>'s caller-thread policy evaluation after the pump
+    /// publishes a Breakpoint stop with <see cref="CallbackPump.LastBreakpointPointer"/> set.</summary>
+    private BreakpointEntry? FindBreakpointEntry(nint breakpointPtr)
     {
-        BreakpointEntry? entry = null;
+        if (breakpointPtr == 0) return null;
         for (int i = 0; i < _breakpoints.Count; i++)
-        {
-            if (_breakpoints[i].Breakpoint == breakpointPtr) { entry = _breakpoints[i]; break; }
-        }
-
-        if (entry is null || entry.Policy is null)
-            return new StopInfo(StopReason.Breakpoint);
-
-        int hitCount = entry.HitCount;
-        PolicyOutcome outcome = EvaluatePolicy(entry.Policy, ref hitCount);
-        entry.HitCount = hitCount;
-
-        return outcome switch
-        {
-            PolicyOutcome.Resume => null,
-            PolicyOutcome.ConditionFault => new StopInfo(StopReason.ConditionError),
-            _ => new StopInfo(StopReason.Breakpoint),
-        };
+            if (_breakpoints[i].Breakpoint == breakpointPtr) return _breakpoints[i];
+        return null;
     }
 
     /// <summary>Step into calls from the current stop. Completion surfaces as a

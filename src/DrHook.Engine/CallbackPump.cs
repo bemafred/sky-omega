@@ -33,10 +33,10 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private readonly IDebugEventSink _userSink;
     private Func<ResumeKind, nint, int>? _resumeHandler;
     private Action? _pauseHandler;
-    private Func<nint, StopInfo?>? _evaluateBreakpoint;  // ADR-010 Increment 2c: substrate per-breakpoint policy
     private Thread? _worker;
-    private nint _stopThread;     // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
-    private int _disposed;        // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
+    private nint _stopThread;            // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
+    private nint _lastBreakpointPointer; // ICorDebugBreakpoint at the most recent BreakpointHit (0 otherwise) — for caller-thread policy lookup
+    private int _disposed;               // 0 = live, 1 = disposed; atomic via Interlocked.Exchange (ENG-CP-1)
 
     public CallbackPump(IDebugEventSink userSink) => _userSink = userSink;
 
@@ -44,6 +44,14 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// before it publishes the stop; visible to a caller after <see cref="WaitForStop"/> returns
     /// (the stop-queue hand-off establishes the happens-before). For inspection (frames/vars).</summary>
     public nint StopThread => _stopThread;
+
+    /// <summary>The ICorDebugBreakpoint pointer for the most recent <see cref="CallbackKind.BreakpointHit"/>
+    /// stop (0 if the most recent stop was not a breakpoint hit). Set by the worker on each BreakpointHit
+    /// before the stop is published; visible to a caller after <see cref="WaitForStop"/> returns. Used by
+    /// the caller-thread breakpoint-policy evaluation in <see cref="DebugSession.WaitForStop"/> to look up
+    /// the entry that fired (ADR-010 Increment 2c, refactored to caller-thread evaluation so policy
+    /// conditions can themselves trigger func-eval without deadlocking the pump worker).</summary>
+    public nint LastBreakpointPointer => _lastBreakpointPointer;
 
     /// <summary>Enqueue side — invoked by the callback thunks on mscordbi's event thread.
     /// Returns immediately so the event thread is never blocked.</summary>
@@ -66,14 +74,6 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 Context: new Dictionary<string, string> { ["callbackKind"] = kind.ToString(), ["callbackName"] = name }));
         }
     }
-
-    /// <summary>Register the per-breakpoint policy evaluator. The pump calls this on each
-    /// <see cref="CallbackKind.BreakpointHit"/>, passing the breakpoint pointer; the evaluator
-    /// returns the <see cref="StopInfo"/> to publish or <c>null</c> to auto-resume the debuggee
-    /// without surfacing. Called by <see cref="DebugSession"/>'s constructor after the pump is
-    /// assigned. ADR-010 Increment 2c — substrate owns policy storage + evaluation; pump owns
-    /// the stop/resume decision based on the evaluator's verdict.</summary>
-    internal void RegisterBreakpointEvaluator(Func<nint, StopInfo?> evaluate) => _evaluateBreakpoint = evaluate;
 
     /// <summary>Begin draining. Call once the process controller exists (after
     /// DebugActiveProcess). <paramref name="resume"/> resumes the debuggee for a given
@@ -196,37 +196,17 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 }
                 else
                 {
-                    // STOPPING: leave the debuggee synchronized, decide surface vs auto-resume, and
-                    // either publish + block until the caller resumes or skip the publish and
-                    // continue directly. The process produces no new callbacks while stopped, so
-                    // the queue behind this event is empty until we resume.
+                    // STOPPING: leave the debuggee synchronized, surface the stop, and block until
+                    // the caller resumes. The process produces no new callbacks while stopped, so
+                    // the queue behind this event is empty until we resume. Capture the breakpoint
+                    // pointer on BreakpointHit so caller-thread policy lookup (ADR-010 Increment 2c,
+                    // caller-thread refactor) can map back to the entry.
                     _stopThread = e.Thread;
+                    _lastBreakpointPointer = e.Kind == CallbackKind.BreakpointHit ? e.Breakpoint : 0;
 
-                    // BreakpointHit: consult the substrate's per-breakpoint policy evaluator. The
-                    // evaluator returns the StopInfo to publish or null to auto-resume under the
-                    // policy's gates (HitCount + Condition + LogMessage + Suspend). For breakpoints
-                    // with no policy, the evaluator returns a plain Breakpoint stop — backward
-                    // compatible with pre-policy callers. ADR-010 Increment 2c.
-                    StopInfo? toPublish;
-                    if (e.Kind == CallbackKind.BreakpointHit && _evaluateBreakpoint is { } evaluate)
-                    {
-                        toPublish = evaluate(e.Breakpoint);
-                    }
-                    else
-                    {
-                        toPublish = e.Kind == CallbackKind.Exception
-                            ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
-                            : new StopInfo(MapReason(e.Kind));
-                    }
-
-                    if (toPublish is null)
-                    {
-                        // Auto-resume: the policy gates failed (condition false / hit count not yet
-                        // reached) OR a Suspend.None logpoint fired its action and is continuing.
-                        // The caller never sees this hit; bypass _resume.Take and Continue directly.
-                        _resumeHandler!(ResumeKind.Continue, _stopThread);
-                        continue;
-                    }
+                    StopInfo toPublish = e.Kind == CallbackKind.Exception
+                        ? new StopInfo(StopReason.Exception, (ExceptionStopKind)e.Detail)
+                        : new StopInfo(MapReason(e.Kind));
 
                     _stops.Add(toPublish);
                     ResumeKind kind;

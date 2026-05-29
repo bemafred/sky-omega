@@ -200,20 +200,22 @@ static class MemberWalker25
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine) == 0)
+        // The whole point: the predicate comes from a Roslyn parse of "box.Size == 42". Each hit the
+        // walker func-evals box.Size on its runtime type and compares — nothing about Box hardcoded.
+        // Policy attaches at SetBreakpoint time (ADR-010 Increment 2c).
+        Func<IEvalContext, bool> predicate = CSharpCondition.Compile(Condition, session);
+        var policy = new BreakpointPolicy(Condition: predicate);
+        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, policy) == 0)
         {
             Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
             return 6;
         }
 
-        // The whole point: the predicate comes from a Roslyn parse of "box.Size == 42". Each hit the
-        // walker func-evals box.Size on its runtime type and compares — nothing about Box hardcoded.
-        Func<IEvalContext, bool> predicate = CSharpCondition.Compile(Condition, session);
-        Console.WriteLine($"running    : breakpoint set; resuming until \"{Condition}\" (member func-eval'd each hit) …");
+        Console.WriteLine($"running    : breakpoint set with Condition policy; resuming until \"{Condition}\" (member func-eval'd each hit) …");
         session.Resume();
 
         // box.Size cycles 40..44, so the breakpoint hits every iteration — only Size==42 should surface.
-        StopInfo? stop = session.WaitForConditionalStop(predicate, TimeSpan.FromSeconds(30));
+        StopInfo? stop = session.WaitForStop(TimeSpan.FromSeconds(30));
         if (stop is null) { Console.Error.WriteLine("FALSIFIED: conditional stop timed out (member func-eval in predicate failed)."); return 7; }
         if (stop.Reason != StopReason.Breakpoint) { Console.Error.WriteLine($"FALSIFIED: surfaced {stop.Reason}, expected Breakpoint."); return 7; }
 
