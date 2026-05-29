@@ -661,10 +661,11 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// the stop thread. Valid only while stopped.</summary>
     public string? GetCurrentExceptionTypeName() => ExceptionInspector.CurrentExceptionTypeName(_pump.StopThread);
 
-    /// <summary>EXPERIMENT (func-eval): evaluate a static, parameterless method in the debuggee at
-    /// the current stop and return its value. Creates an eval on the stopped thread, calls the
-    /// function, resumes to run it, and waits up to <paramref name="timeout"/> for the
-    /// EvalComplete stop. A timeout is the func-eval-deadlock signal. Valid only while stopped.</summary>
+    /// <summary>Evaluate a static, parameterless method in the debuggee at the current stop and
+    /// return its value. Creates an eval on the stopped thread, calls the function, resumes to run
+    /// it, and waits up to <paramref name="timeout"/> for the EvalComplete stop. A timeout is the
+    /// func-eval-deadlock signal. Valid only while stopped. Substrate-validated by probe 19
+    /// (finding 27).</summary>
     public EvalStatus TryEvalStaticCall(string moduleNameSubstring, string typeName, string methodName,
                                         TimeSpan timeout, out ArgumentValue result)
     {
@@ -702,10 +703,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(pModule); }
     }
 
-    /// <summary>EXPERIMENT (func-eval breadth): evaluate a static, single-<c>int</c>-argument method
-    /// in the debuggee at the current stop. The argument is built as an eval value
-    /// (<c>CreateValue</c> + <c>SetValue</c>). On a timeout the eval is aborted
-    /// (<c>ICorDebugEval.Abort</c>) before returning. Valid only while stopped.</summary>
+    /// <summary>Evaluate a static, single-<c>int</c>-argument method in the debuggee at the current
+    /// stop. The argument is built as an eval value (<c>CreateValue</c> + <c>SetValue</c>). On a
+    /// timeout the eval is aborted (<c>ICorDebugEval.Abort</c>) before returning. Valid only while
+    /// stopped. Substrate-validated by probe 20 (finding 28).</summary>
     public EvalStatus TryEvalStaticCallInt(string moduleNameSubstring, string typeName, string methodName,
                                            int argument, TimeSpan timeout, out ArgumentValue result)
     {
@@ -751,11 +752,11 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(pModule); }
     }
 
-    /// <summary>EXPERIMENT (func-eval breadth): call an instance method/property
-    /// <paramref name="declaringTypeName"/>.<paramref name="methodName"/> (resolved in the module
-    /// matching <paramref name="declaringModuleSubstring"/>) on the local named
-    /// <paramref name="thisLocalName"/> as <c>this</c>. E.g. <c>s.Length</c> = String.get_Length on
-    /// the local <c>s</c>. Valid only while stopped.</summary>
+    /// <summary>Call an instance method/property <paramref name="declaringTypeName"/>.<paramref name="methodName"/>
+    /// (resolved in the module matching <paramref name="declaringModuleSubstring"/>) on the local
+    /// named <paramref name="thisLocalName"/> as <c>this</c>. E.g. <c>s.Length</c> =
+    /// String.get_Length on the local <c>s</c>. Valid only while stopped. Substrate-validated by
+    /// probe 21 (finding 29).</summary>
     public EvalStatus TryEvalInstanceCall(string thisLocalName, string declaringModuleSubstring,
                                           string declaringTypeName, string methodName,
                                           TimeSpan timeout, out ArgumentValue result)
@@ -813,11 +814,12 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(thisValue); }
     }
 
-    /// <summary>EXPERIMENT (general member resolution): call the property getter
-    /// <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c> on the local's RUNTIME type —
-    /// no hardcoded declaring type/module — and func-evaluating it. Works for plain reference
-    /// objects; strings/non-object kinds return SetupFailed (the ICorDebugType path is a follow-on).
-    /// Valid only while stopped.</summary>
+    /// <summary>Call the property getter <c>thisLocal.member</c> by resolving <c>get_&lt;member&gt;</c>
+    /// on the local's RUNTIME type — no hardcoded declaring type/module — and func-evaluating it.
+    /// Works for plain reference objects; strings/non-object kinds return SetupFailed (the
+    /// ICorDebugType path is a follow-on). Valid only while stopped. Substrate-validated by probe 24
+    /// (finding 32); used as the implementation of <see cref="IMemberResolver.TryEvalMemberCall"/> by
+    /// <see cref="Expressions.CSharpCondition"/> and by all conditional / logpoint policy paths.</summary>
     public EvalStatus TryEvalMemberCall(string thisLocalName, string memberName, TimeSpan timeout, out ArgumentValue result)
     {
         result = default;
@@ -853,12 +855,12 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { RuntimeNavigation.Release(thisValue); }
     }
 
-    /// <summary>EXPERIMENT (func-eval at an exception stop): at a <see cref="StopReason.Exception"/>
-    /// stop, call the property getter <c>&lt;member&gt;</c> on the in-flight exception object — its
-    /// value comes from <c>ICorDebugThread.GetCurrentException</c>, not a local — by resolving
-    /// <c>get_&lt;member&gt;</c> on the exception's RUNTIME type and func-evaluating it. This composes
-    /// the exception stop (probe 26) with general member resolution (probe 24); the runtime preserves
-    /// the exception across the eval (cordebug.idl). Powers conditional exception breakpoints
+    /// <summary>At a <see cref="StopReason.Exception"/> stop, call the property getter
+    /// <c>&lt;member&gt;</c> on the in-flight exception object — its value comes from
+    /// <c>ICorDebugThread.GetCurrentException</c>, not a local — by resolving <c>get_&lt;member&gt;</c>
+    /// on the exception's RUNTIME type and func-evaluating it. This composes the exception stop
+    /// (probe 26) with general member resolution (probe 24); the runtime preserves the exception
+    /// across the eval (cordebug.idl). Powers conditional exception breakpoints
     /// (<c>ex.Code == 42</c>). Valid only at an exception stop.</summary>
     public EvalStatus TryEvalCurrentExceptionMember(string memberName, TimeSpan timeout, out ArgumentValue result)
     {
