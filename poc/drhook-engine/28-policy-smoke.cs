@@ -19,7 +19,13 @@
 //   D. FAULT                   — Condition that throws → ConditionError stop + a fault LogRecord
 //                                 (proves a broken condition fails LOUD once, not silently false).
 //
-// Falsification: 2 usage/marker; 3 no READY; 4 attach; 5 no setup Break; 6 SetBreakpointAtLine;
+// Migration to ADR-010 Increment 2c (2026-05-28): policy now lives on the breakpoint, not at the
+// wait site. SetBreakpointAtLine takes a BreakpointPolicy; the engine evaluates internally via
+// CallbackPump → DebugSession.EvaluateBreakpointHit; the caller just calls plain WaitForStop.
+// Between configs the probe Remove+Re-SetBP with the next policy (the substrate is stopped after
+// a surfaced stop or after Pause+WaitForStop). Old session-scope WaitForPolicyStop is gone.
+//
+// Falsification: 2 usage/marker; 3 no READY; 4 attach; 5 no setup Break;
 //   7 config A failed; 8 config B failed; 9 config C failed; 10 config D failed; 0 PASS.
 //
 // Usage:  DBGSHIM_PATH=<libdbgshim> dotnet 28-policy-smoke.cs <path-to-28-policy-target.cs>
@@ -140,17 +146,14 @@ static class Policy28
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine) == 0)
-        {
-            Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
-            return 6;
-        }
-        session.Resume();
 
         // --- Config A: CONDITIONAL BREAKPOINT (Condition, Suspend.All) ---------------------------
         var condPolicy = new BreakpointPolicy(Condition: ctx => ReadLocal(ctx, LocalName) == ConditionalExpected);
+        int bpA = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, condPolicy);
+        if (bpA == 0) { Console.Error.WriteLine($"FALSIFIED (A SetBreakpointAtLine): {FileHint}:{markerLine}."); return 7; }
         Console.WriteLine($"A. conditional   : Condition v == {ConditionalExpected}, Suspend.All …");
-        StopInfo? stopA = session.WaitForPolicyStop(condPolicy, TimeSpan.FromSeconds(20));
+        session.Resume();
+        StopInfo? stopA = session.WaitForStop(TimeSpan.FromSeconds(20));
         long? vAtA = session.GetLocals().FirstOrDefault(l => l.Name == LocalName).RawValue;
         Console.WriteLine($"               -> stop={(stopA is null ? "null" : stopA.Reason.ToString())}  v={vAtA?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
         if (stopA is null || stopA.Reason != StopReason.Breakpoint || vAtA != ConditionalExpected)
@@ -158,15 +161,18 @@ static class Policy28
             Console.Error.WriteLine($"FALSIFIED (A): expected Breakpoint with v == {ConditionalExpected}, got stop={stopA?.Reason.ToString() ?? "null"}, v={vAtA}.");
             return 7;
         }
-        session.Resume();
+        if (!session.RemoveBreakpoint(bpA)) { Console.Error.WriteLine("FALSIFIED (A→B swap): RemoveBreakpoint(bpA) failed."); return 7; }
 
         // --- Config B: LOGPOINT (LogMessage, Suspend.None) ---------------------------------------
         int baseB = sink.Count;
         var logPolicy = new BreakpointPolicy(
             LogMessage: ctx => $"v={ReadLocal(ctx, LocalName)?.ToString(CultureInfo.InvariantCulture) ?? "?"}",
             Suspend: SuspendPolicy.None);
+        int bpB = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, logPolicy);
+        if (bpB == 0) { Console.Error.WriteLine("FALSIFIED (B SetBreakpointAtLine)."); return 8; }
         Console.WriteLine("B. logpoint      : LogMessage \"v={v}\", Suspend.None, 2s …");
-        StopInfo? stopB = session.WaitForPolicyStop(logPolicy, TimeSpan.FromSeconds(2));
+        session.Resume();
+        StopInfo? stopB = session.WaitForStop(TimeSpan.FromSeconds(2));
         IReadOnlyList<LogRecord> logsB = sink.SnapshotSince(baseB);
         Console.WriteLine($"               -> stop={(stopB is null ? "null (timeout, expected)" : stopB.Reason.ToString())}  logs={logsB.Count}  first=\"{(logsB.Count > 0 ? logsB[0].Message : "")}\"");
         bool everyLogMatches = logsB.All(r => !r.IsFault && Regex.IsMatch(r.Message, @"^v=\d+$"));
@@ -175,6 +181,11 @@ static class Policy28
             Console.Error.WriteLine($"FALSIFIED (B): expected null stop + >=5 well-formed logpoint lines; stop={stopB?.Reason.ToString() ?? "null"}, logs={logsB.Count}, allMatch={everyLogMatches}.");
             return 8;
         }
+        // Stop the running target so we can swap the policy.
+        session.Pause();
+        StopInfo? pauseB = session.WaitForStop(TimeSpan.FromSeconds(5));
+        if (pauseB is null || pauseB.Reason != StopReason.Pause) { Console.Error.WriteLine($"FALSIFIED (B→C Pause): {pauseB?.Reason.ToString() ?? "null"}."); return 8; }
+        if (!session.RemoveBreakpoint(bpB)) { Console.Error.WriteLine("FALSIFIED (B→C swap): RemoveBreakpoint(bpB) failed."); return 8; }
 
         // --- Config C: HIT-COUNT GATED LOGPOINT (HitCount + LogMessage, Suspend.None) ------------
         int baseC = sink.Count;
@@ -182,8 +193,11 @@ static class Policy28
             HitCount: new HitCountGate(HitCountMode.Equals, 3),
             LogMessage: ctx => $"hit-3 v={ReadLocal(ctx, LocalName)?.ToString(CultureInfo.InvariantCulture) ?? "?"}",
             Suspend: SuspendPolicy.None);
+        int bpC = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, hitLogPolicy);
+        if (bpC == 0) { Console.Error.WriteLine("FALSIFIED (C SetBreakpointAtLine)."); return 9; }
         Console.WriteLine("C. hit-count gate: HitCount Equals(3) + LogMessage, Suspend.None, 2s …");
-        StopInfo? stopC = session.WaitForPolicyStop(hitLogPolicy, TimeSpan.FromSeconds(2));
+        session.Resume();
+        StopInfo? stopC = session.WaitForStop(TimeSpan.FromSeconds(2));
         IReadOnlyList<LogRecord> logsC = sink.SnapshotSince(baseC);
         Console.WriteLine($"               -> stop={(stopC is null ? "null (timeout, expected)" : stopC.Reason.ToString())}  logs={logsC.Count}  (must be exactly 1)  first=\"{(logsC.Count > 0 ? logsC[0].Message : "")}\"");
         if (stopC is not null || logsC.Count != 1 || logsC[0].IsFault || !logsC[0].Message.StartsWith("hit-3 v=", StringComparison.Ordinal))
@@ -191,13 +205,20 @@ static class Policy28
             Console.Error.WriteLine($"FALSIFIED (C): expected null stop + exactly 1 well-formed log; stop={stopC?.Reason.ToString() ?? "null"}, logs={logsC.Count}.");
             return 9;
         }
+        session.Pause();
+        StopInfo? pauseC = session.WaitForStop(TimeSpan.FromSeconds(5));
+        if (pauseC is null || pauseC.Reason != StopReason.Pause) { Console.Error.WriteLine($"FALSIFIED (C→D Pause): {pauseC?.Reason.ToString() ?? "null"}."); return 9; }
+        if (!session.RemoveBreakpoint(bpC)) { Console.Error.WriteLine("FALSIFIED (C→D swap): RemoveBreakpoint(bpC) failed."); return 9; }
 
         // --- Config D: FAULT (Condition throws → ConditionError + fault LogRecord) ---------------
         int baseD = sink.Count;
         var faultPolicy = new BreakpointPolicy(
             Condition: _ => throw new InvalidOperationException("simulated bad condition"));
+        int bpD = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, faultPolicy);
+        if (bpD == 0) { Console.Error.WriteLine("FALSIFIED (D SetBreakpointAtLine)."); return 10; }
         Console.WriteLine("D. fault         : Condition throws -> ConditionError + IsFault log …");
-        StopInfo? stopD = session.WaitForPolicyStop(faultPolicy, TimeSpan.FromSeconds(10));
+        session.Resume();
+        StopInfo? stopD = session.WaitForStop(TimeSpan.FromSeconds(10));
         IReadOnlyList<LogRecord> logsD = sink.SnapshotSince(baseD);
         Console.WriteLine($"               -> stop={(stopD is null ? "null" : stopD.Reason.ToString())}  faultLogs={logsD.Count(r => r.IsFault)}");
         if (stopD is null || stopD.Reason != StopReason.ConditionError
@@ -209,7 +230,7 @@ static class Policy28
         }
         session.Resume();
 
-        Console.WriteLine("\nPROBE 28 PASSED — BreakpointPolicy unifies conditional / logpoint / hit-count / fault as four configs of one type.");
+        Console.WriteLine("\nPROBE 28 PASSED — BreakpointPolicy unifies conditional / logpoint / hit-count / fault as four configs of one type, with policy attached at SetBreakpoint time (ADR-010 Increment 2c).");
         return 0;
     }
 
