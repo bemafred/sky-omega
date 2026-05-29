@@ -230,15 +230,70 @@ Tier 2 ships incrementally as each Open Question is resolved by a probe or by re
 Tools that require new substrate capability before any MCP surface can be added.
 
 - **`drhook_launch` accepting `.csproj`** — requires project inspector (MTP / VSTest / future-variant detection), executable resolver, dispatcher. This is the substantive scope of the original ADR-009.
-- **`drhook_break_source` / `drhook_break_function` with `condition`** — requires Roslyn walker extraction per `EngineSteppingSession.cs:328`. The walker exists in probes; substrate work is the extraction + plumbing.
-- **`drhook_break_source` with `hitCount`** — substrate-internal counter on the breakpoint; threshold check on hit.
-- **`drhook_break_source` with `logMessage`** — substrate-internal logpoint mode; on hit, emit message via existing log/anomaly channel and auto-continue without stopping.
-- **`drhook_break_function` with `hitCount`** — same hit-count mechanism.
+- **`drhook_break_source` / `drhook_break_function` with `condition`** — substrate work **DONE in Increment 2** (extracted as `DrHook.Engine.Expressions/CSharpCondition`; `BreakpointPolicySpec.CompileWith` + `DebugSession.Compile` are the canonical substrate surfaces). MCP wire-up pending — moved into Increment 6 below.
+- **`drhook_break_source` with `hitCount`** — substrate **DONE in Increment 2** (`HitCountGate` + `BreakpointPolicy.HitCount`). MCP wire-up pending — Increment 6.
+- **`drhook_break_source` with `logMessage`** — substrate-internal logpoint mode **DONE in Increment 2** (`BreakpointPolicy.LogMessage` evaluated, with `LogRecord` emission). The `{expr}` interpolation template compiler is the remaining substrate work; `BreakpointPolicySpec.CompileWith` currently throws `NotImplementedException` when `LogMessage` is set. Pending as a follow-up to Increment 1.
+- **`drhook_break_function` with `hitCount`** — same as `break_source`; substrate done.
 - **`drhook_break_data`** — ICorDebug field-write breakpoint. Substrate has not surfaced this; ICorDebug primitive support is `[?]` and needs subject-matter verification (Open Question).
 - **`drhook_set_next_statement`** — ICorDebug `SetIP` on the current frame. Substrate does not currently expose; primitive availability `[?]`.
 - **`drhook_watch`** — general Roslyn expression evaluation against locals + arguments + `this`. Substrate has only narrow static-method func-eval (`DebugSession.cs:687/728`); a general eval surface is substantial new work.
 
 Each Tier 3 tool ships when its substrate dependency lands. Sequencing is not prescribed by this ADR; per-tool work would be motivated by demand and validated by a probe + finding.
+
+### Increment 6 — Exception breakpoint MCP surface + breakpoint introspection alignment
+
+**Status:** Proposed — 2026-05-29.
+
+Increment 2 (closed 2026-05-29 by commits `8cce862` … `2d16923` + `824cc0b`) shipped the substrate work that makes per-breakpoint and per-exception-filter policies first-class: `BreakpointPolicy` (delegate) / `BreakpointPolicySpec` (string), `DebugSession.Compile`, `SetBreakpointAtLine(...policy)`, `SetBreakpoint(...policy)`, `ArmExceptionFilter(...policy)`, and caller-thread evaluation in `WaitForStop` for both breakpoint and exception-filter locations. The substrate also already supports subclass-aware exception matching via `ExceptionInspector.CurrentExceptionTypeChain` (runtime-driven `ICorDebugType.GetBase` walk; cross-module-safe per cordebug.idl — verified by `Interop/ExceptionInspector.cs:60-92`, probe 37, finding 47).
+
+The **MCP-tool surface has not kept up** with this substrate granularity:
+
+- `drhook_step_break_exception(filter: string)` advertises only `"all"` and `"user-unhandled"` in its description. Its code path silently accepts any other string as a literal type name (`EngineSteppingSession.cs:373-378`), but no agent reading the description would discover this. Phase, condition, hit count, and logpoint mode are entirely absent.
+- `drhook_step_breakpoint_list` returns the agent's original `filter` string for exception entries (e.g. `"all"`), losing the resolved `typeName` / `phase`. Source and function entries return `{id, file, line}` / `{id, function}` — the attached `BreakpointPolicy` (condition, hit count, log message, suspend, current hit count) is invisible to the agent.
+- `drhook_step_breakpoint_remove` description ties the removal key to the lossy filter alias rather than the canonical breakpoint ID.
+
+Increment 6 closes this MCP-surface gap, with a new probe explicitly validating target-defined exception hierarchies (not just BCL types).
+
+#### Deliverables
+
+1. **`drhook_step_break_exception` — explicit parameter surface.** Replace the single `filter: string` parameter with:
+   - `typeName: string` (required) — fully-qualified CLR type name (`"System.NullReferenceException"`, `"MyApp.DomainException"`, etc.) or `"*"` wildcard. Document the subclass-aware match semantics with an explicit example covering a target-defined hierarchy.
+   - `phase: string?` (optional, default `"any"`) — one of `"any" | "first-chance" | "user-unhandled" | "catch-handler-found" | "unhandled"`.
+   - `condition: string?` (optional) — compiled via `DebugSession.Compile(new BreakpointPolicySpec(...))`.
+   - `hitCount: int?` (optional).
+   - `suspend: string?` (optional, default `"all"`) — `"all" | "none"`.
+   - Returns: `{id, typeName, phase, hits: 0, policy?, prompt}`.
+   - Convenience presets `"all"` / `"user-unhandled"` stay valid as MCP-layer aliases the description recommends, but the explicit-parameter form is the canonical surface.
+
+2. **`drhook_step_breakpoint_list` — full descriptors.** Each entry exposes the substrate's view in full:
+   - Source: `{id, file, line, policy?, hits}`.
+   - Function: `{id, function, policy?, hits}`.
+   - Exception: `{id, typeName, phase, policy?, hits}`.
+   - `policy?` is `{condition?, hitCount?, logMessage?, suspend}` when present.
+
+3. **`drhook_step_breakpoint_remove` — by-ID canonical.** Accept `id: int` as the primary identifier. The polymorphic `(file+line | functionName | filter)` form deprecates in favor of "list to discover IDs, remove by ID."
+
+4. **`drhook_step_breakpoint` (source) and `drhook_step_break_function` — accept policy parameters.** Add `condition: string?`, `hitCount: int?`, `logMessage: string?`, `suspend: string?` parameters. Same string-spec → `BreakpointPolicySpec.CompileWith` → policy flow as the exception variant. `logMessage` gated until the template compiler lands (substrate currently throws `NotImplementedException` for it).
+
+5. **Probe 57 — target-defined exception hierarchy.** New probe in `poc/drhook-engine/`. Target defines `MyApp.DomainException : System.Exception` and a derived `MyApp.OrderValidationException : MyApp.DomainException`. Probe arms an exception filter on `"MyApp.DomainException"`, throws an `OrderValidationException` in the target, asserts the filter matches via the substrate's subclass-chain walk across the target's own module. Validates the cross-module `GetBase` path explicitly for target-defined types, not just BCL types. Probe number 57 is free per the ADR-007 renumbering.
+
+6. **Tool descriptions updated to match substrate behavior** — no more `'all' or 'user-unhandled'` lossy framing. Subclass-aware semantics documented with examples. Resolved `typeName` / `phase` shown in tool output.
+
+#### Out of scope (deliberate exclusions)
+
+- **Enable/disable toggle independent of Arm/Remove.** VS/VS Code/Rider expose an enable checkbox; substrate has Arm/Remove primitives. Functionally equivalent at the agent surface (Arm to enable, Remove to disable). If a stateful "armed-but-disabled" representation is needed later, that's a separate increment.
+- **`{expr}` template compiler for `LogMessage`.** Pending as a follow-up to Increment 1 (the `CompileTemplate` variant of `CSharpCondition`). Once it lands, `BreakpointPolicySpec.CompileWith` stops throwing on `LogMessage`, and the MCP `logMessage` parameter on `step_breakpoint` / `step_break_function` / `step_break_exception` becomes functional.
+
+#### Validation
+
+- Tool descriptions match substrate behavior; no lossy abstractions.
+- Probe 57 passes on macOS-arm64 (target-defined hierarchy filter matches).
+- Existing 95/95 unit tests and probes 22, 23, 25, 28, 29, 30 still pass.
+- A round-trip from `drhook_step_breakpoint_list` shows everything an agent needs to reason about the breakpoint set (type, phase, policy, hits) without out-of-band knowledge.
+
+#### Why this increment is well-bounded
+
+The substrate work is **done** as of Increment 2. This increment is purely MCP-layer alignment (parameter shapes, tool descriptions, output JSON) plus one verification probe for the target-defined-hierarchy case the existing probes don't cover. No `DebugSession` API changes; no `CallbackPump` changes; no new compilation surfaces.
 
 ## Open questions — answer before Proposed → Accepted
 
