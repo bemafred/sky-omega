@@ -17,9 +17,9 @@ public interface IDebugEventSink
     /// or when a condition faults (<see cref="LogRecord.IsFault"/>). The engine produces the record;
     /// the host chooses the destination — typically a bounded ring buffer drained by a tool, with a
     /// file tee for high-volume runs (finding 35). Default no-op so existing sinks compile without
-    /// change; logpoint-aware sinks override. May be called from the thread that invoked
-    /// <see cref="DebugSession.WaitForPolicyStop"/> (not the callback worker), so implementations
-    /// must be thread-safe if they also handle <see cref="OnEvent"/>.</summary>
+    /// change; logpoint-aware sinks override. Called on the caller thread from inside
+    /// <see cref="DebugSession.WaitForStop"/> (not the callback worker), so implementations must be
+    /// thread-safe if they also handle <see cref="OnEvent"/>.</summary>
     void OnLog(LogRecord record) { }
 
     /// <summary>Invoked when the engine detects a substrate-correctness anomaly — the typed

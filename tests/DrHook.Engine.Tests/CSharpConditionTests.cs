@@ -1,8 +1,8 @@
 // Unit tests for the pure logic of CSharpCondition (the Roslyn-based expression walker that turns
 // a condition string into a Func<IEvalContext, bool>). The end-to-end conditional-breakpoint flow
-// (BreakpointPolicy.Condition evaluated at each hit, via DebugSession.WaitForPolicyStop) is validated
-// live by probes 22-25; here we pin the parser/walker arithmetic against a fake IMemberResolver +
-// IEvalContext so refactors can't drift without notice.
+// (BreakpointPolicy.Condition evaluated at each hit on the caller thread inside
+// DebugSession.WaitForStop) is validated live by probes 22-25; here we pin the parser/walker
+// arithmetic against a fake IMemberResolver + IEvalContext so refactors can't drift without notice.
 
 using System;
 using System.Collections.Generic;

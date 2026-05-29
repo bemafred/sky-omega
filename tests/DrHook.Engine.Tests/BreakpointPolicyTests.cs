@@ -1,5 +1,6 @@
 // Unit tests for the pure logic of BreakpointPolicy gates. The end-to-end policy loop
-// (WaitForPolicyStop: condition + hit-count + log action + suspend) is validated live by
+// (BreakpointPolicy attached at SetBreakpoint time + DebugSession.WaitForStop evaluating
+// condition + hit-count + log action + suspend on the caller thread) is validated live by
 // probe 28; here we just pin the arithmetic so refactors can't drift.
 
 using SkyOmega.DrHook.Engine;

@@ -514,103 +514,12 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// pause queues behind it (will fire after the user resumes the prior stop).</summary>
     public void Pause() => _pump.RequestPause();
 
-    /// <summary>Run until a breakpoint hit where <paramref name="condition"/> holds (or a
-    /// non-breakpoint stop, or timeout). At each breakpoint hit the condition is evaluated against
-    /// a snapshot of the frame's locals/arguments; if false, the debuggee is resumed and the wait
-    /// continues. This is the conditional-breakpoint mechanism: the breakpoint marks WHERE, the
-    /// predicate decides WHETHER. The predicate is a plain delegate — the C#-expression front end
-    /// (Roslyn) lives above the engine. Returns null on timeout.</summary>
-    public StopInfo? WaitForConditionalStop(Func<IEvalContext, bool> condition, TimeSpan timeout)
-    {
-        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
-        while (true)
-        {
-            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) return null;
-            StopInfo? stop = _pump.WaitForStop(remaining);
-            if (stop is null) return null;
-            if (stop.Reason != StopReason.Breakpoint) return stop; // non-breakpoint stops surface as-is
-            IEvalContext context = new EvalContext(GetLocals(), GetArguments());
-            if (condition(context)) return stop;
-            _pump.Resume(); // condition false — keep running to the next hit (within the deadline)
-        }
-    }
-
-    /// <summary>Drive a breakpoint with a <see cref="BreakpointPolicy"/> — the unified surface from
-    /// findings 33/35. At each breakpoint hit: increment a hit counter, evaluate the gates
-    /// (<see cref="BreakpointPolicy.HitCount"/>, then <see cref="BreakpointPolicy.Condition"/>), run
-    /// the <see cref="BreakpointPolicy.LogMessage"/> action if present (rendered + emitted as a
-    /// <see cref="LogRecord"/> via <see cref="IDebugEventSink.OnLog"/>), and surface or auto-resume per
-    /// <see cref="BreakpointPolicy.Suspend"/>. Conditional breakpoint, logpoint, hit-count gate, and
-    /// log-and-break all fall out as configurations of the same policy. A condition that THROWS is a
-    /// FAULT — never silently false — and surfaces as <see cref="StopReason.ConditionError"/> with a
-    /// fault <see cref="LogRecord"/>. Non-breakpoint stops surface as-is. Returns null on timeout (a
-    /// pure logpoint, by design, never returns a non-null value — call with a bounded timeout to
-    /// drain logs).</summary>
-    public StopInfo? WaitForPolicyStop(BreakpointPolicy policy, TimeSpan timeout)
-    {
-        ArgumentNullException.ThrowIfNull(policy);
-        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
-        int hitCount = 0;
-        while (true)
-        {
-            // Deadline-based: total wall-clock budget, not per-stop. A pure logpoint (Suspend.None,
-            // no condition that ever returns) only terminates via this deadline; without it a
-            // fast-hitting breakpoint resets the per-call timeout each iteration and the loop never exits.
-            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) return null;
-            StopInfo? stop = _pump.WaitForStop(remaining);
-            if (stop is null) return null;
-            if (stop.Reason != StopReason.Breakpoint) return stop;
-
-            switch (EvaluatePolicy(policy, ref hitCount))
-            {
-                case PolicyOutcome.Resume: _pump.Resume(); continue;
-                case PolicyOutcome.ConditionFault: return new StopInfo(StopReason.ConditionError);
-                default: return stop; // Surface
-            }
-        }
-    }
-
-    /// <summary>Drive an exception "breakpoint" with a <see cref="BreakpointPolicy"/> — the
-    /// exception-location surface from findings 33/35. Exception stops whose type does not match
-    /// <paramref name="exceptionTypeName"/> are auto-resumed; matching stops run the policy
-    /// (gates, log action, suspend decision), reusing the SAME policy evaluation as
-    /// <see cref="WaitForPolicyStop"/>. A condition like <c>"ex.Code == 42"</c> uses the in-flight
-    /// exception object (resolve via <see cref="TryEvalCurrentExceptionMember"/>) — the walker
-    /// special-cases the <c>ex</c> operand. Returns null on timeout; non-exception stops surface
-    /// as-is. The hit counter only counts matching exceptions, not stray first-chance noise.</summary>
-    public StopInfo? WaitForExceptionPolicyStop(string exceptionTypeName, BreakpointPolicy policy, TimeSpan timeout)
-    {
-        ArgumentNullException.ThrowIfNull(exceptionTypeName);
-        ArgumentNullException.ThrowIfNull(policy);
-        DateTimeOffset deadline = DateTimeOffset.UtcNow + timeout;
-        int hitCount = 0;
-        while (true)
-        {
-            TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
-            if (remaining <= TimeSpan.Zero) return null;
-            StopInfo? stop = _pump.WaitForStop(remaining);
-            if (stop is null) return null;
-            if (stop.Reason != StopReason.Exception) return stop;
-
-            // Type filter — non-matching exceptions auto-resume without polluting the hit counter.
-            if (GetCurrentExceptionTypeName() != exceptionTypeName) { _pump.Resume(); continue; }
-
-            switch (EvaluatePolicy(policy, ref hitCount))
-            {
-                case PolicyOutcome.Resume: _pump.Resume(); continue;
-                case PolicyOutcome.ConditionFault: return new StopInfo(StopReason.ConditionError);
-                default: return stop;
-            }
-        }
-    }
-
     private enum PolicyOutcome { Resume, Surface, ConditionFault }
 
     /// <summary>Run a stop's policy: gates (hit count + condition) → action (log) → suspend decision.
-    /// Shared by <see cref="WaitForPolicyStop"/> and <see cref="WaitForExceptionPolicyStop"/> so the
-    /// fault path and best-effort logging behave identically across location kinds.</summary>
+    /// Invoked from <see cref="WaitForStop"/>'s caller-thread evaluation path for both breakpoint and
+    /// exception-filter locations, so the fault path and best-effort logging behave identically
+    /// across location kinds.</summary>
     private PolicyOutcome EvaluatePolicy(BreakpointPolicy policy, ref int hitCount)
     {
         hitCount++;
