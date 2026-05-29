@@ -363,33 +363,83 @@ public sealed class EngineSteppingSession : IDisposable
         }));
     }
 
-    public Task<string> SetExceptionBreakpointAsync(string filter, CancellationToken ct)
+    public Task<string> SetExceptionBreakpointAsync(string typeName, string? phase, string? condition, int? hitCount, string? suspend, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
+        ArgumentNullException.ThrowIfNull(typeName);
 
-        // Map the DAP-style filter names to engine filters. "all" = any type, first-chance.
-        // "user-unhandled" = any type, unhandled. The engine model is type-first; the * wildcard
-        // is what DAP "all" translates to.
-        (string typeName, ExceptionStopKind phase) = filter switch
+        ExceptionStopKind phaseFilter = ParsePhase(phase);
+
+        // Build a BreakpointPolicy only if at least one policy field was supplied; otherwise the
+        // filter arms with no policy (legacy backward-compat for type-only filters).
+        BreakpointPolicy? policy = null;
+        string? policyError = null;
+        if (condition is not null || hitCount is not null || suspend is not null)
         {
-            "all"             => (ExceptionFilterInfo.AnyType, ExceptionStopKind.FirstChance),
-            "user-unhandled"  => (ExceptionFilterInfo.AnyType, ExceptionStopKind.Unhandled),
-            _ => (filter, ExceptionStopKind.FirstChance), // treat as a literal type name
-        };
-        int id = _session.ArmExceptionFilter(typeName, phase);
-        _exceptionFilters[filter] = id;
+            BreakpointPolicySpec spec = new(
+                Condition: condition,
+                HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
+                LogMessage: null, // template compiler pending (Increment 1 follow-up)
+                Suspend: ParseSuspend(suspend));
+            try { policy = _session.Compile(spec); }
+            catch (NotImplementedException ex) { policyError = ex.Message; }
+            catch (Exception ex) { policyError = $"{ex.GetType().Name}: {ex.Message}"; }
+        }
 
-        return Task.FromResult(Render(new JsonObject
+        if (policyError is not null)
+            return Task.FromResult(Error($"Policy compile failed: {policyError}"));
+
+        int id = _session.ArmExceptionFilter(typeName, phaseFilter, policy);
+
+        // Track by ID-prefixed key so multiple distinct configurations of the same typeName don't
+        // clash in the dictionary. The canonical identifier for removal is the substrate-returned
+        // ID (surfaced in the prompt); Increment 6 deliverable 3 will switch the removal tool to
+        // accept ID directly.
+        _exceptionFilters[$"id={id}"] = id;
+
+        JsonObject result = new()
         {
             ["status"] = "added",
             ["type"] = "exception",
-            ["filter"] = filter,
             ["typeName"] = typeName,
-            ["phase"] = phase.ToString(),
+            ["phase"] = phaseFilter.ToString(),
             ["id"] = id,
-            ["prompt"] = $"Exception filter armed ({filter} → type=\"{typeName}\" phase={phase}, id={id})."
-        }));
+        };
+        if (policy is not null)
+        {
+            JsonObject policyJson = new();
+            if (condition is not null) policyJson["condition"] = condition;
+            if (hitCount is not null)  policyJson["hitCount"] = hitCount.Value;
+            if (suspend is not null)   policyJson["suspend"] = ParseSuspend(suspend).ToString();
+            result["policy"] = policyJson;
+        }
+        result["prompt"] = $"Exception filter armed (id={id}, type=\"{typeName}\", phase={phaseFilter}" +
+            (policy is not null ? ", policy attached" : "") +
+            $"). Use drhook_step_breakpoint_remove with this id to remove.";
+
+        return Task.FromResult(Render(result));
     }
+
+    /// <summary>Parse the MCP-facing phase string into a substrate <see cref="ExceptionStopKind"/>.
+    /// Accepts the substrate's own enum names with kebab-case spelling, plus the DAP alias
+    /// 'user-unhandled' (mapped to <see cref="ExceptionStopKind.Unhandled"/> per DAP convention).
+    /// Unknown / null / 'any' map to <see cref="ExceptionStopKind.None"/> (substrate wildcard).</summary>
+    private static ExceptionStopKind ParsePhase(string? phase) => phase?.ToLowerInvariant() switch
+    {
+        null or "" or "any"      => ExceptionStopKind.None,
+        "first-chance"           => ExceptionStopKind.FirstChance,
+        "user-first-chance"      => ExceptionStopKind.UserFirstChance,
+        "catch-handler-found"    => ExceptionStopKind.CatchHandlerFound,
+        "unhandled"              => ExceptionStopKind.Unhandled,
+        "user-unhandled"         => ExceptionStopKind.Unhandled, // DAP alias
+        _                        => ExceptionStopKind.None,
+    };
+
+    private static SuspendPolicy ParseSuspend(string? suspend) => suspend?.ToLowerInvariant() switch
+    {
+        "none" => SuspendPolicy.None,
+        _      => SuspendPolicy.All,
+    };
 
     public Task<string> RemoveBreakpointAsync(string sourceFile, int line, CancellationToken ct)
     {

@@ -187,15 +187,23 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_break_exception"), Description(
-        "Add an exception breakpoint using DAP exception filters. " +
-        "Stops execution when an exception matching the filter is thrown. " +
-        "'all' breaks on every throw, 'user-unhandled' breaks only on exceptions not caught in user code. " +
-        "Multiple filters can be active simultaneously.")]
+        "Set an exception breakpoint that stops execution when an exception of the specified type is " +
+        "thrown. Matching is SUBCLASS-AWARE: a filter on a base type (e.g. 'System.IOException' or " +
+        "'MyApp.DomainException') matches every subclass — including types defined in the target's own " +
+        "module. Multiple filters compose with OR semantics; arm one per type you want covered. " +
+        "Common idioms: typeName='*' phase='first-chance' = break on every throw (DAP 'all'); " +
+        "typeName='*' phase='unhandled' = break only on unhandled exceptions (DAP 'user-unhandled'). " +
+        "The optional condition is a C# expression evaluated at each matching exception; pair with " +
+        "suspend='none' for a non-stopping exception logpoint (when LogMessage support lands).")]
     public async Task<string> StepBreakException(
-        [Description("Exception filter: 'all' or 'user-unhandled'")] string filter,
+        [Description("Fully-qualified CLR type name (e.g. 'System.NullReferenceException', 'MyApp.DomainException'), or '*' for any type. Matching is subclass-aware via the substrate's cross-module ICorDebugType.GetBase walk — a filter on a base catches every derived throw, regardless of which module defines the derived type.")] string typeName,
+        [Description("Exception phase: 'any' (default — match any phase), 'first-chance' (fired at the throw site), 'user-first-chance' (search reached first user code), 'catch-handler-found' (a handler has been resolved), or 'unhandled' (no handler found).")] string? phase = null,
+        [Description("Optional C# condition gating the breakpoint. Only stops when the expression evaluates true. Has access to the in-flight exception via 'ex' (e.g. 'ex.Code == 42'). Compiled via the substrate's CSharpCondition walker.")] string? condition = null,
+        [Description("Optional hit-count gate. The breakpoint only fires on the Nth matching exception (HitCountMode.Equals). Useful with condition for sampling.")] int? hitCount = null,
+        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint-style emission once LogMessage support lands).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetExceptionBreakpointAsync(filter, ct);
+        return await _session.SetExceptionBreakpointAsync(typeName, phase, condition, hitCount, suspend, ct);
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint_remove"), Description(
