@@ -164,26 +164,37 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint"), Description(
-        "Add a source breakpoint at a specific file and line. " +
+        "Add a source breakpoint at a specific file and line, optionally gated by a policy. " +
         "Multiple breakpoints per file are supported — each call adds to the set. " +
-        "Use drhook_step_continue to run to the breakpoint.")]
+        "Optional policy parameters: 'condition' is a C# expression evaluated each hit (the breakpoint " +
+        "only surfaces when it evaluates true); 'hitCount' fires only on the Nth matching hit; " +
+        "'suspend' set to 'none' fires the policy's actions without stopping (logpoint mode — " +
+        "intended for future LogMessage support). Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakpoint(
         [Description("Absolute path to the source file")] string sourceFile,
         [Description("Line number for the breakpoint")] int line,
+        [Description("Optional C# condition (e.g. 'value == 3', 's.Length > 0'). Has access to locals + arguments of the current frame. Compiled via the substrate's CSharpCondition walker.")] string? condition = null,
+        [Description("Optional hit-count gate. The breakpoint only fires on the Nth matching hit (HitCountMode.Equals).")] int? hitCount = null,
+        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode once LogMessage support lands).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetBreakpointAsync(sourceFile, line, null, ct);
+        return await _session.SetBreakpointAsync(sourceFile, line, condition, hitCount, suspend, ct);
     }
 
     [McpServerTool(Name = "drhook_step_break_function"), Description(
-        "Add a function breakpoint by method name. Stops at method entry. " +
+        "Add a function breakpoint by method name, optionally gated by a policy. Stops at method entry. " +
         "Multiple function breakpoints are supported — each call adds to the set. " +
-        "Use drhook_step_continue to run to the breakpoint.")]
+        "Optional policy parameters mirror drhook_step_breakpoint: 'condition' (C# expression with " +
+        "access to method arguments + locals at entry), 'hitCount' (fire on Nth matching call), " +
+        "'suspend' ('all' to stop, 'none' for logpoint mode). Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakFunction(
         [Description("Fully qualified or simple method name (e.g. 'Fibonacci' or 'MyNamespace.MyClass.Fibonacci')")] string functionName,
+        [Description("Optional C# condition (e.g. 'n > 0'). Has access to method arguments + locals at entry. Compiled via the substrate's CSharpCondition walker.")] string? condition = null,
+        [Description("Optional hit-count gate. The breakpoint only fires on the Nth matching call (HitCountMode.Equals).")] int? hitCount = null,
+        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode once LogMessage support lands).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetFunctionBreakpointAsync(functionName, null, ct);
+        return await _session.SetFunctionBreakpointAsync(functionName, condition, hitCount, suspend, ct);
     }
 
     [McpServerTool(Name = "drhook_step_break_exception"), Description(

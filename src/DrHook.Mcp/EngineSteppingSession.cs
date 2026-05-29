@@ -334,49 +334,92 @@ public sealed class EngineSteppingSession : IDisposable
 
     // ─── Breakpoints ─────────────────────────────────────────────────────────────────────────
 
-    public Task<string> SetBreakpointAsync(string sourceFile, int line, string? condition, CancellationToken ct)
+    public Task<string> SetBreakpointAsync(string sourceFile, int line, string? condition, int? hitCount, string? suspend, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
-        if (!string.IsNullOrEmpty(condition))
-            // Conditional breakpoints via Roslyn would compose probe-25/29 walkers; not in this slice.
-            return Task.FromResult(Error("Conditional breakpoints are a polish item — the Roslyn walker lives in the probes today and hasn't been extracted into DrHook.Engine.Expressions yet."));
 
-        int id = _session.SetBreakpointAtLine(ModuleSubstrForFile(sourceFile), sourceFile, line);
+        BreakpointPolicy? policy = null;
+        BreakpointPolicySpec? spec = null;
+        if (condition is not null || hitCount is not null || suspend is not null)
+        {
+            spec = new BreakpointPolicySpec(
+                Condition: condition,
+                HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
+                LogMessage: null, // template compiler pending (Increment 1 follow-up)
+                Suspend: ParseSuspend(suspend));
+            try { policy = _session.Compile(spec); }
+            catch (NotImplementedException ex) { return Task.FromResult(Error($"Policy compile failed: {ex.Message}")); }
+            catch (Exception ex) { return Task.FromResult(Error($"Policy compile failed: {ex.GetType().Name}: {ex.Message}")); }
+        }
+
+        int id = _session.SetBreakpointAtLine(ModuleSubstrForFile(sourceFile), sourceFile, line, policy);
         if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line} — module/PDB unavailable or no sequence point at that line."));
         _lineBreakpoints[KeyLine(sourceFile, line)] = id;
         _breakpointKinds[id] = BreakpointKind.Source;
+        if (spec is not null) _policySpecs[id] = spec;
 
-        return Task.FromResult(Render(new JsonObject
+        JsonObject result = new()
         {
             ["status"] = "added",
             ["type"] = "source",
             ["file"] = sourceFile,
             ["line"] = line,
             ["id"] = id,
-            ["prompt"] = $"Breakpoint added at {sourceFile}:{line} (id={id}). Use drhook_step_continue to run to it."
-        }));
+        };
+        if (spec is not null)
+        {
+            JsonObject policyJson = new();
+            if (condition is not null) policyJson["condition"] = condition;
+            if (hitCount is not null)  policyJson["hitCount"] = hitCount.Value;
+            if (suspend is not null)   policyJson["suspend"] = ParseSuspend(suspend).ToString();
+            result["policy"] = policyJson;
+        }
+        result["prompt"] = $"Breakpoint added at {sourceFile}:{line} (id={id}{(policy is not null ? ", policy attached" : "")}). Use drhook_step_continue to run to it.";
+        return Task.FromResult(Render(result));
     }
 
-    public Task<string> SetFunctionBreakpointAsync(string functionName, string? condition, CancellationToken ct)
+    public Task<string> SetFunctionBreakpointAsync(string functionName, string? condition, int? hitCount, string? suspend, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
-        if (!string.IsNullOrEmpty(condition))
-            return Task.FromResult(Error("Conditional breakpoints are a polish item (see drhook_step_breakpoint)."));
+
+        BreakpointPolicy? policy = null;
+        BreakpointPolicySpec? spec = null;
+        if (condition is not null || hitCount is not null || suspend is not null)
+        {
+            spec = new BreakpointPolicySpec(
+                Condition: condition,
+                HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
+                LogMessage: null,
+                Suspend: ParseSuspend(suspend));
+            try { policy = _session.Compile(spec); }
+            catch (NotImplementedException ex) { return Task.FromResult(Error($"Policy compile failed: {ex.Message}")); }
+            catch (Exception ex) { return Task.FromResult(Error($"Policy compile failed: {ex.GetType().Name}: {ex.Message}")); }
+        }
 
         (string moduleSubstr, string typeName, string methodName) = SplitFunction(functionName);
-        int id = _session.SetBreakpoint(moduleSubstr, typeName, methodName);
+        int id = _session.SetBreakpoint(moduleSubstr, typeName, methodName, policy);
         if (id == 0) return Task.FromResult(Error($"Could not resolve function '{functionName}' (looked for type '{typeName}', method '{methodName}' in module '{moduleSubstr}')."));
         _functionBreakpoints[functionName] = id;
         _breakpointKinds[id] = BreakpointKind.Function;
+        if (spec is not null) _policySpecs[id] = spec;
 
-        return Task.FromResult(Render(new JsonObject
+        JsonObject result = new()
         {
             ["status"] = "added",
             ["type"] = "function",
             ["function"] = functionName,
             ["id"] = id,
-            ["prompt"] = $"Function breakpoint added at {functionName} entry (id={id})."
-        }));
+        };
+        if (spec is not null)
+        {
+            JsonObject policyJson = new();
+            if (condition is not null) policyJson["condition"] = condition;
+            if (hitCount is not null)  policyJson["hitCount"] = hitCount.Value;
+            if (suspend is not null)   policyJson["suspend"] = ParseSuspend(suspend).ToString();
+            result["policy"] = policyJson;
+        }
+        result["prompt"] = $"Function breakpoint added at {functionName} entry (id={id}{(policy is not null ? ", policy attached" : "")}).";
+        return Task.FromResult(Render(result));
     }
 
     public Task<string> SetExceptionBreakpointAsync(string typeName, string? phase, string? condition, int? hitCount, string? suspend, CancellationToken ct)
