@@ -1024,6 +1024,25 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         return false;
     }
 
+    /// <summary>The number of times the breakpoint with <paramref name="id"/> has fired through its
+    /// policy evaluator since being armed (excludes the substrate-internal events that fail the
+    /// policy's gates — each gate-failing hit still increments the counter, so this reflects the
+    /// total throw count, not the surfaced-stop count). Returns 0 if the breakpoint is not found or
+    /// has no attached policy. ADR-010 Increment 6 deliverable 2 — substrate-internal hit count
+    /// surfaced for breakpoint introspection.</summary>
+    public int GetBreakpointHits(int id)
+    {
+        for (int i = 0; i < _breakpoints.Count; i++)
+            if (_breakpoints[i].Info.Id == id) return _breakpoints[i].HitCount;
+        return 0;
+    }
+
+    /// <summary>The number of matching exceptions the filter with <paramref name="id"/> has admitted
+    /// through its policy evaluator since being armed (each policy-evaluated hit increments,
+    /// regardless of gate outcome). Returns 0 if the filter is not found or has no attached policy.</summary>
+    public int GetExceptionFilterHits(int id)
+        => _exceptionFilterState.TryGetValue(id, out ExceptionFilterState? state) ? state.HitCount : 0;
+
     /// <summary>Deactivate and release ALL active breakpoints; returns how many were cleared. Valid
     /// only while stopped. <see cref="Dispose"/> releases the refs separately (after the runtime
     /// has been terminated, so deactivation is moot).</summary>

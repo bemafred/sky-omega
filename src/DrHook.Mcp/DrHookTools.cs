@@ -227,8 +227,11 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint_list"), Description(
-        "List all active breakpoints — source, function, and exception. " +
-        "Shows file, line, and function name for each.")]
+        "List all active breakpoints with full descriptors — source, function, and exception. " +
+        "Each entry includes: id (use with drhook_step_breakpoint_remove), location (file:line / Type.Method / typeName+phase), " +
+        "hits (running count of times the breakpoint's policy evaluator has been entered), and " +
+        "policy (when one is attached — condition / hitCount / logMessage / suspend, as the agent originally supplied). " +
+        "Use this to discover IDs and to verify what's armed before stepping.")]
     public string StepBreakpointList()
     {
         return _session.ListBreakpoints();

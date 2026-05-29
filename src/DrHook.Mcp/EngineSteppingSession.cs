@@ -41,7 +41,13 @@ public sealed class EngineSteppingSession : IDisposable
     // breakpoint id maps (so remove-by-natural-key resolves to engine ids)
     private readonly Dictionary<string, int> _lineBreakpoints = new();       // key = "file:line"
     private readonly Dictionary<string, int> _functionBreakpoints = new();   // key = "Type.Method"
-    private readonly Dictionary<string, int> _exceptionFilters = new();      // key = "all" / "user-unhandled"
+    private readonly Dictionary<string, int> _exceptionFilters = new();      // key = "id={N}" (composite from Increment 6 Deliverable 1)
+
+    // Per-breakpoint-id presentation Specs — the string form the agent originally supplied. The
+    // substrate compiles Spec → BreakpointPolicy (delegates); the MCP layer keeps the Spec around
+    // so list/inspection tools can show the agent what they configured rather than opaque
+    // delegate references. ADR-010 Increment 6 deliverable 2.
+    private readonly Dictionary<int, BreakpointPolicySpec> _policySpecs = new();
 
     // EA-5: substrate-anomaly buffer drained by drhook_drain_anomalies (per ADR-007 Phase 1).
     // Cross-session — anomalies accumulate until the consumer drains; capacity 256 (~128 KB max).
@@ -373,10 +379,11 @@ public sealed class EngineSteppingSession : IDisposable
         // Build a BreakpointPolicy only if at least one policy field was supplied; otherwise the
         // filter arms with no policy (legacy backward-compat for type-only filters).
         BreakpointPolicy? policy = null;
+        BreakpointPolicySpec? spec = null;
         string? policyError = null;
         if (condition is not null || hitCount is not null || suspend is not null)
         {
-            BreakpointPolicySpec spec = new(
+            spec = new BreakpointPolicySpec(
                 Condition: condition,
                 HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
                 LogMessage: null, // template compiler pending (Increment 1 follow-up)
@@ -396,6 +403,7 @@ public sealed class EngineSteppingSession : IDisposable
         // ID (surfaced in the prompt); Increment 6 deliverable 3 will switch the removal tool to
         // accept ID directly.
         _exceptionFilters[$"id={id}"] = id;
+        if (spec is not null) _policySpecs[id] = spec;
 
         JsonObject result = new()
         {
@@ -448,6 +456,7 @@ public sealed class EngineSteppingSession : IDisposable
         if (!_lineBreakpoints.TryGetValue(key, out int id) || !_session.RemoveBreakpoint(id))
             return Task.FromResult(Error($"No breakpoint registered at {sourceFile}:{line}."));
         _lineBreakpoints.Remove(key);
+        _policySpecs.Remove(id);
         return Task.FromResult(Render(new JsonObject { ["status"] = "removed", ["type"] = "source", ["file"] = sourceFile, ["line"] = line, ["id"] = id }));
     }
 
@@ -457,6 +466,7 @@ public sealed class EngineSteppingSession : IDisposable
         if (!_functionBreakpoints.TryGetValue(functionName, out int id) || !_session.RemoveBreakpoint(id))
             return Task.FromResult(Error($"No function breakpoint registered for '{functionName}'."));
         _functionBreakpoints.Remove(functionName);
+        _policySpecs.Remove(id);
         return Task.FromResult(Render(new JsonObject { ["status"] = "removed", ["type"] = "function", ["function"] = functionName, ["id"] = id }));
     }
 
@@ -466,6 +476,7 @@ public sealed class EngineSteppingSession : IDisposable
         if (!_exceptionFilters.TryGetValue(filter, out int id) || !_session.RemoveExceptionFilter(id))
             return Task.FromResult(Error($"No exception filter '{filter}' is armed."));
         _exceptionFilters.Remove(filter);
+        _policySpecs.Remove(id);
         return Task.FromResult(Render(new JsonObject { ["status"] = "removed", ["type"] = "exception", ["filter"] = filter, ["id"] = id }));
     }
 
@@ -473,25 +484,63 @@ public sealed class EngineSteppingSession : IDisposable
     {
         if (_session is null) return Error("No active stepping session.");
 
+        // Source + function breakpoints are pattern-matched out of substrate's ListBreakpoints —
+        // the engine is authoritative for both descriptor and hit count. The MCP layer's policy-spec
+        // dictionary supplies the string form for policy display.
         JsonArray source = new();
-        foreach ((string key, int id) in _lineBreakpoints)
+        JsonArray function = new();
+        foreach (BreakpointInfo info in _session.ListBreakpoints())
         {
-            int colon = key.LastIndexOf(':');
-            source.Add(new JsonObject
+            int hits = _session.GetBreakpointHits(info.Id);
+            JsonObject? policyJson = _policySpecs.TryGetValue(info.Id, out BreakpointPolicySpec? spec) ? RenderPolicy(spec) : null;
+            switch (info)
             {
-                ["id"] = id,
-                ["file"] = colon > 0 ? key[..colon] : key,
-                ["line"] = colon > 0 && int.TryParse(key[(colon + 1)..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : 0,
-            });
+                case LineBreakpointInfo line:
+                    JsonObject sourceEntry = new()
+                    {
+                        ["id"] = line.Id,
+                        ["file"] = line.FilePath,
+                        ["line"] = line.Line,
+                        ["module"] = line.ModuleSubstring,
+                        ["hits"] = hits,
+                    };
+                    if (policyJson is not null) sourceEntry["policy"] = policyJson;
+                    source.Add(sourceEntry);
+                    break;
+                case FunctionBreakpointInfo func:
+                    JsonObject funcEntry = new()
+                    {
+                        ["id"] = func.Id,
+                        ["function"] = $"{func.TypeName}.{func.MethodName}",
+                        ["module"] = func.ModuleSubstring,
+                        ["hits"] = hits,
+                    };
+                    if (policyJson is not null) funcEntry["policy"] = policyJson;
+                    function.Add(funcEntry);
+                    break;
+            }
         }
 
-        JsonArray function = new();
-        foreach ((string fn, int id) in _functionBreakpoints)
-            function.Add(new JsonObject { ["id"] = id, ["function"] = fn });
-
+        // Exception filters: substrate's ListExceptionFilters has the canonical {id, typeName,
+        // phase}; hit count is per-filter via GetExceptionFilterHits.
         JsonArray exception = new();
-        foreach ((string filter, int id) in _exceptionFilters)
-            exception.Add(new JsonObject { ["id"] = id, ["filter"] = filter });
+        foreach (ExceptionFilterInfo filter in _session.ListExceptionFilters())
+        {
+            int hits = _session.GetExceptionFilterHits(filter.Id);
+            JsonObject entry = new()
+            {
+                ["id"] = filter.Id,
+                ["typeName"] = filter.TypeName,
+                ["phase"] = filter.PhaseFilter.ToString(),
+                ["hits"] = hits,
+            };
+            if (_policySpecs.TryGetValue(filter.Id, out BreakpointPolicySpec? spec))
+            {
+                JsonObject? policyJson = RenderPolicy(spec);
+                if (policyJson is not null) entry["policy"] = policyJson;
+            }
+            exception.Add(entry);
+        }
 
         return Render(new JsonObject
         {
@@ -501,6 +550,21 @@ public sealed class EngineSteppingSession : IDisposable
             ["exception"] = exception,
             ["count"] = source.Count + function.Count + exception.Count,
         });
+    }
+
+    /// <summary>Render a <see cref="BreakpointPolicySpec"/> as JSON for breakpoint-list output —
+    /// the string form an agent supplied at Arm time, not the engine-compiled delegate form. Returns
+    /// null if the spec has no policy fields (the breakpoint arms with no policy).</summary>
+    private static JsonObject? RenderPolicy(BreakpointPolicySpec spec)
+    {
+        if (spec.Condition is null && spec.HitCount is null && spec.LogMessage is null && spec.Suspend == SuspendPolicy.All)
+            return null;
+        JsonObject json = new();
+        if (spec.Condition is not null)  json["condition"] = spec.Condition;
+        if (spec.HitCount is { } gate)   json["hitCount"] = new JsonObject { ["mode"] = gate.Mode.ToString(), ["value"] = gate.Value };
+        if (spec.LogMessage is not null) json["logMessage"] = spec.LogMessage;
+        json["suspend"] = spec.Suspend.ToString();
+        return json;
     }
 
     public Task<string> ClearBreakpointsAsync(string? category, CancellationToken ct)
@@ -514,17 +578,17 @@ public sealed class EngineSteppingSession : IDisposable
 
         if (clearSource)
         {
-            foreach (int id in _lineBreakpoints.Values) if (_session.RemoveBreakpoint(id)) sourceCleared++;
+            foreach (int id in _lineBreakpoints.Values) { if (_session.RemoveBreakpoint(id)) sourceCleared++; _policySpecs.Remove(id); }
             _lineBreakpoints.Clear();
         }
         if (clearFunction)
         {
-            foreach (int id in _functionBreakpoints.Values) if (_session.RemoveBreakpoint(id)) functionCleared++;
+            foreach (int id in _functionBreakpoints.Values) { if (_session.RemoveBreakpoint(id)) functionCleared++; _policySpecs.Remove(id); }
             _functionBreakpoints.Clear();
         }
         if (clearException)
         {
-            foreach (int id in _exceptionFilters.Values) if (_session.RemoveExceptionFilter(id)) exceptionCleared++;
+            foreach (int id in _exceptionFilters.Values) { if (_session.RemoveExceptionFilter(id)) exceptionCleared++; _policySpecs.Remove(id); }
             _exceptionFilters.Clear();
         }
 
