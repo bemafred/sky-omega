@@ -245,19 +245,20 @@ static class Interp29
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        if (session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine) == 0)
-        {
-            Console.Error.WriteLine($"FALSIFIED (SetBreakpointAtLine): {FileHint}:{markerLine}.");
-            return 6;
-        }
-        session.Resume();
+
+        // Migration to ADR-010 Increment 2c: policy attaches to the breakpoint at Set time. Each
+        // config Remove+Re-SetBP with the next policy; between Suspend.None and the next config,
+        // Pause+WaitForStop to synchronize before swapping (RemoveBreakpoint requires being stopped).
 
         // --- Config A: PURE INTERPOLATION LOGPOINT (Roslyn-parsed renderer) ---------------------
         int baseA = sink.Count;
         var logRenderer = CSharp.CompileInterpolation(InterpTemplate, session);
         var logpoint = new BreakpointPolicy(LogMessage: logRenderer, Suspend: SuspendPolicy.None);
+        int bpA = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, logpoint);
+        if (bpA == 0) { Console.Error.WriteLine($"FALSIFIED (A SetBreakpointAtLine): {FileHint}:{markerLine}."); return 7; }
         Console.WriteLine($"A. interp logpoint  : LogMessage parsed from $\"{InterpTemplate}\", Suspend.None, 2s …");
-        StopInfo? stopA = session.WaitForPolicyStop(logpoint, TimeSpan.FromSeconds(2));
+        session.Resume();
+        StopInfo? stopA = session.WaitForStop(TimeSpan.FromSeconds(2));
         IReadOnlyList<LogRecord> logsA = sink.SnapshotSince(baseA);
         bool allMatchA = logsA.All(r => !r.IsFault && Regex.IsMatch(r.Message, @"^v=\d+ doubled=\d+$"));
         // Each line must satisfy doubled == 2*v (the interpolation actually evaluated 2*v).
@@ -273,6 +274,11 @@ static class Interp29
             Console.Error.WriteLine($"FALSIFIED (A): expected null stop + >=5 well-formed interpolated logs; stop={stopA?.Reason.ToString() ?? "null"}, logs={logsA.Count}, shape={allMatchA}, arith={arithmeticCheckA}.");
             return 7;
         }
+        // Pause to swap the policy.
+        session.Pause();
+        StopInfo? pauseA = session.WaitForStop(TimeSpan.FromSeconds(5));
+        if (pauseA is null || pauseA.Reason != StopReason.Pause) { Console.Error.WriteLine($"FALSIFIED (A→B Pause): {pauseA?.Reason.ToString() ?? "null"}."); return 7; }
+        if (!session.RemoveBreakpoint(bpA)) { Console.Error.WriteLine("FALSIFIED (A→B swap): RemoveBreakpoint(bpA) failed."); return 7; }
 
         // --- Config B: CONDITION + INTERPOLATION FROM THE SAME WALKER ---------------------------
         int baseB = sink.Count;
@@ -280,8 +286,11 @@ static class Interp29
             Condition: CSharp.Compile(Condition, session),
             LogMessage: CSharp.CompileInterpolation(MatchedTemplate, session),
             Suspend: SuspendPolicy.All);
+        int bpB = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, matchedPolicy);
+        if (bpB == 0) { Console.Error.WriteLine("FALSIFIED (B SetBreakpointAtLine)."); return 8; }
         Console.WriteLine($"B. cond + interp    : Condition \"{Condition}\" AND LogMessage parsed from $\"{MatchedTemplate}\", Suspend.All …");
-        StopInfo? stopB = session.WaitForPolicyStop(matchedPolicy, TimeSpan.FromSeconds(20));
+        session.Resume();
+        StopInfo? stopB = session.WaitForStop(TimeSpan.FromSeconds(20));
         long? vAtB = session.GetLocals().FirstOrDefault(l => l.Name == "v").RawValue;
         IReadOnlyList<LogRecord> logsB = sink.SnapshotSince(baseB);
         string expected = $"matched v={ConditionalExpected} doubled={2 * ConditionalExpected}";
@@ -294,7 +303,7 @@ static class Interp29
         }
         session.Resume();
 
-        Console.WriteLine("\nPROBE 29 PASSED — one Roslyn walker, two consumers: bool conditions AND interpolated string logpoint messages from the same Eval.");
+        Console.WriteLine("\nPROBE 29 PASSED — one Roslyn walker, two consumers: bool conditions AND interpolated string logpoint messages from the same Eval. Policy attaches at SetBreakpoint time (ADR-010 Increment 2c).");
         return 0;
     }
 

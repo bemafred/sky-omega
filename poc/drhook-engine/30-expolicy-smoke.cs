@@ -245,12 +245,18 @@ static class ExPolicy30
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-        session.Resume();
+
+        // Migration to ADR-010 Increment 2c (exception-filter side): policy attaches to the
+        // exception filter at ArmExceptionFilter time. Each config Remove+Re-Arm with the next
+        // policy; between Suspend.None and the next config, Pause+WaitForStop to synchronize.
+        // Plain WaitForStop drives all configs — WaitForExceptionPolicyStop is retired.
 
         // --- Config A: conditional exception breakpoint --------------------------------------------
         var condPolicy = new BreakpointPolicy(Condition: CSharp.Compile(CondMatch, session));
+        int filterA = session.ArmExceptionFilter(ExpectedType, ExceptionStopKind.None, condPolicy);
         Console.WriteLine($"A. cond ex bp    : Condition \"{CondMatch}\", Suspend.All …");
-        StopInfo? stopA = session.WaitForExceptionPolicyStop(ExpectedType, condPolicy, TimeSpan.FromSeconds(20));
+        session.Resume();
+        StopInfo? stopA = session.WaitForStop(TimeSpan.FromSeconds(20));
         string? typeA = session.GetCurrentExceptionTypeName();
         Console.WriteLine($"               -> stop={(stopA is null ? "null" : stopA.Reason.ToString())}  type={typeA ?? "n/a"}  phase={stopA?.ExceptionKind}");
         if (stopA is null || stopA.Reason != StopReason.Exception || stopA.ExceptionKind != ExceptionStopKind.FirstChance || typeA != ExpectedType)
@@ -258,15 +264,17 @@ static class ExPolicy30
             Console.Error.WriteLine($"FALSIFIED (A): expected FirstChance {ExpectedType}; got stop={stopA?.Reason.ToString() ?? "null"}, kind={stopA?.ExceptionKind}, type={typeA}.");
             return 7;
         }
-        session.Resume();
+        if (!session.RemoveExceptionFilter(filterA)) { Console.Error.WriteLine("FALSIFIED (A→B swap): RemoveExceptionFilter(filterA) failed."); return 7; }
 
         // --- Config B: exception logpoint -----------------------------------------------------------
         int baseB = sink.Count;
         var logPolicy = new BreakpointPolicy(
             LogMessage: CSharp.CompileInterpolation(LogTemplate, session),
             Suspend: SuspendPolicy.None);
+        int filterB = session.ArmExceptionFilter(ExpectedType, ExceptionStopKind.None, logPolicy);
         Console.WriteLine($"B. ex logpoint   : LogMessage parsed from $\"{LogTemplate}\", Suspend.None, 2s …");
-        StopInfo? stopB = session.WaitForExceptionPolicyStop(ExpectedType, logPolicy, TimeSpan.FromSeconds(2));
+        session.Resume();
+        StopInfo? stopB = session.WaitForStop(TimeSpan.FromSeconds(2));
         IReadOnlyList<LogRecord> logsB = sink.SnapshotSince(baseB);
         string expectedLine = $"caught ex.Code={ExpectedCode}";
         bool allOk = logsB.Count >= 3 && logsB.All(r => !r.IsFault && r.Message == expectedLine);
@@ -276,12 +284,19 @@ static class ExPolicy30
             Console.Error.WriteLine($"FALSIFIED (B): expected null stop + >=3 logs of \"{expectedLine}\"; stop={stopB?.Reason.ToString() ?? "null"}, logs={logsB.Count}.");
             return 8;
         }
+        // Pause to swap the filter for Config C.
+        session.Pause();
+        StopInfo? pauseB = session.WaitForStop(TimeSpan.FromSeconds(5));
+        if (pauseB is null || pauseB.Reason != StopReason.Pause) { Console.Error.WriteLine($"FALSIFIED (B→C Pause): {pauseB?.Reason.ToString() ?? "null"}."); return 8; }
+        if (!session.RemoveExceptionFilter(filterB)) { Console.Error.WriteLine("FALSIFIED (B→C swap): RemoveExceptionFilter(filterB) failed."); return 8; }
 
         // --- Config C: fault path (member doesn't exist on the runtime type) ----------------------
         int baseC = sink.Count;
         var faultPolicy = new BreakpointPolicy(Condition: CSharp.Compile(CondFault, session));
+        int filterC = session.ArmExceptionFilter(ExpectedType, ExceptionStopKind.None, faultPolicy);
         Console.WriteLine($"C. ex fault      : Condition \"{CondFault}\" (member does not exist), Suspend.All …");
-        StopInfo? stopC = session.WaitForExceptionPolicyStop(ExpectedType, faultPolicy, TimeSpan.FromSeconds(10));
+        session.Resume();
+        StopInfo? stopC = session.WaitForStop(TimeSpan.FromSeconds(10));
         IReadOnlyList<LogRecord> logsC = sink.SnapshotSince(baseC);
         int faultLogs = logsC.Count(r => r.IsFault);
         Console.WriteLine($"               -> stop={(stopC is null ? "null" : stopC.Reason.ToString())}  faultLogs={faultLogs}");
@@ -293,7 +308,7 @@ static class ExPolicy30
         }
         session.Resume();
 
-        Console.WriteLine("\nPROBE 30 PASSED — BreakpointPolicy drives the EXCEPTION location: type filter + condition / logpoint / fault all compose with the same policy substrate.");
+        Console.WriteLine("\nPROBE 30 PASSED — BreakpointPolicy drives the EXCEPTION location: type filter + condition / logpoint / fault all compose with the same policy substrate, attached at ArmExceptionFilter time (ADR-010 Increment 2c).");
         return 0;
     }
 

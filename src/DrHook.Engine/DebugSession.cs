@@ -98,6 +98,17 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     private readonly List<ExceptionFilterInfo> _exceptionFilters = new();
     private int _nextExceptionFilterId;
 
+    // Substrate-internal per-filter state — Policy + HitCount. Kept parallel to _exceptionFilters
+    // (rather than extending the public ExceptionFilterInfo record) because Policy/HitCount are
+    // implementation details consumers of ListExceptionFilters shouldn't see.
+    // ADR-010 Increment 2c (exception-filter side).
+    private sealed class ExceptionFilterState
+    {
+        public BreakpointPolicy? Policy { get; init; }
+        public int HitCount { get; set; }
+    }
+    private readonly Dictionary<int, ExceptionFilterState> _exceptionFilterState = new();
+
     // Per-module Portable PDB readers, opened on demand for source mapping; disposed on Dispose.
     private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
 
@@ -330,20 +341,39 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             StopInfo? stop = _pump.WaitForStop(remaining);
             if (stop is null) return null;
             if (stop.Reason != StopReason.Exception) return stop;
-            if (ExceptionMatchesAnyFilter(stop.ExceptionKind)) return stop;
-            _pump.Resume();
+
+            ExceptionFilterInfo? match = FindMatchingExceptionFilter(stop.ExceptionKind);
+            if (match is null) { _pump.Resume(); continue; }
+
+            // Policy-bearing filter: run gates/action/suspend, decide surface/resume/fault.
+            // Filters without policies surface as before — backward compatible.
+            // ADR-010 Increment 2c (exception-filter side).
+            if (_exceptionFilterState.TryGetValue(match.Id, out ExceptionFilterState? state) && state.Policy is not null)
+            {
+                int hitCount = state.HitCount;
+                PolicyOutcome outcome = EvaluatePolicy(state.Policy, ref hitCount);
+                state.HitCount = hitCount;
+                switch (outcome)
+                {
+                    case PolicyOutcome.Resume: _pump.Resume(); continue;
+                    case PolicyOutcome.ConditionFault: return new StopInfo(StopReason.ConditionError);
+                    default: return stop;
+                }
+            }
+
+            return stop;
         }
     }
 
-    private bool ExceptionMatchesAnyFilter(ExceptionStopKind actualPhase)
+    private ExceptionFilterInfo? FindMatchingExceptionFilter(ExceptionStopKind actualPhase)
     {
         // Walk the exception's full type chain (across modules via ICorDebugType.GetBase, probe 37)
         // so a filter on a base class (e.g. "System.Exception") matches any subclass — finding 47.
         IReadOnlyList<string> chain = Interop.ExceptionInspector.CurrentExceptionTypeChain(_pump.StopThread);
-        if (chain.Count == 0) return false;
+        if (chain.Count == 0) return null;
         foreach (ExceptionFilterInfo f in _exceptionFilters)
-            if (f.MatchesChain(chain, actualPhase)) return true;
-        return false;
+            if (f.MatchesChain(chain, actualPhase)) return f;
+        return null;
     }
 
     /// <summary>Resume a stopped debuggee so it runs to the next stop or exit.</summary>
@@ -1115,11 +1145,13 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// subclass walking is a future refinement). <paramref name="phaseFilter"/> defaults to
     /// <see cref="ExceptionStopKind.None"/> meaning "any phase". Returns a positive id; pass to
     /// <see cref="RemoveExceptionFilter"/>.</summary>
-    public int ArmExceptionFilter(string typeName, ExceptionStopKind phaseFilter = ExceptionStopKind.None)
+    public int ArmExceptionFilter(string typeName, ExceptionStopKind phaseFilter = ExceptionStopKind.None, BreakpointPolicy? policy = null)
     {
         ArgumentNullException.ThrowIfNull(typeName);
         int id = ++_nextExceptionFilterId;
         _exceptionFilters.Add(new ExceptionFilterInfo(id, typeName, phaseFilter));
+        if (policy is not null)
+            _exceptionFilterState[id] = new ExceptionFilterState { Policy = policy };
         return id;
     }
 
@@ -1141,6 +1173,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             if (_exceptionFilters[i].Id == id)
             {
                 _exceptionFilters.RemoveAt(i);
+                _exceptionFilterState.Remove(id);
                 return true;
             }
         }
@@ -1153,6 +1186,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     {
         int count = _exceptionFilters.Count;
         _exceptionFilters.Clear();
+        _exceptionFilterState.Clear();
         return count;
     }
 
