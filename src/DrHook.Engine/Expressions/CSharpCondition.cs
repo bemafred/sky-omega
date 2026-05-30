@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -39,6 +40,98 @@ internal static class CSharpCondition
         ArgumentNullException.ThrowIfNull(memberResolver);
         ExpressionSyntax tree = SyntaxFactory.ParseExpression(expression);
         return ctx => (bool)Eval(tree, ctx, memberResolver)!;
+    }
+
+    /// <summary>Parse a logpoint template into a renderer over <see cref="IEvalContext"/>. The template
+    /// is literal text interleaved with <c>{expr}</c> fragments; each fragment is a C# expression
+    /// parsed and walked via the same <see cref="Eval"/> as <see cref="Compile"/>. Escape sequences
+    /// <c>{{</c> and <c>}}</c> produce literal <c>{</c> and <c>}</c> respectively (matches VS Code DAP
+    /// convention). At render time, fragment results are stringified via
+    /// <see cref="Convert.ToString(object?, IFormatProvider?)"/> with <see cref="CultureInfo.InvariantCulture"/>;
+    /// null results render as the empty string.
+    ///
+    /// <para>Supported syntax inside fragments is the same subset <see cref="Compile"/> supports:
+    /// literals, identifiers (local lookup), member access (via <see cref="IMemberResolver.TryEvalMemberCall"/>),
+    /// parenthesized expressions, logical NOT, binary <c>&amp;&amp; || == != &lt; &gt; &lt;= &gt;=</c>.
+    /// Arithmetic and format specifiers are NOT supported — out of scope per ADR-010 Increment 7.</para>
+    ///
+    /// <para>Throws <see cref="ArgumentNullException"/> on null arguments, <see cref="FormatException"/>
+    /// on mismatched braces or empty fragments, and propagates any <see cref="NotSupportedException"/>
+    /// from <see cref="Eval"/> for unsupported syntax inside a fragment (the substrate's
+    /// <see cref="BreakpointPolicy"/> evaluator catches and surfaces these via the existing
+    /// <see cref="LogRecord.IsFault"/> path at render time).</para></summary>
+    public static Func<IEvalContext, string> CompileTemplate(string template, IMemberResolver memberResolver)
+    {
+        ArgumentNullException.ThrowIfNull(template);
+        ArgumentNullException.ThrowIfNull(memberResolver);
+
+        // Parse the template into alternating literal + expression segments. Each "segment" is
+        // either a verbatim string (literal) or a compiled expression delegate.
+        List<Func<IEvalContext, string>> segments = new();
+        StringBuilder literal = new();
+        int i = 0;
+        while (i < template.Length)
+        {
+            char c = template[i];
+            if (c == '{')
+            {
+                if (i + 1 < template.Length && template[i + 1] == '{')
+                {
+                    // Escape sequence: '{{' produces a literal '{'.
+                    literal.Append('{');
+                    i += 2;
+                    continue;
+                }
+                // Flush accumulated literal text before starting an expression fragment.
+                if (literal.Length > 0)
+                {
+                    string text = literal.ToString();
+                    segments.Add(_ => text);
+                    literal.Clear();
+                }
+                // Scan to the matching '}'. We don't support nested '{...}' inside expressions.
+                int close = template.IndexOf('}', i + 1);
+                if (close < 0)
+                    throw new FormatException($"unmatched '{{' at position {i} in template: \"{template}\"");
+                string exprText = template.Substring(i + 1, close - i - 1);
+                if (exprText.Length == 0)
+                    throw new FormatException($"empty '{{}}' fragment at position {i} in template: \"{template}\"");
+                ExpressionSyntax exprTree = SyntaxFactory.ParseExpression(exprText);
+                segments.Add(ctx =>
+                {
+                    object? value = Eval(exprTree, ctx, memberResolver);
+                    return value is null ? "" : Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+                });
+                i = close + 1;
+                continue;
+            }
+            if (c == '}')
+            {
+                if (i + 1 < template.Length && template[i + 1] == '}')
+                {
+                    // Escape sequence: '}}' produces a literal '}'.
+                    literal.Append('}');
+                    i += 2;
+                    continue;
+                }
+                throw new FormatException($"unmatched '}}' at position {i} in template: \"{template}\"");
+            }
+            literal.Append(c);
+            i++;
+        }
+        if (literal.Length > 0)
+        {
+            string trailing = literal.ToString();
+            segments.Add(_ => trailing);
+        }
+
+        // Render = concatenate every segment's contribution.
+        return ctx =>
+        {
+            StringBuilder sb = new();
+            foreach (Func<IEvalContext, string> seg in segments) sb.Append(seg(ctx));
+            return sb.ToString();
+        };
     }
 
     static object? Eval(ExpressionSyntax node, IEvalContext ctx, IMemberResolver memberResolver) => node switch

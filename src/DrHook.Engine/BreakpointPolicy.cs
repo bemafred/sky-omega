@@ -89,20 +89,17 @@ public sealed record BreakpointPolicySpec(
     /// passes <c>this</c> as the resolver. This method is the test/substrate-internal seam that
     /// keeps the compiler exercise-able without a live debug session.</para>
     ///
-    /// <para><see cref="LogMessage"/> compilation throws <see cref="NotImplementedException"/>
-    /// until the template compiler ({expr} interpolation) lands.</para></summary>
+    /// <para><see cref="LogMessage"/> compiles via <see cref="Expressions.CSharpCondition.CompileTemplate"/> —
+    /// literal text with <c>{expr}</c> fragments evaluated each hit (ADR-010 Increment 7).</para></summary>
     internal BreakpointPolicy CompileWith(IMemberResolver memberResolver)
     {
         ArgumentNullException.ThrowIfNull(memberResolver);
-        if (LogMessage is not null)
-            throw new NotImplementedException(
-                "BreakpointPolicySpec.LogMessage compilation is not yet implemented. " +
-                "Pending: template compiler with {expr} interpolation (follow-up to Increment 1). " +
-                "Construct a delegate-bearing BreakpointPolicy directly for logpoint scenarios in the meantime.");
-
-        Func<IEvalContext, bool>? condition = Condition is { } expr
-            ? Expressions.CSharpCondition.Compile(expr, memberResolver)
+        Func<IEvalContext, bool>? condition = Condition is { } cond
+            ? Expressions.CSharpCondition.Compile(cond, memberResolver)
             : null;
-        return new BreakpointPolicy(condition, HitCount, LogMessage: null, Suspend);
+        Func<IEvalContext, string>? logMessage = LogMessage is { } tmpl
+            ? Expressions.CSharpCondition.CompileTemplate(tmpl, memberResolver)
+            : null;
+        return new BreakpointPolicy(condition, HitCount, logMessage, Suspend);
     }
 }

@@ -23,14 +23,16 @@ public sealed class BreakpointPolicySpecTests
         Assert.Throws<ArgumentNullException>(() => spec.CompileWith(null!));
     }
 
-    // ─── LogMessage not yet implemented ────────────────────────────────────────
+    // ─── LogMessage template compilation (ADR-010 Increment 7) ────────────────
 
     [Fact]
-    public void CompileWith_LogMessage_ThrowsNotImplemented()
+    public void CompileWith_LogMessage_ProducesRenderer()
     {
         var spec = new BreakpointPolicySpec(LogMessage: "v={value}");
-        var ex = Assert.Throws<NotImplementedException>(() => spec.CompileWith(new NullMemberResolver()));
-        Assert.Contains("LogMessage", ex.Message);
+        var policy = spec.CompileWith(new NullMemberResolver());
+        Assert.NotNull(policy.LogMessage);
+        var ctx = new FakeEvalContext(Locals: new() { new LocalValue("value", ELEMENT_TYPE_I4, 7) });
+        Assert.Equal("v=7", policy.LogMessage!(ctx));
     }
 
     // ─── Empty spec round-trips with all fields null/default ───────────────────
