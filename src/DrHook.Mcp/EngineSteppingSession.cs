@@ -334,21 +334,20 @@ public sealed class EngineSteppingSession : IDisposable
 
     // ─── Breakpoints ─────────────────────────────────────────────────────────────────────────
 
-    public Task<string> SetBreakpointAsync(string sourceFile, int line, string? condition, int? hitCount, string? suspend, CancellationToken ct)
+    public Task<string> SetBreakpointAsync(string sourceFile, int line, string? condition, int? hitCount, string? logMessage, string? suspend, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
 
         BreakpointPolicy? policy = null;
         BreakpointPolicySpec? spec = null;
-        if (condition is not null || hitCount is not null || suspend is not null)
+        if (condition is not null || hitCount is not null || logMessage is not null || suspend is not null)
         {
             spec = new BreakpointPolicySpec(
                 Condition: condition,
                 HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
-                LogMessage: null, // template compiler pending (Increment 1 follow-up)
+                LogMessage: logMessage,
                 Suspend: ParseSuspend(suspend));
             try { policy = _session.Compile(spec); }
-            catch (NotImplementedException ex) { return Task.FromResult(Error($"Policy compile failed: {ex.Message}")); }
             catch (Exception ex) { return Task.FromResult(Error($"Policy compile failed: {ex.GetType().Name}: {ex.Message}")); }
         }
 
@@ -369,30 +368,30 @@ public sealed class EngineSteppingSession : IDisposable
         if (spec is not null)
         {
             JsonObject policyJson = new();
-            if (condition is not null) policyJson["condition"] = condition;
-            if (hitCount is not null)  policyJson["hitCount"] = hitCount.Value;
-            if (suspend is not null)   policyJson["suspend"] = ParseSuspend(suspend).ToString();
+            if (condition is not null)  policyJson["condition"] = condition;
+            if (hitCount is not null)   policyJson["hitCount"] = hitCount.Value;
+            if (logMessage is not null) policyJson["logMessage"] = logMessage;
+            if (suspend is not null)    policyJson["suspend"] = ParseSuspend(suspend).ToString();
             result["policy"] = policyJson;
         }
         result["prompt"] = $"Breakpoint added at {sourceFile}:{line} (id={id}{(policy is not null ? ", policy attached" : "")}). Use drhook_step_continue to run to it.";
         return Task.FromResult(Render(result));
     }
 
-    public Task<string> SetFunctionBreakpointAsync(string functionName, string? condition, int? hitCount, string? suspend, CancellationToken ct)
+    public Task<string> SetFunctionBreakpointAsync(string functionName, string? condition, int? hitCount, string? logMessage, string? suspend, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
 
         BreakpointPolicy? policy = null;
         BreakpointPolicySpec? spec = null;
-        if (condition is not null || hitCount is not null || suspend is not null)
+        if (condition is not null || hitCount is not null || logMessage is not null || suspend is not null)
         {
             spec = new BreakpointPolicySpec(
                 Condition: condition,
                 HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
-                LogMessage: null,
+                LogMessage: logMessage,
                 Suspend: ParseSuspend(suspend));
             try { policy = _session.Compile(spec); }
-            catch (NotImplementedException ex) { return Task.FromResult(Error($"Policy compile failed: {ex.Message}")); }
             catch (Exception ex) { return Task.FromResult(Error($"Policy compile failed: {ex.GetType().Name}: {ex.Message}")); }
         }
 
@@ -413,16 +412,17 @@ public sealed class EngineSteppingSession : IDisposable
         if (spec is not null)
         {
             JsonObject policyJson = new();
-            if (condition is not null) policyJson["condition"] = condition;
-            if (hitCount is not null)  policyJson["hitCount"] = hitCount.Value;
-            if (suspend is not null)   policyJson["suspend"] = ParseSuspend(suspend).ToString();
+            if (condition is not null)  policyJson["condition"] = condition;
+            if (hitCount is not null)   policyJson["hitCount"] = hitCount.Value;
+            if (logMessage is not null) policyJson["logMessage"] = logMessage;
+            if (suspend is not null)    policyJson["suspend"] = ParseSuspend(suspend).ToString();
             result["policy"] = policyJson;
         }
         result["prompt"] = $"Function breakpoint added at {functionName} entry (id={id}{(policy is not null ? ", policy attached" : "")}).";
         return Task.FromResult(Render(result));
     }
 
-    public Task<string> SetExceptionBreakpointAsync(string typeName, string? phase, string? condition, int? hitCount, string? suspend, CancellationToken ct)
+    public Task<string> SetExceptionBreakpointAsync(string typeName, string? phase, string? condition, int? hitCount, string? logMessage, string? suspend, CancellationToken ct)
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
         ArgumentNullException.ThrowIfNull(typeName);
@@ -434,15 +434,14 @@ public sealed class EngineSteppingSession : IDisposable
         BreakpointPolicy? policy = null;
         BreakpointPolicySpec? spec = null;
         string? policyError = null;
-        if (condition is not null || hitCount is not null || suspend is not null)
+        if (condition is not null || hitCount is not null || logMessage is not null || suspend is not null)
         {
             spec = new BreakpointPolicySpec(
                 Condition: condition,
                 HitCount: hitCount is { } n ? new HitCountGate(HitCountMode.Equals, n) : null,
-                LogMessage: null, // template compiler pending (Increment 1 follow-up)
+                LogMessage: logMessage,
                 Suspend: ParseSuspend(suspend));
             try { policy = _session.Compile(spec); }
-            catch (NotImplementedException ex) { policyError = ex.Message; }
             catch (Exception ex) { policyError = $"{ex.GetType().Name}: {ex.Message}"; }
         }
 
@@ -470,9 +469,10 @@ public sealed class EngineSteppingSession : IDisposable
         if (policy is not null)
         {
             JsonObject policyJson = new();
-            if (condition is not null) policyJson["condition"] = condition;
-            if (hitCount is not null)  policyJson["hitCount"] = hitCount.Value;
-            if (suspend is not null)   policyJson["suspend"] = ParseSuspend(suspend).ToString();
+            if (condition is not null)  policyJson["condition"] = condition;
+            if (hitCount is not null)   policyJson["hitCount"] = hitCount.Value;
+            if (logMessage is not null) policyJson["logMessage"] = logMessage;
+            if (suspend is not null)    policyJson["suspend"] = ParseSuspend(suspend).ToString();
             result["policy"] = policyJson;
         }
         result["prompt"] = $"Exception filter armed (id={id}, type=\"{typeName}\", phase={phaseFilter}" +

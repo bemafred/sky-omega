@@ -168,17 +168,19 @@ public sealed class DrHookTools
         "Multiple breakpoints per file are supported — each call adds to the set. " +
         "Optional policy parameters: 'condition' is a C# expression evaluated each hit (the breakpoint " +
         "only surfaces when it evaluates true); 'hitCount' fires only on the Nth matching hit; " +
-        "'suspend' set to 'none' fires the policy's actions without stopping (logpoint mode — " +
-        "intended for future LogMessage support). Use drhook_step_continue to run to the breakpoint.")]
+        "'logMessage' is a template like 'v={value}' rendered per hit and emitted as a structured " +
+        "LogRecord (pair with suspend='none' for a non-stopping logpoint); 'suspend' set to 'none' " +
+        "fires the policy's actions without stopping. Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakpoint(
         [Description("Absolute path to the source file")] string sourceFile,
         [Description("Line number for the breakpoint")] int line,
         [Description("Optional C# condition (e.g. 'value == 3', 's.Length > 0'). Has access to locals + arguments of the current frame. Compiled via the substrate's CSharpCondition walker.")] string? condition = null,
         [Description("Optional hit-count gate. The breakpoint only fires on the Nth matching hit (HitCountMode.Equals).")] int? hitCount = null,
-        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode once LogMessage support lands).")] string? suspend = null,
+        [Description("Optional log-message template with literal text and {expr} interpolation fragments (e.g. 'v={value} size={box.Size}'). Each fragment uses the same expression subset as condition — literals, identifiers, member access, parens, NOT, comparison binops; arithmetic and format specifiers are NOT yet supported. Use {{ and }} for literal braces. Rendered per hit and emitted via IDebugEventSink.OnLog.")] string? logMessage = null,
+        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode when paired with logMessage).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetBreakpointAsync(sourceFile, line, condition, hitCount, suspend, ct);
+        return await _session.SetBreakpointAsync(sourceFile, line, condition, hitCount, logMessage, suspend, ct);
     }
 
     [McpServerTool(Name = "drhook_step_break_function"), Description(
@@ -186,15 +188,17 @@ public sealed class DrHookTools
         "Multiple function breakpoints are supported — each call adds to the set. " +
         "Optional policy parameters mirror drhook_step_breakpoint: 'condition' (C# expression with " +
         "access to method arguments + locals at entry), 'hitCount' (fire on Nth matching call), " +
-        "'suspend' ('all' to stop, 'none' for logpoint mode). Use drhook_step_continue to run to the breakpoint.")]
+        "'logMessage' (template with {expr} interpolation rendered per hit), 'suspend' ('all' to stop, " +
+        "'none' for logpoint mode). Use drhook_step_continue to run to the breakpoint.")]
     public async Task<string> StepBreakFunction(
         [Description("Fully qualified or simple method name (e.g. 'Fibonacci' or 'MyNamespace.MyClass.Fibonacci')")] string functionName,
         [Description("Optional C# condition (e.g. 'n > 0'). Has access to method arguments + locals at entry. Compiled via the substrate's CSharpCondition walker.")] string? condition = null,
         [Description("Optional hit-count gate. The breakpoint only fires on the Nth matching call (HitCountMode.Equals).")] int? hitCount = null,
-        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode once LogMessage support lands).")] string? suspend = null,
+        [Description("Optional log-message template with {expr} interpolation (e.g. 'entered with n={n}'). Same expression subset as condition; rendered per hit and emitted via IDebugEventSink.OnLog.")] string? logMessage = null,
+        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint mode when paired with logMessage).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetFunctionBreakpointAsync(functionName, condition, hitCount, suspend, ct);
+        return await _session.SetFunctionBreakpointAsync(functionName, condition, hitCount, logMessage, suspend, ct);
     }
 
     [McpServerTool(Name = "drhook_step_break_exception"), Description(
@@ -213,10 +217,11 @@ public sealed class DrHookTools
         [Description("Exception phase: 'any' (default — match any phase), 'first-chance' (fired at the throw site), 'user-first-chance' (search reached first user code), 'catch-handler-found' (a handler has been resolved), or 'unhandled' (no handler found).")] string? phase = null,
         [Description("Optional C# condition gating the breakpoint. Only stops when the expression evaluates true. Has access to the in-flight exception via 'ex' (e.g. 'ex.Code == 42'). Compiled via the substrate's CSharpCondition walker.")] string? condition = null,
         [Description("Optional hit-count gate. The breakpoint only fires on the Nth matching exception (HitCountMode.Equals). Useful with condition for sampling.")] int? hitCount = null,
-        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint-style emission once LogMessage support lands).")] string? suspend = null,
+        [Description("Optional log-message template with {expr} interpolation (e.g. 'caught {ex.Code}'). Rendered per matching exception and emitted via IDebugEventSink.OnLog. Pair with suspend='none' for non-stopping exception telemetry.")] string? logMessage = null,
+        [Description("'all' (default — surface the stop) or 'none' (don't stop; intended for logpoint-style emission when paired with logMessage).")] string? suspend = null,
         CancellationToken ct = default)
     {
-        return await _session.SetExceptionBreakpointAsync(typeName, phase, condition, hitCount, suspend, ct);
+        return await _session.SetExceptionBreakpointAsync(typeName, phase, condition, hitCount, logMessage, suspend, ct);
     }
 
     [McpServerTool(Name = "drhook_step_breakpoint_remove"), Description(
