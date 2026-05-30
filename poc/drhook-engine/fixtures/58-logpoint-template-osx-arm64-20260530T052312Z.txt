@@ -1,0 +1,7 @@
+# DrHook.Engine probe 58 fixture — logpoint template compiler (ADR-010 Increment 7)
+timestamp        = 2026-05-30T05:23:12.5921710Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 83207
+template         = counter={counter} positive={counter > 0}
+verdict          = PASSED
