@@ -1,25 +1,25 @@
 #!/usr/bin/env -S dotnet
 #:project ../../src/DrHook.Engine/DrHook.Engine.csproj
-#:package Microsoft.CodeAnalysis.CSharp@4.11.0
 //
 // DrHook.Engine probe 30 — EXCEPTION-THROUGH-POLICY: BreakpointPolicy at exception stops
 // =======================================================================================
 //
 // The exception-location axis of finding 33 wired to the BreakpointPolicy substrate (finding 38).
-// Engine: DebugSession.WaitForExceptionPolicyStop(typeName, policy, timeout) filters Exception stops
-// by type then applies the SAME EvaluatePolicy core as WaitForPolicyStop — same gates/log/suspend
-// semantics, same fault path. The walker special-cases the `ex` operand: `ex.X` resolves via
-// TryEvalCurrentExceptionMember (probe 27) instead of TryEvalMemberCall on a local.
+// Engine: ArmExceptionFilter(typeName, kind, policy) installs a filter; at the exception stop the
+// SAME EvaluatePolicy core as a breakpoint applies — same gates/log/suspend semantics, same
+// fault path. The walker is the substrate's CSharpCondition (ADR-010 Increment 7); for this probe
+// the identifier `ex` names the in-flight exception object — its member access (e.g. `ex.Code`)
+// resolves via TryEvalCurrentExceptionMember rather than TryEvalMemberCall, accomplished by a
+// custom IMemberResolver wrapping the session.
 //
 // Three configs against one target throwing ProbeException(Code=42) caught in a loop:
-//   A. CONDITIONAL EX BP   — Condition parsed from "ex.Code == 42", Suspend.All
+//   A. CONDITIONAL EX BP   — Condition = "ex.Code == 42", Suspend.All
 //                            → surfaces at the first matching first-chance ProbeException.
-//   B. EX LOGPOINT         — LogMessage parsed from $"caught ex.Code={ex.Code}", Suspend.None, 2s
+//   B. EX LOGPOINT         — LogMessage = "caught ex.Code={ex.Code}", Suspend.None, 2s
 //                            → never surfaces, sink collects "caught ex.Code=42" repeatedly.
-//   C. EX FAULT            — Condition parsed from "ex.Nope == 0" (member doesn't exist on the
-//                            runtime type) → the walker throws on resolution failure →
-//                            ConditionError + IsFault LogRecord (finding 35 tri-state, at an
-//                            exception stop). Proves the fault path works for exception location too.
+//   C. EX FAULT            — Condition = "ex.Nope == 0" (member doesn't exist on the runtime type)
+//                            → resolver returns SetupFailed → walker throws → ConditionError +
+//                            IsFault LogRecord (finding 35 tri-state at an exception stop).
 //
 // Falsification: 2 usage; 3 no READY; 4 attach; 5 no setup Break; 7 config A; 8 config B; 9 config C; 0 PASS.
 //
@@ -32,11 +32,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SkyOmega.DrHook.Engine;
 
 return ExPolicy30.Run(args);
@@ -54,107 +51,19 @@ sealed class RecordingSink : IDebugEventSink
     }
 }
 
-// Same Eval core as probe 29, with one new special case: the identifier `ex` as the operand of a
-// member access routes to TryEvalCurrentExceptionMember (probe 27) instead of TryEvalMemberCall.
-// `ex` stands for the in-flight exception object; the engine sources it via GetCurrentException at
-// the stop, so the walker just names the convention.
-static class CSharp
+// Custom IMemberResolver: the substrate compiler resolves `ex.Member` via this wrapper, which
+// routes the `ex` identifier to TryEvalCurrentExceptionMember (the in-flight exception). All
+// other operands fall through to the session's standard local-member resolution.
+sealed class ExceptionAwareResolver : IMemberResolver
 {
-    public const string ExceptionOperand = "ex";
+    const string ExceptionOperand = "ex";
+    private readonly DebugSession _session;
+    public ExceptionAwareResolver(DebugSession session) => _session = session;
 
-    public static Func<IEvalContext, bool> Compile(string expression, DebugSession session)
-    {
-        ExpressionSyntax tree = SyntaxFactory.ParseExpression(expression);
-        return ctx => (bool)Eval(tree, ctx, session)!;
-    }
-
-    public static Func<IEvalContext, string> CompileInterpolation(string template, DebugSession session)
-    {
-        ExpressionSyntax tree = SyntaxFactory.ParseExpression("$\"" + template + "\"");
-        if (tree is not InterpolatedStringExpressionSyntax interp)
-            throw new ArgumentException($"not an interpolated string: {template}", nameof(template));
-        return ctx => Render(interp, ctx, session);
-    }
-
-    static string Render(InterpolatedStringExpressionSyntax tree, IEvalContext ctx, DebugSession session)
-    {
-        var sb = new StringBuilder();
-        foreach (InterpolatedStringContentSyntax part in tree.Contents)
-        {
-            if (part is InterpolatedStringTextSyntax text)
-                sb.Append(text.TextToken.ValueText);
-            else if (part is InterpolationSyntax interpolation)
-            {
-                object? value = Eval(interpolation.Expression, ctx, session);
-                sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
-            }
-        }
-        return sb.ToString();
-    }
-
-    static object? Eval(ExpressionSyntax node, IEvalContext ctx, DebugSession session) => node switch
-    {
-        LiteralExpressionSyntax lit => lit.Token.Value,
-        IdentifierNameSyntax id => ResolveLocal(ctx, id.Identifier.Text),
-        MemberAccessExpressionSyntax ma when ma.Kind() == SyntaxKind.SimpleMemberAccessExpression
-            => ResolveMember(session, ma),
-        ParenthesizedExpressionSyntax p => Eval(p.Expression, ctx, session),
-        PrefixUnaryExpressionSyntax u when u.Kind() == SyntaxKind.LogicalNotExpression => !(bool)Eval(u.Operand, ctx, session)!,
-        BinaryExpressionSyntax bin => ApplyBinary(bin.Kind(), bin, ctx, session),
-        _ => throw new NotSupportedException($"unsupported expression: {node.Kind()}")
-    };
-
-    static object ResolveLocal(IEvalContext ctx, string name)
-    {
-        foreach (LocalValue l in ctx.Locals)
-            if (l.Name == name)
-                return l.RawValue ?? throw new InvalidOperationException($"local '{name}' has no primitive value");
-        throw new InvalidOperationException($"local '{name}' not found at this stop");
-    }
-
-    static object ResolveMember(DebugSession session, MemberAccessExpressionSyntax ma)
-    {
-        if (ma.Expression is not IdentifierNameSyntax target)
-            throw new NotSupportedException($"member-access operand must be an identifier, got {ma.Expression.Kind()}");
-        string operand = target.Identifier.Text;
-        string member = ma.Name.Identifier.Text;
-
-        // The convention: `ex` is the in-flight exception object at an exception stop.
-        EvalStatus st;
-        ArgumentValue v;
-        if (operand == ExceptionOperand)
-            st = session.TryEvalCurrentExceptionMember(member, TimeSpan.FromSeconds(10), out v);
-        else
-            st = session.TryEvalMemberCall(operand, member, TimeSpan.FromSeconds(10), out v);
-
-        if (st != EvalStatus.Completed)
-            throw new InvalidOperationException($"member eval '{operand}.{member}' did not complete: {st}");
-        return v.RawValue ?? throw new InvalidOperationException($"member '{operand}.{member}' has no primitive value");
-    }
-
-    static object ApplyBinary(SyntaxKind kind, BinaryExpressionSyntax bin, IEvalContext ctx, DebugSession session)
-    {
-        if (kind == SyntaxKind.LogicalAndExpression) return (bool)Eval(bin.Left, ctx, session)! && (bool)Eval(bin.Right, ctx, session)!;
-        if (kind == SyntaxKind.LogicalOrExpression) return (bool)Eval(bin.Left, ctx, session)! || (bool)Eval(bin.Right, ctx, session)!;
-
-        long l = ToLong(Eval(bin.Left, ctx, session));
-        long r = ToLong(Eval(bin.Right, ctx, session));
-        return kind switch
-        {
-            SyntaxKind.EqualsExpression => l == r,
-            SyntaxKind.NotEqualsExpression => l != r,
-            SyntaxKind.GreaterThanExpression => l > r,
-            SyntaxKind.LessThanExpression => l < r,
-            SyntaxKind.GreaterThanOrEqualExpression => l >= r,
-            SyntaxKind.LessThanOrEqualExpression => l <= r,
-            SyntaxKind.AddExpression => l + r,
-            SyntaxKind.SubtractExpression => l - r,
-            SyntaxKind.MultiplyExpression => l * r,
-            _ => throw new NotSupportedException($"unsupported operator: {kind}")
-        };
-    }
-
-    static long ToLong(object? o) => Convert.ToInt64(o, CultureInfo.InvariantCulture);
+    public EvalStatus TryEvalMemberCall(string thisLocalName, string memberName, TimeSpan timeout, out ArgumentValue result)
+        => thisLocalName == ExceptionOperand
+            ? _session.TryEvalCurrentExceptionMember(memberName, timeout, out result)
+            : _session.TryEvalMemberCall(thisLocalName, memberName, timeout, out result);
 }
 
 static class ExPolicy30
@@ -175,7 +84,7 @@ static class ExPolicy30
 
         Console.WriteLine($"runtime    : {RuntimeInformation.FrameworkDescription}");
         Console.WriteLine($"dbgshim    : {Environment.GetEnvironmentVariable("DBGSHIM_PATH") ?? "(resolver default)"}");
-        Console.WriteLine($"plan       : exception location = {ExpectedType}; three policy configs (cond / log / fault)");
+        Console.WriteLine($"plan       : exception location = {ExpectedType}; three policy configs (cond / log / fault) via substrate compiler + ExceptionAwareResolver");
 
         using Process proc = new()
         {
@@ -245,14 +154,12 @@ static class ExPolicy30
             Console.Error.WriteLine($"FALSIFIED (no setup stop): {(setup is null ? "timeout" : setup.Reason.ToString())}.");
             return 5;
         }
-
-        // Migration to ADR-010 Increment 2c (exception-filter side): policy attaches to the
-        // exception filter at ArmExceptionFilter time. Each config Remove+Re-Arm with the next
-        // policy; between Suspend.None and the next config, Pause+WaitForStop to synchronize.
-        // Plain WaitForStop drives all configs — WaitForExceptionPolicyStop is retired.
+        ExceptionAwareResolver exResolver = new(session);
 
         // --- Config A: conditional exception breakpoint --------------------------------------------
-        var condPolicy = new BreakpointPolicy(Condition: CSharp.Compile(CondMatch, session));
+        BreakpointPolicy condPolicy = session.Compile(
+            new BreakpointPolicySpec(Condition: CondMatch, Suspend: SuspendPolicy.All),
+            exResolver);
         int filterA = session.ArmExceptionFilter(ExpectedType, ExceptionStopKind.None, condPolicy);
         Console.WriteLine($"A. cond ex bp    : Condition \"{CondMatch}\", Suspend.All …");
         session.Resume();
@@ -268,11 +175,11 @@ static class ExPolicy30
 
         // --- Config B: exception logpoint -----------------------------------------------------------
         int baseB = sink.Count;
-        var logPolicy = new BreakpointPolicy(
-            LogMessage: CSharp.CompileInterpolation(LogTemplate, session),
-            Suspend: SuspendPolicy.None);
+        BreakpointPolicy logPolicy = session.Compile(
+            new BreakpointPolicySpec(LogMessage: LogTemplate, Suspend: SuspendPolicy.None),
+            exResolver);
         int filterB = session.ArmExceptionFilter(ExpectedType, ExceptionStopKind.None, logPolicy);
-        Console.WriteLine($"B. ex logpoint   : LogMessage parsed from $\"{LogTemplate}\", Suspend.None, 2s …");
+        Console.WriteLine($"B. ex logpoint   : LogMessage \"{LogTemplate}\", Suspend.None, 2s …");
         session.Resume();
         StopInfo? stopB = session.WaitForStop(TimeSpan.FromSeconds(2));
         IReadOnlyList<LogRecord> logsB = sink.SnapshotSince(baseB);
@@ -284,7 +191,6 @@ static class ExPolicy30
             Console.Error.WriteLine($"FALSIFIED (B): expected null stop + >=3 logs of \"{expectedLine}\"; stop={stopB?.Reason.ToString() ?? "null"}, logs={logsB.Count}.");
             return 8;
         }
-        // Pause to swap the filter for Config C.
         session.Pause();
         StopInfo? pauseB = session.WaitForStop(TimeSpan.FromSeconds(5));
         if (pauseB is null || pauseB.Reason != StopReason.Pause) { Console.Error.WriteLine($"FALSIFIED (B→C Pause): {pauseB?.Reason.ToString() ?? "null"}."); return 8; }
@@ -292,7 +198,9 @@ static class ExPolicy30
 
         // --- Config C: fault path (member doesn't exist on the runtime type) ----------------------
         int baseC = sink.Count;
-        var faultPolicy = new BreakpointPolicy(Condition: CSharp.Compile(CondFault, session));
+        BreakpointPolicy faultPolicy = session.Compile(
+            new BreakpointPolicySpec(Condition: CondFault),
+            exResolver);
         int filterC = session.ArmExceptionFilter(ExpectedType, ExceptionStopKind.None, faultPolicy);
         Console.WriteLine($"C. ex fault      : Condition \"{CondFault}\" (member does not exist), Suspend.All …");
         session.Resume();
@@ -308,7 +216,7 @@ static class ExPolicy30
         }
         session.Resume();
 
-        Console.WriteLine("\nPROBE 30 PASSED — BreakpointPolicy drives the EXCEPTION location: type filter + condition / logpoint / fault all compose with the same policy substrate, attached at ArmExceptionFilter time (ADR-010 Increment 2c).");
+        Console.WriteLine("\nPROBE 30 PASSED — substrate BreakpointPolicySpec drives exception-location condition / logpoint / fault via session.Compile(spec, ExceptionAwareResolver); the probe's local walker is retired (ADR-010 Increment 7).");
         return 0;
     }
 
@@ -326,7 +234,7 @@ static class ExPolicy30
         string ts = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
         string path = Path.Combine(dir, $"30-expolicy-{rid}-{ts}.txt");
         string body =
-            "# DrHook.Engine probe 30 fixture — exception-through-policy (BreakpointPolicy at exception stops)\n" +
+            "# DrHook.Engine probe 30 fixture — exception-through-policy (substrate compiler + custom resolver)\n" +
             $"timestamp        = {DateTime.UtcNow:O}\n" +
             $"runtime          = {RuntimeInformation.FrameworkDescription}\n" +
             $"os-arch          = {rid}\n" +

@@ -154,7 +154,7 @@ internal static unsafe class Variables
     {
         int elementType = OutInt(pValue, ValueGetType);
 
-        long? raw = null;
+        object? raw = null;
         nint generic = QueryInterface(pValue, IID_ICorDebugGenericValue);
         if (generic != 0)
         {
@@ -162,7 +162,7 @@ internal static unsafe class Variables
             {
                 long buffer = 0; // pre-zeroed: a 4-byte value lands in the low half on little-endian
                 var getValue = (delegate* unmanaged[Cdecl]<nint, void*, int>)Slot(generic, GenericValueGetValue);
-                if (getValue(generic, &buffer) >= 0) raw = buffer;
+                if (getValue(generic, &buffer) >= 0) raw = ReifyPrimitive(elementType, buffer);
             }
             finally { RuntimeNavigation.Release(generic); }
         }
@@ -172,6 +172,33 @@ internal static unsafe class Variables
 
         return new ArgumentValue(elementType, raw, stringValue);
     }
+
+    /// <summary>Reify the raw 8-byte buffer returned by <c>ICorDebugGenericValue.GetValue</c> as a
+    /// boxed CLR primitive whose runtime type matches the CorElementType. The expression compiler
+    /// in <see cref="SkyOmega.DrHook.Engine.Expressions.CSharpCondition"/> reads
+    /// <see cref="ArgumentValue.RawValue"/> as the typed source for <c>Expression.Constant</c>
+    /// and operator nodes, so this is the single point where the substrate enforces type
+    /// fidelity end-to-end — instead of flattening every primitive to <c>long</c> at the leaf
+    /// and re-typing it under interpretation. Unknown / non-primitive element types fall back
+    /// to boxed <see cref="long"/> so the raw bit pattern remains observable.</summary>
+    internal static object ReifyPrimitive(int elementType, long buffer) => elementType switch
+    {
+        0x02 /* BOOLEAN */ => buffer != 0,
+        0x03 /* CHAR    */ => (char)buffer,
+        0x04 /* I1      */ => (sbyte)buffer,
+        0x05 /* U1      */ => (byte)buffer,
+        0x06 /* I2      */ => (short)buffer,
+        0x07 /* U2      */ => (ushort)buffer,
+        0x08 /* I4      */ => (int)buffer,
+        0x09 /* U4      */ => (uint)buffer,
+        0x0A /* I8      */ => buffer,
+        0x0B /* U8      */ => (ulong)buffer,
+        0x0C /* R4      */ => BitConverter.Int32BitsToSingle((int)buffer),
+        0x0D /* R8      */ => BitConverter.Int64BitsToDouble(buffer),
+        0x18 /* I       */ => (IntPtr)buffer,
+        0x19 /* U       */ => (UIntPtr)(ulong)buffer,
+        _                  => buffer
+    };
 
     private static nint OutPtr(nint pUnk, int slot)
     {

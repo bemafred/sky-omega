@@ -148,17 +148,17 @@ static class Fields39
         }
         Console.WriteLine($"phase A    : counter.Fields = {counter1.Fields.Count} entries");
         foreach (FieldValue f in counter1.Fields)
-            Console.WriteLine($"             - {f.Name}: type=0x{f.ElementType:X2} raw={(f.RawValue?.ToString(CultureInfo.InvariantCulture) ?? "(none)")} str=\"{f.StringValue ?? "(null)"}\" nested={(f.Fields is null ? "no" : f.Fields.Count + " entries")}");
+            Console.WriteLine($"             - {f.Name}: type=0x{f.ElementType:X2} raw={(f.RawValue is { } _r ? Convert.ToString(_r, CultureInfo.InvariantCulture) : "(none)")} str=\"{f.StringValue ?? "(null)"}\" nested={(f.Fields is null ? "no" : f.Fields.Count + " entries")}");
 
         FieldValue? fCount = counter1.Fields.FirstOrDefault(f => f.Name == "Count");
         FieldValue? fLabel = counter1.Fields.FirstOrDefault(f => f.Name == "Label");
         FieldValue? fActive = counter1.Fields.FirstOrDefault(f => f.Name == "Active");
         FieldValue? fNested = counter1.Fields.FirstOrDefault(f => f.Name == "Nested");
-        if (fCount is null || fCount.Value.RawValue != 42)
+        if (fCount is null || !Equals(fCount.Value.RawValue, 42))
         { Console.Error.WriteLine($"FALSIFIED (phase A): Count missing or != 42 (got {fCount?.RawValue})."); return 8; }
         if (fLabel is null || fLabel.Value.StringValue != "hello")
         { Console.Error.WriteLine($"FALSIFIED (phase A): Label missing or StringValue != \"hello\" (got \"{fLabel?.StringValue ?? "(null)"}\")."); return 8; }
-        if (fActive is null || fActive.Value.RawValue != 1)
+        if (fActive is null || !Equals(fActive.Value.RawValue, true))
         { Console.Error.WriteLine($"FALSIFIED (phase A): Active missing or != true (got {fActive?.RawValue})."); return 8; }
         if (fNested is null || fNested.Value.Fields is not null)
         { Console.Error.WriteLine($"FALSIFIED (phase A): Nested missing or its Fields was populated at depth=1 (should be null)."); return 8; }
@@ -167,8 +167,8 @@ static class Fields39
         LocalValue counter2 = session.GetLocals(depth: 2).FirstOrDefault(l => l.Name == LocalName);
         FieldValue? fNested2 = counter2.Fields?.FirstOrDefault(f => f.Name == "Nested");
         FieldValue? fX = fNested2?.Fields?.FirstOrDefault(f => f.Name == "X");
-        Console.WriteLine($"phase B    : counter.Nested.Fields = {fNested2?.Fields?.Count.ToString() ?? "(null)"} entries; X = {fX?.RawValue?.ToString(CultureInfo.InvariantCulture) ?? "(missing)"}");
-        if (fNested2 is null || fNested2.Value.Fields is null || fX is null || fX.Value.RawValue != 99)
+        Console.WriteLine($"phase B    : counter.Nested.Fields = {fNested2?.Fields?.Count.ToString() ?? "(null)"} entries; X = {(fX?.RawValue is { } _x ? Convert.ToString(_x, CultureInfo.InvariantCulture) : "(missing)")}");
+        if (fNested2 is null || fNested2.Value.Fields is null || fX is null || !Equals(fX.Value.RawValue, 99))
         {
             Console.Error.WriteLine($"FALSIFIED (phase B): expected Nested.Fields with X=99, got fNested2.Fields={fNested2?.Fields?.Count.ToString() ?? "(null)"}, X={fX?.RawValue}.");
             return 9;

@@ -137,12 +137,12 @@ static class Variables15
         ArgumentValue[] args = session.GetArguments().ToArray();
         Console.WriteLine($"stopped at {TypeName}.{MethodName} — {args.Length} argument(s):");
         for (int i = 0; i < args.Length; i++)
-            Console.WriteLine($"  arg[{i}]  elementType=0x{args[i].ElementType:X2}  raw={(args[i].RawValue is { } v ? v.ToString(CultureInfo.InvariantCulture) : "(ref)")}");
+            Console.WriteLine($"  arg[{i}]  elementType=0x{args[i].ElementType:X2}  raw={(args[i].RawValue is { } v ? Convert.ToString(v, CultureInfo.InvariantCulture) : "(ref)")}");
 
         if (args.Length == 0) { Console.Error.WriteLine("FALSIFIED: no arguments read — ICorDebugILFrame QI likely failed (wrong IID?)."); return 8; }
 
-        bool nOk = args.Any(a => a.ElementType == ELEMENT_TYPE_I4 && a.RawValue == 7);
-        bool totalOk = args.Any(a => a.ElementType == ELEMENT_TYPE_I8 && a.RawValue == 100);
+        bool nOk = args.Any(a => a.ElementType == ELEMENT_TYPE_I4 && Equals(a.RawValue, 7));
+        bool totalOk = args.Any(a => a.ElementType == ELEMENT_TYPE_I8 && Equals(a.RawValue, 100L));
         bool thisOk = args.Any(a => a.ElementType == ELEMENT_TYPE_CLASS && a.RawValue is null);
         if (!nOk || !totalOk)
         {

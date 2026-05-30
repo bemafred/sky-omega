@@ -1,24 +1,24 @@
 #!/usr/bin/env -S dotnet
 #:project ../../src/DrHook.Engine/DrHook.Engine.csproj
-#:package Microsoft.CodeAnalysis.CSharp@4.11.0
 //
 // DrHook.Engine probe 29 — Roslyn INTERPOLATION walker: {expr} fragments in logpoint messages
 // ============================================================================================
 //
-// The "one front end, two consumers" convergence from finding 33. Probe 22/25's walker produced
-// `Func<IEvalContext, bool>` from a Roslyn-parsed C# expression — used for conditions. This probe
-// extends the SAME walker to produce `Func<IEvalContext, string>` from a Roslyn-parsed INTERPOLATED
-// string: `$"v={v} doubled={2*v}"` becomes a logpoint renderer. The expression-eval core is shared
-// (identifiers, literals, binary ops, member access via TryEvalMemberCall — all of which already
-// existed); only the OUTER shape differs (Render vs Compile-bool).
+// The "one front end, two consumers" convergence from finding 33. The substrate's
+// CSharpCondition (see SkyOmega.DrHook.Engine.Expressions) compiles a single Roslyn-parsed
+// expression-syntax surface into BOTH a Func<IEvalContext,bool> (conditions) AND a
+// Func<IEvalContext,string> (logpoint templates) — the expression-eval core is shared, only the
+// outer shape differs. ADR-010 Increment 7 promoted that template path from probe-local code
+// into the substrate; this probe migrated off its private CSharp walker (deleted) onto
+// session.Compile(spec).
 //
-// Two configs against ONE target/breakpoint, both built from the same evaluator:
-//   A. INTERPOLATED LOGPOINT      — LogMessage parsed from $"v={v} doubled={2*v}",
-//                                   Suspend.None, 2s -> sink collects logs like "v=4 doubled=8".
-//   B. CONDITION + INTERPOLATION  — Condition parsed from "v == 3" AND LogMessage parsed from
-//                                   $"matched v={v} doubled={2*v}", Suspend.All -> at v=3 the line
-//                                   "matched v=3 doubled=6" is emitted AND the stop surfaces.
-//                                   Proves ONE walker driving both consumers in ONE policy.
+// Two configs against ONE target/breakpoint, both built from BreakpointPolicySpec:
+//   A. INTERPOLATED LOGPOINT      — LogMessage = "v={v} doubled={2*v}", Suspend.None, 2s ->
+//                                   sink collects logs like "v=4 doubled=8".
+//   B. CONDITION + INTERPOLATION  — Condition = "v == 3" AND LogMessage = "matched v={v} doubled={2*v}",
+//                                   Suspend.All -> at v=3 the line "matched v=3 doubled=6" emits
+//                                   AND the stop surfaces. Proves the substrate compiler drives
+//                                   both consumers from one spec.
 //
 // Falsification: 2 usage/marker; 3 no READY; 4 attach; 5 no setup Break; 6 SetBreakpointAtLine;
 //   7 config A failed (no logs / malformed); 8 config B failed (no stop / wrong v / no/wrong log);
@@ -33,11 +33,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SkyOmega.DrHook.Engine;
 
 return Interp29.Run(args);
@@ -53,104 +50,6 @@ sealed class RecordingSink : IDebugEventSink
     {
         lock (_lock) { return _logs.GetRange(fromIndex, _logs.Count - fromIndex); }
     }
-}
-
-// ONE walker, two consumers. Same Eval core used by Compile (-> Func<ctx,bool>) and
-// CompileInterpolation (-> Func<ctx,string>). Member access composes via TryEvalMemberCall on a
-// session (probe 25), but is not exercised here — pure local-and-arithmetic conditions/messages.
-static class CSharp
-{
-    public static Func<IEvalContext, bool> Compile(string expression, DebugSession session)
-    {
-        ExpressionSyntax tree = SyntaxFactory.ParseExpression(expression);
-        return ctx => (bool)Eval(tree, ctx, session)!;
-    }
-
-    public static Func<IEvalContext, string> CompileInterpolation(string template, DebugSession session)
-    {
-        // Wrap the template as a C# interpolated-string literal and let Roslyn parse it. This gets
-        // us escape handling, format specifiers, and the {expr} structure for free.
-        ExpressionSyntax tree = SyntaxFactory.ParseExpression("$\"" + template + "\"");
-        if (tree is not InterpolatedStringExpressionSyntax interp)
-            throw new ArgumentException($"not an interpolated string: {template}", nameof(template));
-        return ctx => Render(interp, ctx, session);
-    }
-
-    static string Render(InterpolatedStringExpressionSyntax tree, IEvalContext ctx, DebugSession session)
-    {
-        var sb = new StringBuilder();
-        foreach (InterpolatedStringContentSyntax part in tree.Contents)
-        {
-            if (part is InterpolatedStringTextSyntax text)
-            {
-                sb.Append(text.TextToken.ValueText);
-            }
-            else if (part is InterpolationSyntax interpolation)
-            {
-                object? value = Eval(interpolation.Expression, ctx, session);
-                sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
-            }
-        }
-        return sb.ToString();
-    }
-
-    static object? Eval(ExpressionSyntax node, IEvalContext ctx, DebugSession session) => node switch
-    {
-        LiteralExpressionSyntax lit => lit.Token.Value,
-        IdentifierNameSyntax id => ResolveLocal(ctx, id.Identifier.Text),
-        MemberAccessExpressionSyntax ma when ma.Kind() == SyntaxKind.SimpleMemberAccessExpression
-            => ResolveMember(session, ma),
-        ParenthesizedExpressionSyntax p => Eval(p.Expression, ctx, session),
-        PrefixUnaryExpressionSyntax u when u.Kind() == SyntaxKind.LogicalNotExpression => !(bool)Eval(u.Operand, ctx, session)!,
-        BinaryExpressionSyntax bin => ApplyBinary(bin.Kind(), bin, ctx, session),
-        _ => throw new NotSupportedException($"unsupported expression: {node.Kind()}")
-    };
-
-    static object ResolveLocal(IEvalContext ctx, string name)
-    {
-        foreach (LocalValue l in ctx.Locals)
-            if (l.Name == name)
-                return l.RawValue ?? throw new InvalidOperationException($"local '{name}' has no primitive value");
-        throw new InvalidOperationException($"local '{name}' not found at this stop");
-    }
-
-    static object ResolveMember(DebugSession session, MemberAccessExpressionSyntax ma)
-    {
-        if (ma.Expression is not IdentifierNameSyntax target)
-            throw new NotSupportedException($"member-access operand must be an identifier, got {ma.Expression.Kind()}");
-        string thisLocal = target.Identifier.Text;
-        string member = ma.Name.Identifier.Text;
-        EvalStatus st = session.TryEvalMemberCall(thisLocal, member, TimeSpan.FromSeconds(10), out ArgumentValue v);
-        if (st != EvalStatus.Completed)
-            throw new InvalidOperationException($"member eval '{thisLocal}.{member}' did not complete: {st}");
-        return v.RawValue ?? throw new InvalidOperationException($"member '{thisLocal}.{member}' has no primitive value");
-    }
-
-    static object ApplyBinary(SyntaxKind kind, BinaryExpressionSyntax bin, IEvalContext ctx, DebugSession session)
-    {
-        if (kind == SyntaxKind.LogicalAndExpression) return (bool)Eval(bin.Left, ctx, session)! && (bool)Eval(bin.Right, ctx, session)!;
-        if (kind == SyntaxKind.LogicalOrExpression) return (bool)Eval(bin.Left, ctx, session)! || (bool)Eval(bin.Right, ctx, session)!;
-
-        long l = ToLong(Eval(bin.Left, ctx, session));
-        long r = ToLong(Eval(bin.Right, ctx, session));
-        return kind switch
-        {
-            SyntaxKind.EqualsExpression => l == r,
-            SyntaxKind.NotEqualsExpression => l != r,
-            SyntaxKind.GreaterThanExpression => l > r,
-            SyntaxKind.LessThanExpression => l < r,
-            SyntaxKind.GreaterThanOrEqualExpression => l >= r,
-            SyntaxKind.LessThanOrEqualExpression => l <= r,
-            SyntaxKind.AddExpression => l + r,
-            SyntaxKind.SubtractExpression => l - r,
-            SyntaxKind.MultiplyExpression => l * r,
-            SyntaxKind.DivideExpression => l / r,
-            SyntaxKind.ModuloExpression => l % r,
-            _ => throw new NotSupportedException($"unsupported operator: {kind}")
-        };
-    }
-
-    static long ToLong(object? o) => Convert.ToInt64(o, CultureInfo.InvariantCulture);
 }
 
 static class Interp29
@@ -175,7 +74,7 @@ static class Interp29
         if (markerLine < 0) { Console.Error.WriteLine($"FALSIFIED (usage): '{Marker}' not found."); return 2; }
         Console.WriteLine($"runtime    : {RuntimeInformation.FrameworkDescription}");
         Console.WriteLine($"dbgshim    : {Environment.GetEnvironmentVariable("DBGSHIM_PATH") ?? "(resolver default)"}");
-        Console.WriteLine($"breakpoint : {FileHint}:{markerLine}  (Roslyn-parsed interpolation: $\"{InterpTemplate}\")");
+        Console.WriteLine($"breakpoint : {FileHint}:{markerLine}  (substrate-compiled template \"{InterpTemplate}\")");
 
         using Process proc = new()
         {
@@ -246,22 +145,18 @@ static class Interp29
             return 5;
         }
 
-        // Migration to ADR-010 Increment 2c: policy attaches to the breakpoint at Set time. Each
-        // config Remove+Re-SetBP with the next policy; between Suspend.None and the next config,
-        // Pause+WaitForStop to synchronize before swapping (RemoveBreakpoint requires being stopped).
-
-        // --- Config A: PURE INTERPOLATION LOGPOINT (Roslyn-parsed renderer) ---------------------
+        // --- Config A: PURE INTERPOLATION LOGPOINT (substrate compiler) -------------------------
         int baseA = sink.Count;
-        var logRenderer = CSharp.CompileInterpolation(InterpTemplate, session);
-        var logpoint = new BreakpointPolicy(LogMessage: logRenderer, Suspend: SuspendPolicy.None);
+        BreakpointPolicy logpoint = session.Compile(new BreakpointPolicySpec(
+            LogMessage: InterpTemplate,
+            Suspend:    SuspendPolicy.None));
         int bpA = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, logpoint);
         if (bpA == 0) { Console.Error.WriteLine($"FALSIFIED (A SetBreakpointAtLine): {FileHint}:{markerLine}."); return 7; }
-        Console.WriteLine($"A. interp logpoint  : LogMessage parsed from $\"{InterpTemplate}\", Suspend.None, 2s …");
+        Console.WriteLine($"A. interp logpoint  : LogMessage \"{InterpTemplate}\", Suspend.None, 2s …");
         session.Resume();
         StopInfo? stopA = session.WaitForStop(TimeSpan.FromSeconds(2));
         IReadOnlyList<LogRecord> logsA = sink.SnapshotSince(baseA);
         bool allMatchA = logsA.All(r => !r.IsFault && Regex.IsMatch(r.Message, @"^v=\d+ doubled=\d+$"));
-        // Each line must satisfy doubled == 2*v (the interpolation actually evaluated 2*v).
         bool arithmeticCheckA = logsA.All(r =>
         {
             Match m = Regex.Match(r.Message, @"^v=(\d+) doubled=(\d+)$");
@@ -274,24 +169,23 @@ static class Interp29
             Console.Error.WriteLine($"FALSIFIED (A): expected null stop + >=5 well-formed interpolated logs; stop={stopA?.Reason.ToString() ?? "null"}, logs={logsA.Count}, shape={allMatchA}, arith={arithmeticCheckA}.");
             return 7;
         }
-        // Pause to swap the policy.
         session.Pause();
         StopInfo? pauseA = session.WaitForStop(TimeSpan.FromSeconds(5));
         if (pauseA is null || pauseA.Reason != StopReason.Pause) { Console.Error.WriteLine($"FALSIFIED (A→B Pause): {pauseA?.Reason.ToString() ?? "null"}."); return 7; }
         if (!session.RemoveBreakpoint(bpA)) { Console.Error.WriteLine("FALSIFIED (A→B swap): RemoveBreakpoint(bpA) failed."); return 7; }
 
-        // --- Config B: CONDITION + INTERPOLATION FROM THE SAME WALKER ---------------------------
+        // --- Config B: CONDITION + INTERPOLATION FROM ONE SPEC -----------------------------------
         int baseB = sink.Count;
-        var matchedPolicy = new BreakpointPolicy(
-            Condition: CSharp.Compile(Condition, session),
-            LogMessage: CSharp.CompileInterpolation(MatchedTemplate, session),
-            Suspend: SuspendPolicy.All);
+        BreakpointPolicy matchedPolicy = session.Compile(new BreakpointPolicySpec(
+            Condition:  Condition,
+            LogMessage: MatchedTemplate,
+            Suspend:    SuspendPolicy.All));
         int bpB = session.SetBreakpointAtLine(ModuleSubstr, FileHint, markerLine, matchedPolicy);
         if (bpB == 0) { Console.Error.WriteLine("FALSIFIED (B SetBreakpointAtLine)."); return 8; }
-        Console.WriteLine($"B. cond + interp    : Condition \"{Condition}\" AND LogMessage parsed from $\"{MatchedTemplate}\", Suspend.All …");
+        Console.WriteLine($"B. cond + interp    : Condition \"{Condition}\" AND LogMessage \"{MatchedTemplate}\", Suspend.All …");
         session.Resume();
         StopInfo? stopB = session.WaitForStop(TimeSpan.FromSeconds(20));
-        long? vAtB = session.GetLocals().FirstOrDefault(l => l.Name == "v").RawValue;
+        int? vAtB = session.GetLocals().FirstOrDefault(l => l.Name == "v").RawValue as int?;
         IReadOnlyList<LogRecord> logsB = sink.SnapshotSince(baseB);
         string expected = $"matched v={ConditionalExpected} doubled={2 * ConditionalExpected}";
         bool oneMatch = logsB.Count == 1 && !logsB[0].IsFault && logsB[0].Message == expected;
@@ -303,7 +197,7 @@ static class Interp29
         }
         session.Resume();
 
-        Console.WriteLine("\nPROBE 29 PASSED — one Roslyn walker, two consumers: bool conditions AND interpolated string logpoint messages from the same Eval. Policy attaches at SetBreakpoint time (ADR-010 Increment 2c).");
+        Console.WriteLine("\nPROBE 29 PASSED — substrate Roslyn walker drives bool conditions AND interpolated string logpoint messages from one BreakpointPolicySpec; the probe's local walker is retired (ADR-010 Increment 7).");
         return 0;
     }
 
@@ -330,12 +224,12 @@ static class Interp29
         string ts = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
         string path = Path.Combine(dir, $"29-interp-{rid}-{ts}.txt");
         string body =
-            "# DrHook.Engine probe 29 fixture — Roslyn interpolation walker (one front end, two consumers)\n" +
+            "# DrHook.Engine probe 29 fixture — substrate-driven interpolation (ADR-010 Increment 7)\n" +
             $"timestamp        = {DateTime.UtcNow:O}\n" +
             $"runtime          = {RuntimeInformation.FrameworkDescription}\n" +
             $"os-arch          = {rid}\n" +
             $"target-pid       = {pid}\n" +
-            $"configs          = A interpolation-logpoint, B condition + interpolation from same walker\n" +
+            $"configs          = A interpolation-logpoint, B condition + interpolation from one spec\n" +
             $"verdict          = {(code == 0 ? "PASSED" : $"FALSIFIED-{code}")}\n";
         File.WriteAllText(path, body);
         Console.WriteLine($"fixture    : {path}");

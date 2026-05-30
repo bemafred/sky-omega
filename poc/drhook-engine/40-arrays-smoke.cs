@@ -142,7 +142,7 @@ static class Arrays40
             foreach (FieldValue f in numbers.Fields) Console.WriteLine($"             - {f.Name}: type=0x{f.ElementType:X2} raw={f.RawValue}");
         int[] expectedNumbers = { 1, 2, 3, 5, 8 };
         if (numbers.Fields is null || numbers.Fields.Count != expectedNumbers.Length
-            || !expectedNumbers.Select((v, i) => numbers.Fields[i].Name == $"[{i}]" && numbers.Fields[i].RawValue == v).All(b => b))
+            || !expectedNumbers.Select((v, i) => numbers.Fields[i].Name == $"[{i}]" && Equals(numbers.Fields[i].RawValue, v)).All(b => b))
         { Console.Error.WriteLine($"FALSIFIED (phase A): int[] elements wrong."); return 8; }
 
         // ── Phase B: string[] ──────────────────────────────────────────────────────────────────
@@ -165,8 +165,8 @@ static class Arrays40
         {
             FieldValue item = items.Fields[i];
             FieldValue? n = item.Fields?.FirstOrDefault(f => f.Name == "N");
-            Console.WriteLine($"             - {item.Name}: type=0x{item.ElementType:X2} N={n?.RawValue?.ToString(CultureInfo.InvariantCulture) ?? "(missing)"}");
-            if (item.Name != $"[{i}]" || item.Fields is null || n is null || n.Value.RawValue != expectedNs[i])
+            Console.WriteLine($"             - {item.Name}: type=0x{item.ElementType:X2} N={(n?.RawValue is { } _n ? Convert.ToString(_n, CultureInfo.InvariantCulture) : "(missing)")}");
+            if (item.Name != $"[{i}]" || item.Fields is null || n is null || !Equals(n.Value.RawValue, expectedNs[i]))
             { Console.Error.WriteLine($"FALSIFIED (phase C): items[{i}].N wrong (got {n?.RawValue})."); return 10; }
         }
 

@@ -141,7 +141,7 @@ static class String35
             Console.Error.WriteLine($"FALSIFIED: eval did not complete ({status}).");
             return 8;
         }
-        Console.WriteLine($"eval result: elementType=0x{result.ElementType:X2}  raw={(result.RawValue?.ToString(CultureInfo.InvariantCulture) ?? "(none)")}  StringValue=\"{result.StringValue ?? "(null)"}\"");
+        Console.WriteLine($"eval result: elementType=0x{result.ElementType:X2}  raw={(result.RawValue is { } v ? Convert.ToString(v, CultureInfo.InvariantCulture) : "(none)")}  StringValue=\"{result.StringValue ?? "(null)"}\"");
 
         if (result.StringValue != ExpectedString)
         {

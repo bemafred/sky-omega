@@ -4,18 +4,21 @@
 // DrHook.Engine probe 58 — LOGPOINT TEMPLATE COMPILER (ADR-010 Increment 7 live validation)
 // ==========================================================================================
 //
-// Substrate claim being validated: CSharpCondition.CompileTemplate turns a string like
-// "counter={counter} positive={counter > 0}" into a Func<IEvalContext, string> renderer that
-// stringifies fragment results via Convert.ToString(InvariantCulture); BreakpointPolicySpec
+// Substrate claim being validated: CSharpCondition.CompileTemplate turns a template like
+// "counter={counter} times2={counter*2} plus10={counter+10} even={counter%2==0}" into a typed
+// Func<IEvalContext, string> renderer — fragments compile via Roslyn → System.Linq.Expressions
+// → Lambda.Compile() so each operator runs at native int-typed speed (no long-flatten); the
+// result of each fragment stringifies via Convert.ToString(InvariantCulture). BreakpointPolicySpec
 // with LogMessage = template + Suspend.None produces a non-stopping logpoint that emits one
 // LogRecord per qualifying hit via IDebugEventSink.OnLog.
 //
 // Construction: target loops Probe(counter) with counter incrementing 0..N. Probe arms a
 // breakpoint at the LOGPOINT_HERE line with the template above (Suspend.None). Each hit fires
-// the policy's LogMessage renderer, which evaluates `counter` (identifier) and `counter > 0`
-// (comparison binop — bool result stringified as "True"/"False") via the existing walker. The
-// auto-resume bypass in DebugSession.WaitForStop's policy-evaluation path keeps the target
-// running; no Breakpoint stop surfaces; the sink accumulates LogRecord entries.
+// the policy's LogMessage renderer, which evaluates `counter` (typed int identifier),
+// `counter*2` and `counter+10` (typed int arithmetic), and `counter%2==0` (typed int modulo +
+// equality → bool, stringified "True"/"False") via the substrate's Expression.Compile()-backed
+// walker. The auto-resume bypass in DebugSession.WaitForStop's policy-evaluation path keeps the
+// target running; no Breakpoint stop surfaces; the sink accumulates LogRecord entries.
 //
 // Falsification: 2 usage/marker; 3 no READY; 4 attach; 5 no setup Break; 6 SetBreakpointAtLine;
 //   7 expected null timeout-stop, got a real stop / fewer than 5 logs / malformed template
@@ -54,7 +57,7 @@ static class LogpointTemplate58
     const string ModuleSubstr = "58-logpoint-template-target";
     const string FileHint     = "58-logpoint-template-target.cs";
     const string Marker       = "LOGPOINT_HERE";
-    const string Template     = "counter={counter} positive={counter > 0}";
+    const string Template     = "counter={counter} times2={counter*2} plus10={counter+10} even={counter%2==0}";
 
     public static int Run(string[] args)
     {
@@ -168,13 +171,27 @@ static class LogpointTemplate58
             return 7;
         }
 
-        // Every log line must match the template's shape with counter as a non-negative integer and
-        // positive as True (target's counter starts at 0 and increments; comparison '>' returns False
-        // on the first hit and True thereafter, so we expect a mix).
-        Regex shape = new(@"^counter=(\d+) positive=(True|False)$");
-        bool allShapeOk    = logs.All(r => !r.IsFault && shape.IsMatch(r.Message));
-        bool anyTrue       = logs.Any(r => r.Message.EndsWith("positive=True", StringComparison.Ordinal));
-        bool anyFalse      = logs.Any(r => r.Message.EndsWith("positive=False", StringComparison.Ordinal));
+        // Every log line must match the template's shape: identifier interpolation + int arithmetic
+        // (counter*2 and counter+10) + bool fragment (counter%2==0 returns True/False). The
+        // substrate's typed Expression.Compile() path is validated by the arithmetic equalities
+        // below — int * int → int (no long-flatten), int % int == int → bool, all rendered via
+        // Convert.ToString(InvariantCulture).
+        Regex shape = new(@"^counter=(\d+) times2=(\d+) plus10=(\d+) even=(True|False)$");
+        bool allShapeOk = logs.All(r => !r.IsFault && shape.IsMatch(r.Message));
+        // Each line must internally satisfy times2 == 2*counter, plus10 == counter+10, and
+        // even == (counter%2 == 0) — proving the typed-arithmetic + bool walker, not just shape.
+        bool arithmeticOk = logs.All(r =>
+        {
+            Match m = shape.Match(r.Message);
+            if (!m.Success) return false;
+            int counter = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+            int times2  = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
+            int plus10  = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
+            bool even   = bool.Parse(m.Groups[4].Value);
+            return times2 == counter * 2 && plus10 == counter + 10 && even == (counter % 2 == 0);
+        });
+        bool anyEvenTrue  = logs.Any(r => r.Message.EndsWith("even=True", StringComparison.Ordinal));
+        bool anyEvenFalse = logs.Any(r => r.Message.EndsWith("even=False", StringComparison.Ordinal));
         // Counter values must monotonically increase across emissions (each hit increments).
         var counters = logs
             .Select(r => shape.Match(r.Message))
@@ -183,14 +200,14 @@ static class LogpointTemplate58
             .ToList();
         bool monotonic = counters.Count > 1 && counters.SequenceEqual(counters.OrderBy(x => x));
 
-        if (!allShapeOk || !anyTrue || !anyFalse || !monotonic)
+        if (!allShapeOk || !arithmeticOk || !anyEvenTrue || !anyEvenFalse || !monotonic)
         {
-            Console.Error.WriteLine($"FALSIFIED: shapeOK={allShapeOk}, anyTrue={anyTrue}, anyFalse={anyFalse}, monotonic={monotonic}. " +
-                $"Template rendering failed to interpolate identifier and/or comparison fragments correctly.");
+            Console.Error.WriteLine($"FALSIFIED: shapeOK={allShapeOk}, arithOK={arithmeticOk}, evenTrue={anyEvenTrue}, evenFalse={anyEvenFalse}, monotonic={monotonic}. " +
+                $"Template typed-arithmetic walker did not produce correct int*int, int+int, int%int==int outputs.");
             return 7;
         }
 
-        Console.WriteLine($"\nPROBE 58 PASSED — logpoint template \"{Template}\" rendered {logs.Count} well-formed entries with monotonically increasing counter and mixed parity. Substrate-level CSharpCondition.CompileTemplate + BreakpointPolicy.LogMessage + Suspend.None auto-resume end-to-end (ADR-010 Increment 7).");
+        Console.WriteLine($"\nPROBE 58 PASSED — logpoint template \"{Template}\" rendered {logs.Count} well-formed entries; typed int arithmetic (counter*2, counter+10), modulo + equality (counter%2==0 → bool), and Convert.ToString(InvariantCulture) rendering all hold across hits. Substrate Expression.Compile() walker drives logpoints end-to-end (ADR-010 Increment 7).");
         return 0;
     }
 

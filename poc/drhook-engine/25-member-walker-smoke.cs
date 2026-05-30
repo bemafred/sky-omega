@@ -220,8 +220,8 @@ static class MemberWalker25
         if (stop.Reason != StopReason.Breakpoint) { Console.Error.WriteLine($"FALSIFIED: surfaced {stop.Reason}, expected Breakpoint."); return 7; }
 
         EvalStatus st = session.TryEvalMemberCall(ThisLocal, Member, TimeSpan.FromSeconds(10), out ArgumentValue v);
-        Console.WriteLine($"stopped    : condition held — {ThisLocal}.{Member} eval {st}, value={(v.RawValue is { } x ? x.ToString(CultureInfo.InvariantCulture) : "(n/a)")}");
-        if (st != EvalStatus.Completed || v.ElementType != ELEMENT_TYPE_I4 || v.RawValue != Expected)
+        Console.WriteLine($"stopped    : condition held — {ThisLocal}.{Member} eval {st}, value={(v.RawValue is { } x ? Convert.ToString(x, CultureInfo.InvariantCulture) : "(n/a)")}");
+        if (st != EvalStatus.Completed || v.ElementType != ELEMENT_TYPE_I4 || !Equals(v.RawValue, Expected))
         {
             Console.Error.WriteLine($"FALSIFIED: stopped at {ThisLocal}.{Member}={v.RawValue} (0x{v.ElementType:X2}, {st}), but the condition was {ThisLocal}.{Member}=={Expected}.");
             return 8;

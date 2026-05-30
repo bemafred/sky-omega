@@ -48,7 +48,7 @@ public sealed class CSharpConditionTests
         Assert.Contains("obj", ex.Message);
     }
 
-    // ─── Binary comparisons (l/r are longs after coercion) ────────────────────
+    // ─── Binary comparisons (typed operands via System.Linq.Expressions.MakeBinary) ──────────
 
     [Theory]
     [InlineData("value == 5", 5, true)]
@@ -137,16 +137,33 @@ public sealed class CSharpConditionTests
         Assert.Contains("identifier", ex.Message);
     }
 
-    // ─── Unsupported syntax ───────────────────────────────────────────────────
+    // ─── Arithmetic (ADR-010 Increment 7: typed Expression.MakeBinary on typed operands) ─────
+
+    [Theory]
+    [InlineData("value + 1 == 4",  3, true)]
+    [InlineData("value + 1 == 5",  3, false)]
+    [InlineData("value - 1 == 2",  3, true)]
+    [InlineData("value * 2 == 6",  3, true)]
+    [InlineData("value / 2 == 1",  3, true)]
+    [InlineData("value % 2 == 1",  3, true)]
+    public void Arithmetic_OperatorsProduceTypedResults(string expr, int value, bool expected)
+    {
+        // The substrate compiles `value + 1 == 4` as Equal(Add(Convert(rawCall,int), Constant(1,int)), Constant(4,int)) → bool.
+        // No long-flattening: int + int → int, then compared with int → bool.
+        var predicate = CSharpCondition.Compile(expr, new NullMemberResolver());
+        Assert.Equal(expected, predicate(new FakeEvalContext(Locals: new() { L("value", value) })));
+    }
+
+    // ─── Unsupported syntax (the parser accepts, the walker rejects) ─────────────────────────
 
     [Fact]
-    public void Addition_ThrowsNotSupported()
+    public void ConditionalExpression_ThrowsNotSupported()
     {
-        // "value + 1" — the walker's binary kinds are comparison + logical only.
-        var predicate = CSharpCondition.Compile("value + 1", new NullMemberResolver());
+        // "value > 0 ? 1 : 0" — ConditionalExpressionSyntax is outside the walker's supported set.
+        var predicate = CSharpCondition.Compile("value > 0 ? 1 : 0", new NullMemberResolver());
         var ex = Assert.Throws<NotSupportedException>(()
             => predicate(new FakeEvalContext(Locals: new() { L("value", 3) })));
-        Assert.Contains("unsupported operator", ex.Message);
+        Assert.Contains("unsupported expression", ex.Message);
     }
 
     // ─── Null arguments ───────────────────────────────────────────────────────

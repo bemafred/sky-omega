@@ -197,7 +197,7 @@ static class Conditional22
         if (stop is null) { Console.Error.WriteLine("FALSIFIED: conditional stop timed out."); return 7; }
         if (stop.Reason != StopReason.Breakpoint) { Console.Error.WriteLine($"FALSIFIED: surfaced {stop.Reason}, expected Breakpoint."); return 7; }
 
-        long? value = session.GetLocals().FirstOrDefault(l => l.Name == LocalName).RawValue;
+        int? value = session.GetLocals().FirstOrDefault(l => l.Name == LocalName).RawValue as int?;
         Console.WriteLine($"stopped    : condition held — {LocalName} = {(value?.ToString(CultureInfo.InvariantCulture) ?? "(n/a)")}");
         if (value != Expected)
         {

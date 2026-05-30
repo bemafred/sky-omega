@@ -149,14 +149,14 @@ static class EvalException27
             EvalStatus status = session.TryEvalCurrentExceptionMember(Member, TimeSpan.FromSeconds(10), out ArgumentValue result);
             Console.WriteLine($"eval status: {status}");
             if (status == EvalStatus.Completed)
-                Console.WriteLine($"eval result: elementType=0x{result.ElementType:X2}  value={(result.RawValue is { } v ? v.ToString(CultureInfo.InvariantCulture) : "(none)")}");
+                Console.WriteLine($"eval result: elementType=0x{result.ElementType:X2}  value={(result.RawValue is { } v ? Convert.ToString(v, CultureInfo.InvariantCulture) : "(none)")}");
 
             if (status != EvalStatus.Completed)
             {
                 Console.Error.WriteLine($"FALSIFIED: func-eval at the exception stop did not complete ({status}).");
                 return 8;
             }
-            if (result.ElementType != ELEMENT_TYPE_I4 || result.RawValue != Expected)
+            if (result.ElementType != ELEMENT_TYPE_I4 || !Equals(result.RawValue, Expected))
             {
                 Console.Error.WriteLine($"FALSIFIED: expected I4={Expected}, got 0x{result.ElementType:X2}={result.RawValue}.");
                 return 9;

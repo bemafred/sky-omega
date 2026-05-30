@@ -100,11 +100,11 @@ public sealed class BreakpointPolicySpecTests
     [Fact]
     public void CompileWith_UnsupportedSyntaxInCondition_PropagatesAtEvaluation()
     {
-        // Addition is not in the walker's supported operators; the parser accepts it,
-        // but evaluation throws. The substrate's policy evaluator (DebugSession.EvaluatePolicy)
-        // catches this and surfaces as StopReason.ConditionError; for this unit test we only
-        // assert the delegate behavior — the surfacing is tested by probes/integration.
-        var spec = new BreakpointPolicySpec(Condition: "value + 1");
+        // Conditional ?: is outside the substrate walker's supported expression set; the spec
+        // compiles lazily, so the NotSupportedException surfaces on first invocation. The
+        // substrate's policy evaluator (DebugSession.EvaluatePolicy) catches this and surfaces
+        // as StopReason.ConditionError; for this unit test we only assert the delegate behavior.
+        var spec = new BreakpointPolicySpec(Condition: "value > 0 ? true : false");
         var policy = spec.CompileWith(new NullMemberResolver());
         var ctx = new FakeEvalContext(Locals: new() { new LocalValue("value", ELEMENT_TYPE_I4, 3) });
         Assert.Throws<NotSupportedException>(() => policy.Condition!(ctx));

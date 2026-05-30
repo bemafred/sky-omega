@@ -123,7 +123,7 @@ static class FuncEval19
         EvalStatus status = session.TryEvalStaticCall(ModuleSubstr, TypeName, MethodName, TimeSpan.FromSeconds(10), out ArgumentValue result);
         Console.WriteLine($"eval status: {status}");
         if (status == EvalStatus.Completed)
-            Console.WriteLine($"eval result: elementType=0x{result.ElementType:X2}  value={(result.RawValue is { } v ? v.ToString(CultureInfo.InvariantCulture) : "(none)")}");
+            Console.WriteLine($"eval result: elementType=0x{result.ElementType:X2}  value={(result.RawValue is { } v ? Convert.ToString(v, CultureInfo.InvariantCulture) : "(none)")}");
 
         switch (status)
         {
@@ -138,7 +138,7 @@ static class FuncEval19
                 return 8;
         }
 
-        if (result.ElementType != ELEMENT_TYPE_I4 || result.RawValue != 42)
+        if (result.ElementType != ELEMENT_TYPE_I4 || !Equals(result.RawValue, 42))
         {
             Console.Error.WriteLine($"FALSIFIED: completed but result is not I4=42 (got 0x{result.ElementType:X2}={result.RawValue}).");
             return 9;

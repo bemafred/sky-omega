@@ -154,7 +154,7 @@ static class Policy28
         Console.WriteLine($"A. conditional   : Condition v == {ConditionalExpected}, Suspend.All …");
         session.Resume();
         StopInfo? stopA = session.WaitForStop(TimeSpan.FromSeconds(20));
-        long? vAtA = session.GetLocals().FirstOrDefault(l => l.Name == LocalName).RawValue;
+        int? vAtA = session.GetLocals().FirstOrDefault(l => l.Name == LocalName).RawValue as int?;
         Console.WriteLine($"               -> stop={(stopA is null ? "null" : stopA.Reason.ToString())}  v={vAtA?.ToString(CultureInfo.InvariantCulture) ?? "n/a"}");
         if (stopA is null || stopA.Reason != StopReason.Breakpoint || vAtA != ConditionalExpected)
         {
@@ -234,10 +234,10 @@ static class Policy28
         return 0;
     }
 
-    static long? ReadLocal(IEvalContext ctx, string name)
+    static int? ReadLocal(IEvalContext ctx, string name)
     {
         foreach (LocalValue local in ctx.Locals)
-            if (local.Name == name) return local.RawValue;
+            if (local.Name == name) return local.RawValue as int?;
         return null;
     }
 

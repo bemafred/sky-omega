@@ -120,13 +120,33 @@ public sealed class CSharpConditionTemplateTests
         Assert.Contains("empty", ex.Message);
     }
 
-    // ─── Unsupported syntax in fragment propagates ────────────────────────────
+    // ─── Arithmetic fragments (ADR-010 Increment 7: typed Expression.Compile() per fragment) ─
+
+    [Fact]
+    public void CompileTemplate_ArithmeticFragment_RendersTypedResult()
+    {
+        var render = CSharpCondition.CompileTemplate("doubled={value + value}", new NullMemberResolver());
+        Assert.Equal("doubled=6", render(new FakeEvalContext(Locals: new() { L("value", 3) })));
+    }
+
+    [Fact]
+    public void CompileTemplate_BooleanFragment_RendersTrueFalse()
+    {
+        // counter > 0 evaluates to bool; Convert.ToString(InvariantCulture) renders "True"/"False".
+        var render = CSharpCondition.CompileTemplate("positive={counter > 0}", new NullMemberResolver());
+        Assert.Equal("positive=False", render(new FakeEvalContext(Locals: new() { L("counter", 0) })));
+        Assert.Equal("positive=True",  render(new FakeEvalContext(Locals: new() { L("counter", 5) })));
+    }
+
+    // ─── Unsupported syntax in fragment propagates at compile (first invocation) ─────────────
 
     [Fact]
     public void CompileTemplate_UnsupportedFragmentSyntax_PropagatesAtRender()
     {
-        // Addition isn't in the walker's binary kinds; the parser accepts it but evaluation throws.
-        var render = CSharpCondition.CompileTemplate("doubled={value + value}", new NullMemberResolver());
+        // Conditional ?: is outside the walker's syntactic support. Inside an interpolation the
+        // bare ':' is a format-spec separator, so the expression must be parenthesized; first
+        // invocation triggers compilation, which propagates NotSupportedException to the caller.
+        var render = CSharpCondition.CompileTemplate("c={(value > 0 ? 1 : 0)}", new NullMemberResolver());
         var ctx = new FakeEvalContext(Locals: new() { L("value", 3) });
         Assert.Throws<NotSupportedException>(() => render(ctx));
     }

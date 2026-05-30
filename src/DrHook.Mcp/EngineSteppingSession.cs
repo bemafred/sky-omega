@@ -768,7 +768,7 @@ public sealed class EngineSteppingSession : IDisposable
             ["name"] = l.Name,
             ["elementType"] = $"0x{l.ElementType:X2}",
         };
-        if (l.RawValue is { } raw) node["value"] = raw;
+        if (l.RawValue is { } raw) node["value"] = JsonValue.Create(raw);
         if (l.StringValue is not null) node["string"] = l.StringValue;
         if (l.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
@@ -782,7 +782,7 @@ public sealed class EngineSteppingSession : IDisposable
             ["name"] = index == 0 ? "this" : $"arg{index}",
             ["elementType"] = $"0x{a.ElementType:X2}",
         };
-        if (a.RawValue is { } raw) node["value"] = raw;
+        if (a.RawValue is { } raw) node["value"] = JsonValue.Create(raw);
         if (a.StringValue is not null) node["string"] = a.StringValue;
         if (a.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
@@ -798,7 +798,7 @@ public sealed class EngineSteppingSession : IDisposable
                 ["name"] = f.Name,
                 ["elementType"] = $"0x{f.ElementType:X2}",
             };
-            if (f.RawValue is { } raw) node["value"] = raw;
+            if (f.RawValue is { } raw) node["value"] = JsonValue.Create(raw);
             if (f.StringValue is not null) node["string"] = f.StringValue;
             if (f.Fields is { Count: > 0 } sub) node["fields"] = FieldsToJson(sub);
             arr.Add(node);

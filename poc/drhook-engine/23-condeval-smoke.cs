@@ -132,7 +132,7 @@ static class CondEval23
         long EvalLength()
         {
             EvalStatus st = session.TryEvalInstanceCall(ThisLocal, DeclModule, DeclType, Method, TimeSpan.FromSeconds(10), out ArgumentValue v);
-            return st == EvalStatus.Completed && v.RawValue is { } len ? len : -1;
+            return st == EvalStatus.Completed && v.RawValue is int len ? len : -1;
         }
         Func<IEvalContext, bool> predicate = _ => EvalLength() > Threshold;
         var policy = new BreakpointPolicy(Condition: predicate);

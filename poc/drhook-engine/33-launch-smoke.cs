@@ -118,7 +118,7 @@ static class Launch33
             return 6;
         }
 
-        long? v = session.GetLocals().FirstOrDefault(l => l.Name == "v").RawValue;
+        int? v = session.GetLocals().FirstOrDefault(l => l.Name == "v").RawValue as int?;
         Console.WriteLine($"stop 2     : {stop2.Reason}  v={v?.ToString(CultureInfo.InvariantCulture) ?? "(missing)"}");
         if (v is null)
         {

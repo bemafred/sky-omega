@@ -918,20 +918,35 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         => RuntimeNavigation.ResolveMethodToken(_pProcess, moduleNameSubstring, typeName, methodName);
 
     /// <summary>Lift a <see cref="BreakpointPolicySpec"/> (string data) into a
-    /// <see cref="BreakpointPolicy"/> (engine domain form) by compiling its Condition expression
-    /// against this session's member resolver. The substrate's canonical compiler — external
-    /// callers (MCP layer, probes using string conditions, transport-form constructors) lift via
-    /// this method rather than invoking any parser directly. Compilation logic is substrate-only
-    /// (see <see cref="Expressions.CSharpCondition"/>, internal).
+    /// <see cref="BreakpointPolicy"/> (engine domain form) by compiling its Condition and
+    /// LogMessage against this session's member resolver. The substrate's canonical compiler —
+    /// external callers (MCP layer, probes using string conditions, transport-form constructors)
+    /// lift via this method rather than invoking any parser directly. Compilation logic is
+    /// substrate-only (see <see cref="Expressions.CSharpCondition"/>, internal); the walker
+    /// translates Roslyn syntax into a typed <see cref="System.Linq.Expressions.Expression"/>
+    /// tree that <see cref="System.Linq.Expressions.LambdaExpression.Compile()"/> emits as IL
+    /// for per-hit invocation.
     ///
-    /// <para><see cref="BreakpointPolicySpec.LogMessage"/> template compilation is not yet
-    /// implemented; passing a non-null LogMessage throws <see cref="NotImplementedException"/>
-    /// until the template compiler (with <c>{expr}</c> interpolation) lands as a follow-up
-    /// to Increment 1.</para></summary>
+    /// <para>Templates with <c>{expr}</c> fragments are parsed by Roslyn as interpolated strings
+    /// and compiled per-fragment via the same translator (ADR-010 Increment 7).</para></summary>
     public BreakpointPolicy Compile(BreakpointPolicySpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
         return spec.CompileWith(this);
+    }
+
+    /// <summary>Lift a <see cref="BreakpointPolicySpec"/> using a caller-supplied
+    /// <see cref="IMemberResolver"/> instead of this session. Use when the spec needs custom
+    /// member-resolution semantics that the default <c>TryEvalMemberCall</c> path can't model —
+    /// e.g. an exception-stop walker routing <c>ex.Member</c> through
+    /// <see cref="TryEvalCurrentExceptionMember"/> while delegating other receivers to the session.
+    /// The <paramref name="memberResolver"/> may wrap this session and selectively override
+    /// behavior, keeping the spec-string surface unchanged for callers.</summary>
+    public BreakpointPolicy Compile(BreakpointPolicySpec spec, IMemberResolver memberResolver)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        ArgumentNullException.ThrowIfNull(memberResolver);
+        return spec.CompileWith(memberResolver);
     }
 
     /// <summary>Set an active breakpoint at the entry of

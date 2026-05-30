@@ -259,56 +259,63 @@ Pre-deliverable substrate verification — code-read of `Interop/ExceptionInspec
 
 The "deliberate out-of-scope" items remain out: enable/disable toggle independent of Arm/Remove (substrate uses Arm/Remove primitives; functionally equivalent); `{expr}` template compiler for `LogMessage` (now scoped formally as Increment 7 below).
 
-### Increment 7 — LogMessage template compiler
+### Increment 7 — LogMessage template compiler (typed Expression.Compile() walker)
 
-**Status:** Proposed — 2026-05-30.
+**Status:** Completed — 2026-05-30.
 
-The single deliberate exclusion from Increment 6 — and the only remaining "what's NOT yet shipped" gap that's substrate-level rather than orchestration-level. The substrate's full logpoint mechanism is shipped end-to-end (probes 28/29 validate the `BreakpointPolicy.LogMessage` delegate flow + `Suspend.None` auto-resume + `IDebugEventSink.OnLog` emission); what's missing is the string-to-delegate compilation for templates like `"hit count = {count}, value = {value}"`. Today `BreakpointPolicySpec.CompileWith` throws `NotImplementedException` if `LogMessage` is non-null; the four MCP set tools omit `logMessage` accordingly. Increment 7 closes that hole.
+Closed the substrate-level "what's NOT yet shipped" gap on logpoint template compilation, and in doing so corrected a foul migration that had been carried forward from the probe-local walkers into the initial substrate `CSharpCondition`. The shipped substrate now compiles every supported syntactic form (literals, identifiers, member access, parens, NOT, short-circuit AND/OR, full arithmetic `+ - * / %`, comparison `== != < > <= >=`) via Roslyn → `System.Linq.Expressions.Expression` → `LambdaExpression.Compile()` — meaning conditions and templates evaluate at JIT'd-IL speed with C# operator semantics intact (typed promotion, no `long`-flatten, no per-hit interpretation).
 
-#### Context — what already exists
+The same translator drives both consumers — `Compile` returns `Func<IEvalContext, bool>`, `CompileTemplate` returns `Func<IEvalContext, string>` over a Roslyn `InterpolatedStringExpressionSyntax` parsed from `$@"..."`. Templates with `{expr}` fragments parse natively through Roslyn (no hand-rolled brace scanner); literal `{{` and `}}` are recognized as escapes, brace-structure pre-validation surfaces the standard "unmatched" / "empty fragment" errors before reaching Roslyn for the rest. Validated end-to-end by probe 58 (97 well-formed entries against template `"counter={counter} times2={counter*2} plus10={counter+10} even={counter%2==0}"` — arithmetic equalities and bool fragments all held).
 
-- **Substrate delegate-form**: `BreakpointPolicy.LogMessage: Func<IEvalContext, string>?`. Called once per qualifying breakpoint hit; result emitted as a `LogRecord` via `IDebugEventSink.OnLog`. Probes 28/29 validate the flow with hand-built renderers.
-- **Substrate compiler subset** (`Expressions/CSharpCondition.cs:Eval`): literals, identifiers (local lookup), member access (via `IMemberResolver.TryEvalMemberCall`), parenthesized, logical NOT, binary `&& || == != < > <= >=`. **Arithmetic (`+ - * /`) is NOT in the walker** — Increment 7 stays within the existing subset; extending arithmetic is a separate substrate addition.
+#### Context — what already existed pre-increment
+
+- **Substrate delegate-form**: `BreakpointPolicy.LogMessage: Func<IEvalContext, string>?`. Called once per qualifying breakpoint hit; result emitted as a `LogRecord` via `IDebugEventSink.OnLog`. Probes 28/29 validated the flow with hand-built renderers.
+- **Substrate compiler subset before this increment** (`Expressions/CSharpCondition.cs:Eval`): a hand-walked tree interpreter over Roslyn syntax — literals, identifiers, member access, parens, NOT, short-circuit AND/OR, comparison `== != < > <= >=`. Operands were flattened to `long` via `Convert.ToInt64`; arithmetic was carried in probes 29/30's local `CSharp` classes (with `+ - * / %`) but missing from the substrate. This was the foul migration: probes had arithmetic and Roslyn `InterpolatedStringExpressionSyntax`-based templates; the substrate had neither.
 - **Test seam**: `BreakpointPolicySpec.CompileWith(IMemberResolver)` is internal; tests can supply a fake resolver.
 
-#### Deliverables
+#### Deliverables — as shipped
 
-1. **`CSharpCondition.CompileTemplate(string template, IMemberResolver memberResolver) → Func<IEvalContext, string>`** — substrate method that parses a template into literal segments interleaved with `{expr}` fragments and returns a renderer:
-   - Scan the template for `{` / `}` boundaries; escape sequences `{{` and `}}` produce literal braces (VS Code DAP convention).
-   - Each `{expr}` fragment is parsed with `SyntaxFactory.ParseExpression` and walked via the existing `Eval` (refactored to be reusable from both `Compile` and `CompileTemplate`).
-   - At render time: each fragment's evaluation result is stringified with `Convert.ToString(..., CultureInfo.InvariantCulture)`; literal segments emit verbatim; final string is the concatenation.
-   - Mismatched braces, empty `{}`, or expressions in unsupported syntax throw at compile time with the offending fragment quoted in the message.
+1. **Substrate value carriers typed to CorElementType** (`ArgumentValue` / `LocalValue` / `FieldValue`). `RawValue` changed from `long?` to `object?` carrying the CLR-typed boxed primitive (`int` for I4, `bool` for BOOLEAN, `double` for R8, …). `Interop/Variables.ReifyPrimitive` enforces type fidelity at the single point where ICorDebug returns raw bits; downstream consumers (MCP JSON rendering, expression walker, probes) all read typed values. This is the substrate change that made every subsequent deliverable possible — without it the walker would have to re-type values per hit. (`src/DrHook.Engine/ArgumentValue.cs`, `src/DrHook.Engine/Interop/Variables.cs`.)
 
-2. **`BreakpointPolicySpec.CompileWith` no longer throws on `LogMessage`** — calls `CSharpCondition.CompileTemplate(LogMessage, memberResolver)` and stores the resulting `Func<IEvalContext, string>` in `BreakpointPolicy.LogMessage`.
+2. **`CSharpCondition` rewritten as a Roslyn → `System.Linq.Expressions` translator.** Walker emits typed expression nodes; `LambdaExpression.Compile()` IL-emits a delegate cached after first invocation. Supports literals (with Roslyn-typed `Token.Value`), identifiers (typed unbox from `ReadLocalRaw` based on first-invocation schema), member access (object-typed `ResolveMember` call, narrowed at binary use sites), parens, NOT, short-circuit `&&` / `||` (`Expression.AndAlso` / `Expression.OrElse`), arithmetic `+ - * / %` (`Expression.MakeBinary`), comparison `== != < > <= >=`, numeric widening via standard C# rules. (`src/DrHook.Engine/Expressions/CSharpCondition.cs`.)
 
-3. **`drhook_step_breakpoint`, `drhook_step_break_function`, `drhook_step_break_exception` — `logMessage: string?` parameter**. Flows through `BreakpointPolicySpec` → `DebugSession.Compile` → `SetBreakpointAtLine` / `SetBreakpoint` / `ArmExceptionFilter`. The `suspend="none"` parameter (already exposed) becomes meaningful when paired with `logMessage` — the substrate's existing logpoint flow renders + emits + auto-resumes per ADR-010 Increment 2 + Increment 6.
+3. **`CSharpCondition.CompileTemplate`** parses templates as verbatim interpolated strings (`$@"..."`) — Roslyn's `InterpolatedStringExpressionSyntax` enumeration drives literal-vs-`{expr}` segmentation, no hand-rolled brace scanner. Brace pre-validation surfaces unmatched / empty-fragment errors with stable `FormatException` messages. Each `{expr}` fragment compiles via the same translator (object-typed → stringified via `Convert.ToString(..., InvariantCulture)`).
 
-4. **`drhook_step_breakpoint_list` `policy.logMessage` field** — `RenderPolicy` already emits it when present in the Spec; will start appearing in list output once tools pass it through.
+4. **`BreakpointPolicySpec.CompileWith` compiles both Condition and LogMessage** via the new translator; the `NotImplementedException` stub is gone. `DebugSession.Compile(spec)` (unchanged signature) routes through the typed compiler; a new `Compile(spec, IMemberResolver)` overload accepts a caller-supplied resolver for specialized scenarios — used by probe 30 to route `ex.Member` through `TryEvalCurrentExceptionMember`.
 
-5. **Probe 58 — template compiler end-to-end.** Target with a known local (e.g. `int counter` incrementing 0..N); breakpoint with template `"counter={counter} squared={counter * 2}"` — actually no, multiplication isn't supported; use `"counter={counter} parity={counter == 0}"` instead, exercising literal text + identifier interpolation + comparison-fragment interpolation. Probe asserts N well-formed `LogRecord` entries surface via the sink, content matching the iteration values. Probe number 58 (next available after 57).
+5. **MCP tool surface** — `drhook_step_breakpoint`, `drhook_step_break_function`, `drhook_step_break_exception` accept `logMessage: string?`; `drhook_step_breakpoint_list` renders `policy.logMessage` when present.
 
-6. **Unit tests — `CSharpConditionTemplateTests`.** Pure-logic tests against a fake `IEvalContext` + `IMemberResolver`: empty template, literal-only, single fragment, mixed text+fragments, multiple fragments, escaped `{{`/`}}`, member-access fragments via fake resolver, malformed (unbalanced brace) throws with clear error, expression with unsupported syntax throws with offending fragment quoted.
+6. **Probe 58** validates the typed Expression.Compile() path end-to-end with template `"counter={counter} times2={counter*2} plus10={counter+10} even={counter%2==0}"` — exercises typed int arithmetic (`*`, `+`), modulo + equality producing `bool`, and `Convert.ToString(InvariantCulture)` rendering. 97 well-formed entries; every line satisfies `times2 == counter*2`, `plus10 == counter+10`, `even == (counter%2==0)`.
 
-7. **MCP description audit** — tool descriptions for `step_breakpoint` / `step_break_function` / `step_break_exception` gain a `logMessage` parameter row + an explanation of `{expr}` syntax with the walker's supported-subset note. `drhook_step_breakpoint_list` description mentions `logMessage` may appear in the policy summary.
+7. **Probes 29 + 30 migrated to substrate** — both deleted their embedded `CSharp` walker classes (~100 lines each) and call `session.Compile(spec)`. Probe 30's exception-stop `ex.Member` routing goes through a custom `ExceptionAwareResolver : IMemberResolver` that wraps the session, demonstrating the new `Compile(spec, resolver)` overload's intent.
 
-8. **DEBUGGING.md** — "What's NOT yet shipped" `Logpoint LogMessage interpolation` entry pruned post-shipping. Workflow example expanded with a logpoint usage.
+8. **Unit tests — 119/119 passing.** `CSharpConditionTests` extended with arithmetic operator coverage (Add / Subtract / Multiply / Divide / Modulo); the prior `Addition_ThrowsNotSupported` test is replaced by `Arithmetic_OperatorsProduceTypedResults` (six theory cases) and a new `ConditionalExpression_ThrowsNotSupported` covering the remaining unsupported syntactic form. `CSharpConditionTemplateTests` gains `ArithmeticFragment_RendersTypedResult` and `BooleanFragment_RendersTrueFalse`; the prior unsupported-syntax test now uses parenthesized conditional `(?:)`. `BreakpointPolicySpecTests.CompileWith_UnsupportedSyntaxInCondition_PropagatesAtEvaluation` updated to the same conditional-expression target.
+
+9. **DEBUGGING.md** — "What's NOT yet shipped" Logpoint LogMessage entry pruned; logpoint workflow promoted as a supported MCP capability.
 
 #### Out of scope (deliberate)
 
-- **Arithmetic in expression fragments** (`{count + 1}`, `{value * 2}`). Walker doesn't support these today. Extending `ApplyBinary` to admit `AddExpression` / `SubtractExpression` / `MultiplyExpression` / `DivideExpression` and producing `long` results is a separate substrate addition — orthogonal to template compilation. Probe 29's hand-built renderer (`$"v={v} doubled={2*v}"`) stays delegate-form until that lands.
-- **String-interpolation format specifiers** (`{value:X}`, `{value:N2}`). Out of scope — fragments evaluate to whatever the walker produces; stringification uses invariant culture default. Format-specifier syntax is a follow-on.
+- **String-interpolation format specifiers** (`{value:X}`, `{value:N2}`). Fragments evaluate to whatever the walker produces; stringification uses `Convert.ToString(..., InvariantCulture)`. Format-specifier syntax is a follow-on.
 - **Multi-line / verbatim templates**. Single-line interpolation only. Newlines in templates are passed through verbatim if the agent supplies them.
+- **Conditional `?:` and other unsupported syntactic forms** (cast expressions, method invocations beyond member access, lambdas, array access, `new` expressions). The translator throws `NotSupportedException` for these; extending the supported set is a separate increment.
 
-#### Validation
+#### Validation — as shipped
 
-- All existing 95 unit tests continue to pass.
-- New `CSharpConditionTemplateTests` (estimated ~10 tests covering the cases above) pass.
-- Probe 58 passes on macOS-arm64 with N well-formed logpoint emissions matching iteration values.
-- A round-trip through `drhook_step_breakpoint(logMessage: "v={v}", suspend: "none")` → continue → time-bounded `drhook_step_breakpoint_list` → drain anomalies confirms substrate emits the rendered messages via `OnLog` as the substrate already does for the delegate form.
+- 119/119 unit tests pass (was 95 pre-increment; 24 new tests added across `CSharpConditionTests`, `CSharpConditionTemplateTests`, and `BreakpointPolicySpecTests`).
+- Probe 58 passed on macOS-arm64: 97 well-formed `LogRecord` entries against the typed-arithmetic template; every line internally consistent (times2 == counter\*2, plus10 == counter+10, even == counter%2==0).
+- Probes 29 + 30 retired their local walkers and recompile against the substrate cleanly.
+- Full solution build green; MCP layer carries the rendered `policy.logMessage` field through `RenderPolicy` unchanged.
 
-#### Why this increment is well-bounded
+#### Why the typed-Expression-tree architecture is the right substrate
 
-The substrate compiler subset already exists. Logpoint mechanics from policy gates through `OnLog` emission to auto-resume are all shipped. The change is one parsing pass + a refactor of `Eval` to be reusable from both `Compile` (bool predicate) and `CompileTemplate` (string renderer) + plumbing on the four MCP set tools. No new substrate type, no `DebugSession` API addition beyond removing one `NotImplementedException` throw, no `CallbackPump` changes.
+C# is statically typed. ICorDebug's metadata + CorElementType per value give the substrate the type information at every value boundary; the prior `long?`-flatten erased that information and forced re-typing per evaluation. The architectural lever is to preserve type fidelity end-to-end:
+
+1. `Interop/Variables.ReifyPrimitive` casts the raw 8-byte buffer to the CLR primitive matching CorElementType — one place, one cast per value-read.
+2. `LocalValue.RawValue: object?` carries the typed boxed primitive forward.
+3. The walker's first-invocation schema reads `LocalValue.RawValue?.GetType()` directly — no inference, no defaults for primitives.
+4. `Expression.MakeBinary` operates on typed operands and dispatches to native C# operators; `LambdaExpression.Compile()` IL-emits the delegate; subsequent hits are direct delegate invocation.
+
+This avoids the alternatives (hand-walk with manual operator enumeration, `dynamic` keyword with DLR call-site caches, `Expression.Dynamic` with `Microsoft.CSharp.RuntimeBinder`) — all of which would either lose performance to interpretation, lose type fidelity to runtime boxing, or take a dependency the substrate doesn't need.
 
 Increment 2 (closed 2026-05-29 by commits `8cce862` … `2d16923` + `824cc0b`) shipped the substrate work that makes per-breakpoint and per-exception-filter policies first-class: `BreakpointPolicy` (delegate) / `BreakpointPolicySpec` (string), `DebugSession.Compile`, `SetBreakpointAtLine(...policy)`, `SetBreakpoint(...policy)`, `ArmExceptionFilter(...policy)`, and caller-thread evaluation in `WaitForStop` for both breakpoint and exception-filter locations. The substrate also already supports subclass-aware exception matching via `ExceptionInspector.CurrentExceptionTypeChain` (runtime-driven `ICorDebugType.GetBase` walk; cross-module-safe per cordebug.idl — verified by `Interop/ExceptionInspector.cs:60-92`, probe 37, finding 47).
 

@@ -136,12 +136,12 @@ static class Locals18
         LocalValue[] locals = session.GetLocals().ToArray();
         Console.WriteLine($"stopped at {FileHint}:{markerLine} — named locals:");
         foreach (LocalValue l in locals)
-            Console.WriteLine($"  {l.Name} : elementType=0x{l.ElementType:X2}  value={(l.RawValue is { } v ? v.ToString(CultureInfo.InvariantCulture) : "(n/a)")}");
+            Console.WriteLine($"  {l.Name} : elementType=0x{l.ElementType:X2}  value={(l.RawValue is { } v ? Convert.ToString(v, CultureInfo.InvariantCulture) : "(n/a)")}");
 
         if (locals.Length == 0) { Console.Error.WriteLine("FALSIFIED: no named locals read."); return 8; }
 
-        bool aOk = locals.Any(l => l.Name == "a" && l.ElementType == ELEMENT_TYPE_I4 && l.RawValue == 6);
-        bool bOk = locals.Any(l => l.Name == "b" && l.ElementType == ELEMENT_TYPE_I8 && l.RawValue == 60);
+        bool aOk = locals.Any(l => l.Name == "a" && l.ElementType == ELEMENT_TYPE_I4 && Equals(l.RawValue, 6));
+        bool bOk = locals.Any(l => l.Name == "b" && l.ElementType == ELEMENT_TYPE_I8 && Equals(l.RawValue, 60L));
         if (!aOk || !bOk)
         {
             Console.Error.WriteLine($"FALSIFIED: expected a=6 (I4) and b=60 (I8); aOk={aOk} bOk={bOk}.");
