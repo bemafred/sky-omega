@@ -1,6 +1,6 @@
 # ADR-010: DrHook MCP tool surface — semantic naming and established-debugger alignment
 
-**Status:** Proposed — 2026-05-27
+**Status:** Accepted — 2026-05-31 (Proposed — 2026-05-27 → Accepted after all ten Open Questions resolved 2026-05-30/31).
 
 **Supersedes:** [ADR-009 (DrHook)](ADR-009-test-debugging-mcp-surface.md) — that ADR's test-debugging-specific scope is subsumed by the broader surface redesign captured here. Test-debugging is one input shape to a unified `drhook_launch` tool; it does not require its own MCP-tool family.
 
@@ -122,16 +122,17 @@ DrHook's structural advantages (no IDE matches): substrate-anomaly streaming, BC
 
 ### Naming principles
 
-1. **Verbs match IDE convention** (per the capability table in §Context): `launch`, `attach`, `stop`, `continue`, `pause`, `step_over`, `step_into`, `step_out`, `run_to_cursor`, `set_next_statement`.
-2. **Substrate lifecycle is encoded by verb choice.** `launch` ⇒ Owned (target lifecycle managed by session, terminated on `stop` per ADR-008). `attach` ⇒ Borrowed (target survives session-stop). Per [ADR-008](ADR-008-process-lifecycle-discipline.md).
+1. **Verbs match IDE convention** (per the capability table in §Context): `launch`, `attach`, `detach`, `kill`, `continue`, `pause`, `step_over`, `step_into`, `step_out`, `run_to_cursor`, `set_next_statement`.
+2. **Process lifecycle: natural exit, never termination-by-debugger as a normal session-end.** `launch` ⇒ Owned attachment (substrate spawned the target). `attach` ⇒ Borrowed attachment (substrate connected to an existing PID). Both end the session identically via `detach`; the target runs to its natural exit in both cases. `kill` is a separate anomaly-only tool (forced termination via OS signal) — every invocation is worth investigating, never normal cleanup. Per [ADR-008](ADR-008-process-lifecycle-discipline.md) + [`feedback_process_lifecycle_discipline`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_process_lifecycle_discipline.md) (2026-05-25). Substrate dispatch: Owned `kill` → `DebugSession.Abandon()` (existing per ADR-008 Increment 1b); Borrowed `kill` → pending substrate addition (see [Substrate findings](#substrate-findings) below).
 3. **Runner kind is never exposed at the API surface.** Project inspection happens internally inside `drhook_launch`; the dispatched kind is reported in the *output* `kind` field for diagnostic transparency only. Per [`feedback_substrate_dissolves_per_variant_planning`](../../../.claude/projects/-Users-bemafred/.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_substrate_dissolves_per_variant_planning.md): API-layer runner-agnosticism is a strict superset of substrate-layer runner-agnosticism.
 4. **Breakpoints are first-class entities with stable IDs.** Creation returns ID; modification by ID; removal by ID. No polymorphic dispatch on disjoint parameters.
-5. **`hypothesis` is universal, optional, consistent.** Every action that observes or changes program state accepts `hypothesis` as an optional parameter. Sky Omega epistemic discipline. Substrate-mandatory only at the substrate-discipline-critical observation points (snapshot, today).
+5. **`hypothesis` is required on every state-changing operation and every inspection that reads target state.** Pure substrate-metadata reads (`drhook_processes`, `drhook_break_list`, `drhook_drain_anomalies`) stay parameter-free since they don't change anything and have no expected-vs-observed semantic. **Hypothesis is DrHook's distinguishing substrate capability, not a discipline tax.** VS, Rider, VS Code keep hypothesis in the developer's head — recorded nowhere, recoverable by no analyzer. DrHook makes hypothesis an explicit substrate input so every `(hypothesis, observation)` pair becomes a record the cognitive layer will eventually analyze. Side-effect surprises (property getters with logging or lazy init, thread races, JIT recompilation, GC pressure during eval) become structurally detectable as hypothesis-divergence rather than absences the agent has to notice unaided. Mandatory articulation also slows reactive trial-and-error by forcing the agent to type "expected: X" before invoking the tool — see [`feedback_proactivity_requires_substrate`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_proactivity_requires_substrate.md) (substrate-vs-training cognitive memory principle) and [`feedback_checked_nothing_principle`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_checked_nothing_principle.md) (Silverstein: checked nothing is evidence; untrusted nothing is just absence).
 6. **Tool descriptions are exhaustively self-describing.** Description tells the agent *what it does*, *when to use it (vs. siblings)*, *what it returns*, *known limitations*, *substrate guarantees and known gaps*. No out-of-band knowledge required.
-7. **Prefix consistency: `drhook_<verb>` or `drhook_<category>_<verb>`.** Flat is preferred; sub-categorize only when necessary (`drhook_break_<variant>`).
-8. **Naming asymmetry between existing-but-stale and new tools is acceptable during transition.** MCP self-description means agents read the current state; backwards-compat is not a substrate concern.
+7. **Distinct tools per substrate primitive; no flag-driven dispatch inside tools.** Each substrate primitive surfaces as its own MCP tool with focused parameters and a focused description — `drhook_break_source`, `drhook_break_function`, `drhook_break_exception`, `drhook_break_data` are distinct tools, not one `drhook_break(kind, ...)` with a discriminator. Flag-driven dispatch inside tools is an established anti-pattern: tool descriptions degrade under per-variant conditional parameter shapes ("if kind=X then param Y is required"), test/probe coverage entangles, agent discoverability suffers, and consolidation contradicts substrate truth (the substrate's own public surface already distinguishes `SetBreakpointAtLine`, `SetBreakpoint(module, type, method)`, `ArmExceptionFilter` as three methods, not one with a discriminator). MCP tools mirror substrate truth. See [`feedback_no_behavior_flags`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_no_behavior_flags.md) (2026-05-16) for the substrate-level principle this MCP-surface rule mirrors.
+8. **Prefix consistency: `drhook_<verb>` or `drhook_<category>_<verb>`.** Flat is preferred; sub-categorize only when necessary (`drhook_break_<variant>`).
+9. **Naming asymmetry between existing-but-stale and new tools is acceptable during transition.** MCP self-description means agents read the current state; backwards-compat is not a substrate concern.
 
-### Tool catalog (proposed — 23 tools)
+### Tool catalog (proposed — 25 tools)
 
 Status legend per tool:
 - **(rename-only)** — current substrate capability; tool gets new name + clearer description.
@@ -139,13 +140,14 @@ Status legend per tool:
 - **(verify substrate)** — substrate may or may not support; need code verification before increment can ship.
 - **(substrate addition)** — substrate work required; tool is aspirational until substrate ships.
 
-#### Session lifecycle (3 tools)
+#### Session lifecycle (4 tools)
 
 | Tool | Replaces | Status |
 |---|---|---|
 | `drhook_launch` | `step_run` + (logically) `step_test` | rename-only for `.exe` / `dotnet+dll` launch; **substrate addition** for `.csproj` project-mode (inspector + executable-resolver + dispatcher) |
 | `drhook_attach` | `step_launch` | rename-only |
-| `drhook_stop` | `step_stop` | rename-only |
+| `drhook_detach` | `step_stop` | rename + semantic clarification — session-end is detach (target runs to natural exit), not termination. Same dispatch for both Owned and Borrowed. |
+| `drhook_kill` | — | **(new)** anomaly-only forced termination via OS signal. Owned-side dispatches to `DebugSession.Abandon()` (existing per ADR-008 Increment 1b). **(substrate addition)** Borrowed-side `DebugSession.Kill()` — thin wrapper over BCL `Process.Kill()` with detach-first ordering. Description must surface "anomaly, not normal cleanup; every invocation worth investigating." |
 
 #### Execution control (7 tools)
 
@@ -192,7 +194,7 @@ Status legend per tool:
 |---|---|---|
 | `drhook_drain_anomalies` | `drhook_drain_anomalies` | no change |
 
-**Total: 23 tools** (vs. 20 today; net additions are `run_to_cursor`, `set_next_statement`, `break_data`, `watch`, `frames` — minus `step_test` consolidated into `launch`).
+**Total: 25 tools** (vs. 20 today; net additions are `kill`, `run_to_cursor`, `set_next_statement`, `break_data`, `watch`, `frames`; `step_test` consolidated into `launch`).
 
 ### Tiered increments
 
@@ -368,18 +370,57 @@ Increment 6 closes this MCP-surface gap, with a new probe explicitly validating 
 
 The substrate work is **done** as of Increment 2. This increment is purely MCP-layer alignment (parameter shapes, tool descriptions, output JSON) plus one verification probe for the target-defined-hierarchy case the existing probes don't cover. No `DebugSession` API changes; no `CallbackPump` changes; no new compilation surfaces.
 
+### Substrate findings
+
+Items surfaced by Decision principles 1, 2, and 5 that require substrate-level work before their dependent MCP surface can ship. Recorded here as findings to be probed + implemented in successor increments, with provenance to the discussion that surfaced them.
+
+#### Finding F-010-1: Borrowed-side `DebugSession.Kill()` primitive
+
+**Trigger:** Q2 resolution + the "kill should not be Owned-only" reframe (2026-05-31). The substrate has `DebugSession.Abandon()` for Owned-side forced termination (ADR-008 Increment 1b); there is no equivalent for Borrowed sessions. The MCP `drhook_kill` tool needs both dispatches.
+
+**Substrate work:**
+- Add `DebugSession.Kill()` to the public surface, valid for Borrowed sessions (and possibly Owned as an alias for `Abandon()` so the MCP layer has a uniform call).
+- Implementation: detach cleanly first (avoid leaving the debugger in an inconsistent state mid-ICorDebug-callback), then `Process.GetProcessById(pid).Kill(entireProcessTree: false)` — the substrate must not nuke unrelated children.
+- Probe: Borrowed session against a target that loops indefinitely; arm `Kill()`; verify (a) target terminates, (b) debug session disposes cleanly, (c) no orphaned ICorDebug callbacks fire post-Kill, (d) anomaly stream records the forced termination.
+
+**Out of scope for this finding:**
+- Process-tree termination semantics. The current substrate `Process.Kill(entireProcessTree: true)` in some paths is a documented anti-pattern when the substrate doesn't own the tree.
+
+#### Finding F-010-2: Owned process must not be a child of the debugger process
+
+**Trigger:** Decision principle 2 + Q2 discussion (2026-05-31). The natural-exit lifecycle principle requires that if DrHook crashes, the Owned target should NOT inherit it — it should continue running independently or end through its own logic, not be killed by OS-level parent-child cleanup. Today's `DebugSession.Launch` uses `Process.Start` (per BCL default), which makes the target a child of DrHook on POSIX. If DrHook dies, the orphaned target reparents to `init` rather than failing cleanly — which mostly works but introduces a subtle dependency between debugger process lifetime and target process lifetime.
+
+**Substrate work:**
+- Read `DebugSession.Launch` implementation to verify the current child-process relationship.
+- Evaluate detach-from-parent options at launch: `posix_spawn` with appropriate flags, double-fork on POSIX, `setsid()`, or `CreateProcess(DETACHED_PROCESS)` on Windows.
+- Decision: whether to detach the launched target from DrHook's process tree at `Launch` time, or to accept the child-process relationship with the understanding that DrHook crashes are themselves anomalies the cognitive layer should catch.
+- Finding: probe + document the current behavior before deciding the right path.
+
+**Connects to:** [`feedback_process_lifecycle_discipline`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_process_lifecycle_discipline.md) (2026-05-25); ADR-008 (process lifecycle discipline foundation).
+
+#### Finding F-010-3: General-purpose `Func<IEvalContext, object?>` evaluator for `drhook_watch`
+
+**Trigger:** Q4 ("Is `IEvalContext` usable for an MVP `drhook_watch`?"). Increment 7 made this answer **yes** — `CSharpCondition.Compile(expression, resolver)` already produces typed Roslyn-compiled delegates. A watch evaluator is the same translator returning `Func<IEvalContext, object?>` instead of `Func<IEvalContext, bool>` (drop the bool-coerce at the top of the lambda body) and exposing it via a public substrate method.
+
+**Substrate work:**
+- Add `CSharpCondition.CompileValue(expression, resolver) → Func<IEvalContext, object?>` (or similar name) — same translator, different return-type coercion.
+- Expose `DebugSession.Watch(string expression, hypothesis) → object?` that compiles + evaluates against the current stop's `IEvalContext` and returns the typed result.
+- Stringification at the MCP layer via `Convert.ToString(value, InvariantCulture)`.
+
+**Effort:** small — the load-bearing work was Increment 7.
+
 ## Open questions — answer before Proposed → Accepted
 
-1. **Naming style: `drhook_step_over` vs. `drhook_step_next`?** VS uses "Step Over" terminology; Rider uses "Step Over"; VS Code DAP uses "Step Over". Current MCP tool is `step_next`. Standardize to `step_over` (matches industry). **Confirm.**
-2. **`drhook_stop` vs. `drhook_detach` vs. `drhook_end_session`?** "Stop" matches VS Code's "Stop Debugging" terminology. For Owned sessions the target is terminated; for Borrowed it survives. "Stop" can read as ambiguous (stops the *target*? or the *session*?). **Reviewer call.**
-3. **Does the substrate expose async-stack-reconstruction primitives?** Rider's blog cites "Async call stack debugger improvements" (2017). VS/VS Code expose async stacks via DAP. **`[?]` — needs subject-matter verification on what `Frames.WalkManagedFrames` actually provides and whether async continuation reconstruction is available.**
-4. **Is `IEvalContext` usable for an MVP `drhook_watch`?** `WaitForConditionalStop(Func<IEvalContext, bool>, ...)` exists (`DebugSession.cs:463`) — suggests substrate already has some eval context primitive. Could a Roslyn-based MCP tool use `IEvalContext` for arbitrary expression evaluation, or is it limited to the conditional-stop scenario? **Verify.**
-5. **`drhook_break_data` ICorDebug support.** The agent-research result classifies data breakpoints as "VS: explicit support; Rider: limited; VS Code: not documented." Is the ICorDebug API support actually present, or is this a runtime-version-gated capability? **`[?]` — subject-matter verification required.**
-6. **`hypothesis` discipline — universal or selective?** Current substrate makes `hypothesis` *required* for `drhook_snapshot` (the strongest discipline). Step operations make it *optional*. Should the redesigned API tighten this — require `hypothesis` on every state-changing operation? Or relax (rare-required everywhere)? **Reviewer call.**
-7. **Tool-count target.** 23 tools (proposed) vs. some IDE-style consolidation. Smaller tool count → simpler agent surface but each tool grows in parameter complexity. Larger tool count → more self-describing per tool but more enumeration overhead. **Trade-off — reviewer call.**
-8. **`drhook_break_source(logMessage)` as a separate `drhook_logpoint` tool?** VS Code DAP treats logpoints as a breakpoint variant with `logMessage`. VS calls them "Tracepoints" — a distinct breakpoint kind in UI. **Style: same tool with conditional param, or separate tool?**
-9. **Multi-process / multi-session.** The substrate is per-session (each `DebugSession.AttachAndOwn` returns an independent session); the MCP layer's `EngineSteppingSession` is a DI singleton. Should `drhook_launch` / `drhook_attach` return a session ID, allowing multiple concurrent sessions per MCP server? **Out of this ADR's scope but flagged for a successor ADR.**
-10. **`drhook_step_test` removal timing.** Today it returns "not implemented yet" structured error. Tier 1 removes the tool. **Confirm timing: before or after Tier 3's `drhook_launch` accepts `.csproj`?** Pre-substrate-replacement is honest (no false advertising); post-substrate-replacement is safer (no capability gap). **Reviewer call.**
+1. **~~Naming style: `drhook_step_over` vs. `drhook_step_next`?~~ RESOLVED 2026-05-31 → `drhook_step_over`.** VS, Rider, VS Code DAP all use "Step Over" terminology; `step_next` is the outlier. Standardize to industry vocabulary. Tool catalog (Execution Control table) already reflects this.
+2. **~~`drhook_stop` vs. `drhook_detach` vs. `drhook_end_session`?~~ RESOLVED 2026-05-31 → `drhook_detach`** (with a new `drhook_kill` for anomaly-only forced termination). The prior framing assumed Owned implies terminate-at-session-end, which contradicts the natural-exit lifecycle principle from [`feedback_process_lifecycle_discipline`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_process_lifecycle_discipline.md). Both Owned and Borrowed sessions end identically via detach; the target runs to its natural exit. Forced termination is the anomaly path, mode-agnostic at the MCP surface (substrate dispatches Owned → `Abandon()`, Borrowed → pending `Kill()` per Substrate findings). See Decision principles 1, 2 and the Session lifecycle catalog above.
+3. **~~Does the substrate expose async-stack-reconstruction primitives?~~ DEFERRED 2026-05-31 → resolved by Tier 2 verification finding when `drhook_frames` work begins.** ICorDebug has primitives for async continuation reconstruction (`ICorDebugThread4::GetActiveInternalFrames` + runtime-side async-state-machine inspection); whether `Frames.WalkManagedFrames` exposes them or just returns raw managed frames is a code read deferred to Tier 2 implementation. The MCP `drhook_frames` tool ships when this verification completes; until then it's a substrate-verification item rather than a Proposed → Accepted blocker.
+4. **~~Is `IEvalContext` usable for an MVP `drhook_watch`?~~ RESOLVED 2026-05-31 → YES.** Increment 7 made this answer trivial — `CSharpCondition.Compile(expression, resolver)` already produces typed Roslyn-compiled `Func<IEvalContext, bool>` delegates. A watch evaluator is the same translator with `Func<IEvalContext, object?>` return shape (drop the bool-coerce). Substrate work outlined in [Substrate finding F-010-3](#finding-f-010-3-general-purpose-funcievalcontext-object-evaluator-for-drhook_watch); effort is small, the load-bearing work was Increment 7.
+5. **~~`drhook_break_data` ICorDebug support.~~ DEFERRED 2026-05-31 → resolved by Tier 3 substrate-availability probe.** Data breakpoints in ICorDebug are under-documented and possibly runtime-version-gated. Verifying support requires reading `Microsoft.Diagnostics.Runtime` source or running a substrate probe against the runtime. The MCP `drhook_break_data` tool is gated on this finding; substrate-availability is recorded as a finding when the Tier 3 probe runs. Not a Proposed → Accepted blocker; the ADR is honest about the gap.
+6. **~~`hypothesis` discipline — universal or selective?~~ RESOLVED 2026-05-31 → TIGHTEN.** `hypothesis` is required on every state-changing operation and every inspection that reads target state. Pure substrate-metadata reads (`drhook_processes`, `drhook_break_list`, `drhook_drain_anomalies`) stay parameter-free. Hypothesis is DrHook's distinguishing substrate capability — every `(hypothesis, observation)` pair is corpus for the cognitive-layer analyzer; side-effect surprises become structurally detectable as hypothesis-divergence rather than absences. See Decision principle 5 for the full rationale, with references to [`feedback_proactivity_requires_substrate`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_proactivity_requires_substrate.md) and [`feedback_checked_nothing_principle`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_checked_nothing_principle.md).
+7. **~~Tool-count target.~~ RESOLVED 2026-05-31 → KEEP 25 distinct tools.** Flag-driven dispatch inside tools is an established anti-pattern (Martin's framing). Each substrate primitive surfaces as its own MCP tool; the substrate's own public surface already distinguishes the underlying methods. Smaller tool count via consolidation would contradict substrate truth and create flag-driven dispatch the substrate itself doesn't have. Promoted to Decision principle 7; see [`feedback_no_behavior_flags`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_no_behavior_flags.md) for the substrate-level principle this mirrors.
+8. **~~`drhook_break_source(logMessage)` as a separate `drhook_logpoint` tool?~~ RESOLVED 2026-05-31 → PARAMETER ON EXISTING BREAK TOOLS.** Substrate truth: `BreakpointPolicy` is one record with optional `Condition` / `HitCount` / `LogMessage` / `Suspend` fields. There is no separate substrate primitive for logpoints — the combination `LogMessage != null` + `Suspend == None` is what tracepoint/logpoint UIs name. A `logMessage` parameter on `drhook_break_source` / `drhook_break_function` / `drhook_break_exception` is substrate-truth-aligned per Decision principle 7 (distinct tools per substrate primitive; no flag-driven dispatch); the same shape `suspend` already takes. A separate `drhook_logpoint` tool would duplicate the break-family parameters and introduce an MCP-layer dispatch the substrate itself doesn't have. Tool catalog (line 168 + Increment 7 Deliverable 5) already reflects this.
+9. **~~Multi-process / multi-session.~~ CONFIRMED OUT-OF-SCOPE 2026-05-31.** The substrate is per-session (`DebugSession` per `AttachAndOwn`); the MCP layer's `EngineSteppingSession` is a DI singleton. Lifting that constraint is its own ADR — the substrate-per-session model + the MCP singleton are the current shipping shape. Flagged for a successor ADR when concurrent-session demand materializes.
+10. **~~`drhook_step_test` removal timing.~~ RESOLVED 2026-05-31 → REMOVE IN TIER 1.** Tool descriptions don't carry false-advertising stubs even temporarily (Decision principle 6 — tools are exhaustively self-describing). Callers lose nothing functional (the tool already returns "not implemented" structured errors). The Tier 3 replacement is `drhook_launch(.csproj)` — a different tool with a different name and parameter shape, not a like-for-like substitute, so "no capability gap window" isn't a coherent goal. Tier 1 scope (line 212) already includes this removal.
 
 ## Validation
 
