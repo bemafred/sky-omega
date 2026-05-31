@@ -217,13 +217,13 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <summary>Launch a .NET process under debug control via dbgshim's RegisterForRuntimeStartup
     /// flow: spawn suspended → register a startup callback → resume → await the callback. On return,
     /// the debugger is attached BEFORE managed code has run, so a <c>Debugger.Break()</c> at the top
-    /// of <c>Main</c> surfaces as the first stop (finding 42). Backs <c>drhook_step_run</c> in the
+    /// of <c>Main</c> surfaces as the first stop (finding 42). Backs <c>drhook_launch</c> in the
     /// MCP rewrite. <paramref name="program"/> is typically the <c>dotnet</c> host with the target
     /// DLL as an argument.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
     /// <summary>Launch a .NET process under debug control via dbgshim's RegisterForRuntimeStartup
     /// flow as an OWNED session. Substrate spawns the target, acquires its <see cref="Process"/>
-    /// handle, and kills the target before Dispose's substrate teardown. Use case: drhook_step_run
+    /// handle, and kills the target before Dispose's substrate teardown. Use case: drhook_launch
     /// MCP tool, file-based probes that launch their target. Finding 64 (substrate-owned
     /// lifecycle); callers no longer manage kill-first themselves.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>

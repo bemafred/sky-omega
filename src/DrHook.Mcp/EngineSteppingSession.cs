@@ -1,10 +1,10 @@
 // EngineSteppingSession — the BCL-only replacement for SteppingSessionManager (the netcoredbg-
-// DAP-backed one in src/DrHook/Stepping/). Same 17-method async surface; consumers (DrHookTools
+// DAP-backed one in src/DrHook/Stepping/). Same async surface; consumers (DrHookTools
 // and through it the MCP wire) see the same JSON-shaped responses. Backed entirely by
 // SkyOmega.DrHook.Engine.DebugSession.
 //
-// One session at a time (the engine model — DI-injected as singleton). step_launch / step_run /
-// step_test create the session; step_stop disposes it; other tools require IsActive.
+// One session at a time (the engine model — DI-injected as singleton). drhook_attach / drhook_launch
+// create the session; drhook_detach ends it; other tools require IsActive.
 //
 // JSON shapes preserved at the TOP-LEVEL key level (status, operation, step, currentState,
 // stoppedReason, hypothesis, prompt, metrics). Inner shapes (currentState, variables) carry
@@ -106,9 +106,9 @@ public sealed class EngineSteppingSession : IDisposable
 
     // ─── Session lifecycle ────────────────────────────────────────────────────────────────────
 
-    public Task<string> LaunchAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
+    public Task<string> AttachAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
     {
-        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook:step-stop first."));
+        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_detach first."));
 
         try
         {
@@ -153,13 +153,13 @@ public sealed class EngineSteppingSession : IDisposable
         }
     }
 
-    public Task<string> RunAsync(
+    public Task<string> LaunchAsync(
         string program, string[] args, string? cwd,
         string sourceFile, int line, string hypothesis,
         Dictionary<string, string>? env,
         CancellationToken ct)
     {
-        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook:step-stop first."));
+        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_detach first."));
 
         _sessionHypothesis = hypothesis;
         _targetVersion = "launched";
@@ -211,15 +211,7 @@ public sealed class EngineSteppingSession : IDisposable
         }
     }
 
-    public Task<string> RunTestAsync(string project, string? filter, string? cwd, string sourceFile, int line, string hypothesis, CancellationToken ct)
-    {
-        // Phase 3 polish — the VSTEST_HOST_DEBUG dance (launch dotnet test, wait for the test
-        // host to print its PID, then Attach to it) is not yet ported. Surface this as a
-        // structured "not implemented yet" so the consumer gets a clean signal rather than a hang.
-        return Task.FromResult(Error("drhook_step_test is a Phase 3 polish item — the VSTEST_HOST_DEBUG / testhost-PID-discovery dance is not yet ported to the DrHook.Engine path. Use drhook_step_run or drhook_step_launch in the meantime."));
-    }
-
-    public Task<string> StopAsync(CancellationToken ct)
+    public Task<string> DetachAsync(CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
@@ -239,13 +231,13 @@ public sealed class EngineSteppingSession : IDisposable
 
     // ─── Step operations ──────────────────────────────────────────────────────────────────────
 
-    public Task<string> StepNextAsync(string? hypothesis, CancellationToken ct) => StepOperation("next", s => s.StepOver(), hypothesis);
+    public Task<string> StepOverAsync(string? hypothesis, CancellationToken ct) => StepOperation("stepOver", s => s.StepOver(), hypothesis);
     public Task<string> StepIntoAsync(string? hypothesis, CancellationToken ct) => StepOperation("stepIn", s => s.StepInto(), hypothesis);
     public Task<string> StepOutAsync(string? hypothesis, CancellationToken ct)  => StepOperation("stepOut", s => s.StepOut(), hypothesis);
 
     public Task<string> ContinueAsync(string? hypothesis, bool waitForBreakpoint, CancellationToken ct)
     {
-        if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook:step-launch first."));
+        if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook_launch or drhook_attach first."));
         try
         {
             _session.Resume();
@@ -256,7 +248,7 @@ public sealed class EngineSteppingSession : IDisposable
                     ["operation"] = "continue",
                     ["status"] = "running",
                     ["assemblyVersion"] = _targetVersion,
-                    ["prompt"] = "Process resumed without waiting. Use drhook_step_pause to interrupt or drhook_step_continue with waitForBreakpoint=true to block on a stop."
+                    ["prompt"] = "Process resumed without waiting. Use drhook_pause to interrupt or drhook_continue with waitForBreakpoint=true to block on a stop."
                 }));
             }
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
@@ -298,7 +290,7 @@ public sealed class EngineSteppingSession : IDisposable
                 ["metrics"] = StubMetrics(),
             };
             if (hypothesis is not null) result["hypothesis"] = hypothesis;
-            result["prompt"] = "Execution interrupted. Inspect with drhook_step_vars or step through.";
+            result["prompt"] = "Execution interrupted. Inspect with drhook_locals or step through.";
             return Task.FromResult(Render(result));
         }
         catch (Exception ex) { return Task.FromResult(Error($"Pause failed: {ex.Message}")); }
@@ -306,7 +298,7 @@ public sealed class EngineSteppingSession : IDisposable
 
     private Task<string> StepOperation(string operationName, Action<DebugSession> step, string? hypothesis)
     {
-        if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook:step-launch first."));
+        if (_session is null) return Task.FromResult(Error("No active stepping session. Use drhook_launch or drhook_attach first."));
         try
         {
             _stepCount++;
@@ -374,7 +366,7 @@ public sealed class EngineSteppingSession : IDisposable
             if (suspend is not null)    policyJson["suspend"] = ParseSuspend(suspend).ToString();
             result["policy"] = policyJson;
         }
-        result["prompt"] = $"Breakpoint added at {sourceFile}:{line} (id={id}{(policy is not null ? ", policy attached" : "")}). Use drhook_step_continue to run to it.";
+        result["prompt"] = $"Breakpoint added at {sourceFile}:{line} (id={id}{(policy is not null ? ", policy attached" : "")}). Use drhook_continue to run to it.";
         return Task.FromResult(Render(result));
     }
 
@@ -477,7 +469,7 @@ public sealed class EngineSteppingSession : IDisposable
         }
         result["prompt"] = $"Exception filter armed (id={id}, type=\"{typeName}\", phase={phaseFilter}" +
             (policy is not null ? ", policy attached" : "") +
-            $"). Use drhook_step_breakpoint_remove with this id to remove.";
+            $"). Use drhook_break_remove with this id to remove.";
 
         return Task.FromResult(Render(result));
     }
@@ -513,7 +505,7 @@ public sealed class EngineSteppingSession : IDisposable
     {
         if (_session is null) return Task.FromResult(Error("No active stepping session."));
         if (!_breakpointKinds.TryGetValue(id, out BreakpointKind kind))
-            return Task.FromResult(Error($"No breakpoint with id={id} is tracked at the MCP layer. Use drhook_step_breakpoint_list to discover armed ids."));
+            return Task.FromResult(Error($"No breakpoint with id={id} is tracked at the MCP layer. Use drhook_break_list to discover armed ids."));
 
         bool removed;
         string typeLabel;
@@ -563,7 +555,7 @@ public sealed class EngineSteppingSession : IDisposable
             // The MCP layer thought we knew about this id but the substrate didn't have it. This
             // is a stale-tracking situation (session was cleared at substrate level without going
             // through the MCP path, or the kind tracker drifted). Report honestly.
-            result["prompt"] = $"id={id} was tracked at MCP layer but the substrate had no matching {typeLabel} entry. MCP-layer state pruned; verify with drhook_step_breakpoint_list.";
+            result["prompt"] = $"id={id} was tracked at MCP layer but the substrate had no matching {typeLabel} entry. MCP-layer state pruned; verify with drhook_break_list.";
         }
         return Task.FromResult(Render(result));
     }

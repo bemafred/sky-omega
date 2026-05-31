@@ -1,3 +1,3 @@
 # DrHook MCP Server
 
-MCP server for .NET runtime inspection. 19 tools spanning EventPipe observation, DAP stepping, breakpoint management, expression evaluation, and test debugging.
+MCP server for .NET runtime inspection. 18 tools spanning EventPipe observation, ICorDebug-native stepping, breakpoint management with conditional/hit-count/logpoint policies, locals inspection, and substrate-anomaly streaming. Backed entirely by `DrHook.Engine` (BCL + P/Invoke + source-gen COM). Tool names follow established IDE-debugger convention per [ADR-010](../../docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md).

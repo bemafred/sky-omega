@@ -1,5 +1,5 @@
 // Enumerate the instance fields of an object value, with optional recursive depth — the
-// engine half of drhook_step_vars. Chain: QI ICorDebugValue2 → GetExactType@3 → ICorDebugType
+// engine half of drhook_locals. Chain: QI ICorDebugValue2 → GetExactType@3 → ICorDebugType
 // loop via GetBase@7. At each Type level: GetClass@4 → (module, mdTypeDef); enumerate fields
 // via IMetaDataImport.EnumFields@20 + GetFieldProps@57 (name only); read each field value via
 // ICorDebugObjectValue.GetFieldValue@8 with the level's class; render via Variables.ReadValue.
