@@ -168,7 +168,14 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                 {
                     _userSink.OnEvent(e.Name);
                     if (e.Name == "ExitProcess")
+                    {
+                        // The debuggee is gone — clear the stale stop-thread pointer. Otherwise
+                        // StopThread keeps returning the last stop's now-dead ICorDebugThread, and a
+                        // post-exit GetStackFrames walks it past WalkManagedFrames' (pThread == 0)
+                        // guard, dereferencing a released thread → NRE (finding 77).
+                        _stopThread = 0;
                         _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
+                    }
                     _resumeHandler!(ResumeKind.Continue, 0);
                 }
                 else if (e.Kind == CallbackKind.PauseRequest)

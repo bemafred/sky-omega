@@ -1072,6 +1072,41 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         finally { if (pModule != 0) RuntimeNavigation.Release(pModule); }
     }
 
+    /// <summary>Set a source-line breakpoint by FILE alone — resolve the owning module by which
+    /// loaded module's Portable PDB actually references <paramref name="fileHint"/> at
+    /// <paramref name="line"/>, instead of guessing the module from the file name. Fixes the case
+    /// where the source file name differs from the assembly name (e.g. Program.cs in Launch.dll),
+    /// which the file-stem heuristic the MCP layer used could not resolve (ADR-011 D3 smoke finding).
+    /// Returns the new breakpoint's id (positive) on the first module whose PDB binds the line,
+    /// <c>0</c> if none does. Binds to the nearest sequence point at or after the line.</summary>
+    public int SetBreakpointAtLine(string fileHint, int line, BreakpointPolicy? policy = null)
+    {
+        foreach (string moduleName in EnumerateModules())
+        {
+            nint pModule = RuntimeNavigation.FindModule(_pProcess, moduleName);
+            if (pModule == 0) continue;
+
+            SymbolReader? symbols = SymbolsFor(RuntimeNavigation.ModuleName(pModule));
+            if (symbols is null || !symbols.TryFindLine(fileHint, line, out int token, out int ilOffset))
+            {
+                RuntimeNavigation.Release(pModule);
+                continue;
+            }
+            if (!Breakpoints.TryCreateAtOffset(pModule, (uint)token, (uint)ilOffset, out nint function, out nint breakpoint))
+            {
+                RuntimeNavigation.Release(pModule);
+                continue;
+            }
+
+            int id = ++_nextBreakpointId;
+            _breakpoints.Add(new BreakpointEntry(
+                new LineBreakpointInfo(id, moduleName, fileHint, line),
+                pModule, function, breakpoint, policy));
+            return id; // ownership of pModule moved into _breakpoints
+        }
+        return 0;
+    }
+
     /// <summary>The active breakpoints in registration order — id + descriptor (a
     /// <see cref="LineBreakpointInfo"/> or <see cref="FunctionBreakpointInfo"/>). The MCP list /
     /// remove-by-natural-key flows pattern-match on the concrete subtype to recover file/line or

@@ -189,7 +189,7 @@ public sealed class EngineSteppingSession : IDisposable
             _session.WaitForStop(TimeSpan.FromSeconds(10));
 
             // Set the initial breakpoint and run to it.
-            int id = _session.SetBreakpointAtLine(ModuleSubstrForFile(sourceFile), sourceFile, line);
+            int id = _session.SetBreakpointAtLine(sourceFile, line);
             if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}."));
             _lineBreakpoints[KeyLine(sourceFile, line)] = id;
 
@@ -245,7 +245,7 @@ public sealed class EngineSteppingSession : IDisposable
             // Setup stop (Debugger.Break() in user code or the attach break).
             _session.WaitForStop(TimeSpan.FromSeconds(10));
 
-            int id = _session.SetBreakpointAtLine(ModuleSubstrForFile(sourceFile), sourceFile, line);
+            int id = _session.SetBreakpointAtLine(sourceFile, line);
             if (id == 0) { CleanupSession(); return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}.")); }
             _lineBreakpoints[KeyLine(sourceFile, line)] = id;
 
@@ -389,6 +389,26 @@ public sealed class EngineSteppingSession : IDisposable
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for a stop."));
 
+            if (stop.Reason == StopReason.ProcessExited)
+            {
+                // The debuggee ran to completion during continue (e.g. a suspend=none logpoint that
+                // fired to the end of the program). No frame to report; the session is over. Tear it
+                // down so IsActive clears and the next launch/attach works — the adapter-level
+                // log / console / anomaly buffers survive CleanupSession, so the caller can still
+                // drain the final output (finding 77).
+                string version = _targetVersion;
+                CleanupSession();
+                JsonObject exited = new()
+                {
+                    ["operation"] = "continue",
+                    ["assemblyVersion"] = version,
+                    ["stoppedReason"] = "processExited",
+                    ["prompt"] = "The debuggee exited (ran to completion) — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach."
+                };
+                if (hypothesis is not null) exited["hypothesis"] = hypothesis;
+                return Task.FromResult(Render(exited));
+            }
+
             JsonObject result = new()
             {
                 ["operation"] = "continue",
@@ -478,7 +498,7 @@ public sealed class EngineSteppingSession : IDisposable
             catch (Exception ex) { return Task.FromResult(Error($"Policy compile failed: {ex.GetType().Name}: {ex.Message}")); }
         }
 
-        int id = _session.SetBreakpointAtLine(ModuleSubstrForFile(sourceFile), sourceFile, line, policy);
+        int id = _session.SetBreakpointAtLine(sourceFile, line, policy);
         if (id == 0) return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line} — module/PDB unavailable or no sequence point at that line."));
         _lineBreakpoints[KeyLine(sourceFile, line)] = id;
         _breakpointKinds[id] = BreakpointKind.Source;
@@ -931,15 +951,6 @@ public sealed class EngineSteppingSession : IDisposable
             arr.Add(node);
         }
         return arr;
-    }
-
-    private static string ModuleSubstrForFile(string sourceFile)
-    {
-        // Naive heuristic: the assembly name typically matches the project / file stem. For
-        // file-based apps and most projects this works; richer resolution (search loaded modules
-        // for one whose PDB references the file) is a polish item.
-        string stem = Path.GetFileNameWithoutExtension(sourceFile);
-        return stem.Length > 0 ? stem : sourceFile;
     }
 
     private static (string Module, string Type, string Method) SplitFunction(string functionName)

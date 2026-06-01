@@ -1,0 +1,8 @@
+# DrHook.Engine probe 60 fixture — file-driven breakpoint module resolution (ADR-011 D3 follow-up)
+timestamp        = 2026-06-01T15:44:12.9584380Z
+runtime          = .NET 10.0.0
+os-arch          = osx-arm64
+target-pid       = 37455
+target           = Program.cs compiled into Launch.dll (source stem != assembly name)
+overload         = SetBreakpointAtLine(fileHint, line, policy)  [file-only, no module hint]
+verdict          = PASSED
