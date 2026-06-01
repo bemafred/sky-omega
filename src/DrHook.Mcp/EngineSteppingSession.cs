@@ -61,6 +61,19 @@ public sealed class EngineSteppingSession : IDisposable
     // Cross-session — anomalies accumulate until the consumer drains; capacity 256 (~128 KB max).
     private readonly BoundedAnomalySink _anomalies = new(capacity: 256);
 
+    // ADR-011 D3: logpoint output (previously DROPPED at the MCP layer — BoundedLogSink existed but
+    // was never wired) and launched-debuggee console output each get a bounded buffer, drained by
+    // drhook_drain_log / drhook_drain_console. _sink fans every channel to them — the surface-agnostic
+    // seam (D5): the substrate emits to one sink; Mira views will add their own consumers later.
+    private readonly BoundedLogSink _logs = new(capacity: 512);
+    private readonly BoundedConsoleSink _console = new(capacity: 512);
+    private readonly IDebugEventSink _sink;
+
+    public EngineSteppingSession()
+    {
+        _sink = new CompositeEventSink(_anomalies, _logs, _console);
+    }
+
     /// <summary>Drain the substrate-anomaly buffer as a structured JSON envelope. Anomalies
     /// array is newest-last; dropped count reports records lost to capacity since last drain
     /// (the substrate's honesty marker — no silent loss). Backing for drhook_drain_anomalies.
@@ -102,6 +115,58 @@ public sealed class EngineSteppingSession : IDisposable
         });
     }
 
+    /// <summary>Drain the debuggee-console buffer (ADR-011 D3) as a JSON envelope. Chunks are
+    /// newest-last; dropped reports chunks lost to capacity since the last drain. Backs drhook_drain_console.</summary>
+    public string DrainConsoleAsJson()
+    {
+        ConsoleDrainResult drain = _console.Drain();
+        JsonArray records = new();
+        foreach (ConsoleOutputRecord r in drain.Records)
+            records.Add(new JsonObject
+            {
+                ["capturedAt"] = r.CapturedAt.ToString("O", CultureInfo.InvariantCulture),
+                ["stream"] = r.Stream.ToString(),
+                ["text"] = r.Text,
+            });
+        return Render(new JsonObject
+        {
+            ["status"] = "ok",
+            ["count"] = drain.Records.Count,
+            ["dropped"] = drain.Dropped,
+            ["capacity"] = _console.Capacity,
+            ["output"] = records,
+            ["prompt"] = drain.Records.Count == 0 && drain.Dropped == 0
+                ? "No debuggee console output captured since the previous drain."
+                : $"{drain.Records.Count} console chunk(s) since previous drain ({drain.Dropped} dropped to capacity). Concatenate text in order for the debuggee's stdout/stderr; chunk boundaries are arbitrary (not line-aligned).",
+        });
+    }
+
+    /// <summary>Drain the logpoint-output buffer (ADR-011 D3 — previously dropped at the MCP layer)
+    /// as a JSON envelope. Records newest-last; dropped reports records lost to capacity. Backs drhook_drain_log.</summary>
+    public string DrainLogAsJson()
+    {
+        DrainResult drain = _logs.Drain();
+        JsonArray records = new();
+        foreach (LogRecord r in drain.Records)
+            records.Add(new JsonObject
+            {
+                ["timestamp"] = r.TimestampUtc.ToString("O", CultureInfo.InvariantCulture),
+                ["message"] = r.Message,
+                ["isFault"] = r.IsFault,
+            });
+        return Render(new JsonObject
+        {
+            ["status"] = "ok",
+            ["count"] = drain.Records.Count,
+            ["dropped"] = drain.Dropped,
+            ["capacity"] = _logs.Capacity,
+            ["logs"] = records,
+            ["prompt"] = drain.Records.Count == 0 && drain.Dropped == 0
+                ? "No logpoint records since the previous drain."
+                : $"{drain.Records.Count} logpoint record(s) since previous drain ({drain.Dropped} dropped to capacity). Each is a rendered logMessage template from a suspend='none' breakpoint (or a condition fault, isFault=true).",
+        });
+    }
+
     public bool IsActive => _session is not null;
 
     // ─── Session lifecycle ────────────────────────────────────────────────────────────────────
@@ -119,7 +184,7 @@ public sealed class EngineSteppingSession : IDisposable
             _stepCount = 0;
             _targetPid = pid;
 
-            _session = DebugSession.Attach(pid, _anomalies);
+            _session = DebugSession.Attach(pid, _sink);
             // Setup stop: the engine breaks on attach (Debugger.IsAttached transition). Drain it.
             _session.WaitForStop(TimeSpan.FromSeconds(10));
 
@@ -170,7 +235,7 @@ public sealed class EngineSteppingSession : IDisposable
             // env override is not yet plumbed through DebugSession.Launch (Phase 3 polish item —
             // dedicated env block via CreateProcessForLaunch). For now the launched child inherits
             // our env, which covers the common cases (no per-launch override required).
-            _session = DebugSession.Launch(program, args, cwd, _anomalies);
+            _session = DebugSession.Launch(program, args, cwd, _sink);
 
             // Capture the launched PID for status reporting. DebugSession.Launch (finding 64)
             // now owns the Process handle internally and kill-firsts on Dispose — no separate

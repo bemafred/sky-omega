@@ -310,4 +310,28 @@ public sealed class DrHookTools
     {
         return _session.DrainAnomaliesAsJson();
     }
+
+    [McpServerTool(Name = "drhook_drain_console"), Description(
+        "Drain the captured console output of a LAUNCHED debuggee — its stdout/stderr, isolated to a " +
+        "DrHook-owned pipe (ADR-011 D2/D3) so it never corrupts this MCP channel. Returns chunks " +
+        "(newest-last), each tagged stream='Stdout'|'Stderr' with a UTF-8 text fragment; concatenate " +
+        "text in order to reconstruct the stream (chunk boundaries are arbitrary, not line-aligned). " +
+        "'dropped' reports chunks lost to the bounded buffer since the previous drain. Pull this " +
+        "periodically while stepping a console app to see what it printed. (Only Launched/Owned " +
+        "sessions produce captured output; an Attached target owns its own console.)")]
+    public string DrainConsole()
+    {
+        return _session.DrainConsoleAsJson();
+    }
+
+    [McpServerTool(Name = "drhook_drain_log"), Description(
+        "Drain logpoint output — the rendered logMessage templates from breakpoints set with " +
+        "suspend='none' (non-stopping logpoints), plus any condition-evaluation faults (isFault=true). " +
+        "Returns records newest-last; 'dropped' reports records lost to the bounded buffer since the " +
+        "previous drain. This is where a logpoint's output goes: set one with drhook_break_source " +
+        "logMessage='v={value}' suspend='none', run, then drain here.")]
+    public string DrainLog()
+    {
+        return _session.DrainLogAsJson();
+    }
 }

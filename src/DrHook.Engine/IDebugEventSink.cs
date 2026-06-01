@@ -43,4 +43,13 @@ public interface IDebugEventSink
     /// substrate diagnostic state for process death and is never the right answer. WE-OA-1
     /// (finding 60).</para></summary>
     void OnAnomaly(EngineAnomaly anomaly) { }
+
+    /// <summary>Invoked for each chunk of a LAUNCHED debuggee's console output (stdout/stderr),
+    /// captured from the DrHook-owned pipe the child's streams were redirected to (ADR-011 D2/D3).
+    /// Surface-agnostic: the host buffers it (e.g. <see cref="BoundedConsoleSink"/>, drained by a
+    /// tool) and future Mira surfaces consume the same record. Default no-op so existing sinks
+    /// compile unchanged. Called on DrHook's console-drain background threads (one per stream), so
+    /// implementations must be thread-safe and MUST NOT throw — an unhandled throw would kill the
+    /// drain thread, the pipe would stop draining, and the debuggee would block on its next write.</summary>
+    void OnConsoleOutput(ConsoleOutputRecord record) { }
 }

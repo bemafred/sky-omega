@@ -29,7 +29,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 
 ## DrHook MCP Tools
 
-20 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
+22 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
 
 ### Session lifecycle
 
@@ -82,6 +82,8 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 | Tool | What it does | Former name |
 |------|---------------|-------------|
 | `drhook_drain_anomalies` | Drain the engine's structured-anomaly buffer (substrate-correctness signals the engine detected but didn't raise as exceptions — late mscordbi callbacks, depth-clamped inspections, unexpected HRESULTs, worker-thread exceptions). Substrate-grade observation that no IDE debugger exposes. | *(unchanged)* |
+| `drhook_drain_console` | Drain a LAUNCHED debuggee's captured stdout/stderr (isolated to a DrHook pipe per D2) — chunks tagged Stdout/Stderr, newest-last, with a dropped count. Pull while stepping a console app to see what it printed. | *(new — ADR-011 D3)* |
+| `drhook_drain_log` | Drain logpoint output — rendered `logMessage` templates from `suspend='none'` breakpoints (+ condition faults, `isFault`). Closes the gap where logpoint output was dropped at the MCP layer. | *(new — ADR-011 D3)* |
 
 **Every step, continue, and pause response includes process metrics** — working set, private bytes, thread count, GC heap size, collection counts with deltas from the previous capture. No extra tool call needed.
 

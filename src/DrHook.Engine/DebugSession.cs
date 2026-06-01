@@ -294,15 +294,33 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     {
         _consoleStdoutFd = stdoutFd;
         _consoleStderrFd = stderrFd;
-        if (stdoutFd >= 0) { _consoleStdoutDrain = new Thread(() => DrainDiscard(stdoutFd)) { IsBackground = true, Name = "drhook-console-out" }; _consoleStdoutDrain.Start(); }
-        if (stderrFd >= 0) { _consoleStderrDrain = new Thread(() => DrainDiscard(stderrFd)) { IsBackground = true, Name = "drhook-console-err" }; _consoleStderrDrain.Start(); }
+        if (stdoutFd >= 0) { _consoleStdoutDrain = new Thread(() => DrainToSink(stdoutFd, ConsoleStream.Stdout)) { IsBackground = true, Name = "drhook-console-out" }; _consoleStdoutDrain.Start(); }
+        if (stderrFd >= 0) { _consoleStderrDrain = new Thread(() => DrainToSink(stderrFd, ConsoleStream.Stderr)) { IsBackground = true, Name = "drhook-console-err" }; _consoleStderrDrain.Start(); }
     }
 
-    private static unsafe void DrainDiscard(int fd)
+    // ADR-011 D3: route the debuggee's redirected console output to the sink as OnConsoleOutput
+    // events — surface-agnostic (the MCP layer buffers them in a BoundedConsoleSink drained by
+    // drhook_drain_console; Mira surfaces consume the same events later). One UTF-8 Decoder per
+    // stream handles multi-byte chars split across pipe reads. The drain must keep reading
+    // regardless (an undrained pipe fills and the debuggee blocks), so a misbehaving sink can't
+    // stall it — OnConsoleOutput throws are swallowed (the contract says sinks must not throw;
+    // this is defense in depth on the drain thread).
+    private unsafe void DrainToSink(int fd, ConsoleStream stream)
     {
         byte[] buf = new byte[4096];
+        char[] chars = new char[4096];
+        System.Text.Decoder decoder = System.Text.Encoding.UTF8.GetDecoder();
         fixed (byte* p = buf)
-            while (Interop.PosixSpawn.Read(fd, p, buf.Length) > 0) { /* ADR-011 D2: discard; D3 -> IDebugEventSink */ }
+        {
+            for (nint n; (n = Interop.PosixSpawn.Read(fd, p, buf.Length)) > 0;)
+            {
+                int charCount = decoder.GetChars(buf, 0, (int)n, chars, 0, flush: false);
+                if (charCount == 0) continue;
+                var record = new ConsoleOutputRecord(DateTimeOffset.UtcNow, stream, new string(chars, 0, charCount));
+                try { _sink.OnConsoleOutput(record); }
+                catch { /* sink must not throw; swallow so the drain keeps reading (else the pipe fills and the debuggee blocks) */ }
+            }
+        }
     }
 
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
