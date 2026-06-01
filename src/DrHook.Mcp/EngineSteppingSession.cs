@@ -196,6 +196,10 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for the breakpoint to hit."));
+            if (stop.Reason == StopReason.ProcessExited)
+                return Task.FromResult(RenderProcessExited("attach",
+                    $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             JsonObject result = new()
             {
@@ -252,6 +256,10 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Resume();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) { CleanupSession(); return Task.FromResult(Error("Timed out waiting for the breakpoint to hit.")); }
+            if (stop.Reason == StopReason.ProcessExited)
+                return Task.FromResult(RenderProcessExited("launch",
+                    $"The process exited before reaching the breakpoint at {sourceFile}:{line} — it completed or threw before that line executed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             JsonObject result = new()
             {
@@ -389,25 +397,13 @@ public sealed class EngineSteppingSession : IDisposable
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Timed out waiting for a stop."));
 
+            // The debuggee can run to completion during continue (e.g. a suspend=none logpoint that
+            // fires to the end of the program) — report the exit + tear down rather than walk a dead
+            // process for a frame (finding 77).
             if (stop.Reason == StopReason.ProcessExited)
-            {
-                // The debuggee ran to completion during continue (e.g. a suspend=none logpoint that
-                // fired to the end of the program). No frame to report; the session is over. Tear it
-                // down so IsActive clears and the next launch/attach works — the adapter-level
-                // log / console / anomaly buffers survive CleanupSession, so the caller can still
-                // drain the final output (finding 77).
-                string version = _targetVersion;
-                CleanupSession();
-                JsonObject exited = new()
-                {
-                    ["operation"] = "continue",
-                    ["assemblyVersion"] = version,
-                    ["stoppedReason"] = "processExited",
-                    ["prompt"] = "The debuggee exited (ran to completion) — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach."
-                };
-                if (hypothesis is not null) exited["hypothesis"] = hypothesis;
-                return Task.FromResult(Render(exited));
-            }
+                return Task.FromResult(RenderProcessExited("continue",
+                    "The debuggee exited (ran to completion) — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             JsonObject result = new()
             {
@@ -435,6 +431,10 @@ public sealed class EngineSteppingSession : IDisposable
             _session.Pause();
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromSeconds(10));
             if (stop is null) return Task.FromResult(Error("Pause timed out — the engine did not surface a stop within budget."));
+            if (stop.Reason == StopReason.ProcessExited)
+                return Task.FromResult(RenderProcessExited("pause",
+                    "The debuggee exited before the pause could synchronize — no stop to report; the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             JsonObject result = new()
             {
@@ -460,6 +460,10 @@ public sealed class EngineSteppingSession : IDisposable
             step(_session);
             StopInfo? stop = _session.WaitForStop(TimeSpan.FromMinutes(2));
             if (stop is null) return Task.FromResult(Error("Step did not complete within budget."));
+            if (stop.Reason == StopReason.ProcessExited)
+                return Task.FromResult(RenderProcessExited(operationName,
+                    $"The debuggee exited (ran to completion) during {operationName} — no further stops, the session is over. Drain drhook_drain_log / drhook_drain_console for any final output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             JsonObject result = new()
             {
@@ -878,6 +882,27 @@ public sealed class EngineSteppingSession : IDisposable
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The response for a stop-handler whose target exited instead of reaching the
+    /// expected stop — ran to completion during continue/step/pause, or exited before a
+    /// launch/attach breakpoint. Tears down the now-dead session (IsActive clears, so the next
+    /// launch/attach works) while the adapter-level log / console / anomaly buffers survive for a
+    /// final drain. No frame is read; there is none after exit (finding 77). <paramref name="note"/>
+    /// is the per-operation prompt; <paramref name="operation"/> labels which call surfaced the exit.</summary>
+    private string RenderProcessExited(string operation, string note, string? hypothesis)
+    {
+        string version = _targetVersion;
+        CleanupSession();
+        JsonObject exited = new()
+        {
+            ["operation"] = operation,
+            ["assemblyVersion"] = version,
+            ["stoppedReason"] = "processExited",
+            ["prompt"] = note,
+        };
+        if (hypothesis is not null) exited["hypothesis"] = hypothesis;
+        return Render(exited);
+    }
 
     private JsonObject BuildCurrentState()
     {
