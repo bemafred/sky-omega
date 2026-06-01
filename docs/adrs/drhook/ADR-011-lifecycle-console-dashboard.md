@@ -1,6 +1,6 @@
 # ADR-011: Debug-session lifecycle (stop / detach / kill) and debuggee console I/O — isolation, surfacing, and the DrHook dashboard
 
-**Status:** Proposed — 2026-05-31
+**Status:** Accepted — 2026-06-01 (Proposed — 2026-05-31 → Accepted after all Open Questions resolved/deferred by reviewer 2026-06-01).
 
 **Revises:** [ADR-010](ADR-010-mcp-tool-surface-redesign.md) lifecycle decisions (Q2 + the Session-lifecycle tool catalog). ADR-010 stays Accepted; this ADR refines the lifecycle verbs it shipped in Tier 1 and adds the debuggee-console-I/O concern ADR-010 did not address.
 
@@ -63,13 +63,15 @@ All three IDEs expose a three-way console taxonomy, and DAP formalizes *why*:
 
 `drhook_stop` is the normal, expected end-of-session — what an agent reaches for by default. `drhook_detach` becomes the deliberate "disconnect but keep it alive." `drhook_kill` stays the anomaly escape-hatch. This **supersedes ADR-010 Q2**: the Tier-1 `drhook_detach` is renamed to `drhook_stop`, and `drhook_detach` is re-introduced with leave-running semantics. The rename is cheap (MCP is self-describing; ADR-010 Decision principle 9 covers transition asymmetry).
 
+**Why `drhook_kill`, not `drhook_terminate`** (2026-06-01): "terminate" is the *genus* — both `drhook_stop` (graceful) and the forced verb are terminations; naming the forced one "terminate" wrongly implies `stop` isn't one. DAP's `terminate` request is specifically the *graceful* path (a catchable signal), so `drhook_terminate` = hard-kill would contradict the protocol that formally defines the verb, while `drhook_stop` already owns graceful-for-Owned. `kill` names the specific forced mechanism (SIGKILL), carries the deliberate "anomaly, not routine" starkness, and matches [`feedback_process_lifecycle_discipline`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_process_lifecycle_discipline.md). (VS's "Terminate" button is `terminate`'s one merit — outweighed.)
+
 ### D2 — Isolate launched-debuggee stdio from the MCP channel (the bug fix; do first)
 
 At Launch, give the child **dedicated stdout/stderr pipes** owned by DrHook instead of the inherited MCP-server fds (the fix `EngineSteppingSession.cs:171` already prescribes). This closes the protocol-corruption bug independently of everything else. Substrate work in `DbgShim`/`DebugSession.Launch`: create pipe(s), pass/duplicate the write ends to the child before resume, read the read ends on a DrHook-owned thread. Borrowed is untouched.
 
 ### D3 — Surface captured debuggee output (the `internalConsole` analogue)
 
-Captured stdout/stderr becomes a **new `IDebugEventSink` record kind** (e.g. `OnConsoleOutput`), surfaced to the agent via MCP — either drained like anomalies (`drhook_drain_console` `[?]`) or attached to step/continue responses. Simple line-`stdin` to the debuggee via either a dedicated MCP tool (`drhook_stdin` `[?]`) or — per Q2 — `elicitation/create`, which is a **protocol-native** way to prompt the human for a line and feed it to the debuggee. This gives the agent *observability* of the program's console behavior. No raw/`ReadKey` stdin (that needs a real terminal — D4).
+Captured stdout/stderr becomes a **new `IDebugEventSink` record kind** (e.g. `OnConsoleOutput`), surfaced to the agent via MCP — either drained like anomalies (`drhook_drain_console` `[?]`) or attached to step/continue responses. Simple line-`stdin` to the debuggee via either a dedicated MCP tool (`drhook_stdin` `[?]`) or — per Q2 — `elicitation/create`, which is a **protocol-native** way to prompt the human for a line and feed it to the debuggee. This gives the agent *observability* of the program's console behavior. No raw/`ReadKey` stdin (that needs a real terminal — D4). `OnConsoleOutput` is a **surface-agnostic substrate event** (per D5): the MCP layer consumes it for the agent now; Mira's human surfaces consume the same event later — no refactor.
 
 ### D4 — Real terminal for interactive console apps — DrHook owns the surface
 
@@ -77,18 +79,21 @@ Full interactive stdin (`Console.ReadKey`, cursor control, TUIs) needs a real PT
 
 **Rejected — borrowing the operator's terminal as a workaround.** An earlier draft proposed letting the agent launch the debuggee in the operator's own terminal multiplexer (e.g. a tmux pane used for remote access) and `drhook_attach` by PID. The *pattern* (console decoupled from the protocol channel; attach rather than launch-and-inherit) is sound and informs the design above — but **relying on the operator's incidental access tooling (tmux / Blink / Tailscale / SSH) is an external dependency, not substrate.** It conflates how a human happens to reach the session with how DrHook is built, fails for any consumer not using that tooling (IDE, headless, cron), and is a convenient workaround in place of the real work. Per EEE and [`feedback_no_vibe_coding`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_no_vibe_coding.md): DrHook owns its terminal/dashboard surface — *inspired by* the pattern, not *reliant on* the operator's environment. The collision bug (§D2) is fixed by D2, not papered over with operator tooling.
 
-### D5 — The DrHook dashboard (human-facing surface)
+### D5 — Human-facing surface(s): a surface-agnostic debug-state model, not "a dashboard"
 
-A separate, human-facing surface — a console/TUI process DrHook can spawn — that shows, in real time:
+Per the 2026-06-01 directive ([`project_mira_multisurface_trajectory`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/project_mira_multisurface_trajectory.md)), the human-facing surface is **not** a single TUI. **Console, TUI, and an Avalonia GUI are all eventual _Mira_ views**, and the DrHook + Mira trajectory is toward a full-blown IDE — so the substrate is shaped now to admit multiple views without a later refactor. **Substrate first.**
 
-- **debuggee console output** (the PTY/captured stream from D3/D4),
-- **execution position** (current stop, stack, breakpoint hits),
-- **the `(hypothesis, observation)` log** — DrHook's distinguishing capability (ADR-010 Decision principle 5) made visible,
-- **lifecycle/session state** and the keep-open-after-exit hold.
+The seam:
 
-The dashboard is the architectural payoff of the MCP-can't-delegate constraint: since DrHook must self-host the terminal anyway, that host doubles as **the human's window into the agent's debugging**. This directly serves Sky Omega's governed-automation / human-in-the-loop thesis ([[project_governed_automation_thesis]], [[feedback_together_not_parallel]]): the human *sees* what the agent observes, in a shared frame, decoupled from the agent's JSON channel.
+- **Substrate emits surface-agnostic debug-state.** The existing `IDebugEventSink` stream (`OnEvent` / `OnLog` / `OnAnomaly` / D3's `OnConsoleOutput`) plus a queryable debug-state model — execution position, stack, locals, breakpoints, the `(hypothesis, observation)` log, lifecycle/session state. The substrate knows nothing about views.
+- **Views are pluggable consumers.** The agent (via MCP) is one consumer today; Mira's console / TUI / Avalonia GUI are future ones; a full IDE is the horizon. The transport must admit multiple — possibly simultaneous, possibly remote — consumers; lean to a **local socket** over a shared file for live updates.
+- **No view is baked into the substrate.** The first human rendering is *one view* of the model, not the model. Its requirements feed back into the model, but the model is the load-bearing artifact.
 
-**Keep-open-after-exit** (VS's "Automatically close the console when debugging stops"): when an Owned debuggee exits, the dashboard **holds** the final output until dismissed, configurable. This is a dashboard property, not a lifecycle-verb concern (matching DAP/VS Code, where it's a terminal-host property, not an adapter action).
+This is the architectural payoff of the MCP-can't-delegate constraint (Q2): since DrHook must self-host the terminal/PTY anyway (D4), the surface-agnostic debug-state it already produces becomes **the human's window into the agent's debugging** — governed-automation / human-in-the-loop made concrete ([`project_governed_automation_thesis`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/project_governed_automation_thesis.md), [`feedback_together_not_parallel`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_together_not_parallel.md)) — and the foundation the eventual IDE is built on. It is the [`feedback_infrastructure_no_yagni`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_infrastructure_no_yagni.md) case: the view consumers are *named* (console, TUI, Avalonia), so the surface-agnostic seam is built up front, not speculatively.
+
+**Keep-open-after-exit** (VS's "Automatically close the console when debugging stops"): when an Owned debuggee exits, the surface **holds** the final output until dismissed, configurable — a view/host property, not a lifecycle-verb concern.
+
+**Status:** deferred behind Q6 (= ship D2 + D3 first). When built, the model + transport seam above is locked *before* the first view, so adding views never refactors the substrate.
 
 ### Phasing (EEE — one unknown per phase; learn the rest in use)
 
@@ -101,12 +106,12 @@ Per [[feedback_substrate_dissolves_per_variant_planning]] and Martin's framing, 
 
 ## Open questions — answer before Proposed → Accepted
 
-1. **`stop` vs `detach` rename timing.** Rename in the next increment, or batch with the F-010-1/F-010-2 lifecycle work? (The behavior is shipped under `detach` today; the rename is cosmetic but corrects a just-shipped name.)
+1. **`stop` vs `detach` rename timing.** Rename in the next increment, or batch with the F-010-1/F-010-2 lifecycle work? (The behavior is shipped under `detach` today; the rename is cosmetic but corrects a just-shipped name.) **RESOLVED 2026-06-01 → A: rename now, as its own small self-describing increment — don't let the wrong-but-shipped name sit.**
 2. **~~MCP reverse-request — confirm the constraint.~~ RESOLVED 2026-06-01 → NO protocol equivalent; YES at the agent-orchestration layer.** MCP defines exactly three server→client requests — `sampling/createMessage`, `elicitation/create`, `logging/setLevel` (+ `ping`), per spec **2025-11-25**; **none can spawn/host a process or return a PID.** Claude Code supports sampling and elicitation (elicitation since v2.1.76, 2026-03) but neither hosts a terminal. So DrHook **cannot delegate terminal-hosting via the protocol** the way a DAP adapter does — D4's premise holds: **DrHook must own its terminal surface.** The launch-in-terminal + attach *pattern* (console decoupled from the protocol channel; attach rather than launch-and-inherit) still informs D4 — but an earlier draft that proposed leaning on the operator's terminal multiplexer (a tmux pane the human uses for remote access) is **rejected as a relied-upon workaround**: it conflates the operator's access tooling with the stack (see D4). Side-finding: `elicitation/create` IS a protocol-native channel for *line* stdin (prompt the human for a line, feed it to the debuggee) — folded into D3.
-3. **Dashboard form and transport.** Separate process DrHook spawns (renders PTY + reads a side-channel of debug state)? A TUI? How does the human launch/attach to it, and how does it receive debug-state updates from the MCP server process (shared file? local socket? the anomaly/console sink)? 
-4. **D3 surfacing shape.** Drain-on-demand (`drhook_drain_console`, like anomalies) vs attached-to-step-responses vs server→client MCP notifications? Which fits the agent's loop without flooding it?
-5. **Does `stop`'s Owned-terminate stay graceful (ADR-008 SIGTERM→SIGKILL)?** Proposed yes — it is the shipped behavior and matches DAP `terminate`-then-`disconnect`. Confirm.
-6. **Scope of D4/D5 vs. just D2+D3.** Is the dashboard in near-term scope, or do we ship isolation + capture-and-surface (D2+D3) first and let dashboard demand emerge from use?
+3. **Dashboard form and transport.** Separate process DrHook spawns (renders PTY + reads a side-channel of debug state)? A TUI? How does the human launch/attach to it, and how does it receive debug-state updates from the MCP server process (shared file? local socket? the anomaly/console sink)? **RESOLVED 2026-06-01 → deferred behind Q6 (= A). When built, it is shaped surface-agnostically per D5 — multiple Mira views (console / TUI / Avalonia GUI) over a local-socket transport; the debug-state model is locked before the first view.** 
+4. **D3 surfacing shape.** Drain-on-demand (`drhook_drain_console`, like anomalies) vs attached-to-step-responses vs server→client MCP notifications? Which fits the agent's loop without flooding it? **DEFERRED 2026-06-01 → decided at the D3 implementation increment; not a Proposed→Accepted blocker.**
+5. **Does `stop`'s Owned-terminate stay graceful (ADR-008 SIGTERM→SIGKILL)?** Proposed yes — it is the shipped behavior and matches DAP `terminate`-then-`disconnect`. Confirm. **RESOLVED 2026-06-01 → YES: keep the ADR-008 SIGTERM → wait → SIGKILL escalation.**
+6. **Scope of D4/D5 vs. just D2+D3.** Is the dashboard in near-term scope, or do we ship isolation + capture-and-surface (D2+D3) first and let dashboard demand emerge from use? **RESOLVED 2026-06-01 → A: ship D2 (done) + D3 first; the dashboard (D4/D5) is deferred, its demand and form to emerge from D3 in use.**
 
 ## Consequences
 
