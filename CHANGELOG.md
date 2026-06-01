@@ -34,11 +34,19 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 
 ### Changed
 
-- **DrHook MCP tool surface renamed to established IDE-debugger convention** ([ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md) Tier 1). Tools now follow VS / VS Code / Rider vocabulary and agree with the substrate's own `DebugSession.Launch` / `.Attach` verbs: `drhook_launch` (was `drhook_step_run` — launches a NEW process), `drhook_attach` (was `drhook_step_launch` — attaches to a running PID), `drhook_detach` (was `drhook_step_stop`), `drhook_continue` / `drhook_pause` (was `drhook_step_continue` / `drhook_step_pause`), `drhook_step_over` (was `drhook_step_next`), the `drhook_break_*` family — source / function / exception / list / remove / clear (was `drhook_step_breakpoint*` / `drhook_step_break_*`), and `drhook_locals` (was `drhook_step_vars`). `drhook_step_into` / `drhook_step_out` keep their names. The inverted internal adapter methods (`EngineSteppingSession.RunAsync` launched while `LaunchAsync` attached) are corrected to match. Stale `netcoredbg` / DAP references in descriptions removed. 18 tools.
+- **DrHook MCP tool surface renamed to established IDE-debugger convention** ([ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md) Tier 1). Tools now follow VS / VS Code / Rider vocabulary and agree with the substrate's own `DebugSession.Launch` / `.Attach` verbs: `drhook_launch` (was `drhook_step_run` — launches a NEW process), `drhook_attach` (was `drhook_step_launch` — attaches to a running PID), `drhook_stop` (was `drhook_step_stop`; the normal session end), `drhook_continue` / `drhook_pause` (was `drhook_step_continue` / `drhook_step_pause`), `drhook_step_over` (was `drhook_step_next`), the `drhook_break_*` family — source / function / exception / list / remove / clear (was `drhook_step_breakpoint*` / `drhook_step_break_*`), and `drhook_locals` (was `drhook_step_vars`). `drhook_step_into` / `drhook_step_out` keep their names. The inverted internal adapter methods (`EngineSteppingSession.RunAsync` launched while `LaunchAsync` attached) are corrected to match. Stale `netcoredbg` / DAP references in descriptions removed. 20 tools (incl. the D1 lifecycle additions below).
 
 ### Removed
 
 - **`drhook_step_test`** MCP tool — it only ever returned a structured "not implemented" error. Project-aware launch from a `.csproj` (dispatching MTP / VSTest internally) is the planned replacement (ADR-010 Tier 3); until then, attach to the testhost child with `drhook_attach`.
+
+### Added
+
+- **`drhook_detach`** (detach, leave the target running) and **`drhook_kill`** (forced termination — anomaly path) MCP tools ([ADR-011](docs/adrs/drhook/ADR-011-lifecycle-console-dashboard.md) D1), completing the `stop` / `detach` / `kill` lifecycle triad. `drhook_detach` supports Borrowed (attached) targets; Owned (launched) detach-leave-running is pending finding F-010-2. `drhook_kill` force-terminates Owned targets via `DebugSession.Abandon` (SIGTERM brief-grace → SIGKILL); Borrowed force-kill is pending finding F-010-1. (`kill`, not `terminate`: "terminate" is the genus and collides with DAP's *graceful* terminate, while `stop` already owns graceful-for-Owned.)
+
+### Fixed
+
+- **A launched debuggee's console output no longer corrupts the MCP JSON-RPC channel** ([ADR-011](docs/adrs/drhook/ADR-011-lifecycle-console-dashboard.md) D2, macOS). `drhook_launch` now owns process creation — `posix_spawn` the target SUSPENDED with stdout/stderr redirected to DrHook-owned pipes, then `RegisterForRuntimeStartup` + `SIGCONT` (validated by probe 59 / finding 75) — instead of dbgshim's `CreateProcessForLaunch`, which left the child inheriting the server's stdio fds.
 
 ## [1.8.2] - 2026-05-23
 

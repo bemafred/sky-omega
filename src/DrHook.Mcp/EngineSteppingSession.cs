@@ -108,7 +108,7 @@ public sealed class EngineSteppingSession : IDisposable
 
     public Task<string> AttachAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
     {
-        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_detach first."));
+        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_stop first."));
 
         try
         {
@@ -159,7 +159,7 @@ public sealed class EngineSteppingSession : IDisposable
         Dictionary<string, string>? env,
         CancellationToken ct)
     {
-        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_detach first."));
+        if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_stop first."));
 
         _sessionHypothesis = hypothesis;
         _targetVersion = "launched";
@@ -211,22 +211,89 @@ public sealed class EngineSteppingSession : IDisposable
         }
     }
 
-    public Task<string> DetachAsync(CancellationToken ct)
+    // drhook_stop — the normal session end. Owned: Dispose's ADR-008 graceful SIGTERM→(2s)→SIGKILL.
+    // Borrowed: Dispose detaches, target left running. Dispatches internally via DebugSession._ownsTarget.
+    public Task<string> StopAsync(CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
+        bool owned = _session!.OwnsTarget;
         JsonObject summary = new()
         {
             ["status"] = "stopped",
+            ["mode"] = owned ? "owned" : "borrowed",
+            ["disposition"] = owned
+                ? "Owned: target asked to exit gracefully (SIGTERM → SIGKILL if stuck, ADR-008)"
+                : "Borrowed: detached, target left running",
             ["totalSteps"] = _stepCount,
             ["sessionHypothesis"] = _sessionHypothesis,
             ["assemblyVersion"] = _targetVersion,
-            ["prompt"] = $"Session complete after {_stepCount} steps. " +
+            ["prompt"] = $"Session ended after {_stepCount} steps ({(owned ? "Owned: target gracefully terminated" : "Borrowed: target left running")}). " +
                          $"Did the observations confirm or challenge the hypothesis: \"{_sessionHypothesis}\"?"
         };
 
         CleanupSession();
         return Task.FromResult(Render(summary));
+    }
+
+    // drhook_detach — disconnect and LEAVE THE TARGET RUNNING (deliberate). Borrowed: supported (Dispose's
+    // Borrowed path detaches without killing). Owned: NOT YET — pending ADR-011 F-010-2 (the launched target
+    // is the debugger's child); honest error, session left active.
+    public Task<string> DetachAsync(CancellationToken ct)
+    {
+        if (!IsActive) return Task.FromResult(Error("No active stepping session."));
+
+        if (_session!.OwnsTarget)
+            return Task.FromResult(Error(
+                "drhook_detach (leave-running) is not yet available for an Owned (drhook_launch) target — the " +
+                "launched target is currently the debugger's child (ADR-011 finding F-010-2). Use drhook_stop to " +
+                "end it gracefully, or drhook_kill to force-terminate."));
+
+        JsonObject summary = new()
+        {
+            ["status"] = "detached",
+            ["mode"] = "borrowed",
+            ["disposition"] = "detached, attached target left running un-debugged",
+            ["totalSteps"] = _stepCount,
+            ["sessionHypothesis"] = _sessionHypothesis,
+            ["assemblyVersion"] = _targetVersion,
+            ["prompt"] = $"Detached after {_stepCount} steps; the attached target keeps running. " +
+                         $"Did the observations confirm or challenge the hypothesis: \"{_sessionHypothesis}\"?"
+        };
+        CleanupSession();
+        return Task.FromResult(Render(summary));
+    }
+
+    // drhook_kill — forced termination (anomaly path). Owned: DebugSession.Abandon (SIGTERM brief-grace → SIGKILL
+    // → teardown, ADR-008). Borrowed: NOT YET — substrate doesn't own an attached target's lifecycle (F-010-1).
+    public Task<string> KillAsync(CancellationToken ct)
+    {
+        if (!IsActive) return Task.FromResult(Error("No active stepping session."));
+
+        if (!_session!.OwnsTarget)
+            return Task.FromResult(Error(
+                "drhook_kill is not yet available for a Borrowed (drhook_attach) target — the substrate does not own " +
+                "an attached target's lifecycle (ADR-011 finding F-010-1). Use drhook_detach to disconnect, or " +
+                "terminate the target via your own process management."));
+
+        int steps = _stepCount, pid = _targetPid;
+        string hyp = _sessionHypothesis, ver = _targetVersion;
+        try { _session.Abandon(); }
+        catch (Exception ex) { return Task.FromResult(Error($"Kill (Abandon) failed: {ex.GetType().Name}: {ex.Message}")); }
+        CleanupSession(); // Abandon already disposed; CleanupSession's Dispose is the idempotent no-op + state reset.
+
+        return Task.FromResult(Render(new JsonObject
+        {
+            ["status"] = "killed",
+            ["mode"] = "owned",
+            ["pid"] = pid,
+            ["disposition"] = "forcibly terminated (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)",
+            ["totalSteps"] = steps,
+            ["sessionHypothesis"] = hyp,
+            ["assemblyVersion"] = ver,
+            ["prompt"] = $"Target {pid} force-killed after {steps} steps. drhook_kill is an anomaly path — a well-behaved " +
+                         $"target should end via drhook_stop; worth recording WHY force was needed."
+        }));
     }
 
     // ─── Step operations ──────────────────────────────────────────────────────────────────────

@@ -29,7 +29,7 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 
 ## DrHook MCP Tools
 
-18 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
+20 tools. Every state-changing operation and every inspection that reads target state takes a `hypothesis` parameter — state what you expect *before* you observe (Sky Omega epistemic discipline; ADR-010 Decision principle 5).
 
 ### Session lifecycle
 
@@ -37,7 +37,9 @@ The substrate is `DrHook.Engine` — a BCL + P/Invoke + source-gen COM implement
 |------|---------------|-------------|
 | `drhook_launch` | **Launches a NEW process** under debugger control (Owned session). | `drhook_step_run` |
 | `drhook_attach` | **Attaches to an already-running .NET process** by PID (Borrowed session — target survives the session). | `drhook_step_launch` |
-| `drhook_detach` | Ends the session and detaches. Borrowed: target keeps running. Owned: target is asked to exit gracefully — SIGTERM, escalating to SIGKILL only if it does not exit within the natural-exit window (ADR-008). *(True detach-and-leave-running for Owned targets is planned — ADR-010 finding F-010-2.)* | `drhook_step_stop` |
+| `drhook_stop` | **Ends the session** — the normal finish. Borrowed: detaches, target keeps running. Owned: target asked to exit gracefully — SIGTERM → SIGKILL if it doesn't exit within the ~2s window (ADR-008). | `drhook_step_stop` → `drhook_detach` |
+| `drhook_detach` | Detaches and **leaves the target running** (deliberate). Borrowed: supported. Owned: not yet — pending finding **F-010-2** (the launched target is the debugger's child); returns an error pointing to `drhook_stop` / `drhook_kill`. | *(new — ADR-011 D1)* |
+| `drhook_kill` | **Forcibly terminates** the target — anomaly escape hatch, *not* normal cleanup; every call is worth investigating. Owned: SIGTERM brief-grace → SIGKILL (`DebugSession.Abandon`, ADR-008). Borrowed: not yet — pending finding **F-010-1**. | *(new — ADR-011 D1)* |
 
 `drhook_step_test` was **removed** in this rename (it only ever returned "not implemented") — see [What's NOT yet shipped](#whats-not-yet-shipped).
 
@@ -92,7 +94,8 @@ Substrate work is required before these surfaces become functional:
 - **Set next statement.** ICorDebug `SetIP` is not exposed at the substrate level. ADR-010 Tier 3.
 - **Data breakpoints.** Not in the substrate today; ICorDebug support level is an Open Question per ADR-010 §Open. ADR-010 Tier 3.
 - **Run to cursor.** Composable from existing primitives (`SetBreakpointAtLine` + `Resume` + remove-on-hit); not yet packaged as a tool. ADR-010 Tier 2.
-- **Kill (forced termination).** A separate anomaly-only `drhook_kill` tool — Owned dispatches to `DebugSession.Abandon()`, Borrowed needs finding F-010-1. Deferred from Tier 1. (Today, forced termination is folded into `drhook_detach`'s Owned path via the ADR-008 escalation.)
+- **Owned detach-and-leave-running** — `drhook_detach` on an Owned (`drhook_launch`) target is pending finding **F-010-2** (the launched target is currently the debugger's child); returns an error meanwhile. Use `drhook_stop` (graceful end) or `drhook_kill` (force).
+- **Borrowed force-kill** — `drhook_kill` on a Borrowed (`drhook_attach`) target is pending finding **F-010-1** (the substrate doesn't own an attached target's lifecycle); returns an error meanwhile. Use `drhook_detach`.
 - **Test-project launch.** `drhook_step_test` was removed in ADR-010 Tier 1 (it only returned "not implemented"). Replacement: ADR-010 Tier 3 lets `drhook_launch` accept a `.csproj` target and dispatches MTP / VSTest internally. Until then, attach to the testhost child with `drhook_attach`.
 - **Multi-session.** `EngineSteppingSession` is a DI singleton; only one debug session per MCP server. Substrate's `DebugSession` is per-session; the singleton is the MCP-layer constraint. ADR-010 §Open Question 9.
 - **Cross-platform.** Only macOS/arm64 is exercised. ADR-007 Phase 9 (Open).
@@ -132,7 +135,7 @@ drhook_step_into              # follow into a method call
 drhook_step_out               # return to caller
 
 # 7. End session
-drhook_detach                 # Owned: target asked to exit gracefully; Borrowed: target survives
+drhook_stop                   # normal end — Owned: target gracefully terminated; Borrowed: target survives
 ```
 
 ## Launch Requirements
