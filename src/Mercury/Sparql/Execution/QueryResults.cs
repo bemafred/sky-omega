@@ -206,10 +206,12 @@ internal ref partial struct QueryResults
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static QueryResults FromMaterializedWithGraphContext(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        string? graphContext, int limit = 0, int offset = 0, bool distinct = false)
+        string? graphContext, int limit = 0, int offset = 0, bool distinct = false,
+        OrderByClause orderBy = default, GroupByClause groupBy = default,
+        SelectClause selectClause = default, HavingClause having = default)
     {
         var result = new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
-            limit, offset, distinct, default, default, default, default);
+            limit, offset, distinct, orderBy, groupBy, selectClause, having);
         result._graphContext = graphContext;
         return result;
     }
@@ -293,6 +295,8 @@ internal ref partial struct QueryResults
         _hasOrderBy = true; // Force use of MoveNextOrdered() to iterate pre-collected results
         _sortedResults = rows;
         _sortedIndex = -1;
+        _isMaterialized = true;  // grouped-collection path (MoveNextUnorderedForCollection) iterates the pre-materialized rows
+        _materializedIndex = -1;
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;

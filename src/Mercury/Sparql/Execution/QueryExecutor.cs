@@ -785,7 +785,9 @@ internal partial class QueryExecutor : IDisposable
             // Always use FromMaterializedWithGraphContext to support EXISTS/MINUS filters
             // graphContext can be null - EXISTS will still work against default graph
             return QueryResults.FromMaterializedWithGraphContext(graphResults, _buffer, _source.AsSpan(), _store, graphBindings, _stringBuffer,
-                graphContext, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
+                graphContext, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+                _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
+                _buffer.GetSelectClause(), _buffer.GetHavingClause());
         }
 
         // Check for SERVICE clauses - use _buffer
