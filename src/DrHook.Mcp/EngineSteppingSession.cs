@@ -213,7 +213,7 @@ public sealed class EngineSteppingSession : IDisposable
 
     // drhook_stop — the normal session end. Owned: Dispose's ADR-008 graceful SIGTERM→(2s)→SIGKILL.
     // Borrowed: Dispose detaches, target left running. Dispatches internally via DebugSession._ownsTarget.
-    public Task<string> StopAsync(CancellationToken ct)
+    public Task<string> StopAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
@@ -221,6 +221,7 @@ public sealed class EngineSteppingSession : IDisposable
         JsonObject summary = new()
         {
             ["status"] = "stopped",
+            ["hypothesis"] = hypothesis,
             ["mode"] = owned ? "owned" : "borrowed",
             ["disposition"] = owned
                 ? "Owned: target asked to exit gracefully (SIGTERM → SIGKILL if stuck, ADR-008)"
@@ -239,7 +240,7 @@ public sealed class EngineSteppingSession : IDisposable
     // drhook_detach — disconnect and LEAVE THE TARGET RUNNING (deliberate). Borrowed: supported (Dispose's
     // Borrowed path detaches without killing). Owned: NOT YET — pending ADR-011 F-010-2 (the launched target
     // is the debugger's child); honest error, session left active.
-    public Task<string> DetachAsync(CancellationToken ct)
+    public Task<string> DetachAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
@@ -252,6 +253,7 @@ public sealed class EngineSteppingSession : IDisposable
         JsonObject summary = new()
         {
             ["status"] = "detached",
+            ["hypothesis"] = hypothesis,
             ["mode"] = "borrowed",
             ["disposition"] = "detached, attached target left running un-debugged",
             ["totalSteps"] = _stepCount,
@@ -266,7 +268,7 @@ public sealed class EngineSteppingSession : IDisposable
 
     // drhook_kill — forced termination (anomaly path). Owned: DebugSession.Abandon (SIGTERM brief-grace → SIGKILL
     // → teardown, ADR-008). Borrowed: NOT YET — substrate doesn't own an attached target's lifecycle (F-010-1).
-    public Task<string> KillAsync(CancellationToken ct)
+    public Task<string> KillAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
@@ -285,14 +287,15 @@ public sealed class EngineSteppingSession : IDisposable
         return Task.FromResult(Render(new JsonObject
         {
             ["status"] = "killed",
+            ["hypothesis"] = hypothesis,
             ["mode"] = "owned",
             ["pid"] = pid,
             ["disposition"] = "forcibly terminated (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = hyp,
             ["assemblyVersion"] = ver,
-            ["prompt"] = $"Target {pid} force-killed after {steps} steps. drhook_kill is an anomaly path — a well-behaved " +
-                         $"target should end via drhook_stop; worth recording WHY force was needed."
+            ["prompt"] = $"Target {pid} force-killed after {steps} steps — reason: \"{hypothesis}\". " +
+                         $"drhook_kill is an anomaly path; a well-behaved target ends via drhook_stop."
         }));
     }
 

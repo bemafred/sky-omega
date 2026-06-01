@@ -42,11 +42,12 @@ Cycle 10 r4 production validation: [docs/validations/cycle10-phase3-r4-21b-2026-
 
 ### Added
 
-- **`drhook_detach`** (detach, leave the target running) and **`drhook_kill`** (forced termination — anomaly path) MCP tools ([ADR-011](docs/adrs/drhook/ADR-011-lifecycle-console-dashboard.md) D1), completing the `stop` / `detach` / `kill` lifecycle triad. `drhook_detach` supports Borrowed (attached) targets; Owned (launched) detach-leave-running is pending finding F-010-2. `drhook_kill` force-terminates Owned targets via `DebugSession.Abandon` (SIGTERM brief-grace → SIGKILL); Borrowed force-kill is pending finding F-010-1. (`kill`, not `terminate`: "terminate" is the genus and collides with DAP's *graceful* terminate, while `stop` already owns graceful-for-Owned.)
+- **`drhook_detach`** (detach, leave the target running) and **`drhook_kill`** (forced termination — anomaly path) MCP tools ([ADR-011](docs/adrs/drhook/ADR-011-lifecycle-console-dashboard.md) D1), completing the `stop` / `detach` / `kill` lifecycle triad. `drhook_detach` supports Borrowed (attached) targets; Owned (launched) detach-leave-running is pending finding F-010-2. `drhook_kill` force-terminates Owned targets via `DebugSession.Abandon` (SIGTERM brief-grace → SIGKILL); Borrowed force-kill is pending finding F-010-1. (`kill`, not `terminate`: "terminate" is the genus and collides with DAP's *graceful* terminate, while `stop` already owns graceful-for-Owned.) All three lifecycle tools require a `hypothesis` per Decision principle 5 — echoed in the response (for `kill`, the reason force was needed).
 
 ### Fixed
 
 - **A launched debuggee's console output no longer corrupts the MCP JSON-RPC channel** ([ADR-011](docs/adrs/drhook/ADR-011-lifecycle-console-dashboard.md) D2, macOS). `drhook_launch` now owns process creation — `posix_spawn` the target SUSPENDED with stdout/stderr redirected to DrHook-owned pipes, then `RegisterForRuntimeStartup` + `SIGCONT` (validated by probe 59 / finding 75) — instead of dbgshim's `CreateProcessForLaunch`, which left the child inheriting the server's stdio fds.
+- **Detaching an already-terminated target no longer emits a spurious anomaly** — `DebugSession.Detach` treats `CORDBG_E_PROCESS_TERMINATED` as the expected gone-target outcome (the detach goal is already met), not an `UnexpectedHResult`. Surfaced by the D1 `drhook_kill` live smoke (force-killing a stopped Owned target reliably hit it on the dead-target Dispose→Detach path).
 
 ## [1.8.2] - 2026-05-23
 

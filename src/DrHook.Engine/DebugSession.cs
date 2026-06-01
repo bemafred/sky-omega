@@ -1176,18 +1176,25 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <summary>Detach the debugger; the target resumes running without it. Idempotent.</summary>
     public void Detach()
     {
+        // CORDBG_E_PROCESS_TERMINATED — the target already exited. Detaching from a gone process is a
+        // benign no-op (the detach goal, disconnect, is already met), NOT a substrate-correctness
+        // surprise — so it is not flagged as an anomaly. ADR-011 D1 smoke surfaced this: drhook_kill of
+        // a stopped Owned target reliably hit it on the dead-target Dispose→Detach path.
+        const int CORDBG_E_PROCESS_TERMINATED = unchecked((int)0x8013134F);
+
         // Atomic idempotence gate (ENG-DS-1) — concurrent Detach calls don't double-invoke
         // ICorDebugController.Detach (whose behavior on already-detached is undefined per docs).
         if (Interlocked.Exchange(ref _detached, 1) != 0) return;
         int hr = _controller.Detach();
-        if (hr < 0)
+        if (hr < 0 && hr != CORDBG_E_PROCESS_TERMINATED)
         {
-            // EA capture (UnexpectedHResult): Detach failed. Engine continues teardown — failure
-            // here usually means the target already exited or mscordbi is in an inconsistent state.
+            // EA capture (UnexpectedHResult): Detach failed for a reason OTHER than the target being
+            // already gone. Engine continues teardown — this usually means mscordbi is in an
+            // inconsistent state.
             _sink.OnAnomaly(new EngineAnomaly(
                 DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Detach",
                 Observed: $"HRESULT 0x{hr:X8}",
-                Expected: "S_OK",
+                Expected: "S_OK (or CORDBG_E_PROCESS_TERMINATED, the expected gone-target case)",
                 Context: new Dictionary<string, string> { ["hresult"] = $"0x{hr:X8}" }));
         }
     }

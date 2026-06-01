@@ -258,10 +258,13 @@ public sealed class DrHookTools
         "Borrowed sessions (started with drhook_attach) detach and leave the target running. " +
         "Owned sessions (started with drhook_launch) ask the target to exit gracefully — SIGTERM, escalating " +
         "to SIGKILL only if it does not exit within the ~2s natural-exit window (ADR-008). " +
-        "Use drhook_detach to explicitly keep an attached target running, or drhook_kill to force-terminate.")]
-    public async Task<string> Stop(CancellationToken ct = default)
+        "Use drhook_detach to explicitly keep an attached target running, or drhook_kill to force-terminate. " +
+        "Requires a hypothesis — your closing read of the session.")]
+    public async Task<string> Stop(
+        [Description("Your closing read — what you concluded or expected at session end (e.g. 'confirmed the off-by-one at line 42').")] string hypothesis,
+        CancellationToken ct = default)
     {
-        return await _session.StopAsync(ct);
+        return await _session.StopAsync(hypothesis, ct);
     }
 
     [McpServerTool(Name = "drhook_detach"), Description(
@@ -270,10 +273,12 @@ public sealed class DrHookTools
         "Owned sessions (drhook_launch): NOT YET — true detach-and-leave-running for a launched target is pending " +
         "ADR-011 finding F-010-2 (the target is currently the debugger's child); this returns an error pointing you " +
         "to drhook_stop (graceful end) or drhook_kill (force). Contrast drhook_stop, which ENDS the session " +
-        "(graceful-terminate for an Owned target).")]
-    public async Task<string> Detach(CancellationToken ct = default)
+        "(graceful-terminate for an Owned target). Requires a hypothesis.")]
+    public async Task<string> Detach(
+        [Description("What you expect the target to do after you disconnect (e.g. 'keeps serving requests un-debugged').")] string hypothesis,
+        CancellationToken ct = default)
     {
-        return await _session.DetachAsync(ct);
+        return await _session.DetachAsync(hypothesis, ct);
     }
 
     [McpServerTool(Name = "drhook_kill"), Description(
@@ -281,10 +286,13 @@ public sealed class DrHookTools
         "investigating: a well-behaved target ends via drhook_stop. " +
         "Owned sessions (drhook_launch): SIGTERM with a brief (~200ms) grace, then SIGKILL (DebugSession.Abandon, ADR-008). " +
         "Borrowed sessions (drhook_attach): NOT YET — force-killing an attached target you don't own is pending ADR-011 " +
-        "finding F-010-1; this returns an error (detach with drhook_detach, or terminate it via your own process management).")]
-    public async Task<string> Kill(CancellationToken ct = default)
+        "finding F-010-1; this returns an error (detach with drhook_detach, or terminate it via your own process management). " +
+        "Requires a hypothesis recording WHY force was needed.")]
+    public async Task<string> Kill(
+        [Description("WHY force is needed — what state the target is stuck in (e.g. 'eternal loop, ignores SIGTERM'). Every kill records its reason — the anomaly's value.")] string hypothesis,
+        CancellationToken ct = default)
     {
-        return await _session.KillAsync(ct);
+        return await _session.KillAsync(hypothesis, ct);
     }
 
     // ─── Substrate diagnostics ──────────────────────────────────────────────
