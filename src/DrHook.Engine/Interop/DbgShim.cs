@@ -273,6 +273,61 @@ internal sealed unsafe class DbgShim : IDisposable
         }
     }
 
+    /// <summary>POSIX launch with ISOLATED stdio (ADR-011 D2 / finding 75). Unlike
+    /// <see cref="LaunchWithDebugger"/> — which uses dbgshim's <c>CreateProcessForLaunch</c> and so
+    /// makes the child inherit the debugger process's stdin/stdout/stderr — this posix_spawnp's the
+    /// target SUSPENDED with stdout/stderr redirected to DrHook-owned pipes, arms
+    /// <c>RegisterForRuntimeStartup</c>, then <c>SIGCONT</c>s it. The launched debuggee's console
+    /// output therefore cannot reach the parent's fds, which under an MCP stdio server are the
+    /// JSON-RPC channel. On success <paramref name="pid"/> + <paramref name="pUnknown"/> are set and
+    /// the caller owns draining/closing <paramref name="stdoutFd"/> + <paramref name="stderrFd"/>;
+    /// the caller still <c>DebugActiveProcess</c>es to complete the attach (same as the other paths).</summary>
+    public int LaunchWithDebuggerPosix(string program, IReadOnlyList<string> args, string? workingDirectory,
+        TimeSpan startupTimeout, out uint pid, out nint pUnknown, out int stdoutFd, out int stderrFd)
+    {
+        pid = 0;
+        pUnknown = 0;
+        stdoutFd = -1;
+        stderrFd = -1;
+
+        string[] argv = new string[args.Count + 1];
+        argv[0] = program;
+        for (int i = 0; i < args.Count; i++) argv[i + 1] = args[i];
+
+        int spawnRc = PosixSpawn.SpawnSuspendedRedirected(program, argv, workingDirectory, out int childPid, out int oFd, out int eFd);
+        if (spawnRc != 0) return E_FAIL;
+        pid = (uint)childPid;
+
+        var ctx = new StartupContext();
+        GCHandle handle = GCHandle.Alloc(ctx);
+        nint pContext = GCHandle.ToIntPtr(handle);
+        nint unregisterToken = 0;
+        try
+        {
+            nint pCallback = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int, void>)&StartupCallbackThunk;
+            int hr = _registerForRuntimeStartup((uint)childPid, pCallback, pContext, &unregisterToken);
+            if (hr < 0) { PosixSpawn.Kill(childPid); PosixSpawn.Close(oFd); PosixSpawn.Close(eFd); return hr; }
+
+            // Callback armed — release the suspended child. START_SUSPENDED guaranteed the CLR could
+            // not have initialized before now, so the runtime-startup callback is not missed.
+            PosixSpawn.Continue(childPid);
+
+            if (!ctx.Signaled.Wait(startupTimeout)) { PosixSpawn.Kill(childPid); PosixSpawn.Close(oFd); PosixSpawn.Close(eFd); return E_FAIL; }
+            if (ctx.HResult < 0) { PosixSpawn.Kill(childPid); PosixSpawn.Close(oFd); PosixSpawn.Close(eFd); return ctx.HResult; }
+
+            pUnknown = ctx.PCordb;
+            stdoutFd = oFd;
+            stderrFd = eFd;
+            return 0;
+        }
+        finally
+        {
+            if (unregisterToken != 0) _unregisterForRuntimeStartup(unregisterToken);
+            handle.Free();
+            ctx.Signaled.Dispose();
+        }
+    }
+
     /// <summary>The startup callback parameter — a <c>GCHandle.ToIntPtr</c> of one of these is passed
     /// to <c>RegisterForRuntimeStartup</c>, and the static thunk publishes the result here. Reference
     /// type so the GCHandle keeps it pinned for the dbgshim's native thread to write into.</summary>

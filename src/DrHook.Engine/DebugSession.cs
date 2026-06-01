@@ -112,6 +112,14 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     // Per-module Portable PDB readers, opened on demand for source mapping; disposed on Dispose.
     private readonly Dictionary<string, SymbolReader?> _symbols = new(StringComparer.Ordinal);
 
+    // ADR-011 D2 / finding 75: for a POSIX Owned launch the debuggee's stdout/stderr are redirected
+    // to these DrHook-owned pipe read ends; background threads drain them so a verbose debuggee can't
+    // fill the pipe and block on write, and its console output never reaches the inherited (under an
+    // MCP stdio server, JSON-RPC) fds. -1 when not a POSIX Owned launch (Attach, or the Windows path).
+    // D3 will route the drained bytes to the IDebugEventSink instead of discarding them.
+    private int _consoleStdoutFd = -1, _consoleStderrFd = -1;
+    private Thread? _consoleStdoutDrain, _consoleStderrDrain;
+
     private DebugSession(int processId, DbgShim dbgShim, CallbackPump pump, ManagedCallbackHost callback,
                          ICorDebug cordbg, ICorDebugController controller, IDebugEventSink sink,
                          nint pUnknown, nint pProcess, bool ownsTarget, Process? targetProcess,
@@ -233,29 +241,68 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(sink);
-        string commandLine = BuildCommandLine(program, args);
         DbgShim dbgShim = DbgShim.Load();
         nint pUnknown = 0;
         Process? targetProcess = null;
+        int stdoutFd = -1, stderrFd = -1;
         try
         {
+            if (!OperatingSystem.IsWindows())
+            {
+                // POSIX (ADR-011 D2 / finding 75): OWN the spawn so the debuggee's stdout/stderr go to
+                // DrHook-owned pipes, not the inherited fds — which under an MCP stdio server are the
+                // JSON-RPC channel. dbgshim's CreateProcessForLaunch offers no stdio redirection.
+                ThrowIfFailed(
+                    dbgShim.LaunchWithDebuggerPosix(program, args, workingDirectory, TimeSpan.FromSeconds(30),
+                        out uint pidPosix, out pUnknown, out stdoutFd, out stderrFd),
+                    "DbgShim.LaunchWithDebuggerPosix");
+                try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
+                DebugSession session = FromCordbg(dbgShim, sink, (int)pidPosix, pUnknown, ownsTarget: true,
+                    targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
+                session.BeginConsoleDrain(stdoutFd, stderrFd);
+                return session;
+            }
+
+            // Windows: dbgshim CreateProcessForLaunch — the child inherits the debugger's fds. Stdio
+            // isolation for the Windows launch path (CreateProcess CREATE_SUSPENDED + STARTUPINFO) is
+            // ADR-011 D2 follow-up; macOS-arm64 is the substrate's exercised platform today.
+            string commandLine = BuildCommandLine(program, args);
             ThrowIfFailed(
                 dbgShim.LaunchWithDebugger(commandLine, workingDirectory, TimeSpan.FromSeconds(30), out uint pid, out pUnknown),
                 "DbgShim.LaunchWithDebugger");
-            // Acquire Process handle for the just-launched target so Dispose can kill-first
-            // internally. If the target somehow exited between LaunchWithDebugger and now,
-            // we proceed with targetProcess=null — Dispose's kill is best-effort.
             try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
             return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess,
                 naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
         }
         catch
         {
+            try { if (targetProcess is { HasExited: false }) targetProcess.Kill(); } catch { /* best effort */ }
+            if (stdoutFd >= 0) Interop.PosixSpawn.Close(stdoutFd);
+            if (stderrFd >= 0) Interop.PosixSpawn.Close(stderrFd);
             if (pUnknown != 0) Marshal.Release(pUnknown);
             dbgShim.Dispose();
             targetProcess?.Dispose();
             throw;
         }
+    }
+
+    /// <summary>Start background discard-drains on a POSIX launch's redirected stdout/stderr read ends
+    /// (ADR-011 D2). Draining is mandatory, not cosmetic: an undrained pipe fills (~64 KB) and the
+    /// debuggee then blocks on its next write, stalling the session. Bytes are discarded today; D3
+    /// routes them to the IDebugEventSink. No-op when no console pipes were created (fds = -1).</summary>
+    internal void BeginConsoleDrain(int stdoutFd, int stderrFd)
+    {
+        _consoleStdoutFd = stdoutFd;
+        _consoleStderrFd = stderrFd;
+        if (stdoutFd >= 0) { _consoleStdoutDrain = new Thread(() => DrainDiscard(stdoutFd)) { IsBackground = true, Name = "drhook-console-out" }; _consoleStdoutDrain.Start(); }
+        if (stderrFd >= 0) { _consoleStderrDrain = new Thread(() => DrainDiscard(stderrFd)) { IsBackground = true, Name = "drhook-console-err" }; _consoleStderrDrain.Start(); }
+    }
+
+    private static unsafe void DrainDiscard(int fd)
+    {
+        byte[] buf = new byte[4096];
+        fixed (byte* p = buf)
+            while (Interop.PosixSpawn.Read(fd, p, buf.Length) > 0) { /* ADR-011 D2: discard; D3 -> IDebugEventSink */ }
     }
 
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
@@ -1409,6 +1456,14 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         _dbgShim.Dispose();
         GC.KeepAlive(_cordbg);
         GC.KeepAlive(_controller);
+
+        // ADR-011 D2: close the console-drain pipes and join the discard threads. The Owned target is
+        // dead by now (kill-first above), so the threads have already hit EOF; closing unblocks any
+        // still-pending read and the brief join lets them exit. No-op when no console drain was started.
+        if (_consoleStdoutFd >= 0) { Interop.PosixSpawn.Close(_consoleStdoutFd); _consoleStdoutFd = -1; }
+        if (_consoleStderrFd >= 0) { Interop.PosixSpawn.Close(_consoleStderrFd); _consoleStderrFd = -1; }
+        _consoleStdoutDrain?.Join(TimeSpan.FromMilliseconds(200));
+        _consoleStderrDrain?.Join(TimeSpan.FromMilliseconds(200));
 
         // Release substrate's Process handle (finding 64). The OS process is already
         // dead (TryKillTargetAndSettle handled it for Owned) or was never substrate's
