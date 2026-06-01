@@ -1,0 +1,131 @@
+# ADR-011: Debug-session lifecycle (stop / detach / kill) and debuggee console I/O — isolation, surfacing, and the DrHook dashboard
+
+**Status:** Proposed — 2026-05-31
+
+**Revises:** [ADR-010](ADR-010-mcp-tool-surface-redesign.md) lifecycle decisions (Q2 + the Session-lifecycle tool catalog). ADR-010 stays Accepted; this ADR refines the lifecycle verbs it shipped in Tier 1 and adds the debuggee-console-I/O concern ADR-010 did not address.
+
+## Epistemic note — read first
+
+Like ADR-010, this is structured for review, not ship. Every factual claim about the current substrate is grounded in a code read (cited `file:line`); every claim about IDE/protocol behavior is grounded in cited research (a four-strand survey of Visual Studio, VS Code, the Debug Adapter Protocol, and JetBrains Rider, 2026-05-31). Proposed-but-uncertain points carry `[?]`. The Open Questions MUST be answered before Proposed → Accepted.
+
+Two findings motivate this ADR, one urgent:
+
+1. **A confirmed latent correctness bug** (urgent): a launched debuggee's console output corrupts the MCP JSON-RPC channel.
+2. **The lifecycle verbs ADR-010 shipped are mis-named** relative to established convention — and the console concern needs a home.
+
+## Context
+
+### The urgent finding — debuggee stdout collides with the MCP protocol channel (factual, code-read)
+
+`DrHook.Mcp` runs as a **stdio JSON-RPC MCP server** — `Program.cs` builds it `WithStdioServerTransport()` (`Program.cs:91`), so the server's **stdout is the protocol channel** to the client (Claude Code).
+
+`drhook_launch` (Owned) spawns the debuggee via `DbgShim.LaunchWithDebugger` → `CreateProcessForLaunch(commandLine, suspend: TRUE, env: null, cwd, out pid, out resumeHandle)` (`Interop/DbgShim.cs:237`). **No stdio handles are redirected** — the launched child inherits the MCP server process's stdin/stdout/stderr unmodified. Therefore a debugged `Console.WriteLine` (or any write to fd 1/2) is injected **directly into the MCP server's stdout**, corrupting the JSON-RPC frame stream → protocol desync → tool failure.
+
+This is **already known and explicitly deferred**: `EngineSteppingSession.cs:171` and [ADR-006](ADR-006-drhook-engine.md):149 both record *"stdout/stderr isolation (child currently inherits parent fds, leaking target output — fix is dedicated pipes through CreateProcessForLaunch)"* as "Phase 3 polish." No capture/redirect exists today: the `IDebugEventSink` surface (`OnEvent` / `OnLog` / `OnAnomaly`) carries **debugger telemetry and logpoint output, not debuggee console I/O**.
+
+**Empirical corroboration (EEE, found-in-use):** the ADR-010 Tier 1 smoke launched `examples/drhook-verify.cs`, which executes five `Console.WriteLine`s in `DoWork` before the stop that surfaced. The MCP responses returned as clean JSON anyway — meaning the client *tolerated* the interleaved non-JSON lines. The bug is real; it was masked by client leniency, not avoided. A verbose target, or output landing mid-frame, would break the session.
+
+**Attach (Borrowed) is unaffected:** `DebugActiveProcess` connects to a process that already owns its console; DrHook creates nothing and inherits nothing. The problem is exclusive to Launch (Owned).
+
+### The lifecycle finding — ADR-010's verbs don't match established convention (cited survey)
+
+ADR-010 Q2 chose `drhook_detach` (mode-agnostic normal-end) + a deferred `drhook_kill` (anomaly). Tier 1 shipped `drhook_detach` with this behavior: Owned → SIGTERM→SIGKILL graceful terminate (ADR-008); Borrowed → detach-leave-running.
+
+The survey shows that **behavior is correct but the name is wrong** — every established tool calls that action *Stop*, and reserves *Detach* for "disconnect and leave running":
+
+- **Visual Studio** (`learn.microsoft.com/.../debug-multiple-processes`): *Stop Debugging* (Shift+F5) → launched process **ended**, attached process **detached/left running**. *Detach All* → **all left running** (even launched). *Terminate All* → **all ended**. Per-process "Detach when debugging stops" overrides the default.
+- **DAP** (`microsoft.github.io/debug-adapter-protocol`): `disconnect` → MUST terminate if launched, MUST NOT terminate if attached (override via `terminateDebuggee`). `terminate` → graceful cooperative shutdown (a signal the debuggee can intercept), best-effort, escalate to `disconnect` if vetoed.
+- **Rider** (`jetbrains.com/help/rider`): *Stop* (Ctrl+F2) → launched **terminated**, attached **left running**. True detach-without-kill for a *launched* process is an open request (RIDER-3800 / RIDER-53869) — **even Rider hasn't solved the Owned-leave-running case**, confirming DrHook's F-010-2 is intrinsically hard, not a local gap.
+
+Consensus triad: **stop** (normal end; terminate-if-launched / detach-if-attached), **detach** (always leave running), **kill/terminate** (force end regardless of origin).
+
+### The console-hosting finding — a protocol-channel debugger cannot host the console on its own channel (cited survey)
+
+All three IDEs expose a three-way console taxonomy, and DAP formalizes *why*:
+
+- **VS Code `console`** (`code.visualstudio.com/docs/csharp/debugger-settings`): `internalConsole` (default; debuggee stdio routed through the Debug Console; simple `Console.ReadLine` works, **no `ReadKey`/raw input**), `integratedTerminal` (real PTY; full interactive stdin), `externalTerminal` (separate OS window). VS 2022 17.5+ and Rider's "terminal mode" (Automatic / pseudoterminal / redirect-streams / External Console) mirror this.
+- **DAP `runInTerminal`** (reverse request, adapter→client) exists precisely because *"the debuggee … output channels are connected to a client's debug console via output events. However, this has … limitations, such as not being able to write to the terminal device directly and not being able to accept standard input. For those cases, launching the debuggee in a terminal is preferable."* The adapter asks the **client** to spawn the debuggee in a terminal and report its `processId`; the adapter then drives it by PID. Debuggee console I/O is bound to the client's terminal, **decoupled from the adapter's protocol channel**.
+
+**The MCP constraint `[?]→`confirmed-by-spec-reading:** DAP solves this with a *reverse request*. **MCP has no reverse-request equivalent** — it is client→server requests plus server→client notifications; a server cannot synchronously ask its client "run this in your terminal and return the PID." Therefore DrHook **cannot delegate terminal-hosting to its client** the way a DAP adapter does. Its options reduce to:
+
+1. **Capture-and-surface** (the `internalConsole` analogue): redirect the child's stdout/stderr to pipes DrHook owns; surface captured output via the event sink / an MCP tool; accept simple line-stdin via an MCP tool. No raw/`ReadKey` stdin. *This is also the fix for the §collision bug.*
+2. **Self-hosted terminal/PTY** (the `runInTerminal` analogue, but DrHook-owned because MCP can't delegate): DrHook allocates a PTY (openpty/forkpty on POSIX, ConPTY on Windows), binds the launched child to it, and a **separate human-facing surface renders that PTY**. This is the only path to full interactive stdin — and it is where the **dashboard** lives.
+
+## Decision (proposed)
+
+### D1 — Lifecycle is three verbs, by established convention
+
+| Tool | Owned (launched) | Borrowed (attached) | Status |
+|---|---|---|---|
+| **`drhook_stop`** | graceful terminate (SIGTERM→SIGKILL escalation, ADR-008) | detach, leave running | **rename of the Tier-1 `drhook_detach`** — behavior already shipped |
+| **`drhook_detach`** | detach, **leave running** | detach, leave running | Borrowed works today; **Owned gated on F-010-2** (intrinsically hard — see Rider) |
+| **`drhook_kill`** | force SIGKILL (`DebugSession.Abandon()`) | force SIGKILL | Owned exists (ADR-008 1b); **Borrowed gated on F-010-1** |
+
+`drhook_stop` is the normal, expected end-of-session — what an agent reaches for by default. `drhook_detach` becomes the deliberate "disconnect but keep it alive." `drhook_kill` stays the anomaly escape-hatch. This **supersedes ADR-010 Q2**: the Tier-1 `drhook_detach` is renamed to `drhook_stop`, and `drhook_detach` is re-introduced with leave-running semantics. The rename is cheap (MCP is self-describing; ADR-010 Decision principle 9 covers transition asymmetry).
+
+### D2 — Isolate launched-debuggee stdio from the MCP channel (the bug fix; do first)
+
+At Launch, give the child **dedicated stdout/stderr pipes** owned by DrHook instead of the inherited MCP-server fds (the fix `EngineSteppingSession.cs:171` already prescribes). This closes the protocol-corruption bug independently of everything else. Substrate work in `DbgShim`/`DebugSession.Launch`: create pipe(s), pass/duplicate the write ends to the child before resume, read the read ends on a DrHook-owned thread. Borrowed is untouched.
+
+### D3 — Surface captured debuggee output (the `internalConsole` analogue)
+
+Captured stdout/stderr becomes a **new `IDebugEventSink` record kind** (e.g. `OnConsoleOutput`), surfaced to the agent via MCP — either drained like anomalies (`drhook_drain_console` `[?]`) or attached to step/continue responses. Simple line-`stdin` to the debuggee via a dedicated MCP tool (`drhook_stdin` `[?]`). This gives the agent *observability* of the program's console behavior. No raw/`ReadKey` stdin (that needs D4).
+
+### D4 — Self-hosted PTY for interactive console apps (the `runInTerminal` analogue)
+
+For targets needing a real terminal (`Console.ReadKey`, cursor control, TUIs), DrHook allocates a **PTY it owns** and binds the launched child to it. Because MCP has no reverse-request, DrHook hosts the terminal itself rather than delegating to the client. The PTY master is rendered by D5.
+
+### D5 — The DrHook dashboard (human-facing surface)
+
+A separate, human-facing surface — a console/TUI process DrHook can spawn — that shows, in real time:
+
+- **debuggee console output** (the PTY/captured stream from D3/D4),
+- **execution position** (current stop, stack, breakpoint hits),
+- **the `(hypothesis, observation)` log** — DrHook's distinguishing capability (ADR-010 Decision principle 5) made visible,
+- **lifecycle/session state** and the keep-open-after-exit hold.
+
+The dashboard is the architectural payoff of the MCP-can't-delegate constraint: since DrHook must self-host the terminal anyway, that host doubles as **the human's window into the agent's debugging**. This directly serves Sky Omega's governed-automation / human-in-the-loop thesis ([[project_governed_automation_thesis]], [[feedback_together_not_parallel]]): the human *sees* what the agent observes, in a shared frame, decoupled from the agent's JSON channel.
+
+**Keep-open-after-exit** (VS's "Automatically close the console when debugging stops"): when an Owned debuggee exits, the dashboard **holds** the final output until dismissed, configurable. This is a dashboard property, not a lifecycle-verb concern (matching DAP/VS Code, where it's a terminal-host property, not an adapter action).
+
+### Phasing (EEE — one unknown per phase; learn the rest in use)
+
+1. **Phase 1 — Isolation (D2).** Fix the collision bug. Pure substrate; smallest, highest-urgency. Probe: launch a verbose target, confirm the MCP stream stays clean.
+2. **Phase 2 — Lifecycle triad (D1).** Rename `detach`→`stop`; add leave-running `detach` (Borrowed only until F-010-2); `drhook_kill` (Owned now; Borrowed with F-010-1). Mostly MCP-surface + the deferred findings.
+3. **Phase 3 — Surface captured output (D3).** Agent observability of console behavior.
+4. **Phase 4 — PTY + dashboard (D4 + D5).** The richest, most exploratory; design refined in use. Interactive console apps + the human surface.
+
+Per [[feedback_substrate_dissolves_per_variant_planning]] and Martin's framing, build a **flexible, simple primitive** at each phase and discover the routing nuances by using the MCP tool — do not over-specify the dashboard up front.
+
+## Open questions — answer before Proposed → Accepted
+
+1. **`stop` vs `detach` rename timing.** Rename in the next increment, or batch with the F-010-1/F-010-2 lifecycle work? (The behavior is shipped under `detach` today; the rename is cosmetic but corrects a just-shipped name.)
+2. **MCP reverse-request — confirm the constraint.** Is there any MCP mechanism (elicitation, sampling, a client-capability) by which a server could ask Claude Code to host a terminal and return a PID? If yes, a `runInTerminal`-equivalent (client-hosted terminal) becomes possible and may be simpler than a DrHook-owned PTY. `[?]` — needs an MCP-spec/Claude-Code-capability check.
+3. **Dashboard form and transport.** Separate process DrHook spawns (renders PTY + reads a side-channel of debug state)? A TUI? How does the human launch/attach to it, and how does it receive debug-state updates from the MCP server process (shared file? local socket? the anomaly/console sink)? 
+4. **D3 surfacing shape.** Drain-on-demand (`drhook_drain_console`, like anomalies) vs attached-to-step-responses vs server→client MCP notifications? Which fits the agent's loop without flooding it?
+5. **Does `stop`'s Owned-terminate stay graceful (ADR-008 SIGTERM→SIGKILL)?** Proposed yes — it is the shipped behavior and matches DAP `terminate`-then-`disconnect`. Confirm.
+6. **Scope of D4/D5 vs. just D2+D3.** Is the dashboard in near-term scope, or do we ship isolation + capture-and-surface (D2+D3) first and let dashboard demand emerge from use?
+
+## Consequences
+
+- **Closes a real bug.** D2 removes a protocol-corruption hazard that currently makes `drhook_launch` unsafe for any verbose target.
+- **Names match every IDE an agent might know** (D1) — the mental model transfers, as ADR-010 intended.
+- **Turns an MCP limitation into a thesis-aligned feature** (D5) — because DrHook must self-host the terminal, it gains a human-facing dashboard that makes the cognitive loop legible. No IDE's console does the `(hypothesis, observation)` part.
+- **Interacts with the deferred findings**: F-010-1 (Borrowed `Kill`) and F-010-2 (Owned detach-leave-running) become Phase-2 dependencies; the latter is hard (Rider hasn't solved it).
+
+## References
+
+### Code reads (factual basis)
+- `src/DrHook.Mcp/Program.cs:91` — `WithStdioServerTransport()` (stdout = protocol channel).
+- `src/DrHook.Engine/Interop/DbgShim.cs:237` — `CreateProcessForLaunch(...)`; no handle redirection.
+- `src/DrHook.Mcp/EngineSteppingSession.cs:171` — known-gap comment ("child inherits parent fds … fix is dedicated pipes").
+- `docs/adrs/drhook/ADR-006-drhook-engine.md:149` — same gap recorded as Phase 3 polish.
+
+### IDE / protocol survey (cited 2026-05-31)
+- VS: `learn.microsoft.com/.../debug-multiple-processes`, `.../how-to-specify-debugger-settings` (Stop/Detach/Terminate matrix; auto-close-console option).
+- VS Code / DAP: `code.visualstudio.com/docs/csharp/debugger-settings` (`console` enum), `microsoft.github.io/debug-adapter-protocol/specification.html` (`runInTerminal`, `disconnect`/`terminateDebuggee`, `terminate`), `.../changelog.html` (runInTerminal DAP 1.12).
+- Rider: `jetbrains.com/help/rider/Debug_Tool_Window.html`, `.../attach-to-process.html`; YouTrack RIDER-3800 / RIDER-53869 (no detach-from-launched), RIDER-43475 (no keep-console-open).
+
+### Prior ADRs / memory
+- [ADR-010](ADR-010-mcp-tool-surface-redesign.md) — lifecycle Q2 revised here; substrate findings F-010-1 / F-010-2 become Phase-2 dependencies.
+- [ADR-008](ADR-008-process-lifecycle-discipline.md) — SIGTERM→SIGKILL graceful escalation = `drhook_stop`'s Owned behavior.
