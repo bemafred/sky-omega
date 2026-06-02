@@ -971,7 +971,7 @@ public sealed class EngineSteppingSession : IDisposable
             ["name"] = l.Name,
             ["elementType"] = $"0x{l.ElementType:X2}",
         };
-        if (l.RawValue is { } raw) node["value"] = JsonValue.Create(raw);
+        if (l.RawValue is { } raw) node["value"] = RawToJson(raw);
         if (l.StringValue is not null) node["string"] = l.StringValue;
         if (l.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
@@ -985,7 +985,7 @@ public sealed class EngineSteppingSession : IDisposable
             ["name"] = index == 0 ? "this" : $"arg{index}",
             ["elementType"] = $"0x{a.ElementType:X2}",
         };
-        if (a.RawValue is { } raw) node["value"] = JsonValue.Create(raw);
+        if (a.RawValue is { } raw) node["value"] = RawToJson(raw);
         if (a.StringValue is not null) node["string"] = a.StringValue;
         if (a.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
@@ -1001,13 +1001,39 @@ public sealed class EngineSteppingSession : IDisposable
                 ["name"] = f.Name,
                 ["elementType"] = $"0x{f.ElementType:X2}",
             };
-            if (f.RawValue is { } raw) node["value"] = JsonValue.Create(raw);
+            if (f.RawValue is { } raw) node["value"] = RawToJson(raw);
             if (f.StringValue is not null) node["string"] = f.StringValue;
             if (f.Fields is { Count: > 0 } sub) node["fields"] = FieldsToJson(sub);
             arr.Add(node);
         }
         return arr;
     }
+
+    // JsonValue.Create(object) forces resolver-based serialization (the value's static type is
+    // object), which throws against the resolver-less render options ("JsonSerializerOptions ...
+    // must specify a TypeInfoResolver setting before being marked as read-only") — the bug that
+    // broke drhook_locals. The CLR-typed RawValue is already reified to its boxed primitive
+    // (Interop.Variables.ReifyPrimitive), so dispatch to the typed JsonValue.Create overloads
+    // (built-in converters, no resolver) — the same path every other primitive in the response
+    // takes. Pointers / non-primitives fall back to their string representation.
+    private static JsonNode? RawToJson(object raw) => raw switch
+    {
+        bool b => JsonValue.Create(b),
+        string s => JsonValue.Create(s),
+        byte v => JsonValue.Create(v),
+        sbyte v => JsonValue.Create(v),
+        short v => JsonValue.Create(v),
+        ushort v => JsonValue.Create(v),
+        int v => JsonValue.Create(v),
+        uint v => JsonValue.Create(v),
+        long v => JsonValue.Create(v),
+        ulong v => JsonValue.Create(v),
+        float v => JsonValue.Create(v),
+        double v => JsonValue.Create(v),
+        decimal v => JsonValue.Create(v),
+        char c => JsonValue.Create(c.ToString()),
+        _ => JsonValue.Create(raw.ToString() ?? raw.GetType().Name),
+    };
 
     private static (string Module, string Type, string Method) SplitFunction(string functionName)
     {
