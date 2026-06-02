@@ -186,7 +186,22 @@ public sealed class EngineSteppingSession : IDisposable
 
             _session = DebugSession.Attach(pid, _sink);
             // Setup stop: the engine breaks on attach (Debugger.IsAttached transition). Drain it.
-            _session.WaitForStop(TimeSpan.FromSeconds(10));
+            StopInfo? setup = _session.WaitForStop(TimeSpan.FromSeconds(10));
+
+            // The target must be synchronized before ICorDebug inspection (SetBreakpointAtLine ->
+            // EnumerateAppDomains). If the attached process exited or never broke within the window,
+            // enumerating on an unsynchronized/exited CordbProcess faults inside mscordbi and crashes
+            // the server. Guard: return a clean status rather than crash.
+            if (setup is null)
+            {
+                CleanupSession();
+                return Task.FromResult(Error(
+                    $"The attached process did not reach a synchronized stop within 10s, so the breakpoint at {sourceFile}:{line} could not be armed safely. The target may be running without yielding a debugger stop."));
+            }
+            if (setup.Reason == StopReason.ProcessExited)
+                return Task.FromResult(RenderProcessExited("attach",
+                    $"The process exited during attach setup, before the breakpoint at {sourceFile}:{line} could be armed. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             // Set the initial breakpoint and run to it.
             int id = _session.SetBreakpointAtLine(sourceFile, line);
@@ -246,8 +261,24 @@ public sealed class EngineSteppingSession : IDisposable
             // _launchedProcess management here.
             _targetPid = _session.ProcessId;
 
-            // Setup stop (Debugger.Break() in user code or the attach break).
-            _session.WaitForStop(TimeSpan.FromSeconds(10));
+            // Setup stop (Debugger.Break() in user code, or the attach-before-main initial stop).
+            StopInfo? setup = _session.WaitForStop(TimeSpan.FromSeconds(10));
+
+            // The process MUST be synchronized (stopped) before any ICorDebug inspection. If it ran
+            // to completion or never stopped within the setup window, SetBreakpointAtLine ->
+            // EnumerateAppDomains would run on an exited/unsynchronized CordbProcess and fault inside
+            // mscordbi (null-deref at 0x2a8), taking the whole server down. A debugger must not crash
+            // because the debuggee finished — return a clean status instead.
+            if (setup is null)
+            {
+                CleanupSession();
+                return Task.FromResult(Error(
+                    $"The launched process did not stop before the breakpoint at {sourceFile}:{line} could be armed — it ran past the 10s setup window without an early stop (e.g. Debugger.Break, or a breakpoint armed at the initial stop). Arming a breakpoint at the attach-before-main stop for any target is pending substrate work; for now launch a target that halts early."));
+            }
+            if (setup.Reason == StopReason.ProcessExited)
+                return Task.FromResult(RenderProcessExited("launch",
+                    $"The process exited during launch setup, before the breakpoint at {sourceFile}:{line} could be armed — it completed or threw within the 10s setup window. Drain drhook_drain_log / drhook_drain_console for any output; start the next session with drhook_launch or drhook_attach.",
+                    hypothesis));
 
             int id = _session.SetBreakpointAtLine(sourceFile, line);
             if (id == 0) { CleanupSession(); return Task.FromResult(Error($"Could not set breakpoint at {sourceFile}:{line}.")); }

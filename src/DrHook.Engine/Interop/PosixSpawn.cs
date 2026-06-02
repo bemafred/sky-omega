@@ -2,8 +2,9 @@
 // (validated by probe 59 / finding 75). dbgshim's CreateProcessForLaunch takes no stdio handles,
 // so a launched debuggee inherits the debugger process's fds — on an MCP stdio server that means
 // the debuggee's Console.WriteLine corrupts the JSON-RPC channel. Here DrHook OWNS the spawn:
-// posix_spawnp the target SUSPENDED with stdout/stderr dup2'd to DrHook-owned pipes; the caller
-// arms RegisterForRuntimeStartup, then SIGCONT (Continue) to release it. POSIX-specific;
+// posix_spawnp the target SUSPENDED with stdin redirected to /dev/null and stdout/stderr dup2'd to
+// DrHook-owned pipes; the caller arms RegisterForRuntimeStartup, then SIGCONT (Continue) to release
+// it. POSIX-specific;
 // Windows uses CreateProcess(CREATE_SUSPENDED) + STARTUPINFO redirection (not yet wired).
 
 using System.Runtime.InteropServices;
@@ -15,6 +16,7 @@ internal static unsafe class PosixSpawn
     private const int POSIX_SPAWN_START_SUSPENDED = 0x0080;   // <spawn.h> (Darwin)
     private const int SIGCONT = 19;                            // Darwin signal numbers
     private const int SIGKILL = 9;
+    private const int O_RDONLY = 0;                            // <fcntl.h> (Darwin)
 
     [DllImport("libc", SetLastError = true)] private static extern int pipe(int* fds);
     [DllImport("libc", SetLastError = true)] private static extern int close(int fd);
@@ -28,6 +30,7 @@ internal static unsafe class PosixSpawn
     [DllImport("libc")] private static extern int posix_spawn_file_actions_adddup2(nint* fa, int fd, int newfd);
     [DllImport("libc")] private static extern int posix_spawn_file_actions_addclose(nint* fa, int fd);
     [DllImport("libc")] private static extern int posix_spawn_file_actions_addchdir_np(nint* fa, byte* path);
+    [DllImport("libc")] private static extern int posix_spawn_file_actions_addopen(nint* fa, int fd, byte* path, int oflag, int mode);
     [DllImport("libc")] private static extern int posix_spawn_file_actions_destroy(nint* fa);
 
     /// <summary>SIGCONT — release a START_SUSPENDED child once the debugger callback is armed.</summary>
@@ -41,7 +44,8 @@ internal static unsafe class PosixSpawn
     internal static nint Read(int fd, byte* buf, nint count) => read(fd, buf, count);
 
     /// <summary>Spawn <paramref name="file"/> (PATH-searched like execvp) SUSPENDED, with the child's
-    /// stdout → a fresh pipe and stderr → a second pipe. Returns 0 with <paramref name="pid"/> and the
+    /// stdin → /dev/null (never the debugger's fd 0 / MCP JSON-RPC channel), stdout → a fresh pipe and
+    /// stderr → a second pipe. Returns 0 with <paramref name="pid"/> and the
     /// parent-side read fds on success; a negative/errno-style code on failure (read fds = -1). The
     /// caller must arm RegisterForRuntimeStartup, then <see cref="Continue"/> to let the child run, and
     /// owns draining + closing the returned read fds.</summary>
@@ -60,6 +64,13 @@ internal static unsafe class PosixSpawn
         posix_spawnattr_init(&attr);
         posix_spawnattr_setflags(&attr, unchecked((short)POSIX_SPAWN_START_SUSPENDED));
         posix_spawn_file_actions_init(&fa);
+        // Child stdin -> /dev/null: a launched debuggee must NEVER inherit the debugger's stdin. On an
+        // MCP stdio server fd 0 is the JSON-RPC REQUEST channel, so an inherited fd 0 lets the child
+        // share — and break — the protocol input, disconnecting the server. D2 isolated fd 1/2 (output
+        // corrupting the channel); fd 0 is the input half of that same isolation. The debuggee is
+        // non-interactive here — real interactive stdin is the D4 PTY concern (ADR-011), not this.
+        byte* devNull = Utf8("/dev/null");
+        posix_spawn_file_actions_addopen(&fa, 0, devNull, O_RDONLY, 0);
         posix_spawn_file_actions_adddup2(&fa, oW, 1);   // child stdout -> stdout pipe
         posix_spawn_file_actions_adddup2(&fa, eW, 2);   // child stderr -> stderr pipe
         posix_spawn_file_actions_addclose(&fa, oR);     // child doesn't keep the read ends
@@ -82,6 +93,7 @@ internal static unsafe class PosixSpawn
         FreeArray(cArgv);
         FreeArray(cEnvp);
         Marshal.FreeCoTaskMem((nint)cFile);
+        Marshal.FreeCoTaskMem((nint)devNull);
         if (cwdPtr != null) Marshal.FreeCoTaskMem((nint)cwdPtr);
 
         // Parent drops the write ends so read() returns EOF when the child closes them (exit).
