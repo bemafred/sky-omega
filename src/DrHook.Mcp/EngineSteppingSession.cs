@@ -174,6 +174,7 @@ public sealed class EngineSteppingSession : IDisposable
     public Task<string> AttachAsync(int pid, string sourceFile, int line, string hypothesis, CancellationToken ct)
     {
         if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_stop first."));
+        ResetOutputBuffers(); // new session — drains reflect only this session
 
         try
         {
@@ -244,6 +245,7 @@ public sealed class EngineSteppingSession : IDisposable
         CancellationToken ct)
     {
         if (IsActive) return Task.FromResult(Error("A stepping session is already active. Use drhook_stop first."));
+        ResetOutputBuffers(); // new session — drains reflect only this session (buffers survive a session's END, reset at its START)
 
         _sessionHypothesis = hypothesis;
         _targetVersion = "launched";
@@ -927,6 +929,16 @@ public sealed class EngineSteppingSession : IDisposable
             if (a.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
                 return System.IO.Path.GetFileNameWithoutExtension(a);
         return System.IO.Path.GetFileNameWithoutExtension(program);
+    }
+
+    // A new session's drains must reflect only that session. The console / log / anomaly buffers
+    // intentionally survive a session's END for a final drain (see RenderProcessExited), so reset
+    // them at the next session's START. Finding: console output bled across sessions (2026-06-02 dogfood).
+    private void ResetOutputBuffers()
+    {
+        _console.Reset();
+        _logs.Reset();
+        _anomalies.Reset();
     }
 
     /// <summary>The response for a stop-handler whose target exited instead of reaching the

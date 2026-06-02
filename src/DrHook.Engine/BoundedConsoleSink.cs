@@ -82,4 +82,16 @@ public sealed class BoundedConsoleSink : IDebugEventSink
             return new ConsoleDrainResult(records, dropped);
         }
     }
+
+    /// <summary>Drop all buffered chunks and the dropped counter — called when a NEW debug session
+    /// starts so its drains reflect only that session. (The buffer intentionally survives a session's
+    /// END for a final drain; this resets it at the next session's START.)</summary>
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            _buffer.Clear();
+            _dropped = 0;
+        }
+    }
 }
