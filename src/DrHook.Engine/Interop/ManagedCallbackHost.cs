@@ -183,7 +183,7 @@ internal sealed unsafe class ManagedCallbackHost : IDisposable
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ExitProcess(nint p, nint proc) => Fire(p, "ExitProcess");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int CreateThread(nint p, nint a, nint t) => Fire(p, "CreateThread");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int ExitThread(nint p, nint a, nint t) => Fire(p, "ExitThread");
-    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LoadModule(nint p, nint a, nint m) => Fire(p, "LoadModule");
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LoadModule(nint p, nint a, nint m) => Fire(p, CallbackKind.Informational, "LoadModule", a, 0, 0, breakpoint: m); // carry the ICorDebugModule for the Layer 2 entry-module hold-gate
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int UnloadModule(nint p, nint a, nint m) => Fire(p, "UnloadModule");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int LoadClass(nint p, nint a, nint c) => Fire(p, "LoadClass");
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })] private static int UnloadClass(nint p, nint a, nint c) => Fire(p, "UnloadClass");

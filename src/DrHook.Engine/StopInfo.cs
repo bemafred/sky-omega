@@ -26,6 +26,11 @@ public enum StopReason
     /// <summary>The caller invoked <see cref="DebugSession.Pause"/> — an async-break that
     /// synchronized the running debuggee. There is no specific thread associated with the stop.</summary>
     Pause,
+    /// <summary>The launch held the process synchronized at its entry assembly's load (ADR-011
+    /// Layer 2 hold-gate) — modules are loaded but main has not run: the window in which a launch
+    /// breakpoint can be armed against the entry module. Launch-only, one-shot, opt-in via the
+    /// launch's entry-module hold; an attach or a hold-less launch never surfaces it.</summary>
+    EntryModuleLoaded,
     /// <summary>The debuggee exited; no further stops will occur.</summary>
     ProcessExited,
 }

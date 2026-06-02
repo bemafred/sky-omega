@@ -33,6 +33,7 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     private readonly IDebugEventSink _userSink;
     private Func<ResumeKind, nint, int>? _resumeHandler;
     private Action? _pauseHandler;
+    private Func<nint, bool>? _moduleHoldHandler; // ADR-011 Layer 2: one-shot entry-module hold on launch (null = no hold)
     private Thread? _worker;
     private nint _stopThread;            // ICorDebugThread at the current stop — handed to the resume handler (for stepping)
     private nint _lastBreakpointPointer; // ICorDebugBreakpoint at the most recent BreakpointHit (0 otherwise) — for caller-thread policy lookup
@@ -82,10 +83,11 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
     /// running debuggee (calls <c>ICorDebugController.Stop(0)</c>) when the worker receives a
     /// <see cref="CallbackKind.PauseRequest"/>; both controller operations are owned by this
     /// single worker thread.</summary>
-    public void Start(Func<ResumeKind, nint, int> resume, Action pause)
+    public void Start(Func<ResumeKind, nint, int> resume, Action pause, Func<nint, bool>? moduleHold = null)
     {
         _resumeHandler = resume;
         _pauseHandler = pause;
+        _moduleHoldHandler = moduleHold;
         // Explicit 1 MB maxStackSize — cross-platform substrate consistency (ENG-STK-2).
         // Defends against platform-default variance (Windows 1 MB / macOS secondary 512 KB /
         // Linux 8 MB) and future JIT/inlining variance across CoreCLR releases. Pump work is
@@ -175,8 +177,33 @@ internal sealed class CallbackPump : IManagedCallbackSink, IDisposable
                         // guard, dereferencing a released thread → NRE (finding 77).
                         _stopThread = 0;
                         _stops.TryAdd(new StopInfo(StopReason.ProcessExited)); // wake any waiter
+                        _resumeHandler!(ResumeKind.Continue, 0);
                     }
-                    _resumeHandler!(ResumeKind.Continue, 0);
+                    else if (e.Name == "LoadModule" && _moduleHoldHandler is { } hold && hold(e.Breakpoint))
+                    {
+                        // ADR-011 Layer 2 hold-gate: hold the process synchronized at the launch entry
+                        // assembly's load — modules are loaded but main has not run — so the caller can
+                        // arm a launch breakpoint against the entry module. One-shot (the handler
+                        // consumes itself). Park like a STOPPING event until the caller resumes.
+                        _stopThread = 0;
+                        _stops.Add(new StopInfo(StopReason.EntryModuleLoaded));
+                        ResumeKind kind;
+                        try { kind = _resume.Take(); }
+                        catch (InvalidOperationException)
+                        {
+                            _userSink.OnAnomaly(new EngineAnomaly(
+                                DateTimeOffset.UtcNow, AnomalyKind.WorkerSilentBreak, "pump-worker",
+                                "Pump (entry-module hold)",
+                                Observed: "_resume.Take threw with an EntryModuleLoaded hold pending",
+                                Expected: "caller arms the launch breakpoint and resumes"));
+                            break;
+                        }
+                        _resumeHandler!(kind, 0);
+                    }
+                    else
+                    {
+                        _resumeHandler!(ResumeKind.Continue, 0);
+                    }
                 }
                 else if (e.Kind == CallbackKind.PauseRequest)
                 {

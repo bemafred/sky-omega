@@ -254,7 +254,10 @@ public sealed class EngineSteppingSession : IDisposable
             // env override is not yet plumbed through DebugSession.Launch (Phase 3 polish item —
             // dedicated env block via CreateProcessForLaunch). For now the launched child inherits
             // our env, which covers the common cases (no per-launch override required).
-            _session = DebugSession.Launch(program, args, cwd, _sink);
+            // ADR-011 Layer 2: tell the engine the entry assembly so it holds at that module's load
+            // (modules loaded, before main) and we arm the breakpoint there — so launch works on
+            // targets that don't self-stop (no Debugger.Break needed).
+            _session = DebugSession.Launch(program, args, cwd, _sink, entryModule: DeriveEntryModule(program, args));
 
             // Capture the launched PID for status reporting. DebugSession.Launch (finding 64)
             // now owns the Process handle internally and kill-firsts on Dispose — no separate
@@ -913,6 +916,18 @@ public sealed class EngineSteppingSession : IDisposable
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────────────────────
+
+    // The launch breakpoint is armed at the entry assembly's load (ADR-011 Layer 2 hold-gate).
+    // Identify the entry assembly: the first .dll among the args (dotnet exec X.dll / dotnet X.dll),
+    // else the program's own stem (a native apphost). Returns the simple name the engine matches the
+    // loaded module against; an unmatched value just means no hold fires (the launch guard covers it).
+    private static string? DeriveEntryModule(string program, string[] args)
+    {
+        foreach (string a in args)
+            if (a.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                return System.IO.Path.GetFileNameWithoutExtension(a);
+        return System.IO.Path.GetFileNameWithoutExtension(program);
+    }
 
     /// <summary>The response for a stop-handler whose target exited instead of reaching the
     /// expected stop — ran to completion during continue/step/pause, or exited before a

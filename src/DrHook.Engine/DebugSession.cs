@@ -236,7 +236,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// lifecycle); callers no longer manage kill-first themselves.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
     /// <param name="naturalExitTimeout">See <see cref="AttachAndOwn"/>'s parameter doc.</param>
-    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null)
+    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null, string? entryModule = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(args);
@@ -258,7 +258,8 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                     "DbgShim.LaunchWithDebuggerPosix");
                 try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
                 DebugSession session = FromCordbg(dbgShim, sink, (int)pidPosix, pUnknown, ownsTarget: true,
-                    targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
+                    targetProcess: targetProcess, naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout,
+                    entryModule: entryModule);
                 session.BeginConsoleDrain(stdoutFd, stderrFd);
                 return session;
             }
@@ -272,7 +273,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 "DbgShim.LaunchWithDebugger");
             try { targetProcess = Process.GetProcessById((int)pid); } catch (ArgumentException) { /* exited already */ }
             return FromCordbg(dbgShim, sink, (int)pid, pUnknown, ownsTarget: true, targetProcess: targetProcess,
-                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout);
+                naturalExitTimeout: naturalExitTimeout ?? DefaultNaturalExitTimeout, entryModule: entryModule);
         }
         catch
         {
@@ -326,7 +327,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <summary>Shared post-cordbg setup: cast to <see cref="ICorDebug"/>, build the pump and
     /// callback vtable, register the handler, <c>DebugActiveProcess</c>, start the continue-loop.
     /// Same shape used by Attach and Launch.</summary>
-    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout)
+    private static DebugSession FromCordbg(DbgShim dbgShim, IDebugEventSink sink, int processId, nint pUnknown, bool ownsTarget, Process? targetProcess, TimeSpan naturalExitTimeout, string? entryModule = null)
     {
         CallbackPump? pump = null;
         ManagedCallbackHost? callback = null;
@@ -347,13 +348,30 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             // then Continues. The pause handler synchronizes the running debuggee for an AsyncBreak
             // (DebugSession.Pause). Both are routed through the worker so the controller has a single
             // caller. Callbacks enqueued since SetManagedHandler (if any) drain immediately.
+            // ADR-011 Layer 2: on launch, hold the process at the entry assembly's LoadModule (modules
+            // loaded, before main) so a breakpoint can be armed there. Opt-in via entryModule; attach
+            // and hold-less launch pass null and never hold. One-shot — the closure consumes itself.
+            Func<nint, bool>? moduleHold = null;
+            if (entryModule is not null)
+            {
+                bool held = false;
+                moduleHold = pModule =>
+                {
+                    if (held) return false;
+                    string? stem = System.IO.Path.GetFileNameWithoutExtension(RuntimeNavigation.ModuleName(pModule));
+                    if (!string.Equals(stem, entryModule, StringComparison.OrdinalIgnoreCase)) return false;
+                    held = true;
+                    return true;
+                };
+            }
             pump.Start(
                 (kind, thread) =>
                 {
                     Stepping.Arm(thread, kind);
                     return controller.Continue(0);
                 },
-                () => controller.Stop(0));
+                () => controller.Stop(0),
+                moduleHold);
 
             return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout);
         }
