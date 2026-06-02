@@ -93,6 +93,13 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     private readonly List<BreakpointEntry> _breakpoints = new();
     private int _nextBreakpointId;
 
+    // Pending line breakpoints whose module is not yet loaded — bound by TryBindPending when the
+    // module loads (full pending-breakpoints, ADR-011 Layer 2 follow-on). Accessed under the
+    // caller/pump alternation invariant: the caller registers (SetBreakpointAtLine) only while the
+    // pump is parked at a stop; the pump binds (TryBindPending) only while the caller is blocked in
+    // WaitForStop — never concurrently, so no lock (matching _breakpoints).
+    private readonly List<(int Id, string FileHint, int Line, BreakpointPolicy? Policy)> _pending = new();
+
     // Armed exception filters: consulted by WaitForStop on Exception stops. No native resources to
     // release; purely consumer-side state.
     private readonly List<ExceptionFilterInfo> _exceptionFilters = new();
@@ -364,6 +371,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                     return true;
                 };
             }
+            // Construct the session before Start so the pump's per-LoadModule hook can call
+            // session.TryBindPending (full pending-breakpoints). Start begins the worker; nothing
+            // drains until then, so building the session first is race-free.
+            var session = new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout);
             pump.Start(
                 (kind, thread) =>
                 {
@@ -371,9 +382,9 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                     return controller.Continue(0);
                 },
                 () => controller.Stop(0),
-                moduleHold);
-
-            return new DebugSession(processId, dbgShim, pump, callback, cordbg, controller, sink, pUnknown, pProcess, ownsTarget, targetProcess, naturalExitTimeout);
+                moduleHold,
+                session.TryBindPending);
+            return session;
         }
         catch
         {
@@ -1122,7 +1133,42 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 pModule, function, breakpoint, policy));
             return id; // ownership of pModule moved into _breakpoints
         }
-        return 0;
+        // No loaded module references this file yet — register the breakpoint as PENDING. It binds
+        // when its module loads (TryBindPending, called from the pump on each LoadModule). Returning a
+        // real id lets the caller run to it; the launch hold-gate guarantees this registration happens
+        // before main runs, so the binding LoadModule is not missed.
+        int pendingId = ++_nextBreakpointId;
+        _pending.Add((pendingId, fileHint, line, policy));
+        return pendingId;
+    }
+
+    /// <summary>Bind any pending line breakpoints whose module just loaded — called from the pump
+    /// (under the caller/pump alternation) for each LoadModule before it auto-continues, so a
+    /// breakpoint in a lazily-loaded module is armed the instant its module appears, before the
+    /// process runs past the code. <paramref name="pModule"/> is the borrowed ICorDebugModule from the
+    /// callback (valid for this synchronized event); an owned ref for the entry is taken via FindModule.</summary>
+    internal void TryBindPending(nint pModule)
+    {
+        if (_pending.Count == 0) return;
+        string moduleName = RuntimeNavigation.ModuleName(pModule);
+        SymbolReader? symbols = SymbolsFor(moduleName);
+        if (symbols is null) return;
+        for (int i = _pending.Count - 1; i >= 0; i--)
+        {
+            (int id, string fileHint, int line, BreakpointPolicy? policy) = _pending[i];
+            if (!symbols.TryFindLine(fileHint, line, out int token, out int ilOffset)) continue;
+            nint owned = RuntimeNavigation.FindModule(_pProcess, moduleName);
+            if (owned == 0) continue;
+            if (!Breakpoints.TryCreateAtOffset(owned, (uint)token, (uint)ilOffset, out nint function, out nint breakpoint))
+            {
+                RuntimeNavigation.Release(owned);
+                continue;
+            }
+            _breakpoints.Add(new BreakpointEntry(
+                new LineBreakpointInfo(id, moduleName, fileHint, line),
+                owned, function, breakpoint, policy));
+            _pending.RemoveAt(i);
+        }
     }
 
     /// <summary>The active breakpoints in registration order — id + descriptor (a
