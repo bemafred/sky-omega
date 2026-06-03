@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>LeaveRunningTarget</RootNamespace>
+    <AssemblyName>LeaveRunning</AssemblyName>
+    <!-- Probe 62 (F-010-2 Owned detach-leave-running). DebugSession.Launch attaches before Main via
+         the entry-module hold-gate; the probe resumes past the hold, Pause-stops the loop, then calls
+         DetachLeaveRunning and asserts the file heartbeat keeps advancing. The target writes ONLY to a
+         file (never Console) so the Detach-survival question stays isolated from the console-pipe
+         (D2/D4) unknown. Not part of the solution; built ad-hoc by the probe. -->
+  </PropertyGroup>
+</Project>

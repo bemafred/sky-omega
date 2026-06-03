@@ -1438,6 +1438,94 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         }
     }
 
+    /// <summary>F-010-2 — detach the debugger from an OWNED (launched) target and LEAVE IT RUNNING.
+    /// Runs the same quiescent-detach sequence the Borrowed live path uses inside <see cref="Dispose"/>
+    /// (pump teardown → Quiesce → TryResumeForDetach → Detach → Terminate), but for a target the
+    /// substrate launched, deliberately SKIPPING the SIGTERM/SIGKILL the Owned <see cref="Dispose"/>
+    /// branch issues. The explicit resume is load-bearing: probe 33 documented that detaching a
+    /// currently-stopped launched target WITHOUT a Continue leaves it synchronized indefinitely (hung) —
+    /// TryResumeForDetach's Continue-until-S_FALSE is what moves the target back to a running state
+    /// before Detach unwinds. On success the target reparents (launchd / PPID=1 on macOS) and keeps
+    /// running un-debugged. Idempotent (shares the _disposed gate, so a later Dispose is a no-op).
+    ///
+    /// SCOPE (probe 62): validated for a synchronized target with NO armed breakpoints (Pause-stop
+    /// shape). A breakpoint-stopped target would re-hit its breakpoints during the resume-to-detach;
+    /// deactivating breakpoints before the resume is the breakpoint-variant follow-up, not built here.
+    ///
+    /// CONSOLE PIPES (deferred second unknown): a launched target's stdout/stderr are DrHook-owned
+    /// pipes (D2, BeginConsoleDrain). Unlike the Owned-kill path — where the target is dead and the
+    /// drains have hit EOF — a leave-running target is ALIVE and still holds the write ends. Closing
+    /// the read ends here would EPIPE/SIGPIPE the target on its next Console write, so this method does
+    /// NOT close them. Handing the console back (a PTY, D4) is the separate console-survival unknown
+    /// probe 62 isolates by using a file-heartbeat target that writes nothing to Console.</summary>
+    public void DetachLeaveRunning()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
+        // Join the pump worker first (it drives controller.Continue); after this mscordbi still holds
+        // the target halted at its stop, released below by the explicit resume.
+        _pump.Dispose();
+
+        bool targetDead = _targetProcess?.HasExited == true;
+        if (targetDead)
+        {
+            // Target died between the stop and this call — nothing to leave running. Settle and Detach
+            // so the CCW is released before _callback.Dispose frees it (finding 66 ordering).
+            Thread.Sleep(ExitWorkSettleMs);
+            Detach();
+        }
+        else
+        {
+            // Detach must run against a SYNCHRONIZED target. Probe 62 v1 copied the Borrowed exit-race
+            // recipe (TryResumeForDetach → running → Detach) and Detach returned
+            // CORDBG_E_PROCESS_NOT_SYNCHRONIZED (0x80131302): a pre-resumed target is running, and
+            // Detach rejects a running target. A leave-running target is NOT exiting, so the
+            // stopped-state exit-race the Borrowed pre-resume guards against (probe 12) does not apply
+            // here. The target is already synchronized at the stop we were called from; Quiesce keeps
+            // it synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully —
+            // mscordbi implicit-resumes the target on Detach, so it runs free un-debugged.
+            Quiesce();
+            Detach();
+        }
+
+        int terminateHr = _cordbg.Terminate();
+        if (terminateHr < 0)
+        {
+            _sink.OnAnomaly(new EngineAnomaly(
+                DateTimeOffset.UtcNow, AnomalyKind.UnexpectedHResult, "mcp-request", "Terminate (DetachLeaveRunning)",
+                Observed: $"HRESULT 0x{terminateHr:X8}",
+                Expected: "S_OK (ICorDebug fully torn down)",
+                Context: new Dictionary<string, string> { ["hresult"] = $"0x{terminateHr:X8}" }));
+        }
+
+        // Ref-release tail — identical ordering to Dispose (Detach already released the CCW, so freeing
+        // _callback below is safe). Kept inline rather than shared with Dispose so this new path does
+        // not modify the validated Dispose teardown; DRY-ing via a shared private teardown is a
+        // follow-up once probe 62 confirms the path.
+        foreach (BreakpointEntry e in _breakpoints)
+        {
+            RuntimeNavigation.Release(e.Breakpoint);
+            RuntimeNavigation.Release(e.Function);
+            RuntimeNavigation.Release(e.Module);
+        }
+        _breakpoints.Clear();
+
+        foreach (SymbolReader? reader in _symbols.Values) reader?.Dispose();
+        _symbols.Clear();
+
+        if (_pProcess != 0) { Marshal.Release(_pProcess); _pProcess = 0; }
+        if (_pUnknown != 0) { Marshal.Release(_pUnknown); _pUnknown = 0; }
+
+        _callback.Dispose();
+        _dbgShim.Dispose();
+        GC.KeepAlive(_cordbg);
+        GC.KeepAlive(_controller);
+
+        // Console pipes intentionally NOT closed (see summary): the target is alive and may write to
+        // them. Release only the managed Process handle — the OS process keeps running.
+        _targetProcess?.Dispose();
+    }
+
     public void Dispose()
     {
         // Atomic idempotence gate (ENG-DS-1) — concurrent Dispose calls return without

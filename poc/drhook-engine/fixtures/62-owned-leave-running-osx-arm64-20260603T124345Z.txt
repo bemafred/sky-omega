@@ -1,0 +1,10 @@
+# DrHook.Engine probe 62 fixture — F-010-2 Owned detach-leave-running (held/stopped x clean detach)
+timestamp            = 2026-06-03T12:43:45.6409740Z
+runtime              = .NET 10.0.0
+os-arch              = osx-arm64
+launched-pid         = 53473
+beat-at-stop         = 7
+beat-after-detach    = 26
+target-alive-after   = True
+anomaly-count        = 1
+verdict              = PASSED
