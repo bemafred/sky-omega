@@ -15,3 +15,4 @@ Intent and rationale: [ADR-004 — DrHook: Runtime Observation Substrate](../ADR
 | [ADR-009](ADR-009-test-debugging-mcp-surface.md)                 | Test-Debugging MCP Surface — MTP-First Launch + Universal Attach + Project-Aware Mode Selection | Superseded by ADR-010 |
 | [ADR-010](ADR-010-mcp-tool-surface-redesign.md)                  | MCP Tool Surface Redesign — Semantic Naming and Established-Debugger Alignment | Accepted |
 | [ADR-011](ADR-011-lifecycle-console-dashboard.md)                | Debug-Session Lifecycle (stop/detach/kill) and Debuggee Console I/O — Isolation, Surfacing, and the DrHook Dashboard | Accepted |
+| [ADR-012](ADR-012-debug-state-surfaces.md)                       | Debug-State Surfaces — a Surface-Agnostic Model and its First Human Views (TUI Dashboard, Avalonia Sibling) | Proposed |

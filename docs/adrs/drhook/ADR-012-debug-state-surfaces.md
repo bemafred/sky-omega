@@ -1,0 +1,120 @@
+# ADR-012: Debug-state surfaces — a surface-agnostic model and its first human views (TUI dashboard, Avalonia sibling)
+
+**Status:** Proposed — 2026-06-03 (Emergence / ideation).
+
+**Realizes:** [ADR-011](ADR-011-lifecycle-console-dashboard.md) D4 (DrHook owns the terminal/dashboard surface) and D5 (a surface-agnostic debug-state model, not "a dashboard"), which ADR-011 deferred behind its Q6 (ship D2 + D3 first, let the dashboard's demand and form emerge). F-010-2 (Owned detach-leave-running) is now closed end-to-end (ADR-011 lifecycle triad complete on macOS; findings 78–80), so the next DrHook phase is the human surface.
+
+## Epistemic note — read first
+
+This ADR is **ideation** (the EEE Emergence phase). Unlike ADR-010/011 it is not yet structured for ship: it commits to an architectural **seam** and sketches the views, but deliberately under-specifies the views themselves. Martin's standing directive ([`project_mira_multisurface_trajectory`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/project_mira_multisurface_trajectory.md)) governs the *shaping*; his methodology governs the *pace*: **"build a flexible, simple primitive at each phase and discover the routing nuances by using the surface — do not over-specify the dashboard up front. Substrate first. Impatience does not benefit us."**
+
+The reason to commit the *seam* now and not the *views*: the consumers are **named** (the agent via MCP today; a console/TUI dashboard and an Avalonia GUI as Mira views; a full IDE on the horizon). Named consumers mean the seam is built up front, not speculatively — [`feedback_infrastructure_no_yagni`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_infrastructure_no_yagni.md). The views are *not* named in detail, so they are sketched, and their nuances are discovered in use.
+
+Every factual claim about today's substrate is grounded in a code read (`file:line`). Proposed-but-uncertain points carry `[?]`. The Open Questions MUST be resolved before Proposed → Accepted.
+
+## Context
+
+### The trajectory (the directive)
+
+Per the 2026-06-01 directive and the **Mira** component of the Sky Omega architecture (surface / interaction layer): **console, TUI, and an Avalonia GUI are all eventual _Mira_ views**, and the DrHook + Mira trajectory is toward a full-blown IDE. The substrate must be shaped now so multiple views — possibly simultaneous, possibly remote — plug in without ever forcing a refactor. The first human rendering is *one view of the model*, not the model itself.
+
+The thesis payoff is specific: DrHook's distinguishing capability over a classical debugger is the **`(hypothesis, observation)` braid** — every state-changing or state-reading operation carries a hypothesis (ADR-010 Decision 5), and the (hypothesis, observation) pairs are the corpus a cognitive-layer analyzer consumes. A human surface that renders that braid live makes the agent's cognitive loop **legible** — governed automation made concrete ([`project_governed_automation_thesis`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/project_governed_automation_thesis.md)). No IDE's debugger console shows this.
+
+### What exists today (factual, code-read)
+
+The substrate already emits **surface-agnostic events** and already supports **multiple consumers** — the seam is half-built:
+
+- **`IDebugEventSink`** (`src/DrHook.Engine/IDebugEventSink.cs`) is the event contract: `OnEvent(string)` (`:14`), `OnLog(LogRecord)` (`:23`), `OnAnomaly(EngineAnomaly)` (`:45`), and `OnConsoleOutput(ConsoleOutputRecord)` (ADR-011 D3; `src/DrHook.Engine/BoundedConsoleSink.cs:56`). The substrate emits; it knows nothing about views.
+- **`CompositeEventSink`** (`src/DrHook.Engine/CompositeEventSink.cs:13`) **already fans one event stream to N sinks** — the multi-consumer fan-out primitive exists. A new view is just another `IDebugEventSink`.
+- **`BoundedConsoleSink` / `BoundedAnomalySink` / `BoundedLogSink`** are bounded ring buffers drained on demand — the buffered-stream pattern.
+- The **queryable** state is reachable today only **piecemeal**, through individual MCP tools (`drhook_locals`, `drhook_break_list`, `drhook_snapshot`, `drhook_drain_console` / `_log` / `_anomalies`). There is **no single unified queryable debug-state model**.
+- The **only consumer today** is the MCP server (`src/DrHook.Mcp/EngineSteppingSession.cs`), and it is a **stdio JSON-RPC server** — `Program.cs:91` builds it `WithStdioServerTransport()`, so **its stdout is the protocol channel**. It therefore **cannot host a TUI on its own process** (the same constraint that forced ADR-011 D2's console isolation).
+- The **`(hypothesis, observation)` braid is not yet recorded** as substrate state: a hypothesis is passed into each MCP tool and echoed in the response, but no persistent (hypothesis, observation) log exists in `DrHook.Engine`.
+
+### The constraint that shapes everything (inherited from ADR-011 D2 / Q2)
+
+A protocol-channel debugger **cannot host a human surface on its own channel**, and MCP has no reverse-request / terminal-hosting (ADR-011 Q2, confirmed against the MCP 2025-11-25 spec). Therefore the human surface **must be a separate process** that consumes the debug-state over a **transport**, decoupled from the MCP JSON-RPC channel. This is the same decoupling ADR-011 D2 forced for debuggee console I/O; the dashboard generalizes it to *all* debug-state.
+
+## Decision (proposed)
+
+### D1 — The surface-agnostic debug-state model is the load-bearing artifact
+
+A single model the substrate produces, knowing nothing about views, with **two faces**:
+
+- a **snapshot** — a queryable, point-in-time view; and
+- a **delta stream** — live events (the existing `IDebugEventSink`).
+
+Built by **extending** the existing sink + bounded-buffer machinery, **not** replacing it. Contents:
+
+- **Session / lifecycle**: Owned vs Borrowed, active, stopped vs running, target pid + assembly version.
+- **Execution position**: current stop (reason), top frame, call stack.
+- **Inspection**: locals / arguments at the current stop (on demand — depth-bounded per `MaxInspectionDepth`).
+- **Breakpoints + exception filters**: with their policies, conditions, hit counts.
+- **Streams**: console output (D3), logpoints, anomalies.
+- **The braid**: the `(hypothesis, observation)` log — the running cognitive loop. *This is new substrate state* (see D4) and the element that distinguishes DrHook's surface from any IDE's.
+
+### D2 — A transport carries the model to multiple, possibly-remote consumers
+
+Lean to a **local socket** (Unix domain socket on POSIX) over a shared file, for live, low-latency, **bidirectional** updates — debug-state **out** (deltas + snapshot-on-request) and commands **in** (D5: the dashboard *controls*, it is not read-only). The fan-out already exists (`CompositeEventSink`); the new piece is a sink that **serializes the stream onto the transport** plus a command reader.
+
+Topology is an Open Question (Q1): the lightest path is **MCP-server-as-host** — the process that already hosts `DrHook.Engine` adds a publishing sink + a command socket, so the dashboard is a pure peer consumer with no broker. The cleaner-long-term path is a **separate DrHook host/broker** that both the MCP server and the dashboard connect to (decouples the human surface from the agent's transport entirely). Resolve by building the lighter one first and feeling the seams.
+
+### D3 — Views are pluggable consumers; ship ONE simple reference view first
+
+- The **agent** (via MCP) is a consumer today.
+- The **first human view**: a **simple console / TUI dashboard** that *visualizes* the model **and** *controls / interacts with* the debugger (Martin's three verbs). Keep it minimal; grow it by use.
+- The **Avalonia GUI** is the sibling — the **same** model + transport, richer rendering.
+- A full IDE is the horizon.
+
+No view is baked into the substrate; each is one rendering of the model. The model's requirements feed back from the views, but the model — not any view — is the artifact under version control as the contract.
+
+### D4 — The `(hypothesis, observation)` braid is first-class, and recording it is new substrate work
+
+The substrate begins **recording** the `(hypothesis, observation)` pairs into the debug-state model (today they pass through MCP requests/responses unrecorded). The dashboard surfaces this braid **prominently** — the human watches the agent reason in real time. This both (a) makes the cognitive loop legible (governed automation, human-in-the-loop) and (b) produces the in-substrate corpus the eventual cognitive-layer analyzer consumes (ADR-010's "hypothesis as cognitive-loop seam" insight). This is the surface no classical debugger has.
+
+### D5 — One shared session; the human and the agent debug *together, not in parallel*
+
+The dashboard and the agent drive the **same** `DebugSession` — not two sessions, not a parallel context. Commands from both surfaces are **serialized by the substrate** (the pump is already a single-consumer FIFO — ADR-007 finding 58), and **both surfaces render the same model**. When the agent steps, the human's view updates; when the human sets a breakpoint, the agent's next operation sees it. This is [`feedback_together_not_parallel`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_together_not_parallel.md) made concrete in the debugging surface — one working frame, shared. The conflict/coordination semantics (who has the "stop", what happens to an in-flight agent operation when the human continues) are discovered in use (Q3).
+
+### Sovereignty: model + transport are BCL-only; views may use frameworks
+
+The **debug-state model and the transport are BCL-only** — they are substrate, and substrate keeps semantic sovereignty (BCL + P/Invoke, as `DrHook.Engine` already is). The **views are application-layer surfaces** and may use view frameworks: **Avalonia** for the GUI is settled (Martin). The **TUI technology is an Open Question** (Q2) — a BCL-`Console`-only renderer keeps the first view sovereign and matches "simple", versus a TUI library for speed. This mirrors the Mercury rule: core BCL-only, surfaces/tooling may use packages.
+
+## Phasing (EEE — one unknown per phase; discover the rest in use)
+
+1. **Phase 1 — The model + a read-only tap.** Promote the piecemeal queryable state into one unified **snapshot** type and formalize the **delta stream** atop `IDebugEventSink`. Prove it by adding a sink to the existing `CompositeEventSink` that logs the unified stream. Pure substrate; smallest.
+2. **Phase 2 — The transport (read-only).** Publish the stream over a local socket; a trivial consumer (`drhook-tail`, prints deltas) proves **multiple live consumers decoupled from the MCP channel**. The urgent correctness property: the MCP JSON-RPC channel stays clean (the D2 lesson generalized).
+3. **Phase 3 — Record the braid (D4).** Begin persisting `(hypothesis, observation)` pairs into the model; surface them on the tap.
+4. **Phase 4 — The TUI dashboard, read-only.** Render the model — execution position, stack, locals, breakpoints, console/log/anomaly streams, and the braid.
+5. **Phase 5 — Control (commands in).** The transport goes bidirectional; the TUI drives break / step / continue / detach. The shared-session concurrency nuances (D5 / Q3) are discovered here.
+6. **Phase 6 — The Avalonia GUI sibling.** Same model + transport, richer view. Confirms the seam admits a second, structurally different view with no substrate refactor — the directive's acceptance test.
+
+## Open questions (resolve before Proposed → Accepted)
+
+1. **Transport topology** — MCP-server-as-host (publishes the stream + accepts commands) vs a separate DrHook host/broker both the MCP server and the dashboard connect to? Lighter-now vs cleaner-long-term.
+2. **TUI technology** — BCL-`Console`-only (sovereign, "simple") vs a TUI library? (Avalonia is settled for the GUI.)
+3. **Shared-session control semantics (D5)** — how do agent and human commands serialize and display? What happens to an in-flight agent operation when the human continues/stops? Is there an explicit "who holds the stop" notion, or pure FIFO?
+4. **Wire format** — a JSON line-protocol over the socket, a binary frame, or a reuse of the existing MCP/tool JSON shapes?
+5. **Console (PTY) + debug-state in one surface?** — does the dashboard also host the debuggee's PTY (ADR-011 D4), giving one surface for both the program's console *and* the debug-state, or are they separate panes/processes?
+6. **Dashboard lifecycle** — does the dashboard *attach* to a running MCP-hosted session, or can it *launch / own* sessions independently (human-driven debugging with no agent present)? Both, eventually — which first?
+
+## Consequences
+
+- Realizes ADR-011 D4 + D5 as a concrete, phased line of work, now that F-010-2 / the lifecycle triad is closed.
+- The surface-agnostic seam means console / TUI / Avalonia / IDE never force a substrate refactor — the directive's whole point.
+- Turns the MCP-can't-host-a-terminal *constraint* into a thesis-aligned *feature*: a human window into the agent's cognitive loop. The `(hypothesis, observation)` braid (D4) is the part no classical debugger surface has.
+- **DrHook + Mira → IDE**: this ADR defines the seam where Mira's surfaces plug in. The TUI shipped here is DrHook's reference view; Mira's console / TUI / Avalonia views (and eventually a full IDE) consume the same contract.
+- Adds substrate state (the braid, D4) and a long-lived transport — both are new resource-lifecycle surfaces and must be accounted under [`feedback_resource_limit_class_audit`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_resource_limit_class_audit.md) (socket fds, per-consumer buffers, the braid's bounded growth).
+- Cross-platform is a fluent goal: macOS-arm64 first to production, Windows/Linux validated later (ADR-007 Phase 9). The transport (Unix domain socket) and any P/Invoke follow the engine's existing POSIX-first / Windows-deferred pattern.
+
+## References
+
+### Code reads (factual basis)
+- `src/DrHook.Engine/IDebugEventSink.cs:14/23/45` — the `OnEvent` / `OnLog` / `OnAnomaly` event contract; `src/DrHook.Engine/BoundedConsoleSink.cs:56` — `OnConsoleOutput` (D3).
+- `src/DrHook.Engine/CompositeEventSink.cs:13` — the existing multi-consumer fan-out primitive.
+- `src/DrHook.Mcp/EngineSteppingSession.cs` — the sole consumer today; `src/DrHook.Mcp/Program.cs:91` — `WithStdioServerTransport()` (stdout = protocol channel, so the MCP process cannot host a TUI).
+
+### Prior ADRs / memory
+- [ADR-011](ADR-011-lifecycle-console-dashboard.md) D2 / D4 / D5 / Q2 — the protocol-channel decoupling and the deferred dashboard this ADR realizes.
+- [ADR-010](ADR-010-mcp-tool-surface-redesign.md) — hypothesis as the cognitive-loop seam (the braid's origin).
+- Memory: [`project_mira_multisurface_trajectory`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/project_mira_multisurface_trajectory.md) (the directive), [`project_governed_automation_thesis`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/project_governed_automation_thesis.md), [`feedback_infrastructure_no_yagni`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_infrastructure_no_yagni.md), [`feedback_together_not_parallel`](../../../.claude/projects/-Users-bemafred-src-repos-sky-omega/memory/feedback_together_not_parallel.md).
