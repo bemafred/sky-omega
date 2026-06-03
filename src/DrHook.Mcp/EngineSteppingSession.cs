@@ -346,29 +346,35 @@ public sealed class EngineSteppingSession : IDisposable
         return Task.FromResult(Render(summary));
     }
 
-    // drhook_detach — disconnect and LEAVE THE TARGET RUNNING (deliberate). Borrowed: supported (Dispose's
-    // Borrowed path detaches without killing). Owned: NOT YET — pending ADR-011 F-010-2 (the launched target
-    // is the debugger's child); honest error, session left active.
+    // drhook_detach — disconnect and LEAVE THE TARGET RUNNING (deliberate). Borrowed: Dispose's Borrowed
+    // path detaches without killing. Owned (F-010-2, probes 62/62b): DetachLeaveRunning runs the clean
+    // detach (deactivate breakpoints -> Quiesce -> Detach -> Terminate), skipping the kill the Owned
+    // Dispose branch issues; the launched target reparents (launchd/PPID=1 on macOS) and keeps running.
     public Task<string> DetachAsync(string hypothesis, CancellationToken ct)
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
-        if (_session!.OwnsTarget)
-            return Task.FromResult(Error(
-                "drhook_detach (leave-running) is not yet available for an Owned (drhook_launch) target — the " +
-                "launched target is currently the debugger's child (ADR-011 finding F-010-2). Use drhook_stop to " +
-                "end it gracefully, or drhook_kill to force-terminate."));
+        bool owned = _session!.OwnsTarget;
+        if (owned)
+        {
+            // Owned leave-running: explicitly detach-without-kill. Sets DebugSession._disposed, so the
+            // CleanupSession -> Dispose below is the idempotent no-op + state reset (the KillAsync pattern).
+            try { _session.DetachLeaveRunning(); }
+            catch (Exception ex) { return Task.FromResult(Error($"Detach (leave-running) failed: {ex.GetType().Name}: {ex.Message}")); }
+        }
 
         JsonObject summary = new()
         {
             ["status"] = "detached",
             ["hypothesis"] = hypothesis,
-            ["mode"] = "borrowed",
-            ["disposition"] = "detached, attached target left running un-debugged",
+            ["mode"] = owned ? "owned" : "borrowed",
+            ["disposition"] = owned
+                ? "detached, launched target left running un-debugged (substrate reaps it when it exits; reparents to launchd only if the debugger exits first)"
+                : "detached, attached target left running un-debugged",
             ["totalSteps"] = _stepCount,
             ["sessionHypothesis"] = _sessionHypothesis,
             ["assemblyVersion"] = _targetVersion,
-            ["prompt"] = $"Detached after {_stepCount} steps; the attached target keeps running. " +
+            ["prompt"] = $"Detached after {_stepCount} steps; the {(owned ? "launched" : "attached")} target keeps running. " +
                          $"Did the observations confirm or challenge the hypothesis: \"{_sessionHypothesis}\"?"
         };
         CleanupSession();

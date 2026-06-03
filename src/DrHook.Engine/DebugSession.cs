@@ -1445,8 +1445,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// branch issues. The explicit resume is load-bearing: probe 33 documented that detaching a
     /// currently-stopped launched target WITHOUT a Continue leaves it synchronized indefinitely (hung) —
     /// TryResumeForDetach's Continue-until-S_FALSE is what moves the target back to a running state
-    /// before Detach unwinds. On success the target reparents (launchd / PPID=1 on macOS) and keeps
-    /// running un-debugged. Idempotent (shares the _disposed gate, so a later Dispose is a no-op).
+    /// before Detach unwinds. On success the target keeps running un-debugged; it remains a child of
+    /// this process until it exits (a dedicated waitpid thread reaps it then, so it does not zombie),
+    /// reparenting to launchd only if the debugger exits first. Idempotent (shares the _disposed gate,
+    /// so a later Dispose is a no-op).
     ///
     /// SCOPE: validated for the Pause-stop cell (probe 62) and the breakpoint-stop cell (probe 62b).
     /// ICorDebug refuses to Detach while breakpoints are active (CORDBG_E_DETACH_FAILED_OUTSTANDING_
@@ -1532,8 +1534,25 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         GC.KeepAlive(_cordbg);
         GC.KeepAlive(_controller);
 
+        // Disown-and-reap (POSIX; dogfood finding 2026-06-03): detaching the debugger does NOT
+        // reparent the OS child — the target stays a child of this (potentially long-lived) process,
+        // and since it was acquired via GetProcessById (not Process.Start) the runtime's reaper does
+        // not track it, so an exited detached target would zombie under us. A dedicated background
+        // thread blocks in waitpid(pid) and collects the corpse whenever the target exits (immediately
+        // if already gone). The thread is just a blocked syscall and dies with the process; launchd
+        // reaps the orphan if we exit first. One thread per live detached target — self-limiting.
+        if (_targetProcess is not null && (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()))
+        {
+            int reapPid = _targetProcess.Id;
+            new Thread(() => Interop.PosixSignals.ReapChild(reapPid), maxStackSize: 256 * 1024)
+            {
+                IsBackground = true,
+                Name = $"drhook-reaper-{reapPid}",
+            }.Start();
+        }
+
         // Console pipes intentionally NOT closed (see summary): the target is alive and may write to
-        // them. Release only the managed Process handle — the OS process keeps running.
+        // them. Release only the managed Process handle — the OS process keeps running (reaped above).
         _targetProcess?.Dispose();
     }
 

@@ -269,11 +269,11 @@ public sealed class DrHookTools
 
     [McpServerTool(Name = "drhook_detach"), Description(
         "Detach the debugger and LEAVE THE TARGET RUNNING — the deliberate 'disconnect, keep it alive' action. " +
-        "Borrowed sessions (drhook_attach): supported — the target keeps running un-debugged. " +
-        "Owned sessions (drhook_launch): NOT YET — true detach-and-leave-running for a launched target is pending " +
-        "ADR-011 finding F-010-2 (the target is currently the debugger's child); this returns an error pointing you " +
-        "to drhook_stop (graceful end) or drhook_kill (force). Contrast drhook_stop, which ENDS the session " +
-        "(graceful-terminate for an Owned target). Requires a hypothesis.")]
+        "Borrowed sessions (drhook_attach): the target keeps running un-debugged. " +
+        "Owned sessions (drhook_launch): the launched target is detached cleanly and left running — it reparents " +
+        "(to launchd/PPID=1 on macOS) and keeps executing un-debugged (F-010-2; breakpoints are deactivated before " +
+        "Detach so it does not hang). Contrast drhook_stop, which ENDS the session (graceful-terminate for an Owned " +
+        "target), and drhook_kill, which force-terminates. Requires a hypothesis.")]
     public async Task<string> Detach(
         [Description("What you expect the target to do after you disconnect (e.g. 'keeps serving requests un-debugged').")] string hypothesis,
         CancellationToken ct = default)
