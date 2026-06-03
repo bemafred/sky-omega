@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <RootNamespace>EnvTarget</RootNamespace>
+    <AssemblyName>EnvTarget</AssemblyName>
+    <!-- Probe 63: echoes the launch-overridden env var (DRHOOK_PROBE_ENV) and an inherited one (HOME)
+         to a file, proving DebugSession.Launch's env override (inherit-plus-override) reaches the
+         child via the POSIX spawn's envp. Not part of the solution; built ad-hoc by the probe. -->
+  </PropertyGroup>
+</Project>

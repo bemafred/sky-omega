@@ -243,7 +243,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// lifecycle); callers no longer manage kill-first themselves.</summary>
     /// <exception cref="DebugEngineException">The launch failed or the runtime didn't initialize.</exception>
     /// <param name="naturalExitTimeout">See <see cref="AttachAndOwn"/>'s parameter doc.</param>
-    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null, string? entryModule = null)
+    public static DebugSession Launch(string program, IReadOnlyList<string> args, string? workingDirectory, IDebugEventSink sink, TimeSpan? naturalExitTimeout = null, string? entryModule = null, IReadOnlyDictionary<string, string>? env = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(args);
@@ -260,7 +260,7 @@ public sealed class DebugSession : IDisposable, IMemberResolver
                 // DrHook-owned pipes, not the inherited fds — which under an MCP stdio server are the
                 // JSON-RPC channel. dbgshim's CreateProcessForLaunch offers no stdio redirection.
                 ThrowIfFailed(
-                    dbgShim.LaunchWithDebuggerPosix(program, args, workingDirectory, TimeSpan.FromSeconds(30),
+                    dbgShim.LaunchWithDebuggerPosix(program, args, workingDirectory, env, TimeSpan.FromSeconds(30),
                         out uint pidPosix, out pUnknown, out stdoutFd, out stderrFd),
                     "DbgShim.LaunchWithDebuggerPosix");
                 try { targetProcess = Process.GetProcessById((int)pidPosix); } catch (ArgumentException) { /* exited already */ }
@@ -274,6 +274,12 @@ public sealed class DebugSession : IDisposable, IMemberResolver
             // Windows: dbgshim CreateProcessForLaunch — the child inherits the debugger's fds. Stdio
             // isolation for the Windows launch path (CreateProcess CREATE_SUSPENDED + STARTUPINFO) is
             // ADR-011 D2 follow-up; macOS-arm64 is the substrate's exercised platform today.
+            // Windows env override is not yet wired (the CreateProcessForLaunch env block lands with the
+            // Phase 9 Windows launch hardening). Fail explicitly rather than silently inheriting — silent
+            // drop is the exact gap this change closes. POSIX (macOS/Linux) applies env above.
+            if (env is { Count: > 0 })
+                throw new PlatformNotSupportedException(
+                    "Launch env override is not yet wired on the Windows launch path (Phase 9 — CreateProcessForLaunch env block). POSIX supports it.");
             string commandLine = BuildCommandLine(program, args);
             ThrowIfFailed(
                 dbgShim.LaunchWithDebugger(commandLine, workingDirectory, TimeSpan.FromSeconds(30), out uint pid, out pUnknown),

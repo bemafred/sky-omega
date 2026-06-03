@@ -56,7 +56,7 @@ public sealed class DrHookTools
         [Description("Line number for the initial breakpoint")] int line,
         [Description("What you expect to observe at this breakpoint")] string hypothesis,
         [Description("Working directory (optional, defaults to current)")] string? cwd = null,
-        [Description("Environment variables as KEY=VALUE strings (e.g. [\"DOTNET_TieredCompilation=0\"])")] string[]? env = null,
+        [Description("Environment variables as KEY=VALUE strings, merged onto the inherited environment (e.g. [\"DOTNET_TieredCompilation=0\"]). Launch/Owned only — an attached target's environment is fixed at its own start.")] string[]? env = null,
         CancellationToken ct = default)
     {
         Dictionary<string, string>? envDict = null;

@@ -253,13 +253,11 @@ public sealed class EngineSteppingSession : IDisposable
 
         try
         {
-            // env override is not yet plumbed through DebugSession.Launch (Phase 3 polish item —
-            // dedicated env block via CreateProcessForLaunch). For now the launched child inherits
-            // our env, which covers the common cases (no per-launch override required).
             // ADR-011 Layer 2: tell the engine the entry assembly so it holds at that module's load
             // (modules loaded, before main) and we arm the breakpoint there — so launch works on
-            // targets that don't self-stop (no Debugger.Break needed).
-            _session = DebugSession.Launch(program, args, cwd, _sink, entryModule: DeriveEntryModule(program, args));
+            // targets that don't self-stop (no Debugger.Break needed). env overrides are merged onto
+            // the inherited environment by the POSIX spawn (BuildChildEnv) — Owned/launch only.
+            _session = DebugSession.Launch(program, args, cwd, _sink, entryModule: DeriveEntryModule(program, args), env: env);
 
             // Capture the launched PID for status reporting. DebugSession.Launch (finding 64)
             // now owns the Process handle internally and kill-firsts on Dispose — no separate

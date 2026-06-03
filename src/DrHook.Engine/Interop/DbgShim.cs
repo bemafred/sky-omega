@@ -283,7 +283,7 @@ internal sealed unsafe class DbgShim : IDisposable
     /// the caller owns draining/closing <paramref name="stdoutFd"/> + <paramref name="stderrFd"/>;
     /// the caller still <c>DebugActiveProcess</c>es to complete the attach (same as the other paths).</summary>
     public int LaunchWithDebuggerPosix(string program, IReadOnlyList<string> args, string? workingDirectory,
-        TimeSpan startupTimeout, out uint pid, out nint pUnknown, out int stdoutFd, out int stderrFd)
+        IReadOnlyDictionary<string, string>? env, TimeSpan startupTimeout, out uint pid, out nint pUnknown, out int stdoutFd, out int stderrFd)
     {
         pid = 0;
         pUnknown = 0;
@@ -294,7 +294,7 @@ internal sealed unsafe class DbgShim : IDisposable
         argv[0] = program;
         for (int i = 0; i < args.Count; i++) argv[i + 1] = args[i];
 
-        int spawnRc = PosixSpawn.SpawnSuspendedRedirected(program, argv, workingDirectory, out int childPid, out int oFd, out int eFd);
+        int spawnRc = PosixSpawn.SpawnSuspendedRedirected(program, argv, workingDirectory, env, out int childPid, out int oFd, out int eFd);
         if (spawnRc != 0) return E_FAIL;
         pid = (uint)childPid;
 

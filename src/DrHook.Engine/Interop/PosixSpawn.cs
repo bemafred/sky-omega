@@ -50,7 +50,7 @@ internal static unsafe class PosixSpawn
     /// caller must arm RegisterForRuntimeStartup, then <see cref="Continue"/> to let the child run, and
     /// owns draining + closing the returned read fds.</summary>
     internal static int SpawnSuspendedRedirected(string file, string[] argv, string? cwd,
-        out int pid, out int stdoutReadFd, out int stderrReadFd)
+        IReadOnlyDictionary<string, string>? env, out int pid, out int stdoutReadFd, out int stderrReadFd)
     {
         pid = 0; stdoutReadFd = -1; stderrReadFd = -1;
 
@@ -82,7 +82,7 @@ internal static unsafe class PosixSpawn
         if (!string.IsNullOrEmpty(cwd)) { cwdPtr = Utf8(cwd); posix_spawn_file_actions_addchdir_np(&fa, cwdPtr); }
 
         byte** cArgv = MarshalArray(argv);
-        byte** cEnvp = MarshalArray(CurrentEnv());
+        byte** cEnvp = MarshalArray(BuildChildEnv(env));
         byte* cFile = Utf8(file);
 
         int childPid;
@@ -124,11 +124,21 @@ internal static unsafe class PosixSpawn
         Marshal.FreeCoTaskMem((nint)arr);
     }
 
-    private static string[] CurrentEnv()
+    /// <summary>The child's environment as a <c>KEY=VALUE</c> array for <c>posix_spawn</c>'s envp:
+    /// the parent's environment with <paramref name="overrides"/> applied on top (inherit-plus-override).
+    /// <paramref name="overrides"/> null/empty reproduces the inherit-only behaviour. POSIX env keys are
+    /// case-sensitive, so the merge uses ordinal comparison.</summary>
+    private static string[] BuildChildEnv(IReadOnlyDictionary<string, string>? overrides)
     {
-        var list = new List<string>();
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (System.Collections.DictionaryEntry e in Environment.GetEnvironmentVariables())
-            list.Add($"{e.Key}={e.Value}");
+            map[(string)e.Key] = e.Value?.ToString() ?? string.Empty;
+        if (overrides is not null)
+            foreach (KeyValuePair<string, string> kv in overrides)
+                map[kv.Key] = kv.Value;   // set or replace — overrides win
+        var list = new List<string>(map.Count);
+        foreach (KeyValuePair<string, string> kv in map)
+            list.Add($"{kv.Key}={kv.Value}");
         return list.ToArray();
     }
 }
