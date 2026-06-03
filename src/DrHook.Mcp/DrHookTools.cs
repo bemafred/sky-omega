@@ -285,9 +285,9 @@ public sealed class DrHookTools
         "Forcibly terminate the target — the ANOMALY escape hatch, NOT normal cleanup. Every invocation is worth " +
         "investigating: a well-behaved target ends via drhook_stop. " +
         "Owned sessions (drhook_launch): SIGTERM with a brief (~200ms) grace, then SIGKILL (DebugSession.Abandon, ADR-008). " +
-        "Borrowed sessions (drhook_attach): NOT YET — force-killing an attached target you don't own is pending ADR-011 " +
-        "finding F-010-1; this returns an error (detach with drhook_detach, or terminate it via your own process management). " +
-        "Requires a hypothesis recording WHY force was needed.")]
+        "Borrowed sessions (drhook_attach): SIGKILL of the attached target — a deliberate force (F-010-1); the substrate " +
+        "holds the death-detection handle and tears the session down cleanly. Prefer drhook_detach to disconnect and " +
+        "leave it running. Requires a hypothesis recording WHY force was needed.")]
     public async Task<string> Kill(
         [Description("WHY force is needed — what state the target is stuck in (e.g. 'eternal loop, ignores SIGTERM'). Every kill records its reason — the anomaly's value.")] string hypothesis,
         CancellationToken ct = default)

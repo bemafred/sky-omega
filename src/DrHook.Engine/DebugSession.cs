@@ -574,24 +574,31 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <see cref="DefaultNaturalExitTimeout"/> (2 seconds) for natural exit. Use Abandon when you
     /// know the target won't end on its own and you've chosen to terminate quickly.</para>
     ///
-    /// <para>No-op on already-Disposed sessions. For Borrowed sessions: Abandon's kill semantics
-    /// don't apply (substrate doesn't own the target); the call falls through to Dispose's
-    /// Borrowed teardown path.</para></summary>
+    /// <para>No-op on already-Disposed sessions. For Borrowed sessions (F-010-1): Abandon force-
+    /// SIGKILLs the attached target via the death-detection handle — a deliberate force-terminate
+    /// (no graceful SIGTERM, since we don't own it), then the dead-target Dispose teardown.</para></summary>
     public void Abandon(TimeSpan? briefGrace = null)
     {
         if (Volatile.Read(ref _disposed) != 0) return;
 
-        TimeSpan grace = briefGrace ?? DefaultAbandonBriefGrace;
-        if (_ownsTarget && _targetProcess is not null && !_targetProcess.HasExited)
+        if (_targetProcess is not null && !_targetProcess.HasExited)
         {
-            // Stage 1: SIGTERM with brief grace — catches well-behaved targets.
-            bool exitedNaturally;
-            try { exitedNaturally = RequestExit(grace); }
-            catch { exitedNaturally = _targetProcess.HasExited; }
+            bool exitedNaturally = false;
+            if (_ownsTarget)
+            {
+                // Owned Stage 1: SIGTERM with brief grace — catches well-behaved targets.
+                TimeSpan grace = briefGrace ?? DefaultAbandonBriefGrace;
+                try { exitedNaturally = RequestExit(grace); }
+                catch { exitedNaturally = _targetProcess.HasExited; }
+            }
 
-            // Stage 2: SIGKILL fallback. The TargetStuckAtDispose anomaly is reserved for
-            // Dispose's default path (where the discipline-default 2s timeout was applied);
-            // Abandon's deliberate fast-escalation doesn't emit it — the caller opted in.
+            // Stage 2: SIGKILL. The fallback for an Owned target that ignored SIGTERM, AND the
+            // direct force-terminate for a Borrowed target (F-010-1) — drhook_kill on an attached
+            // target is a deliberate force, no graceful contract (we don't own it). The death-
+            // detection Process handle is held for both modes (finding 66); Dispose's dead-target
+            // path then tears down cleanly (settle + Detach, no active mscordbi pushes against the
+            // dying target). The TargetStuckAtDispose anomaly is reserved for Dispose's default
+            // path; Abandon's deliberate fast-escalation doesn't emit it — the caller opted in.
             if (!exitedNaturally)
             {
                 TryKillTargetAndSettle();

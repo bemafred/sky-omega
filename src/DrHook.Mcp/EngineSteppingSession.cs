@@ -381,12 +381,7 @@ public sealed class EngineSteppingSession : IDisposable
     {
         if (!IsActive) return Task.FromResult(Error("No active stepping session."));
 
-        if (!_session!.OwnsTarget)
-            return Task.FromResult(Error(
-                "drhook_kill is not yet available for a Borrowed (drhook_attach) target — the substrate does not own " +
-                "an attached target's lifecycle (ADR-011 finding F-010-1). Use drhook_detach to disconnect, or " +
-                "terminate the target via your own process management."));
-
+        bool owned = _session!.OwnsTarget;
         int steps = _stepCount, pid = _targetPid;
         string hyp = _sessionHypothesis, ver = _targetVersion;
         try { _session.Abandon(); }
@@ -397,9 +392,11 @@ public sealed class EngineSteppingSession : IDisposable
         {
             ["status"] = "killed",
             ["hypothesis"] = hypothesis,
-            ["mode"] = "owned",
+            ["mode"] = owned ? "owned" : "borrowed",
             ["pid"] = pid,
-            ["disposition"] = "forcibly terminated (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)",
+            ["disposition"] = owned
+                ? "forcibly terminated (SIGTERM brief-grace → SIGKILL, DebugSession.Abandon)"
+                : "forcibly terminated (SIGKILL — Borrowed force, F-010-1)",
             ["totalSteps"] = steps,
             ["sessionHypothesis"] = hyp,
             ["assemblyVersion"] = ver,
