@@ -1448,9 +1448,11 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// before Detach unwinds. On success the target reparents (launchd / PPID=1 on macOS) and keeps
     /// running un-debugged. Idempotent (shares the _disposed gate, so a later Dispose is a no-op).
     ///
-    /// SCOPE (probe 62): validated for a synchronized target with NO armed breakpoints (Pause-stop
-    /// shape). A breakpoint-stopped target would re-hit its breakpoints during the resume-to-detach;
-    /// deactivating breakpoints before the resume is the breakpoint-variant follow-up, not built here.
+    /// SCOPE: validated for the Pause-stop cell (probe 62) and the breakpoint-stop cell (probe 62b).
+    /// ICorDebug refuses to Detach while breakpoints are active (CORDBG_E_DETACH_FAILED_OUTSTANDING_
+    /// BREAKPOINTS, 0x80131C21), so the live path deactivates them first (ClearBreakpoints). Steppers
+    /// and evals — the sibling OUTSTANDING_* errors — cannot be in flight at a stop, so they need no
+    /// handling here.
     ///
     /// CONSOLE PIPES (deferred second unknown): a launched target's stdout/stderr are DrHook-owned
     /// pipes (D2, BeginConsoleDrain). Unlike the Owned-kill path — where the target is dead and the
@@ -1476,14 +1478,23 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         }
         else
         {
-            // Detach must run against a SYNCHRONIZED target. Probe 62 v1 copied the Borrowed exit-race
-            // recipe (TryResumeForDetach → running → Detach) and Detach returned
-            // CORDBG_E_PROCESS_NOT_SYNCHRONIZED (0x80131302): a pre-resumed target is running, and
-            // Detach rejects a running target. A leave-running target is NOT exiting, so the
-            // stopped-state exit-race the Borrowed pre-resume guards against (probe 12) does not apply
-            // here. The target is already synchronized at the stop we were called from; Quiesce keeps
-            // it synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully —
-            // mscordbi implicit-resumes the target on Detach, so it runs free un-debugged.
+            // Detach must run against a SYNCHRONIZED target with NO outstanding ICorDebug breakpoints:
+            //   - Probe 62 v1: a pre-resume (Borrowed exit-race recipe TryResumeForDetach → running →
+            //     Detach) left the target running and Detach returned CORDBG_E_PROCESS_NOT_SYNCHRONIZED
+            //     (0x80131302). A leave-running target is NOT exiting, so the stopped-state exit-race
+            //     the Borrowed pre-resume guards against (probe 12) does not apply — drop the pre-resume.
+            //   - Probe 62b: with an armed breakpoint, Detach returned
+            //     CORDBG_E_DETACH_FAILED_OUTSTANDING_BREAKPOINTS (0x80131C21) and the target hung at the
+            //     breakpoint (the Terminate that followed then failed CORDBG_E_ILLEGAL_SHUTDOWN_ORDER
+            //     0x80131C15). ICorDebug refuses to detach while breakpoints are active, so deactivate
+            //     them first (ClearBreakpoints → ICorDebugBreakpoint.Activate(FALSE)). The sibling
+            //     OUTSTANDING_* errors — evals (0x1c18) and steppers (0x1c19) — cannot be in flight at
+            //     a stop: a func-eval is synchronous, and a stepper is consumed by the StepComplete
+            //     that produced the stop.
+            // The target is synchronized at the stop we were called from; ClearBreakpoints + Quiesce
+            // keep it synchronized (finding 14: RC thread not mid-flush) and Detach then detaches fully
+            // — mscordbi implicit-resumes the target on Detach, so it runs free un-debugged.
+            ClearBreakpoints();
             Quiesce();
             Detach();
         }

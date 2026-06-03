@@ -26,6 +26,7 @@ for (int beat = 1; beat <= 600; beat++)
 {
     File.WriteAllText(tmp, beat.ToString(CultureInfo.InvariantCulture));
     File.Move(tmp, beatFile, overwrite: true);
+    GC.KeepAlive(beat);   // BEAT_HERE — probe 62b arms a line breakpoint here (62 ignores it)
     Thread.Sleep(100);
 }
 

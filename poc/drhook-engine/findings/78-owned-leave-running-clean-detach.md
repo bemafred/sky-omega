@@ -43,7 +43,7 @@ The probe now **falsifies (code 10)** if any `UnexpectedHResult` anomaly surface
 **Validated:** Owned + entry-module hold-gate + **Pause-stop** + clean leave-running `Detach`, macOS-arm64, 5/5.
 
 **Deferred (named, not hidden):**
-1. **Breakpoint-stop variant** — the MCP-realistic case (the agent detaches from a breakpoint stop). v2 does not pre-resume, so `Detach` removes the breakpoint and resumes; expected to work, but **untested** → probe 62b before MCP wiring.
+1. **Breakpoint-stop variant** — **CLOSED by finding 79 / probe 62b.** It did *not* "just work": ICorDebug `Detach` refuses an outstanding breakpoint (`CORDBG_E_DETACH_FAILED_OUTSTANDING_BREAKPOINTS`, `0x80131C21`) and hung the target — almost certainly the actual lost-night bug. Fix: deactivate breakpoints (`ClearBreakpoints`) before `Quiesce → Detach`.
 2. **Console-pipe survival** — a leave-running target that writes to `Console` vs. the D2 DrHook-owned pipes (`EPIPE`/`SIGPIPE` on teardown). Probe 62 isolates this out via a file-only-heartbeat target. The console handover (a PTY, D4) is the separate unknown.
 3. **MCP wiring** — `DetachAsync` for Owned still returns the "not yet available" error. Wiring it to `DetachLeaveRunning` is the now-green-lit next increment (after 62b).
 4. **Cross-platform** (Windows/Linux) — Phase 9.
