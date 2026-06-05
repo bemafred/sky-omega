@@ -4,7 +4,7 @@ date: 2026-06-04
 status: draft
 ---
 
-*Your AI coding agent can write the code and run the tests. What it cannot do is watch the code run. Over about ten weeks we built the substrate that closes that gap — and discovered, building it, that a debugger whose user is a reasoning loop instead of a human eye is a different instrument than the one in your IDE. This is the trajectory of DrHook: a dozen decision records, more than sixty probes, over eighty dated findings, and one wrong answer that sounded completely right. The technical asides are marked; you can skip every one and still get the whole story.*
+*Your AI coding agent can write the code and run the tests. What it cannot do is watch the code run. Over about ten weeks we built the substrate that closes that gap — and discovered, building it, that a debugger whose user is a reasoning loop instead of a human eye is a different instrument than the one in your IDE. This is the trajectory of DrHook: a [dozen decision records](../adrs/drhook/README.md), more than sixty probes, [over eighty dated findings](../../poc/drhook-engine/findings/), and one wrong answer that sounded completely right. The technical asides are marked; you can skip every one and still get the whole story.*
 
 ---
 
@@ -16,13 +16,13 @@ Green tests confirm the behavior you *expected*. They are silent on everything y
 
 The agent is blind to running code.
 
-The fix is a third verb. **Compile → Test → Inspect.** Not to replace tests — to make execution behavior *queryable* instead of *inferred*. That is the entire thesis of DrHook, written down on 2026‑03‑22 as the substrate's founding decision: runtime observation is the missing step in the AI coding loop, and adding it closes two gaps at once — the *diagnostic* gap (the hangs and exhaustions that emit nothing) and the *epistemic* gap (green tests never surfacing the unexpected).
+The fix is a third verb. **Compile → Test → Inspect.** Not to replace tests — to make execution behavior *queryable* instead of *inferred*. That is the entire thesis of DrHook, written down on 2026‑03‑22 as the substrate's [founding decision](../adrs/ADR-004-drhook-runtime-observation-substrate.md): runtime observation is the missing step in the AI coding loop, and adding it closes two gaps at once — the *diagnostic* gap (the hangs and exhaustions that emit nothing) and the *epistemic* gap (green tests never surfacing the unexpected).
 
 DrHook is the thing that adds the verb: an MCP server — the standard way an AI assistant plugs into an external tool — that lets the agent attach to a live .NET process, set breakpoints, step through code, read variables at a stopped frame, and report back what it found. A debugger, in other words. But the user holding it is not a person.
 
 ## The cheap version, and what it cost
 
-We did the unglamorous thing first: we proved the idea before building the substrate. A throwaway proof of concept (2026‑03‑21) demonstrated the whole hypothesis end to end — detecting a tight loop by sampling threads, descending into a recursive call, breaking on every thrown exception, inspecting mutable state at depth. Seven written observation sessions, each one confirming that *Inspect* surfaced something *Test* could not. The hypothesis held. Only then did DrHook become a real substrate.
+We did the unglamorous thing first: we proved the idea before building the substrate. A throwaway [proof of concept](https://github.com/bemafred/DrHook.Poc) (2026‑03‑21) demonstrated the whole hypothesis end to end — detecting a tight loop by sampling threads, descending into a recursive call, breaking on every thrown exception, inspecting mutable state at depth. Seven written observation sessions, each one confirming that *Inspect* surfaced something *Test* could not. The hypothesis held. Only then did DrHook become a real substrate.
 
 Version 1 wrapped an existing engine: **netcoredbg**, Samsung's open-source .NET debugger. This was the right call to make and it carried DrHook through its entire first phase. It also came with a bill. netcoredbg is an external binary we don't control; its macOS/Apple-Silicon support had been dormant since 2023; and one capability — evaluating an expression at a breakpoint, the thing that turns "show me this variable" into "tell me whether `order.Total > limit` right now" — simply hung.
 
@@ -38,7 +38,7 @@ It was falsified by a single question: *does expression evaluation work in any o
 
 It does. JetBrains Rider, same Mac, same .NET runtime, same target process, evaluates expressions without blinking. If the runtime were broken at the platform level, Rider would fail too. It doesn't. One observation collapsed the entire elaborate story — and relocated the bug from "the platform" (unfixable, terminal) to "this one debugger's implementation" (fixable, if we owned the layer).
 
-The decision record that captured this named the failure mode precisely, because it is a failure mode worth naming: **epistemic depth without epistemic breadth.** The investigation went deep into one hypothesis without ever checking whether the hypothesis was *necessary*. The simplest discriminating test — try another debugger — was never run, or even proposed. And the thoroughness itself was the trap: it functioned as an *epistemic lubricant*, manufacturing confidence in a conclusion that had never been grounded.
+The [decision record](../adrs/drhook/ADR-005-expression-evaluation-diagnosis-correction.md) that captured this named the failure mode precisely, because it is a failure mode worth naming: **epistemic depth without epistemic breadth.** The investigation went deep into one hypothesis without ever checking whether the hypothesis was *necessary*. The simplest discriminating test — try another debugger — was never run, or even proposed. And the thoroughness itself was the trap: it functioned as an *epistemic lubricant*, manufacturing confidence in a conclusion that had never been grounded.
 
 This is the human-AI collaboration in one frame, and it's the same pattern every good instance of this work runs on: the AI side built the elaborate, plausible, wrong answer; the human side asked the one falsifying question. Neither half does this reliably alone. The lesson isn't "AI gets things wrong" — it's that *a thorough-sounding answer with no falsifying test behind it is not evidence*, no matter who produced it, and that the cheapest discriminating experiment beats the most sophisticated causal narrative every time.
 
@@ -46,7 +46,7 @@ It also handed us our mandate. The bug was fixable. We just had to own the layer
 
 ## Building the instrument we'd own
 
-So we replaced the engine. **DrHook.Engine** talks to the .NET debugging interfaces directly — BCL plus P/Invoke, no external debugger process, zero binaries we don't control. Sovereignty restored, and the failure class that had cost us a workstream became ours to fix instead of ours to work around.
+So we replaced the engine. [**DrHook.Engine**](../adrs/drhook/ADR-006-drhook-engine.md) talks to the .NET debugging interfaces directly — BCL plus P/Invoke, no external debugger process, zero binaries we don't control. Sovereignty restored, and the failure class that had cost us a workstream became ours to fix instead of ours to work around.
 
 The build was not a straight line, and the most interesting part is a thing we'd never have learned by reading documentation.
 
@@ -72,7 +72,7 @@ Three answers fell out that a human IDE never has to think about.
 
 **3. The hypothesis seam — the idea that makes DrHook unlike any IDE debugger.** DrHook *requires* the agent to state a hypothesis before any operation that changes or reads the target's state. Not "show me `count`" but "I expect `count` to be 3 here — show me." Then it shows what's actually there.
 
-This is not ceremony. It is, in the substrate's own words:
+This is not ceremony. It is, in [the substrate's own words](../adrs/drhook/ADR-010-mcp-tool-surface-redesign.md):
 
 > *Hypothesis is DrHook's distinguishing substrate capability, not a discipline tax. VS, Rider, VS Code keep hypothesis in the developer's head — recorded nowhere, recoverable by no analyzer. DrHook makes hypothesis an explicit substrate input so every `(hypothesis, observation)` pair becomes a record the cognitive layer will eventually analyze.*
 
@@ -94,9 +94,9 @@ The strongest validation, though, is the one a debugger is uniquely able to give
 
 ## What it opens
 
-The lifecycle now has a deliberate vocabulary: **stop**, **detach**, **kill** — and *kill* is filed as an anomaly tool, not a cleanup step, because a well-built process ends on its own and reaching for the kill signal is always worth investigating. That single naming choice encodes a whole stance on how software should behave.
+The lifecycle now has a [deliberate vocabulary](../adrs/drhook/ADR-011-lifecycle-console-dashboard.md): **stop**, **detach**, **kill** — and *kill* is filed as an anomaly tool, not a cleanup step, because a well-built process ends on its own and reaching for the kill signal is always worth investigating. That single naming choice encodes a whole stance on how software should behave.
 
-The newest move, proposed as this is written and not yet built, points at where DrHook is going: a **surface-agnostic model of debug state**, so the same live picture of a stopped program can drive a terminal dashboard, a desktop GUI, and — eventually — the interaction surfaces of the broader system DrHook belongs to. Put a runtime-observation substrate next to a presentation layer and you have, structurally, an IDE. But one built for an agent first and a human second, with the human looking over the agent's shoulder rather than the other way around. The seam between the state and its views is being shaped now, so the views can plug in later without a rewrite.
+The newest move, proposed as this is written and not yet built, points at where DrHook is going: a [**surface-agnostic model of debug state**](../adrs/drhook/ADR-012-debug-state-surfaces.md), so the same live picture of a stopped program can drive a terminal dashboard, a desktop GUI, and — eventually — the interaction surfaces of the broader system DrHook belongs to. Put a runtime-observation substrate next to a presentation layer and you have, structurally, an IDE. But one built for an agent first and a human second, with the human looking over the agent's shoulder rather than the other way around. The seam between the state and its views is being shaped now, so the views can plug in later without a rewrite.
 
 That's the thread worth pulling on. A debugger for an AI is not a smaller version of the debugger in your IDE. It's a different instrument, because the reader is a reasoning loop, not an eye — and the moment you take that seriously, the tool names become an API, the program's output becomes a protocol hazard, and the developer's private hunch becomes a recorded, queryable input.
 
@@ -105,3 +105,20 @@ Your agent could already write the code and run the tests. Now it can watch the 
 ---
 
 *DrHook is one of the runtime substrates of Sky Omega, built in a sustained human-AI engineering collaboration — the "we" in this article is load-bearing. The decision records, probes, and findings referenced here are public in the repository; every claim has a dated artifact behind it. The discipline is the story; the artifacts are the evidence.*
+
+---
+
+## The artifacts behind this
+
+Every claim above has a dated record in the public repository — [github.com/bemafred/sky-omega](https://github.com/bemafred/sky-omega).
+
+- **[DrHook ADR index](../adrs/drhook/README.md)** — all twelve decision records, with their EEE status (Proposed → Accepted → Completed).
+- **[ADR-004](../adrs/ADR-004-drhook-runtime-observation-substrate.md)** — the founding decision: runtime observation as the missing step in the AI coding loop.
+- **[ADR-005](../adrs/drhook/ADR-005-expression-evaluation-diagnosis-correction.md)** — the pivot: the bug was netcoredbg's, not the platform's ("epistemic depth without epistemic breadth").
+- **[ADR-006](../adrs/drhook/ADR-006-drhook-engine.md)** — DrHook.Engine: the native ICorDebug rewrite, BCL-only, rebuilt from a probe-by-probe evidence pack.
+- **[ADR-010](../adrs/drhook/ADR-010-mcp-tool-surface-redesign.md)** — the tool-surface redesign, including the hypothesis seam.
+- **[ADR-011](../adrs/drhook/ADR-011-lifecycle-console-dashboard.md)** — lifecycle (stop / detach / kill) and console-I/O isolation.
+- **[ADR-012](../adrs/drhook/ADR-012-debug-state-surfaces.md)** — debug-state surfaces (proposed; not yet built).
+- **[The engine probes and findings](../../poc/drhook-engine/findings/)** — the dated lab notebook: protocol surveys, probe outcomes, and audits.
+- **[DrHook.Poc](https://github.com/bemafred/DrHook.Poc)** — the original proof of concept that validated Compile → Test → Inspect.
+- **[netcoredbg](https://github.com/Samsung/netcoredbg)** (Samsung, MIT) — the engine that carried DrHook's first phase.
