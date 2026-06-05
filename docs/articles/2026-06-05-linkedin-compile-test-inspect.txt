@@ -1,0 +1,85 @@
+============================================================
+LINKEDIN POST — paste-ready (no markdown)
+Companion to: docs/articles/2026-06-04-compile-test-inspect.md
+Publish: any day. The body uses no relative-time phrasing, so
+it needs no date edit before posting. Body is 2,958 characters —
+one feed post, under LinkedIn's 3,000 limit.
+============================================================
+
+PUBLISHING NOTES (do not paste):
+
+* LinkedIn auto-renders bare URLs as clickable. Both URLs in the
+  post will be clickable on paste — preview them before publishing.
+* LinkedIn truncates with "see more" around 210 characters. The
+  first line ("...What it can't do is watch the code run.") is the
+  whole hook and stands alone before the cut. Verified strong.
+* No hashtags in the body. Add 2-3 at the bottom only if you want
+  algorithmic distribution: #AI #SoftwareEngineering #DotNet
+  #DeveloperTools #AIAgents — otherwise leave clean.
+* The post leads partly on the "wrong answer that sounded right"
+  beat — the AI side's confident-but-wrong diagnosis. The "we"
+  framing makes it the collaboration's story, not a confession.
+  Confirm that's the public face you want before posting.
+* Image: a terminal showing a DrHook hypothesis + the observation
+  it returned (expected vs. actual) is the strongest possible
+  attachment — it shows the seam in one glance. Optional.
+
+============================================================
+POST BODY (paste from here down)
+============================================================
+
+Your AI coding agent can write the code and run the tests. What it can't do is watch the code run.
+
+We spent ten weeks building the thing that lets it — and found that a debugger for an AI is a different instrument than the one in your IDE.
+
+AI agents loop: compile, test, stop when the tests pass. But green tests only confirm what you expected. A deadlock, an infinite loop, a process pinned at 100% emit no signal a log-reading agent can see — so it reasons about runtime behavior from the only thing it can read: the source text. Exactly the move that produces confident, plausible, wrong code.
+
+The fix is a third verb: compile, test, INSPECT. DrHook adds it — an agent attaches to a live .NET process, sets breakpoints, steps, reads variables at a stopped frame, and reports what it found instead of guessing.
+
+—
+
+The wrong answer that sounded right
+
+Early on, one capability kept hanging. Asked why, the AI side of this collaboration gave a confident diagnosis: the platform is broken. Six citations, a clean causal chain — it read like diligence.
+
+One question falsified it: does this work in any other debugger on the same machine? It did. The bug wasn't the platform's — it was local, and fixable. The lesson: a thorough-sounding answer with no falsifying test behind it isn't evidence, whoever produced it.
+
+—
+
+A debugger whose user isn't human
+
+When the user is a reasoning loop, not a person at a screen, three things change:
+
+• The tool names are an API — a backwards name isn't a style nit, it's a bug: the agent decides what to call by reading them.
+• The program's own output becomes a protocol hazard, not a convenience.
+• And the one no IDE has: DrHook makes the agent state a hypothesis before it looks — not "show me count" but "I expect count to be 3 here — show me." Then it shows what's actually there.
+
+Every (expected, observed) pair becomes a record — a debugger that asks what you expect FIRST, because the gap between expected and observed is the signal the loop should learn from.
+
+—
+
+What "we" means
+
+One human architect and one persistent AI collaborator — spare hours, shared discipline. When the external debugger we started on cost us control, we replaced it with our own: BCL-only. A dozen decision records, over eighty dated findings, all public. The wrong-answer story is the template: one side builds the elaborate answer, the other asks the falsifying question. Neither half does it alone.
+
+Untrusted nothing is just absence. Checked nothing is evidence — Kjell Silverstein's poem, built into a debugger.
+
+—
+
+Next, a presentation layer makes this, structurally, an IDE — built for an agent first. But the substrate comes first.
+
+The full write-up:
+https://github.com/bemafred/sky-omega/blob/main/docs/articles/2026-06-04-compile-test-inspect.md
+
+The repo (MIT):
+https://github.com/bemafred/sky-omega
+
+If you build AI systems that need to see what their code actually does, the artifacts are open. Curious is enough.
+
+============================================================
+END OF BODY
+============================================================
+
+DrHook's trajectory is in the open: a dozen decision records under
+docs/adrs/drhook/, and the probe-by-probe findings under
+poc/drhook-engine/findings/. Every claim has a dated artifact behind it.
