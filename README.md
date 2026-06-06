@@ -6,7 +6,7 @@
 
 *A home for AI & Shared Knowledge*
 
-**Current release: [Sky Omega 1.8.2](CHANGELOG.md)** · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired) · **three paired Mercury measurements** on the same substrate generation:
+**Current release: [Sky Omega 1.8.3](CHANGELOG.md)** · Mercury substrate production-validated across the 1.7 line · DrHook substrate-independence reached at 1.8.2 (netcoredbg retired), with the lifecycle triad + console-I/O isolation + 22-tool MCP surface landing at 1.8.3 · **three paired Mercury measurements** on the same substrate generation:
 - [cycle 10 Phase 3 r4](docs/validations/cycle10-phase3-r4-21b-2026-05-12.md) — **21.3 B full** Wikidata, 23 h 57 m end-to-end (2026-05-13)
 - [truthy r1](docs/validations/truthy-r1-2026-05-14.md) — **8.17 B truthy** Wikidata, 14 h 13 m end-to-end (2026-05-14)
 - [WGPB step C](docs/validations/wgpb-step-c-2026-05-16.md) — **~150 M 2018 reduced-truthy** Wikidata, 4 m 30 s end-to-end + **849/850 WGPB queries in 4 m 43 s** (2026-05-16)
@@ -209,12 +209,12 @@ Everything below has code in `src/`, tests, and benchmarks.
 | **Mercury.Pruning**    | Dual-instance pruning with copy-and-switch pattern                                         |
 | **Mercury MCP**        | Claude integration with persistent semantic memory                                         |
 | **Mercury CLI**        | Interactive REPL with persistent store, global tool install                                 |
-| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots. Substrate-independence reached at 1.8.2 (netcoredbg retired). Forty PoC probes validating each capability on macOS/arm64; production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Proposed 2026-05-23). |
-| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP) — 17 stepping tools (attach, launch, breakpoints + conditions, exception filters, locals + field/array inspection, step, continue, pause) + processes + snapshot, all backed by DrHook.Engine. |
+| **DrHook.Engine**      | Runtime observation substrate — BCL + P/Invoke + source-gen COM, 6,231 lines. ICorDebug via per-RID `libdbgshim`; EventPipe for process listing + thread/stack snapshots. Substrate-independence reached at 1.8.2 (netcoredbg retired). PoC probes through 63 with 81 dated findings validating each capability on macOS/arm64 (single-platform so far). Production-suitability sequenced under [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Accepted). |
+| **DrHook MCP**         | MCP server for .NET runtime inspection (peer to Mercury MCP) — 22 tools backed by DrHook.Engine: session lifecycle (launch / attach / stop / detach / kill), execution control (continue / pause / step over / into / out), breakpoints (source / function / exception with subclass filtering + condition / hit-count / logpoint, list / remove / clear), `locals` (field + array inspection), `processes`, `snapshot`, and console / log / anomaly drains. Tool names follow IDE-debugger convention ([ADR-010](docs/adrs/drhook/ADR-010-mcp-tool-surface-redesign.md)); every state-changing or state-reading tool takes a `hypothesis`. |
 
 ## 🔭 Architectural Vision
 
-The agent architecture that Mercury is being built to support. These components begin in **Sky Omega 1.8** — the cognitive-layers entry point — per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26).
+The agent architecture that Mercury and DrHook are being built to support. The **Sky Omega 1.8** line opens the cognitive-layers entry point per the amended [version-line model](docs/roadmap/production-hardening-1.8.md) (2026-04-26); in practice the early 1.8.x releases (1.8.1 → 1.8.3) first completed DrHook's substrate-independence and lifecycle hardening, so the cognitive layers below begin landing later in the 1.8.x line.
 
 | Component                      | Role                                                                                        |
 |--------------------------------|---------------------------------------------------------------------------------------------|

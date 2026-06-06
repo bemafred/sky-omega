@@ -212,7 +212,7 @@ SkyOmega.sln
 │   │   ├── Interop/         # CorDebug COM surface, MetadataResolver, Eval, Variables, Frames, Breakpoints, Stepping, DbgShim, ManagedCallbackHost
 │   │   ├── Diagnostics/     # ProcessAttacher, StackInspector (EventPipe)
 │   │   └── Observation/     # ProcessInspector
-│   ├── DrHook.Mcp/          # MCP server for .NET runtime inspection — 17 stepping tools + processes + snapshot, all backed by DrHook.Engine
+│   ├── DrHook.Mcp/          # MCP server for .NET runtime inspection — 22 tools (lifecycle + stepping + breakpoints + drains + processes + snapshot), all backed by DrHook.Engine
 │   │
 │   └── SkyOmega.Bcl/        # BCL extensions (ChunkedList/ChunkedArray, BitVector, SplitMix64Hash)
 ├── tests/
