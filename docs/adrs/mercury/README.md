@@ -47,3 +47,5 @@
 | [ADR-042](ADR-042-mphf-construction-memory-adaptive-sizing.md) | MPHF Construction Memory Adaptive Sizing — Substrate-Correct Data Shapes | Completed (1.7.60 Parts 1+4, 1.7.62 Parts 2+3, 1.7.64 Part 5, 2026-05-16) |
 | [ADR-043](ADR-043-metric-emission-decoupling.md) | Metric Emission Decoupling — Bounded Staleness for Live Observability under Shared-Disk Pressure | Completed (1.7.74, 2026-05-17) |
 | [ADR-044](ADR-044-sparql-update-literal-canonicalization.md) | SPARQL UPDATE Literal Escape Canonicalization — Atom-Store Identity Across Ingestion Paths | Completed (1.7.73, 2026-05-17) |
+| [ADR-045](ADR-045-graph-clause-feature-parity.md) | One Pattern Path — Eliminate the Divergent GRAPH Parse/Execution Path (a default graph is also a graph) | Accepted (2026-06-06) |
+| [ADR-046](ADR-046-multi-operation-update-facade.md) | Multi-operation SPARQL UPDATE at the Engine Facade (one update path; single = N=1) | Accepted (2026-06-06) |
