@@ -1,14 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Storage;
 using Xunit;
 using Xunit.Abstractions;
+using ExprValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
 
 namespace SkyOmega.Mercury.Tests.Sparql;
 
@@ -26,11 +29,15 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 /// shipping engine's DEFAULT-graph baseline for the unwrapped query. The divergence is dissolved by construction —
 /// there is no GRAPH-only evaluation path to be wrong.
 ///
-/// THIS INCREMENT covers the non-expression spine: BGP scan / GRAPH / nested group / UNION / OPTIONAL (left join) /
-/// single-variable VALUES (inline-data join). It proves union, optional and values (3 of the 4 RED cases). BIND
-/// and FILTER (which reuse <c>BindExpressionEvaluator</c> / <c>FilterEvaluator</c> over the engine's binding form)
-/// are the next evaluator increment. The walker is a correctness MODEL (heap solution bags, not zero-GC); the
-/// production cutover reimplements it zero-GC over BindingTable and wires it into <see cref="SparqlEngine"/>.
+/// THE WALKER covers the full spine: BGP scan / GRAPH / nested group / UNION / OPTIONAL (left join) /
+/// single-variable VALUES (inline-data join) / BIND / FILTER. BIND and FILTER reuse the REAL
+/// <c>BindExpressionEvaluator</c> / <c>FilterEvaluator</c> — matched terms are bound RAW as String exactly as the
+/// engine does (`STR`'s bracket-stripping and PNAME expansion are the evaluators' job, given the prologue prefixes),
+/// so the proof carries real expression semantics. All 4 RED gate cases (bind, values, optional, union) plus the
+/// FILTER cases now go GREEN through this one path. The walker is a correctness MODEL (heap solution bags, not
+/// zero-GC); the production cutover reimplements it zero-GC over BindingTable and wires it into
+/// <see cref="SparqlEngine"/>, then deletes the divergent path. Still to add before cutover: MINUS / EXISTS /
+/// sub-SELECT / SERVICE / property paths (each throws <c>NotSupportedException</c> today rather than mis-evaluating).
 /// </summary>
 public class GraphTreeEvaluatorTests : IDisposable
 {
@@ -71,10 +78,17 @@ public class GraphTreeEvaluatorTests : IDisposable
     }
 
     [Theory]
+    // Non-expression spine (first evaluator increment):
     [InlineData("bgp", "SELECT ?s ?o WHERE { ?s <urn:p> ?o }")]
     [InlineData("union", "SELECT ?s WHERE { { ?s <urn:p> ?o } UNION { ?s <urn:q> ?o } }")]
     [InlineData("optional", "SELECT ?s ?x WHERE { ?s <urn:p> ?o OPTIONAL { ?s <urn:q> ?x } }")]
     [InlineData("values", "SELECT ?o WHERE { VALUES ?s { <urn:a> } ?s <urn:p> ?o }")]
+    // Expression spine (this increment): BIND is the 4th RED gate case (BIND-in-GRAPH parse-fails on shipping);
+    // FILTER cases reuse the real FilterEvaluator (the PNAME case also exercises prologue prefix expansion).
+    [InlineData("bind", "SELECT ?l WHERE { ?s <urn:p> ?o BIND(STR(?o) AS ?l) }")]
+    [InlineData("filter-object-iri", "SELECT ?s WHERE { ?s <urn:p> ?o FILTER(?o = <urn:v1>) }")]
+    [InlineData("filter-subject-full-iri", "SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = <urn:a>) }")]
+    [InlineData("filter-subject-pname", "PREFIX ex: <urn:> SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = ex:a) }")]
     public void GraphWrapped_ThroughTheUniformWalker_EqualsTheDefaultGraphBaseline(string name, string query)
     {
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
@@ -83,13 +97,16 @@ public class GraphTreeEvaluatorTests : IDisposable
         var projection = baseline.Variables!;
         var expected = Canonicalize(baseline.Rows, projection);
 
+        // Prologue prefixes for FILTER PNAME expansion come from the ORIGINAL query (offsets into it).
+        var prefixes = ExtractPrefixes(query);
+
         // The new path on the GRAPH-WRAPPED query: recursive parser → uniform walker (active graph = mirror).
-        // The projection comes from the ORIGINAL query — the mirrored form fails to parse on the shipping engine.
+        // The projection/prefixes come from the ORIGINAL query — the mirrored form may fail to parse on shipping.
         string mirrored = MirrorWhereIntoGraph(query, MirrorGraph);
-        var mirroredResult = EvaluateThroughTreeWalker(mirrored, projection);
+        var mirroredResult = EvaluateThroughTreeWalker(mirrored, projection, prefixes, query);
 
         // And the new path on the UNWRAPPED query (active graph = default) — same evaluator, one path.
-        var defaultResult = EvaluateThroughTreeWalker(query, projection);
+        var defaultResult = EvaluateThroughTreeWalker(query, projection, prefixes, query);
 
         _output.WriteLine($"[{name}] baseline={Show(expected)}");
         _output.WriteLine($"  mirrored(<m>) via walker = {Show(mirroredResult)}");
@@ -102,7 +119,8 @@ public class GraphTreeEvaluatorTests : IDisposable
     }
 
     /// <summary>Parse a query's WHERE group with the recursive parser and walk it with the uniform evaluator.</summary>
-    private List<string> EvaluateThroughTreeWalker(string query, string[] projection)
+    private List<string> EvaluateThroughTreeWalker(string query, string[] projection,
+        PrefixMapping[]? prefixes, string prefixSource)
     {
         string whereGroup = ExtractWhereGroup(query);
         var buffer = new byte[PatternSlot.Size * 256];
@@ -110,9 +128,31 @@ public class GraphTreeEvaluatorTests : IDisposable
         var parser = new SparqlParser(whereGroup.AsSpan());
         int root = parser.ParsePatternTree(ref pa);
 
-        var evaluator = new GraphTreeEvaluator(_store, whereGroup);
+        var evaluator = new GraphTreeEvaluator(_store, whereGroup, prefixes, prefixSource);
         var solutions = evaluator.Evaluate(ref pa, root);
         return Canonicalize(solutions, projection);
+    }
+
+    /// <summary>Recover the prologue prefixes (offsets into <paramref name="query"/>) via the shipping parser.</summary>
+    private static PrefixMapping[]? ExtractPrefixes(string query)
+    {
+        var parser = new SparqlParser(query.AsSpan());
+        var parsed = parser.ParseQuery();
+        int count = parsed.Prologue.PrefixCount;
+        if (count == 0) return null;
+        var prefixes = new PrefixMapping[count];
+        for (int i = 0; i < count; i++)
+        {
+            var (prefixStart, prefixLength, iriStart, iriLength) = parsed.Prologue.GetPrefix(i);
+            prefixes[i] = new PrefixMapping
+            {
+                PrefixStart = prefixStart,
+                PrefixLength = prefixLength,
+                IriStart = iriStart,
+                IriLength = iriLength
+            };
+        }
+        return prefixes;
     }
 
     // ── Helpers shared with the gate (kept local so each test file reads self-contained) ───────────────
@@ -177,11 +217,15 @@ internal sealed class GraphTreeEvaluator
 {
     private readonly QuadStore _store;
     private readonly string _source;
+    private readonly PrefixMapping[]? _prefixes;
+    private readonly string _prefixSource;
 
-    public GraphTreeEvaluator(QuadStore store, string source)
+    public GraphTreeEvaluator(QuadStore store, string source, PrefixMapping[]? prefixes = null, string? prefixSource = null)
     {
         _store = store;
         _source = source;
+        _prefixes = prefixes;
+        _prefixSource = prefixSource ?? source;
     }
 
     public List<Dictionary<string, string>> Evaluate(ref PatternArray pa, int root)
@@ -198,9 +242,14 @@ internal sealed class GraphTreeEvaluator
         var e = pa.EnumerateDirectChildren(headerIndex);
         while (e.MoveNext()) children.Add(e.CurrentIndex);
 
+        // Patterns and BINDs are positional joins; FILTER is scoped to the whole group, so defer it to the end.
         var current = input;
         foreach (int ci in children)
-            current = JoinStep(ref pa, ci, activeGraph, current);
+            if (pa[ci].Kind != PatternKind.Filter)
+                current = JoinStep(ref pa, ci, activeGraph, current);
+        foreach (int ci in children)
+            if (pa[ci].Kind == PatternKind.Filter)
+                current = ApplyFilter(ref pa, ci, current);
         return current;
     }
 
@@ -249,9 +298,11 @@ internal sealed class GraphTreeEvaluator
             }
             case PatternKind.ValuesHeader:
                 return ValuesJoin(ref pa, childIndex, input);
+            case PatternKind.Bind:
+                return BindStep(ref pa, childIndex, input);
             default:
                 throw new NotSupportedException(
-                    $"{kind} is a later evaluator increment (BIND/FILTER reuse the expression evaluators; MINUS/EXISTS/subquery follow).");
+                    $"{kind} is a later evaluator increment (MINUS/EXISTS/subquery/paths follow).");
         }
     }
 
@@ -330,6 +381,75 @@ internal sealed class GraphTreeEvaluator
             }
         return output;
     }
+
+    /// <summary>BIND: extend each solution with the evaluated expression, via the real <see cref="BindExpressionEvaluator"/>.</summary>
+    private List<Dictionary<string, string>> BindStep(ref PatternArray pa, int bindIndex,
+        List<Dictionary<string, string>> input)
+    {
+        var slot = pa[bindIndex];
+        string exprText = _source.Substring(slot.BindExprStart, slot.BindExprLength);
+        string key = VarName(_source.Substring(slot.BindVarStart, slot.BindVarLength));
+
+        var output = new List<Dictionary<string, string>>();
+        foreach (var sol in input)
+        {
+            Span<Binding> store = new Binding[64];
+            Span<char> stringBuffer = new char[8192];
+            var table = new BindingTable(store, stringBuffer);
+            Populate(ref table, sol);
+
+            var evaluator = new BindExpressionEvaluator(exprText.AsSpan(),
+                table.GetBindings(), table.Count, table.GetStringBuffer());
+            string rendered = Render(evaluator.Evaluate());
+
+            output.Add(new Dictionary<string, string>(sol) { [key] = rendered });
+        }
+        return output;
+    }
+
+    /// <summary>FILTER: keep solutions for which the constraint holds, via the real <see cref="FilterEvaluator"/>.</summary>
+    private List<Dictionary<string, string>> ApplyFilter(ref PatternArray pa, int filterIndex,
+        List<Dictionary<string, string>> input)
+    {
+        var slot = pa[filterIndex];
+        string exprText = _source.Substring(slot.FilterStart, slot.FilterLength);
+
+        var output = new List<Dictionary<string, string>>();
+        foreach (var sol in input)
+        {
+            Span<Binding> store = new Binding[64];
+            Span<char> stringBuffer = new char[8192];
+            var table = new BindingTable(store, stringBuffer);
+            Populate(ref table, sol);
+
+            var evaluator = new FilterEvaluator(exprText.AsSpan());
+            bool pass = _prefixes is not null
+                ? evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan())
+                : evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer());
+            if (pass) output.Add(sol);
+        }
+        return output;
+    }
+
+    /// <summary>
+    /// Populate a transient binding table from a solution, mirroring the engine exactly: matched terms are bound
+    /// RAW as String (no bracket/quote stripping — that is the expression evaluators' job) and the variable name
+    /// carries its leading '?'.
+    /// </summary>
+    private static void Populate(ref BindingTable table, Dictionary<string, string> sol)
+    {
+        foreach (var kv in sol)
+            table.Bind(("?" + kv.Key).AsSpan(), kv.Value.AsSpan());
+    }
+
+    /// <summary>Render a BIND result to the string form the result set would carry.</summary>
+    private static string Render(Value value) => value.Type switch
+    {
+        ExprValueType.Integer => value.IntegerValue.ToString(CultureInfo.InvariantCulture),
+        ExprValueType.Double => value.DoubleValue.ToString("G", CultureInfo.InvariantCulture),
+        ExprValueType.Boolean => value.BooleanValue ? "true" : "false",
+        _ => value.StringValue.ToString(),
+    };
 
     private static string VarName(string termText) => termText.TrimStart('?');
 }
