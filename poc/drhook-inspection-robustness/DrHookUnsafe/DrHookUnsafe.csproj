@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- DrHook isolation probe, round 2 (ADR-007). Common shapes were all safe at depth 2.
+       Remaining suspect: a walked reference type holding an unsafe/native pointer field
+       (QuadStore's mmap base pointer shape). List<int> already proved class-walking is safe,
+       so this isolates the POINTER field as the variable. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>portable</DebugType>
+    <Optimize>false</Optimize>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>
