@@ -386,6 +386,60 @@ internal ref struct PatternArray
     }
 
     /// <summary>
+    /// Insert a new group-like header at <paramref name="subtreeStart"/>, wrapping the already-emitted,
+    /// contiguous subtree <c>[subtreeStart, Count)</c> as its first children. Returns the new header's index
+    /// (== <paramref name="subtreeStart"/>); the header is left open, so pair it with <see cref="EndGroupHeader"/>.
+    /// </summary>
+    /// <remarks>
+    /// The append-only buffer requires a header to sit immediately before its contiguous children, but UNION's
+    /// header kind is only known <em>after</em> its first branch has been parsed (ADR-045 recursive parser).
+    /// This is the buffer equivalent of "collect children, then build their parent": it shifts the subtree up
+    /// one slot (a memmove-safe overlapped copy) and bumps the absolute child-range index of every header inside
+    /// it. Only headers with stored absolute child indices are bumped — group-like headers (ChildStartIndex) and
+    /// EXISTS headers (ExistsChildStart); VALUES entries are positional and shift with the block.
+    /// </remarks>
+    public int WrapSubtree(int subtreeStart, PatternKind headerKind)
+    {
+        if (_count >= _capacity)
+            throw new InvalidOperationException("PatternArray is full");
+
+        int moved = _count - subtreeStart;
+
+        // Shift [subtreeStart, _count) up by one slot. Span.CopyTo is memmove-safe for the overlap.
+        _buffer.Slice(subtreeStart * PatternSlot.Size, moved * PatternSlot.Size)
+            .CopyTo(_buffer.Slice((subtreeStart + 1) * PatternSlot.Size, moved * PatternSlot.Size));
+        _count++;
+
+        // Every header inside the shifted region pointed at an absolute child index >= subtreeStart; bump by one.
+        for (int i = subtreeStart + 1; i < _count; i++)
+        {
+            var s = this[i];
+            switch (s.Kind)
+            {
+                case PatternKind.GraphHeader:
+                case PatternKind.GroupHeader:
+                case PatternKind.UnionHeader:
+                case PatternKind.OptionalHeader:
+                case PatternKind.MinusHeader:
+                    s.ChildStartIndex += 1;
+                    break;
+                case PatternKind.ExistsHeader:
+                case PatternKind.NotExistsHeader:
+                    s.ExistsChildStart += 1;
+                    break;
+            }
+        }
+
+        // Write the wrapping header into the freed slot; EndGroupHeader recomputes ChildCount once branches close.
+        var header = new PatternSlot(_buffer.Slice(subtreeStart * PatternSlot.Size, PatternSlot.Size));
+        header.Clear();
+        header.Kind = headerKind;
+        header.ChildStartIndex = subtreeStart + 1;
+        header.ChildCount = moved;
+        return subtreeStart;
+    }
+
+    /// <summary>
     /// Index one past the subtree rooted at <paramref name="index"/> (its next-sibling position).
     /// Group-like headers (Graph/Group/Union/Optional/Minus) span their flattened child-range; EXISTS headers
     /// span theirs; a VALUES header spans its trailing entries; every other slot is a single-slot leaf.
