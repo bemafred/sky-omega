@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- DrHook dogfood target (NOT in the solution). Observes whether the GRAPH
+       materialized path collects all rows before applying LIMIT. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Mercury/Mercury.csproj" />
+  </ItemGroup>
+
+</Project>

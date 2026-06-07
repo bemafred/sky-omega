@@ -99,6 +99,15 @@ Two structural guarantees; supporting gates verify and keep them.
 3. **Executor unification** — active-graph-parameterized evaluator; delete `FromMaterializedWithGraphContext`.
 4. **Gates** — full W3C 421/421 *through the facade*; `sparql12` manifest loaded; zero-GC allocation check; dogfood + DrHook observation.
 
+## Implementation progress
+
+**Reframe (grounded 2026-06-07).** The index-child arena is *not* greenfield: `PatternArray`/`PatternSlot` (`src/Mercury/Sparql/Patterns/PatternSlot.cs`) is *already* an index-child buffer where `GraphHeader`/`ExistsHeader`/`ValuesHeader` carry child ranges. It was only partially recursive (UNION/OPTIONAL flat-encoded in the AST; the GRAPH body routed through the impoverished `GraphClause`). So the build **completes the existing buffer to uniform recursion** rather than adding a parallel arena (which would itself be the anti-pattern). The probe (`poc/adr-045-pattern-model/probe-pattern-arena.cs`) validated the principle; the codebase already half-implemented it. The Engineering order above is refined into:
+
+- [x] **Step 1 — uniform-recursion foundation** (2026-06-07). `PatternArray` extended with nestable `GroupHeader`/`UnionHeader`/`OptionalHeader`/`MinusHeader` (reusing the `GraphHeader` child-range layout), `SubtreeEnd` + `DirectChildEnumerator` for skip-aware direct-child iteration, and a uniform `GetChildren`. Validated by `tests/Mercury.Tests/Sparql/PatternTreeNestingTests.cs`: nested Group/Union/Optional/Graph compose; direct-child iteration skips nested subtrees; one recursive walk threads the active graph as a parameter (default = the unnamed graph). Mercury builds 0/0; 17 existing slot tests + the new test green.
+- [ ] **Step 2 — recursive parser** producing the tree directly, retiring the flat `GraphPattern` + `GraphClause` AST and `ParseGraph`.
+- [ ] **Step 3 — metamorphic mirror suite** (`default ≡ named` over the W3C corpus) — the gate, landed before the executor change.
+- [ ] **Step 4 — uniform executor walk** (active-graph parameter; folds in the LIMIT-pushdown requirement from `ck:obs-graph-limit-pushdown`) → cutover; delete `FromMaterializedWithGraphContext` and the `QueryExecutor.Graph` divergence.
+
 ## References
 
 - Prior instances: 1.7.71 (property-list shorthand in GRAPH), 1.8.3 / commit `b1c5c18` (aggregation on the GRAPH path).

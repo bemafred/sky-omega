@@ -36,6 +36,13 @@ internal enum PatternKind : byte
     MinusTriple = 7,     // MINUS pattern - same layout as Triple
     ValuesHeader = 8,    // VALUES clause header
     ValuesEntry = 9,     // VALUES clause entry
+
+    // Nestable group-like headers (ADR-045). Each carries a child-range at the GraphHeader
+    // layout (ChildStartIndex@16 / ChildCount@20), so the tree is uniformly recursive.
+    GroupHeader = 10,    // a nested group { ... }
+    UnionHeader = 11,    // children are the union branches (each a GroupHeader)
+    OptionalHeader = 12, // child is one GroupHeader
+    MinusHeader = 13,    // child is one GroupHeader (block form of MINUS)
 }
 
 /// <summary>
@@ -171,7 +178,22 @@ internal ref struct PatternSlot
     public readonly bool IsNegatedExists => Kind == PatternKind.NotExistsHeader;
     public readonly bool IsValuesHeader => Kind == PatternKind.ValuesHeader;
     public readonly bool IsValuesEntry => Kind == PatternKind.ValuesEntry;
-    
+    public readonly bool IsGroupHeader => Kind == PatternKind.GroupHeader;
+    public readonly bool IsUnionHeader => Kind == PatternKind.UnionHeader;
+    public readonly bool IsOptionalHeader => Kind == PatternKind.OptionalHeader;
+    public readonly bool IsMinusHeader => Kind == PatternKind.MinusHeader;
+
+    /// <summary>
+    /// True for headers that carry a child-range at the GraphHeader layout
+    /// (ChildStartIndex@16 / ChildCount@20): GraphHeader plus the ADR-045 nestable group headers.
+    /// (ExistsHeader uses a different offset and is excluded.)
+    /// </summary>
+    public readonly bool IsNestableGroup =>
+        Kind == PatternKind.GraphHeader || Kind == PatternKind.GroupHeader ||
+        Kind == PatternKind.UnionHeader || Kind == PatternKind.OptionalHeader ||
+        Kind == PatternKind.MinusHeader;
+
+
     /// <summary>
     /// Clear slot for reuse
     /// </summary>
@@ -339,7 +361,67 @@ internal ref struct PatternArray
         var header = this[headerIndex];
         header.ExistsChildCount = _count - header.ExistsChildStart;
     }
-    
+
+    /// <summary>
+    /// Begin a nestable group-like header (ADR-045): GroupHeader / UnionHeader / OptionalHeader / MinusHeader.
+    /// Uses the same child-range layout as GraphHeader (ChildStartIndex@16 / ChildCount@20). Returns the header index.
+    /// </summary>
+    public int BeginGroupHeader(PatternKind kind)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = kind;
+        slot.ChildStartIndex = _count; // children follow contiguously
+        slot.ChildCount = 0;
+        return headerIndex;
+    }
+
+    /// <summary>
+    /// End a nestable group-like header; records the flattened descendant span as ChildCount.
+    /// </summary>
+    public void EndGroupHeader(int headerIndex)
+    {
+        var header = this[headerIndex];
+        header.ChildCount = _count - header.ChildStartIndex;
+    }
+
+    /// <summary>
+    /// Index one past the subtree rooted at <paramref name="index"/> (its next-sibling position).
+    /// Group-like headers (Graph/Group/Union/Optional/Minus) span their flattened child-range; EXISTS headers
+    /// span theirs; a VALUES header spans its trailing entries; every other slot is a single-slot leaf.
+    /// </summary>
+    public static int SubtreeEnd(Span<byte> buffer, int index)
+    {
+        var slot = new PatternSlot(buffer.Slice(index * PatternSlot.Size, PatternSlot.Size));
+        switch (slot.Kind)
+        {
+            case PatternKind.GraphHeader:
+            case PatternKind.GroupHeader:
+            case PatternKind.UnionHeader:
+            case PatternKind.OptionalHeader:
+            case PatternKind.MinusHeader:
+                return slot.ChildStartIndex + slot.ChildCount;
+            case PatternKind.ExistsHeader:
+            case PatternKind.NotExistsHeader:
+                return slot.ExistsChildStart + slot.ExistsChildCount;
+            case PatternKind.ValuesHeader:
+                return index + 1 + slot.ValuesEntryCount;
+            default:
+                return index + 1;
+        }
+    }
+
+    /// <summary>
+    /// Enumerate the DIRECT children of a group-like header, skipping nested subtrees (children are stored
+    /// contiguously and ChildCount is the flattened span). The uniform-recursion walk seam (ADR-045).
+    /// </summary>
+    public DirectChildEnumerator EnumerateDirectChildren(int headerIndex)
+    {
+        var header = this[headerIndex];
+        int start = header.ChildStartIndex;
+        return new DirectChildEnumerator(_buffer, start, start + header.ChildCount);
+    }
+
     /// <summary>
     /// Get child patterns for a header slot
     /// </summary>
@@ -348,7 +430,9 @@ internal ref struct PatternArray
         var header = this[headerIndex];
         return header.Kind switch
         {
-            PatternKind.GraphHeader => new PatternArraySlice(_buffer, header.ChildStartIndex, header.ChildCount),
+            PatternKind.GraphHeader or PatternKind.GroupHeader or PatternKind.UnionHeader
+                or PatternKind.OptionalHeader or PatternKind.MinusHeader =>
+                new PatternArraySlice(_buffer, header.ChildStartIndex, header.ChildCount),
             PatternKind.ExistsHeader or PatternKind.NotExistsHeader => 
                 new PatternArraySlice(_buffer, header.ExistsChildStart, header.ExistsChildCount),
             _ => default
@@ -544,6 +628,39 @@ internal ref struct FilterEnumerator
     public PatternSlot Current => new(_buffer.Slice(_index * PatternSlot.Size, PatternSlot.Size));
 
     public FilterEnumerator GetEnumerator() => this;
+}
+
+/// <summary>
+/// Enumerates the DIRECT children of a group-like header, skipping nested subtrees via
+/// <see cref="PatternArray.SubtreeEnd"/>. Children are stored contiguously and a header's ChildCount is the
+/// flattened descendant span, so a naive linear walk would mistake a nested header's children for siblings.
+/// </summary>
+internal ref struct DirectChildEnumerator
+{
+    private readonly Span<byte> _buffer;
+    private readonly int _end;   // exclusive end of the child-range (absolute slot index)
+    private int _pos;            // next direct child to yield (absolute slot index)
+    private int _current;        // current direct child (absolute slot index)
+
+    public DirectChildEnumerator(Span<byte> buffer, int start, int end)
+    {
+        _buffer = buffer;
+        _end = end;
+        _pos = start;
+        _current = -1;
+    }
+
+    public bool MoveNext()
+    {
+        if (_pos >= _end) return false;
+        _current = _pos;
+        _pos = PatternArray.SubtreeEnd(_buffer, _pos); // skip this child's whole subtree
+        return true;
+    }
+
+    public readonly PatternSlot Current => new(_buffer.Slice(_current * PatternSlot.Size, PatternSlot.Size));
+    public readonly int CurrentIndex => _current;
+    public DirectChildEnumerator GetEnumerator() => this;
 }
 
 /// <summary>
