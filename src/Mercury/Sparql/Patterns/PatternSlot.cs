@@ -472,8 +472,20 @@ internal ref struct PatternArray
     public DirectChildEnumerator EnumerateDirectChildren(int headerIndex)
     {
         var header = this[headerIndex];
-        int start = header.ChildStartIndex;
-        return new DirectChildEnumerator(_buffer, start, start + header.ChildCount);
+        // EXISTS/NOT EXISTS headers carry their child-range at a different offset (ExistsChildStart@4) than the
+        // nestable group headers (ChildStartIndex@16); dispatch so the uniform walk handles both.
+        int start, count;
+        if (header.Kind == PatternKind.ExistsHeader || header.Kind == PatternKind.NotExistsHeader)
+        {
+            start = header.ExistsChildStart;
+            count = header.ExistsChildCount;
+        }
+        else
+        {
+            start = header.ChildStartIndex;
+            count = header.ChildCount;
+        }
+        return new DirectChildEnumerator(_buffer, start, start + count);
     }
 
     /// <summary>

@@ -309,19 +309,49 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// FILTER constraint. Captures the constraint as a source span (the leaf-level reuse the shipping parser
-    /// performs) and emits a Filter leaf scoped to the current tree depth. Bracketed expression and BuiltInCall /
-    /// FunctionCall forms are handled; (NOT) EXISTS is a deferred increment (it is itself a nested group).
+    /// FILTER constraint. <c>FILTER [NOT] EXISTS { … }</c> (bare or parenthesized) becomes an
+    /// <c>ExistsHeader</c>/<c>NotExistsHeader</c> whose body is parsed by the same group-body loop — so it is a
+    /// nested group, evaluated per solution with the current bindings in scope. Otherwise the constraint is
+    /// captured as a source span (the leaf-level reuse the shipping parser performs) and emitted as a Filter leaf.
     /// </summary>
     private void EmitFilterTree(scoped ref PatternArray pa, int depth)
     {
         ConsumeKeyword("FILTER");
         SkipWhitespace();
 
+        // FILTER [NOT] EXISTS { … }, optionally wrapped in one level of parentheses.
+        int savedPos = _position;
+        bool paren = false;
+        if (Peek() == '(') { Advance(); SkipWhitespace(); paren = true; }
+
         var look = PeekSpan(10);
-        if (KeywordIs(look, "EXISTS") ||
-            (look.Length >= 3 && look[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase)))
-            throw new SparqlParseException("FILTER (NOT) EXISTS is not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
+        bool negated = false;
+        if (look.Length >= 3 && look[..3].Equals("NOT", StringComparison.OrdinalIgnoreCase) &&
+            (look.Length < 4 || (!IsLetterOrDigit(look[3]) && look[3] != '_')))
+        {
+            ConsumeKeyword("NOT");
+            SkipWhitespace();
+            look = PeekSpan(6);
+            negated = true;
+        }
+        if (KeywordIs(look, "EXISTS"))
+        {
+            ConsumeKeyword("EXISTS");
+            SkipWhitespace();
+            if (Peek() != '{')
+                throw new SparqlParseException("Expected '{' after EXISTS");
+            Advance(); // consume '{'
+            int header = pa.BeginExists(negated);
+            ParseGroupBodyTree(ref pa, depth + 1);
+            pa.EndExists(header);
+            SkipWhitespace();
+            if (Peek() == '}') Advance();
+            if (paren) { SkipWhitespace(); if (Peek() == ')') Advance(); }
+            return;
+        }
+
+        // Not EXISTS — rewind any consumed '(' / NOT and parse a normal constraint.
+        _position = savedPos;
 
         if (Peek() == '(')
         {

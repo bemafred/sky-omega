@@ -61,6 +61,7 @@ public class GraphTreeEvaluatorTests : IDisposable
             ("<urn:a>", "<urn:q>", "\"qa\""),
             ("<urn:b>", "<urn:p>", "<urn:v2>"),
             ("<urn:b>", "<urn:q>", "\"qb\""),
+            ("<urn:c>", "<urn:p>", "<urn:v3>"), // p but no q — makes MINUS / (NOT) EXISTS non-trivial
         };
         _store.BeginBatch();
         foreach (var (s, p, o) in data)
@@ -89,6 +90,10 @@ public class GraphTreeEvaluatorTests : IDisposable
     [InlineData("filter-object-iri", "SELECT ?s WHERE { ?s <urn:p> ?o FILTER(?o = <urn:v1>) }")]
     [InlineData("filter-subject-full-iri", "SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = <urn:a>) }")]
     [InlineData("filter-subject-pname", "PREFIX ex: <urn:> SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = ex:a) }")]
+    // MINUS (positional anti-join) and FILTER [NOT] EXISTS (group-scoped sub-pattern): ?c has p but not q.
+    [InlineData("minus", "SELECT ?s WHERE { ?s <urn:p> ?o MINUS { ?s <urn:q> ?x } }")]
+    [InlineData("exists", "SELECT ?s WHERE { ?s <urn:p> ?o FILTER EXISTS { ?s <urn:q> ?x } }")]
+    [InlineData("not-exists", "SELECT ?s WHERE { ?s <urn:p> ?o FILTER NOT EXISTS { ?s <urn:q> ?x } }")]
     public void GraphWrapped_ThroughTheUniformWalker_EqualsTheDefaultGraphBaseline(string name, string query)
     {
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
@@ -242,16 +247,25 @@ internal sealed class GraphTreeEvaluator
         var e = pa.EnumerateDirectChildren(headerIndex);
         while (e.MoveNext()) children.Add(e.CurrentIndex);
 
-        // Patterns and BINDs are positional joins; FILTER is scoped to the whole group, so defer it to the end.
+        // Patterns / BIND / MINUS are positional joins; FILTER and (NOT) EXISTS are scoped to the whole group,
+        // so defer them and apply to all of the group's solutions.
         var current = input;
         foreach (int ci in children)
-            if (pa[ci].Kind != PatternKind.Filter)
+            if (!IsGroupScoped(pa[ci].Kind))
                 current = JoinStep(ref pa, ci, activeGraph, current);
         foreach (int ci in children)
-            if (pa[ci].Kind == PatternKind.Filter)
+        {
+            var kind = pa[ci].Kind;
+            if (kind == PatternKind.Filter)
                 current = ApplyFilter(ref pa, ci, current);
+            else if (kind == PatternKind.ExistsHeader || kind == PatternKind.NotExistsHeader)
+                current = ApplyExists(ref pa, ci, activeGraph, current, negated: kind == PatternKind.NotExistsHeader);
+        }
         return current;
     }
+
+    private static bool IsGroupScoped(PatternKind kind) =>
+        kind == PatternKind.Filter || kind == PatternKind.ExistsHeader || kind == PatternKind.NotExistsHeader;
 
     private List<Dictionary<string, string>> JoinStep(ref PatternArray pa, int childIndex, string activeGraph,
         List<Dictionary<string, string>> input)
@@ -300,9 +314,11 @@ internal sealed class GraphTreeEvaluator
                 return ValuesJoin(ref pa, childIndex, input);
             case PatternKind.Bind:
                 return BindStep(ref pa, childIndex, input);
+            case PatternKind.MinusHeader:
+                return MinusStep(ref pa, childIndex, activeGraph, input);
             default:
                 throw new NotSupportedException(
-                    $"{kind} is a later evaluator increment (MINUS/EXISTS/subquery/paths follow).");
+                    $"{kind} is a later evaluator increment (sub-SELECT / SERVICE / property paths follow).");
         }
     }
 
@@ -427,6 +443,56 @@ internal sealed class GraphTreeEvaluator
                 ? evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan())
                 : evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer());
             if (pass) output.Add(sol);
+        }
+        return output;
+    }
+
+    /// <summary>
+    /// MINUS (positional): drop a left solution iff the right side has a solution that is compatible with it AND
+    /// shares at least one variable (SPARQL §8.3 — disjoint domains do not remove). The right side is evaluated
+    /// INDEPENDENTLY of the left (seeded with the empty solution), unlike NOT EXISTS.
+    /// </summary>
+    private List<Dictionary<string, string>> MinusStep(ref PatternArray pa, int minusIndex, string activeGraph,
+        List<Dictionary<string, string>> input)
+    {
+        var seed = new List<Dictionary<string, string>> { new() };
+        var rhs = EvalGroup(ref pa, minusIndex, activeGraph, seed);
+
+        var output = new List<Dictionary<string, string>>();
+        foreach (var mu in input)
+        {
+            bool removed = false;
+            foreach (var other in rhs)
+            {
+                bool sharesVar = false, compatible = true;
+                foreach (var kv in mu)
+                    if (other.TryGetValue(kv.Key, out var otherValue))
+                    {
+                        sharesVar = true;
+                        if (otherValue != kv.Value) { compatible = false; break; }
+                    }
+                if (sharesVar && compatible) { removed = true; break; }
+            }
+            if (!removed) output.Add(mu);
+        }
+        return output;
+    }
+
+    /// <summary>
+    /// FILTER [NOT] EXISTS (group-scoped): keep a solution iff its body — evaluated with that solution's bindings
+    /// in scope (seeded with the solution, so its bound variables constrain the body's scans) — is non-empty
+    /// (EXISTS) or empty (NOT EXISTS). EXISTS adds no bindings; it only filters.
+    /// </summary>
+    private List<Dictionary<string, string>> ApplyExists(ref PatternArray pa, int existsIndex, string activeGraph,
+        List<Dictionary<string, string>> input, bool negated)
+    {
+        var output = new List<Dictionary<string, string>>();
+        foreach (var mu in input)
+        {
+            var seed = new List<Dictionary<string, string>> { new Dictionary<string, string>(mu) };
+            var body = EvalGroup(ref pa, existsIndex, activeGraph, seed);
+            bool exists = body.Count > 0;
+            if (negated ? !exists : exists) output.Add(mu);
         }
         return output;
     }
