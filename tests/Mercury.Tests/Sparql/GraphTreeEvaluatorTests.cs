@@ -62,6 +62,8 @@ public class GraphTreeEvaluatorTests : IDisposable
             ("<urn:b>", "<urn:p>", "<urn:v2>"),
             ("<urn:b>", "<urn:q>", "\"qb\""),
             ("<urn:c>", "<urn:p>", "<urn:v3>"), // p but no q — makes MINUS / (NOT) EXISTS non-trivial
+            ("<urn:a>", "<urn:next>", "<urn:b>"), // a -> b -> c chain for property-path closures
+            ("<urn:b>", "<urn:next>", "<urn:c>"),
         };
         _store.BeginBatch();
         foreach (var (s, p, o) in data)
@@ -94,6 +96,19 @@ public class GraphTreeEvaluatorTests : IDisposable
     [InlineData("minus", "SELECT ?s WHERE { ?s <urn:p> ?o MINUS { ?s <urn:q> ?x } }")]
     [InlineData("exists", "SELECT ?s WHERE { ?s <urn:p> ?o FILTER EXISTS { ?s <urn:q> ?x } }")]
     [InlineData("not-exists", "SELECT ?s WHERE { ?s <urn:p> ?o FILTER NOT EXISTS { ?s <urn:q> ?x } }")]
+    // Property paths — ALL forms (inverse / + / * / ? / sequence / alternative / grouped / negated / PNAME),
+    // each threaded through the active graph. Nothing deferred — a deferred path form is exactly the divergence.
+    [InlineData("path-inverse", "SELECT ?o WHERE { <urn:b> ^<urn:next> ?o }")]
+    [InlineData("path-plus-fwd", "SELECT ?o WHERE { <urn:a> <urn:next>+ ?o }")]
+    [InlineData("path-plus-bwd", "SELECT ?s WHERE { ?s <urn:next>+ <urn:c> }")]
+    [InlineData("path-plus-both", "SELECT ?s ?o WHERE { ?s <urn:next>+ ?o }")]
+    [InlineData("path-star-fwd", "SELECT ?o WHERE { <urn:a> <urn:next>* ?o }")]
+    [InlineData("path-zero-or-one", "SELECT ?o WHERE { <urn:a> <urn:next>? ?o }")]
+    [InlineData("path-sequence", "SELECT ?o WHERE { <urn:a> <urn:next>/<urn:next> ?o }")]
+    [InlineData("path-alternative", "SELECT ?o WHERE { <urn:a> <urn:next>|<urn:p> ?o }")]
+    [InlineData("path-grouped", "SELECT ?o WHERE { <urn:a> (<urn:next>)+ ?o }")]
+    [InlineData("path-negated", "SELECT ?o WHERE { <urn:a> !<urn:next> ?o }")]
+    [InlineData("path-pname", "PREFIX ex: <urn:> SELECT ?o WHERE { <urn:a> ex:next+ ?o }")]
     public void GraphWrapped_ThroughTheUniformWalker_EqualsTheDefaultGraphBaseline(string name, string query)
     {
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
@@ -327,11 +342,20 @@ internal sealed class GraphTreeEvaluator
     {
         var slot = pa[tripleIndex];
         string sText = _source.Substring(slot.SubjectStart, slot.SubjectLength);
-        string pText = _source.Substring(slot.PredicateStart, slot.PredicateLength);
         string oText = _source.Substring(slot.ObjectStart, slot.ObjectLength);
         var sType = slot.SubjectType;
-        var pType = slot.PredicateType;
         var oType = slot.ObjectType;
+
+        // A property path of any form: the slot carries the full path-expression span; evaluate the path algebra.
+        if (slot.PathKind != PathType.None)
+        {
+            string pathText = _source.Substring(slot.PathIriStart, slot.PathIriLength);
+            ScanPathTriple(pathText, sType, sText, oType, oText, sol, activeGraph, output);
+            return;
+        }
+
+        string pText = _source.Substring(slot.PredicateStart, slot.PredicateLength);
+        var pType = slot.PredicateType;
 
         string sCon = Constraint(sType, sText, sol);
         string pCon = Constraint(pType, pText, sol);
@@ -368,6 +392,282 @@ internal sealed class GraphTreeEvaluator
         if (ext.TryGetValue(name, out var existing)) return existing == value;
         ext[name] = value;
         return true;
+    }
+
+    // ── Property paths (ALL forms) ────────────────────────────────────────────────────────────────────
+    // The slot carries the full path-expression source span; the path algebra is evaluated against the active
+    // graph as a relation (set of subject→object pairs) and filtered by the bound endpoints. Arbitrary-length
+    // (* +) and zero-length (* ?) paths yield DISTINCT endpoint pairs (SPARQL §9) — the pair-set gives that.
+    // No path form is deferred; deferring on the new path is the very divergence ADR-045 deletes.
+
+    private void ScanPathTriple(string pathText, TermType sType, string sText, TermType oType, string oText,
+        Dictionary<string, string> sol, string activeGraph, List<Dictionary<string, string>> output)
+    {
+        string? sBound = Bound(sType, sText, sol);
+        string? oBound = Bound(oType, oText, sol);
+
+        int pos = 0;
+        var pairs = PathAlternative(pathText, ref pos, activeGraph);
+
+        foreach (var (s, o) in pairs)
+        {
+            if (sBound != null && s != sBound) continue;
+            if (oBound != null && o != oBound) continue;
+            var ext = new Dictionary<string, string>(sol);
+            bool ok = true;
+            if (sType == TermType.Variable)
+            {
+                string name = VarName(sText);
+                if (ext.TryGetValue(name, out var ev)) ok = ev == s; else ext[name] = s;
+            }
+            if (ok && oType == TermType.Variable)
+            {
+                string name = VarName(oText);
+                if (ext.TryGetValue(name, out var ev)) ok = ev == o; else ext[name] = o;
+            }
+            if (ok) output.Add(ext);
+        }
+    }
+
+    /// <summary>A bound endpoint's value (a constant term or a bound variable), or null for an unbound variable.</summary>
+    private static string? Bound(TermType type, string text, Dictionary<string, string> sol)
+        => type == TermType.Variable ? (sol.TryGetValue(VarName(text), out var v) ? v : null) : text;
+
+    // [98] PathAlternative ::= PathSequence ( '|' PathSequence )*
+    private HashSet<(string, string)> PathAlternative(string t, ref int pos, string ag)
+    {
+        var result = PathSequence(t, ref pos, ag);
+        SkipPathWs(t, ref pos);
+        while (pos < t.Length && t[pos] == '|')
+        {
+            pos++;
+            result.UnionWith(PathSequence(t, ref pos, ag));
+            SkipPathWs(t, ref pos);
+        }
+        return result;
+    }
+
+    // [99] PathSequence ::= PathEltOrInverse ( '/' PathEltOrInverse )*
+    private HashSet<(string, string)> PathSequence(string t, ref int pos, string ag)
+    {
+        var result = PathEltOrInverse(t, ref pos, ag);
+        SkipPathWs(t, ref pos);
+        while (pos < t.Length && t[pos] == '/')
+        {
+            pos++;
+            result = Compose(result, PathEltOrInverse(t, ref pos, ag));
+            SkipPathWs(t, ref pos);
+        }
+        return result;
+    }
+
+    // [100] PathEltOrInverse ::= '^'? PathElt
+    private HashSet<(string, string)> PathEltOrInverse(string t, ref int pos, string ag)
+    {
+        SkipPathWs(t, ref pos);
+        bool inverse = pos < t.Length && t[pos] == '^';
+        if (inverse) pos++;
+        var rel = PathElt(t, ref pos, ag);
+        return inverse ? Swap(rel) : rel;
+    }
+
+    // [101] PathElt ::= PathPrimary ( '*' | '+' | '?' )?
+    private HashSet<(string, string)> PathElt(string t, ref int pos, string ag)
+    {
+        var rel = PathPrimary(t, ref pos, ag);
+        SkipPathWs(t, ref pos);
+        if (pos < t.Length && (t[pos] == '*' || t[pos] == '+' || t[pos] == '?'))
+        {
+            char mod = t[pos++];
+            return mod switch
+            {
+                '+' => TransitiveClosure(rel),
+                '*' => ReflexiveTransitiveClosure(rel, ag),
+                _ => ZeroOrOne(rel, ag),
+            };
+        }
+        return rel;
+    }
+
+    // [102] PathPrimary ::= iri | 'a' | '(' Path ')' | '!' PathNegatedPropertySet
+    private HashSet<(string, string)> PathPrimary(string t, ref int pos, string ag)
+    {
+        SkipPathWs(t, ref pos);
+        if (pos < t.Length && t[pos] == '(')
+        {
+            pos++;
+            var inner = PathAlternative(t, ref pos, ag);
+            SkipPathWs(t, ref pos);
+            if (pos < t.Length && t[pos] == ')') pos++;
+            return inner;
+        }
+        if (pos < t.Length && t[pos] == '!')
+        {
+            pos++;
+            return PathNegatedPropertySet(t, ref pos, ag);
+        }
+        return BasePairs(ReadPathIri(t, ref pos), ag);
+    }
+
+    // [104]/[105] PathNegatedPropertySet — a single step whose predicate is NOT in the set (forward, plus ^inverse).
+    private HashSet<(string, string)> PathNegatedPropertySet(string t, ref int pos, string ag)
+    {
+        var forward = new HashSet<string>();
+        var inverse = new HashSet<string>();
+        SkipPathWs(t, ref pos);
+        if (pos < t.Length && t[pos] == '(')
+        {
+            pos++;
+            SkipPathWs(t, ref pos);
+            while (pos < t.Length && t[pos] != ')')
+            {
+                ReadOneInPropertySet(t, ref pos, forward, inverse);
+                SkipPathWs(t, ref pos);
+                if (pos < t.Length && t[pos] == '|') { pos++; SkipPathWs(t, ref pos); }
+            }
+            if (pos < t.Length && t[pos] == ')') pos++;
+        }
+        else
+        {
+            ReadOneInPropertySet(t, ref pos, forward, inverse);
+        }
+
+        var result = new HashSet<(string, string)>();
+        var scan = _store.QueryCurrent("".AsSpan(), "".AsSpan(), "".AsSpan(), ag.AsSpan());
+        while (scan.MoveNext())
+        {
+            var q = scan.Current;
+            string s = q.Subject.ToString(), p = q.Predicate.ToString(), o = q.Object.ToString();
+            if (!forward.Contains(p)) result.Add((s, o));
+            if (inverse.Count > 0 && !inverse.Contains(p)) result.Add((o, s));
+        }
+        return result;
+    }
+
+    private void ReadOneInPropertySet(string t, ref int pos, HashSet<string> forward, HashSet<string> inverse)
+    {
+        SkipPathWs(t, ref pos);
+        bool inv = pos < t.Length && t[pos] == '^';
+        if (inv) pos++;
+        (inv ? inverse : forward).Add(ReadPathIri(t, ref pos));
+    }
+
+    private static void SkipPathWs(string t, ref int pos)
+    {
+        while (pos < t.Length && char.IsWhiteSpace(t[pos])) pos++;
+    }
+
+    /// <summary>Read an IRI / prefixed name / 'a' path primary and resolve it to canonical IRI form ("&lt;…&gt;").</summary>
+    private string ReadPathIri(string t, ref int pos)
+    {
+        SkipPathWs(t, ref pos);
+        if (pos < t.Length && t[pos] == '<')
+        {
+            int start = pos++;
+            while (pos < t.Length && t[pos] != '>') pos++;
+            if (pos < t.Length) pos++; // consume '>'
+            return t.Substring(start, pos - start);
+        }
+        int s = pos;
+        while (pos < t.Length && (char.IsLetterOrDigit(t[pos]) || t[pos] == ':' || t[pos] == '_' || t[pos] == '-' || t[pos] == '.'))
+            pos++;
+        string token = t.Substring(s, pos - s);
+        if (token == "a")
+            return "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
+        return ExpandPathPname(token);
+    }
+
+    private string ExpandPathPname(string token)
+    {
+        int colon = token.IndexOf(':');
+        if (colon < 0 || _prefixes is null) return token;
+        // The prologue stores the prefix WITH its trailing ':' ("ex:") and the namespace IRI WITH its < > .
+        var prefixWithColon = token.AsSpan(0, colon + 1);
+        string local = token.Substring(colon + 1);
+        foreach (var pm in _prefixes)
+        {
+            if (!_prefixSource.AsSpan(pm.PrefixStart, pm.PrefixLength).SequenceEqual(prefixWithColon)) continue;
+            var ns = _prefixSource.AsSpan(pm.IriStart, pm.IriLength);
+            if (ns.Length >= 2 && ns[0] == '<' && ns[^1] == '>') ns = ns[1..^1];
+            return "<" + ns.ToString() + local + ">";
+        }
+        return token;
+    }
+
+    private HashSet<(string, string)> BasePairs(string iri, string ag)
+    {
+        var result = new HashSet<(string, string)>();
+        var scan = _store.QueryCurrent("".AsSpan(), iri.AsSpan(), "".AsSpan(), ag.AsSpan());
+        while (scan.MoveNext())
+        {
+            var q = scan.Current;
+            result.Add((q.Subject.ToString(), q.Object.ToString()));
+        }
+        return result;
+    }
+
+    private static HashSet<(string, string)> Swap(HashSet<(string, string)> rel)
+    {
+        var result = new HashSet<(string, string)>();
+        foreach (var (s, o) in rel) result.Add((o, s));
+        return result;
+    }
+
+    private static HashSet<(string, string)> Compose(HashSet<(string, string)> a, HashSet<(string, string)> b)
+    {
+        var byMid = new Dictionary<string, List<string>>();
+        foreach (var (m, o) in b)
+        {
+            if (!byMid.TryGetValue(m, out var list)) byMid[m] = list = new List<string>();
+            list.Add(o);
+        }
+        var result = new HashSet<(string, string)>();
+        foreach (var (s, m) in a)
+            if (byMid.TryGetValue(m, out var os))
+                foreach (var o in os) result.Add((s, o));
+        return result;
+    }
+
+    private static HashSet<(string, string)> TransitiveClosure(HashSet<(string, string)> rel)
+    {
+        var result = new HashSet<(string, string)>(rel);
+        var frontier = new HashSet<(string, string)>(rel);
+        while (frontier.Count > 0)
+        {
+            var next = Compose(frontier, rel);
+            next.ExceptWith(result);
+            if (next.Count == 0) break;
+            result.UnionWith(next);
+            frontier = next;
+        }
+        return result;
+    }
+
+    private HashSet<(string, string)> ReflexiveTransitiveClosure(HashSet<(string, string)> rel, string ag)
+    {
+        var result = TransitiveClosure(rel);
+        foreach (var node in GraphNodes(ag)) result.Add((node, node));
+        return result;
+    }
+
+    private HashSet<(string, string)> ZeroOrOne(HashSet<(string, string)> rel, string ag)
+    {
+        var result = new HashSet<(string, string)>(rel);
+        foreach (var node in GraphNodes(ag)) result.Add((node, node));
+        return result;
+    }
+
+    private HashSet<string> GraphNodes(string ag)
+    {
+        var nodes = new HashSet<string>();
+        var scan = _store.QueryCurrent("".AsSpan(), "".AsSpan(), "".AsSpan(), ag.AsSpan());
+        while (scan.MoveNext())
+        {
+            var q = scan.Current;
+            nodes.Add(q.Subject.ToString());
+            nodes.Add(q.Object.ToString());
+        }
+        return nodes;
     }
 
     private List<Dictionary<string, string>> ValuesJoin(ref PatternArray pa, int valuesHeaderIndex,

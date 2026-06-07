@@ -242,8 +242,10 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// TriplesBlock: one subject followed by a predicate-object list, with ';' property-list shorthand
     /// (same subject, new predicate-object). Emits one Triple leaf per predicate-object pair. Returns false at a
-    /// non-triple boundary so the body loop can stop. (RDF-star, blank-node property lists, collections and
-    /// sequence-path expansion are deferred increments; a plain property path is carried on the Triple slot.)
+    /// non-triple boundary so the body loop can stop. A property path of ANY form (^ / * + ? / | ! grouping) is
+    /// carried as its full source span on the Triple slot, for the evaluator's path algebra — no path form is
+    /// deferred (a deferral on the new path is exactly the divergence ADR-045 deletes). (RDF-star quoted triples
+    /// and blank-node property lists remain deferred.)
     /// </summary>
     private bool EmitTripleBlockTree(scoped ref PatternArray pa)
     {
@@ -258,7 +260,9 @@ internal ref partial struct SparqlParser
             throw new SparqlParseException("RDF-star quoted triples are not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
 
         SkipWhitespace();
+        int pathStart = _position;
         var (predicate, path) = ParsePredicateOrPath();
+        int pathLength = _position - pathStart;
         if (predicate.Length == 0 && path.Type == PathType.None)
             throw new SparqlParseException("Incomplete triple pattern - expected predicate");
 
@@ -268,10 +272,8 @@ internal ref partial struct SparqlParser
             throw new SparqlParseException("Incomplete triple pattern - expected object");
         if (obj.IsQuotedTriple)
             throw new SparqlParseException("RDF-star quoted triples are not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
-        if (path.Type == PathType.Sequence)
-            throw new SparqlParseException("Sequence-path expansion is not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
 
-        EmitTriple(ref pa, subject, predicate, obj, path);
+        EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
 
         // PropertyListNotEmpty ::= Verb ObjectList ( ';' ( Verb ObjectList )? )*
         SkipWhitespace();
@@ -284,28 +286,37 @@ internal ref partial struct SparqlParser
             if (IsBodyKeywordAhead())
                 break;
 
+            int nextPathStart = _position;
             var (nextPredicate, nextPath) = ParsePredicateOrPath();
+            int nextPathLength = _position - nextPathStart;
             SkipWhitespace();
             var nextObj = ParseTerm();
             if (nextObj.Length == 0)
                 throw new SparqlParseException("Incomplete triple pattern - expected object after ';'");
-            if (nextPath.Type == PathType.Sequence)
-                throw new SparqlParseException("Sequence-path expansion is not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
 
-            EmitTriple(ref pa, subject, nextPredicate, nextObj, nextPath);
+            EmitTriple(ref pa, subject, nextPredicate, nextObj, nextPath, nextPathStart, nextPathLength);
             SkipWhitespace();
         }
 
         return true;
     }
 
-    private void EmitTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path)
+    /// <summary>
+    /// Emit a Triple slot. For a property path (<paramref name="path"/>.Type != None) the slot carries the FULL
+    /// path-expression source span (<paramref name="pathStart"/>..<paramref name="pathLength"/>) — not just the
+    /// base IRI — so the evaluator re-parses and evaluates the complete path algebra; for a plain predicate the
+    /// path fields are empty and PathKind is None.
+    /// </summary>
+    private void EmitTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path,
+        int pathStart, int pathLength)
     {
+        int pathIriStart = path.Type == PathType.None ? path.Iri.Start : pathStart;
+        int pathIriLength = path.Type == PathType.None ? path.Iri.Length : pathLength;
         pa.AddTriple(
             subject.Type, subject.Start, subject.Length,
             predicate.Type, predicate.Start, predicate.Length,
             obj.Type, obj.Start, obj.Length,
-            path.Type, path.Iri.Start, path.Iri.Length);
+            path.Type, pathIriStart, pathIriLength);
     }
 
     /// <summary>
