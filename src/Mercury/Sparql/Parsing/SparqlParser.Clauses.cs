@@ -3719,7 +3719,7 @@ internal ref partial struct SparqlParser
     /// [59] ServiceGraphPattern ::= 'SERVICE' 'SILENT'? VarOrIri GroupGraphPattern
     /// Parses SERVICE [SILENT] &lt;uri&gt; { patterns } for federated queries.
     /// </summary>
-    private void ParseService(ref GraphPattern pattern)
+    internal void ParseService(ref GraphPattern pattern)
     {
         ConsumeKeyword("SERVICE");
         SkipWhitespace();

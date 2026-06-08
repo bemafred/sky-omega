@@ -23,21 +23,19 @@ namespace SkyOmega.Mercury.Sparql.Parsing;
 // (D2), PNAME-in-FILTER-in-GRAPH) becomes unrepresentable — there is no GRAPH-only
 // body grammar to omit a feature from.
 //
-// HANDLED by this first increment (the spine):
-//   GroupGraphPattern '{' … '}'        → GroupHeader
-//   GRAPH (VarOrIri) '{' … '}'         → GraphHeader (active graph rebinds for the subtree)
-//   { … } UNION { … } …                → UnionHeader { branch GroupHeaders }
-//   OPTIONAL '{' … '}'                 → OptionalHeader
-//   MINUS '{' … '}'                    → MinusHeader
-//   TriplesBlock (subject verb object, ';' property-list shorthand)
-//   FILTER (BrackettedExpression | BuiltInCall)   → Filter leaf (source span)
-//   BIND '(' Expression 'AS' Var ')'              → Bind leaf (source spans)
-//   VALUES Var '{' … '}' (single-variable form)   → ValuesHeader + ValuesEntry leaves
+// HANDLED (the full common pattern grammar):
+//   GroupGraphPattern '{' … '}'        → GroupHeader        |  GRAPH (VarOrIri) '{' … '}'  → GraphHeader
+//   { … } UNION { … } …                → UnionHeader        |  OPTIONAL '{' … '}'           → OptionalHeader
+//   MINUS '{' … '}'                    → MinusHeader        |  { SELECT … }                 → SubSelectHeader
+//   SERVICE [SILENT] ep '{' … '}'      → ServiceHeader      |  FILTER [NOT] EXISTS { … }    → (Not)ExistsHeader
+//   TriplesBlock (';' property-list shorthand; RDF-star quoted triples and blank-node property lists expand
+//     via AddTriplePatternOrExpand; ALL property-path forms ^ / | * + ? ( ) ! carried as the full path span)
+//   FILTER (BrackettedExpression | BuiltInCall) → Filter    |  BIND ( Expr AS Var )         → Bind
+//   VALUES Var '{' … '}' (single-variable form) → ValuesHeader + ValuesEntry
 //
-// DEFERRED to later Step 2 increments (before cutover) — kept explicit so nothing is
-// silently mis-parsed: sub-SELECT, SERVICE, FILTER (NOT) EXISTS, multi-variable VALUES,
-// RDF-star quoted triples, blank-node property lists, collections, and property-path
-// sequence expansion. Each throws SparqlParseException on encounter rather than guessing.
+// STILL DEFERRED (each throws SparqlParseException rather than guessing — to be eliminated before cutover, not
+// left, per ck:lesson-deferral-is-the-divergence): multi-variable VALUES ( '(' ?a ?b ')' … ) and RDF collections
+// ( '(' a b c ')' ).
 // ═══════════════════════════════════════════════════════════════════════════
 
 internal ref partial struct SparqlParser
@@ -160,10 +158,21 @@ internal ref partial struct SparqlParser
             }
 
             if (KeywordIs(span, "SERVICE"))
-                throw new SparqlParseException("SERVICE is not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
+            {
+                // SERVICE is federation — its inner pattern is sent to a remote endpoint, not the local active
+                // graph. Reuse the shipping ParseService (into a throwaway pattern) to advance past the clause and
+                // carry its source span; the evaluator re-parses it and delegates to an ISparqlServiceExecutor.
+                int serviceStart = _position;
+                var serviceClause = new GraphPattern();
+                ParseService(ref serviceClause);
+                pa.AddServiceHeader(serviceStart, _position - serviceStart);
+                continue;
+            }
 
+            // A sub-SELECT is `{ SELECT … }`, caught at the group level (the '{' branch above → ParseGroupTree).
+            // A bare SELECT here is an unwrapped subquery — a syntax error, not a missing feature.
             if (KeywordIs(span, "SELECT"))
-                throw new SparqlParseException("Sub-SELECT is not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
+                throw new SparqlParseException("SELECT (subquery) must be wrapped in braces: { SELECT ... }");
 
             if (KeywordIs(span, "UNION"))
                 throw new SparqlParseException("UNION requires graph patterns enclosed in braces: { pattern } UNION { pattern }");

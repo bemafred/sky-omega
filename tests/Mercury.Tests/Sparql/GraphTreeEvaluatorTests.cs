@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
@@ -38,8 +41,12 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 /// so the proof carries real expression semantics. All 4 RED gate cases (bind, values, optional, union) plus the
 /// FILTER cases now go GREEN through this one path. The walker is a correctness MODEL (heap solution bags, not
 /// zero-GC); the production cutover reimplements it zero-GC over BindingTable and wires it into
-/// <see cref="SparqlEngine"/>, then deletes the divergent path. Still to add before cutover: MINUS / EXISTS /
-/// sub-SELECT / SERVICE / property paths (each throws <c>NotSupportedException</c> today rather than mis-evaluating).
+/// <see cref="SparqlEngine"/>, then deletes the divergent path.
+///
+/// The walker now covers the full common pattern grammar: BGP, GRAPH, nested group, UNION, OPTIONAL, VALUES
+/// (single-var), BIND, FILTER, MINUS, (NOT) EXISTS, property paths (all forms), sub-SELECT, RDF-star, blank-node
+/// property lists, and SERVICE (delegated to an injected <c>ISparqlServiceExecutor</c>). Still to add before the
+/// cutover: multi-variable VALUES and RDF collections — the only patterns the recursive parser still rejects.
 /// </summary>
 public class GraphTreeEvaluatorTests : IDisposable
 {
@@ -170,6 +177,53 @@ public class GraphTreeEvaluatorTests : IDisposable
         // and the default graph runs through the very same evaluator.
         Assert.Equal(expected, mirroredResult);
         Assert.Equal(expected, defaultResult);
+    }
+
+    [Fact]
+    public void Service_DelegatesToTheServiceExecutor_AndIgnoresTheActiveGraph()
+    {
+        // SERVICE is federation: the inner pattern goes to a REMOTE endpoint, not the local active graph. A mock
+        // executor returns canned results; wrapping the SERVICE in GRAPH <m> must not change anything — the active
+        // graph does not leak into a SERVICE. (The cutover injects HttpSparqlServiceExecutor for real HTTP; shipping
+        // would attempt a live request, so there is no facade baseline here.)
+        const string query = "SELECT ?o WHERE { SERVICE <http://remote/sparql> { ?s <urn:r> ?o } }";
+        var projection = new[] { "o" };
+        var executor = new MockServiceExecutor();
+
+        var unwrapped = EvaluateService(query, projection, executor);
+        var wrapped = EvaluateService(MirrorWhereIntoGraph(query, MirrorGraph), projection, executor);
+
+        var expected = new List<string> { "o=<urn:remote1>", "o=<urn:remote2>" };
+        Assert.Equal(expected, unwrapped);
+        Assert.Equal(expected, wrapped); // SERVICE is graph-context-independent
+    }
+
+    private List<string> EvaluateService(string query, string[] projection, ISparqlServiceExecutor executor)
+    {
+        string whereGroup = ExtractWhereGroup(query);
+        var buffer = new byte[PatternSlot.Size * 256];
+        var pa = new PatternArray(buffer);
+        int root = new SparqlParser(whereGroup.AsSpan()).ParsePatternTree(ref pa);
+        var evaluator = new GraphTreeEvaluator(_store, whereGroup, null, null, executor);
+        return Canonicalize(evaluator.Evaluate(ref pa, root), projection);
+    }
+
+    private sealed class MockServiceExecutor : ISparqlServiceExecutor
+    {
+        public ValueTask<List<ServiceResultRow>> ExecuteSelectAsync(string endpointUri, string query, CancellationToken ct = default)
+        {
+            var rows = new List<ServiceResultRow>();
+            foreach (var iri in new[] { "urn:remote1", "urn:remote2" })
+            {
+                var row = new ServiceResultRow();
+                row.AddBinding("o", new ServiceBinding(ServiceBindingType.Uri, iri));
+                rows.Add(row);
+            }
+            return new ValueTask<List<ServiceResultRow>>(rows);
+        }
+
+        public ValueTask<bool> ExecuteAskAsync(string endpointUri, string query, CancellationToken ct = default)
+            => new ValueTask<bool>(false);
     }
 
     /// <summary>Parse a query's WHERE group with the recursive parser and walk it with the uniform evaluator.</summary>
@@ -313,13 +367,16 @@ internal sealed class GraphTreeEvaluator
     private readonly string _source;
     private readonly PrefixMapping[]? _prefixes;
     private readonly string _prefixSource;
+    private readonly ISparqlServiceExecutor? _serviceExecutor;
 
-    public GraphTreeEvaluator(QuadStore store, string source, PrefixMapping[]? prefixes = null, string? prefixSource = null)
+    public GraphTreeEvaluator(QuadStore store, string source, PrefixMapping[]? prefixes = null,
+        string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null)
     {
         _store = store;
         _source = source;
         _prefixes = prefixes;
         _prefixSource = prefixSource ?? source;
+        _serviceExecutor = serviceExecutor;
     }
 
     public List<Dictionary<string, string>> Evaluate(ref PatternArray pa, int root)
@@ -411,9 +468,10 @@ internal sealed class GraphTreeEvaluator
                 return MinusStep(ref pa, childIndex, activeGraph, input);
             case PatternKind.SubSelectHeader:
                 return SubSelectStep(ref pa, childIndex, activeGraph, input);
+            case PatternKind.ServiceHeader:
+                return ServiceStep(ref pa, childIndex, input);
             default:
-                throw new NotSupportedException(
-                    $"{kind} is a later evaluator increment (SERVICE / RDF-star / blank-node property lists follow).");
+                throw new NotSupportedException($"{kind} has no evaluator case.");
         }
     }
 
@@ -901,7 +959,7 @@ internal sealed class GraphTreeEvaluator
         var innerBuffer = new byte[PatternSlot.Size * 256];
         var innerPa = new PatternArray(innerBuffer);
         int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
-        var innerEval = new GraphTreeEvaluator(_store, innerWhere, _prefixes, _prefixSource);
+        var innerEval = new GraphTreeEvaluator(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor);
         var innerBag = innerEval.Evaluate(ref innerPa, innerRoot, activeGraph);
 
         // Apply the solution modifiers via the shipping layer (project/distinct/group/aggregate/having/order/limit).
@@ -994,6 +1052,107 @@ internal sealed class GraphTreeEvaluator
         }
         throw new ArgumentException("Unbalanced braces in sub-SELECT");
     }
+
+    // ── SERVICE (federation) ──────────────────────────────────────────────────────────────────────────
+    // SERVICE [SILENT] ep { P } sends P to a REMOTE endpoint (not the local active graph — so the active graph
+    // does NOT thread into it), and joins the returned solutions with the outer. The walker parses it and delegates
+    // to an ISparqlServiceExecutor (a mock here; the cutover injects HttpSparqlServiceExecutor), exactly as
+    // sub-SELECT delegates the modifier layer to the shared QueryResults code.
+
+    private List<Dictionary<string, string>> ServiceStep(ref PatternArray pa, int headerIndex,
+        List<Dictionary<string, string>> input)
+    {
+        if (_serviceExecutor is null)
+            throw new InvalidOperationException("SERVICE requires an ISparqlServiceExecutor (the cutover injects HttpSparqlServiceExecutor).");
+
+        var slot = pa[headerIndex];
+        string serviceSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
+        var (endpointIsVariable, endpointText, silent, innerWhere) = ParseServiceParts(serviceSrc);
+        string query = "SELECT * WHERE " + innerWhere;
+
+        if (!endpointIsVariable)
+            return JoinBags(input, ServiceCall(StripIri(endpointText), query, silent));
+
+        // SERVICE ?ep — the endpoint is taken from each outer solution's binding.
+        string epVar = VarName(endpointText);
+        var output = new List<Dictionary<string, string>>();
+        foreach (var outer in input)
+        {
+            if (!outer.TryGetValue(epVar, out var epValue)) continue; // endpoint unbound: no call
+            foreach (var res in ServiceCall(StripIri(epValue), query, silent))
+            {
+                bool compatible = true;
+                foreach (var kv in res)
+                    if (outer.TryGetValue(kv.Key, out var ov) && ov != kv.Value) { compatible = false; break; }
+                if (!compatible) continue;
+                var merged = new Dictionary<string, string>(outer);
+                foreach (var kv in res) merged[kv.Key] = kv.Value;
+                output.Add(merged);
+            }
+        }
+        return output;
+    }
+
+    private List<Dictionary<string, string>> ServiceCall(string endpoint, string query, bool silent)
+    {
+        try
+        {
+            var rows = _serviceExecutor!.ExecuteSelectAsync(endpoint, query).GetAwaiter().GetResult();
+            var solutions = new List<Dictionary<string, string>>(rows.Count);
+            foreach (var row in rows)
+            {
+                var sol = new Dictionary<string, string>();
+                foreach (var v in row.Variables)
+                    if (row.TryGetBinding(v, out var b)) sol[v.TrimStart('?')] = b.ToRdfTerm();
+                solutions.Add(sol);
+            }
+            return solutions;
+        }
+        catch when (silent)
+        {
+            return new List<Dictionary<string, string>> { new() }; // SILENT: one empty solution (the join preserves the outer rows)
+        }
+    }
+
+    private static List<Dictionary<string, string>> JoinBags(List<Dictionary<string, string>> outer,
+        List<Dictionary<string, string>> inner)
+    {
+        var output = new List<Dictionary<string, string>>();
+        foreach (var a in outer)
+            foreach (var b in inner)
+            {
+                bool compatible = true;
+                foreach (var kv in b)
+                    if (a.TryGetValue(kv.Key, out var av) && av != kv.Value) { compatible = false; break; }
+                if (!compatible) continue;
+                var merged = new Dictionary<string, string>(a);
+                foreach (var kv in b) merged[kv.Key] = kv.Value;
+                output.Add(merged);
+            }
+        return output;
+    }
+
+    private static (bool endpointIsVariable, string endpointText, bool silent, string innerWhere) ParseServiceParts(string s)
+    {
+        int i = SkipWs(s, "SERVICE".Length);
+        bool silent = false;
+        if (Matches(s, i, "SILENT")) { i = SkipWs(s, i + "SILENT".Length); silent = true; }
+
+        int epStart = i;
+        bool isVar;
+        if (i < s.Length && s[i] == '<') { while (i < s.Length && s[i] != '>') i++; if (i < s.Length) i++; isVar = false; }
+        else { while (i < s.Length && !char.IsWhiteSpace(s[i]) && s[i] != '{') i++; isVar = true; }
+        string endpointText = s.Substring(epStart, i - epStart);
+
+        int open = s.IndexOf('{', i);
+        int close = MatchBrace(s, open);
+        return (isVar, endpointText, silent, s.Substring(open, close - open + 1));
+    }
+
+    private static int SkipWs(string s, int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; return i; }
+    private static bool Matches(string s, int i, string w) =>
+        i + w.Length <= s.Length && string.Compare(s, i, w, 0, w.Length, StringComparison.OrdinalIgnoreCase) == 0;
+    private static string StripIri(string t) => t.Length >= 2 && t[0] == '<' && t[^1] == '>' ? t[1..^1] : t;
 
     /// <summary>
     /// Populate a transient binding table from a solution, mirroring the engine exactly: matched terms are bound

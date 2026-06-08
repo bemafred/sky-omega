@@ -44,6 +44,7 @@ internal enum PatternKind : byte
     OptionalHeader = 12, // child is one GroupHeader
     MinusHeader = 13,    // child is one GroupHeader (block form of MINUS)
     SubSelectHeader = 14, // { SELECT … } — a leaf carrying the sub-SELECT source span (re-parsed on evaluation)
+    ServiceHeader = 15,   // SERVICE [SILENT] ep { … } — a leaf carrying the SERVICE source span (re-parsed on evaluation)
 }
 
 /// <summary>
@@ -351,6 +352,21 @@ internal ref struct PatternArray
         int headerIndex = _count;
         var slot = AllocateSlot();
         slot.Kind = PatternKind.SubSelectHeader;
+        slot.GraphTermStart = sourceStart;
+        slot.GraphTermLength = sourceLength;
+        return headerIndex;
+    }
+
+    /// <summary>
+    /// Add a SERVICE leaf (ADR-045): <c>SERVICE [SILENT] ep { … }</c>. The full SERVICE source span is carried on
+    /// the slot (re-parsed on evaluation for the endpoint / SILENT / inner pattern, which is sent to the remote
+    /// endpoint); it has no in-tree children. Returns the slot index.
+    /// </summary>
+    public int AddServiceHeader(int sourceStart, int sourceLength)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.ServiceHeader;
         slot.GraphTermStart = sourceStart;
         slot.GraphTermLength = sourceLength;
         return headerIndex;
