@@ -183,6 +183,60 @@ public class TreeJoinExecutorTests : IDisposable
             => new ValueTask<bool>(false);
     }
 
+    [Fact]
+    public void VariableGraph_ThroughTheZeroGcExecutor_EqualsTheBaseline()
+    {
+        // GRAPH ?g { ... } enumerates the NAMED graphs (the mirror — the default graph is not named) and binds ?g.
+        const string query = "SELECT ?g ?o WHERE { GRAPH ?g { ?s <urn:p> ?o } }";
+        var baseline = BaselineCanonical(query, new[] { "g", "o" });
+        var rows = Canonicalize(ExecuteTree(ExtractWhereGroup(query), ""), new[] { "g", "o" });
+        Assert.Equal(baseline, rows);
+    }
+
+    [Fact]
+    public void PnamePatterns_ThroughTheZeroGcExecutor_ResolveViaPrefixes()
+    {
+        // A prefixed name in a pattern (ex:p) resolves only when the prologue prefixes are threaded into the scan, so
+        // the tree is parsed over the FULL query (prefixes live in the prologue) and the same source handed over.
+        const string query = "PREFIX ex: <urn:> SELECT ?o WHERE { ?s ex:p ?o }";
+        var baseline = BaselineCanonical(query, new[] { "o" });
+        var rows = Canonicalize(ExecuteTreeFullQuery(query, ""), new[] { "o" });
+        Assert.Equal(baseline, rows);
+    }
+
+    private List<MaterializedRow> ExecuteTreeFullQuery(string query, string activeGraph)
+    {
+        int whereStart = query.IndexOf('{'); // the first '{' opens the WHERE group of a SELECT query
+        var prefixes = ExtractPrefixes(query);
+        var buffer = new byte[PatternSlot.Size * 256];
+        var pa = new PatternArray(buffer);
+        int root = new SparqlParser(query.AsSpan()).ParsePatternTreeAt(whereStart, ref pa);
+
+        _store.AcquireReadLock();
+        try
+        {
+            return new TreeJoinExecutor(_store, query, prefixes, query).Evaluate(ref pa, root, activeGraph);
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+    }
+
+    private static PrefixMapping[]? ExtractPrefixes(string query)
+    {
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
+        int count = parsed.Prologue.PrefixCount;
+        if (count == 0) return null;
+        var prefixes = new PrefixMapping[count];
+        for (int i = 0; i < count; i++)
+        {
+            var (prefixStart, prefixLength, iriStart, iriLength) = parsed.Prologue.GetPrefix(i);
+            prefixes[i] = new PrefixMapping { PrefixStart = prefixStart, PrefixLength = prefixLength, IriStart = iriStart, IriLength = iriLength };
+        }
+        return prefixes;
+    }
+
     private static List<string> Canonicalize(List<MaterializedRow> rows, string[] projection)
     {
         var canon = new List<string>(rows.Count);

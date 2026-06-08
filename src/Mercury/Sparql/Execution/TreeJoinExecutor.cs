@@ -43,15 +43,25 @@ internal sealed class TreeJoinExecutor
     private readonly PrefixMapping[]? _prefixes;
     private readonly string _prefixSource;
     private readonly ISparqlServiceExecutor? _serviceExecutor;
+    private readonly TemporalQueryMode _temporalMode;
+    private readonly DateTimeOffset _asOfTime;
+    private readonly DateTimeOffset _rangeStart;
+    private readonly DateTimeOffset _rangeEnd;
 
     public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
-        string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null)
+        string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
+        TemporalQueryMode temporalMode = TemporalQueryMode.Current,
+        DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default)
     {
         _store = store;
         _source = source;
         _prefixes = prefixes;
         _prefixSource = prefixSource ?? source;
         _serviceExecutor = serviceExecutor;
+        _temporalMode = temporalMode;
+        _asOfTime = asOfTime;
+        _rangeStart = rangeStart;
+        _rangeEnd = rangeEnd;
     }
 
     /// <summary>Evaluate the group at <paramref name="rootHeader"/> into materialized rows, threading the active graph.</summary>
@@ -158,7 +168,10 @@ internal sealed class TreeJoinExecutor
             case PatternKind.GraphHeader:
             {
                 var slot = pa[ci];
-                return EvalGroup(ref pa, ci, _source.Substring(slot.GraphTermStart, slot.GraphTermLength), input);
+                string graphTerm = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
+                return slot.GraphTermType == TermType.Variable
+                    ? VariableGraphStep(ref pa, ci, graphTerm, input)
+                    : EvalGroup(ref pa, ci, graphTerm, input);
             }
             case PatternKind.GroupHeader:
                 return EvalGroup(ref pa, ci, activeGraph, input);
@@ -276,6 +289,41 @@ internal sealed class TreeJoinExecutor
             if (negated ? !exists : exists) output.Add(row);
         }
         return output;
+    }
+
+    /// <summary>
+    /// GRAPH ?g { P }: for each named graph g, evaluate P against g and bind ?g = g, unioned over the graphs. (The
+    /// default graph is not a named graph, so it is not enumerated — matching SPARQL's GRAPH semantics.)
+    /// </summary>
+    private List<MaterializedRow> VariableGraphStep(ref PatternArray pa, int graphHeaderIndex, string graphVar, List<MaterializedRow> input)
+    {
+        var graphNames = new List<string>();
+        var en = _store.GetNamedGraphs();
+        while (en.MoveNext()) graphNames.Add(en.Current.ToString());
+
+        var output = new List<MaterializedRow>();
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(8);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 10);
+        try
+        {
+            foreach (var g in graphNames)
+            {
+                string graphIri = g.Length > 0 && g[0] == '<' ? g : "<" + g + ">"; // the scan's active graph, in IRI form
+                var bodyRows = EvalGroup(ref pa, graphHeaderIndex, graphIri, input);
+                if (bodyRows.Count == 0) continue;
+
+                var table = new BindingTable(bindingArray.AsSpan(0, 8), charArray.AsSpan(0, 1 << 10));
+                table.TruncateTo(0);
+                table.Bind(graphVar.AsSpan(), graphIri.AsSpan());
+                output.AddRange(Join(bodyRows, new List<MaterializedRow> { new(table) }));
+            }
+            return output;
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
     }
 
     /// <summary>
@@ -416,7 +464,8 @@ internal sealed class TreeJoinExecutor
         var innerBuffer = new byte[PatternSlot.Size * 256];
         var innerPa = new PatternArray(innerBuffer);
         int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
-        var innerBag = new TreeJoinExecutor(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor)
+        var innerBag = new TreeJoinExecutor(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd)
             .Evaluate(ref innerPa, innerRoot, activeGraph);
 
         var selectClause = BuildSelectClause(sub);
@@ -598,7 +647,8 @@ internal sealed class TreeJoinExecutor
             return;
         }
 
-        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan());
+        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
         try
         {
             while (scan.MoveNext(ref bindings))

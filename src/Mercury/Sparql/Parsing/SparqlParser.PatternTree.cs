@@ -51,6 +51,17 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// ADR-045 cutover: parse the WHERE group at <paramref name="position"/> (the opening <c>'{'</c>) over THIS
+    /// parser's source — the FULL query — so the tree's slot offsets index the same source as the prologue
+    /// prefixes. Used to wire the executor against a whole query (the prefixes live in the prologue, not the group).
+    /// </summary>
+    internal int ParsePatternTreeAt(int position, scoped ref PatternArray pa)
+    {
+        _position = position;
+        return ParsePatternTree(ref pa);
+    }
+
+    /// <summary>
     /// [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
     /// A <c>{ SELECT … }</c> body is a sub-SELECT, captured as a SubSelectHeader leaf carrying its source span
     /// (re-parsed and evaluated as a nested query). Otherwise emits a GroupHeader over the body. Returns the index.
