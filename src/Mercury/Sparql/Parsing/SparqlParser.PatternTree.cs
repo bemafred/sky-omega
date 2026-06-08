@@ -323,6 +323,18 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// ADR-045 cutover: re-parse the predicate-or-path at <paramref name="position"/> — a path span captured on a
+    /// tree slot — over THIS parser's source, so the resulting <see cref="PropertyPath"/>'s offsets index the same
+    /// source the zero-GC executor hands <c>TriplePatternScan</c>. The slot can't hold the full PropertyPath, so it
+    /// carries the span and the executor reconstructs the PropertyPath here on demand.
+    /// </summary>
+    internal (Term predicate, PropertyPath path) ParsePredicateOrPathAt(int position)
+    {
+        _position = position;
+        return ParsePredicateOrPath();
+    }
+
+    /// <summary>
     /// Emit a Triple slot. For a property path (<paramref name="path"/>.Type != None) the slot carries the FULL
     /// path-expression source span (<paramref name="pathStart"/>..<paramref name="pathLength"/>) — not just the
     /// base IRI — so the evaluator re-parses and evaluates the complete path algebra; for a plain predicate the

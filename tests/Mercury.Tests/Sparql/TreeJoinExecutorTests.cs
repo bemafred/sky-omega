@@ -34,6 +34,8 @@ public class TreeJoinExecutorTests : IDisposable
             ("<urn:b>", "<urn:p>", "<urn:v2>"),
             ("<urn:c>", "<urn:p>", "<urn:v3>"),
             ("<urn:v1>", "<urn:next>", "<urn:z>"), // only v1 has a next — makes the 2-pattern join selective
+            ("<urn:a>", "<urn:link>", "<urn:b>"),  // a -> b -> c chain for property-path closures
+            ("<urn:b>", "<urn:link>", "<urn:c>"),
         };
         _store.BeginBatch();
         foreach (var (s, p, o) in data)
@@ -53,6 +55,16 @@ public class TreeJoinExecutorTests : IDisposable
     [Theory]
     [InlineData("SELECT ?s ?o WHERE { ?s <urn:p> ?o }", new[] { "s", "o" })]
     [InlineData("SELECT ?s ?x WHERE { ?s <urn:p> ?o . ?o <urn:next> ?x }", new[] { "s", "x" })]
+    // Property paths — reused from TriplePatternScan via the re-parsed PropertyPath: + (transitive), * (reflexive
+    // transitive), ^ (inverse), / (sequence), | (alternative).
+    [InlineData("SELECT ?s ?o WHERE { ?s <urn:link>+ ?o }", new[] { "s", "o" })]
+    [InlineData("SELECT ?o WHERE { <urn:a> <urn:link>* ?o }", new[] { "o" })]
+    [InlineData("SELECT ?s WHERE { ?s ^<urn:link> <urn:c> }", new[] { "s" })]
+    [InlineData("SELECT ?o WHERE { <urn:a> <urn:link>/<urn:link> ?o }", new[] { "o" })]
+    [InlineData("SELECT ?o WHERE { <urn:a> <urn:link>|<urn:p> ?o }", new[] { "o" })]
+    [InlineData("SELECT ?o WHERE { <urn:a> <urn:link>? ?o }", new[] { "o" })]          // zero-or-one (reflexive + one hop)
+    [InlineData("SELECT ?o WHERE { <urn:a> !<urn:p> ?o }", new[] { "o" })]             // negated property set
+    [InlineData("SELECT ?o WHERE { <urn:a> (<urn:link>/<urn:link>) ?o }", new[] { "o" })] // grouped sequence
     public void DefaultAndGraphWrapped_ThroughTheZeroGcExecutor_EqualTheBaseline(string query, string[] projection)
     {
         var baseline = BaselineCanonical(query, projection);

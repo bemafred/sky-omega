@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
+using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Storage;
@@ -93,10 +94,15 @@ internal sealed class TreeJoinExecutor
             switch (slot.Kind)
             {
                 case PatternKind.Triple:
-                    if (slot.PathKind != PathType.None)
-                        throw new NotSupportedException("Property paths are a later increment of the zero-GC tree executor (reconcile the tree's path-span with TriplePatternScan's base-IRI form).");
-                    patterns.Add(TripleFromSlot(slot));
-                    graphs.Add(activeGraph);
+                    if (slot.PathKind == PathType.None)
+                    {
+                        patterns.Add(TripleFromSlot(slot));
+                        graphs.Add(activeGraph);
+                    }
+                    else
+                    {
+                        AddPathPatterns(slot, activeGraph, patterns, graphs);
+                    }
                     break;
                 case PatternKind.GraphHeader:
                     Flatten(ref pa, ci, _source.Substring(slot.GraphTermStart, slot.GraphTermLength), patterns, graphs);
@@ -143,4 +149,28 @@ internal sealed class TreeJoinExecutor
         Predicate = new Term { Type = slot.PredicateType, Start = slot.PredicateStart, Length = slot.PredicateLength },
         Object = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength },
     };
+
+    /// <summary>
+    /// A property-path triple. The slot carries the full path-expression SPAN (not a base IRI); re-parse it over the
+    /// SAME source (so the PropertyPath's offsets index the source given to <see cref="TriplePatternScan"/>). Then
+    /// reuse the shipping expansion: a top-level SEQUENCE expands to intermediate-variable triples (TriplePatternScan
+    /// does not evaluate a top-level sequence — the shipping flat path always expands it); every other form —
+    /// ^ * + ? | ( ) ! and grouped sequences — stays one pattern TriplePatternScan evaluates zero-GC. Subject/object
+    /// come from the slot; the synthetic intermediate variables are ones TriplePatternScan already resolves.
+    /// </summary>
+    private void AddPathPatterns(PatternSlot slot, string activeGraph, List<TriplePattern> patterns, List<string> graphs)
+    {
+        var pathParser = new SparqlParser(_source.AsSpan());
+        var (predicate, path) = pathParser.ParsePredicateOrPathAt(slot.PathIriStart);
+        var subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength };
+        var obj = new Term { Type = slot.ObjectType, Start = slot.ObjectStart, Length = slot.ObjectLength };
+
+        var expanded = new GraphPattern();
+        pathParser.AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
+        for (int i = 0; i < expanded.PatternCount; i++)
+        {
+            patterns.Add(expanded.GetPattern(i));
+            graphs.Add(activeGraph);
+        }
+    }
 }

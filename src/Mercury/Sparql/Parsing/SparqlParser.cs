@@ -662,7 +662,7 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Add a triple pattern, handling quoted triples, blank node property lists, and sequence paths.
     /// </summary>
-    private void AddTriplePatternOrExpand(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
+    internal void AddTriplePatternOrExpand(ref GraphPattern pattern, Term subject, Term predicate, Term obj, PropertyPath path)
     {
         // Check if subject or object is a quoted triple - if so, expand to reification patterns
         if (subject.IsQuotedTriple || obj.IsQuotedTriple)
