@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Execution;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
@@ -76,6 +79,10 @@ public class TreeJoinExecutorTests : IDisposable
     [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o FILTER EXISTS { ?s <urn:q> ?x } }", new[] { "s" })]
     [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o FILTER NOT EXISTS { ?s <urn:q> ?x } }", new[] { "s" })]
     [InlineData("SELECT ?s WHERE { { ?s <urn:p> ?o } }", new[] { "s" })]
+    // Composing operators (batch B) — MINUS, VALUES, sub-SELECT (with the shared modifier layer).
+    [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o MINUS { ?s <urn:q> ?x } }", new[] { "s" })]
+    [InlineData("SELECT ?o WHERE { VALUES ?s { <urn:a> <urn:b> } ?s <urn:p> ?o }", new[] { "o" })]
+    [InlineData("SELECT ?o WHERE { { SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 2 } }", new[] { "o" })]
     public void DefaultAndGraphWrapped_ThroughTheZeroGcExecutor_EqualTheBaseline(string query, string[] projection)
     {
         var baseline = BaselineCanonical(query, projection);
@@ -124,7 +131,7 @@ public class TreeJoinExecutorTests : IDisposable
         }
     }
 
-    private List<MaterializedRow> ExecuteTree(string whereGroup, string activeGraph)
+    private List<MaterializedRow> ExecuteTree(string whereGroup, string activeGraph, ISparqlServiceExecutor? serviceExecutor = null)
     {
         var buffer = new byte[PatternSlot.Size * 256];
         var pa = new PatternArray(buffer);
@@ -133,12 +140,47 @@ public class TreeJoinExecutorTests : IDisposable
         _store.AcquireReadLock();
         try
         {
-            return new TreeJoinExecutor(_store, whereGroup).Evaluate(ref pa, root, activeGraph);
+            return new TreeJoinExecutor(_store, whereGroup, null, null, serviceExecutor).Evaluate(ref pa, root, activeGraph);
         }
         finally
         {
             _store.ReleaseReadLock();
         }
+    }
+
+    [Fact]
+    public void Service_ThroughTheZeroGcExecutor_DelegatesAndIgnoresTheActiveGraph()
+    {
+        // SERVICE is federation: the inner pattern goes to a REMOTE endpoint, not the active graph. A mock executor
+        // returns canned rows; wrapping the SERVICE in GRAPH <m> must not change anything. (Shipping would attempt a
+        // live request, so there is no facade baseline; the model validates the same shape.)
+        const string where = "{ SERVICE <http://remote/sparql> { ?s <urn:r> ?o } }";
+        var executor = new MockServiceExecutor();
+
+        var unwrapped = Canonicalize(ExecuteTree(where, "", executor), new[] { "o" });
+        var wrapped = Canonicalize(ExecuteTree("{ GRAPH " + MirrorGraph + " " + where + " }", "", executor), new[] { "o" });
+
+        var expected = new List<string> { "o=<urn:remote1>", "o=<urn:remote2>" };
+        Assert.Equal(expected, unwrapped);
+        Assert.Equal(expected, wrapped);
+    }
+
+    private sealed class MockServiceExecutor : ISparqlServiceExecutor
+    {
+        public ValueTask<List<ServiceResultRow>> ExecuteSelectAsync(string endpointUri, string query, CancellationToken ct = default)
+        {
+            var rows = new List<ServiceResultRow>();
+            foreach (var iri in new[] { "urn:remote1", "urn:remote2" })
+            {
+                var row = new ServiceResultRow();
+                row.AddBinding("o", new ServiceBinding(ServiceBindingType.Uri, iri));
+                rows.Add(row);
+            }
+            return new ValueTask<List<ServiceResultRow>>(rows);
+        }
+
+        public ValueTask<bool> ExecuteAskAsync(string endpointUri, string query, CancellationToken ct = default)
+            => new ValueTask<bool>(false);
     }
 
     private static List<string> Canonicalize(List<MaterializedRow> rows, string[] projection)

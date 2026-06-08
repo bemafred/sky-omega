@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
+using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
@@ -41,20 +42,22 @@ internal sealed class TreeJoinExecutor
     private readonly string _source;
     private readonly PrefixMapping[]? _prefixes;
     private readonly string _prefixSource;
+    private readonly ISparqlServiceExecutor? _serviceExecutor;
 
-    public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null, string? prefixSource = null)
+    public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
+        string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null)
     {
         _store = store;
         _source = source;
         _prefixes = prefixes;
         _prefixSource = prefixSource ?? source;
+        _serviceExecutor = serviceExecutor;
     }
 
     /// <summary>Evaluate the group at <paramref name="rootHeader"/> into materialized rows, threading the active graph.</summary>
     public List<MaterializedRow> Evaluate(ref PatternArray pa, int rootHeader, string activeGraph)
     {
-        var seed = new List<MaterializedRow> { new(new BindingTable(Array.Empty<Binding>(), Array.Empty<char>())) };
-        return EvalGroup(ref pa, rootHeader, activeGraph, seed);
+        return EvalGroup(ref pa, rootHeader, activeGraph, new List<MaterializedRow> { EmptyRow() });
     }
 
     /// <summary>
@@ -183,8 +186,16 @@ internal sealed class TreeJoinExecutor
             }
             case PatternKind.Bind:
                 return BindStep(ref pa, ci, input);
+            case PatternKind.MinusHeader:
+                return MinusStep(ref pa, ci, activeGraph, input);
+            case PatternKind.ValuesHeader:
+                return ValuesStep(ref pa, ci, input);
+            case PatternKind.SubSelectHeader:
+                return SubSelectStep(ref pa, ci, activeGraph, input);
+            case PatternKind.ServiceHeader:
+                return ServiceStep(ref pa, ci, input);
             default:
-                throw new NotSupportedException($"{kind} is a later increment of the zero-GC executor's operators (MINUS / VALUES / sub-SELECT / SERVICE).");
+                throw new NotSupportedException($"{kind} has no evaluator case.");
         }
     }
 
@@ -266,6 +277,311 @@ internal sealed class TreeJoinExecutor
         }
         return output;
     }
+
+    /// <summary>
+    /// MINUS (positional): drop a left row iff the right side has a row compatible with it AND sharing at least one
+    /// variable (SPARQL §8.3 — disjoint domains do not remove). The right side is evaluated INDEPENDENTLY of the
+    /// left (seeded with the empty row), unlike NOT EXISTS.
+    /// </summary>
+    private List<MaterializedRow> MinusStep(ref PatternArray pa, int minusIndex, string activeGraph, List<MaterializedRow> input)
+    {
+        var rhs = EvalGroup(ref pa, minusIndex, activeGraph, new List<MaterializedRow> { EmptyRow() });
+        var output = new List<MaterializedRow>();
+        foreach (var row in input)
+        {
+            bool removed = false;
+            foreach (var other in rhs)
+                if (SharesVariable(row, other) && Compatible(row, other)) { removed = true; break; }
+            if (!removed) output.Add(row);
+        }
+        return output;
+    }
+
+    /// <summary>VALUES (inline data): build a row per data row (UNDEF leaves a variable unbound) and join with the input.</summary>
+    private List<MaterializedRow> ValuesStep(ref PatternArray pa, int valuesIndex, List<MaterializedRow> input)
+    {
+        var slot = pa[valuesIndex];
+        string valuesSpan = _source.Substring(slot.ValuesVarStart, slot.ValuesVarLength);
+        var temp = new GraphPattern();
+        new SparqlParser(valuesSpan.AsSpan()).ParseValues(ref temp);
+        var vc = temp.Values;
+        int varCount = vc.VariableCount;
+        if (varCount == 0) return input;
+
+        var varNames = new string[varCount];
+        for (int i = 0; i < varCount; i++) { var (vs, vl) = vc.GetVariable(i); varNames[i] = valuesSpan.Substring(vs, vl); }
+
+        var valueRows = new List<MaterializedRow>();
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            for (int r = 0; r < vc.RowCount; r++)
+            {
+                table.TruncateTo(0);
+                for (int c = 0; c < varCount; c++)
+                {
+                    var (vs, vl) = vc.GetValueAt(r, c);
+                    if (vl < 0) continue; // UNDEF
+                    table.Bind(varNames[c].AsSpan(), valuesSpan.AsSpan(vs, vl));
+                }
+                valueRows.Add(new MaterializedRow(table));
+            }
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+        return Join(input, valueRows);
+    }
+
+    // ── SERVICE (federation) ──────────────────────────────────────────────────────────────────────────
+    // SERVICE [SILENT] ep { P } sends P to a REMOTE endpoint (not the local active graph — so the active graph does
+    // NOT thread into it), and joins the returned rows with the input. Delegated to an injected ISparqlServiceExecutor
+    // (the cutover injects HttpSparqlServiceExecutor), exactly as sub-SELECT delegates the modifier layer.
+
+    private List<MaterializedRow> ServiceStep(ref PatternArray pa, int serviceIndex, List<MaterializedRow> input)
+    {
+        if (_serviceExecutor is null)
+            throw new InvalidOperationException("SERVICE requires an ISparqlServiceExecutor (the cutover injects HttpSparqlServiceExecutor).");
+
+        var slot = pa[serviceIndex];
+        string serviceSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
+        var (endpointIsVariable, endpointText, silent, innerWhere) = ParseServiceParts(serviceSrc);
+        string query = "SELECT * WHERE " + innerWhere;
+
+        if (!endpointIsVariable)
+            return Join(input, ServiceCall(StripIri(endpointText), query, silent));
+
+        // SERVICE ?ep — the endpoint is taken from each outer row's binding.
+        var output = new List<MaterializedRow>();
+        foreach (var row in input)
+        {
+            var epValue = row.GetValueByName(endpointText.AsSpan());
+            if (epValue.IsEmpty) continue; // endpoint unbound: no call
+            output.AddRange(Join(new List<MaterializedRow> { row }, ServiceCall(StripIri(epValue.ToString()), query, silent)));
+        }
+        return output;
+    }
+
+    private List<MaterializedRow> ServiceCall(string endpoint, string query, bool silent)
+    {
+        try
+        {
+            var rows = _serviceExecutor!.ExecuteSelectAsync(endpoint, query).GetAwaiter().GetResult();
+            var result = new List<MaterializedRow>(rows.Count);
+            var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+            var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+            try
+            {
+                var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+                foreach (var row in rows)
+                {
+                    table.TruncateTo(0);
+                    foreach (var v in row.Variables)
+                        if (row.TryGetBinding(v, out var b)) table.Bind(("?" + v.TrimStart('?')).AsSpan(), b.ToRdfTerm().AsSpan());
+                    result.Add(new MaterializedRow(table));
+                }
+            }
+            finally
+            {
+                ArrayPool<Binding>.Shared.Return(bindingArray);
+                ArrayPool<char>.Shared.Return(charArray);
+            }
+            return result;
+        }
+        catch when (silent)
+        {
+            return new List<MaterializedRow> { EmptyRow() }; // SILENT: one empty row (the join preserves the input rows)
+        }
+    }
+
+    // ── sub-SELECT ────────────────────────────────────────────────────────────────────────────────────
+    // A nested query: its WHERE is walked through the SAME path with the active graph threaded in, then the
+    // SOLUTION-MODIFIER layer (project / distinct / group + aggregates / having / order / limit) is applied by the
+    // shipping QueryResults.FromMaterializedSimple — graph-agnostic and shared, reused not reimplemented. The
+    // projected rows then join with the outer rows on their shared variables.
+
+    private List<MaterializedRow> SubSelectStep(ref PatternArray pa, int headerIndex, string activeGraph, List<MaterializedRow> input)
+    {
+        var slot = pa[headerIndex];
+        string subSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
+        var sub = new SparqlParser(subSrc.AsSpan()).ParseSubSelectCore();
+
+        int open = subSrc.IndexOf('{');
+        int close = MatchBrace(subSrc, open);
+        string innerWhere = subSrc.Substring(open, close - open + 1);
+        var innerBuffer = new byte[PatternSlot.Size * 256];
+        var innerPa = new PatternArray(innerBuffer);
+        int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
+        var innerBag = new TreeJoinExecutor(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor)
+            .Evaluate(ref innerPa, innerRoot, activeGraph);
+
+        var selectClause = BuildSelectClause(sub);
+        var qrBindings = new Binding[64];
+        var qrStringBuffer = new char[16384];
+        var qr = QueryResults.FromMaterializedSimple(innerBag, subSrc.AsSpan(), _store, qrBindings, qrStringBuffer,
+            sub.Limit, sub.Offset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
+
+        var outNames = OutputVarNames(sub, subSrc, innerWhere);
+        var projected = new List<MaterializedRow>();
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            while (qr.MoveNext())
+            {
+                var bt = qr.Current;
+                table.TruncateTo(0);
+                foreach (var name in outNames)
+                {
+                    int idx = bt.FindBinding(("?" + name).AsSpan());
+                    if (idx >= 0) table.Bind(("?" + name).AsSpan(), bt.GetString(idx));
+                }
+                projected.Add(new MaterializedRow(table));
+            }
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+        return Join(input, projected);
+    }
+
+    private static SelectClause BuildSelectClause(SubSelect sub)
+    {
+        var sc = new SelectClause { Distinct = sub.Distinct, SelectAll = sub.SelectAll };
+        for (int i = 0; i < sub.ProjectedVarCount; i++)
+        {
+            var (start, length) = sub.GetProjectedVariable(i);
+            sc.AddProjectedVariable(start, length);
+        }
+        for (int i = 0; i < sub.AggregateCount; i++)
+            sc.AddAggregate(sub.GetAggregate(i));
+        return sc;
+    }
+
+    private static List<string> OutputVarNames(SubSelect sub, string subSrc, string innerWhere)
+    {
+        var names = new List<string>();
+        var seen = new HashSet<string>();
+        if (sub.SelectAll)
+        {
+            // SELECT * — the output variables are the inner WHERE's variables, in first-seen order.
+            for (int i = 0; i < innerWhere.Length; i++)
+            {
+                if (innerWhere[i] != '?') continue;
+                int j = i + 1;
+                while (j < innerWhere.Length && (char.IsLetterOrDigit(innerWhere[j]) || innerWhere[j] == '_')) j++;
+                if (j > i + 1 && seen.Add(innerWhere.Substring(i + 1, j - i - 1))) names.Add(innerWhere.Substring(i + 1, j - i - 1));
+                i = j - 1;
+            }
+            return names;
+        }
+        for (int i = 0; i < sub.ProjectedVarCount; i++)
+        {
+            var (start, length) = sub.GetProjectedVariable(i);
+            string name = subSrc.Substring(start, length).TrimStart('?');
+            if (seen.Add(name)) names.Add(name);
+        }
+        return names;
+    }
+
+    // ── shared composition helpers (over MaterializedRow) ───────────────────────────────────────────────
+
+    private static MaterializedRow EmptyRow() => new(new BindingTable(Array.Empty<Binding>(), Array.Empty<char>()));
+
+    /// <summary>Natural join: every compatible (left, right) pair merges (left's bindings plus right's new ones).</summary>
+    private static List<MaterializedRow> Join(List<MaterializedRow> left, List<MaterializedRow> right)
+    {
+        var output = new List<MaterializedRow>();
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            foreach (var l in left)
+                foreach (var r in right)
+                {
+                    if (!Compatible(l, r)) continue;
+                    table.TruncateTo(0);
+                    l.RestoreBindings(ref table);
+                    for (int j = 0; j < r.BindingCount; j++)
+                        if (!HasHash(l, r.GetHash(j))) table.BindWithHash(r.GetHash(j), r.GetValue(j));
+                    output.Add(new MaterializedRow(table));
+                }
+            return output;
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+    }
+
+    /// <summary>Two rows are compatible iff every shared variable (same name-hash) has the same value.</summary>
+    private static bool Compatible(MaterializedRow a, MaterializedRow b)
+    {
+        for (int i = 0; i < a.BindingCount; i++)
+        {
+            int h = a.GetHash(i);
+            for (int j = 0; j < b.BindingCount; j++)
+                if (b.GetHash(j) == h && !a.GetValue(i).SequenceEqual(b.GetValue(j))) return false;
+        }
+        return true;
+    }
+
+    private static bool SharesVariable(MaterializedRow a, MaterializedRow b)
+    {
+        for (int i = 0; i < a.BindingCount; i++)
+            for (int j = 0; j < b.BindingCount; j++)
+                if (a.GetHash(i) == b.GetHash(j)) return true;
+        return false;
+    }
+
+    private static bool HasHash(MaterializedRow row, int hash)
+    {
+        for (int i = 0; i < row.BindingCount; i++)
+            if (row.GetHash(i) == hash) return true;
+        return false;
+    }
+
+    private static int MatchBrace(string s, int open)
+    {
+        int depth = 0;
+        for (int i = open; i < s.Length; i++)
+        {
+            if (s[i] == '{') depth++;
+            else if (s[i] == '}' && --depth == 0) return i;
+        }
+        throw new ArgumentException("Unbalanced braces");
+    }
+
+    private static (bool endpointIsVariable, string endpointText, bool silent, string innerWhere) ParseServiceParts(string s)
+    {
+        int i = SkipWs(s, "SERVICE".Length);
+        bool silent = false;
+        if (Matches(s, i, "SILENT")) { i = SkipWs(s, i + "SILENT".Length); silent = true; }
+
+        int epStart = i;
+        bool isVar;
+        if (i < s.Length && s[i] == '<') { while (i < s.Length && s[i] != '>') i++; if (i < s.Length) i++; isVar = false; }
+        else { while (i < s.Length && !char.IsWhiteSpace(s[i]) && s[i] != '{') i++; isVar = true; }
+        string endpointText = s.Substring(epStart, i - epStart);
+
+        int open = s.IndexOf('{', i);
+        int close = MatchBrace(s, open);
+        return (isVar, endpointText, silent, s.Substring(open, close - open + 1));
+    }
+
+    private static int SkipWs(string s, int i) { while (i < s.Length && char.IsWhiteSpace(s[i])) i++; return i; }
+    private static bool Matches(string s, int i, string w) =>
+        i + w.Length <= s.Length && string.Compare(s, i, w, 0, w.Length, StringComparison.OrdinalIgnoreCase) == 0;
+    private static string StripIri(string t) => t.Length >= 2 && t[0] == '<' && t[^1] == '>' ? t[1..^1] : t;
 
     /// <summary>
     /// Recursive nested-loop join (the continuation is the recursion). The scan is a ref-struct stack local; it
