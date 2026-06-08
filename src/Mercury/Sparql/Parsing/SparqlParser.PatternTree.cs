@@ -272,8 +272,6 @@ internal ref partial struct SparqlParser
         var subject = ParseTerm();
         if (subject.Type == TermType.Variable && subject.Length == 0)
             return false;
-        if (subject.IsQuotedTriple)
-            throw new SparqlParseException("RDF-star quoted triples are not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
 
         SkipWhitespace();
         int pathStart = _position;
@@ -286,8 +284,6 @@ internal ref partial struct SparqlParser
         var obj = ParseTerm();
         if (obj.Length == 0)
             throw new SparqlParseException("Incomplete triple pattern - expected object");
-        if (obj.IsQuotedTriple)
-            throw new SparqlParseException("RDF-star quoted triples are not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
 
         EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
 
@@ -326,6 +322,28 @@ internal ref partial struct SparqlParser
     private void EmitTriple(scoped ref PatternArray pa, Term subject, Term predicate, Term obj, PropertyPath path,
         int pathStart, int pathLength)
     {
+        // RDF-star quoted triples and blank-node property lists expand (at parse time) to several plain triples
+        // carrying synthetic terms (reifier / blank-node join variables at negative offsets, the rdf:* IRIs at
+        // -1..-5). Reuse the shipping expansion (AddTriplePatternOrExpand — same parser instance, same synthetic
+        // counters) into a throwaway pattern, then copy the expanded triples into the tree; the evaluator resolves
+        // the synthetic offsets via SyntheticTermHelper.
+        if (subject.IsQuotedTriple || obj.IsQuotedTriple ||
+            IsBlankNodePropertyList(subject) || IsBlankNodePropertyList(obj))
+        {
+            var expanded = new GraphPattern();
+            AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);
+            for (int i = 0; i < expanded.PatternCount; i++)
+            {
+                var tp = expanded.GetPattern(i);
+                pa.AddTriple(
+                    tp.Subject.Type, tp.Subject.Start, tp.Subject.Length,
+                    tp.Predicate.Type, tp.Predicate.Start, tp.Predicate.Length,
+                    tp.Object.Type, tp.Object.Start, tp.Object.Length,
+                    tp.Path.Type, tp.Path.Iri.Start, tp.Path.Iri.Length);
+            }
+            return;
+        }
+
         int pathIriStart = path.Type == PathType.None ? path.Iri.Start : pathStart;
         int pathIriLength = path.Type == PathType.None ? path.Iri.Length : pathLength;
         pa.AddTriple(

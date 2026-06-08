@@ -6,6 +6,7 @@ using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
 using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
+using SkyOmega.Mercury.Sparql.Execution.Operators;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Sparql.Types;
@@ -65,6 +66,15 @@ public class GraphTreeEvaluatorTests : IDisposable
             ("<urn:c>", "<urn:p>", "<urn:v3>"), // p but no q — makes MINUS / (NOT) EXISTS non-trivial
             ("<urn:a>", "<urn:next>", "<urn:b>"), // a -> b -> c chain for property-path closures
             ("<urn:b>", "<urn:next>", "<urn:c>"),
+            // RDF-star: the reification of << <urn:a> <urn:p> <urn:v1> >> annotated with <urn:certainty> "0.9".
+            ("<urn:r1>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement>"),
+            ("<urn:r1>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#subject>", "<urn:a>"),
+            ("<urn:r1>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#predicate>", "<urn:p>"),
+            ("<urn:r1>", "<http://www.w3.org/1999/02/22-rdf-syntax-ns#object>", "<urn:v1>"),
+            ("<urn:r1>", "<urn:certainty>", "\"0.9\""),
+            // blank-node property list: <urn:d> knows <urn:e>, and <urn:e> has name "x".
+            ("<urn:d>", "<urn:knows>", "<urn:e>"),
+            ("<urn:e>", "<urn:name>", "\"x\""),
         };
         _store.BeginBatch();
         foreach (var (s, p, o) in data)
@@ -118,13 +128,28 @@ public class GraphTreeEvaluatorTests : IDisposable
     [InlineData("subselect-distinct", "SELECT ?p2 WHERE { { SELECT DISTINCT ?p2 WHERE { ?s ?p2 ?o } } }")]
     [InlineData("subselect-aggregate", "SELECT ?c WHERE { { SELECT (COUNT(*) AS ?c) WHERE { ?s <urn:p> ?o } } }")]
     [InlineData("subselect-order-limit", "SELECT ?o WHERE { { SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 2 } }")]
+    // RDF-star quoted triple (expands to reification) and blank-node property list (expands to a synthetic-variable
+    // subject) — both produce synthetic terms (negative offsets) resolved via SyntheticTermHelper.
+    [InlineData("rdf-star", "SELECT ?c WHERE { << <urn:a> <urn:p> <urn:v1> >> <urn:certainty> ?c }")]
+    [InlineData("blank-node-proplist", "SELECT ?s WHERE { ?s <urn:knows> [ <urn:name> \"x\" ] }")]
     public void GraphWrapped_ThroughTheUniformWalker_EqualsTheDefaultGraphBaseline(string name, string query)
     {
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
+        // The SparqlEngine facade's query planner mishandles RDF-star's synthetic offsets (it throws), so for a
+        // query it cannot run we fall back to the core QueryExecutor — the path SparqlStarTests trusts — which does.
         var baseline = SparqlEngine.Query(_store, query);
-        Assert.True(baseline.Success, $"baseline failed: {baseline.ErrorMessage}");
-        var projection = baseline.Variables!;
-        var expected = Canonicalize(baseline.Rows, projection);
+        List<Dictionary<string, string>>? baselineRows;
+        string[] projection;
+        if (baseline.Success)
+        {
+            baselineRows = baseline.Rows;
+            projection = baseline.Variables!;
+        }
+        else
+        {
+            (baselineRows, projection) = BaselineViaExecutor(query);
+        }
+        var expected = Canonicalize(baselineRows, projection);
 
         // Prologue prefixes for FILTER PNAME expansion come from the ORIGINAL query (offsets into it).
         var prefixes = ExtractPrefixes(query);
@@ -160,6 +185,46 @@ public class GraphTreeEvaluatorTests : IDisposable
         var evaluator = new GraphTreeEvaluator(_store, whereGroup, prefixes, prefixSource);
         var solutions = evaluator.Evaluate(ref pa, root);
         return Canonicalize(solutions, projection);
+    }
+
+    /// <summary>
+    /// Baseline via the core <see cref="QueryExecutor"/> (no planner) — the path that handles RDF-star's synthetic
+    /// offsets, used when the <see cref="SparqlEngine"/> facade's planner cannot run the query.
+    /// </summary>
+    private (List<Dictionary<string, string>> rows, string[] projection) BaselineViaExecutor(string query)
+    {
+        var parsed = new SparqlParser(query.AsSpan()).ParseQuery();
+        var projection = new List<string>();
+        for (int i = 0; i < parsed.SelectClause.ProjectedVariableCount; i++)
+        {
+            var (start, length) = parsed.SelectClause.GetProjectedVariable(i);
+            projection.Add(query.Substring(start, length).TrimStart('?'));
+        }
+
+        var rows = new List<Dictionary<string, string>>();
+        _store.AcquireReadLock();
+        try
+        {
+            using var executor = new QueryExecutor(_store, query.AsSpan(), parsed);
+            var results = executor.Execute();
+            while (results.MoveNext())
+            {
+                var bt = results.Current;
+                var row = new Dictionary<string, string>();
+                foreach (var name in projection)
+                {
+                    int idx = bt.FindBinding(("?" + name).AsSpan());
+                    if (idx >= 0) row[name] = bt.GetString(idx).ToString();
+                }
+                rows.Add(row);
+            }
+            results.Dispose();
+        }
+        finally
+        {
+            _store.ReleaseReadLock();
+        }
+        return (rows, projection.ToArray());
     }
 
     /// <summary>Recover the prologue prefixes (offsets into <paramref name="query"/>) via the shipping parser.</summary>
@@ -356,8 +421,8 @@ internal sealed class GraphTreeEvaluator
         Dictionary<string, string> sol, List<Dictionary<string, string>> output)
     {
         var slot = pa[tripleIndex];
-        string sText = _source.Substring(slot.SubjectStart, slot.SubjectLength);
-        string oText = _source.Substring(slot.ObjectStart, slot.ObjectLength);
+        string sText = TermText(slot.SubjectType, slot.SubjectStart, slot.SubjectLength);
+        string oText = TermText(slot.ObjectType, slot.ObjectStart, slot.ObjectLength);
         var sType = slot.SubjectType;
         var oType = slot.ObjectType;
 
@@ -369,7 +434,7 @@ internal sealed class GraphTreeEvaluator
             return;
         }
 
-        string pText = _source.Substring(slot.PredicateStart, slot.PredicateLength);
+        string pText = TermText(slot.PredicateType, slot.PredicateStart, slot.PredicateLength);
         var pType = slot.PredicateType;
 
         string sCon = Constraint(sType, sText, sol);
@@ -951,4 +1016,19 @@ internal sealed class GraphTreeEvaluator
     };
 
     private static string VarName(string termText) => termText.TrimStart('?');
+
+    /// <summary>
+    /// Resolve a term's text. A synthetic term (negative offset, from RDF-star or blank-node-property-list
+    /// expansion) is resolved via <see cref="SyntheticTermHelper"/> — the rdf:* IRIs (-1..-5) and the reifier /
+    /// blank-node join variables (<c>?_qt…</c> / <c>?_bn…</c>) — so the expanded triples are evaluable; a normal
+    /// term is read from the source.
+    /// </summary>
+    private string TermText(TermType type, int start, int length)
+    {
+        if (start < 0)
+            return (type == TermType.Iri
+                ? SyntheticTermHelper.GetSyntheticIri(start)
+                : SyntheticTermHelper.GetSyntheticVarName(start)).ToString();
+        return _source.Substring(start, length);
+    }
 }
