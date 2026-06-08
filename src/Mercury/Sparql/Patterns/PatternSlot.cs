@@ -43,6 +43,7 @@ internal enum PatternKind : byte
     UnionHeader = 11,    // children are the union branches (each a GroupHeader)
     OptionalHeader = 12, // child is one GroupHeader
     MinusHeader = 13,    // child is one GroupHeader (block form of MINUS)
+    SubSelectHeader = 14, // { SELECT … } — a leaf carrying the sub-SELECT source span (re-parsed on evaluation)
 }
 
 /// <summary>
@@ -340,6 +341,21 @@ internal ref struct PatternArray
         header.ChildCount = _count - header.ChildStartIndex;
     }
     
+    /// <summary>
+    /// Add a sub-SELECT leaf (ADR-045): <c>{ SELECT … }</c>. The full sub-SELECT source span is carried on the
+    /// slot (re-parsed on evaluation); it has no in-tree children. Returns the slot index. Reuses the GraphHeader
+    /// term-span fields (GraphTermStart@8 / GraphTermLength@12) to hold the span.
+    /// </summary>
+    public int AddSubSelectHeader(int sourceStart, int sourceLength)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.SubSelectHeader;
+        slot.GraphTermStart = sourceStart;
+        slot.GraphTermLength = sourceLength;
+        return headerIndex;
+    }
+
     /// <summary>
     /// Begin an EXISTS/NOT EXISTS filter
     /// </summary>

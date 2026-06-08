@@ -54,7 +54,8 @@ internal ref partial struct SparqlParser
 
     /// <summary>
     /// [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
-    /// Emits a GroupHeader whose direct children are the body's patterns. Returns the header index.
+    /// A <c>{ SELECT … }</c> body is a sub-SELECT, captured as a SubSelectHeader leaf carrying its source span
+    /// (re-parsed and evaluated as a nested query). Otherwise emits a GroupHeader over the body. Returns the index.
     /// </summary>
     private int ParseGroupTree(scoped ref PatternArray pa, int depth)
     {
@@ -65,10 +66,25 @@ internal ref partial struct SparqlParser
         if (Peek() != '{')
             throw new SparqlParseException("Expected '{' to open a group graph pattern");
         Advance(); // consume '{'
+        SkipWhitespace();
 
-        int header = pa.BeginGroupHeader(PatternKind.GroupHeader);
-        ParseGroupBodyTree(ref pa, depth);
-        pa.EndGroupHeader(header);
+        int header;
+        if (KeywordIs(PeekSpan(6), "SELECT"))
+        {
+            // SubSelect: parse it with the shipping sub-SELECT parser purely to advance past it, and carry the
+            // source span on the slot — the evaluator re-parses it (for the solution modifiers) and walks its
+            // WHERE through the uniform path with the active graph threaded in.
+            int subStart = _position;
+            ParseSubSelectCore();
+            int subLength = _position - subStart;
+            header = pa.AddSubSelectHeader(subStart, subLength);
+        }
+        else
+        {
+            header = pa.BeginGroupHeader(PatternKind.GroupHeader);
+            ParseGroupBodyTree(ref pa, depth);
+            pa.EndGroupHeader(header);
+        }
 
         SkipWhitespace();
         if (Peek() == '}')

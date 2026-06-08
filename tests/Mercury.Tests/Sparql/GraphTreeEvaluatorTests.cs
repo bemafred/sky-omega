@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using SkyOmega.Mercury;
 using SkyOmega.Mercury.Runtime;
+using SkyOmega.Mercury.Sparql.Execution;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
@@ -109,6 +110,14 @@ public class GraphTreeEvaluatorTests : IDisposable
     [InlineData("path-grouped", "SELECT ?o WHERE { <urn:a> (<urn:next>)+ ?o }")]
     [InlineData("path-negated", "SELECT ?o WHERE { <urn:a> !<urn:next> ?o }")]
     [InlineData("path-pname", "PREFIX ex: <urn:> SELECT ?o WHERE { <urn:a> ex:next+ ?o }")]
+    // Sub-SELECT — the inner WHERE walked through the uniform path (active graph), the solution modifiers reused
+    // from the shipping layer, then joined with the outer: basic nesting, join-on-shared-var, DISTINCT,
+    // aggregation, and ORDER BY + LIMIT.
+    [InlineData("subselect-basic", "SELECT ?o WHERE { { SELECT ?o WHERE { <urn:a> <urn:p> ?o } } }")]
+    [InlineData("subselect-join", "SELECT ?s ?o2 WHERE { ?s <urn:p> ?o { SELECT ?s ?o2 WHERE { ?s <urn:q> ?o2 } } }")]
+    [InlineData("subselect-distinct", "SELECT ?p2 WHERE { { SELECT DISTINCT ?p2 WHERE { ?s ?p2 ?o } } }")]
+    [InlineData("subselect-aggregate", "SELECT ?c WHERE { { SELECT (COUNT(*) AS ?c) WHERE { ?s <urn:p> ?o } } }")]
+    [InlineData("subselect-order-limit", "SELECT ?o WHERE { { SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 2 } }")]
     public void GraphWrapped_ThroughTheUniformWalker_EqualsTheDefaultGraphBaseline(string name, string query)
     {
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
@@ -249,9 +258,13 @@ internal sealed class GraphTreeEvaluator
     }
 
     public List<Dictionary<string, string>> Evaluate(ref PatternArray pa, int root)
+        => Evaluate(ref pa, root, activeGraph: "");
+
+    /// <summary>Evaluate the tree at <paramref name="root"/> with an explicit starting active graph (the default graph is "").</summary>
+    public List<Dictionary<string, string>> Evaluate(ref PatternArray pa, int root, string activeGraph)
     {
         var seed = new List<Dictionary<string, string>> { new() };
-        return EvalGroup(ref pa, root, activeGraph: "", seed);
+        return EvalGroup(ref pa, root, activeGraph, seed);
     }
 
     /// <summary>Evaluate a group-like header's body: fold its direct children left-to-right as a join sequence.</summary>
@@ -331,9 +344,11 @@ internal sealed class GraphTreeEvaluator
                 return BindStep(ref pa, childIndex, input);
             case PatternKind.MinusHeader:
                 return MinusStep(ref pa, childIndex, activeGraph, input);
+            case PatternKind.SubSelectHeader:
+                return SubSelectStep(ref pa, childIndex, activeGraph, input);
             default:
                 throw new NotSupportedException(
-                    $"{kind} is a later evaluator increment (sub-SELECT / SERVICE / property paths follow).");
+                    $"{kind} is a later evaluator increment (SERVICE / RDF-star / blank-node property lists follow).");
         }
     }
 
@@ -795,6 +810,124 @@ internal sealed class GraphTreeEvaluator
             if (negated ? !exists : exists) output.Add(mu);
         }
         return output;
+    }
+
+    // ── sub-SELECT ────────────────────────────────────────────────────────────────────────────────────
+    // A nested query: its WHERE is walked through the SAME uniform path with the active graph threaded in (the
+    // GRAPH-relevant part the walker owns), then the SOLUTION-MODIFIER layer (projection / DISTINCT / GROUP BY +
+    // aggregates / HAVING / ORDER BY / LIMIT / OFFSET) is applied by the shipping QueryResults code — that layer
+    // is graph-agnostic and shared (the cutover inherits it from SparqlEngine), so it is reused, not reimplemented.
+    // The projected results then join with the outer solutions on their shared variables.
+
+    private List<Dictionary<string, string>> SubSelectStep(ref PatternArray pa, int headerIndex, string activeGraph,
+        List<Dictionary<string, string>> input)
+    {
+        var slot = pa[headerIndex];
+        string subSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
+
+        // The sub-SELECT's solution modifiers (parsed by the shipping sub-SELECT parser; offsets into subSrc).
+        var sub = new SparqlParser(subSrc.AsSpan()).ParseSubSelectCore();
+
+        // Walk the inner WHERE through the uniform path, threading the active graph; evaluated independently of
+        // the outer bindings (a sub-SELECT is its own scope), then joined.
+        int open = subSrc.IndexOf('{');
+        int close = MatchBrace(subSrc, open);
+        string innerWhere = subSrc.Substring(open, close - open + 1);
+        var innerBuffer = new byte[PatternSlot.Size * 256];
+        var innerPa = new PatternArray(innerBuffer);
+        int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
+        var innerEval = new GraphTreeEvaluator(_store, innerWhere, _prefixes, _prefixSource);
+        var innerBag = innerEval.Evaluate(ref innerPa, innerRoot, activeGraph);
+
+        // Apply the solution modifiers via the shipping layer (project/distinct/group/aggregate/having/order/limit).
+        var rows = new List<MaterializedRow>();
+        foreach (var sol in innerBag)
+        {
+            Span<Binding> store = new Binding[64];
+            Span<char> stringBuffer = new char[8192];
+            var table = new BindingTable(store, stringBuffer);
+            Populate(ref table, sol);
+            rows.Add(new MaterializedRow(table));
+        }
+        var selectClause = BuildSelectClause(sub, subSrc);
+        var qrBindings = new Binding[64];
+        var qrStringBuffer = new char[16384];
+        var qr = QueryResults.FromMaterializedSimple(rows, subSrc.AsSpan(), _store, qrBindings, qrStringBuffer,
+            sub.Limit, sub.Offset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
+
+        // Read the modified rows back over the projected/aggregated output variables.
+        var outNames = OutputVarNames(sub, subSrc, innerBag);
+        var results = new List<Dictionary<string, string>>();
+        while (qr.MoveNext())
+        {
+            var bt = qr.Current;
+            var row = new Dictionary<string, string>();
+            foreach (var name in outNames)
+            {
+                int idx = bt.FindBinding(("?" + name).AsSpan());
+                if (idx >= 0) row[name] = bt.GetString(idx).ToString();
+            }
+            results.Add(row);
+        }
+
+        // Join with the outer solutions on shared variables.
+        var output = new List<Dictionary<string, string>>();
+        foreach (var outer in input)
+            foreach (var res in results)
+            {
+                bool compatible = true;
+                foreach (var kv in res)
+                    if (outer.TryGetValue(kv.Key, out var ov) && ov != kv.Value) { compatible = false; break; }
+                if (!compatible) continue;
+                var merged = new Dictionary<string, string>(outer);
+                foreach (var kv in res) merged[kv.Key] = kv.Value;
+                output.Add(merged);
+            }
+        return output;
+    }
+
+    private static SelectClause BuildSelectClause(SubSelect sub, string subSrc)
+    {
+        var sc = new SelectClause { Distinct = sub.Distinct, SelectAll = sub.SelectAll };
+        for (int i = 0; i < sub.ProjectedVarCount; i++)
+        {
+            var (start, length) = sub.GetProjectedVariable(i);
+            sc.AddProjectedVariable(start, length);
+        }
+        for (int i = 0; i < sub.AggregateCount; i++)
+            sc.AddAggregate(sub.GetAggregate(i));
+        return sc;
+    }
+
+    private static List<string> OutputVarNames(SubSelect sub, string subSrc, List<Dictionary<string, string>> innerBag)
+    {
+        var names = new List<string>();
+        var seen = new HashSet<string>();
+        if (sub.SelectAll)
+        {
+            foreach (var sol in innerBag)
+                foreach (var k in sol.Keys)
+                    if (seen.Add(k)) names.Add(k);
+            return names;
+        }
+        for (int i = 0; i < sub.ProjectedVarCount; i++)
+        {
+            var (start, length) = sub.GetProjectedVariable(i);
+            string name = VarName(subSrc.Substring(start, length));
+            if (seen.Add(name)) names.Add(name);
+        }
+        return names;
+    }
+
+    private static int MatchBrace(string s, int open)
+    {
+        int depth = 0;
+        for (int i = open; i < s.Length; i++)
+        {
+            if (s[i] == '{') depth++;
+            else if (s[i] == '}' && --depth == 0) return i;
+        }
+        throw new ArgumentException("Unbalanced braces in sub-SELECT");
     }
 
     /// <summary>

@@ -1459,7 +1459,7 @@ internal ref partial struct SparqlParser
         }
     }
 
-    private SubSelect ParseSubSelectCore()
+    internal SubSelect ParseSubSelectCore()
     {
         var subSelect = new SubSelect();
 
