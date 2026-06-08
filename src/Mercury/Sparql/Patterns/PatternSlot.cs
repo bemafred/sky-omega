@@ -579,6 +579,22 @@ internal ref struct PatternArray
     }
 
     /// <summary>
+    /// Add a VALUES leaf carrying the full <c>VALUES … { … }</c> source span (ADR-045 recursive parser). Re-parsed
+    /// on evaluation via the shipping VALUES parser, so single- AND multi-variable forms are one path. The span is
+    /// stored in the ValuesVar fields with zero trailing entries (so SubtreeEnd treats it as a single-slot leaf).
+    /// </summary>
+    public int AddValuesBlock(int sourceStart, int sourceLength)
+    {
+        int headerIndex = _count;
+        var slot = AllocateSlot();
+        slot.Kind = PatternKind.ValuesHeader;
+        slot.ValuesVarStart = sourceStart;
+        slot.ValuesVarLength = sourceLength;
+        slot.ValuesEntryCount = 0;
+        return headerIndex;
+    }
+
+    /// <summary>
     /// Add a VALUES clause header, returns header index
     /// </summary>
     public int AddValuesHeader(int varStart, int varLen)

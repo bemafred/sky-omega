@@ -3324,7 +3324,7 @@ internal ref partial struct SparqlParser
     /// Supports single variable or multiple variables with cardinality validation.
     /// UNDEF values are stored with length = -1.
     /// </summary>
-    private void ParseValues(ref GraphPattern pattern)
+    internal void ParseValues(ref GraphPattern pattern)
     {
         ConsumeKeyword("VALUES");
         SkipWhitespace();

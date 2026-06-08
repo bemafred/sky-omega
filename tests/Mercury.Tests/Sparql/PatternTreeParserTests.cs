@@ -62,8 +62,8 @@ public class PatternTreeParserTests
         var inGraph = pa.EnumerateDirectChildren(graph);
         Assert.True(inGraph.MoveNext());
         Assert.Equal(PatternKind.ValuesHeader, inGraph.Current.Kind);
-        Assert.Equal("?s", source.Substring(inGraph.Current.ValuesVarStart, inGraph.Current.ValuesVarLength));
-        Assert.Equal(1, inGraph.Current.ValuesEntryCount);
+        // The VALUES leaf carries the full source span (re-parsed on evaluation for single- and multi-variable forms).
+        Assert.Equal("VALUES ?s { <urn:x> }", source.Substring(inGraph.Current.ValuesVarStart, inGraph.Current.ValuesVarLength));
         Assert.True(inGraph.MoveNext());
         Assert.Equal(PatternKind.Triple, inGraph.Current.Kind);
         Assert.False(inGraph.MoveNext());

@@ -519,54 +519,17 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// [61] InlineData ::= 'VALUES' DataBlock. Single-variable form: <c>VALUES ?v { val … }</c>. Emits a
-    /// ValuesHeader followed by one ValuesEntry per value (UNDEF carried as length -1, matching the shipping
-    /// parser). Multi-variable VALUES <c>( ?a ?b )</c> is a deferred increment (the slot stores one variable).
+    /// [61] InlineData ::= 'VALUES' DataBlock. Single- AND multi-variable forms (<c>VALUES ?v { … }</c> and
+    /// <c>VALUES (?a ?b) { (…) … }</c>). Reuses the shipping VALUES parser (same parser instance) to advance past
+    /// the clause and carries its source span on a ValuesHeader leaf; the evaluator re-parses it into a
+    /// ValuesClause — one path for both forms, no special-casing.
     /// </summary>
     private void EmitValuesTree(scoped ref PatternArray pa, int depth)
     {
-        ConsumeKeyword("VALUES");
-        SkipWhitespace();
-
-        if (Peek() == '(')
-            throw new SparqlParseException("Multi-variable VALUES is not yet handled by the recursive pattern parser (ADR-045 Step 2 increment)");
-        if (Peek() != '?')
-            throw new SparqlParseException("Expected a variable after VALUES");
-
-        int varStart = _position;
-        Advance(); // consume '?'
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
-            Advance();
-        int varLength = _position - varStart;
-
-        SkipWhitespace();
-        if (Peek() != '{')
-            throw new SparqlParseException("Expected '{' after the VALUES variable");
-        Advance(); // consume '{'
-
-        int header = pa.AddValuesHeader(varStart, varLength);
-        SkipWhitespace();
-        while (!IsAtEnd() && Peek() != '}')
-        {
-            var span = PeekSpan(5);
-            if (KeywordIs(span, "UNDEF"))
-            {
-                ConsumeKeyword("UNDEF");
-                pa.AddValuesEntry(0, -1, header); // UNDEF marker
-            }
-            else
-            {
-                int valueStart = _position;
-                int valueLen = ParseValuesValue(); // shipping leaf-parser: advances the cursor, returns length
-                if (valueLen <= 0)
-                    break;
-                pa.AddValuesEntry(valueStart, valueLen, header);
-            }
-            SkipWhitespace();
-        }
-
-        if (Peek() == '}')
-            Advance(); // consume '}'
+        int start = _position; // at "VALUES"
+        var dataBlock = new GraphPattern();
+        ParseValues(ref dataBlock);
+        pa.AddValuesBlock(start, _position - start);
     }
 
     /// <summary>True if a body keyword (one that ends a property list) begins <paramref name="span"/>.</summary>

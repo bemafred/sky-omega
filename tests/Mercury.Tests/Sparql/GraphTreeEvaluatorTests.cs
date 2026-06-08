@@ -139,6 +139,13 @@ public class GraphTreeEvaluatorTests : IDisposable
     // subject) — both produce synthetic terms (negative offsets) resolved via SyntheticTermHelper.
     [InlineData("rdf-star", "SELECT ?c WHERE { << <urn:a> <urn:p> <urn:v1> >> <urn:certainty> ?c }")]
     [InlineData("blank-node-proplist", "SELECT ?s WHERE { ?s <urn:knows> [ <urn:name> \"x\" ] }")]
+    // Multi-variable VALUES (one path with single-var via the shipping ParseValues), joined with a triple.
+    // (A VALUES-only multi-var WHERE is excluded — the shipping facade returns nothing for it; see the UNDEF
+    // Fact below, which asserts the walker directly. The join form exercises the same VALUES parsing + binding.)
+    [InlineData("values-multi-join", "SELECT ?o WHERE { VALUES (?s ?o) { (<urn:a> <urn:v1>) (<urn:a> <urn:wrong>) } ?s <urn:p> ?o }")]
+    // RDF collection: ParseCollection returns a blank node (no rdf:first/rest expansion) in BOTH the recursive
+    // parser and the shipping parser — so it does NOT throw and the walker matches the (shared, incomplete) baseline.
+    [InlineData("collection", "SELECT ?s WHERE { ?s <urn:p> ( <urn:a> ) }")]
     public void GraphWrapped_ThroughTheUniformWalker_EqualsTheDefaultGraphBaseline(string name, string query)
     {
         // The known-correct baseline: the unwrapped query over the default graph, via the shipping engine.
@@ -196,6 +203,20 @@ public class GraphTreeEvaluatorTests : IDisposable
         var expected = new List<string> { "o=<urn:remote1>", "o=<urn:remote2>" };
         Assert.Equal(expected, unwrapped);
         Assert.Equal(expected, wrapped); // SERVICE is graph-context-independent
+    }
+
+    [Fact]
+    public void ValuesMultiVariable_WithUndef_LeavesTheVariableUnbound()
+    {
+        // SPARQL: UNDEF in a VALUES row leaves that variable unbound for the row. (The shipping facade mishandles a
+        // VALUES-only WHERE with UNDEF — it returns no rows — so this is asserted directly, not against a baseline.)
+        const string query = "SELECT ?a ?b WHERE { VALUES (?a ?b) { (<urn:a> UNDEF) (<urn:c> <urn:v3>) } }";
+        string whereGroup = ExtractWhereGroup(query);
+        var buffer = new byte[PatternSlot.Size * 256];
+        var pa = new PatternArray(buffer);
+        int root = new SparqlParser(whereGroup.AsSpan()).ParsePatternTree(ref pa);
+        var rows = Canonicalize(new GraphTreeEvaluator(_store, whereGroup).Evaluate(ref pa, root), new[] { "a", "b" });
+        Assert.Equal(new List<string> { "a=<urn:a>", "a=<urn:c>|b=<urn:v3>" }, rows);
     }
 
     private List<string> EvaluateService(string query, string[] projection, ISparqlServiceExecutor executor)
@@ -461,7 +482,7 @@ internal sealed class GraphTreeEvaluator
                 return output;
             }
             case PatternKind.ValuesHeader:
-                return ValuesJoin(ref pa, childIndex, input);
+                return ValuesStep(ref pa, childIndex, input);
             case PatternKind.Bind:
                 return BindStep(ref pa, childIndex, input);
             case PatternKind.MinusHeader:
@@ -808,32 +829,50 @@ internal sealed class GraphTreeEvaluator
         return nodes;
     }
 
-    private List<Dictionary<string, string>> ValuesJoin(ref PatternArray pa, int valuesHeaderIndex,
+    /// <summary>
+    /// VALUES (single- and multi-variable): re-parse the carried span into a <see cref="ValuesClause"/> via the
+    /// shipping parser, build one solution per row (UNDEF leaves a variable unbound), and join with the input.
+    /// </summary>
+    private List<Dictionary<string, string>> ValuesStep(ref PatternArray pa, int valuesHeaderIndex,
         List<Dictionary<string, string>> input)
     {
-        var header = pa[valuesHeaderIndex];
-        string valuesVar = VarName(_source.Substring(header.ValuesVarStart, header.ValuesVarLength));
-        int entryCount = header.ValuesEntryCount;
+        var slot = pa[valuesHeaderIndex];
+        string valuesSpan = _source.Substring(slot.ValuesVarStart, slot.ValuesVarLength);
 
-        var entries = new List<string?>();
-        for (int k = 1; k <= entryCount; k++)
+        var temp = new GraphPattern();
+        new SparqlParser(valuesSpan.AsSpan()).ParseValues(ref temp);
+        var vc = temp.Values;
+
+        int varCount = vc.VariableCount;
+        if (varCount == 0) return input;
+        var varNames = new string[varCount];
+        for (int i = 0; i < varCount; i++)
         {
-            var entry = pa[valuesHeaderIndex + k];
-            entries.Add(entry.ValuesEntryLength < 0
-                ? null // UNDEF
-                : _source.Substring(entry.ValuesEntryStart, entry.ValuesEntryLength));
+            var (vs, vl) = vc.GetVariable(i);
+            varNames[i] = VarName(valuesSpan.Substring(vs, vl));
         }
 
-        var output = new List<Dictionary<string, string>>();
-        foreach (var sol in input)
-            foreach (var value in entries)
+        var rows = new List<Dictionary<string, string>>();
+        for (int r = 0; r < vc.RowCount; r++)
+        {
+            var row = new Dictionary<string, string>();
+            for (int c = 0; c < varCount; c++)
             {
-                if (value is null) { output.Add(new Dictionary<string, string>(sol)); continue; } // UNDEF binds nothing
-                if (sol.TryGetValue(valuesVar, out var existing) && existing != value) continue;   // inconsistent
-                var ext = new Dictionary<string, string>(sol) { [valuesVar] = value };
-                output.Add(ext);
+                var (vs, vl) = vc.GetValueAt(r, c);
+                if (vl < 0) continue; // UNDEF: leave the variable unbound for this row
+                row[varNames[c]] = ExpandValueTerm(valuesSpan.Substring(vs, vl));
             }
-        return output;
+            rows.Add(row);
+        }
+        return JoinBags(input, rows);
+    }
+
+    /// <summary>A VALUES value term as a canonical RDF term — a prefixed name is expanded; everything else is verbatim.</summary>
+    private string ExpandValueTerm(string text)
+    {
+        if (text.Length == 0 || text[0] is '<' or '"' or '_' or '-' or '+' || char.IsDigit(text[0])) return text;
+        if (text is "true" or "false") return text;
+        return text.Contains(':') ? ExpandPathPname(text) : text;
     }
 
     /// <summary>BIND: extend each solution with the evaluated expression, via the real <see cref="BindExpressionEvaluator"/>.</summary>
