@@ -36,6 +36,8 @@ public class TreeJoinExecutorTests : IDisposable
             ("<urn:v1>", "<urn:next>", "<urn:z>"), // only v1 has a next — makes the 2-pattern join selective
             ("<urn:a>", "<urn:link>", "<urn:b>"),  // a -> b -> c chain for property-path closures
             ("<urn:b>", "<urn:link>", "<urn:c>"),
+            ("<urn:a>", "<urn:q>", "\"qa\""),      // a, b have q; c does not — makes OPTIONAL / (NOT) EXISTS non-trivial
+            ("<urn:b>", "<urn:q>", "\"qb\""),
         };
         _store.BeginBatch();
         foreach (var (s, p, o) in data)
@@ -65,6 +67,15 @@ public class TreeJoinExecutorTests : IDisposable
     [InlineData("SELECT ?o WHERE { <urn:a> <urn:link>? ?o }", new[] { "o" })]          // zero-or-one (reflexive + one hop)
     [InlineData("SELECT ?o WHERE { <urn:a> !<urn:p> ?o }", new[] { "o" })]             // negated property set
     [InlineData("SELECT ?o WHERE { <urn:a> (<urn:link>/<urn:link>) ?o }", new[] { "o" })] // grouped sequence
+    // Composing operators (batch A) — UNION, OPTIONAL, BIND, FILTER, (NOT) EXISTS, nested group.
+    [InlineData("SELECT ?s WHERE { { ?s <urn:p> ?o } UNION { ?s <urn:q> ?o } }", new[] { "s" })]
+    [InlineData("SELECT ?s ?x WHERE { ?s <urn:p> ?o OPTIONAL { ?s <urn:q> ?x } }", new[] { "s", "x" })]
+    [InlineData("SELECT ?l WHERE { ?s <urn:p> ?o BIND(STR(?o) AS ?l) }", new[] { "l" })]
+    [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o FILTER(?o = <urn:v1>) }", new[] { "s" })]
+    [InlineData("SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = <urn:a>) }", new[] { "o" })]
+    [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o FILTER EXISTS { ?s <urn:q> ?x } }", new[] { "s" })]
+    [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o FILTER NOT EXISTS { ?s <urn:q> ?x } }", new[] { "s" })]
+    [InlineData("SELECT ?s WHERE { { ?s <urn:p> ?o } }", new[] { "s" })]
     public void DefaultAndGraphWrapped_ThroughTheZeroGcExecutor_EqualTheBaseline(string query, string[] projection)
     {
         var baseline = BaselineCanonical(query, projection);
