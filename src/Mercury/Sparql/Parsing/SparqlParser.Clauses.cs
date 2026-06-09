@@ -3802,6 +3802,32 @@ internal ref partial struct SparqlParser
     /// <summary>
     /// Parse GRAPH clause: GRAPH &lt;iri&gt; { patterns } or GRAPH ?var { patterns }
     /// </summary>
+    /// <summary>
+    /// ADR-045 cutover (layer 2): the flat <see cref="GraphClause"/> cannot represent GRAPH-internal operators
+    /// (BIND / UNION / OPTIONAL …), and the live tree executor re-parses the WHERE for execution anyway — so when
+    /// such an operator appears in a GRAPH body, consume the rest of the body (to its matching '}') instead of
+    /// erroring or hoisting it to the parent. The flat parse then succeeds with HasGraph and no top-level triples,
+    /// which routes the query to <c>ExecuteGraphViaTree</c>. Leaves the cursor ON the GRAPH body's closing '}'.
+    /// </summary>
+    private void ConsumeRestOfGraphBody()
+    {
+        int depth = 1; // already inside the GRAPH body (past its '{')
+        while (!IsAtEnd())
+        {
+            char c = Peek();
+            if (c == '}')
+            {
+                depth--;
+                if (depth == 0) return; // GRAPH body close — leave the cursor on it
+            }
+            else if (c == '{')
+            {
+                depth++;
+            }
+            Advance();
+        }
+    }
+
     private void ParseGraph(ref GraphPattern pattern)
     {
         ConsumeKeyword("GRAPH");
@@ -3837,12 +3863,25 @@ internal ref partial struct SparqlParser
                 continue;
             }
 
-            // Check for OPTIONAL inside GRAPH
+            // BIND / UNION / OPTIONAL inside GRAPH: the flat GraphClause cannot represent them and the live tree
+            // executor re-parses the WHERE for execution — consume the rest of the body so the flat parse succeeds
+            // (HasGraph, no top-level triples) and routes to ExecuteGraphViaTree, instead of erroring or hoisting.
+            if (span.Length >= 5 && span[..4].Equals("BIND", StringComparison.OrdinalIgnoreCase)
+                && (span[4] == '(' || char.IsWhiteSpace(span[4])))
+            {
+                ConsumeRestOfGraphBody();
+                break;
+            }
+            if (span.Length >= 6 && span[..5].Equals("UNION", StringComparison.OrdinalIgnoreCase)
+                && (span[5] == '{' || char.IsWhiteSpace(span[5])))
+            {
+                ConsumeRestOfGraphBody();
+                break;
+            }
             if (span.Length >= 8 && span[..8].Equals("OPTIONAL", StringComparison.OrdinalIgnoreCase))
             {
-                // TODO: Handle OPTIONAL inside GRAPH properly
-                ParseOptional(ref pattern);
-                continue;
+                ConsumeRestOfGraphBody();
+                break;
             }
 
             // Check for MINUS inside GRAPH

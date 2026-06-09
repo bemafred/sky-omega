@@ -79,12 +79,13 @@ public class GraphMirrorGateTests : IDisposable
     [InlineData("filter-subject-full-iri", true, "SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = <urn:a>) }")]
     [InlineData("filter-subject-pname", true, "PREFIX ex: <urn:> SELECT ?o WHERE { ?s <urn:p> ?o FILTER(?s = ex:a) }")]
     [InlineData("property-list", true, "SELECT ?o1 ?o2 WHERE { ?s <urn:p> ?o1 ; <urn:q> ?o2 }")]
-    // The ADR-045 cutover wire (execution, layer 1) FIXED VALUES-in-GRAPH; the remaining FALSE cases still diverge
-    // because the FLAT parser errors on BIND/UNION-in-GRAPH before execution (cutover layer 2), so flip each as it lands:
-    [InlineData("bind", false, "SELECT ?l WHERE { ?s <urn:p> ?o BIND(STR(?o) AS ?l) }")]        // D2: BIND-in-GRAPH fails to parse (flat parser — layer 2)
-    [InlineData("values", true, "SELECT ?o WHERE { VALUES ?s { <urn:a> } ?s <urn:p> ?o }")]      // was D1 (VALUES ignored); FIXED by the cutover wire
-    [InlineData("optional", false, "SELECT ?s ?x WHERE { ?s <urn:p> ?o OPTIONAL { ?s <urn:q> ?x } }")] // OPTIONAL-in-GRAPH still diverges on the shipping path
-    [InlineData("union", false, "SELECT ?s WHERE { { ?s <urn:p> ?o } UNION { ?s <urn:q> ?o } }")]      // UNION-in-GRAPH fails to parse (flat parser — layer 2)
+    // ALL FIXED by the ADR-045 cutover: layer 1 (the live execution wire) closed VALUES-in-GRAPH; layer 2 (the flat
+    // parser consuming GRAPH-internal operators so the parse succeeds and routes to the wire) closed BIND / UNION /
+    // OPTIONAL-in-GRAPH. The GRAPH path no longer diverges from the default — a default graph is also a graph.
+    [InlineData("bind", true, "SELECT ?l WHERE { ?s <urn:p> ?o BIND(STR(?o) AS ?l) }")]
+    [InlineData("values", true, "SELECT ?o WHERE { VALUES ?s { <urn:a> } ?s <urn:p> ?o }")]
+    [InlineData("optional", true, "SELECT ?s ?x WHERE { ?s <urn:p> ?o OPTIONAL { ?s <urn:q> ?x } }")]
+    [InlineData("union", true, "SELECT ?s WHERE { { ?s <urn:p> ?o } UNION { ?s <urn:q> ?o } }")]
     public void DefaultEquivNamed_CharacterizesTheGraphPathDivergenceSurface(string name, bool expectedEquivalent, string query)
     {
         string mirrored = MirrorWhereIntoGraph(query, MirrorGraph);
