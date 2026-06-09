@@ -47,11 +47,14 @@ internal sealed class TreeJoinExecutor
     private readonly DateTimeOffset _asOfTime;
     private readonly DateTimeOffset _rangeStart;
     private readonly DateTimeOffset _rangeEnd;
+    // Dataset (FROM NAMED / USING NAMED): which named graphs GRAPH may access. null = all; empty = none; [g…] = those.
+    private readonly string[]? _namedGraphs;
 
     public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
         string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
         TemporalQueryMode temporalMode = TemporalQueryMode.Current,
-        DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default)
+        DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default,
+        string[]? namedGraphs = null)
     {
         _store = store;
         _source = source;
@@ -62,6 +65,7 @@ internal sealed class TreeJoinExecutor
         _asOfTime = asOfTime;
         _rangeStart = rangeStart;
         _rangeEnd = rangeEnd;
+        _namedGraphs = namedGraphs;
     }
 
     /// <summary>Evaluate the group at <paramref name="rootHeader"/> into materialized rows, threading the active graph.</summary>
@@ -169,9 +173,15 @@ internal sealed class TreeJoinExecutor
             {
                 var slot = pa[ci];
                 string graphTerm = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
-                return slot.GraphTermType == TermType.Variable
-                    ? VariableGraphStep(ref pa, ci, graphTerm, input)
-                    : EvalGroup(ref pa, ci, graphTerm, input);
+                if (slot.GraphTermType == TermType.Variable)
+                    return VariableGraphStep(ref pa, ci, graphTerm, input);
+                // Expand a prefixed graph name (GRAPH :g1) to its full IRI so it matches the stored graph.
+                string graphIri = ExpandGraphTerm(graphTerm);
+                // A dataset restriction (USING / FROM NAMED) makes a graph outside it inaccessible — GRAPH <g> over
+                // such a graph matches nothing (e.g. USING without USING NAMED makes ALL named graphs inaccessible).
+                if (!GraphAccessible(graphIri))
+                    return new List<MaterializedRow>();
+                return EvalGroup(ref pa, ci, graphIri, input);
             }
             case PatternKind.GroupHeader:
                 return EvalGroup(ref pa, ci, activeGraph, input);
@@ -298,8 +308,15 @@ internal sealed class TreeJoinExecutor
     private List<MaterializedRow> VariableGraphStep(ref PatternArray pa, int graphHeaderIndex, string graphVar, List<MaterializedRow> input)
     {
         var graphNames = new List<string>();
-        var en = _store.GetNamedGraphs();
-        while (en.MoveNext()) graphNames.Add(en.Current.ToString());
+        if (_namedGraphs != null)
+        {
+            graphNames.AddRange(_namedGraphs); // dataset restriction: only these named graphs are visible
+        }
+        else
+        {
+            var en = _store.GetNamedGraphs();
+            while (en.MoveNext()) graphNames.Add(en.Current.ToString());
+        }
 
         var output = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(8);
@@ -465,7 +482,7 @@ internal sealed class TreeJoinExecutor
         var innerPa = new PatternArray(innerBuffer);
         int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
         var innerBag = new TreeJoinExecutor(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd)
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs)
             .Evaluate(ref innerPa, innerRoot, activeGraph);
 
         var selectClause = BuildSelectClause(sub);
@@ -631,6 +648,39 @@ internal sealed class TreeJoinExecutor
     private static bool Matches(string s, int i, string w) =>
         i + w.Length <= s.Length && string.Compare(s, i, w, 0, w.Length, StringComparison.OrdinalIgnoreCase) == 0;
     private static string StripIri(string t) => t.Length >= 2 && t[0] == '<' && t[^1] == '>' ? t[1..^1] : t;
+
+    /// <summary>
+    /// Expand a prefixed graph name (<c>:g1</c>, <c>ex:g1</c>) to its full <c>&lt;…&gt;</c> IRI via the prologue
+    /// prefixes (stored WITH the trailing colon and WITH brackets), so it matches the stored graph. A term already
+    /// in IRI form, or with an unknown prefix, is returned unchanged.
+    /// </summary>
+    private string ExpandGraphTerm(string term)
+    {
+        if (term.Length == 0 || term[0] == '<' || _prefixes == null) return term;
+        int colon = term.IndexOf(':');
+        if (colon < 0) return term;
+
+        var prefix = term.AsSpan(0, colon + 1); // includes the ':' — e.g. "ex:" or ":"
+        foreach (var pm in _prefixes)
+        {
+            if (_prefixSource.AsSpan(pm.PrefixStart, pm.PrefixLength).SequenceEqual(prefix))
+            {
+                var iri = _prefixSource.AsSpan(pm.IriStart, pm.IriLength);
+                var inner = iri.Length >= 2 && iri[0] == '<' ? iri[1..^1] : iri;
+                return "<" + inner.ToString() + term.AsSpan(colon + 1).ToString() + ">";
+            }
+        }
+        return term;
+    }
+
+    /// <summary>Whether a concrete graph IRI is visible under the dataset restriction (null = all visible).</summary>
+    private bool GraphAccessible(string graphTerm)
+    {
+        if (_namedGraphs == null) return true;
+        foreach (var g in _namedGraphs)
+            if (StripIri(g) == StripIri(graphTerm)) return true;
+        return false;
+    }
 
     /// <summary>
     /// Recursive nested-loop join (the continuation is the recursion). The scan is a ref-struct stack local; it

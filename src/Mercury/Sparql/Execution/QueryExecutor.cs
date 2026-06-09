@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Threading;
 using SkyOmega.Mercury.Runtime.Buffers;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Parsing;
 using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
@@ -476,6 +477,41 @@ internal partial class QueryExecutor : IDisposable
     /// ADR-003: This method follows the Buffer Pattern for stack safety by returning
     /// MaterializedQueryResults (~200 bytes) instead of QueryResults (~22KB).
     /// </remarks>
+    /// <summary>
+    /// ADR-045 cutover: evaluate the GRAPH-clause WHERE group through the unified zero-GC tree executor. Parses the
+    /// WHERE group over the FULL query (so the tree's slot offsets index the same source as the prologue prefixes),
+    /// threads the active graph per pattern and the dataset (USING / FROM NAMED) restriction, and returns
+    /// materialized rows for the shared modifier layer.
+    /// </summary>
+    private List<MaterializedRow> ExecuteGraphViaTree()
+    {
+        int whereStart = FindWhereGroupStart();
+        var treeBuffer = new byte[PatternSlot.Size * 1024];
+        var tree = new PatternArray(treeBuffer);
+        int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereStart, ref tree);
+        return new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs).Evaluate(ref tree, root, "");
+    }
+
+    /// <summary>
+    /// Locate the THIS-statement's WHERE-group opening '{'. The source can be a whole multi-statement UPDATE (a text
+    /// search for "WHERE" would find the wrong statement, and the first '{' is the DELETE/INSERT template), so derive
+    /// it from the buffer: the WHERE group encloses the GRAPH clauses, so it is the '{' immediately before the first
+    /// graph header's term (whose offset is into this statement's slice of the source).
+    /// </summary>
+    private int FindWhereGroupStart()
+    {
+        var patterns = _buffer.GetPatterns();
+        var headers = patterns.EnumerateGraphHeaders();
+        if (headers.MoveNext())
+        {
+            int termStart = System.Math.Min(headers.Current.GraphTermStart, _source.Length - 1);
+            int brace = _source.LastIndexOf('{', termStart);
+            if (brace >= 0) return brace;
+        }
+        return _source.IndexOf('{');
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal MaterializedQueryResults ExecuteToMaterialized()
     {
@@ -489,8 +525,8 @@ internal partial class QueryExecutor : IDisposable
         // Check for GRAPH clauses (no top-level patterns)
         if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
         {
-            var results = ExecuteGraphClausesToList();
-            return WrapResultsAsMaterialized(results);
+            // ADR-045 cutover: the unified zero-GC tree executor (see ExecuteGraphViaTree).
+            return WrapResultsAsMaterialized(ExecuteGraphViaTree());
         }
 
         // Check for SERVICE clauses
@@ -761,31 +797,17 @@ internal partial class QueryExecutor : IDisposable
         // instead of QueryResults (~22KB) to reduce stack pressure
         if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
         {
-            var graphResults = ExecuteGraphClausesToList();
+            // ADR-045 cutover: route GRAPH queries through the unified zero-GC tree executor ("a default graph is
+            // also a graph") and the shared FromMaterializedSimple modifier layer — the same one the default path
+            // uses. This replaces the divergent ExecuteGraphClausesToList + FromMaterializedWithGraphContext path.
+            var graphResults = ExecuteGraphViaTree();
 
-            if (graphResults == null || graphResults.Count == 0)
+            if (graphResults.Count == 0)
                 return QueryResults.Empty();
 
-            var graphBindings = new Binding[16];
-
-            // For EXISTS/MINUS evaluation inside GRAPH clauses, we need to pass the graph context
-            // Get the graph IRI from the first graph header slot
-            string? graphContext = null;
-            if (_buffer.GraphClauseCount == 1 && !_buffer.FirstGraphIsVariable)
-            {
-                var patterns = _buffer.GetPatterns();
-                var graphHeaders = patterns.EnumerateGraphHeaders();
-                if (graphHeaders.MoveNext())
-                {
-                    var header = graphHeaders.Current;
-                    graphContext = _source.Substring(header.GraphTermStart, header.GraphTermLength);
-                }
-            }
-
-            // Always use FromMaterializedWithGraphContext to support EXISTS/MINUS filters
-            // graphContext can be null - EXISTS will still work against default graph
-            return QueryResults.FromMaterializedWithGraphContext(graphResults, _buffer, _source.AsSpan(), _store, graphBindings, _stringBuffer,
-                graphContext, _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            var graphBindings = new Binding[64];
+            return QueryResults.FromMaterializedSimple(graphResults, _source.AsSpan(), _store, graphBindings, _stringBuffer,
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
                 _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
                 _buffer.GetSelectClause(), _buffer.GetHavingClause());
         }
