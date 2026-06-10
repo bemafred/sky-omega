@@ -68,10 +68,43 @@ internal sealed class TreeJoinExecutor
         _namedGraphs = namedGraphs;
     }
 
-    /// <summary>Evaluate the group at <paramref name="rootHeader"/> into materialized rows, threading the active graph.</summary>
-    public List<MaterializedRow> Evaluate(ref PatternArray pa, int rootHeader, string activeGraph)
+    // LIMIT-pushdown row cap (ADR-045): when the query is a pure BGP with LIMIT and no order/group/distinct/having
+    // (see IsPureBgp + the QueryExecutor guard), the BGP scan stops after this many rows instead of materializing
+    // the whole match set then truncating. int.MaxValue = no cap (every other shape).
+    private int _maxRows = int.MaxValue;
+
+    /// <summary>
+    /// Evaluate the group at <paramref name="rootHeader"/> into materialized rows, threading the active graph.
+    /// <paramref name="maxRows"/> caps the BGP scan for a pushed-down LIMIT (default: no cap).
+    /// </summary>
+    public List<MaterializedRow> Evaluate(ref PatternArray pa, int rootHeader, string activeGraph, int maxRows = int.MaxValue)
     {
+        _maxRows = maxRows;
         return EvalGroup(ref pa, rootHeader, activeGraph, new List<MaterializedRow> { EmptyRow() });
+    }
+
+    /// <summary>
+    /// True if the subtree at <paramref name="header"/> is a pure basic graph pattern — only triples, GRAPH headers,
+    /// and nested groups, no composing operators (FILTER / BIND / UNION / OPTIONAL / MINUS / VALUES / EXISTS /
+    /// sub-SELECT / SERVICE). Only then may a LIMIT push into the scan: nothing between the BGP and the LIMIT
+    /// drops or adds rows, so the first N matched rows are exactly the first N result rows.
+    /// </summary>
+    public static bool IsPureBgp(ref PatternArray pa, int header)
+    {
+        var e = pa.EnumerateDirectChildren(header);
+        while (e.MoveNext())
+        {
+            var kind = e.Current.Kind;
+            if (kind == PatternKind.Triple)
+                continue;
+            if (kind is PatternKind.GraphHeader or PatternKind.GroupHeader)
+            {
+                if (!IsPureBgp(ref pa, e.CurrentIndex)) return false;
+                continue;
+            }
+            return false; // any composing operator
+        }
+        return true;
     }
 
     /// <summary>
@@ -151,6 +184,7 @@ internal sealed class TreeJoinExecutor
             var bindings = new BindingTable(bindingArray.AsSpan(0, 256), charArray.AsSpan(0, 1 << 16));
             foreach (var row in input)
             {
+                if (output.Count >= _maxRows) break; // LIMIT pushed into the scan
                 bindings.TruncateTo(0);
                 row.RestoreBindings(ref bindings);
                 JoinAt(patternArr, graphArr, 0, ref bindings, output);
@@ -693,7 +727,8 @@ internal sealed class TreeJoinExecutor
     {
         if (index == patterns.Length)
         {
-            results.Add(new MaterializedRow(bindings));
+            if (results.Count < _maxRows) // LIMIT pushed into the scan
+                results.Add(new MaterializedRow(bindings));
             return;
         }
 
@@ -701,7 +736,8 @@ internal sealed class TreeJoinExecutor
             _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
         try
         {
-            while (scan.MoveNext(ref bindings))
+            // Stop the nested-loop scan as soon as the cap is reached — the work-saving heart of LIMIT-pushdown.
+            while (results.Count < _maxRows && scan.MoveNext(ref bindings))
                 JoinAt(patterns, graphs, index + 1, ref bindings, results);
         }
         finally

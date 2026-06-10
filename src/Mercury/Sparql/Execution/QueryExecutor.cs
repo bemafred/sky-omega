@@ -494,8 +494,25 @@ internal partial class QueryExecutor : IDisposable
         {
             var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
             int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereStart, ref tree);
+
+            // LIMIT-pushdown: a pure-BGP GRAPH query with LIMIT and no order/group/aggregate/distinct/having can stop
+            // the scan after OFFSET+LIMIT rows instead of materializing the whole match set then truncating
+            // (ck:obs-graph-limit-pushdown). Any of those modifiers needs the full result first, so no cap there.
+            int maxRows = int.MaxValue;
+            if (_buffer.Limit > 0
+                && !_buffer.GetOrderByClause().HasOrderBy
+                && !_buffer.GetGroupByClause().HasGroupBy
+                && !_buffer.GetHavingClause().HasHaving
+                && _buffer.GetSelectClause().AggregateCount == 0
+                && !_buffer.SelectDistinct
+                && TreeJoinExecutor.IsPureBgp(ref tree, root))
+            {
+                long cap = (long)_buffer.Offset + _buffer.Limit;
+                if (cap < int.MaxValue) maxRows = (int)cap;
+            }
+
             return new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs).Evaluate(ref tree, root, "");
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs).Evaluate(ref tree, root, "", maxRows);
         }
         finally
         {

@@ -327,4 +327,50 @@ public class AllocationTests
             TempPath.SafeCleanup(path);
         }
     }
+
+    /// <summary>
+    /// ADR-045 LIMIT-pushdown gate: a pure-BGP GRAPH query with LIMIT N stops the scan after N rows, so its
+    /// allocation must NOT scale with the size of the matching set — before the cutover the GRAPH path materialized
+    /// the whole set then truncated (ck:obs-graph-limit-pushdown). A LIMIT 2 over 100 vs 5000 matching triples must
+    /// allocate the same; without pushdown the 5000 case would allocate ~50x as much.
+    /// </summary>
+    [Fact]
+    public void GraphPath_Limit_PushesIntoScan()
+    {
+        long small = MeasureGraphLimitAllocation(100);
+        long large = MeasureGraphLimitAllocation(5000);
+
+        Assert.True(large - small < 4096,
+            $"LIMIT did not push into the scan: alloc over 100 edges = {small} B, over 5000 edges = {large} B — " +
+            "a pure-BGP LIMIT must bound the scan, not materialize the whole match set.");
+    }
+
+    private static long MeasureGraphLimitAllocation(int edges)
+    {
+        var path = TempPath.Test($"alloc-limit-{edges}");
+        try
+        {
+            using var store = new QuadStore(path);
+            store.BeginBatch();
+            for (int i = 0; i < edges; i++)
+                store.AddCurrentBatched($"<urn:s{i}>", "<urn:p>", $"<urn:o{i}>", "<urn:g>");
+            store.CommitBatch();
+
+            const string query = "SELECT ?s WHERE { GRAPH <urn:g> { ?s <urn:p> ?o } } LIMIT 2";
+            for (int i = 0; i < 20; i++) _ = SparqlEngine.Query(store, query); // warm JIT + caches
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            const int iterations = 30;
+            for (int i = 0; i < iterations; i++) _ = SparqlEngine.Query(store, query);
+            return (GC.GetAllocatedBytesForCurrentThread() - before) / iterations;
+        }
+        finally
+        {
+            TempPath.SafeCleanup(path);
+        }
+    }
 }
