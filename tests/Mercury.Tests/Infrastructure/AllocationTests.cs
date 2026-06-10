@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using SkyOmega.Mercury;
 using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Rdf.Turtle;
 using SkyOmega.Mercury.Runtime;
@@ -276,5 +277,54 @@ public class AllocationTests
         // Should detect significant allocations
         Assert.True(allocated > 1000,
             $"Control test: expected significant allocations but only measured {allocated} bytes.");
+    }
+
+    /// <summary>
+    /// ADR-045 cutover gate: GRAPH queries execute through the live TreeJoinExecutor wire — a pooled-BindingTable +
+    /// TriplePatternScan nested-loop join. A GRAPH join that scans far MORE triples but yields the SAME single
+    /// result must allocate the SAME amount: the inner scan loop adds NOTHING per step (only the once-per-query
+    /// setup and the bounded result rows allocate). Scaling the scanned-triple count must not scale allocation.
+    /// </summary>
+    [Fact]
+    public void GraphPath_HotScanLoop_IsZeroGcPerScanStep()
+    {
+        long small = MeasureGraphJoinAllocation(50);
+        long large = MeasureGraphJoinAllocation(2000);
+        long perExtraScan = (large - small) / (2000 - 50);
+
+        Assert.True(perExtraScan < 8,
+            $"GRAPH scan loop allocated ~{perExtraScan} bytes/step (50 scans = {small} B, 2000 scans = {large} B) — " +
+            "the cutover's hot path must stay zero-GC.");
+    }
+
+    private static long MeasureGraphJoinAllocation(int edges)
+    {
+        var path = TempPath.Test($"alloc-graph-{edges}");
+        try
+        {
+            using var store = new QuadStore(path);
+            store.BeginBatch();
+            for (int i = 0; i < edges; i++)
+                store.AddCurrentBatched($"<urn:s{i}>", "<urn:p>", $"<urn:o{i}>", "<urn:g>");
+            store.CommitBatch();
+
+            // Pattern 1 scans every p-edge in the graph; pattern 2 (<s0> p ?o) constrains the join to exactly one
+            // solution — so the inner loop does ~`edges` scans regardless, but only a single row is materialized.
+            const string query = "SELECT ?s WHERE { GRAPH <urn:g> { ?s <urn:p> ?o . <urn:s0> <urn:p> ?o } }";
+            for (int i = 0; i < 20; i++) _ = SparqlEngine.Query(store, query); // warm JIT + caches
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            const int iterations = 30;
+            for (int i = 0; i < iterations; i++) _ = SparqlEngine.Query(store, query);
+            return (GC.GetAllocatedBytesForCurrentThread() - before) / iterations;
+        }
+        finally
+        {
+            TempPath.SafeCleanup(path);
+        }
     }
 }

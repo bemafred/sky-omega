@@ -486,11 +486,21 @@ internal partial class QueryExecutor : IDisposable
     private List<MaterializedRow> ExecuteGraphViaTree()
     {
         int whereStart = FindWhereGroupStart();
-        var treeBuffer = new byte[PatternSlot.Size * 1024];
-        var tree = new PatternArray(treeBuffer);
-        int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereStart, ref tree);
-        return new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs).Evaluate(ref tree, root, "");
+        // Pool the pattern-tree buffer — it is per-query setup, not the hot path, but renting keeps the GRAPH path's
+        // per-query allocation bounded by the result rows rather than a fixed ~64 KB buffer each call.
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
+        {
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereStart, ref tree);
+            return new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs).Evaluate(ref tree, root, "");
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
+        }
     }
 
     /// <summary>
