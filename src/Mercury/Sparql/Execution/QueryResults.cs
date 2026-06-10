@@ -199,24 +199,6 @@ internal ref partial struct QueryResults
     }
 
     /// <summary>
-    /// Create QueryResults from pre-materialized rows with graph context for EXISTS/MINUS evaluation.
-    /// Used for GRAPH clause results where EXISTS filters need to query the named graph.
-    /// NoInlining prevents stack frame merging with caller (ADR-003).
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    internal static QueryResults FromMaterializedWithGraphContext(List<MaterializedRow> rows, Patterns.QueryBuffer buffer,
-        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
-        string? graphContext, int limit = 0, int offset = 0, bool distinct = false,
-        OrderByClause orderBy = default, GroupByClause groupBy = default,
-        SelectClause selectClause = default, HavingClause having = default)
-    {
-        var result = new QueryResults(rows, buffer, source, store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having);
-        result._graphContext = graphContext;
-        return result;
-    }
-
-    /// <summary>
     /// Create QueryResults from pre-materialized rows without requiring the full GraphPattern.
     /// This overload avoids stack overflow by not passing the large GraphPattern struct.
     /// NoInlining prevents stack frame merging with caller (ADR-003).

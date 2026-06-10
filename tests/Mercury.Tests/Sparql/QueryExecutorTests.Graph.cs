@@ -30,8 +30,8 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            // Use ExecuteGraphToMaterialized() to avoid stack overflow from large QueryResults struct
-            var results = executor.ExecuteGraphToMaterialized();
+            // Use ExecuteToMaterialized() to avoid stack overflow from large QueryResults struct
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -98,7 +98,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var names = new List<string>();
             while (results.MoveNext())
@@ -134,7 +134,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -167,7 +167,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -201,7 +201,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var foundGraphs = new HashSet<string>();
             var foundNames = new HashSet<string>();
@@ -246,7 +246,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var graphs = new List<string>();
             while (results.MoveNext())
@@ -282,7 +282,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var foundGraphs = new HashSet<string>();
             while (results.MoveNext())
@@ -320,7 +320,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -368,7 +368,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var found = new List<(string name, string age)>();
             while (results.MoveNext())
@@ -412,7 +412,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var found = new List<(string g, string label, string price)>();
             while (results.MoveNext())
@@ -461,7 +461,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -606,7 +606,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var graphs = new HashSet<string>();
             var items = new HashSet<string>();
@@ -818,7 +818,7 @@ SELECT * WHERE {
 
             // Use the specialized GRAPH+EXISTS method that returns lightweight MaterializedQueryResults
             // to avoid the ~22KB QueryResults struct on the stack
-            var results = executor.ExecuteGraphWithExistsToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var subjects = new System.Collections.Generic.List<string>();
             while (results.MoveNext())
@@ -915,7 +915,7 @@ SELECT ?s WHERE {
         try
         {
             using var executorNoMinus = new QueryExecutor(Store, queryNoMinus.AsSpan(), bufferNoMinus);
-            var resultsNoMinus = executorNoMinus.ExecuteGraphToMaterialized();
+            var resultsNoMinus = executorNoMinus.ExecuteToMaterialized();
 
             int count = 0;
             while (resultsNoMinus.MoveNext())
@@ -946,7 +946,7 @@ SELECT ?s WHERE {
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), buffer);
-            var results = executor.ExecuteGraphToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
