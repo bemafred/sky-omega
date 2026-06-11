@@ -83,6 +83,8 @@ public class TreeJoinExecutorTests : IDisposable
     [InlineData("SELECT ?s WHERE { ?s <urn:p> ?o MINUS { ?s <urn:q> ?x } }", new[] { "s" })]
     [InlineData("SELECT ?o WHERE { VALUES ?s { <urn:a> <urn:b> } ?s <urn:p> ?o }", new[] { "o" })]
     [InlineData("SELECT ?o WHERE { { SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 2 } }", new[] { "o" })]
+    // Aggregate-aliased sub-SELECT: (COUNT(?o) AS ?c) projects ?c, an alias read back from the modifier layer.
+    [InlineData("SELECT ?c WHERE { { SELECT (COUNT(?o) AS ?c) WHERE { ?s <urn:p> ?o } } }", new[] { "c" })]
     public void DefaultAndGraphWrapped_ThroughTheZeroGcExecutor_EqualTheBaseline(string query, string[] projection)
     {
         var baseline = BaselineCanonical(query, projection);
@@ -200,6 +202,18 @@ public class TreeJoinExecutorTests : IDisposable
         // the tree is parsed over the FULL query (prefixes live in the prologue) and the same source handed over.
         const string query = "PREFIX ex: <urn:> SELECT ?o WHERE { ?s ex:p ?o }";
         var baseline = BaselineCanonical(query, new[] { "o" });
+        var rows = Canonicalize(ExecuteTreeFullQuery(query, ""), new[] { "o" });
+        Assert.Equal(baseline, rows);
+    }
+
+    [Fact]
+    public void PnameValuedValues_ThroughTheZeroGcExecutor_ResolveViaPrefixes()
+    {
+        // VALUES ?s { ex:a } — a prefixed-name VALUE must expand to its full IRI via the prologue prefixes, exactly
+        // like a prefixed name in a pattern; otherwise the verbatim "ex:a" joins nothing.
+        const string query = "PREFIX ex: <urn:> SELECT ?o WHERE { VALUES ?s { ex:a } ?s <urn:p> ?o }";
+        var baseline = BaselineCanonical(query, new[] { "o" });
+        Assert.NotEmpty(baseline); // guard: the shipping baseline itself resolves the prefixed value
         var rows = Canonicalize(ExecuteTreeFullQuery(query, ""), new[] { "o" });
         Assert.Equal(baseline, rows);
     }

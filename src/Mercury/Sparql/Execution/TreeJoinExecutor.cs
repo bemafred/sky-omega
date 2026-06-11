@@ -210,7 +210,7 @@ internal sealed class TreeJoinExecutor
                 if (slot.GraphTermType == TermType.Variable)
                     return VariableGraphStep(ref pa, ci, graphTerm, input);
                 // Expand a prefixed graph name (GRAPH :g1) to its full IRI so it matches the stored graph.
-                string graphIri = ExpandGraphTerm(graphTerm);
+                string graphIri = ExpandPname(graphTerm);
                 // A dataset restriction (USING / FROM NAMED) makes a graph outside it inaccessible — GRAPH <g> over
                 // such a graph matches nothing (e.g. USING without USING NAMED makes ALL named graphs inaccessible).
                 if (!GraphAccessible(graphIri))
@@ -423,7 +423,7 @@ internal sealed class TreeJoinExecutor
                 {
                     var (vs, vl) = vc.GetValueAt(r, c);
                     if (vl < 0) continue; // UNDEF
-                    table.Bind(varNames[c].AsSpan(), valuesSpan.AsSpan(vs, vl));
+                    table.Bind(varNames[c].AsSpan(), ExpandValueTerm(valuesSpan.Substring(vs, vl)).AsSpan());
                 }
                 valueRows.Add(new MaterializedRow(table));
             }
@@ -588,6 +588,15 @@ internal sealed class TreeJoinExecutor
             string name = subSrc.Substring(start, length).TrimStart('?');
             if (seen.Add(name)) names.Add(name);
         }
+        // Aggregate aliases: SELECT (COUNT(?x) AS ?c) projects ?c, which is not a plain projected variable —
+        // FromMaterializedSimple binds the computed aggregate to that alias, so read it back too.
+        for (int i = 0; i < sub.AggregateCount; i++)
+        {
+            var agg = sub.GetAggregate(i);
+            if (agg.AliasLength == 0) continue;
+            string name = subSrc.Substring(agg.AliasStart, agg.AliasLength).TrimStart('?');
+            if (seen.Add(name)) names.Add(name);
+        }
         return names;
     }
 
@@ -684,11 +693,22 @@ internal sealed class TreeJoinExecutor
     private static string StripIri(string t) => t.Length >= 2 && t[0] == '<' && t[^1] == '>' ? t[1..^1] : t;
 
     /// <summary>
-    /// Expand a prefixed graph name (<c>:g1</c>, <c>ex:g1</c>) to its full <c>&lt;…&gt;</c> IRI via the prologue
-    /// prefixes (stored WITH the trailing colon and WITH brackets), so it matches the stored graph. A term already
+    /// A VALUES value as a canonical RDF term: a prefixed name is expanded to its full IRI; an IRI, literal (string,
+    /// langtagged, or typed), number, boolean, or blank node is verbatim. (UNDEF is handled by the caller.)
+    /// </summary>
+    private string ExpandValueTerm(string text)
+    {
+        if (text.Length == 0 || text[0] is '<' or '"' or '\'' or '_' or '-' or '+' || char.IsDigit(text[0])) return text;
+        if (text is "true" or "false") return text;
+        return text.Contains(':') ? ExpandPname(text) : text; // a prefixed name; everything else has no ':' to expand
+    }
+
+    /// <summary>
+    /// Expand a prefixed name (<c>:g1</c>, <c>ex:g1</c>) to its full <c>&lt;…&gt;</c> IRI via the prologue prefixes
+    /// (stored WITH the trailing colon and WITH brackets) — used for GRAPH terms and VALUES values. A term already
     /// in IRI form, or with an unknown prefix, is returned unchanged.
     /// </summary>
-    private string ExpandGraphTerm(string term)
+    private string ExpandPname(string term)
     {
         if (term.Length == 0 || term[0] == '<' || _prefixes == null) return term;
         int colon = term.IndexOf(':');
