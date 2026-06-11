@@ -855,6 +855,22 @@ internal partial class QueryExecutor : IDisposable
 
         if (_buffer.TriplePatternCount == 0)
         {
+            // VALUES-only WHERE (inline data, no triple patterns): route through the unified tree executor, which
+            // materializes the rows — including MULTI-variable rows — correctly. The empty-pattern path below would
+            // return nothing (it only checks for aggregate/BIND/FILTER/EXISTS expressions, not VALUES).
+            if (_buffer.HasValues)
+            {
+                var valuesResults = ExecuteGraphViaTree();
+                if (valuesResults.Count == 0)
+                    return QueryResults.Empty();
+
+                var valuesBindings = new Binding[64];
+                return QueryResults.FromMaterializedSimple(valuesResults, _source.AsSpan(), _store, valuesBindings, _stringBuffer,
+                    _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+                    _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
+                    _buffer.GetSelectClause(), _buffer.GetHavingClause());
+            }
+
             // Check if there are BIND, FILTER, EXISTS, or SELECT expressions to evaluate
             // (e.g., SELECT (REPLACE(...) AS ?new) WHERE {} or SELECT ?x WHERE { BIND(UUID() AS ?x) })
             var selectClause = _buffer.GetSelectClause();
