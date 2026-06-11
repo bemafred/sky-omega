@@ -478,6 +478,24 @@ internal partial class QueryExecutor : IDisposable
     /// MaterializedQueryResults (~200 bytes) instead of QueryResults (~22KB).
     /// </remarks>
     /// <summary>
+    /// Execute the WHERE through the unified tree executor and apply the shared solution-modifier layer. Used by
+    /// every path the ADR-045 cutover routes to TreeJoinExecutor: GRAPH-only, VALUES-only, and VALUES + triple
+    /// patterns. Returns <see cref="QueryResults.Empty"/> on no rows.
+    /// </summary>
+    private QueryResults ExecuteViaTreeMaterialized()
+    {
+        var rows = ExecuteGraphViaTree();
+        if (rows.Count == 0)
+            return QueryResults.Empty();
+
+        var bindings = new Binding[64];
+        return QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
+            _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
+            _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
+            _buffer.GetSelectClause(), _buffer.GetHavingClause());
+    }
+
+    /// <summary>
     /// ADR-045 cutover: evaluate the GRAPH-clause WHERE group through the unified zero-GC tree executor. Parses the
     /// WHERE group over the FULL query (so the tree's slot offsets index the same source as the prologue prefixes),
     /// threads the active graph per pattern and the dataset (USING / FROM NAMED) restriction, and returns
@@ -827,16 +845,7 @@ internal partial class QueryExecutor : IDisposable
             // ADR-045 cutover: route GRAPH queries through the unified zero-GC tree executor ("a default graph is
             // also a graph") and the shared FromMaterializedSimple modifier layer — the same one the default path
             // uses. This replaces the divergent ExecuteGraphClausesToList + FromMaterializedWithGraphContext path.
-            var graphResults = ExecuteGraphViaTree();
-
-            if (graphResults.Count == 0)
-                return QueryResults.Empty();
-
-            var graphBindings = new Binding[64];
-            return QueryResults.FromMaterializedSimple(graphResults, _source.AsSpan(), _store, graphBindings, _stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
-                _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
-                _buffer.GetSelectClause(), _buffer.GetHavingClause());
+            return ExecuteViaTreeMaterialized();
         }
 
         // Check for SERVICE clauses - use _buffer
@@ -859,17 +868,7 @@ internal partial class QueryExecutor : IDisposable
             // materializes the rows — including MULTI-variable rows — correctly. The empty-pattern path below would
             // return nothing (it only checks for aggregate/BIND/FILTER/EXISTS expressions, not VALUES).
             if (_buffer.HasValues)
-            {
-                var valuesResults = ExecuteGraphViaTree();
-                if (valuesResults.Count == 0)
-                    return QueryResults.Empty();
-
-                var valuesBindings = new Binding[64];
-                return QueryResults.FromMaterializedSimple(valuesResults, _source.AsSpan(), _store, valuesBindings, _stringBuffer,
-                    _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
-                    _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
-                    _buffer.GetSelectClause(), _buffer.GetHavingClause());
-            }
+                return ExecuteViaTreeMaterialized();
 
             // Check if there are BIND, FILTER, EXISTS, or SELECT expressions to evaluate
             // (e.g., SELECT (REPLACE(...) AS ?new) WHERE {} or SELECT ?x WHERE { BIND(UUID() AS ?x) })
@@ -888,6 +887,15 @@ internal partial class QueryExecutor : IDisposable
         {
             return ExecuteWithDefaultGraphs();
         }
+
+        // NOTE: VALUES combined with triple patterns is NOT routed through the tree executor yet. The old default
+        // BGP path below handles it incompletely (drops a non-join VALUES variable, ignores trailing VALUES), but
+        // routing it to the tree surfaced two tree gaps the old path covers (ck:obs-values-join-default-path-incomplete):
+        // (1) ValuesStep binds a numeric value raw ("25"), so it fails to join a stored typed literal
+        //     ("25"^^xsd:integer) — the tree needs the value canonicalization the old path's CompareValuesMatch does;
+        // (2) a zero-length property path (`?p?`) over a VALUES-bound term must only match terms IN THE GRAPH, not the
+        //     query-defined VALUES term (W3C property-path/values_and_path) — the tree binds it anyway.
+        // Each is its own fix; until both land, VALUES+triple stays on the old path. VALUES-only already routes above.
 
         // For regular queries, use cached pattern from buffer
         // Build binding storage
