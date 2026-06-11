@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Patterns;
 
 namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 
@@ -19,6 +20,8 @@ internal ref struct BindExpressionEvaluator
     private ReadOnlySpan<char> _bindingStrings;
     private int _bindingCount;
     private ReadOnlySpan<char> _baseIri;
+    private PrefixMapping[]? _prefixes;       // prologue prefixes, for expanding a constant prefixed name (ex:local)
+    private ReadOnlySpan<char> _prefixSource;  // the source the PrefixMapping offsets index into
 
     public BindExpressionEvaluator(ReadOnlySpan<char> expression,
         ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer)
@@ -48,6 +51,19 @@ internal ref struct BindExpressionEvaluator
     /// </summary>
     public Value Evaluate()
     {
+        _position = 0;
+        return ParseComparison();
+    }
+
+    /// <summary>
+    /// Evaluate with prologue prefixes in scope, so a constant prefixed name (e.g. <c>ex:a-b</c>) expands to its
+    /// IRI — exactly as <see cref="FilterEvaluator"/> does. Without this overload a prefixed name resolves only
+    /// for the hardcoded xsd/rdf/rdfs prefixes.
+    /// </summary>
+    public Value Evaluate(PrefixMapping[]? prefixes, ReadOnlySpan<char> prefixSource)
+    {
+        _prefixes = prefixes;
+        _prefixSource = prefixSource;
         _position = 0;
         return ParseComparison();
     }
@@ -319,8 +335,8 @@ internal ref struct BindExpressionEvaluator
             return ParseNumericLiteral();
         }
 
-        // Function call or boolean literal
-        if (IsLetter(ch))
+        // Function call, boolean literal, or prefixed name — including the empty prefix (:local starts with ':').
+        if (IsLetter(ch) || ch == ':')
         {
             return ParseFunctionOrLiteral();
         }
@@ -1149,6 +1165,26 @@ internal ref struct BindExpressionEvaluator
             var localName = name.Slice(5);
             _stringResult = $"http://www.w3.org/2000/01/rdf-schema#{localName.ToString()}";
             return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+        }
+
+        // Prologue prefixes (PREFIX ex: <…>): expand ex:local -> <baseIri + local>, exactly as FilterEvaluator does,
+        // so a constant prefixed name in BIND resolves to its full IRI (not only the hardcoded xsd/rdf/rdfs above).
+        var colon = name.IndexOf(':');
+        if (colon >= 0 && _prefixes != null && !_prefixSource.IsEmpty)
+        {
+            var prefix = name.Slice(0, colon + 1); // include the ':' to match the stored prefix form "ex:"
+            var local = name.Slice(colon + 1);
+            foreach (var mapping in _prefixes)
+            {
+                if (_prefixSource.Slice(mapping.PrefixStart, mapping.PrefixLength).SequenceEqual(prefix))
+                {
+                    var iri = _prefixSource.Slice(mapping.IriStart, mapping.IriLength);
+                    if (iri.Length >= 2 && iri[0] == '<' && iri[^1] == '>')
+                        iri = iri.Slice(1, iri.Length - 2); // stored as "<http://…>"
+                    _stringResult = $"<{iri.ToString()}{local.ToString()}>";
+                    return new Value { Type = ValueType.Uri, StringValue = _stringResult.AsSpan() };
+                }
+            }
         }
 
         return new Value { Type = ValueType.Unbound };

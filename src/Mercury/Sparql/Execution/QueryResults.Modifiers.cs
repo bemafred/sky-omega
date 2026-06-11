@@ -663,7 +663,7 @@ internal ref partial struct QueryResults
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 baseIri);
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_buffer?.Prefixes, _source);
 
             // Bind the result to the alias variable
             // Prefer StringValue if available (preserves original datatype annotation)
@@ -739,7 +739,7 @@ internal ref partial struct QueryResults
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 ReadOnlySpan<char>.Empty);
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_buffer?.Prefixes, _source);
 
             // Bind the result if valid
             switch (value.Type)

@@ -274,7 +274,7 @@ internal sealed class TreeJoinExecutor
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
                 var evaluator = new BindExpressionEvaluator(exprText.AsSpan(), table.GetBindings(), table.Count, table.GetStringBuffer());
-                table.Bind(varName.AsSpan(), Render(evaluator.Evaluate()).AsSpan());
+                table.Bind(varName.AsSpan(), Render(evaluator.Evaluate(_prefixes, _prefixSource.AsSpan())).AsSpan());
                 output.Add(new MaterializedRow(table));
             }
             return output;

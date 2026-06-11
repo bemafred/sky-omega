@@ -549,7 +549,7 @@ internal ref struct MultiPatternScan
                 bindings.GetBindings(),
                 bindings.Count,
                 bindings.GetStringBuffer());
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_prefixes, _source);
 
             // Bind the result to the target variable using typed overloads
             switch (value.Type)

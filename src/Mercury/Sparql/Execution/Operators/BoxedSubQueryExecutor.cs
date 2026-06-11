@@ -1535,7 +1535,7 @@ internal sealed class BoxedSubQueryExecutor
                 bindings.Count,
                 stringBuffer,
                 ReadOnlySpan<char>.Empty);  // No base IRI in subquery context
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_prefixes, _source);
 
             // Bind the result to the alias variable
             switch (value.Type)

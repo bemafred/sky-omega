@@ -1223,6 +1223,8 @@ internal sealed class GroupedRow
                         bindings.GetBindings(),
                         bindings.Count,
                         bindings.GetStringBuffer());
+                    // UpdateAggregates has no buffer/prefixes in scope — the aggregate-inner-expression path keeps the
+                    // hardcoded xsd/rdf/rdfs prefixes only (a prologue-prefixed constant inside an aggregate is rare).
                     var value = evaluator.Evaluate();
 
                     // Convert the evaluated value to the format expected by aggregation

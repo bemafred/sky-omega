@@ -1084,7 +1084,7 @@ internal ref partial struct QueryResults
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 baseIri);
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_buffer!.Prefixes, _source);
 
             // Bind the result to the target variable using typed overloads
             switch (value.Type)
@@ -1143,7 +1143,7 @@ internal ref partial struct QueryResults
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 baseIri);
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_buffer!.Prefixes, _source);
 
             // Bind the result to the alias variable
             switch (value.Type)

@@ -629,7 +629,7 @@ internal partial class QueryExecutor : IDisposable
                     bindingTable.Count,
                     _stringBuffer,
                     baseIri);
-                var value = evaluator.Evaluate();
+                var value = evaluator.Evaluate(_prefixMappings, _source);
 
                 // Bind the result using typed overloads
                 switch (value.Type)
@@ -672,7 +672,7 @@ internal partial class QueryExecutor : IDisposable
                 bindingTable.Count,
                 _stringBuffer,
                 baseIri);
-            var value = evaluator.Evaluate();
+            var value = evaluator.Evaluate(_prefixMappings, _source);
 
             // Bind the result to the alias variable
             switch (value.Type)
@@ -1095,7 +1095,7 @@ internal partial class QueryExecutor : IDisposable
                         bindingTable.Count,
                         stringBuffer,
                         baseIri);
-                    var value = evaluator.Evaluate();
+                    var value = evaluator.Evaluate(_prefixMappings, _source);
 
                     // Bind the result using typed overloads
                     switch (value.Type)
