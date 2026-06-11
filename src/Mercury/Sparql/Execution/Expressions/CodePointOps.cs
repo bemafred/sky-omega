@@ -12,6 +12,26 @@ namespace SkyOmega.Mercury.Sparql.Execution.Expressions;
 internal static class CodePointOps
 {
     /// <summary>
+    /// True if the character at <paramref name="pos"/> continues a prefixed name's local part (SPARQL PN_LOCAL):
+    /// a letter, digit, '_', ':', or '-' (PN_CHARS), or an INTERNAL '.' — a '.' belongs to a local name only when
+    /// followed by another local-part char; a trailing '.' is a statement terminator, not part of the name. This is
+    /// why <c>ck:obs-graph-limit-pushdown</c> is one prefixed name and not <c>ck:obs - graph - limit - pushdown</c>:
+    /// the expression tokenizer must consume the hyphens, exactly as the BGP-term tokenizer already does.
+    /// </summary>
+    public static bool IsPrefixedNameLocalChar(ReadOnlySpan<char> expr, int pos)
+    {
+        if ((uint)pos >= (uint)expr.Length) return false;
+        char c = expr[pos];
+        if (IsLocalNameChar(c)) return true;
+        // An internal '.' (followed by another local char) is part of PN_LOCAL; a trailing '.' is not.
+        return c == '.' && pos + 1 < expr.Length && IsLocalNameChar(expr[pos + 1]);
+
+        static bool IsLocalNameChar(char ch) =>
+            (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+            ch == '_' || ch == ':' || ch == '-';
+    }
+
+    /// <summary>
     /// Counts the number of Unicode code points in a span.
     /// Surrogate pairs count as one code point.
     /// </summary>

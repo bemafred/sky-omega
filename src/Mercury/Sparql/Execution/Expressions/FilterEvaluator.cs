@@ -614,8 +614,10 @@ internal ref partial struct FilterEvaluator
     {
         var start = _position;
 
-        // Allow letters, digits, underscore, and colon
-        while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == ':'))
+        // A prefixed name's local part is PN_LOCAL — letters, digits, '_', ':', '-', and internal '.' — so a
+        // hyphenated name like ck:obs-graph-limit-pushdown is one token, not the arithmetic ck:obs - graph - …
+        // (a function name stops at '(' either way, since '(' is not a local-name char).
+        while (!IsAtEnd() && CodePointOps.IsPrefixedNameLocalChar(_expression, _position))
             Advance();
 
         var name = _expression.Slice(start, _position - start);
