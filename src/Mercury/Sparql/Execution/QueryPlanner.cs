@@ -52,7 +52,11 @@ internal sealed class QueryPlanner
         // Check if predicate is a constant (not a variable)
         if (!pattern.Predicate.IsVariable)
         {
-            var predicateSpan = source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
+            // A synthetic predicate (rdf:first/rest/nil from RDF-collection expansion, etc.) carries a negative
+            // marker offset, not a source position — resolve it to its IRI so the stats lookup still works.
+            var predicateSpan = Operators.SyntheticTermHelper.IsSynthetic(pattern.Predicate.Start)
+                ? Operators.SyntheticTermHelper.GetSyntheticIri(pattern.Predicate.Start)
+                : source.Slice(pattern.Predicate.Start, pattern.Predicate.Length);
             var predicateAtom = _atoms.GetAtomId(predicateSpan);
 
             if (predicateAtom > 0)

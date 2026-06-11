@@ -302,7 +302,8 @@ internal ref partial struct SparqlParser
 
         SkipWhitespace();
         var obj = ParseTerm();
-        if (obj.Length == 0)
+        // A synthetic term (negative marker offset — an empty collection () is rdf:nil at -8) is valid at Length 0.
+        if (obj.Length == 0 && obj.Start >= 0)
             throw new SparqlParseException("Incomplete triple pattern - expected object");
 
         EmitTriple(ref pa, subject, predicate, obj, path, pathStart, pathLength);
@@ -323,7 +324,7 @@ internal ref partial struct SparqlParser
             int nextPathLength = _position - nextPathStart;
             SkipWhitespace();
             var nextObj = ParseTerm();
-            if (nextObj.Length == 0)
+            if (nextObj.Length == 0 && nextObj.Start >= 0)
                 throw new SparqlParseException("Incomplete triple pattern - expected object after ';'");
 
             EmitTriple(ref pa, subject, nextPredicate, nextObj, nextPath, nextPathStart, nextPathLength);
@@ -360,7 +361,8 @@ internal ref partial struct SparqlParser
         // counters) into a throwaway pattern, then copy the expanded triples into the tree; the evaluator resolves
         // the synthetic offsets via SyntheticTermHelper.
         if (subject.IsQuotedTriple || obj.IsQuotedTriple ||
-            IsBlankNodePropertyList(subject) || IsBlankNodePropertyList(obj))
+            IsBlankNodePropertyList(subject) || IsBlankNodePropertyList(obj) ||
+            IsCollection(subject) || IsCollection(obj))
         {
             var expanded = new GraphPattern();
             AddTriplePatternOrExpand(ref expanded, subject, predicate, obj, path);

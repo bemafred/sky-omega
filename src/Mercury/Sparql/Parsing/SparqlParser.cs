@@ -614,8 +614,9 @@ internal ref partial struct SparqlParser
 
         var obj = ParseTerm();
 
-        // Check that we got a valid object
-        if (obj.Length == 0)
+        // Check that we got a valid object. A synthetic term (negative marker offset — e.g. an empty collection ()
+        // is rdf:nil at offset -8) is valid even though its Length is 0; only a real zero-length term is missing.
+        if (obj.Length == 0 && obj.Start >= 0)
         {
             throw new SparqlParseException("Incomplete triple pattern - expected object");
         }
@@ -680,10 +681,18 @@ internal ref partial struct SparqlParser
         {
             actualSubject = ExpandBlankNodePropertyList(ref pattern, subject);
         }
+        else if (IsCollection(subject))
+        {
+            actualSubject = ExpandCollection(ref pattern, subject);
+        }
 
         if (IsBlankNodePropertyList(obj))
         {
             actualObject = ExpandBlankNodePropertyList(ref pattern, obj);
+        }
+        else if (IsCollection(obj))
+        {
+            actualObject = ExpandCollection(ref pattern, obj);
         }
 
         // Check for sequence path - expand to multiple patterns with intermediate variables
@@ -712,6 +721,75 @@ internal ref partial struct SparqlParser
 
         // Check if it starts with '[' - if so, it's a property list, not a named blank node like _:b1
         return term.Start >= 0 && term.Start < _source.Length && _source[term.Start] == '[';
+    }
+
+    /// <summary>
+    /// True if a term is an RDF collection — a <c>( … )</c> list. ParseCollection returns the parenthesised span as
+    /// a blank node (with the head still to be generated); an empty <c>()</c> is rdf:nil and is NOT a collection here.
+    /// </summary>
+    private bool IsCollection(Term term)
+    {
+        return term.IsBlankNode && term.Start >= 0 && term.Start < _source.Length && _source[term.Start] == '(';
+    }
+
+    /// <summary>
+    /// Expand an RDF collection <c>( a b c )</c> (in subject or object position) into its rdf:first / rdf:rest /
+    /// rdf:nil list structure, joined through synthetic variables (a blank node in a pattern is a wildcard, so the
+    /// co-referring list nodes use the -300 join-variable range — the same mechanism as blank-node property lists),
+    /// and return the head node so the enclosing triple refers to the list head. Nested collections and blank-node
+    /// property lists inside the list are expanded recursively.
+    /// </summary>
+    private Term ExpandCollection(ref GraphPattern pattern, Term collection)
+    {
+        var savedPosition = _position;
+        _position = collection.Start + 1; // skip '('
+        SkipWhitespace();
+
+        Term head = NewListJoinVariable();
+        Term node = head;
+        while (!IsAtEnd() && Peek() != ')')
+        {
+            Term item = ParseTerm();
+            if (IsCollection(item)) item = ExpandCollection(ref pattern, item);
+            else if (IsBlankNodePropertyList(item)) item = ExpandBlankNodePropertyList(ref pattern, item);
+
+            // node rdf:first item  (rdf:first = synthetic IRI -6)
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = node,
+                Predicate = new Term { Type = TermType.Iri, Start = -6, Length = 0 },
+                Object = item
+            });
+
+            SkipWhitespace();
+            bool last = IsAtEnd() || Peek() == ')';
+            // node rdf:rest (next | rdf:nil)  (rdf:rest = -7, rdf:nil = -8)
+            Term rest = last ? new Term { Type = TermType.Iri, Start = -8, Length = 0 } : NewListJoinVariable();
+            pattern.AddPattern(new TriplePattern
+            {
+                Subject = node,
+                Predicate = new Term { Type = TermType.Iri, Start = -7, Length = 0 },
+                Object = rest
+            });
+            node = rest;
+            SkipWhitespace();
+        }
+
+        if (Peek() == ')')
+            Advance();
+        _position = savedPosition;
+        return head;
+    }
+
+    /// <summary>
+    /// A fresh synthetic join variable in the -300..-331 range (resolved by SyntheticTermHelper), shared with
+    /// blank-node property lists so co-referring nodes get distinct, joinable variables. Bounded at 32 per query.
+    /// </summary>
+    private Term NewListJoinVariable()
+    {
+        if (_blankNodePropListCounter >= 32)
+            throw new SparqlParseException("RDF collection / blank-node property list exceeds the synthetic join-variable limit (32 per query)");
+        return Term.Variable(-(_blankNodePropListCounter++ + 300), 0);
     }
 
     /// <summary>
@@ -1933,12 +2011,11 @@ internal ref partial struct SparqlParser
         Advance(); // Skip '('
         SkipWhitespace();
 
-        // Handle empty collection ()
+        // Handle empty collection () — rdf:nil (synthetic IRI offset -8, resolved by SyntheticTermHelper)
         if (Peek() == ')')
         {
             Advance();
-            // Empty list is rdf:nil - represent as IRI
-            return Term.Iri(start, _position - start);
+            return new Term { Type = TermType.Iri, Start = -8, Length = 0 };
         }
 
         // Parse items, counting nested parens and brackets
