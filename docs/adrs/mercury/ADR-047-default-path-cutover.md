@@ -2,7 +2,23 @@
 
 ## Status
 
-**Status:** Proposed — 2026-06-11 (Emergence. ADR-045 unified the GRAPH path onto `TreeJoinExecutor` and deleted the divergent GRAPH executor; the **default** query path still runs the older `QueryPlanner` + slot-based operators. Two executors for one algebra is the same divergence ADR-045 named, relocated. This ADR proposes completing the cutover. Unlike the GRAPH path, the default path carries the selectivity **planner**, so **performance parity** — not only correctness parity — is the central open question. Not yet validated.)
+**Status:** Proposed — 2026-06-11 (Emergence. ADR-045 unified the GRAPH path onto `TreeJoinExecutor` and deleted the divergent GRAPH executor; the **default** query path still runs the older `QueryPlanner` + slot-based operators. Two executors for one algebra is the same divergence ADR-045 named, relocated. This ADR proposes completing the cutover. Unlike the GRAPH path, the default path carries the selectivity **planner**, so **performance parity** — not only correctness parity — is the central open question. **The 2026-06-12 spike validated the mechanism** — see *Validation to date* — so the load-bearing risk is substantially down; **broad-scale validation remains** before Accepted.)
+
+## Validation to date (2026-06-12)
+
+Two probes have de-risked both halves; neither is the full corpus/scale validation the Quality guarantee requires, but both point the right way.
+
+- **Correctness — the differential gate** (`ffbfe44`, `DefaultVsTreeDifferentialTests`): runs each query through both executors and compares solution bags. A 28-case battery covering the whole algebra (paths `* ? ^ | +`, EXISTS/NOT EXISTS, GROUP BY + HAVING, nested OPTIONAL, aggregation, sub-SELECT, multi-var VALUES join, FILTER functions) is **equivalent** through the tree; the parity surface is **exactly the three known gaps** (VALUES numeric canonicalization, VALUES cross-join with a triple, zero-length-path graph-term membership). No unpredicted gaps.
+- **Performance — the planner spike** (`ed994f1`, `DefaultPathPlannerSpike`): reorder the tree's BGP run by the existing `QueryPlanner.OptimizePatternOrder` selectivity model (correctness-neutral — a BGP join is commutative). On a 2-pattern join with pessimal source order (50,000-row pattern first, 5-row second), with statistics collected:
+
+  | path | mean |
+  |---|---|
+  | old path (QueryPlanner) | 22.7 µs |
+  | tree, source order (unplanned) | 26.2 ms (~2,500× slower — planning is essential) |
+  | tree, selectivity reorder (planned) | **10.6 µs (~2× faster than the old path)** |
+
+  A selectivity-planned tree does not merely *match* the old path — it **beats it ~2×**, on the same planning model with leaner execution. The planner-as-tree-reordering-pass (the proposed design) works.
+- **Caveat surfaced**: predicate statistics are **lazy** — `CollectPredicateStatistics` runs on checkpoint/Dispose, not on commit. Without them the planner estimates a uniform default and reorders nothing (both paths then run source-order). The planned tree's advantage, like the old path's, depends on current statistics; the cutover inherits — it does not worsen — this existing dependency.
 
 ## Context
 
