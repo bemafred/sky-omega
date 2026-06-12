@@ -734,9 +734,41 @@ internal sealed class TreeJoinExecutor
     /// </summary>
     private string ExpandValueTerm(string text)
     {
-        if (text.Length == 0 || text[0] is '<' or '"' or '\'' or '_' or '-' or '+' || char.IsDigit(text[0])) return text;
-        if (text is "true" or "false") return text;
+        if (text.Length == 0) return text;
+        char c = text[0];
+        if (c is '<' or '"' or '\'' or '_') return text; // IRI / literal / blank node — already a canonical term
+
+        // Numeric and boolean VALUES tokens are typed literals in SPARQL (25 ≡ "25"^^xsd:integer). Canonicalize so an
+        // inline value joins a stored typed literal under the executor's exact-term comparison; the old path matched
+        // these value-aware instead. xsd: full IRIs, to match the stored lexical form.
+        if (text is "true" or "false")
+            return $"\"{text}\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+        if ((c is '-' or '+' || char.IsDigit(c)) && TryNumericDatatype(text, out var datatype))
+            return $"\"{text}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>";
+
         return text.Contains(':') ? ExpandPname(text) : text; // a prefixed name; everything else has no ':' to expand
+    }
+
+    /// <summary>
+    /// Classify a numeric literal token by its SPARQL lexical form: an exponent ⇒ xsd:double, a '.' ⇒ xsd:decimal,
+    /// otherwise xsd:integer. Returns false (leave verbatim) for anything that is not a valid numeric literal.
+    /// </summary>
+    private static bool TryNumericDatatype(string text, out string datatype)
+    {
+        datatype = "";
+        bool hasDot = false, hasExp = false, hasDigit = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch is >= '0' and <= '9') hasDigit = true;
+            else if (ch == '.') { if (hasDot || hasExp) return false; hasDot = true; }
+            else if (ch is 'e' or 'E') { if (hasExp || !hasDigit) return false; hasExp = true; }
+            else if (ch is '+' or '-') { if (i != 0 && text[i - 1] is not ('e' or 'E')) return false; } // sign only leads or follows the exponent
+            else return false;
+        }
+        if (!hasDigit) return false;
+        datatype = hasExp ? "double" : hasDot ? "decimal" : "integer";
+        return true;
     }
 
     /// <summary>

@@ -486,20 +486,27 @@ internal ref struct TriplePatternScan
             // For reflexive: if subject is bound, use it; if subject is unbound but object is bound, use object
             // This handles queries like "?s :p? :o" where the reflexive case should bind ?s = :o
             ReadOnlySpan<char> reflexiveValue;
+            bool reflexiveFromVariable;
             if (!subjectSpan.IsEmpty)
             {
                 reflexiveValue = subjectSpan;
+                reflexiveFromVariable = _pattern.Subject.IsVariable;
             }
             else if (!objectSpan.IsEmpty)
             {
                 reflexiveValue = objectSpan;
+                reflexiveFromVariable = _pattern.Object.IsVariable;
             }
             else
             {
                 reflexiveValue = ReadOnlySpan<char>.Empty;
+                reflexiveFromVariable = false;
             }
 
-            if (!reflexiveValue.IsEmpty)
+            // SPARQL §9.3: the zero-length node set is the graph's nodes PLUS the terms written in the query. A
+            // CONSTANT endpoint (e.g. `?s :p? :o`) is a query term and always matches the reflexive, even on an empty
+            // graph; a value bound to a VARIABLE (e.g. via VALUES) matches only if it is a node of the graph.
+            if (!reflexiveValue.IsEmpty && (!reflexiveFromVariable || IsGraphNode(reflexiveValue)))
             {
                 // Bind both subject and object to the same value (reflexive)
                 if (TryBindVariable(_pattern.Subject, reflexiveValue, ref bindings) &&
@@ -511,6 +518,21 @@ internal ref struct TriplePatternScan
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// True if <paramref name="term"/> is a node of the active graph — the subject or object of at least one triple.
+    /// Used to gate the zero-length-path reflexive match (SPARQL §9.3).
+    /// </summary>
+    private bool IsGraphNode(ReadOnlySpan<char> term)
+    {
+        var asSubject = ExecuteTemporalQuery(term, ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty);
+        try { if (asSubject.MoveNext()) return true; }
+        finally { asSubject.Dispose(); }
+
+        var asObject = ExecuteTemporalQuery(ReadOnlySpan<char>.Empty, ReadOnlySpan<char>.Empty, term);
+        try { return asObject.MoveNext(); }
+        finally { asObject.Dispose(); }
     }
 
     private bool MoveNextTransitive(ref BindingTable bindings)

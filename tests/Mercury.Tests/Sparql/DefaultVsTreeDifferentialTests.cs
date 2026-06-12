@@ -82,10 +82,15 @@ public class DefaultVsTreeDifferentialTests : IDisposable
     [InlineData("multivar-values-all-join", true, "SELECT ?o WHERE { VALUES (?s ?o) { (<urn:a> <urn:v1>) } ?s <urn:p> ?o }")]
     [InlineData("filter-bound", true, "SELECT ?s WHERE { ?s <urn:p> ?o OPTIONAL { ?o <urn:next> ?x } FILTER(BOUND(?x)) }")]
     [InlineData("filter-regex", true, "SELECT ?s WHERE { ?s <urn:q> ?o FILTER(REGEX(?o, \"^q\")) }")]
-    // ── Known parity gaps (ADR-047 step 2 closes these; flip to true then). ──
-    [InlineData("values-numeric-join", false, "SELECT ?s WHERE { ?s <urn:age> ?age VALUES ?age { 25 } }")]
+    // ── ADR-047 step 2: gaps CLOSED on the tree — now equivalent (regression coverage). ──
+    // Numeric/boolean VALUES tokens canonicalize to a typed literal so they join a stored typed literal;
+    // a zero-length-path reflexive over a VARIABLE-bound value is gated on graph-node membership (SPARQL §9.3).
+    [InlineData("values-numeric-join", true, "SELECT ?s WHERE { ?s <urn:age> ?age VALUES ?age { 25 } }")]
+    [InlineData("zero-length-path-values", true, "SELECT ?v WHERE { VALUES ?v { <urn:zzz> } ?v <urn:p>? ?v }")]
+    // ── Tree is MORE correct than the old path — the cutover IMPROVES this, it is NOT a tree regression. ──
+    // VALUES after a triple cross-joins it (SPARQL §18); the old default path drops the inline data. Stays divergent
+    // by design until the flip, when the tree's (correct) behaviour becomes the shipping behaviour.
     [InlineData("values-after-triple", false, "SELECT ?x WHERE { ?s <urn:p> ?o VALUES ?x { 1 2 } }")]
-    [InlineData("zero-length-path-values", false, "SELECT ?v WHERE { VALUES ?v { <urn:zzz> } ?v <urn:p>? ?v }")]
     public void DefaultEquivTree_CharacterizesTheParitySurface(string name, bool expectedEquivalent, string query)
     {
         var old = SparqlEngine.Query(_store, query);
@@ -97,6 +102,23 @@ public class DefaultVsTreeDifferentialTests : IDisposable
         _output.WriteLine($"  tree: {Describe(tree)}");
 
         Assert.Equal(expectedEquivalent, equivalent);
+    }
+
+    [Fact]
+    public void ValuesAfterTriple_TheTreeResultIsTheCorrectCrossJoin()
+    {
+        // The one remaining divergence is the tree being MORE correct, not a tree bug. SPARQL §18: VALUES in a group
+        // joins; with no shared variable that is a cross-product. The store has 2 <urn:p> triples, so the result is
+        // 2 × {1,2} = 4 rows. The tree produces this; the old default path drops the inline data. The cutover adopts
+        // the tree's (correct) behaviour — so this case being divergent is an improvement the flip lands, not a risk.
+        const string query = "SELECT ?x WHERE { ?s <urn:p> ?o VALUES ?x { 1 2 } }";
+
+        var tree = SparqlEngine.QueryViaTreeForDifferential(_store, query);
+        Assert.True(tree.Success, tree.ErrorMessage);
+        Assert.Equal(4, tree.Rows!.Count);
+
+        var old = SparqlEngine.Query(_store, query);
+        Assert.NotEqual(4, old.Rows!.Count); // the old path drops VALUES-after-triple — the bug the cutover fixes
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────────────
