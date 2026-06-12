@@ -530,7 +530,7 @@ internal partial class QueryExecutor : IDisposable
             }
 
             return new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs).Evaluate(ref tree, root, "", maxRows);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree).Evaluate(ref tree, root, "", maxRows);
         }
         finally
         {
@@ -829,6 +829,12 @@ internal partial class QueryExecutor : IDisposable
     /// the production dispatch never sets it. SELECT only (ASK/CONSTRUCT use their own entry points).
     /// </summary>
     internal bool ForceTreeForDifferential { get; set; }
+
+    /// <summary>
+    /// ADR-047 spike: when routing through the tree, reorder each BGP run by selectivity (the QueryPlanner model)
+    /// before the nested-loop join. Benchmark-only knob to measure planned-tree vs unplanned-tree vs the old path.
+    /// </summary>
+    internal bool ReorderBgpInTree { get; set; }
 
     /// <remarks>
     /// ADR-009: [NoInlining] isolates stack frame for 22KB QueryResults and large Query struct access.

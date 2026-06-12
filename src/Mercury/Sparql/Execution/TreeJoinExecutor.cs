@@ -49,12 +49,16 @@ internal sealed class TreeJoinExecutor
     private readonly DateTimeOffset _rangeEnd;
     // Dataset (FROM NAMED / USING NAMED): which named graphs GRAPH may access. null = all; empty = none; [g…] = those.
     private readonly string[]? _namedGraphs;
+    // ADR-047 spike: reorder each BGP run by selectivity (the QueryPlanner model) before the nested-loop join. A
+    // BGP join is commutative, so this is correctness-neutral; it only changes the join order's cost.
+    private readonly bool _reorderBgp;
+    private QueryPlanner? _planner;
 
     public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
         string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
         TemporalQueryMode temporalMode = TemporalQueryMode.Current,
         DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default,
-        string[]? namedGraphs = null)
+        string[]? namedGraphs = null, bool reorderBgp = false)
     {
         _store = store;
         _source = source;
@@ -66,6 +70,7 @@ internal sealed class TreeJoinExecutor
         _rangeStart = rangeStart;
         _rangeEnd = rangeEnd;
         _namedGraphs = namedGraphs;
+        _reorderBgp = reorderBgp;
     }
 
     // LIMIT-pushdown row cap (ADR-045): when the query is a pure BGP with LIMIT and no order/group/distinct/having
@@ -177,6 +182,9 @@ internal sealed class TreeJoinExecutor
         var patternArr = patterns.ToArray();
         var graphArr = graphs.ToArray();
 
+        if (_reorderBgp && patternArr.Length > 1)
+            ReorderBySelectivity(ref patternArr, ref graphArr);
+
         var bindingArray = ArrayPool<Binding>.Shared.Rent(256);
         var charArray = ArrayPool<char>.Shared.Rent(1 << 16);
         try
@@ -196,6 +204,34 @@ internal sealed class TreeJoinExecutor
             ArrayPool<Binding>.Shared.Return(bindingArray);
             ArrayPool<char>.Shared.Return(charArray);
         }
+    }
+
+    /// <summary>
+    /// ADR-047 spike: reorder a BGP run by the QueryPlanner's selectivity model (greedy: most selective first,
+    /// given the variables earlier patterns bind), so the nested-loop join runs the smallest outer set. Correctness-
+    /// neutral — a BGP join is commutative. Reuses the production planner via <see cref="QueryPlanner.OptimizePatternOrder"/>.
+    /// </summary>
+    private void ReorderBySelectivity(ref TriplePattern[] patternArr, ref string[] graphArr)
+    {
+        _planner ??= new QueryPlanner(_store.Statistics, _store.Atoms);
+
+        var gp = new GraphPattern();
+        foreach (var tp in patternArr)
+            gp.AddPattern(tp);
+
+        int[] order = _planner.OptimizePatternOrder(gp, _source.AsSpan());
+        if (order.Length != patternArr.Length)
+            return; // shape mismatch (e.g. an optional crept in) — leave source order untouched
+
+        var reorderedPatterns = new TriplePattern[patternArr.Length];
+        var reorderedGraphs = new string[graphArr.Length];
+        for (int i = 0; i < order.Length; i++)
+        {
+            reorderedPatterns[i] = patternArr[order[i]];
+            reorderedGraphs[i] = graphArr[order[i]];
+        }
+        patternArr = reorderedPatterns;
+        graphArr = reorderedGraphs;
     }
 
     private List<MaterializedRow> JoinOperator(ref PatternArray pa, int ci, PatternKind kind, string activeGraph,

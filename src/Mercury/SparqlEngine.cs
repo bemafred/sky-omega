@@ -34,10 +34,10 @@ public static class SparqlEngine
     /// ADR-047 differential gate: run the query through the unified tree executor instead of the old default path,
     /// so a test can compare the two paths for the SAME query. Test-only; identical materialization to <see cref="Query"/>.
     /// </summary>
-    internal static QueryResult QueryViaTreeForDifferential(QuadStore store, string sparql)
-        => QueryCore(store, sparql, default, forceTreeForDifferential: true);
+    internal static QueryResult QueryViaTreeForDifferential(QuadStore store, string sparql, bool reorderBgp = false)
+        => QueryCore(store, sparql, default, forceTreeForDifferential: true, reorderBgp: reorderBgp);
 
-    private static QueryResult QueryCore(QuadStore store, string sparql, CancellationToken ct, bool forceTreeForDifferential)
+    private static QueryResult QueryCore(QuadStore store, string sparql, CancellationToken ct, bool forceTreeForDifferential, bool reorderBgp = false)
     {
         var sw = Stopwatch.StartNew();
         QueryResult result;
@@ -71,6 +71,7 @@ public static class SparqlEngine
 
                 using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, null, planner);
                 executor.ForceTreeForDifferential = forceTreeForDifferential;
+                executor.ReorderBgpInTree = reorderBgp;
 
                 result = parsed.Type switch
                 {
