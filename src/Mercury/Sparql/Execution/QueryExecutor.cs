@@ -823,12 +823,23 @@ internal partial class QueryExecutor : IDisposable
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
     }
 
+    /// <summary>
+    /// ADR-047 differential gate: force this query's WHERE through the unified tree executor instead of its normal
+    /// dispatch, so a test can compare the tree path against the old default path for the SAME query. Test-only —
+    /// the production dispatch never sets it. SELECT only (ASK/CONSTRUCT use their own entry points).
+    /// </summary>
+    internal bool ForceTreeForDifferential { get; set; }
+
     /// <remarks>
     /// ADR-009: [NoInlining] isolates stack frame for 22KB QueryResults and large Query struct access.
     /// </remarks>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     public QueryResults Execute()
     {
+        // ADR-047 differential gate: route the whole query through the tree executor (the cutover candidate).
+        if (ForceTreeForDifferential)
+            return ExecuteViaTreeMaterialized();
+
         // Check for subqueries first - they may have graph context that takes precedence
         // over empty GRAPH clause execution
         if (_buffer.HasSubQueries)

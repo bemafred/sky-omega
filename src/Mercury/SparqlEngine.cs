@@ -28,6 +28,16 @@ public static class SparqlEngine
     /// <param name="ct">Optional cancellation token.</param>
     /// <returns>A <see cref="QueryResult"/> with the query results and timing information.</returns>
     public static QueryResult Query(QuadStore store, string sparql, CancellationToken ct = default)
+        => QueryCore(store, sparql, ct, forceTreeForDifferential: false);
+
+    /// <summary>
+    /// ADR-047 differential gate: run the query through the unified tree executor instead of the old default path,
+    /// so a test can compare the two paths for the SAME query. Test-only; identical materialization to <see cref="Query"/>.
+    /// </summary>
+    internal static QueryResult QueryViaTreeForDifferential(QuadStore store, string sparql)
+        => QueryCore(store, sparql, default, forceTreeForDifferential: true);
+
+    private static QueryResult QueryCore(QuadStore store, string sparql, CancellationToken ct, bool forceTreeForDifferential)
     {
         var sw = Stopwatch.StartNew();
         QueryResult result;
@@ -60,6 +70,7 @@ public static class SparqlEngine
                 var planner = new QueryPlanner(store.Statistics, store.Atoms);
 
                 using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, null, planner);
+                executor.ForceTreeForDifferential = forceTreeForDifferential;
 
                 result = parsed.Type switch
                 {
