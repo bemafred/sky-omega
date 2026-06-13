@@ -9,12 +9,16 @@ using SkyOmega.Mercury.Runtime;
 namespace SkyOmega.Mercury.Benchmarks;
 
 /// <summary>
-/// ADR-047 spike — Tier A, the materialization risk. TreeJoinExecutor MATERIALIZES the BGP result as a
-/// <c>List&lt;MaterializedRow&gt;</c>; the old default path STREAMS its operators. For a query with a LARGE
-/// intermediate reduced to a small final result, the tree holds the whole intermediate in memory where the old path
-/// streams it into the aggregate. Here: COUNT over a 1000×1000 = 1,000,000-row self-join (K subjects sharing one
-/// object), from 1000 triples of input. This measures the peak-allocation gap — the cutover's memory risk at scale,
-/// and the one place a naive cutover could OOM where the old path does not.
+/// ADR-047 Tier A — the materialization risk and its FIX, now a regression guard. The tree's one materialization
+/// regression vs the streaming old path was the reduce-to-one-row case: a simple aggregate (no GROUP BY) over a BGP
+/// materialized the whole intermediate as a <c>List&lt;MaterializedRow&gt;</c> just to count it, where the old path
+/// streams its operators into the aggregate. The fix (TreeJoinExecutor.FoldFlatBgpAggregate) folds each join row
+/// straight into the accumulator as the scan produces it — O(1) intermediate memory, zero per-row allocation. Here:
+/// COUNT over a 1000×1000 = 1,000,000-row self-join (K subjects sharing one object), from 1000 triples of input. The
+/// folded tree now allocates ~27 KB (constant) where the naive materialization held ~365 MB — and is leaner than the
+/// streaming old path itself (~107 MB), which still allocates per-row binding strings through its operator pipeline.
+/// This benchmark guards that the fold stays O(1): a regression that reintroduces the row List shows up as a memory
+/// blow-up here, the one place a naive cutover could OOM at Reference scale where the old path does not.
 /// </summary>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 1, iterationCount: 3)]
@@ -65,6 +69,6 @@ public class DefaultPathMaterializationSpike
     [Benchmark(Baseline = true, Description = "old path (streams the join into COUNT)")]
     public long OldPath() => CountResult(SparqlEngine.Query(_store, Query));
 
-    [Benchmark(Description = "tree (materializes the 1M-row intermediate)")]
-    public long TreeMaterialized() => CountResult(SparqlEngine.QueryViaTreeForDifferential(_store, Query));
+    [Benchmark(Description = "tree (folds the join into COUNT — O(1), ADR-047 fix)")]
+    public long TreeFolded() => CountResult(SparqlEngine.QueryViaTreeForDifferential(_store, Query));
 }

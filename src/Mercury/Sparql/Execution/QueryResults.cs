@@ -220,6 +220,24 @@ internal ref partial struct QueryResults
             limit, offset, distinct, orderBy, groupBy, selectClause, having);
     }
 
+    private static readonly List<MaterializedRow> EmptyMaterializedRows = new();
+
+    /// <summary>
+    /// ADR-047 materialization fix — present aggregate groups the tree FOLDED streaming (no intermediate row List)
+    /// through the same grouped path the materializing route uses. <see cref="MoveNextGrouped"/> skips
+    /// <see cref="CollectAndGroupResults"/> when <c>_groupedResults</c> is already set, so no rows are collected or
+    /// iterated — the pre-finalized groups present directly. Used by QueryExecutor.TryFoldStreamingAggregate for a
+    /// simple aggregate (real aggregates, no GROUP BY) over a flat BGP, the tree's one materialization regression.
+    /// NoInlining prevents stack frame merging (ADR-003).
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal static QueryResults FromFinalizedGroups(List<GroupedRow> groups,
+        ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct, SelectClause selectClause)
+    {
+        return new QueryResults(groups, source, store, bindings, stringBuffer, limit, offset, distinct, selectClause);
+    }
+
     /// <summary>
     /// Create QueryResults from pre-materialized rows without any large clause structs.
     /// This is the minimal version that avoids stack overflow.
@@ -343,6 +361,58 @@ internal ref partial struct QueryResults
         _groupedIndex = -1;
         _having = having;
         _hasHaving = having.HasHaving;
+    }
+
+    /// <summary>
+    /// ADR-047 materialization fix — constructor for pre-finalized aggregate groups (the streaming fold). Mirrors the
+    /// pre-materialized constructor's iteration state, but pre-sets <c>_groupedResults</c> so
+    /// <see cref="MoveNextGrouped"/> skips collection and presents the finalized groups directly. The caller has
+    /// already folded the BGP into the group(s) and called <see cref="GroupedRow.FinalizeAggregates"/>; this type only
+    /// projects and applies LIMIT/OFFSET. The gated path has no GROUP BY / ORDER BY / HAVING (a single global group).
+    /// </summary>
+    private QueryResults(List<GroupedRow> groups, ReadOnlySpan<char> source,
+        QuadStore store, Binding[] bindings, char[] stringBuffer,
+        int limit, int offset, bool distinct, SelectClause selectClause)
+    {
+        _buffer = null;
+        _source = source;
+        _store = store;
+        _bindings = bindings;
+        _stringBuffer = stringBuffer;
+        _bindingTable = new BindingTable(bindings, stringBuffer);
+        _hasFilters = false;
+        _hasOptional = false;
+        _hasUnion = false;
+        _isMultiPattern = false;
+        _isSubQuery = false;
+        _isDefaultGraphUnion = false;
+        _isCrossGraphMultiPattern = false;
+        _isEmpty = groups.Count == 0;
+        _limit = limit;
+        _offset = offset;
+        _skipped = 0;
+        _returned = 0;
+        _distinct = distinct;
+        _seenHashes = distinct ? new HashSet<int>() : null;
+        _unionBranchActive = false;
+        _orderBy = default;
+        _hasOrderBy = false;
+        _sortedResults = EmptyMaterializedRows; // unused: MoveNextGrouped reads _groupedResults, not _sortedResults
+        _sortedIndex = -1;
+        _isMaterialized = true;
+        _materializedIndex = -1;
+        _hasBinds = false;
+        _hasMinus = false;
+        _hasValues = false;
+        _hasPostQueryValues = false;
+        _hasExists = false;
+        _groupBy = default;
+        _selectClause = selectClause;
+        _hasGroupBy = true;        // present via MoveNextGrouped
+        _groupedResults = groups;  // pre-finalized ⇒ MoveNextGrouped skips CollectAndGroupResults
+        _groupedIndex = -1;
+        _having = default;
+        _hasHaving = false;
     }
 
     /// <summary>

@@ -484,6 +484,15 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     private QueryResults ExecuteViaTreeMaterialized()
     {
+        // ADR-047 materialization fix — a simple aggregate (real aggregates, no GROUP BY) over a flat BGP folds each
+        // join row straight into the accumulator as the scan produces it (O(1) intermediate memory, zero per-row
+        // allocation) instead of materializing the whole intermediate as a List<MaterializedRow> just to reduce it to
+        // one row. That materialization is the tree's one regression vs the STREAMING old path (a COUNT over a
+        // 1M-row join held 1M rows). Everything else falls through to the materializing path below — including ORDER
+        // BY / DISTINCT, which materialize on BOTH paths and so are not a regression.
+        if (TryFoldStreamingAggregate(out var folded))
+            return folded;
+
         var rows = ExecuteGraphViaTree();
         if (rows.Count == 0)
             return QueryResults.Empty();
@@ -493,6 +502,64 @@ internal partial class QueryExecutor : IDisposable
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
             _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
             _buffer.GetSelectClause(), _buffer.GetHavingClause());
+    }
+
+    /// <summary>
+    /// ADR-047 materialization fix — if the query is a simple aggregate over a FLAT pure-BGP, fold it streaming and
+    /// return true with the result; otherwise return false (the caller takes the materializing path). The fold drives
+    /// the SAME <see cref="GroupedRow.UpdateAggregates"/> the materializing route uses, so the result is identical —
+    /// only the intermediate rows are never collected. Gated (cheaply, before any parse) to a single global group with
+    /// only aggregate columns and no modifier the fold does not itself apply: GROUP BY / HAVING / ORDER BY / DISTINCT
+    /// fall back (they either materialize on both paths anyway, or need the group(s) post-fold). LIMIT/OFFSET pass
+    /// through — the presentation applies them to the one aggregate row. The flat-BGP shape is confirmed after the
+    /// parse; nested groups / property paths fall back too.
+    /// </summary>
+    private bool TryFoldStreamingAggregate(out QueryResults result)
+    {
+        result = default;
+
+        var select = _buffer.GetSelectClause();
+        if (!select.HasRealAggregates) return false;          // not an aggregate query
+        if (select.ProjectedVariableCount > 0) return false;  // a plain SELECT var alongside an aggregate — needs the rows
+        if (_buffer.GetGroupByClause().HasGroupBy) return false; // grouping is O(groups), not O(1) — not this fold
+        if (_buffer.GetHavingClause().HasHaving) return false;   // HAVING filters the group post-fold — fall back
+        if (_buffer.GetOrderByClause().HasOrderBy) return false; // ORDER BY — fall back (a no-op on one row, but keep the gate tight)
+        if (_buffer.SelectDistinct) return false;                // query-level DISTINCT — fall back
+
+        int whereStart = FindWhereGroupStart();
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
+        {
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereStart, ref tree);
+            if (!TreeJoinExecutor.IsFlatBgp(ref tree, root))
+                return false; // nested group / property path — the materializing path handles those
+
+            // Fold the flat BGP into one global group (no GROUP BY ⇒ KeyCount 0, so the throwaway BindingTable below is
+            // unread). Zero input rows still finalize to the default aggregate values (COUNT 0, etc.) — SPARQL's
+            // implicit-aggregation-of-the-empty-set rule, the same one the materializing path applies.
+            var groupBindingArray = new Binding[16];
+            var groupCharArray = new char[256];
+            var groupBindings = new BindingTable(groupBindingArray, groupCharArray);
+            var group = new GroupedRow(default, select, groupBindings, _source);
+
+            new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree)
+                .FoldFlatBgpAggregate(ref tree, root, "", group);
+
+            group.FinalizeAggregates();
+
+            var groups = new List<GroupedRow>(1) { group };
+            var bindings = new Binding[64];
+            result = QueryResults.FromFinalizedGroups(groups, _source.AsSpan(), _store, bindings, _stringBuffer,
+                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct, select);
+            return true;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
+        }
     }
 
     /// <summary>

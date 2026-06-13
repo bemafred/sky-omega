@@ -113,6 +113,27 @@ internal sealed class TreeJoinExecutor
     }
 
     /// <summary>
+    /// ADR-047 materialization fix — stricter than <see cref="IsPureBgp"/>: every direct child of
+    /// <paramref name="header"/> is a PLAIN triple (no property paths, no nested groups, no GRAPH headers). Only this
+    /// flat shape can be streamed by <see cref="FoldFlatBgpAggregate"/>, which collects the children as one BGP run
+    /// and folds each join row into the aggregate accumulator. Nested groups / paths reintroduce the List-materializing
+    /// operator composition the fold exists to avoid, so they fall back to the materializing path. Requires at least
+    /// one triple: an empty group ({}) folds nothing and is left to the materializing path's empty-row seed.
+    /// </summary>
+    public static bool IsFlatBgp(ref PatternArray pa, int header)
+    {
+        var e = pa.EnumerateDirectChildren(header);
+        bool any = false;
+        while (e.MoveNext())
+        {
+            any = true;
+            if (e.Current.Kind != PatternKind.Triple) return false;
+            if (e.Current.PathKind != PathType.None) return false;
+        }
+        return any;
+    }
+
+    /// <summary>
     /// Evaluate a group: consecutive triples accumulate into a BGP run (flushed zero-GC, seeded by each input row);
     /// each composing operator composes over the materialized rows; FILTER and (NOT) EXISTS are group-scoped and
     /// applied last to the whole group's solutions.
@@ -827,6 +848,74 @@ internal sealed class TreeJoinExecutor
             // Stop the nested-loop scan as soon as the cap is reached — the work-saving heart of LIMIT-pushdown.
             while (results.Count < _maxRows && scan.MoveNext(ref bindings))
                 JoinAt(patterns, graphs, index + 1, ref bindings, results);
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// ADR-047 materialization fix — fold a FLAT pure-BGP into the aggregate accumulator as the nested-loop join
+    /// produces each row, instead of materializing the whole intermediate as a <c>List&lt;MaterializedRow&gt;</c> just
+    /// to reduce it to one row. This restores the streaming old path's O(1) intermediate memory: a COUNT over a
+    /// 1,000,000-row join no longer allocates the 1,000,000 rows. The leaf drives the SAME
+    /// <see cref="GroupedRow.UpdateAggregates"/> the materializing path uses, so the result is identical — only the
+    /// rows are never collected. The caller (QueryExecutor.TryFoldStreamingAggregate) gates on <see cref="IsFlatBgp"/>
+    /// (every child a plain triple) and a single global group (no GROUP BY); the accumulator handles the rest.
+    /// </summary>
+    public void FoldFlatBgpAggregate(ref PatternArray pa, int rootHeader, string activeGraph, GroupedRow group)
+    {
+        var patterns = new List<TriplePattern>();
+        var graphs = new List<string>();
+        var e = pa.EnumerateDirectChildren(rootHeader);
+        while (e.MoveNext())
+        {
+            patterns.Add(TripleFromSlot(e.Current)); // IsFlatBgp guarantees: every child is a plain triple
+            graphs.Add(activeGraph);
+        }
+        if (patterns.Count == 0)
+            return; // nothing to fold ⇒ the group finalizes to default aggregate values (COUNT 0, etc.)
+
+        var patternArr = patterns.ToArray();
+        var graphArr = graphs.ToArray();
+        if (_reorderBgp && patternArr.Length > 1)
+            ReorderBySelectivity(ref patternArr, ref graphArr);
+
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(256);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 16);
+        try
+        {
+            var bindings = new BindingTable(bindingArray.AsSpan(0, 256), charArray.AsSpan(0, 1 << 16));
+            JoinAtFold(patternArr, graphArr, 0, ref bindings, group);
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+    }
+
+    /// <summary>
+    /// Streaming sibling of <see cref="JoinAt"/>: the same zero-GC nested-loop BGP join, but at the leaf it FOLDS the
+    /// solution into the aggregate accumulator (<see cref="GroupedRow.UpdateAggregates"/>) rather than materializing a
+    /// <see cref="MaterializedRow"/>. No List, no per-row allocation — the materialization fix's hot path. No
+    /// <c>_maxRows</c> cap: an aggregate consumes the whole match set.
+    /// </summary>
+    private void JoinAtFold(TriplePattern[] patterns, string[] graphs, int index, ref BindingTable bindings, GroupedRow group)
+    {
+        if (index == patterns.Length)
+        {
+            group.UpdateAggregates(bindings, _source);
+            return;
+        }
+
+        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
+        try
+        {
+            while (scan.MoveNext(ref bindings))
+                JoinAtFold(patterns, graphs, index + 1, ref bindings, group);
         }
         finally
         {
