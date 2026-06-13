@@ -493,6 +493,14 @@ internal partial class QueryExecutor : IDisposable
         if (TryFoldStreamingAggregate(out var folded))
             return folded;
 
+        // ADR-047 — the other "stream when reducible" case: ORDER BY + LIMIT is a top-N, so keep only the N we need in
+        // a bounded heap as the scan runs (O(OFFSET+LIMIT) memory) instead of materializing the whole match set just
+        // to sort it and slice the first page. Genuine disk spill for ORDER BY *without* a bounding LIMIT would not
+        // help peak memory here — QueryResult.Rows materializes the full result regardless (the result floor), so the
+        // sorted set is held either way; that case needs streaming result presentation, a separate change.
+        if (TryStreamOrderByTopK(out var topk))
+            return topk;
+
         var rows = ExecuteGraphViaTree();
         if (rows.Count == 0)
             return QueryResults.Empty();
@@ -554,6 +562,66 @@ internal partial class QueryExecutor : IDisposable
             var bindings = new Binding[64];
             result = QueryResults.FromFinalizedGroups(groups, _source.AsSpan(), _store, bindings, _stringBuffer,
                 _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct, select);
+            return true;
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(treeBuffer);
+        }
+    }
+
+    /// <summary>
+    /// ADR-047 memory bound for must-materialize ORDER BY — if the query is ORDER BY + LIMIT over a FLAT pure-BGP,
+    /// stream it into a bounded top-K heap (retains OFFSET+LIMIT rows) and return true with the result; otherwise
+    /// return false (the caller takes the materializing path). A top-N is reducible: only the first page is kept, so
+    /// the whole match set never lives in memory. Gated to a bounding LIMIT (without one, top-K cannot bound it and
+    /// QueryResult.Rows materializes the full result anyway), no DISTINCT / GROUP BY / aggregate / HAVING, and a
+    /// capacity within a memory-adaptive cap (a pathological OFFSET+LIMIT falls back rather than OOM the heap). The
+    /// kept rows are re-sorted (cheap, ≤ capacity) and paged by the shared modifier layer — identical bag to the old
+    /// path, which sorts the whole set then slices the same page.
+    /// </summary>
+    private bool TryStreamOrderByTopK(out QueryResults result)
+    {
+        result = default;
+
+        var orderBy = _buffer.GetOrderByClause();
+        if (!orderBy.HasOrderBy) return false;        // not an ORDER BY query
+        if (_buffer.Limit <= 0) return false;         // no bounding LIMIT — top-K cannot bound it (result floor)
+        if (_buffer.SelectDistinct) return false;     // DISTINCT must dedup before the top-N — fall back
+        var select = _buffer.GetSelectClause();
+        if (select.HasRealAggregates) return false;   // aggregates go through the fold / grouped path
+        if (_buffer.GetGroupByClause().HasGroupBy) return false;
+        if (_buffer.GetHavingClause().HasHaving) return false;
+
+        // The heap retains `capacity` (= OFFSET + LIMIT) rows. Bound that by a fraction of available physical memory so
+        // a pathological OFFSET+LIMIT cannot itself OOM the heap; above the cap, fall back to full materialization (the
+        // streaming-presentation territory, not this fold). This is the "adapted to system memory availability" budget.
+        long capacity64 = (long)_buffer.Offset + _buffer.Limit;
+        long budget = SkyOmega.Mercury.Runtime.ProcessMemoryProbe.AvailablePhysicalBytes() / 8;
+        const long AssumedRowBytes = 512;
+        long capCap = System.Math.Max(100_000, budget / AssumedRowBytes);
+        if (capacity64 <= 0 || capacity64 > capCap) return false;
+        int capacity = (int)capacity64;
+
+        int whereStart = FindWhereGroupStart();
+        const int treeBytes = PatternSlot.Size * 1024;
+        var treeBuffer = System.Buffers.ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
+        {
+            var tree = new PatternArray(treeBuffer.AsSpan(0, treeBytes));
+            int root = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereStart, ref tree);
+            if (!TreeJoinExecutor.IsFlatBgp(ref tree, root))
+                return false; // nested group / property path — full materialization handles those
+
+            var comparer = new MaterializedRowComparer(orderBy, _source);
+            var rows = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree)
+                .StreamFlatBgpTopK(ref tree, root, "", comparer, capacity);
+
+            var bindings = new Binding[64];
+            result = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
+                _buffer.Limit, _buffer.Offset, distinct: false,
+                orderBy, default, select, default);
             return true;
         }
         finally

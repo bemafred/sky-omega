@@ -871,6 +871,31 @@ internal sealed class MaterializedRowComparer : IComparer<MaterializedRow>
         return 0;
     }
 
+    /// <summary>
+    /// ADR-047 top-K — compare a CANDIDATE row still in its <see cref="BindingTable"/> against a kept
+    /// <see cref="MaterializedRow"/>, WITHOUT materializing the candidate. Mirrors <see cref="Compare(MaterializedRow,
+    /// MaterializedRow)"/> exactly — same ORDER BY terms, same value comparison, same direction — reading the
+    /// candidate's values from the binding table instead of a row. Lets the streaming top-K heap reject a row that
+    /// sorts after the worst kept without ever allocating it: only rows that ENTER the heap are materialized.
+    /// </summary>
+    public int CompareBindings(scoped ref BindingTable bindings, MaterializedRow row)
+    {
+        for (int i = 0; i < _orderBy.Count; i++)
+        {
+            var cond = _orderBy.GetCondition(i);
+            var varName = _source.AsSpan(cond.VariableStart, cond.VariableLength);
+
+            int idx = bindings.FindBinding(varName);
+            var aValue = idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
+            var bValue = row.GetValueByName(varName);
+
+            int cmp = CompareValues(aValue, bValue);
+            if (cmp != 0)
+                return cond.Direction == OrderDirection.Descending ? -cmp : cmp;
+        }
+        return 0;
+    }
+
     private static int CompareValues(ReadOnlySpan<char> a, ReadOnlySpan<char> b)
     {
         // SPARQL ORDER BY term type ordering: Unbound < Blank nodes < IRIs < Literals

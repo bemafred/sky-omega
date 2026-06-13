@@ -923,6 +923,97 @@ internal sealed class TreeJoinExecutor
         }
     }
 
+    /// <summary>
+    /// ADR-047 — stream a FLAT pure-BGP into a bounded top-K heap for ORDER BY + LIMIT, instead of materializing the
+    /// whole match set just to sort it and take the first <paramref name="capacity"/> rows. Retains only
+    /// <paramref name="capacity"/> (= OFFSET + LIMIT) rows — O(K) memory — where the old path materializes the full
+    /// set. <see cref="MaterializedRowComparer.CompareBindings"/> rejects a row that sorts after the worst kept
+    /// WITHOUT allocating it, so only rows that enter the heap are materialized (near-zero-GC). Returns the kept rows
+    /// UNSORTED (≤ capacity); the caller re-sorts that small set and applies OFFSET/LIMIT. The caller gates on
+    /// <see cref="IsFlatBgp"/> and a bounded capacity. The "stream when reducible" half applied to ORDER BY: top-N
+    /// is bounded, so we keep only the N we need.
+    /// </summary>
+    public List<MaterializedRow> StreamFlatBgpTopK(ref PatternArray pa, int rootHeader, string activeGraph,
+        MaterializedRowComparer comparer, int capacity)
+    {
+        // A min-PQ whose MIN is the WORST kept (the row that sorts LAST): feed it the REVERSED comparer, so Peek is the
+        // eviction candidate and a better row displaces it.
+        var heap = new PriorityQueue<MaterializedRow, MaterializedRow>(
+            Comparer<MaterializedRow>.Create((x, y) => comparer.Compare(y, x)));
+
+        var patterns = new List<TriplePattern>();
+        var graphs = new List<string>();
+        var e = pa.EnumerateDirectChildren(rootHeader);
+        while (e.MoveNext())
+        {
+            patterns.Add(TripleFromSlot(e.Current)); // IsFlatBgp guarantees: every child is a plain triple
+            graphs.Add(activeGraph);
+        }
+        if (patterns.Count == 0)
+            return new List<MaterializedRow>();
+
+        var patternArr = patterns.ToArray();
+        var graphArr = graphs.ToArray();
+        if (_reorderBgp && patternArr.Length > 1)
+            ReorderBySelectivity(ref patternArr, ref graphArr);
+
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(256);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 16);
+        try
+        {
+            var bindings = new BindingTable(bindingArray.AsSpan(0, 256), charArray.AsSpan(0, 1 << 16));
+            JoinAtTopK(patternArr, graphArr, 0, ref bindings, heap, capacity, comparer);
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+
+        var result = new List<MaterializedRow>(heap.Count);
+        while (heap.TryDequeue(out var row, out _))
+            result.Add(row);
+        return result;
+    }
+
+    /// <summary>
+    /// Streaming sibling of <see cref="JoinAt"/> for top-K: at the leaf, offer the solution to the bounded heap. Below
+    /// capacity it is materialized and inserted; at capacity it is materialized ONLY if it sorts before the worst kept
+    /// (checked against the binding table, no allocation otherwise), then displaces that worst. No <c>_maxRows</c> cap:
+    /// every solution is offered, but at most <paramref name="capacity"/> survive.
+    /// </summary>
+    private void JoinAtTopK(TriplePattern[] patterns, string[] graphs, int index, ref BindingTable bindings,
+        PriorityQueue<MaterializedRow, MaterializedRow> heap, int capacity, MaterializedRowComparer comparer)
+    {
+        if (index == patterns.Length)
+        {
+            if (heap.Count < capacity)
+            {
+                var row = new MaterializedRow(bindings);
+                heap.Enqueue(row, row);
+            }
+            else if (comparer.CompareBindings(ref bindings, heap.Peek()) < 0) // sorts before the worst kept
+            {
+                var row = new MaterializedRow(bindings);
+                heap.EnqueueDequeue(row, row); // add it, evict the worst
+            }
+            // else: sorts at/after every kept row — drop it without allocating (the zero-GC win)
+            return;
+        }
+
+        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
+        try
+        {
+            while (scan.MoveNext(ref bindings))
+                JoinAtTopK(patterns, graphs, index + 1, ref bindings, heap, capacity, comparer);
+        }
+        finally
+        {
+            scan.Dispose();
+        }
+    }
+
     private static TriplePattern TripleFromSlot(PatternSlot slot) => new()
     {
         Subject = new Term { Type = slot.SubjectType, Start = slot.SubjectStart, Length = slot.SubjectLength },

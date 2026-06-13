@@ -67,6 +67,12 @@ public class DefaultVsTreeDifferentialTests : IDisposable
     [InlineData("minus", true, "SELECT ?s WHERE { ?s <urn:p> ?o MINUS { ?s <urn:q> ?x } }")]
     [InlineData("distinct", true, "SELECT DISTINCT ?p WHERE { ?s ?p ?o }")]
     [InlineData("order-by-limit", true, "SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 1")]
+    // ADR-047 top-K (ORDER BY + LIMIT streams into a bounded heap): DESC, OFFSET, LIMIT > set size, multi-key, numeric.
+    [InlineData("order-by-desc-limit", true, "SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY DESC(?o) LIMIT 1")]
+    [InlineData("order-by-offset-limit", true, "SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 1 OFFSET 1")]
+    [InlineData("order-by-limit-exceeds-set", true, "SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 5")]
+    [InlineData("order-by-multivar-limit", true, "SELECT ?s ?o WHERE { ?s <urn:p> ?o } ORDER BY ?s ?o LIMIT 1")]
+    [InlineData("order-by-numeric-limit", true, "SELECT ?age WHERE { ?s <urn:age> ?age } ORDER BY ?age LIMIT 1")]
     [InlineData("aggregate-count", true, "SELECT (COUNT(?o) AS ?c) WHERE { ?s <urn:p> ?o }")]
     [InlineData("property-path-plus", true, "SELECT ?s ?x WHERE { ?s <urn:next>+ ?x }")]
     [InlineData("sub-select", true, "SELECT ?o WHERE { { SELECT ?o WHERE { ?s <urn:p> ?o } ORDER BY ?o LIMIT 1 } }")]
