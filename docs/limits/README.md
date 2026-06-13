@@ -42,6 +42,7 @@ Borrows from ADR but lighter — no Decision section, no alternatives-considered
 
 | Limit | Status | Trigger condition |
 |---|---|---|
+| [Unbounded result-set materialization](unbounded-result-materialization.md) | **Monitoring** | Shipping the upgraded global tool (CLI/MCP) on the tree-unified path — a fail-fast guard is a **ship-gate**; or any path returning > ~RAM/row-size rows (unbounded ORDER BY/DISTINCT, high-cardinality SELECT at Reference scale). Field-compared 2026-06-13: Mercury materializes where Jena/RDF4J/QLever stream and Virtuoso caps. |
 | [Predicate-statistics memory](predicate-statistics-memory.md) | Latent | `CollectPredicateStatistics` running on a Cognitive store > ~5 B triples, or any non-bulk write path on a 21.3 B Reference store |
 | [Hash function quality](hash-function-quality.md) | Latent | Need for sustained ingest throughput improvement once schema-reduction wins (ADR-029) are banked, OR adversarial-input concerns surface |
 | [Bit-packed atom IDs](bit-packed-atom-ids.md) | Latent (re-affirmed 2026-05-01) | Deferral re-confirmed in Phase 7c Round 2 review: 1B trace shows GSPO write at 0.45% of FlushToDisk; storage savings real (~340-680 GB) but not binding on 8 TB target; substantial implementation cost. |

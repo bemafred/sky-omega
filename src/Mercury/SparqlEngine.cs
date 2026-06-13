@@ -351,8 +351,12 @@ public static class SparqlEngine
                 rows.Add(BindingsToRow(bindings, columnNames, projectedNames));
             }
 
+            long maxResultRows = executor.MaxResultRows; // unbounded-result guard (StorageOptions.MaxResultRows)
             while (results.MoveNext())
+            {
                 rows.Add(BindingsToRow(results.Current, columnNames, projectedNames));
+                ResultLimitExceededException.ThrowIfExceeded(maxResultRows, rows.Count);
+            }
         }
         finally
         {
@@ -376,10 +380,12 @@ public static class SparqlEngine
         var results = executor.ExecuteConstruct();
         try
         {
+            long maxResultRows = executor.MaxResultRows; // unbounded-result guard
             while (results.MoveNext())
             {
                 var triple = results.Current;
                 triples.Add((triple.Subject.ToString(), triple.Predicate.ToString(), triple.Object.ToString()));
+                ResultLimitExceededException.ThrowIfExceeded(maxResultRows, triples.Count);
             }
         }
         finally
@@ -403,11 +409,13 @@ public static class SparqlEngine
         var results = executor.Execute();
         try
         {
+            long maxResultRows = executor.MaxResultRows; // unbounded-result guard
             while (results.MoveNext())
             {
                 var b = results.Current;
                 if (b.Count >= 3)
                     triples.Add((b.GetString(0).ToString(), b.GetString(1).ToString(), b.GetString(2).ToString()));
+                ResultLimitExceededException.ThrowIfExceeded(maxResultRows, triples.Count);
             }
         }
         finally

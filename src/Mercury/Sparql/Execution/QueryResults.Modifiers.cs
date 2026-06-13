@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Sparql.Types;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using ValueType = SkyOmega.Mercury.Sparql.Execution.Expressions.ValueType;
@@ -92,12 +93,14 @@ internal ref partial struct QueryResults
         _sortedResults = new List<MaterializedRow>();
 
         // Collect all results using the streaming approach
+        long maxResultRows = _store?.MaxResultRows ?? 0; // unbounded-result guard: ORDER BY materializes all rows here
         while (MoveNextUnorderedForCollection())
         {
             // Materialize the current row
             var row = new MaterializedRow(_bindingTable);
             _sortedResults.Add(row);
             _bindingTable.Clear();
+            ResultLimitExceededException.ThrowIfExceeded(maxResultRows, _sortedResults.Count);
         }
 
         // Sort the results
@@ -369,6 +372,9 @@ internal ref partial struct QueryResults
             {
                 group = new GroupedRow(_groupBy, _selectClause, _bindingTable, sourceStr);
                 groups[groupKey] = group;
+                // Unbounded-result guard: a GROUP BY over a high-cardinality key explodes the group set here, before
+                // the result drain ever sees a row. One result row per group, so the group count is the result size.
+                ResultLimitExceededException.ThrowIfExceeded(_store?.MaxResultRows ?? 0, groups.Count);
             }
 
             // Update aggregates for this group

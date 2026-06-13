@@ -965,6 +965,10 @@ internal partial class QueryExecutor : IDisposable
     /// </summary>
     internal bool ForceTreeForDifferential { get; set; }
 
+    /// <summary>The store's result-row cap (<c>StorageOptions.MaxResultRows</c>; 0 = unbounded) — the drain loops
+    /// check it via <see cref="ResultLimitExceededException.ThrowIfExceeded"/>. The unbounded-result guard.</summary>
+    internal long MaxResultRows => _store.MaxResultRows;
+
     /// <summary>
     /// ADR-047 spike: when routing through the tree, reorder each BGP run by selectivity (the QueryPlanner model)
     /// before the nested-loop join. Benchmark-only knob to measure planned-tree vs unplanned-tree vs the old path.

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
+using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Execution.Federated;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
@@ -52,6 +53,7 @@ internal sealed class TreeJoinExecutor
     // ADR-047 spike: reorder each BGP run by selectivity (the QueryPlanner model) before the nested-loop join. A
     // BGP join is commutative, so this is correctness-neutral; it only changes the join order's cost.
     private readonly bool _reorderBgp;
+    private readonly long _guardCap; // StorageOptions.MaxResultRows — the unbounded-result guard (0 = unbounded)
     private QueryPlanner? _planner;
 
     public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
@@ -71,6 +73,7 @@ internal sealed class TreeJoinExecutor
         _rangeEnd = rangeEnd;
         _namedGraphs = namedGraphs;
         _reorderBgp = reorderBgp;
+        _guardCap = store.MaxResultRows;
     }
 
     // LIMIT-pushdown row cap (ADR-045): when the query is a pure BGP with LIMIT and no order/group/distinct/having
@@ -837,7 +840,10 @@ internal sealed class TreeJoinExecutor
         if (index == patterns.Length)
         {
             if (results.Count < _maxRows) // LIMIT pushed into the scan
+            {
                 results.Add(new MaterializedRow(bindings));
+                ResultLimitExceededException.ThrowIfExceeded(_guardCap, results.Count); // unbounded-result guard
+            }
             return;
         }
 

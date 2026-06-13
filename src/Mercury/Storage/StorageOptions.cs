@@ -83,6 +83,24 @@ public sealed class StorageOptions
     public StoreProfile Profile { get; init; } = StoreProfile.Cognitive;
 
     /// <summary>
+    /// Default maximum result rows: 10,000,000. Well above any interactive or analytical result, far below the
+    /// point an unbounded result-set materialization exhausts memory.
+    /// </summary>
+    public const long DefaultMaxResultRows = 10_000_000;
+
+    /// <summary>
+    /// Maximum number of rows a single query result may materialize before the substrate fails fast with
+    /// <see cref="Abstractions.ResultLimitExceededException"/>, rather than OOMing. SPARQL drains the whole result
+    /// (and sorts ORDER BY in memory) before returning it, so an unbounded result at Reference scale would exhaust
+    /// memory — this guard is the fail-fast bound (the <c>unbounded-result-materialization</c> limit; the field's
+    /// equivalent of Virtuoso's <c>ResultSetMaxRows</c>). Checked at every row-accumulation point.
+    /// Default: <see cref="DefaultMaxResultRows"/>. Set to <c>0</c> for unbounded (opt-out — the caller accepts the
+    /// OOM risk). A store backing a large profile on a memory-constrained host should lower this; a big-memory
+    /// Reference host may raise it.
+    /// </summary>
+    public long MaxResultRows { get; init; } = DefaultMaxResultRows;
+
+    /// <summary>
     /// When true, <see cref="AtomHashTableInitialCapacity"/> is honored exactly even in
     /// bulk mode — bypasses the 256M-bucket floor that <see cref="BulkMode"/> normally
     /// applies. Used by ADR-028 Stage 2 validation to exercise rehash-on-grow under

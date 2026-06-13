@@ -57,6 +57,7 @@ public sealed class QuadStore : IDisposable
     private readonly ILogger _logger;
     private readonly IBufferManager _bufferManager;
     private readonly long _minimumFreeDiskSpace;
+    private readonly long _maxResultRows;
     private readonly StatisticsStore _statistics = new();
     private long _activeBatchTxId = -1;
     // Reference profile has no WAL and therefore no batch transaction id. A simple
@@ -139,6 +140,7 @@ public sealed class QuadStore : IDisposable
         _logger = logger ?? NullLogger.Instance;
         _bufferManager = bufferManager ?? PooledBufferManager.Shared;
         _minimumFreeDiskSpace = (storageOptions ?? StorageOptions.Default).MinimumFreeDiskSpace;
+        _maxResultRows = (storageOptions ?? StorageOptions.Default).MaxResultRows;
 
         if (!Directory.Exists(baseDirectory))
             Directory.CreateDirectory(baseDirectory);
@@ -455,6 +457,14 @@ public sealed class QuadStore : IDisposable
     /// Thread-safe: returns immutable snapshots via copy-on-write.
     /// </summary>
     public StatisticsStore Statistics => _statistics;
+
+    /// <summary>
+    /// The configured result-row cap for queries against this store (<c>StorageOptions.MaxResultRows</c>; 0 =
+    /// unbounded). The query path checks this at every row-accumulation point and fails fast with
+    /// <see cref="Abstractions.ResultLimitExceededException"/> rather than OOMing — the <c>unbounded-result-
+    /// materialization</c> guard.
+    /// </summary>
+    internal long MaxResultRows => _maxResultRows;
 
     /// <summary>
     /// Access to atom store for looking up atom IDs.
