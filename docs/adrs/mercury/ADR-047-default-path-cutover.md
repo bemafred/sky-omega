@@ -27,6 +27,10 @@ Two probes have de-risked both halves; neither is the full corpus/scale validati
 
 **Remaining for Accepted** (breadth + scale, not mechanism): run the now profile-parameterized, temporal-aware differential over a larger corpus — **WDBench** is the right intermediate-scale dogfood (loadable in Cognitive for broad + temporal) — and validate the planner-spike finding **at scale on Reference** (the 21.3 B Wikidata on disk, or WDBench-scale). The materialization risk is resolved for both regression-class cases — the aggregate fold (reduce-to-one-row) and the ORDER BY + LIMIT top-K (reduce-to-a-page). The only residual is the *non-regression* ORDER BY-without-LIMIT / DISTINCT case, which both paths materialize equally and which a disk spill cannot bound without streaming result presentation (the result floor) — a separate change, not a cutover blocker. Strategy: **Cognitive for broad correctness, Reference for scale performance.**
 
+**Property-path correctness (breadth-driven, 2026-06-13/14):** the WDBench differential breadth run (`WdBenchDifferentialRunner` — every query old-vs-tree against the 1 TB truthy Reference store, reorder=true) reframed the cutover. Of 101 c2rpqs divergences, **90 are the OLD path's bug**: it drops the zero-length reflexive (`?x = ?o`, SPARQL §9.3) for a subject **bound by a prior pattern** (it is correct for a *constant* subject — which is why W3C conformance + the hand-built cases never caught it); the tree is W3C-correct. So **the cutover is mostly a correctness *win*** (90 old-path bugs the flip fixes) with **7 genuine tree bugs** — composite property paths. Because the old path is a contaminated oracle here, correctness was pinned to an **EBNF-grounded W3C conformance suite** (`PropertyPathW3CConformanceTests` — cases synthesized to the SPARQL path grammar [88]–[94], answers computed by hand from §18.4/§9.3, asserting tree ≡ W3C). Three tree-side fixes landed: parser quantified-head sequence `(p*/p)` (`1d956d5`); the recursive walker's **re-entrancy** bug, alternation-of-sequences (`09371d8`); quantifier-closure on a leg/branch `p*` (`fc143a9`).
+
+**One conformance row remains, and it is a flip-prerequisite that resolves *on deletion* — not a bug to patch.** `p/(p*|r*)` needs `ExpandSequencePath` to re-parse its segments via the canonical `ParsePredicateOrPath` instead of the weaker, **duplicate** `ParsePathSegment` (a second path parser; each gap in it is a divergence from the canonical one). That change is **tree-correct** — the case passes through the tree — but regresses W3C **pp31** `(:p1|:p2)/(:p3|:p4)` **on the old path**, whose slot operators are entangled with `ParsePathSegment`'s specific bag-vs-set output. The old executor — and `ParsePathSegment` with it — is deleted at the flip; the fix is then clean and the row goes green with no special-casing. Band-aiding `ParsePathSegment` to keep a doomed component green would be the two-implementations smell this ADR exists to remove.
+
 ## Context
 
 ### ADR-045 unified one path and left the other
@@ -91,13 +95,19 @@ There is **no tactical-patch variant.** Patching the old default path is the sam
 
 ## Engineering order
 
-1. **Differential gate** — the *default ≡ tree* harness over the W3C suite + dogfood; characterize **every** parity gap (Emergence → Epistemics).
-2. **Correctness parity** — fix the gaps on the tree: VALUES canonicalization, zero-length-path membership, `_defaultGraphs` union, + whatever the differential surfaces. Gate green.
-3. **Planner-integration design** — reorder the `PatternArray` BGP by the `QueryPlanner` selectivity model; validate the design on the BGP benchmark (Epistemics — the central unknown).
-4. **Performance parity** — measure the planned tree vs the old path on the benchmark + the Wikidata gradient; gate on no regression.
-5. **Flip + delete** — route the default dispatch to the tree; delete the old default-path executor; extend the allocation gate (Engineering).
+**Done — de-risking (the tree is correct + competitive; none of it flips anything yet):**
+1. ✅ **Differential gate** — the `default ≡ tree` metamorphic mirror, run at WDBench breadth (`WdBenchDifferentialRunner`).
+2. ✅ **Correctness parity** — VALUES canonicalization, zero-length-path membership, `_defaultGraphs` union; the materialization fixes (aggregate fold + ORDER BY-LIMIT top-K); and the property-path fixes (3 of 4 classes — the 4th resolves on deletion, see *Validation*).
+3. ✅ **Planner-integration design** — reorder the `PatternArray` BGP by the `QueryPlanner` selectivity model; the spike showed the planned tree ~2× the old path (lazy-stats caveat).
+4. ✅ **Ship-gate** — the unbounded-result guard, so the upgraded global tool fails fast rather than OOMing.
 
-Steps 1–2 (correctness) are tractable now. Step 3 (planning) is the load-bearing unknown that keeps this Proposed: **Accepted is earned by validating that a selectivity-planned tree matches the old path's performance** — not before.
+**Remaining for the flip (Accepted → Completed):**
+5. **Conformance through the tree** — the 1,181 W3C tests currently validate the OLD path; run them through the tree and confirm conformance (divergences are the tree being *more* correct — pin against the EBNF oracle, not `old ≡ tree`).
+6. **Full WDBench breadth re-run** — all five categories, reorder=true, post-path-fixes; confirm the 7 genuine bugs closed and the 90 improvements hold; seal the tally.
+7. **Reference-scale performance** — the planner-reorder at 21.3 B / WDBench-scale; gate on no regression vs the old path.
+8. **The flip + delete** — route the default dispatch through `ExecuteViaTreeMaterialized` (reorder on); delete the old default-path executor (slot operators + planner-as-executor — **keep the selectivity model**) **and `ParsePathSegment`**; apply the `ExpandSequencePath` full-parser fix; un-skip `seq-alt-of-star`. The differential gate retires here (there is no `old` to compare) — the W3C/EBNF oracle + the sealed WDBench tally become the reference.
+
+Today the default path still runs the old executor; `ExecuteViaTreeMaterialized` (with the fold/top-K) fires only for GRAPH / `ForceTreeForDifferential` / VALUES-only. Steps 1–4 de-risk the flip; the planner spike retired the original central unknown, so **step 7 (Reference-scale planner perf) is now what keeps this Proposed** — Accepted is earned by validating the planned tree matches the old path's performance at scale, not before.
 
 ## References
 
