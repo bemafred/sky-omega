@@ -247,6 +247,24 @@ internal ref struct TriplePatternScan
             return false;
         }
 
+        // ADR-047: a bound-start alternative was evaluated eagerly by the path walker (see the ctor); emit its
+        // reachable nodes here, binding by direction. Both-ends-unbound alternatives have no _groupedResults and fall
+        // through to the streaming loop below.
+        if (_isAlternative && _groupedResults != null)
+        {
+            while (_groupedResults.Count > 0)
+            {
+                var node = _groupedResults.Dequeue();
+                bindings.TruncateTo(_initialBindingsCount);
+                var subjVal = _startedFromObject ? node.AsSpan() : _startNode.AsSpan();
+                var objVal = _startedFromObject ? _startNode.AsSpan() : node.AsSpan();
+                if (TryBindVariable(_pattern.Subject, subjVal, ref bindings) &&
+                    TryBindVariable(_pattern.Object, objVal, ref bindings))
+                    return true;
+            }
+            return false;
+        }
+
         while (true)
         {
             QueryCancellation.ThrowIfCancellationRequested();
@@ -721,6 +739,27 @@ internal ref struct TriplePatternScan
         }
         else if (_isAlternative)
         {
+            // ADR-047: route a bound-start alternative (p1|p2|...) through the general path WALKER, which unions over
+            // branches and recurses into composite branches (grouped sequences, nested alternatives, quantifiers) —
+            // the ad-hoc handler in the else below degraded a composite branch like (p/p) to a literal-predicate query
+            // (→ empty). The walker needs a concrete start node, so the rare both-ends-unbound alternative keeps the
+            // streaming path. Collect the reachable nodes (deduped, set semantics); MoveNext emits them.
+            var altStartSpan = !subject.IsEmpty ? subject : obj;
+            if (!altStartSpan.IsEmpty)
+            {
+                _startedFromObject = subject.IsEmpty; // object is the bound end ⇒ walk the path in reverse
+                _startNode = ExpandPrefixedName(altStartSpan).ToString();
+                int altContentStart = _pattern.Path.LeftStart;
+                int altContentLength = (_pattern.Path.RightStart + _pattern.Path.RightLength) - altContentStart;
+                var altOutput = RentTempQueue();
+                WalkPathContentInto(_startNode, _source.Slice(altContentStart, altContentLength), _startedFromObject, altOutput);
+                _groupedResults = new Queue<string>();
+                var altSeen = new HashSet<string>();
+                while (altOutput.Count > 0) { var node = altOutput.Dequeue(); if (altSeen.Add(node)) _groupedResults.Enqueue(node); }
+                ReturnTempQueue(altOutput);
+            }
+            else
+            {
             // For alternative path (p1|p2|...), start with first segment from Left offsets
             // Store remaining right span for subsequent phases (supports n-ary alternatives)
             _alternativeRemainingStart = _pattern.Path.RightStart;
@@ -795,6 +834,7 @@ internal ref struct TriplePatternScan
                 else
                     _enumerator = ExecuteTemporalQuery(subject, predicate, obj);
             }
+            } // end both-ends-unbound streaming path
         }
         else if (_isNegatedSet)
         {
@@ -931,16 +971,18 @@ internal ref struct TriplePatternScan
         Span<int> ranges = stackalloc int[32]; // up to 16 segments (start + length each) — comfortable for real queries
         char topOp = ScanTopLevelPathOperator(content, ranges, out int rangeCount);
 
+        // Re-entrancy: this walker recurses (alternation-of-sequences, nested alternatives, sequences-of-groups), so
+        // each level must use its OWN dedup set — the previous shared _walkerStepSeen was clobbered across levels (a
+        // branch's final node ended up "already seen" by an inner leg's dedup and was dropped → empty result, ADR-047).
         if (topOp == '|')
         {
             // Top-level alternative: union over branches from startNode.
             // (Inverse marker on the outer group flips direction for each branch.)
-            EnsureWalkerStepSeen();
-            _walkerStepSeen!.Clear();
+            var stepSeen = new HashSet<string>();
             for (int i = 0; i < rangeCount; i++)
             {
                 var branch = content.Slice(ranges[i * 2], ranges[i * 2 + 1]);
-                WalkOneBranchInto(startNode, branch, inverseDir, output, _walkerStepSeen);
+                WalkOneBranchInto(startNode, branch, inverseDir, output, stepSeen);
             }
         }
         else if (topOp == '/')
@@ -952,9 +994,7 @@ internal ref struct TriplePatternScan
         else
         {
             // Single predicate, possibly with leading '^'.
-            EnsureWalkerStepSeen();
-            _walkerStepSeen!.Clear();
-            WalkOneBranchInto(startNode, content, inverseDir, output, _walkerStepSeen);
+            WalkOneBranchInto(startNode, content, inverseDir, output, new HashSet<string>());
         }
     }
 
@@ -1035,12 +1075,12 @@ internal ref struct TriplePatternScan
     private void WalkSequenceInto(string startNode, ReadOnlySpan<char> content, scoped ReadOnlySpan<int> ranges,
         int rangeCount, bool inverseDir, Queue<string> output)
     {
-        EnsureFrontierSets();
-        var current = _walkerCurrent!;
-        var next = _walkerNext!;
-        current.Clear();
-        next.Clear();
-        current.Add(startNode);
+        // Local frontier + per-leg dedup sets (NOT the shared instance fields) so nested/alternating sequences are
+        // re-entrant — see the note in WalkPathContentInto. Frontier is a set: a node reached by multiple paths is
+        // carried forward once (path set semantics).
+        var current = new HashSet<string> { startNode };
+        var next = new HashSet<string>();
+        var legStepSeen = new HashSet<string>();
 
         // Iterate legs in source order for forward, reverse order for inverse-of-sequence.
         // For each leg, take all current frontier nodes through the leg (forward or inverse-flipped).
@@ -1049,13 +1089,12 @@ internal ref struct TriplePatternScan
             int legIndex = inverseDir ? (rangeCount - 1 - idx) : idx;
             var leg = content.Slice(ranges[legIndex * 2], ranges[legIndex * 2 + 1]);
 
-            EnsureWalkerStepSeen();
-            _walkerStepSeen!.Clear();
+            legStepSeen.Clear();
             foreach (var node in current)
             {
                 // Walk this leg from `node` into a temp queue, then merge into `next`.
                 var pooled = RentTempQueue();
-                WalkOneBranchInto(node, leg, inverseDir, pooled, _walkerStepSeen);
+                WalkOneBranchInto(node, leg, inverseDir, pooled, legStepSeen);
                 while (pooled.Count > 0)
                     next.Add(pooled.Dequeue());
                 ReturnTempQueue(pooled);

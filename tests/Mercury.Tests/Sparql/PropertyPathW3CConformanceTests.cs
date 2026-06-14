@@ -66,6 +66,8 @@ public class PropertyPathW3CConformanceTests : IDisposable
     [InlineData("seq-head-star", "<urn:a> (<urn:p>*/<urn:p>) ?x", "b,c,d")] // FIXED: p* from a, then one p
     // ── [89] PathAlternative ──
     [InlineData("alt-simple", "<urn:a> (<urn:p>|<urn:q>) ?x", "b,e")]
+    [InlineData("alt-obj-bound", "?x (<urn:p>|<urn:q>) <urn:c>", "b")]  // object-bound: ?x reaches c via p|q ⇒ b (b-p→c)
+    [InlineData("alt-of-seq", "<urn:a> ((<urn:p>/<urn:p>)|(<urn:q>/<urn:q>)) ?x", "c,f")]  // FIXED (walker re-entrancy)
     // ── [91] PathEltOrInverse ::= '^' PathElt ──
     [InlineData("inv-simple", "<urn:d> ^<urn:p> ?x", "c")]
     [InlineData("inv-star", "<urn:d> (^<urn:p>)* ?x", "a,b,c,d")]          // reverse closure
@@ -76,13 +78,12 @@ public class PropertyPathW3CConformanceTests : IDisposable
     public void Tree_MatchesW3CPathSemantics(string name, string body, string expectedX)
         => AssertTreeMatchesW3CPathSemantics(name, body, expectedX);
 
-    [Theory(Skip = "ADR-047 — composite-path evaluator gap WDBench breadth surfaced (both executors); fix in " +
-        "progress. (The parser gap — a quantified element heading a grouped sequence, (p*/p) — is FIXED; seq-head-star " +
-        "is now live above.) Remaining: an alternation whose branches are sequences (seq|seq), and a sequence with a " +
-        "nested alternation-of-quantifiers p/(a*|b*), evaluate to empty. The expected column is the EBNF-grounded W3C " +
-        "oracle these satisfy once fixed — un-skip a row as its fix lands.")]
-    // ── [89] PathAlternative whose branches are sequences — evaluator gap ──
-    [InlineData("alt-of-seq", "<urn:a> ((<urn:p>/<urn:p>)|(<urn:q>/<urn:q>)) ?x", "c,f")]
+    [Theory(Skip = "ADR-047 — composite-path evaluator, remaining gap. FIXED so far: the parser gap (p*/p), and the " +
+        "recursive walker's re-entrancy bug (alternation-of-sequences). REMAINING: a QUANTIFIER (* + ?) inside a " +
+        "composite — the recursive walker (WalkOneBranchInto) treats a quantified leg like p* as a literal predicate, " +
+        "so a sequence/alternation containing one evaluates to empty. Needs quantifier-closure in the walker. The " +
+        "expected column is the EBNF-grounded W3C oracle these satisfy once fixed; un-skip a row as its fix lands.")]
+    // ── quantifier inside a composite — walker lacks closure on a leg/branch ──
     [InlineData("alt-of-seq-star", "<urn:a> ((<urn:p>/<urn:p>*)|(<urn:q>/<urn:q>*)) ?x", "b,c,d,e,f")]
     [InlineData("seq-alt-of-star", "<urn:a> (<urn:p>/(<urn:p>*|<urn:r>*)) ?x", "b,c,d,g")] // p* from b ∪ r* from b
     public void Tree_MatchesW3CPathSemantics_KnownBugs(string name, string body, string expectedX)
