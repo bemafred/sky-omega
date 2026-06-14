@@ -63,6 +63,7 @@ public class PropertyPathW3CConformanceTests : IDisposable
     [InlineData("seq-tail-star", "<urn:a> (<urn:p>/<urn:p>*) ?x", "b,c,d")] // a→b, then p* from b
     [InlineData("seq-tail-plus", "<urn:a> (<urn:p>/<urn:p>+) ?x", "c,d")]   // a→b, then p+ from b
     [InlineData("seq-tail-opt", "<urn:a> (<urn:p>/<urn:p>?) ?x", "b,c")]    // a→b, then p? from b = {b,c}
+    [InlineData("seq-head-star", "<urn:a> (<urn:p>*/<urn:p>) ?x", "b,c,d")] // FIXED: p* from a, then one p
     // ── [89] PathAlternative ──
     [InlineData("alt-simple", "<urn:a> (<urn:p>|<urn:q>) ?x", "b,e")]
     // ── [91] PathEltOrInverse ::= '^' PathElt ──
@@ -75,13 +76,11 @@ public class PropertyPathW3CConformanceTests : IDisposable
     public void Tree_MatchesW3CPathSemantics(string name, string body, string expectedX)
         => AssertTreeMatchesW3CPathSemantics(name, body, expectedX);
 
-    [Theory(Skip = "ADR-047 — composite-path bugs WDBench breadth surfaced (both executors); fix in progress. " +
-        "(1) parser gap: a quantified element at the HEAD of a grouped sequence, e.g. (p*/p), fails to parse. " +
-        "(2) evaluator gap: an alternation whose branches are sequences (seq|seq), and a sequence with a nested " +
-        "alternation-of-quantifiers p/(a*|b*), evaluate to empty. The expected column is the EBNF-grounded W3C oracle " +
-        "these satisfy once fixed — un-skip a row as its fix lands.")]
-    // ── [90] PathSequence with a quantified HEAD — parser gap ──
-    [InlineData("seq-head-star", "<urn:a> (<urn:p>*/<urn:p>) ?x", "b,c,d")] // p* from a, then one p
+    [Theory(Skip = "ADR-047 — composite-path evaluator gap WDBench breadth surfaced (both executors); fix in " +
+        "progress. (The parser gap — a quantified element heading a grouped sequence, (p*/p) — is FIXED; seq-head-star " +
+        "is now live above.) Remaining: an alternation whose branches are sequences (seq|seq), and a sequence with a " +
+        "nested alternation-of-quantifiers p/(a*|b*), evaluate to empty. The expected column is the EBNF-grounded W3C " +
+        "oracle these satisfy once fixed — un-skip a row as its fix lands.")]
     // ── [89] PathAlternative whose branches are sequences — evaluator gap ──
     [InlineData("alt-of-seq", "<urn:a> ((<urn:p>/<urn:p>)|(<urn:q>/<urn:q>)) ?x", "c,f")]
     [InlineData("alt-of-seq-star", "<urn:a> ((<urn:p>/<urn:p>*)|(<urn:q>/<urn:q>*)) ?x", "b,c,d,e,f")]

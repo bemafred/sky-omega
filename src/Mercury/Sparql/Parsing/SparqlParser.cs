@@ -1520,28 +1520,24 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
         ch = Peek();
 
-        if (ch == '*')
-        {
-            Advance();
-            return (term, PropertyPath.ZeroOrMore(term));
-        }
+        // Parse an optional modifier on the base term (PathElt ::= PathPrimary PathMod?). A quantified element can
+        // still be the HEAD of a sequence/alternative — p*/q, p+|q, p?/q ([90] PathSequence, [89] PathAlternative) —
+        // so do NOT return here; record the quantified path and fall through to the continuation below. Returning
+        // early was the (p*/p) "Expected ')'" parse bug WDBench breadth surfaced (ADR-047).
+        bool hasQuantifier = false;
+        PropertyPath quantified = default;
+        if (ch == '*') { Advance(); quantified = PropertyPath.ZeroOrMore(term); hasQuantifier = true; }
+        else if (ch == '+') { Advance(); quantified = PropertyPath.OneOrMore(term); hasQuantifier = true; }
+        else if (ch == '?' && !IsLetter(PeekAt(1)) && PeekAt(1) != '_') { Advance(); quantified = PropertyPath.ZeroOrOne(term); hasQuantifier = true; }
 
-        if (ch == '+')
-        {
-            Advance();
-            return (term, PropertyPath.OneOrMore(term));
-        }
+        // The left PathElt span — base term plus the modifier char if present — is the left operand of any following
+        // sequence/alternative, so that p*/q re-parses its left as p*, not p. Without a modifier it is exactly the
+        // term (matching the prior behaviour); with one it extends to include it.
+        int leftStart = term.Start;
+        int leftLength = hasQuantifier ? (_position - term.Start) : term.Length;
 
-        if (ch == '?')
-        {
-            // Need to distinguish from variable - '?' followed by letter is variable
-            var next = PeekAt(1);
-            if (!IsLetter(next) && next != '_')
-            {
-                Advance();
-                return (term, PropertyPath.ZeroOrOne(term));
-            }
-        }
+        SkipWhitespace();
+        ch = Peek();
 
         // SPARQL operator precedence: '/' binds tighter than '|'
         // So we need to check for '|' at top level first (lower precedence = parse first)
@@ -1568,9 +1564,7 @@ internal ref partial struct SparqlParser
         // This handles both "p1|p2" and "p1/p2|p3" (the latter has '/' first but '|' at top level)
         if (ch == '|' || (hasTopLevelAlternative && ch == '/'))
         {
-            var leftStart = term.Start;
-            var leftLength = term.Length;
-
+            // leftStart/leftLength were computed above (base term + any modifier).
             if (ch == '|')
             {
                 // Direct '|' - just skip past it
@@ -1622,8 +1616,7 @@ internal ref partial struct SparqlParser
         // Check for sequence: iri1/iri2/iri3... (only if no '|' at top level)
         if (ch == '/')
         {
-            var leftStart = term.Start;
-            var leftLength = term.Length;
+            // leftStart/leftLength were computed above (base term + any modifier).
             Advance(); // Skip '/'
             SkipWhitespace();
             var rightStart = _position;
@@ -1646,6 +1639,10 @@ internal ref partial struct SparqlParser
             var rightLength = rightEnd - rightStart;  // Use end position, not current position
             return (term, PropertyPath.Sequence(leftStart, leftLength, rightStart, rightLength));
         }
+
+        // A quantified element with no following operator (p*, p+, p?) — the standalone path modifier.
+        if (hasQuantifier)
+            return (term, quantified);
 
         // Simple predicate - no path
         return (term, default);
