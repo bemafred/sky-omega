@@ -1027,6 +1027,15 @@ internal ref struct TriplePatternScan
             return;
         }
 
+        // A trailing quantifier (X*, X+, X?) binds TIGHTER than / and |, so it only reaches here once no top-level
+        // sequence/alternative remains (e.g. the leg p* of p/p*, or the branch r* of p*|r*). Evaluate it as a closure
+        // from startNode, walking the base X per hop (recursively, so (a/b)* and (a|b)+ work too). ADR-047.
+        if (branch.Length >= 2 && (branch[^1] == '*' || branch[^1] == '+' || branch[^1] == '?'))
+        {
+            WalkQuantifiedInto(startNode, branch.Slice(0, branch.Length - 1).Trim(), branch[^1], inverseDir, output, stepSeen);
+            return;
+        }
+
         // Atomic predicate: optional leading '^', then the IRI/prefixed name.
         bool branchIsInverse = branch.Length > 0 && branch[0] == '^';
         var predicateSpan = branchIsInverse ? branch.Slice(1).TrimStart() : branch;
@@ -1072,6 +1081,57 @@ internal ref struct TriplePatternScan
     /// or a sub-group. The outer <paramref name="inverseDir"/> flag reverses leg order and
     /// inverts each leg's direction (semantics of inverse-of-sequence).
     /// </summary>
+    /// <summary>
+    /// ADR-047 — evaluate a quantified path element (X*, X+, X?) from <paramref name="startNode"/> as a closure,
+    /// walking the base expression <paramref name="baseExpr"/> per hop (recursively via WalkOneBranchInto, so X may
+    /// itself be a sequence/alternative/group). '*' and '?' include the reflexive (zero-length) node; '+' includes
+    /// startNode only if a cycle reaches it. Path set semantics (distinct nodes).
+    /// </summary>
+    private void WalkQuantifiedInto(string startNode, ReadOnlySpan<char> baseExpr, char quant, bool inverseDir,
+        Queue<string> output, HashSet<string> stepSeen)
+    {
+        var result = new HashSet<string>();
+        if (quant == '*' || quant == '?')
+            result.Add(startNode); // zero-length (reflexive)
+
+        if (quant == '?')
+        {
+            // Zero-or-one: at most one hop.
+            var pooled = RentTempQueue();
+            WalkOneBranchInto(startNode, baseExpr, inverseDir, pooled, new HashSet<string>());
+            while (pooled.Count > 0) result.Add(pooled.Dequeue());
+            ReturnTempQueue(pooled);
+        }
+        else
+        {
+            // Zero/one-or-more: BFS transitive closure. `visited` bounds the frontier (cycle-safe); `result`
+            // accumulates every node reached via >= 1 hop, so a cycle back to startNode is included (as '+' requires).
+            var frontier = new HashSet<string> { startNode };
+            var visited = new HashSet<string> { startNode };
+            while (frontier.Count > 0)
+            {
+                var nextFrontier = new HashSet<string>();
+                foreach (var node in frontier)
+                {
+                    var pooled = RentTempQueue();
+                    WalkOneBranchInto(node, baseExpr, inverseDir, pooled, new HashSet<string>());
+                    while (pooled.Count > 0)
+                    {
+                        var reached = pooled.Dequeue();
+                        result.Add(reached);
+                        if (visited.Add(reached)) nextFrontier.Add(reached);
+                    }
+                    ReturnTempQueue(pooled);
+                }
+                frontier = nextFrontier;
+            }
+        }
+
+        foreach (var node in result)
+            if (stepSeen.Add(node))
+                output.Enqueue(node);
+    }
+
     private void WalkSequenceInto(string startNode, ReadOnlySpan<char> content, scoped ReadOnlySpan<int> ranges,
         int rangeCount, bool inverseDir, Queue<string> output)
     {

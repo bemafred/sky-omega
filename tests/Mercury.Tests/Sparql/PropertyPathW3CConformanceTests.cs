@@ -68,6 +68,8 @@ public class PropertyPathW3CConformanceTests : IDisposable
     [InlineData("alt-simple", "<urn:a> (<urn:p>|<urn:q>) ?x", "b,e")]
     [InlineData("alt-obj-bound", "?x (<urn:p>|<urn:q>) <urn:c>", "b")]  // object-bound: ?x reaches c via p|q ⇒ b (b-p→c)
     [InlineData("alt-of-seq", "<urn:a> ((<urn:p>/<urn:p>)|(<urn:q>/<urn:q>)) ?x", "c,f")]  // FIXED (walker re-entrancy)
+    [InlineData("alt-of-seq-star", "<urn:a> ((<urn:p>/<urn:p>*)|(<urn:q>/<urn:q>*)) ?x", "b,c,d,e,f")]  // FIXED (quantifier-closure)
+    [InlineData("alt-of-quant", "<urn:b> (<urn:p>*|<urn:r>*) ?x", "b,c,d,g")]  // alternation of bare quantifiers (constant subject)
     // ── [91] PathEltOrInverse ::= '^' PathElt ──
     [InlineData("inv-simple", "<urn:d> ^<urn:p> ?x", "c")]
     [InlineData("inv-star", "<urn:d> (^<urn:p>)* ?x", "a,b,c,d")]          // reverse closure
@@ -78,13 +80,13 @@ public class PropertyPathW3CConformanceTests : IDisposable
     public void Tree_MatchesW3CPathSemantics(string name, string body, string expectedX)
         => AssertTreeMatchesW3CPathSemantics(name, body, expectedX);
 
-    [Theory(Skip = "ADR-047 — composite-path evaluator, remaining gap. FIXED so far: the parser gap (p*/p), and the " +
-        "recursive walker's re-entrancy bug (alternation-of-sequences). REMAINING: a QUANTIFIER (* + ?) inside a " +
-        "composite — the recursive walker (WalkOneBranchInto) treats a quantified leg like p* as a literal predicate, " +
-        "so a sequence/alternation containing one evaluates to empty. Needs quantifier-closure in the walker. The " +
-        "expected column is the EBNF-grounded W3C oracle these satisfy once fixed; un-skip a row as its fix lands.")]
-    // ── quantifier inside a composite — walker lacks closure on a leg/branch ──
-    [InlineData("alt-of-seq-star", "<urn:a> ((<urn:p>/<urn:p>*)|(<urn:q>/<urn:q>*)) ?x", "b,c,d,e,f")]
+    [Theory(Skip = "ADR-047 — composite-path, remaining edge. FIXED: parser gap (p*/p), walker re-entrancy " +
+        "(alternation-of-sequences), and quantifier-closure (p*/q, (p*|r*), alternation-of-sequences-with-quantifiers). " +
+        "REMAINING: a grouped ALTERNATION as the second segment of a TOP-LEVEL sequence, p/(p*|r*). The whole sequence " +
+        "goes through ExpandSequencePath, which re-parses each segment via the weaker ParsePathSegment — that doesn't " +
+        "parse a grouped alternation, so the expanded `?syn (p*|r*) ?x` pattern gets the wrong path type and never " +
+        "reaches the (working) alternative walker. Fix = re-parse expansion segments via the full path parser. " +
+        "Note (p*|r*) is correct standalone (alt-of-quant, green above); only the sequence-expanded position fails.")]
     [InlineData("seq-alt-of-star", "<urn:a> (<urn:p>/(<urn:p>*|<urn:r>*)) ?x", "b,c,d,g")] // p* from b ∪ r* from b
     public void Tree_MatchesW3CPathSemantics_KnownBugs(string name, string body, string expectedX)
         => AssertTreeMatchesW3CPathSemantics(name, body, expectedX);
