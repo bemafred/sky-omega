@@ -1,0 +1,116 @@
+{"phase":"wdbench_differential_query","file":"00001.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00002.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":16,"tree_rows":16}
+{"phase":"wdbench_differential_query","file":"00003.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":17149,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00004.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":17149,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00005.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":426,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00006.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":426,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00007.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":0,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00008.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00009.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00010.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":752,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00011.sparql","category":"paths","verdict":"both_failed","old_status":"Failed","tree_status":"Failed","old_rows":0,"tree_rows":0,"old_error":"Query result exceeded the maximum of 10,000,000 rows (StorageOptions.MaxResultRows). Add a LIMIT clause to bound the result, or raise the cap (0 = unbounded). The substrate materializes the full result before returning it, so an unbounded result at scale would exhaust memory.","tree_error":"Query result exceeded the maximum of 10,000,000 rows (StorageOptions.MaxResultRows). Add a LIMIT clause to bound the result, or raise the cap (0 = unbounded). The substrate materializes the full result before returning it, so an unbounded result at scale would exhaust memory."}
+{"phase":"wdbench_differential_query","file":"00012.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00013.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00014.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00015.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00016.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00017.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00018.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00019.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00020.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00021.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":15448,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00022.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00023.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00024.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":75,"tree_rows":75}
+{"phase":"wdbench_differential_query","file":"00025.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00026.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":7,"tree_rows":7}
+{"phase":"wdbench_differential_query","file":"00027.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00028.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00029.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00030.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":1,"tree_rows":1}
+{"phase":"wdbench_differential_query","file":"00031.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00032.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00033.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00034.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":9,"tree_rows":9}
+{"phase":"wdbench_differential_query","file":"00035.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00036.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00037.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00038.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":117,"tree_rows":117}
+{"phase":"wdbench_differential_query","file":"00039.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00040.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00041.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00042.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00043.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00044.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00045.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00046.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00047.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00048.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":7,"tree_rows":7}
+{"phase":"wdbench_differential_query","file":"00049.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00050.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00051.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00052.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00053.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00054.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00055.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00056.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00057.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00058.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":57439,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00059.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":57439,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00060.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":284,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00061.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":284,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00062.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":404316,"tree_rows":404316}
+{"phase":"wdbench_differential_query","file":"00063.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":2900,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00064.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":2265,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00065.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00066.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00067.sparql","category":"paths","verdict":"both_timeout","old_status":"TimedOut","tree_status":"TimedOut","old_rows":0,"tree_rows":0,"old_error":"Query cancelled","tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00068.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00069.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00070.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00071.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00072.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":41110,"tree_rows":41110}
+{"phase":"wdbench_differential_query","file":"00073.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":60,"tree_rows":60}
+{"phase":"wdbench_differential_query","file":"00074.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00075.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00076.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00077.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00078.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00079.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00080.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00081.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":0,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00082.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":51095,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00083.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00084.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":1415,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00085.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00086.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":7,"tree_rows":7}
+{"phase":"wdbench_differential_query","file":"00087.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00088.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":8,"tree_rows":8}
+{"phase":"wdbench_differential_query","file":"00089.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00090.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00091.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":3,"tree_rows":3}
+{"phase":"wdbench_differential_query","file":"00092.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00093.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":0,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00094.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":95442,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00095.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":3098,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00096.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00097.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":42304,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00098.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":3461,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00099.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":4,"tree_rows":4}
+{"phase":"wdbench_differential_query","file":"00100.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":58,"tree_rows":58}
+{"phase":"wdbench_differential_query","file":"00101.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":0,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00102.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":40529,"tree_rows":40529}
+{"phase":"wdbench_differential_query","file":"00103.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00104.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":13063,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00105.sparql","category":"paths","verdict":"timeout_asymmetric","old_status":"Completed","tree_status":"TimedOut","old_rows":13063,"tree_rows":0,"tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00106.sparql","category":"paths","verdict":"result_divergent","old_status":"Completed","tree_status":"Completed","old_rows":27138,"tree_rows":0}
+{"phase":"wdbench_differential_query","file":"00107.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00108.sparql","category":"paths","verdict":"error_asymmetric","old_status":"Completed","tree_status":"Failed","old_rows":287,"tree_rows":0,"tree_error":"Query result exceeded the maximum of 10,000,000 rows (StorageOptions.MaxResultRows). Add a LIMIT clause to bound the result, or raise the cap (0 = unbounded). The substrate materializes the full result before returning it, so an unbounded result at scale would exhaust memory."}
+{"phase":"wdbench_differential_query","file":"00109.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00110.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":3,"tree_rows":3}
+{"phase":"wdbench_differential_query","file":"00111.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":6,"tree_rows":6}
+{"phase":"wdbench_differential_query","file":"00112.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00113.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":5,"tree_rows":5}
+{"phase":"wdbench_differential_query","file":"00114.sparql","category":"paths","verdict":"both_timeout","old_status":"TimedOut","tree_status":"TimedOut","old_rows":0,"tree_rows":0,"old_error":"Query cancelled","tree_error":"Query cancelled"}
+{"phase":"wdbench_differential_query","file":"00115.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":1,"tree_rows":1}
+{"phase":"wdbench_differential_query","file":"00116.sparql","category":"paths","verdict":"equivalent","old_status":"Completed","tree_status":"Completed","old_rows":1,"tree_rows":1}

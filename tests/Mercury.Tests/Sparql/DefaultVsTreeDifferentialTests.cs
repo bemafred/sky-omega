@@ -127,6 +127,56 @@ public class DefaultVsTreeDifferentialTests : IDisposable
         Assert.NotEqual(4, old.Rows!.Count); // the old path drops VALUES-after-triple — the bug the cutover fixes
     }
 
+    [Theory]
+    // WDBench breadth (reorder=true truthy, 2026-06-13) surfaced ~101 c2rpqs divergences. Triage — Martin (RDF
+    // authority) concurring — established the DOMINANT signature is the TREE being W3C-CORRECT and the OLD path
+    // BUGGY, not the reverse: a `?`/`*` path whose subject is bound by a prior pattern must emit the zero-length
+    // reflexive (?x = ?o) for each bound ?o (SPARQL 1.1 §9.3 — a zero-length path binds (n,n) for every node n in the
+    // graph). The old path drops those reflexives in the JOIN context — though it emits them fine for a CONSTANT
+    // subject (see path-question-in-graph above), which is exactly why W3C conformance + the 35 hand-built cases
+    // never caught it. The cutover ADOPTS the tree's correct behaviour. So these assert the TREE, not old≡tree.
+    //
+    // Fixture: a→v1, b→v2 (urn:p); v1→v2 (urn:next). Each bound ?o ∈ {v1, v2} contributes its reflexive; v1 also
+    // reaches v2. The W3C-correct bag is the three solutions {(a,v1,v1), (a,v1,v2), (b,v2,v2)} — three rows. The two
+    // x=v2 rows under SELECT ?x are NOT double-emission: they are two distinct mappings (a,v1,v2)+(b,v2,v2) colliding
+    // on the projected column (bag semantics). The old path returns one row — it dropped both reflexive solutions.
+    [InlineData("zoo-grouped", "SELECT ?s ?o ?x WHERE { ?s <urn:p> ?o . ?o (<urn:next>)? ?x }")]
+    [InlineData("zoo-bare", "SELECT ?s ?o ?x WHERE { ?s <urn:p> ?o . ?o <urn:next>? ?x }")]
+    [InlineData("zom", "SELECT ?s ?o ?x WHERE { ?s <urn:p> ?o . ?o <urn:next>* ?x }")]
+    [InlineData("zoo-proj-x", "SELECT ?x WHERE { ?s <urn:p> ?o . ?o (<urn:next>)? ?x }")]
+    public void PathReflexive_BoundSubject_TreeIsW3CCorrect_OldDropsReflexives(string name, string query)
+    {
+        var tree = SparqlEngine.QueryViaTreeForDifferential(_store, query);
+        var old = SparqlEngine.Query(_store, query);
+        _output.WriteLine($"[{name}] tree: {Describe(tree)}");
+        _output.WriteLine($"[{name}] old:  {Describe(old)}");
+        Assert.True(tree.Success, $"[{name}] tree: {tree.ErrorMessage}");
+        Assert.True(old.Success, $"[{name}] old: {old.ErrorMessage}");
+
+        // The tree emits the zero-length reflexive per bound ?o — the three W3C-correct solutions.
+        Assert.True(tree.Rows!.Count == 3, $"[{name}] expected the 3 W3C solutions; got {Describe(tree)}");
+        // The old path drops the reflexives in the join context — one row. This is the bug the cutover fixes; the
+        // assertion pins it so a future change to the (soon-deleted) old path can't silently re-flip the divergence.
+        Assert.True(old.Rows!.Count == 1, $"[{name}] expected the old path to drop the reflexives (1 row); got {Describe(old)}");
+    }
+
+    [Fact]
+    public void PathReflexive_BoundSubject_TheTreeBagIsTheThreeW3CSolutions()
+    {
+        // Pin the exact W3C-correct bag (not just the count): the three distinct solution mappings.
+        var tree = SparqlEngine.QueryViaTreeForDifferential(_store,
+            "SELECT ?s ?o ?x WHERE { ?s <urn:p> ?o . ?o <urn:next>? ?x }");
+        Assert.True(tree.Success, tree.ErrorMessage);
+        Assert.Equal(
+            new List<string>
+            {
+                "o=<urn:v1>|s=<urn:a>|x=<urn:v1>", // zero-length at v1
+                "o=<urn:v1>|s=<urn:a>|x=<urn:v2>", // v1 —next→ v2
+                "o=<urn:v2>|s=<urn:b>|x=<urn:v2>", // zero-length at v2
+            },
+            Canonicalize(tree.Rows));
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────────────────
 
     private static bool ResultsEquivalent(QueryResult a, QueryResult b)

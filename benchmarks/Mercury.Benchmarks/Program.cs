@@ -14,6 +14,8 @@ public class Program
             {
                 case "wdbench":
                     return WdBenchRunner.Run(args.AsSpan(1).ToArray());
+                case "wdbench-diff":
+                    return WdBenchDifferentialRunner.Run(args.AsSpan(1).ToArray());
             }
         }
 
