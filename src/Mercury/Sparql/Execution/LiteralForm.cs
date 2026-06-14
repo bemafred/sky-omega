@@ -85,6 +85,56 @@ internal static class LiteralForm
     }
 
     /// <summary>
+    /// Canonicalize a bare numeric or boolean object token to its typed-literal lexical form so it matches the atom
+    /// store: SPARQL treats <c>30</c> ≡ <c>"30"^^xsd:integer</c>, <c>3.0</c> ≡ <c>"3.0"^^xsd:decimal</c>,
+    /// <c>1e0</c> ≡ <c>"1e0"^^xsd:double</c>, and <c>true</c> ≡ <c>"true"^^xsd:boolean</c> (xsd: as the full IRI —
+    /// the stored lexical form). A token already in IRI / quoted-literal / blank-node form, or one that is not a
+    /// valid numeric or boolean, is returned verbatim. Shared by TriplePatternScan's constant-object match and the
+    /// tree executor's VALUES expansion so the two canonicalizations cannot drift.
+    /// </summary>
+    public static ReadOnlySpan<char> CanonicalizeNumericOrBoolean(ReadOnlySpan<char> token, out string? scratchOwner)
+    {
+        scratchOwner = null;
+        if (token.Length == 0) return token;
+        char c = token[0];
+        if (c is '<' or '"' or '\'' or '_') return token; // IRI / literal / blank node — not a bare numeric or boolean
+
+        if (token.SequenceEqual("true") || token.SequenceEqual("false"))
+        {
+            scratchOwner = $"\"{token}\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            return scratchOwner.AsSpan();
+        }
+        if ((c is '-' or '+' || (c >= '0' && c <= '9')) && TryNumericDatatype(token, out var datatype))
+        {
+            scratchOwner = $"\"{token}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>";
+            return scratchOwner.AsSpan();
+        }
+        return token;
+    }
+
+    /// <summary>
+    /// Classify a numeric literal token by its SPARQL lexical form: an exponent ⇒ xsd:double, a '.' ⇒ xsd:decimal,
+    /// otherwise xsd:integer. Returns false (leave verbatim) for anything that is not a valid numeric literal.
+    /// </summary>
+    private static bool TryNumericDatatype(ReadOnlySpan<char> text, out string datatype)
+    {
+        datatype = "";
+        bool hasDot = false, hasExp = false, hasDigit = false;
+        for (int i = 0; i < text.Length; i++)
+        {
+            char ch = text[i];
+            if (ch is >= '0' and <= '9') hasDigit = true;
+            else if (ch == '.') { if (hasDot || hasExp) return false; hasDot = true; }
+            else if (ch is 'e' or 'E') { if (hasExp || !hasDigit) return false; hasExp = true; }
+            else if (ch is '+' or '-') { if (i != 0 && text[i - 1] is not ('e' or 'E')) return false; } // sign only leads or follows the exponent
+            else return false;
+        }
+        if (!hasDigit) return false;
+        datatype = hasExp ? "double" : hasDot ? "decimal" : "integer";
+        return true;
+    }
+
+    /// <summary>
     /// Canonicalize the unwrapped content of a SPARQL literal — i.e., the bytes
     /// between the opening and closing wrapper quotes, with no surrounding `"`,
     /// no `@lang`, no `^^<iri>` suffix. Used by FilterEvaluator and
