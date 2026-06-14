@@ -357,7 +357,10 @@ internal ref partial struct QueryResults
         _hasBinds = false;
         _hasMinus = false;
         _hasValues = false;
-        _hasPostQueryValues = false;
+        // ADR-047 cutover: a trailing (post-query) VALUES restricts the result AFTER the BGP join, which the tree does
+        // not apply during materialization — so the pre-materialized presentation applies it (MoveNextOrdered), the
+        // same per-row constraint the streaming path uses. (Inline VALUES+triple still stays on the old path.)
+        _hasPostQueryValues = buffer?.HasPostQueryValues ?? false;
         _hasExists = false;
         _groupBy = groupBy;
         _selectClause = selectClause;
