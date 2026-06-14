@@ -39,6 +39,15 @@ internal ref partial struct QueryResults
                 _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
             }
 
+            // ADR-047 cutover: pre-materialized rows from the tree carry only the joined pattern bindings — the lazy
+            // per-row SELECT-expression evaluation the streaming/collection path applies (MoveNextUnorderedForCollection
+            // line 235) never ran for them. Evaluate computed projections ((expr AS ?var)) now, before FILTER/DISTINCT
+            // see them and before the projection reads them. Gated on _isMaterialized so the scan-collected ORDER BY path
+            // (already evaluated during collection, _isMaterialized=false) is not re-evaluated — a second eval would
+            // diverge for non-deterministic expressions (UUID/RAND/NOW). _buffer is the tree path's buffer.
+            if (_isMaterialized && _buffer != null)
+                EvaluateSelectExpressions();
+
             // Apply regular FILTER clauses (for pre-materialized results from GRAPH clauses)
             if (_hasFilters)
             {

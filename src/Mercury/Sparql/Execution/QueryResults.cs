@@ -207,7 +207,8 @@ internal ref partial struct QueryResults
     internal static QueryResults FromMaterializedSimple(List<MaterializedRow> rows,
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
+        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default,
+        Patterns.QueryBuffer? buffer = null)
     {
         // If actual ORDER BY is specified, sort the materialized results
         if (orderBy.HasOrderBy && rows.Count > 1)
@@ -217,7 +218,7 @@ internal ref partial struct QueryResults
         }
 
         return new QueryResults(rows, source, store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having);
+            limit, offset, distinct, orderBy, groupBy, selectClause, having, buffer);
     }
 
     private static readonly List<MaterializedRow> EmptyMaterializedRows = new();
@@ -319,9 +320,14 @@ internal ref partial struct QueryResults
     private QueryResults(List<MaterializedRow> rows, ReadOnlySpan<char> source,
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy,
-        GroupByClause groupBy, SelectClause selectClause, HavingClause having)
+        GroupByClause groupBy, SelectClause selectClause, HavingClause having,
+        Patterns.QueryBuffer? buffer = null)
     {
-        _buffer = null; // No pattern needed for materialized results
+        // ADR-047 cutover: the tree path passes its QueryBuffer so the pre-materialized presentation can evaluate
+        // computed SELECT projections ((expr AS ?var)) — EvaluateSelectExpressions needs _buffer.Prefixes. The other
+        // _has* flags below stay false, so a non-null _buffer activates nothing else (MINUS/VALUES/FILTER are gated on
+        // their own flags). Null is still valid (the pattern itself is not needed to iterate materialized rows).
+        _buffer = buffer;
         _source = source;
         _store = store;
         _bindings = bindings;

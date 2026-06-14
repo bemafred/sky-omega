@@ -509,7 +509,7 @@ internal partial class QueryExecutor : IDisposable
         return QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
             _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
             _buffer.GetOrderByClause(), _buffer.GetGroupByClause(),
-            _buffer.GetSelectClause(), _buffer.GetHavingClause());
+            _buffer.GetSelectClause(), _buffer.GetHavingClause(), _buffer);
     }
 
     /// <summary>
@@ -621,7 +621,7 @@ internal partial class QueryExecutor : IDisposable
             var bindings = new Binding[64];
             result = QueryResults.FromMaterializedSimple(rows, _source.AsSpan(), _store, bindings, _stringBuffer,
                 _buffer.Limit, _buffer.Offset, distinct: false,
-                orderBy, default, select, default);
+                orderBy, default, select, default, _buffer);
             return true;
         }
         finally
