@@ -674,10 +674,14 @@ internal partial class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Locate the THIS-statement's WHERE-group opening '{'. The source can be a whole multi-statement UPDATE (a text
-    /// search for "WHERE" would find the wrong statement, and the first '{' is the DELETE/INSERT template), so derive
-    /// it from the buffer: the WHERE group encloses the GRAPH clauses, so it is the '{' immediately before the first
-    /// graph header's term (whose offset is into this statement's slice of the source).
+    /// Locate THIS-statement's WHERE-group opening '{'. The source can be a whole multi-statement UPDATE (a naive text
+    /// search for "WHERE" would find the wrong statement, and the first '{' is the DELETE/INSERT template), so anchor on
+    /// the buffer, which is per-statement. With a GRAPH clause the WHERE group encloses it, so the '{' is the one
+    /// immediately before the first graph header's term. Without one, bound the search by this statement's earliest
+    /// triple-pattern term (also a per-statement offset) and take the WHERE keyword at or before it: that skips a
+    /// preceding DELETE/INSERT template '{ ... }' and any earlier statement's WHERE — both of which the bare first-'{'
+    /// would wrongly select, so the tree scanned the template and INSERT/DELETE … WHERE silently did nothing. (For a
+    /// plain SELECT the term sits just inside the WHERE group, so this resolves to the same '{' as the first-'{' did.)
     /// </summary>
     private int FindWhereGroupStart()
     {
@@ -689,7 +693,60 @@ internal partial class QueryExecutor : IDisposable
             int brace = _source.LastIndexOf('{', termStart);
             if (brace >= 0) return brace;
         }
+
+        int firstTerm = FirstPatternTermStart();
+        if (firstTerm >= 0)
+        {
+            int whereKw = LastWhereKeywordAtOrBefore(firstTerm);
+            if (whereKw >= 0)
+            {
+                int brace = _source.IndexOf('{', whereKw);
+                if (brace >= 0 && brace <= firstTerm) return brace;
+            }
+        }
+
         return _source.IndexOf('{');
+    }
+
+    /// <summary>The least source offset among this statement's cached triple-pattern subjects, or -1 if there are none.</summary>
+    private int FirstPatternTermStart()
+    {
+        ref readonly var pattern = ref _cachedPattern;
+        int min = -1;
+        for (int i = 0; i < pattern.PatternCount; i++)
+        {
+            int s = pattern.GetPattern(i).Subject.Start;
+            if (s >= 0 && (min < 0 || s < min)) min = s;
+        }
+        return min;
+    }
+
+    /// <summary>
+    /// The start index of the last standalone "WHERE" keyword token (case-insensitive, with non-alphanumeric
+    /// boundaries) at or before <paramref name="limit"/>, or -1 if there is none. String literals are skipped so a
+    /// "where" inside one is not mistaken for the keyword. Anchors the WHERE group within a multi-statement UPDATE.
+    /// </summary>
+    private int LastWhereKeywordAtOrBefore(int limit)
+    {
+        int found = -1;
+        for (int i = 0; i + 5 <= _source.Length && i <= limit; i++)
+        {
+            char ch = _source[i];
+            if (ch == '"' || ch == '\'')
+            {
+                i++;
+                while (i < _source.Length && _source[i] != ch) { if (_source[i] == '\\') i++; i++; }
+                continue;
+            }
+            if ((ch | 0x20) != 'w' || (_source[i + 1] | 0x20) != 'h' || (_source[i + 2] | 0x20) != 'e'
+                || (_source[i + 3] | 0x20) != 'r' || (_source[i + 4] | 0x20) != 'e')
+                continue;
+            if (i > 0 && (char.IsLetterOrDigit(_source[i - 1]) || _source[i - 1] == '_')) continue;
+            int after = i + 5;
+            if (after < _source.Length && (char.IsLetterOrDigit(_source[after]) || _source[after] == '_')) continue;
+            found = i;
+        }
+        return found;
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
