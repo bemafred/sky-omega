@@ -278,7 +278,12 @@ internal sealed class TreeJoinExecutor
                 return EvalGroup(ref pa, ci, graphIri, input);
             }
             case PatternKind.GroupHeader:
-                return EvalGroup(ref pa, ci, activeGraph, input);
+                // A nested group { P } is evaluated INDEPENDENTLY and then joined — Join(input, eval(P)) per SPARQL
+                // §18.2 — NOT seeded by the outer bindings. Seeding leaks an outer-only variable into the group's own
+                // FILTER scope: in BIND(4 AS ?z) { ?s :p ?v FILTER(?v=?z) }, ?z is NOT in scope for the inner FILTER
+                // (W3C bind10), so the FILTER must see ?z unbound. (Seeding remains a valid pushdown only for the BGP
+                // runs inside a group, where it cannot change FILTER scope.)
+                return Join(input, EvalGroup(ref pa, ci, activeGraph, new List<MaterializedRow> { EmptyRow() }));
             case PatternKind.UnionHeader:
             {
                 var output = new List<MaterializedRow>();
