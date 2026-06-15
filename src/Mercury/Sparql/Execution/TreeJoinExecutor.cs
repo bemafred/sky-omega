@@ -478,12 +478,26 @@ internal sealed class TreeJoinExecutor
         string valuesSpan = _source.Substring(slot.ValuesVarStart, slot.ValuesVarLength);
         var temp = new GraphPattern();
         new SparqlParser(valuesSpan.AsSpan()).ParseValues(ref temp);
-        var vc = temp.Values;
+        return JoinValuesClause(input, temp.Values, valuesSpan);
+    }
+
+    /// <summary>
+    /// The trailing (post-query) VALUES is a JOIN with the inline data, not a filter — it can MULTIPLY a solution (one
+    /// that is compatible with several data rows) and BIND a variable left unbound by an OPTIONAL (W3C values5/values7).
+    /// The buffer's ValuesClause carries offsets into this executor's source, so it reuses the same join as inline VALUES.
+    /// </summary>
+    public List<MaterializedRow> JoinPostQueryValues(List<MaterializedRow> input, ValuesClause postValues)
+        => JoinValuesClause(input, postValues, _source);
+
+    /// <summary>Build a row per VALUES data row (UNDEF leaves the variable unbound) and join it with the input — the
+    /// join multiplies and merges, so a solution compatible with several data rows yields several solutions.</summary>
+    private List<MaterializedRow> JoinValuesClause(List<MaterializedRow> input, ValuesClause vc, string vcSource)
+    {
         int varCount = vc.VariableCount;
         if (varCount == 0) return input;
 
         var varNames = new string[varCount];
-        for (int i = 0; i < varCount; i++) { var (vs, vl) = vc.GetVariable(i); varNames[i] = valuesSpan.Substring(vs, vl); }
+        for (int i = 0; i < varCount; i++) { var (vs, vl) = vc.GetVariable(i); varNames[i] = vcSource.Substring(vs, vl); }
 
         var valueRows = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
@@ -498,7 +512,7 @@ internal sealed class TreeJoinExecutor
                 {
                     var (vs, vl) = vc.GetValueAt(r, c);
                     if (vl < 0) continue; // UNDEF
-                    table.Bind(varNames[c].AsSpan(), ExpandValueTerm(valuesSpan.Substring(vs, vl)).AsSpan());
+                    table.Bind(varNames[c].AsSpan(), ExpandValueTerm(vcSource.Substring(vs, vl)).AsSpan());
                 }
                 valueRows.Add(new MaterializedRow(table));
             }

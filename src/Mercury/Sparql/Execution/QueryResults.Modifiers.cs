@@ -69,11 +69,6 @@ internal ref partial struct QueryResults
                     continue; // Matches MINUS, skip this row
             }
 
-            // Apply post-query (trailing) VALUES - restrict to rows matching the inline data (the tree materializes the
-            // BGP without it). Pre-materialized rows only; the streaming/collection path applies this in its own loop.
-            if (_hasPostQueryValues && !MatchesPostQueryValuesConstraint())
-                continue;
-
             // Apply DISTINCT - skip duplicate rows
             // This must happen after loading bindings so we can compute the hash
             if (_distinct)

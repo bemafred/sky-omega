@@ -528,6 +528,7 @@ internal partial class QueryExecutor : IDisposable
 
         var select = _buffer.GetSelectClause();
         if (!select.HasRealAggregates) return false;          // not an aggregate query
+        if (_buffer.HasPostQueryValues) return false;         // a trailing VALUES joins before the aggregate — the fold would miss it
         if (select.ProjectedVariableCount > 0) return false;  // a plain SELECT var alongside an aggregate — needs the rows
         if (_buffer.GetGroupByClause().HasGroupBy) return false; // grouping is O(groups), not O(1) — not this fold
         if (_buffer.GetHavingClause().HasHaving) return false;   // HAVING filters the group post-fold — fall back
@@ -586,6 +587,7 @@ internal partial class QueryExecutor : IDisposable
 
         var orderBy = _buffer.GetOrderByClause();
         if (!orderBy.HasOrderBy) return false;        // not an ORDER BY query
+        if (_buffer.HasPostQueryValues) return false; // a trailing VALUES joins (multiplies) before the page — top-K would miss it
         if (_buffer.Limit <= 0) return false;         // no bounding LIMIT — top-K cannot bound it (result floor)
         if (_buffer.SelectDistinct) return false;     // DISTINCT must dedup before the top-N — fall back
         var select = _buffer.GetSelectClause();
@@ -658,14 +660,22 @@ internal partial class QueryExecutor : IDisposable
                 && !_buffer.GetHavingClause().HasHaving
                 && _buffer.GetSelectClause().AggregateCount == 0
                 && !_buffer.SelectDistinct
+                && !_buffer.HasPostQueryValues   // a trailing VALUES joins AFTER the BGP — it can multiply rows, so the cap is invalid
                 && TreeJoinExecutor.IsPureBgp(ref tree, root))
             {
                 long cap = (long)_buffer.Offset + _buffer.Limit;
                 if (cap < int.MaxValue) maxRows = (int)cap;
             }
 
-            return new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree).Evaluate(ref tree, root, "", maxRows);
+            var executor = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree);
+            var rows = executor.Evaluate(ref tree, root, "", maxRows);
+
+            // A trailing (post-query) VALUES is JOINED with the whole-pattern solution (multiply + bind), not filtered.
+            if (_buffer.HasPostQueryValues)
+                rows = executor.JoinPostQueryValues(rows, _buffer.PostQueryValues);
+
+            return rows;
         }
         finally
         {
