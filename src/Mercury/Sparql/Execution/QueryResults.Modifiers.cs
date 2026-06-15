@@ -46,7 +46,12 @@ internal ref partial struct QueryResults
             // (already evaluated during collection, _isMaterialized=false) is not re-evaluated — a second eval would
             // diverge for non-deterministic expressions (UUID/RAND/NOW). _buffer is the tree path's buffer.
             if (_isMaterialized && _buffer != null)
+            {
+                // Per-row bnode seed so BNODE(str) yields a fresh blank node per row (same str → same bnode WITHIN a row,
+                // different across rows), matching the streaming/collection path (W3C bnode01).
+                BindExpressionEvaluator.IncrementBnodeRowSeed();
                 EvaluateSelectExpressions();
+            }
 
             // Apply regular FILTER clauses (for pre-materialized results from GRAPH clauses)
             if (_hasFilters)
