@@ -1606,6 +1606,27 @@ internal ref struct TriplePatternScan
     }
 
     /// <summary>
+    /// The matching form of a bound variable. A numeric or boolean binding (e.g. a BIND result) carries a BARE lexical
+    /// ("2") plus its datatype tag (ADR-047: MaterializedRow preserves the tag), so to match a stored typed literal
+    /// ("2"^^xsd:integer) the scan needs the canonical typed form. A triple-bound value is already a full term
+    /// (Type=String) and is returned verbatim — so this never double-types one.
+    /// </summary>
+    private ReadOnlySpan<char> CanonicalBoundValue(int idx)
+    {
+        var value = _initialBindings.GetString(idx);
+        string? datatype = _initialBindings.GetType(idx) switch
+        {
+            BindingValueType.Integer => "integer",
+            BindingValueType.Double => "double",
+            BindingValueType.Boolean => "boolean",
+            _ => null,
+        };
+        if (datatype == null) return value;
+        _literalScratch = $"\"{value}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>";
+        return _literalScratch.AsSpan();
+    }
+
+    /// <summary>
     /// Resolve term for query with position-based string storage.
     /// Expanded IRIs are stored as strings in position-specific fields to ensure
     /// span lifetime safety when multiple terms are resolved simultaneously.
@@ -1632,7 +1653,7 @@ internal ref struct TriplePatternScan
             var varName = _source.Slice(term.Start, term.Length);
             var idx = _initialBindings.FindBinding(varName);
             if (idx >= 0)
-                return _initialBindings.GetString(idx);
+                return CanonicalBoundValue(idx);
             return ReadOnlySpan<char>.Empty;
         }
 
@@ -1730,7 +1751,7 @@ internal ref struct TriplePatternScan
             var varName = _source.Slice(term.Start, term.Length);
             var idx = _initialBindings.FindBinding(varName);
             if (idx >= 0)
-                return _initialBindings.GetString(idx);
+                return CanonicalBoundValue(idx);
             return ReadOnlySpan<char>.Empty;
         }
 
@@ -2174,7 +2195,20 @@ internal ref struct TriplePatternScan
         {
             // Must match existing binding
             var existingValue = bindings.GetString(existingIndex);
-            return value.SequenceEqual(existingValue);
+            if (value.SequenceEqual(existingValue))
+                return true;
+
+            // ADR-047: a numeric/boolean binding (e.g. a BIND result) stores a BARE lexical ("2") plus its datatype tag,
+            // while the matched term is the full typed literal ("2"^^xsd:integer). Compare value-aware — the typed
+            // literal's lexical part against the bare existing value — so BIND(?o+1 AS ?z) … ?p ?z joins (W3C bind03).
+            if (bindings.GetType(existingIndex) is BindingValueType.Integer or BindingValueType.Double or BindingValueType.Boolean
+                && value.Length > 1 && value[0] == '"')
+            {
+                int closeQuote = value.LastIndexOf('"');
+                if (closeQuote > 0)
+                    return value.Slice(1, closeQuote - 1).SequenceEqual(existingValue);
+            }
+            return false;
         }
 
         // Bind new variable

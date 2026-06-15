@@ -334,7 +334,17 @@ internal sealed class TreeJoinExecutor
                 table.TruncateTo(0);
                 row.RestoreBindings(ref table);
                 var evaluator = new BindExpressionEvaluator(exprText.AsSpan(), table.GetBindings(), table.Count, table.GetStringBuffer());
-                table.Bind(varName.AsSpan(), Render(evaluator.Evaluate(_prefixes, _prefixSource.AsSpan())).AsSpan());
+                // Bind via the typed overloads so the result carries its RDF datatype tag (Integer/Double/Boolean), which
+                // MaterializedRow now preserves. A numeric BIND result then reads back as its lexical form yet still
+                // matches a stored typed literal when it feeds a later pattern (W3C bind03).
+                var v = evaluator.Evaluate(_prefixes, _prefixSource.AsSpan());
+                switch (v.Type)
+                {
+                    case ExprValueType.Integer: table.Bind(varName.AsSpan(), v.IntegerValue); break;
+                    case ExprValueType.Double: table.Bind(varName.AsSpan(), v.DoubleValue); break;
+                    case ExprValueType.Boolean: table.Bind(varName.AsSpan(), v.BooleanValue); break;
+                    default: table.Bind(varName.AsSpan(), v.StringValue); break;
+                }
                 output.Add(new MaterializedRow(table));
             }
             return output;
@@ -1026,12 +1036,4 @@ internal sealed class TreeJoinExecutor
             graphs.Add(activeGraph);
         }
     }
-
-    private static string Render(Value value) => value.Type switch
-    {
-        ExprValueType.Integer => value.IntegerValue.ToString(CultureInfo.InvariantCulture),
-        ExprValueType.Double => value.DoubleValue.ToString("G", CultureInfo.InvariantCulture),
-        ExprValueType.Boolean => value.BooleanValue ? "true" : "false",
-        _ => value.StringValue.ToString(),
-    };
 }

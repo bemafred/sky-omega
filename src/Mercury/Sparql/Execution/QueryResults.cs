@@ -1102,6 +1102,7 @@ internal sealed class MaterializedRow
 {
     private readonly int[] _hashes;
     private readonly string[] _values;
+    private readonly BindingValueType[] _types;   // ADR-047: keep each value's datatype tag (see RestoreBindings)
     private readonly int _count;
 
     public int BindingCount => _count;
@@ -1111,12 +1112,14 @@ internal sealed class MaterializedRow
         _count = bindings.Count;
         _hashes = new int[_count];
         _values = new string[_count];
+        _types = new BindingValueType[_count];
 
         var bindingSpan = bindings.GetBindings();
         for (int i = 0; i < _count; i++)
         {
             _hashes[i] = bindingSpan[i].VariableNameHash;
             _values[i] = bindings.GetString(i).ToString();
+            _types[i] = bindingSpan[i].Type;
         }
     }
 
@@ -1142,7 +1145,9 @@ internal sealed class MaterializedRow
     {
         for (int i = 0; i < _count; i++)
         {
-            bindings.BindWithHash(_hashes[i], _values[i].AsSpan());
+            // Restore WITH the datatype tag: a numeric/boolean binding (a BIND result) keeps "2"+Integer rather than a
+            // plain "2", so when it seeds a later pattern scan the scan can match it against the stored typed literal.
+            bindings.BindWithHash(_hashes[i], _values[i].AsSpan(), _types[i]);
         }
     }
 

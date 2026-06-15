@@ -172,6 +172,40 @@ internal ref struct BindingTable
     }
 
     /// <summary>
+    /// Bind a value using a pre-computed hash AND its datatype tag. Used to RESTORE a materialized row so a numeric
+    /// or boolean binding (e.g. a BIND result) keeps its type — without it the value reads back as a plain string and
+    /// a later pattern scan cannot match it against a stored typed literal (ADR-047 / W3C bind03).
+    /// </summary>
+    public void BindWithHash(int variableNameHash, ReadOnlySpan<char> value, BindingValueType type)
+    {
+        if (_count >= _bindings.Length) return;
+        if (_stringOffset + value.Length > _stringBuffer.Length) return;
+
+        value.CopyTo(_stringBuffer.Slice(_stringOffset));
+
+        ref var binding = ref _bindings[_count++];
+        binding.VariableNameHash = variableNameHash;
+        binding.Type = type;
+        binding.StringOffset = _stringOffset;
+        binding.StringLength = value.Length;
+        binding.BindScopeDepth = -1;
+
+        // Reconstruct the denormalized typed value from the lexical so consumers that read IntegerValue/DoubleValue/
+        // BooleanValue for a numeric/boolean binding (e.g. FilterEvaluator) see the real value, not a zero default.
+        switch (type)
+        {
+            case BindingValueType.Integer when long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l):
+                binding.IntegerValue = l; break;
+            case BindingValueType.Double when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d):
+                binding.DoubleValue = d; break;
+            case BindingValueType.Boolean:
+                binding.BooleanValue = value.SequenceEqual("true"); break;
+        }
+
+        _stringOffset += value.Length;
+    }
+
+    /// <summary>
     /// Set the scope depth of the last added binding.
     /// Call this after Bind() when adding a binding from a BIND expression.
     /// </summary>
