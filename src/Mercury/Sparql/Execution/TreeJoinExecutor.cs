@@ -55,12 +55,16 @@ internal sealed class TreeJoinExecutor
     private readonly bool _reorderBgp;
     private readonly long _guardCap; // StorageOptions.MaxResultRows — the unbounded-result guard (0 = unbounded)
     private QueryPlanner? _planner;
+    // ADR-024 trigram pre-filter: object-variable name → candidate object atom IDs from text:match. A pattern whose
+    // object is one of these variables scans candidate-filtered (the old MultiPatternScan integration, now in the tree).
+    private readonly Dictionary<string, HashSet<long>>? _trigramCandidatesByVar;
 
     public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
         string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
         TemporalQueryMode temporalMode = TemporalQueryMode.Current,
         DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default,
-        string[]? namedGraphs = null, bool reorderBgp = false)
+        string[]? namedGraphs = null, bool reorderBgp = false,
+        Dictionary<string, HashSet<long>>? trigramCandidatesByVar = null)
     {
         _store = store;
         _source = source;
@@ -74,6 +78,17 @@ internal sealed class TreeJoinExecutor
         _namedGraphs = namedGraphs;
         _reorderBgp = reorderBgp;
         _guardCap = store.MaxResultRows;
+        _trigramCandidatesByVar = trigramCandidatesByVar;
+    }
+
+    /// <summary>The trigram candidate object atom IDs for a pattern whose object is a text:match variable (simple
+    /// forward pattern only — the candidate filter is an object-position pre-filter), or null.</summary>
+    private HashSet<long>? ObjectCandidatesFor(in TriplePattern p)
+    {
+        if (_trigramCandidatesByVar == null || p.Path.Type != PathType.None || !p.Object.IsVariable)
+            return null;
+        var varName = _source.AsSpan(p.Object.Start + 1, p.Object.Length - 1); // skip '?'
+        return _trigramCandidatesByVar.TryGetValue(varName.ToString(), out var c) ? c : null;
     }
 
     // LIMIT-pushdown row cap (ADR-045): when the query is a pure BGP with LIMIT and no order/group/distinct/having
@@ -853,7 +868,7 @@ internal sealed class TreeJoinExecutor
         }
 
         var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
             // Stop the nested-loop scan as soon as the cap is reached — the work-saving heart of LIMIT-pushdown.
@@ -922,7 +937,7 @@ internal sealed class TreeJoinExecutor
         }
 
         var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
             while (scan.MoveNext(ref bindings))
@@ -1013,7 +1028,7 @@ internal sealed class TreeJoinExecutor
         }
 
         var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes);
+            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
             while (scan.MoveNext(ref bindings))

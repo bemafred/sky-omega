@@ -1248,6 +1248,25 @@ internal ref partial struct SparqlParser
         SkipWhitespace();
         var ch = Peek();
 
+        // ADR-047 pp31: a grouped leg, e.g. (p1|p2) in (p1|p2)/(p3|p4). ParseTerm cannot parse a group, which is why
+        // this weaker re-parser dropped grouped alternations; find the matching ')' within the segment and recurse on
+        // the inner path (a group is transparent for our PropertyPath model — (P) ≡ P).
+        if (ch == '(')
+        {
+            int innerStart = _position + 1;
+            int depth = 1, p = innerStart;
+            while (p < segmentEnd && depth > 0)
+            {
+                char c = _source[p];
+                if (c == '(') depth++;
+                else if (c == ')') { depth--; if (depth == 0) break; }
+                p++;
+            }
+            var (groupTerm, groupPath) = ParsePathSegment(innerStart, p - innerStart);
+            _position = savedPosition;
+            return (groupTerm, groupPath);
+        }
+
         Term term;
         PropertyPath resultPath = default;
 

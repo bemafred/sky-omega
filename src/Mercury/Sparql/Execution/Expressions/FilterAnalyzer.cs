@@ -435,7 +435,8 @@ internal static class FilterAnalyzer
             {
                 SearchTerm = searchTerm,
                 PatternLevel = objectLevel,
-                FilterIndex = i
+                FilterIndex = i,
+                VarName = varName.ToString() // the object variable, so the tree can map by variable (it reorders levels)
             });
         }
 
@@ -476,4 +477,7 @@ internal struct TextMatchHint
 
     /// <summary>Index of the filter in the graph pattern.</summary>
     public int FilterIndex;
+
+    /// <summary>The object variable name (without '?') — the tree maps trigram candidates by variable, not level.</summary>
+    public string VarName;
 }

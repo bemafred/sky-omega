@@ -105,6 +105,7 @@ internal ref struct TriplePatternScan
     private string? _expandedPredicate;
     private string? _expandedObject;
     private string? _literalScratch; // ADR-044: scratch owner for canonicalized literals
+    private readonly HashSet<long>? _trigramObjectCandidates; // ADR-024: text:match pre-filter candidate object atom IDs
 
     public TriplePatternScan(QuadStore store, ReadOnlySpan<char> source,
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph = default)
@@ -117,8 +118,9 @@ internal ref struct TriplePatternScan
         TriplePattern pattern, BindingTable initialBindings, ReadOnlySpan<char> graph,
         TemporalQueryMode temporalMode, DateTimeOffset asOfTime,
         DateTimeOffset rangeStart, DateTimeOffset rangeEnd,
-        PrefixMapping[]? prefixes = null)
+        PrefixMapping[]? prefixes = null, HashSet<long>? trigramObjectCandidates = null)
     {
+        _trigramObjectCandidates = trigramObjectCandidates;
         _store = store;
         _source = source;
         _pattern = pattern;
@@ -881,6 +883,12 @@ internal ref struct TriplePatternScan
     private TemporalResultEnumerator ExecuteTemporalQuery(
         ReadOnlySpan<char> subject, ReadOnlySpan<char> predicate, ReadOnlySpan<char> obj)
     {
+        // ADR-024 trigram pre-filter: when the object position is a text:match variable, the caller passes the
+        // trigram candidate atom IDs so the scan skips non-candidate objects at the index level (set only for a simple
+        // forward pattern, whose ONLY query is this basic scan, so the object is genuinely the object position).
+        if (_trigramObjectCandidates != null && _temporalMode == TemporalQueryMode.Current)
+            return _store.QueryCurrentWithCandidates(subject, predicate, obj, _trigramObjectCandidates, _graph);
+
         return _temporalMode switch
         {
             TemporalQueryMode.AsOf =>

@@ -667,8 +667,20 @@ internal partial class QueryExecutor : IDisposable
                 if (cap < int.MaxValue) maxRows = (int)cap;
             }
 
+            // ADR-024: text:match trigram pre-filter — resolve candidate object atom IDs per text:match variable so the
+            // tree's scan filters at the index level (the integration the old MultiPatternScan had; mandatory at scale).
+            Dictionary<string, HashSet<long>>? trigramMap = null;
+            var textHints = FilterAnalyzer.DetectTextMatchFilters(in _cachedPattern, _source.AsSpan(), null);
+            if (textHints != null)
+                foreach (var hint in textHints)
+                {
+                    var candidates = _store.QueryTrigramCandidates(hint.SearchTerm.AsSpan());
+                    if (candidates.Count > 0)
+                        (trigramMap ??= new Dictionary<string, HashSet<long>>())[hint.VarName] = new HashSet<long>(candidates);
+                }
+
             var executor = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree, trigramMap);
             var rows = executor.Evaluate(ref tree, root, "", maxRows);
 
             // A trailing (post-query) VALUES is JOINED with the whole-pattern solution (multiply + bind), not filtered.
@@ -1110,6 +1122,15 @@ internal partial class QueryExecutor : IDisposable
         {
             return ExecuteWithDefaultGraphs();
         }
+
+        // ADR-047 CUTOVER (the flip): the default plain-BGP path runs through the unified zero-GC tree executor — the
+        // same one GRAPH queries use (ADR-045, "a default graph is also a graph"). Validated at 1TB WDBench breadth:
+        // the tree is correct (more correct than the old contaminated oracle on var-predicate joins, chained OPTIONAL,
+        // and path reflexives) and parity-to-4x faster, never the slower path. VALUES+triple remains the one carve-out
+        // (its two tree gaps — numeric canonicalization and zero-length-path-over-VALUES — not yet closed); it, and the
+        // sub-query / FROM / SERVICE branches above, still reach the old slot operators, which a later phase deletes.
+        if (!_buffer.HasValues)
+            return ExecuteViaTreeMaterialized();
 
         // NOTE: VALUES combined with triple patterns is NOT routed through the tree executor yet. The old default
         // BGP path below handles it incompletely (drops a non-join VALUES variable, ignores trailing VALUES), but

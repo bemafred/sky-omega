@@ -144,20 +144,16 @@ public class DefaultVsTreeDifferentialTests : IDisposable
     [InlineData("zoo-bare", "SELECT ?s ?o ?x WHERE { ?s <urn:p> ?o . ?o <urn:next>? ?x }")]
     [InlineData("zom", "SELECT ?s ?o ?x WHERE { ?s <urn:p> ?o . ?o <urn:next>* ?x }")]
     [InlineData("zoo-proj-x", "SELECT ?x WHERE { ?s <urn:p> ?o . ?o (<urn:next>)? ?x }")]
-    public void PathReflexive_BoundSubject_TreeIsW3CCorrect_OldDropsReflexives(string name, string query)
+    public void PathReflexive_BoundSubject_DefaultPathEmitsTheW3CReflexives(string name, string query)
     {
-        var tree = SparqlEngine.QueryViaTreeForDifferential(_store, query);
-        var old = SparqlEngine.Query(_store, query);
-        _output.WriteLine($"[{name}] tree: {Describe(tree)}");
-        _output.WriteLine($"[{name}] old:  {Describe(old)}");
-        Assert.True(tree.Success, $"[{name}] tree: {tree.ErrorMessage}");
-        Assert.True(old.Success, $"[{name}] old: {old.ErrorMessage}");
-
-        // The tree emits the zero-length reflexive per bound ?o — the three W3C-correct solutions.
-        Assert.True(tree.Rows!.Count == 3, $"[{name}] expected the 3 W3C solutions; got {Describe(tree)}");
-        // The old path drops the reflexives in the join context — one row. This is the bug the cutover fixes; the
-        // assertion pins it so a future change to the (soon-deleted) old path can't silently re-flip the divergence.
-        Assert.True(old.Rows!.Count == 1, $"[{name}] expected the old path to drop the reflexives (1 row); got {Describe(old)}");
+        // ADR-047 cutover: the default path IS the tree now, so SparqlEngine.Query emits the zero-length reflexive per
+        // bound ?o — the three W3C-correct solutions. This pinned the old-vs-tree divergence DURING the cutover (the old
+        // path dropped the reflexives in the join context); the flip eliminated it, so it now asserts the default path
+        // directly as a regression guard.
+        var result = SparqlEngine.Query(_store, query);
+        _output.WriteLine($"[{name}] default: {Describe(result)}");
+        Assert.True(result.Success, $"[{name}] {result.ErrorMessage}");
+        Assert.True(result.Rows!.Count == 3, $"[{name}] expected the 3 W3C reflexive solutions; got {Describe(result)}");
     }
 
     [Fact]
