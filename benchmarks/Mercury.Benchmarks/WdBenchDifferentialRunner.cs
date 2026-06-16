@@ -66,6 +66,10 @@ public static class WdBenchDifferentialRunner
         var verdictCounts = new Dictionary<string, int>();
         var divergent = new List<(string File, string Verdict, Digest Old, Digest Tree)>();
         var keyBuffer = new List<string>(16); // reused across rows to bound hashing allocation
+        // ADR-047 perf prerequisite: per-query latency, old vs tree, on the same Reference store (both-completed only,
+        // so a timeout/error on either path does not skew the comparison). This is the Reference-scale planner check.
+        var oldTimesMs = new List<double>();
+        var treeTimesMs = new List<double>();
         var globalStopwatch = Stopwatch.StartNew();
 
         for (int i = 0; i < queryFiles.Count; i++)
@@ -75,8 +79,17 @@ public static class WdBenchDifferentialRunner
             try { sparql = File.ReadAllText(file); }
             catch (Exception ex) { Console.Error.WriteLine($"  read-failed {Path.GetFileName(file)}: {ex.Message}"); continue; }
 
+            var swOld = Stopwatch.StartNew();
             var oldDigest = RunAndDigest(pool.Active, sparql, opts.PerQueryTimeout, tree: false, opts.ReorderBgp, keyBuffer);
+            swOld.Stop();
+            var swTree = Stopwatch.StartNew();
             var treeDigest = RunAndDigest(pool.Active, sparql, opts.PerQueryTimeout, tree: true, opts.ReorderBgp, keyBuffer);
+            swTree.Stop();
+            if (oldDigest.Status == RunStatus.Completed && treeDigest.Status == RunStatus.Completed)
+            {
+                oldTimesMs.Add(swOld.Elapsed.TotalMilliseconds);
+                treeTimesMs.Add(swTree.Elapsed.TotalMilliseconds);
+            }
             string verdict = Classify(oldDigest, treeDigest);
 
             verdictCounts.TryGetValue(verdict, out int c);
@@ -109,6 +122,19 @@ public static class WdBenchDifferentialRunner
         Console.WriteLine($"  CORRECTNESS divergences (result_divergent + error_asymmetric): {divergent.Count}");
         if (divergent.Count == 0)
             Console.WriteLine("  ✓ the tree path matches the old path on every compared query.");
+
+        if (oldTimesMs.Count > 0)
+        {
+            oldTimesMs.Sort(); treeTimesMs.Sort();
+            static double Med(List<double> xs) => xs[xs.Count / 2];
+            static double P95(List<double> xs) => xs[Math.Min(xs.Count - 1, (int)(xs.Count * 0.95))];
+            static double Tot(List<double> xs) { double t = 0; foreach (var x in xs) t += x; return t; }
+            Console.WriteLine();
+            Console.WriteLine($"  PERF (both paths completed: {oldTimesMs.Count} queries) — per-query ms on the Reference store:");
+            Console.WriteLine($"    old   median={Med(oldTimesMs),8:F2}  p95={P95(oldTimesMs),9:F2}  total={Tot(oldTimesMs),10:F0}");
+            Console.WriteLine($"    tree  median={Med(treeTimesMs),8:F2}  p95={P95(treeTimesMs),9:F2}  total={Tot(treeTimesMs),10:F0}");
+            Console.WriteLine($"    tree/old total ratio: {Tot(treeTimesMs) / Tot(oldTimesMs):F2}x  (the Reference-scale planner check)");
+        }
 
         if (report is not null)
         {
