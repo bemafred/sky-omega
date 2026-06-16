@@ -329,6 +329,23 @@ internal static class FilterAnalyzer
 
     private static int ComputeHash(ReadOnlySpan<char> value) => Fnv1a.Hash(value);
 
+    /// <summary>True if the expression contains a logical-OR operator (<c>||</c>) outside of string literals.</summary>
+    private static bool ContainsDisjunction(ReadOnlySpan<char> expr)
+    {
+        for (int i = 0; i + 1 < expr.Length; i++)
+        {
+            char c = expr[i];
+            if (c == '"' || c == '\'')
+            {
+                char q = c; i++;
+                while (i < expr.Length && expr[i] != q) { if (expr[i] == '\\') i++; i++; }
+                continue;
+            }
+            if (c == '|' && expr[i + 1] == '|') return true;
+        }
+        return false;
+    }
+
     /// <summary>
     /// Detect text:match(?var, "constant") filters suitable for trigram pre-filtering.
     /// Only filters where the variable is bound to an object position qualify.
@@ -348,6 +365,14 @@ internal static class FilterAnalyzer
         {
             var filter = pattern.GetFilter(i);
             var expr = source.Slice(filter.Start, filter.Length);
+
+            // Trigram pre-filter safety: a text:match inside a DISJUNCTION is not a required conjunct of the filter,
+            // so restricting the variable to that one term's candidate atoms would drop rows that satisfy ANOTHER
+            // branch (e.g. text:match(?n,"Stock") || text:match(?n,"Malmö") — pre-filtering ?n to "Stock" candidates
+            // loses Malmö). Skip the hint for any filter containing '||' (outside string literals); FilterEvaluator
+            // still evaluates text:match exactly, so the result stays correct — only the index pre-filter is forgone.
+            if (ContainsDisjunction(expr))
+                continue;
 
             // Skip leading parenthesis (FilterExpr Start is after FILTER keyword, includes parens)
             var inner = expr;

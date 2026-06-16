@@ -698,24 +698,24 @@ internal partial class QueryExecutor : IDisposable
     /// <summary>
     /// Locate THIS-statement's WHERE-group opening '{'. The source can be a whole multi-statement UPDATE (a naive text
     /// search for "WHERE" would find the wrong statement, and the first '{' is the DELETE/INSERT template), so anchor on
-    /// the buffer, which is per-statement. With a GRAPH clause the WHERE group encloses it, so the '{' is the one
-    /// immediately before the first graph header's term. Without one, bound the search by this statement's earliest
-    /// triple-pattern term (also a per-statement offset) and take the WHERE keyword at or before it: that skips a
-    /// preceding DELETE/INSERT template '{ ... }' and any earlier statement's WHERE — both of which the bare first-'{'
-    /// would wrongly select, so the tree scanned the template and INSERT/DELETE … WHERE silently did nothing. (For a
-    /// plain SELECT the term sits just inside the WHERE group, so this resolves to the same '{' as the first-'{' did.)
+    /// the buffer, which is per-statement.
+    /// <para>
+    /// Primary: bound the search by this statement's earliest triple-pattern term (a per-statement offset) and take the
+    /// WHERE keyword at or before it; the WHERE group's '{' is the first '{' after that keyword. That skips a preceding
+    /// DELETE/INSERT template '{ … }' and any earlier statement's WHERE. Crucially it is also robust to a GRAPH header
+    /// nested inside EXISTS / MINUS / a sub-group: keying off the first graph header (the fallback below) would pick the
+    /// brace of THAT nested group, so the tree parsed and ran only the sub-pattern as the whole query — dropping the
+    /// outer BGP and the EXISTS/MINUS semantics (this is the exists-graph-variable over-match,
+    /// ck:bug-findwheregroupstart-nested-graph).
+    /// </para>
+    /// <para>
+    /// Fallback (no top-level triple, or no WHERE keyword — e.g. a GRAPH-clause-only group <c>SELECT * { GRAPH ?g { … } }</c>):
+    /// the WHERE group encloses the GRAPH clause, so the '{' is the one immediately before the first (outermost,
+    /// document-order) graph header's term.
+    /// </para>
     /// </summary>
     private int FindWhereGroupStart()
     {
-        var patterns = _buffer.GetPatterns();
-        var headers = patterns.EnumerateGraphHeaders();
-        if (headers.MoveNext())
-        {
-            int termStart = System.Math.Min(headers.Current.GraphTermStart, _source.Length - 1);
-            int brace = _source.LastIndexOf('{', termStart);
-            if (brace >= 0) return brace;
-        }
-
         int firstTerm = FirstPatternTermStart();
         if (firstTerm >= 0)
         {
@@ -725,6 +725,15 @@ internal partial class QueryExecutor : IDisposable
                 int brace = _source.IndexOf('{', whereKw);
                 if (brace >= 0 && brace <= firstTerm) return brace;
             }
+        }
+
+        var patterns = _buffer.GetPatterns();
+        var headers = patterns.EnumerateGraphHeaders();
+        if (headers.MoveNext())
+        {
+            int termStart = System.Math.Min(headers.Current.GraphTermStart, _source.Length - 1);
+            int brace = _source.LastIndexOf('{', termStart);
+            if (brace >= 0) return brace;
         }
 
         return _source.IndexOf('{');

@@ -199,7 +199,7 @@ internal sealed class TreeJoinExecutor
         {
             var kind = pa[ci].Kind;
             if (kind == PatternKind.Filter)
-                current = ApplyFilter(ref pa, ci, current);
+                current = ApplyFilter(ref pa, ci, activeGraph, current);
             else if (kind is PatternKind.ExistsHeader or PatternKind.NotExistsHeader)
                 current = ApplyExists(ref pa, ci, activeGraph, current, negated: kind == PatternKind.NotExistsHeader);
         }
@@ -377,10 +377,20 @@ internal sealed class TreeJoinExecutor
     }
 
     /// <summary>FILTER: keep rows for which the constraint holds, via the real <see cref="FilterEvaluator"/>.</summary>
-    private List<MaterializedRow> ApplyFilter(ref PatternArray pa, int filterIndex, List<MaterializedRow> input)
+    private List<MaterializedRow> ApplyFilter(ref PatternArray pa, int filterIndex, string activeGraph, List<MaterializedRow> input)
     {
         var slot = pa[filterIndex];
-        string exprText = _source.Substring(slot.FilterStart, slot.FilterLength);
+        int exprStart = slot.FilterStart;
+        string exprText = _source.Substring(exprStart, slot.FilterLength);
+
+        // A FILTER whose expression EMBEDS [NOT] EXISTS { … } as a sub-expression (e.g. ?a = ?b || NOT EXISTS { … })
+        // — distinct from a standalone FILTER [NOT] EXISTS, which the parser lifts to an ExistsHeader (ApplyExists).
+        // FilterEvaluator has no EXISTS support, so resolve each embedded EXISTS per row against the store and
+        // substitute its truth value into the expression text; any surrounding NOT / ! / || / && is then handled by
+        // FilterEvaluator. (W3C subset-02 — NOT EXISTS inside a MINUS's FILTER.)
+        var existsSpans = FindEmbeddedExists(exprText);
+        if (existsSpans.Count > 0)
+            return ApplyFilterWithEmbeddedExists(exprText, exprStart, existsSpans, activeGraph, input);
 
         var output = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
@@ -405,6 +415,117 @@ internal sealed class TreeJoinExecutor
             ArrayPool<Binding>.Shared.Return(bindingArray);
             ArrayPool<char>.Shared.Return(charArray);
         }
+    }
+
+    /// <summary>
+    /// FILTER with an EXISTS embedded in a compound expression: per row, substitute each <c>EXISTS { … }</c> with its
+    /// truth value (evaluated against the store, seeded with the row so its bound variables constrain the body), then
+    /// evaluate the rewritten expression. The body is re-parsed over THIS executor's source (offsets index it) and run
+    /// through the same <see cref="EvalGroup"/> as everything else, so a nested GRAPH / FILTER / EXISTS inside it works.
+    /// </summary>
+    private List<MaterializedRow> ApplyFilterWithEmbeddedExists(string exprText, int exprStart,
+        List<(int start, int end, int braceRel)> existsSpans, string activeGraph, List<MaterializedRow> input)
+    {
+        var output = new List<MaterializedRow>();
+        var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
+        var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
+        try
+        {
+            var table = new BindingTable(bindingArray.AsSpan(0, 64), charArray.AsSpan(0, 1 << 13));
+            var sb = new System.Text.StringBuilder(exprText.Length);
+            foreach (var row in input)
+            {
+                sb.Clear();
+                int cursor = 0;
+                foreach (var (start, end, braceRel) in existsSpans)
+                {
+                    sb.Append(exprText, cursor, start - cursor);
+                    bool exists = ExistsBodyHasMatch(exprStart + braceRel, activeGraph, row);
+                    sb.Append(exists ? "true" : "false");
+                    cursor = end;
+                }
+                sb.Append(exprText, cursor, exprText.Length - cursor);
+                string rewritten = sb.ToString();
+
+                table.TruncateTo(0);
+                row.RestoreBindings(ref table);
+                var evaluator = new FilterEvaluator(rewritten.AsSpan());
+                bool pass = _prefixes is not null
+                    ? evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer(), _prefixes, _prefixSource.AsSpan())
+                    : evaluator.Evaluate(table.GetBindings(), table.Count, table.GetStringBuffer());
+                if (pass) output.Add(row);
+            }
+            return output;
+        }
+        finally
+        {
+            ArrayPool<Binding>.Shared.Return(bindingArray);
+            ArrayPool<char>.Shared.Return(charArray);
+        }
+    }
+
+    /// <summary>True iff the EXISTS body at <paramref name="braceOffset"/> (the body's '{' in this executor's source)
+    /// has at least one solution when seeded with <paramref name="row"/>'s bindings (which constrain it).</summary>
+    private bool ExistsBodyHasMatch(int braceOffset, string activeGraph, MaterializedRow row)
+    {
+        const int treeBytes = PatternSlot.Size * 256;
+        var buf = ArrayPool<byte>.Shared.Rent(treeBytes);
+        try
+        {
+            var subPa = new PatternArray(buf.AsSpan(0, treeBytes));
+            int subRoot = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(braceOffset, ref subPa);
+            return EvalGroup(ref subPa, subRoot, activeGraph, new List<MaterializedRow> { row }).Count > 0;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buf);
+        }
+    }
+
+    /// <summary>
+    /// Locate each <c>EXISTS { … }</c> embedded in a FILTER expression (keyword + braced body), skipping string
+    /// literals so an "EXISTS" inside a quoted string is not matched. Returns (start, endExclusive, braceRel) per
+    /// occurrence, braceRel being the body '{' offset within <paramref name="expr"/>. A leading NOT is intentionally
+    /// left in place — the caller substitutes the bare EXISTS truth value and lets FilterEvaluator apply NOT / '!'.
+    /// </summary>
+    private static List<(int start, int end, int braceRel)> FindEmbeddedExists(string expr)
+    {
+        var spans = new List<(int, int, int)>();
+        int i = 0;
+        while (i < expr.Length)
+        {
+            char c = expr[i];
+            if (c == '"' || c == '\'')
+            {
+                char q = c; i++;
+                while (i < expr.Length && expr[i] != q) { if (expr[i] == '\\') i++; i++; }
+                i++; // closing quote
+                continue;
+            }
+            if ((c == 'E' || c == 'e') && IsKeywordAt(expr, i, "EXISTS"))
+            {
+                int braceRel = expr.IndexOf('{', i + 6);
+                if (braceRel < 0) break;
+                int braceEnd = MatchBrace(expr, braceRel);
+                spans.Add((i, braceEnd + 1, braceRel));
+                i = braceEnd + 1;
+                continue;
+            }
+            i++;
+        }
+        return spans;
+    }
+
+    /// <summary>Whether the case-insensitive keyword sits at <paramref name="pos"/> with non-identifier boundaries.</summary>
+    private static bool IsKeywordAt(string s, int pos, string kw)
+    {
+        if (pos + kw.Length > s.Length) return false;
+        for (int k = 0; k < kw.Length; k++)
+            if (char.ToUpperInvariant(s[pos + k]) != kw[k]) return false;
+        if (pos > 0 && (char.IsLetterOrDigit(s[pos - 1]) || s[pos - 1] == '_')) return false;
+        int after = pos + kw.Length;
+        if (after < s.Length && (char.IsLetterOrDigit(s[after]) || s[after] == '_')) return false;
+        return true;
     }
 
     /// <summary>
