@@ -103,7 +103,14 @@ internal sealed class TreeJoinExecutor
     public List<MaterializedRow> Evaluate(ref PatternArray pa, int rootHeader, string activeGraph, int maxRows = int.MaxValue)
     {
         _maxRows = maxRows;
-        return EvalGroup(ref pa, rootHeader, activeGraph, new List<MaterializedRow> { EmptyRow() });
+        var seed = new List<MaterializedRow> { EmptyRow() };
+        // A WHERE that IS a bare sub-SELECT (single-braced `WHERE { SELECT … }`) or SERVICE parses to THAT header as the
+        // root, not a GroupHeader wrapping it — so dispatch it directly; EvalGroup would enumerate its (zero) children
+        // and return the seed unchanged (the sub-SELECT never runs — W3C basic-update insert-05a etc.).
+        var rootKind = pa[rootHeader].Kind;
+        if (rootKind is PatternKind.SubSelectHeader or PatternKind.ServiceHeader)
+            return JoinOperator(ref pa, rootHeader, rootKind, activeGraph, seed);
+        return EvalGroup(ref pa, rootHeader, activeGraph, seed);
     }
 
     /// <summary>
@@ -731,26 +738,36 @@ internal sealed class TreeJoinExecutor
     private List<MaterializedRow> SubSelectStep(ref PatternArray pa, int headerIndex, string activeGraph, List<MaterializedRow> input)
     {
         var slot = pa[headerIndex];
-        string subSrc = _source.Substring(slot.GraphTermStart, slot.GraphTermLength);
-        var sub = new SparqlParser(subSrc.AsSpan()).ParseSubSelectCore();
+        int subStart = slot.GraphTermStart; // absolute offset of the sub-SELECT in _source
 
-        int open = subSrc.IndexOf('{');
-        int close = MatchBrace(subSrc, open);
-        string innerWhere = subSrc.Substring(open, close - open + 1);
+        // ADR-047 — evaluate the sub-SELECT in the ONE source/offset regime. Parse its clauses AND its body at absolute
+        // offsets over _source, the same string the prologue prefixes index, so a prefixed name in the body expands
+        // against the same source. (The old code sliced subSrc/innerWhere substrings and handed them to a second
+        // executor as its source, while the prefix mappings still indexed the outer prologue — so prefix expansion
+        // sliced the substring at a prologue offset and threw ArgumentOutOfRange on any prefixed inner term.)
+        var sub = new SparqlParser(_source.AsSpan()).ParseSubSelectCoreAt(subStart);
+
+        int whereBrace = _source.IndexOf('{', subStart); // the body's '{' (first brace after the SELECT clause)
+        int whereClose = MatchBrace(_source, whereBrace);
         var innerBuffer = new byte[PatternSlot.Size * 256];
         var innerPa = new PatternArray(innerBuffer);
-        int innerRoot = new SparqlParser(innerWhere.AsSpan()).ParsePatternTree(ref innerPa);
-        var innerBag = new TreeJoinExecutor(_store, innerWhere, _prefixes, _prefixSource, _serviceExecutor,
+        int innerRoot = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereBrace, ref innerPa);
+        var innerBag = new TreeJoinExecutor(_store, _source, _prefixes, _prefixSource, _serviceExecutor,
                 _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs)
             .Evaluate(ref innerPa, innerRoot, activeGraph);
+
+        // A trailing VALUES inside the sub-SELECT joins its WHERE solutions BEFORE the modifier layer (W3C inline02).
+        // sub.Values offsets index _source (parsed at absolute offset above), so the shared join reuses _source.
+        if (sub.Values.HasValues)
+            innerBag = JoinPostQueryValues(innerBag, sub.Values);
 
         var selectClause = BuildSelectClause(sub);
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
-        var qr = QueryResults.FromMaterializedSimple(innerBag, subSrc.AsSpan(), _store, qrBindings, qrStringBuffer,
+        var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
             sub.Limit, sub.Offset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
 
-        var outNames = OutputVarNames(sub, subSrc, innerWhere);
+        var outNames = OutputVarNames(sub, _source, whereBrace, whereClose);
         var projected = new List<MaterializedRow>();
         var bindingArray = ArrayPool<Binding>.Shared.Rent(64);
         var charArray = ArrayPool<char>.Shared.Rent(1 << 13);
@@ -790,19 +807,20 @@ internal sealed class TreeJoinExecutor
         return sc;
     }
 
-    private static List<string> OutputVarNames(SubSelect sub, string subSrc, string innerWhere)
+    private static List<string> OutputVarNames(SubSelect sub, string source, int whereBrace, int whereClose)
     {
         var names = new List<string>();
         var seen = new HashSet<string>();
         if (sub.SelectAll)
         {
-            // SELECT * — the output variables are the inner WHERE's variables, in first-seen order.
-            for (int i = 0; i < innerWhere.Length; i++)
+            // SELECT * — the output variables are the body's variables, in first-seen order, scanned over the body's
+            // span (whereBrace..whereClose) in the one source.
+            for (int i = whereBrace; i <= whereClose && i < source.Length; i++)
             {
-                if (innerWhere[i] != '?') continue;
+                if (source[i] != '?') continue;
                 int j = i + 1;
-                while (j < innerWhere.Length && (char.IsLetterOrDigit(innerWhere[j]) || innerWhere[j] == '_')) j++;
-                if (j > i + 1 && seen.Add(innerWhere.Substring(i + 1, j - i - 1))) names.Add(innerWhere.Substring(i + 1, j - i - 1));
+                while (j < source.Length && (char.IsLetterOrDigit(source[j]) || source[j] == '_')) j++;
+                if (j > i + 1 && seen.Add(source.Substring(i + 1, j - i - 1))) names.Add(source.Substring(i + 1, j - i - 1));
                 i = j - 1;
             }
             return names;
@@ -810,7 +828,7 @@ internal sealed class TreeJoinExecutor
         for (int i = 0; i < sub.ProjectedVarCount; i++)
         {
             var (start, length) = sub.GetProjectedVariable(i);
-            string name = subSrc.Substring(start, length).TrimStart('?');
+            string name = source.Substring(start, length).TrimStart('?');
             if (seen.Add(name)) names.Add(name);
         }
         // Aggregate aliases: SELECT (COUNT(?x) AS ?c) projects ?c, which is not a plain projected variable —
@@ -819,7 +837,7 @@ internal sealed class TreeJoinExecutor
         {
             var agg = sub.GetAggregate(i);
             if (agg.AliasLength == 0) continue;
-            string name = subSrc.Substring(agg.AliasStart, agg.AliasLength).TrimStart('?');
+            string name = source.Substring(agg.AliasStart, agg.AliasLength).TrimStart('?');
             if (seen.Add(name)) names.Add(name);
         }
         return names;

@@ -772,7 +772,11 @@ internal ref partial struct QueryResults
     /// </summary>
     public bool MoveNext()
     {
-        if (_isEmpty) return false;
+        // An IMPLICIT aggregation (real aggregates, no GROUP BY) over an empty input still yields ONE row — the
+        // aggregate identity (COUNT 0, SUM 0, GROUP_CONCAT "", …), SPARQL §18.5 — so it must NOT short-circuit on
+        // empty here; it falls through to MoveNextGrouped, whose CollectAndGroupResults synthesizes the default group.
+        // Explicit GROUP BY over empty correctly yields zero rows, so it still short-circuits.
+        if (_isEmpty && !(_selectClause.HasRealAggregates && !_groupBy.HasGroupBy)) return false;
 
         // Empty pattern (WHERE { BIND(...) }) - return exactly one row with computed expressions
         if (_isEmptyPattern)
@@ -1180,6 +1184,8 @@ internal sealed class GroupedRow
     private readonly decimal[] _decimalSums;    // For precise decimal arithmetic
     private readonly decimal[] _decimalMins;
     private readonly decimal[] _decimalMaxes;
+    private readonly string?[] _minTerms;   // MIN/MAX keep the winning value's ORIGINAL term (type fidelity) — re-formatting
+    private readonly string?[] _maxTerms;   // to xsd:decimal broke a join on the result (W3C sq08: ?x ex:p MAX(?y)).
     private readonly bool[] _useDecimal;        // True if all values are decimal (not double/float)
     private readonly HashSet<string>?[] _distinctSets;
     private readonly List<string>?[] _concatValues;  // For GROUP_CONCAT
@@ -1224,6 +1230,8 @@ internal sealed class GroupedRow
         _decimalSums = new decimal[_aggCount];
         _decimalMins = new decimal[_aggCount];
         _decimalMaxes = new decimal[_aggCount];
+        _minTerms = new string?[_aggCount];
+        _maxTerms = new string?[_aggCount];
         _useDecimal = new bool[_aggCount];
         _distinctSets = new HashSet<string>?[_aggCount];
         _concatValues = new List<string>?[_aggCount];
@@ -1428,8 +1436,11 @@ internal sealed class GroupedRow
                 case AggregateFunction.Min:
                     if (hasNumValue)
                     {
-                        if (numValue < _mins[i])
+                        if (_minTerms[i] == null || numValue < _mins[i])
+                        {
                             _mins[i] = numValue;
+                            _minTerms[i] = valueStr; // the winning value's original term — preserved verbatim
+                        }
                         if (decimalValue < _decimalMins[i])
                             _decimalMins[i] = decimalValue;
                     }
@@ -1442,8 +1453,11 @@ internal sealed class GroupedRow
                 case AggregateFunction.Max:
                     if (hasNumValue)
                     {
-                        if (numValue > _maxes[i])
+                        if (_maxTerms[i] == null || numValue > _maxes[i])
+                        {
                             _maxes[i] = numValue;
+                            _maxTerms[i] = valueStr;
+                        }
                         if (decimalValue > _decimalMaxes[i])
                             _decimalMaxes[i] = decimalValue;
                     }
@@ -1454,8 +1468,10 @@ internal sealed class GroupedRow
                     }
                     break;
                 case AggregateFunction.GroupConcat:
+                    // GROUP_CONCAT concatenates the STR() lexical value of each term (SPARQL §18.5.1.7), not the raw
+                    // RDF term — so an IRI joins without <>, a literal without its quotes / datatype / language tag.
                     if (valueStr != null)
-                        _concatValues[i]!.Add(valueStr);
+                        _concatValues[i]!.Add(LexicalOf(valueStr));
                     break;
                 case AggregateFunction.Sample:
                     // SAMPLE returns an arbitrary value - we take the first one
@@ -1493,15 +1509,13 @@ internal sealed class GroupedRow
                         ? FormatTypedLiteral(FormatDecimal(_decimalSums[i] / _counts[i]), XsdDecimal)
                         : FormatTypedLiteral((_sums[i] / _counts[i]).ToString(CultureInfo.InvariantCulture), XsdDouble))
                     : FormatTypedLiteral("0", XsdInteger),
-                AggregateFunction.Min => _useDecimal[i]
-                    ? (_decimalMins[i] == decimal.MaxValue ? "" : FormatTypedLiteral(FormatDecimal(_decimalMins[i]), XsdDecimal))
-                    : (_mins[i] == double.MaxValue ? "" : FormatTypedLiteral(_mins[i].ToString(CultureInfo.InvariantCulture), XsdDouble)),
-                AggregateFunction.Max => _useDecimal[i]
-                    ? (_decimalMaxes[i] == decimal.MinValue ? "" : FormatTypedLiteral(FormatDecimal(_decimalMaxes[i]), XsdDecimal))
-                    : (_maxes[i] == double.MinValue ? "" : FormatTypedLiteral(_maxes[i].ToString(CultureInfo.InvariantCulture), XsdDouble)),
+                // MIN/MAX return the winning value's ORIGINAL term (type-preserving, SPARQL §18.5.1.4/5), not a numeric
+                // re-format — so MAX(?y) of xsd:integer values stays integer and can join back into the graph (sq08).
+                AggregateFunction.Min => _minTerms[i] ?? "",
+                AggregateFunction.Max => _maxTerms[i] ?? "",
                 AggregateFunction.GroupConcat => _concatValues[i] != null
-                    ? string.Join(_separators[i], _concatValues[i]!)
-                    : "",
+                    ? "\"" + string.Join(_separators[i], _concatValues[i]!) + "\""  // a simple (xsd:string) literal
+                    : "\"\"",
                 AggregateFunction.Sample => _sampleValues[i] ?? "",
                 _ => ""
             };
@@ -1518,6 +1532,22 @@ internal sealed class GroupedRow
     private static string FormatTypedLiteral(string value, string datatype)
     {
         return $"\"{value}\"^^<{datatype}>";
+    }
+
+    /// <summary>
+    /// The STR() lexical value of an RDF term: an IRI's content without the &lt;&gt;, a literal's lexical form without
+    /// the surrounding quotes / <c>^^datatype</c> / <c>@lang</c> tag. GROUP_CONCAT concatenates these, not raw terms.
+    /// </summary>
+    private static string LexicalOf(string term)
+    {
+        if (term.Length >= 2 && term[0] == '<' && term[^1] == '>')
+            return term.Substring(1, term.Length - 2);
+        if (term.Length >= 2 && term[0] == '"')
+        {
+            int close = term.LastIndexOf('"');
+            if (close > 0) return term.Substring(1, close - 1);
+        }
+        return term;
     }
 
     /// <summary>

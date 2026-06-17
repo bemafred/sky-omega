@@ -595,9 +595,11 @@ public partial class QueryExecutorTests
             // Alice has 3 predicates (name, age, knows)
             Assert.True(groups.ContainsKey("<http://example.org/Alice>"));
             var alicePredicates = groups["<http://example.org/Alice>"];
-            Assert.Contains("<http://xmlns.com/foaf/0.1/name>", alicePredicates);
-            Assert.Contains("<http://xmlns.com/foaf/0.1/age>", alicePredicates);
-            Assert.Contains("<http://xmlns.com/foaf/0.1/knows>", alicePredicates);
+            // ADR-047: GROUP_CONCAT concatenates the STR() lexical value of each term (SPARQL §18.5.1.7) — an IRI
+            // without its angle brackets — not the raw RDF term. (W3C agg-groupconcat conformance confirms this form.)
+            Assert.Contains("http://xmlns.com/foaf/0.1/name", alicePredicates);
+            Assert.Contains("http://xmlns.com/foaf/0.1/age", alicePredicates);
+            Assert.Contains("http://xmlns.com/foaf/0.1/knows", alicePredicates);
         }
         finally
         {
@@ -631,10 +633,10 @@ public partial class QueryExecutorTests
             var names = results.Current.GetString(namesIdx).ToString();
             // Should contain comma separator between names
             Assert.Contains(", ", names);
-            // Should contain all 3 names
-            Assert.Contains("\"Alice\"", names);
-            Assert.Contains("\"Bob\"", names);
-            Assert.Contains("\"Charlie\"", names);
+            // Should contain all 3 names — ADR-047: GROUP_CONCAT uses STR() of each value, a literal without its quotes.
+            Assert.Contains("Alice", names);
+            Assert.Contains("Bob", names);
+            Assert.Contains("Charlie", names);
 
             results.Dispose();
         }

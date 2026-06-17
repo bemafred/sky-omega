@@ -755,6 +755,29 @@ internal partial class QueryExecutor : IDisposable
             int s = pattern.GetPattern(i).Subject.Start;
             if (s >= 0 && (min < 0 || s < min)) min = s;
         }
+        // A sub-SELECT-only WHERE has no top-level triple to anchor on, but its content still sits INSIDE the WHERE
+        // group — anchor on the sub-query's earliest term (pattern subject / projected var / aggregate alias) so
+        // FindWhereGroupStart locates THIS statement's WHERE. Without it, an `INSERT { … } WHERE { SELECT (COUNT(*) …) }`
+        // in a multi-statement UPDATE falls back to IndexOf('{'), which grabs the INSERT template brace.
+        for (int q = 0; q < pattern.SubQueryCount; q++)
+        {
+            var sq = pattern.GetSubQuery(q);
+            for (int i = 0; i < sq.PatternCount; i++)
+            {
+                int s = sq.GetPattern(i).Subject.Start;
+                if (s >= 0 && (min < 0 || s < min)) min = s;
+            }
+            for (int i = 0; i < sq.ProjectedVarCount; i++)
+            {
+                int s = sq.GetProjectedVariable(i).Start;
+                if (s >= 0 && (min < 0 || s < min)) min = s;
+            }
+            for (int i = 0; i < sq.AggregateCount; i++)
+            {
+                int s = sq.GetAggregate(i).AliasStart;
+                if (s >= 0 && (min < 0 || s < min)) min = s;
+            }
+        }
         return min;
     }
 
@@ -766,6 +789,8 @@ internal partial class QueryExecutor : IDisposable
     private int LastWhereKeywordAtOrBefore(int limit)
     {
         int found = -1;
+        int depth = 0; // brace depth — a WHERE nested in a sub-SELECT / EXISTS / group body sits at depth > 0 and is NOT
+                       // this statement's group opener (the same nested-WHERE over-match the flip fixed for GRAPH/EXISTS).
         for (int i = 0; i + 5 <= _source.Length && i <= limit; i++)
         {
             char ch = _source[i];
@@ -775,6 +800,9 @@ internal partial class QueryExecutor : IDisposable
                 while (i < _source.Length && _source[i] != ch) { if (_source[i] == '\\') i++; i++; }
                 continue;
             }
+            if (ch == '{') { depth++; continue; }
+            if (ch == '}') { if (depth > 0) depth--; continue; }
+            if (depth != 0) continue; // only a top-level WHERE opens this statement's group
             if ((ch | 0x20) != 'w' || (_source[i + 1] | 0x20) != 'h' || (_source[i + 2] | 0x20) != 'e'
                 || (_source[i + 3] | 0x20) != 'r' || (_source[i + 4] | 0x20) != 'e')
                 continue;
@@ -789,12 +817,8 @@ internal partial class QueryExecutor : IDisposable
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal MaterializedQueryResults ExecuteToMaterialized()
     {
-        // Check for subqueries first
-        if (_buffer.HasSubQueries)
-        {
-            var results = ExecuteWithSubQueries_ToList();
-            return WrapResultsAsMaterialized(results);
-        }
+        // ADR-047 B1: sub-queries route through the unified tree (SubSelectStep) — see Execute(). GRAPH-only falls into
+        // the GRAPH branch below; a sub-SELECT joined with outer triples falls through to the regular tree route.
 
         // Check for GRAPH clauses (no top-level patterns)
         if (_buffer.HasGraph && _buffer.TriplePatternCount == 0)
@@ -819,6 +843,10 @@ internal partial class QueryExecutor : IDisposable
         // Empty pattern case
         if (_buffer.TriplePatternCount == 0)
         {
+            // A sub-SELECT-only or VALUES-only WHERE has no top-level triples but is real content — route it to the
+            // tree (SubSelectStep / ValuesStep), not the empty-pattern path (ADR-047 B1).
+            if (_buffer.HasSubQueries || _buffer.HasValues)
+                return WrapResultsAsMaterialized(ExecuteGraphViaTree());
             // For empty patterns with BIND/expressions, execute and collect results
             return ExecuteEmptyPatternToMaterialized();
         }
@@ -1083,12 +1111,11 @@ internal partial class QueryExecutor : IDisposable
         if (ForceTreeForDifferential)
             return ExecuteViaTreeMaterialized();
 
-        // Check for subqueries first - they may have graph context that takes precedence
-        // over empty GRAPH clause execution
-        if (_buffer.HasSubQueries)
-        {
-            return ExecuteWithSubQueries();
-        }
+        // ADR-047 B1: sub-queries route through the unified tree like everything else — a { SELECT … } in the WHERE is
+        // a SubSelectHeader the tree's SubSelectStep evaluates (threading the active graph, so GRAPH-context and
+        // per-graph-aggregate sub-SELECTs work). A GRAPH-only sub-query falls into the GRAPH branch below (also the
+        // tree); a sub-SELECT joined with outer triples falls through to the default tree dispatch. The old
+        // ExecuteWithSubQueries / BoxedSubQueryExecutor path is dead, deleted in phase C.
 
         // Check for GRAPH clauses - use _buffer to avoid large struct copies
         // A query with GRAPH but no direct triple patterns (only patterns inside GRAPH)
@@ -1118,10 +1145,11 @@ internal partial class QueryExecutor : IDisposable
 
         if (_buffer.TriplePatternCount == 0)
         {
-            // VALUES-only WHERE (inline data, no triple patterns): route through the unified tree executor, which
-            // materializes the rows — including MULTI-variable rows — correctly. The empty-pattern path below would
-            // return nothing (it only checks for aggregate/BIND/FILTER/EXISTS expressions, not VALUES).
-            if (_buffer.HasValues)
+            // A WHERE with no top-level triples is NOT necessarily empty. VALUES-only inline data, or a sub-SELECT-only
+            // body ({ SELECT … }), is real content the unified tree materializes — the empty-pattern path below only
+            // checks aggregate/BIND/FILTER/EXISTS, so it would wrongly return nothing. ADR-047 B1: a sub-SELECT-only
+            // WHERE routes to the tree, where SubSelectStep evaluates it (and joins nothing — there are no outer rows).
+            if (_buffer.HasValues || _buffer.HasSubQueries)
                 return ExecuteViaTreeMaterialized();
 
             // Check if there are BIND, FILTER, EXISTS, or SELECT expressions to evaluate

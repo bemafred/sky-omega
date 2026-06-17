@@ -62,6 +62,20 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
+    /// ADR-047: parse a sub-SELECT's clauses (SelectClause / WhereClause / SolutionModifier) at <paramref name="position"/>
+    /// over THIS parser's source — the FULL query — so the resulting clause offsets (projected variables, aggregate
+    /// aliases, ORDER BY keys) index the same source the executor evaluates the body against. One source/offset regime
+    /// for the whole sub-SELECT: the body's prefixed names expand against the same prologue the outer query uses, with
+    /// no substring re-base (the substring/separate-source split sliced the body's source with prologue-relative prefix
+    /// offsets — ArgumentOutOfRange on any prefixed inner term).
+    /// </summary>
+    internal SubSelect ParseSubSelectCoreAt(int position)
+    {
+        _position = position;
+        return ParseSubSelectCore();
+    }
+
+    /// <summary>
     /// [53] GroupGraphPattern ::= '{' ( SubSelect | GroupGraphPatternSub ) '}'
     /// A <c>{ SELECT … }</c> body is a sub-SELECT, captured as a SubSelectHeader leaf carrying its source span
     /// (re-parsed and evaluated as a nested query). Otherwise emits a GroupHeader over the body. Returns the index.
@@ -243,7 +257,22 @@ internal ref partial struct SparqlParser
         Advance(); // consume '{'
 
         int header = pa.BeginGraph(graphTerm.Type, graphTerm.Start, graphTerm.Length);
-        ParseGroupBodyTree(ref pa, depth + 1);
+        SkipWhitespace();
+        if (KeywordIs(PeekSpan(6), "SELECT"))
+        {
+            // GRAPH g { SELECT … } — the GroupGraphPattern is a SubSelect ([53] GroupGraphPattern ::= '{' SubSelect '}'),
+            // e.g. W3C agg-empty-group-count-graph: GRAPH ?g { SELECT (count(*) AS ?c) WHERE { … } }. Carry the
+            // sub-SELECT span as a SubSelectHeader child of the GraphHeader; the evaluator threads the active graph into
+            // it, so an aggregating sub-SELECT is computed PER graph (one row per named graph, count 0 for empty ones).
+            // (The double-braced form GRAPH g { { SELECT … } } already reaches this via ParseGroupOrUnionTree below.)
+            int subStart = _position;
+            ParseSubSelectCore();
+            pa.AddSubSelectHeader(subStart, _position - subStart);
+        }
+        else
+        {
+            ParseGroupBodyTree(ref pa, depth + 1);
+        }
         pa.EndGraph(header);
 
         SkipWhitespace();
