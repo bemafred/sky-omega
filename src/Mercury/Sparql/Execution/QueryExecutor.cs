@@ -823,8 +823,12 @@ internal partial class QueryExecutor : IDisposable
             return ExecuteEmptyPatternToMaterialized();
         }
 
-        // Regular query - execute and materialize
-        return ExecuteRegularPatternToMaterialized();
+        // ADR-047 A3: the regular (non-carve-out) WHERE materializes through the unified tree — identical to the GRAPH
+        // case above (WrapResultsAsMaterialized over ExecuteGraphViaTree). The tree has already applied the BGP join,
+        // FILTER and (NOT) EXISTS; MaterializedQueryResults applies LIMIT / OFFSET / DISTINCT. This is the test-only
+        // materialized entry (QueryExecutorTests); production SELECT goes through Execute(). The old
+        // ExecuteRegularPatternToMaterialized is now dead — deleted in phase C.
+        return WrapResultsAsMaterialized(ExecuteGraphViaTree());
     }
 
     /// <summary>
