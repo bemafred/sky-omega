@@ -638,7 +638,7 @@ internal partial class QueryExecutor : IDisposable
     /// threads the active graph per pattern and the dataset (USING / FROM NAMED) restriction, and returns
     /// materialized rows for the shared modifier layer.
     /// </summary>
-    private List<MaterializedRow> ExecuteGraphViaTree()
+    private List<MaterializedRow> ExecuteGraphViaTree(int askExistenceCap = 0)
     {
         int whereStart = FindWhereGroupStart();
         // Pool the pattern-tree buffer — it is per-query setup, not the hot path, but renting keeps the GRAPH path's
@@ -654,7 +654,13 @@ internal partial class QueryExecutor : IDisposable
             // the scan after OFFSET+LIMIT rows instead of materializing the whole match set then truncating
             // (ck:obs-graph-limit-pushdown). Any of those modifiers needs the full result first, so no cap there.
             int maxRows = int.MaxValue;
-            if (_buffer.Limit > 0
+            // ADR-047 A2 — ASK existence probe: a solution exists iff the FIRST row does. A pure BGP has no post-join
+            // filter, so the first matched row IS a real solution; cap the scan at 1 (the unconstrained ASK { ?s ?p ?o }
+            // short-circuits instead of materializing the store). A group with a FILTER / EXISTS / operator needs the
+            // whole group first (the cap is left off — the tree's EvalGroup-then-test existence primitive applies).
+            if (askExistenceCap > 0 && TreeJoinExecutor.IsPureBgp(ref tree, root))
+                maxRows = askExistenceCap;
+            else if (_buffer.Limit > 0
                 && !_buffer.GetOrderByClause().HasOrderBy
                 && !_buffer.GetGroupByClause().HasGroupBy
                 && !_buffer.GetHavingClause().HasHaving
@@ -1343,51 +1349,12 @@ internal partial class QueryExecutor : IDisposable
             return false;
         }
 
-        var requiredCount = pattern.RequiredPatternCount;
-
-        // Single required pattern - just scan
-        if (requiredCount == 1)
-        {
-            int requiredIdx = 0;
-            for (int i = 0; i < pattern.PatternCount; i++)
-            {
-                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
-            }
-
-            var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
-
-            // For ASK, we just need to know if any result exists
-            // No need for LIMIT/OFFSET/DISTINCT/ORDER BY
-            var results = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
-            try
-            {
-                return results.MoveNext();
-            }
-            finally
-            {
-                results.Dispose();
-            }
-        }
-
-        // No required patterns
-        if (requiredCount == 0)
-        {
-            return false;
-        }
-
-        // Multiple required patterns - need join
-        var multiScan = new MultiPatternScan(_store, _source, pattern, false, default, _buffer.Prefixes);
-        var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
-        try
-        {
-            return multiResults.MoveNext();
-        }
-        finally
-        {
-            multiResults.Dispose();
-        }
+        // ADR-047 A2: a non-empty WHERE's existence goes through the unified tree — the same evaluator SELECT and
+        // CONSTRUCT use. A pure BGP short-circuits at the first matched row (askExistenceCap: 1, safe because nothing
+        // filters after the join); a group with FILTER / EXISTS / an operator is evaluated whole (the tree's existence
+        // primitive, the one ExistsBodyHasMatch uses) and tested non-empty. An all-OPTIONAL group keeps the empty-row
+        // seed, so it correctly ASKs true — the old path's requiredCount==0 → false silently dropped that solution.
+        return ExecuteGraphViaTree(askExistenceCap: 1).Count > 0;
     }
 
     /// <summary>
@@ -1417,6 +1384,14 @@ internal partial class QueryExecutor : IDisposable
         // If no patterns and no subqueries, return empty
         if (pattern.PatternCount == 0)
             return ConstructResults.Empty();
+
+        // ADR-047 A2: the non-FROM WHERE evaluates through the unified tree — the materialized rows (all variables
+        // bound, no projection) ConstructResults reads via .Current. FROM (default-graph dataset) still uses the old
+        // slot scan below, cut over in B2.
+        if (_defaultGraphs == null || _defaultGraphs.Length == 0)
+            return new ConstructResults(
+                QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, stringBuffer),
+                template, _source, bindings, stringBuffer, _buffer.Prefixes);
 
         var requiredCount = pattern.RequiredPatternCount;
 
@@ -1468,43 +1443,17 @@ internal partial class QueryExecutor : IDisposable
         ref readonly var pattern = ref _cachedPattern;
         var describeAll = _buffer.DescribeAll;
 
-        // Build binding storage
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-        var bindingTable = new BindingTable(bindings, stringBuffer);
-
         // If no WHERE clause, return empty
         if (pattern.PatternCount == 0)
             return DescribeResults.Empty();
 
-        var requiredCount = pattern.RequiredPatternCount;
+        // ADR-047 A2: evaluate the WHERE through the unified tree to collect the resources to describe — the
+        // materialized rows (all variables bound, no projection) DescribeResults reads via .Current. DESCRIBE has
+        // always scanned the unnamed default graph; the tree's activeGraph="" preserves that (FROM stays a no-op here).
+        var bindings = new Binding[16];
+        var queryResults = QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, _stringBuffer);
 
-        // Execute WHERE clause to get resources to describe
-        QueryResults queryResults;
-        if (requiredCount == 1)
-        {
-            int requiredIdx = 0;
-            for (int i = 0; i < pattern.PatternCount; i++)
-            {
-                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
-            }
-
-            var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
-            queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
-        }
-        else if (requiredCount == 0)
-        {
-            return DescribeResults.Empty();
-        }
-        else
-        {
-            var multiScan = new MultiPatternScan(_store, _source, pattern, false, default, _buffer.Prefixes);
-            queryResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
-        }
-
-        return new DescribeResults(_store, queryResults, bindings, stringBuffer, describeAll);
+        return new DescribeResults(_store, queryResults, bindings, _stringBuffer, describeAll);
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array
