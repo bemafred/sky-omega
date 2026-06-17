@@ -303,8 +303,10 @@ public partial class QueryExecutorTests
             }
             results.Dispose();
 
-            // ?other is never bound, so VALUES constraint allows all results
-            Assert.Equal(3, count);
+            // ADR-047: VALUES is inline data JOINED with the group (SPARQL §18), not a filter. ?other is disjoint from
+            // the pattern, so the join is a cross-product: 3 name triples × 3 VALUES rows = 9 (each binding ?other).
+            // The old default path dropped the disjoint VALUES join (returned 3); the tree cutover is W3C-correct.
+            Assert.Equal(9, count);
         }
         finally
         {

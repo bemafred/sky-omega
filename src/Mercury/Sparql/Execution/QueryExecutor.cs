@@ -1132,86 +1132,16 @@ internal partial class QueryExecutor : IDisposable
             return ExecuteWithDefaultGraphs();
         }
 
-        // ADR-047 CUTOVER (the flip): the default plain-BGP path runs through the unified zero-GC tree executor — the
-        // same one GRAPH queries use (ADR-045, "a default graph is also a graph"). Validated at 1TB WDBench breadth:
-        // the tree is correct (more correct than the old contaminated oracle on var-predicate joins, chained OPTIONAL,
-        // and path reflexives) and parity-to-4x faster, never the slower path. VALUES+triple remains the one carve-out
-        // (its two tree gaps — numeric canonicalization and zero-length-path-over-VALUES — not yet closed); it, and the
-        // sub-query / FROM / SERVICE branches above, still reach the old slot operators, which a later phase deletes.
-        if (!_buffer.HasValues)
-            return ExecuteViaTreeMaterialized();
-
-        // NOTE: VALUES combined with triple patterns is NOT routed through the tree executor yet. The old default
-        // BGP path below handles it incompletely (drops a non-join VALUES variable, ignores trailing VALUES), but
-        // routing it to the tree surfaced two tree gaps the old path covers (ck:obs-values-join-default-path-incomplete):
-        // (1) ValuesStep binds a numeric value raw ("25"), so it fails to join a stored typed literal
-        //     ("25"^^xsd:integer) — the tree needs the value canonicalization the old path's CompareValuesMatch does;
-        // (2) a zero-length property path (`?p?`) over a VALUES-bound term must only match terms IN THE GRAPH, not the
-        //     query-defined VALUES term (W3C property-path/values_and_path) — the tree binds it anyway.
-        // Each is its own fix; until both land, VALUES+triple stays on the old path. VALUES-only already routes above.
-
-        // For regular queries, use cached pattern from buffer
-        // Build binding storage
-        var bindings = new Binding[16];
-        var stringBuffer = _stringBuffer;
-        var bindingTable = new BindingTable(bindings, stringBuffer);
-
-        // Access cached pattern (from buffer)
-        ref readonly var pattern = ref _cachedPattern;
-        var requiredCount = pattern.RequiredPatternCount;
-
-        // Single required pattern - just scan
-        if (requiredCount == 1)
-        {
-            // Find the first required pattern
-            int requiredIdx = 0;
-            for (int i = 0; i < pattern.PatternCount; i++)
-            {
-                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
-            }
-
-            var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
-
-            return new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct,
-                _buffer.GetOrderByClause(), _buffer.GetGroupByClause(), _buffer.GetSelectClause(),
-                _buffer.GetHavingClause());
-        }
-
-        // No required patterns but have optional - need special handling
-        if (requiredCount == 0)
-        {
-            // All patterns are optional - start with empty bindings and try to match optionals
-            // For now, just return empty (proper implementation would need different semantics)
-            return QueryResults.Empty();
-        }
-
-        // Multiple required patterns - need join
-        // Note: This can cause stack overflow with very large cross-products (e.g., variable predicates)
-        // due to the ~4KB GraphPattern struct being copied in hot loops. See ADR-009 for details.
-        // ADR-024: Detect text:match filters for trigram pre-filtering
-        var textMatchHints = pattern.FilterCount > 0
-            ? FilterAnalyzer.DetectTextMatchFilters(in pattern, _source, _optimizedPatternOrder)
-            : null;
-
-        return new QueryResults(
-            new MultiPatternScan(_store, _source, pattern, false, default,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _optimizedPatternOrder, null, _buffer.Prefixes,
-                textMatchHints),
-            _buffer,
-            _source,
-            _store,
-            bindings,
-            stringBuffer,
-            _buffer.Limit,
-            _buffer.Offset,
-            _buffer.SelectDistinct,
-            _buffer.GetOrderByClause(),
-            _buffer.GetGroupByClause(),
-            _buffer.GetSelectClause(),
-            _buffer.GetHavingClause());
+        // ADR-047 CUTOVER (the flip): the default query path — plain BGP AND inline VALUES + triple — runs through the
+        // unified zero-GC tree executor, the same one GRAPH queries use (ADR-045, "a default graph is also a graph").
+        // Validated at 1TB WDBench breadth: the tree is correct (more correct than the old contaminated oracle on
+        // var-predicate joins, chained OPTIONAL, and path reflexives) and parity-to-4x faster, never the slower path.
+        // The two former VALUES+triple gaps are CLOSED: numeric/boolean VALUES tokens canonicalize to a typed literal
+        // before the join (ExpandValueTerm→LiteralForm, the routine TriplePatternScan also applies to a constant), and
+        // a zero-length-path reflexive over a VALUES-bound term is gated on graph-node membership (SPARQL §9.3); a
+        // VALUES after a triple now correctly cross-joins (SPARQL §18) where the old path silently dropped it. The
+        // sub-query / FROM / SERVICE branches above still reach the old slot operators, which a later phase deletes.
+        return ExecuteViaTreeMaterialized();
     }
 
     /// <summary>
