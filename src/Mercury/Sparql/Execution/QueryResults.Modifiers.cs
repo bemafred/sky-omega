@@ -44,8 +44,11 @@ internal ref partial struct QueryResults
             // line 235) never ran for them. Evaluate computed projections ((expr AS ?var)) now, before FILTER/DISTINCT
             // see them and before the projection reads them. Gated on _isMaterialized so the scan-collected ORDER BY path
             // (already evaluated during collection, _isMaterialized=false) is not re-evaluated — a second eval would
-            // diverge for non-deterministic expressions (UUID/RAND/NOW). _buffer is the tree path's buffer.
-            if (_isMaterialized && _buffer != null)
+            // diverge for non-deterministic expressions (UUID/RAND/NOW). C2: gate on the SELECT clause actually having
+            // computed projections (Function=None aggregates), not on _buffer — the sub-SELECT path has expressions to
+            // evaluate but no outer buffer (it lends prefixes via _materializedPrefixes instead). A clause with no such
+            // expressions makes the block a no-op, so this never fires spuriously.
+            if (_isMaterialized && _selectClause.AggregateCount > 0)
             {
                 // Per-row bnode seed so BNODE(str) yields a fresh blank node per row (same str → same bnode WITHIN a row,
                 // different across rows), matching the streaming/collection path (W3C bnode01).
@@ -683,7 +686,7 @@ internal ref partial struct QueryResults
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 baseIri);
-            var value = evaluator.Evaluate(_buffer?.Prefixes, _source);
+            var value = evaluator.Evaluate(_buffer?.Prefixes ?? _materializedPrefixes, _source);
 
             // Bind the result to the alias variable
             // Prefer StringValue if available (preserves original datatype annotation)
@@ -759,7 +762,7 @@ internal ref partial struct QueryResults
                 _bindingTable.Count,
                 _bindingTable.GetStringBuffer(),
                 ReadOnlySpan<char>.Empty);
-            var value = evaluator.Evaluate(_buffer?.Prefixes, _source);
+            var value = evaluator.Evaluate(_buffer?.Prefixes ?? _materializedPrefixes, _source);
 
             // Bind the result if valid
             switch (value.Type)

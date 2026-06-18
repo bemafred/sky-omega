@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using SkyOmega.Mercury.Sparql.Types;
+using SkyOmega.Mercury.Sparql.Patterns;
 using SkyOmega.Mercury.Storage;
 using SkyOmega.Mercury.Sparql.Execution.Expressions;
 using SkyOmega.Mercury.Sparql.Execution.Operators;
@@ -22,6 +23,9 @@ internal ref partial struct QueryResults
     private CrossGraphMultiPatternScan _crossGraphScan;
     // Pattern data stored on heap via QueryBuffer (eliminates ~4KB GraphPattern from stack)
     private Patterns.QueryBuffer? _buffer;
+    // ADR-047 C2: prefix mappings for evaluating computed SELECT projections ((expr AS ?var)) on materialized rows when
+    // there is no _buffer — the sub-SELECT path (SubSelectStep), which has prefixes but no outer QueryBuffer to lend.
+    private readonly PrefixMapping[]? _materializedPrefixes;
     private ReadOnlySpan<char> _source;
     private QuadStore? _store;
     private Binding[]? _bindings;
@@ -208,7 +212,7 @@ internal ref partial struct QueryResults
         ReadOnlySpan<char> source, QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
         GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default,
-        Patterns.QueryBuffer? buffer = null)
+        Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null)
     {
         // If actual ORDER BY is specified, sort the materialized results
         if (orderBy.HasOrderBy && rows.Count > 1)
@@ -218,7 +222,7 @@ internal ref partial struct QueryResults
         }
 
         return new QueryResults(rows, source, store, bindings, stringBuffer,
-            limit, offset, distinct, orderBy, groupBy, selectClause, having, buffer);
+            limit, offset, distinct, orderBy, groupBy, selectClause, having, buffer, prefixes);
     }
 
     private static readonly List<MaterializedRow> EmptyMaterializedRows = new();
@@ -321,13 +325,15 @@ internal ref partial struct QueryResults
         QuadStore store, Binding[] bindings, char[] stringBuffer,
         int limit, int offset, bool distinct, OrderByClause orderBy,
         GroupByClause groupBy, SelectClause selectClause, HavingClause having,
-        Patterns.QueryBuffer? buffer = null)
+        Patterns.QueryBuffer? buffer = null, PrefixMapping[]? prefixes = null)
     {
         // ADR-047 cutover: the tree path passes its QueryBuffer so the pre-materialized presentation can evaluate
-        // computed SELECT projections ((expr AS ?var)) — EvaluateSelectExpressions needs _buffer.Prefixes. The other
-        // _has* flags below stay false, so a non-null _buffer activates nothing else (MINUS/VALUES/FILTER are gated on
-        // their own flags). Null is still valid (the pattern itself is not needed to iterate materialized rows).
+        // computed SELECT projections ((expr AS ?var)) — EvaluateSelectExpressions needs prefixes. The other _has* flags
+        // below stay false, so a non-null _buffer activates nothing else (MINUS/VALUES/FILTER are gated on their own
+        // flags). Null is still valid (the pattern itself is not needed to iterate materialized rows). The sub-SELECT
+        // path (C2) has no outer buffer to lend, so it passes its prefixes directly via `prefixes`.
         _buffer = buffer;
+        _materializedPrefixes = prefixes;
         _source = source;
         _store = store;
         _bindings = bindings;

@@ -774,8 +774,11 @@ internal sealed class TreeJoinExecutor
         var selectClause = BuildSelectClause(sub);
         var qrBindings = new Binding[64];
         var qrStringBuffer = new char[16384];
+        // Lend the prefixes (there is no outer QueryBuffer here) so the modifier layer can evaluate a computed sub-SELECT
+        // projection like ( CONCAT(?f," ",?l) AS ?full ) — without them EvaluateSelectExpressions never ran and the alias
+        // came out unbound (W3C sq12, surfaced by the C2 CONSTRUCT-subquery cutover).
         var qr = QueryResults.FromMaterializedSimple(innerBag, _source.AsSpan(), _store, qrBindings, qrStringBuffer,
-            sub.Limit, sub.Offset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having);
+            sub.Limit, sub.Offset, sub.Distinct, sub.OrderBy, sub.GroupBy, selectClause, sub.Having, buffer: null, prefixes: _prefixes);
 
         var outNames = OutputVarNames(sub, _source, whereBrace, whereClose);
         var projected = new List<MaterializedRow>();

@@ -940,6 +940,46 @@ SELECT ?s ?o1 ?o2
     }
 
     [Fact]
+    public void ExecuteConstruct_WithSubquery_RoutesThroughTree()
+    {
+        // ADR-047 C2: a CONSTRUCT whose WHERE is a sub-SELECT — the tree's SubSelectStep evaluates it (projection +
+        // LIMIT applied INSIDE the sub-query), and the materialized rows feed the template. This was the last caller of
+        // the old ExecuteWithSubQueries; the cutover IS the test — the behaviour must hold across the re-route.
+        var query = @"CONSTRUCT { ?person <http://example.org/named> ?name }
+                      WHERE { SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name } LIMIT 2 }";
+        var parser = new SparqlParser(query.AsSpan());
+        var parsedQuery = parser.ParseQuery();
+
+        Assert.Equal(QueryType.Construct, parsedQuery.Type);
+        Assert.True(parsedQuery.WhereClause.Pattern.HasSubQueries);
+
+        Store.AcquireReadLock();
+        try
+        {
+            var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
+            var results = executor.ExecuteConstruct();
+
+            var triples = new List<(string s, string p, string o)>();
+            while (results.MoveNext())
+            {
+                var t = results.Current;
+                triples.Add((t.Subject.ToString(), t.Predicate.ToString(), t.Object.ToString()));
+            }
+            results.Dispose();
+
+            // The inner LIMIT 2 caps the sub-query at 2 of the 3 named people -> exactly 2 constructed triples, each
+            // the constructed predicate bound to a real foaf:name object.
+            Assert.Equal(2, triples.Count);
+            Assert.All(triples, t => Assert.Equal("<http://example.org/named>", t.p));
+            Assert.All(triples, t => Assert.StartsWith("\"", t.o));
+        }
+        finally
+        {
+            Store.ReleaseReadLock();
+        }
+    }
+
+    [Fact]
     public void ExecuteConstruct_MultipleTemplatePatterns()
     {
         // CONSTRUCT multiple patterns per result

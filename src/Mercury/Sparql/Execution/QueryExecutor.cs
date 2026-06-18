@@ -1357,23 +1357,17 @@ internal partial class QueryExecutor : IDisposable
         // Build binding storage
         var bindings = new Binding[16];
         var stringBuffer = _stringBuffer;
-        var bindingTable = new BindingTable(bindings, stringBuffer);
 
-        // Check for subqueries first (e.g., CONSTRUCT { ?x ?p ?y } WHERE { SELECT ... })
-        if (_buffer.HasSubQueries)
-        {
-            var subResults = ExecuteWithSubQueries();
-            return new ConstructResults(subResults, template, _source, bindings, stringBuffer, _buffer.Prefixes);
-        }
-
-        // If no patterns and no subqueries, return empty
-        if (pattern.PatternCount == 0)
+        // A CONSTRUCT WHERE with neither top-level triples nor a sub-SELECT is genuinely empty. A sub-SELECT-only WHERE
+        // ({ SELECT … }) IS real content (the tree's SubSelectStep evaluates it), so it must NOT short-circuit to empty.
+        if (pattern.PatternCount == 0 && !_buffer.HasSubQueries)
             return ConstructResults.Empty();
 
-        // ADR-047 A2/B2: the WHERE evaluates through the unified tree — the materialized rows (all variables bound, no
-        // projection) ConstructResults reads via .Current. A FROM dataset is honoured by the tree (_defaultGraphs reach
-        // the TreeJoinExecutor in ExecuteGraphViaTree, whose default-context scan unions the FROM graphs), so CONSTRUCT
-        // FROM no longer needs the old slot scan — that path is dead, deleted in phase C.
+        // ADR-047 A2/B2/C2: the WHERE — BGP, FROM dataset, OR a sub-SELECT — evaluates through the unified tree; the
+        // materialized rows (all variables bound, no projection) ConstructResults reads via .Current. C2 routed
+        // CONSTRUCT-with-subquery here too (the last ExecuteWithSubQueries caller; B1 had cut SELECT/ASK). A FROM
+        // dataset is honoured by the tree (_defaultGraphs union, B2). The old ExecuteWithSubQueries / slot scan path
+        // is dead, deleted later in phase C.
         return new ConstructResults(
             QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, stringBuffer),
             template, _source, bindings, stringBuffer, _buffer.Prefixes);
