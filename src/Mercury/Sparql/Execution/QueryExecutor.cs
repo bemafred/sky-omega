@@ -554,7 +554,7 @@ internal partial class QueryExecutor : IDisposable
             var group = new GroupedRow(default, select, groupBindings, _source);
 
             new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree)
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .FoldFlatBgpAggregate(ref tree, root, "", group);
 
             group.FinalizeAggregates();
@@ -617,7 +617,7 @@ internal partial class QueryExecutor : IDisposable
 
             var comparer = new MaterializedRowComparer(orderBy, _source);
             var rows = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree)
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree)
                 .StreamFlatBgpTopK(ref tree, root, "", comparer, capacity);
 
             var bindings = new Binding[64];
@@ -686,7 +686,7 @@ internal partial class QueryExecutor : IDisposable
                 }
 
             var executor = new TreeJoinExecutor(_store, _source, _prefixMappings, _source, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, ReorderBgpInTree, trigramMap);
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs, ReorderBgpInTree, trigramMap);
             var rows = executor.Evaluate(ref tree, root, "", maxRows);
 
             // A trailing (post-query) VALUES is JOINED with the whole-pattern solution (multiply + bind), not filtered.
@@ -834,11 +834,9 @@ internal partial class QueryExecutor : IDisposable
             return WrapResultsAsMaterialized(results);
         }
 
-        // Check for FROM clauses
-        if (_defaultGraphs != null && _defaultGraphs.Length > 0)
-        {
-            return ExecuteFromToMaterialized();
-        }
+        // ADR-047 B2: FROM (default-graph dataset) materializes through the unified tree too — _defaultGraphs reaches
+        // the TreeJoinExecutor (see ExecuteGraphViaTree), whose default-context scan unions the FROM graphs. The old
+        // ExecuteFromToMaterialized / CrossGraphMultiPatternScan path is dead, deleted in phase C.
 
         // Empty pattern case
         if (_buffer.TriplePatternCount == 0)
@@ -1164,11 +1162,10 @@ internal partial class QueryExecutor : IDisposable
             return QueryResults.Empty();
         }
 
-        // Check for FROM clauses (default graph dataset)
-        if (_defaultGraphs != null && _defaultGraphs.Length > 0)
-        {
-            return ExecuteWithDefaultGraphs();
-        }
+        // ADR-047 B2: a FROM dataset (default-graph clauses) runs through the unified tree like everything else — the
+        // FROM graphs are passed to the TreeJoinExecutor as _defaultGraphs, and a default-context pattern scans their
+        // UNION (their RDF merge IS the default graph, SPARQL §13.2). The old ExecuteWithDefaultGraphs /
+        // CrossGraphMultiPatternScan path is dead, deleted in phase C.
 
         // ADR-047 CUTOVER (the flip): the default query path — plain BGP AND inline VALUES + triple — runs through the
         // unified zero-GC tree executor, the same one GRAPH queries use (ADR-045, "a default graph is also a graph").
@@ -1381,11 +1378,13 @@ internal partial class QueryExecutor : IDisposable
             return false;
         }
 
-        // ADR-047 A2: a non-empty WHERE's existence goes through the unified tree — the same evaluator SELECT and
+        // ADR-047 A2/B2: a non-empty WHERE's existence goes through the unified tree — the same evaluator SELECT and
         // CONSTRUCT use. A pure BGP short-circuits at the first matched row (askExistenceCap: 1, safe because nothing
         // filters after the join); a group with FILTER / EXISTS / an operator is evaluated whole (the tree's existence
         // primitive, the one ExistsBodyHasMatch uses) and tested non-empty. An all-OPTIONAL group keeps the empty-row
-        // seed, so it correctly ASKs true — the old path's requiredCount==0 → false silently dropped that solution.
+        // seed, so it correctly ASKs true — the old path's requiredCount==0 → false silently dropped that solution. A
+        // FROM dataset is honoured here too (the tree unions _defaultGraphs), so ASK FROM tests the FROM graphs — the
+        // old slot path this never reached ignored FROM and tested the unnamed default (a latent bug the cutover fixes).
         return ExecuteGraphViaTree(askExistenceCap: 1).Count > 0;
     }
 
@@ -1417,52 +1416,13 @@ internal partial class QueryExecutor : IDisposable
         if (pattern.PatternCount == 0)
             return ConstructResults.Empty();
 
-        // ADR-047 A2: the non-FROM WHERE evaluates through the unified tree — the materialized rows (all variables
-        // bound, no projection) ConstructResults reads via .Current. FROM (default-graph dataset) still uses the old
-        // slot scan below, cut over in B2.
-        if (_defaultGraphs == null || _defaultGraphs.Length == 0)
-            return new ConstructResults(
-                QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, stringBuffer),
-                template, _source, bindings, stringBuffer, _buffer.Prefixes);
-
-        var requiredCount = pattern.RequiredPatternCount;
-
-        // Get graph context from FROM clause if present
-        ReadOnlySpan<char> graphIri = default;
-        if (_defaultGraphs != null && _defaultGraphs.Length == 1)
-        {
-            graphIri = _defaultGraphs[0].AsSpan();
-        }
-
-        // Single required pattern - just scan
-        if (requiredCount == 1)
-        {
-            int requiredIdx = 0;
-            for (int i = 0; i < pattern.PatternCount; i++)
-            {
-                if (!pattern.IsOptional(i)) { requiredIdx = i; break; }
-            }
-
-            var tp = pattern.GetPattern(requiredIdx);
-            var scan = new TriplePatternScan(_store, _source, tp, bindingTable, graphIri,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _buffer.Prefixes);
-            var queryResults = new QueryResults(scan, _buffer, _source, _store, bindings, stringBuffer);
-
-            return new ConstructResults(queryResults, template, _source, bindings, stringBuffer, _buffer.Prefixes);
-        }
-
-        // No required patterns
-        if (requiredCount == 0)
-        {
-            return ConstructResults.Empty();
-        }
-
-        // Multiple required patterns - need join
-        var multiScan = new MultiPatternScan(_store, _source, pattern, false, graphIri,
-            _temporalMode, _asOfTime, _rangeStart, _rangeEnd, null, null, _buffer.Prefixes);
-        var multiResults = new QueryResults(multiScan, _buffer, _source, _store, bindings, stringBuffer);
-
-        return new ConstructResults(multiResults, template, _source, bindings, stringBuffer, _buffer.Prefixes);
+        // ADR-047 A2/B2: the WHERE evaluates through the unified tree — the materialized rows (all variables bound, no
+        // projection) ConstructResults reads via .Current. A FROM dataset is honoured by the tree (_defaultGraphs reach
+        // the TreeJoinExecutor in ExecuteGraphViaTree, whose default-context scan unions the FROM graphs), so CONSTRUCT
+        // FROM no longer needs the old slot scan — that path is dead, deleted in phase C.
+        return new ConstructResults(
+            QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, stringBuffer),
+            template, _source, bindings, stringBuffer, _buffer.Prefixes);
     }
 
     /// <summary>
@@ -1479,9 +1439,11 @@ internal partial class QueryExecutor : IDisposable
         if (pattern.PatternCount == 0)
             return DescribeResults.Empty();
 
-        // ADR-047 A2: evaluate the WHERE through the unified tree to collect the resources to describe — the
-        // materialized rows (all variables bound, no projection) DescribeResults reads via .Current. DESCRIBE has
-        // always scanned the unnamed default graph; the tree's activeGraph="" preserves that (FROM stays a no-op here).
+        // ADR-047 A2/B2: evaluate the WHERE through the unified tree to collect the resources to describe — the
+        // materialized rows (all variables bound, no projection) DescribeResults reads via .Current. A FROM dataset is
+        // honoured here too (the tree's default-context scan unions _defaultGraphs, see ExecuteGraphViaTree): the WHERE
+        // matches against the dataset's default graph, the union of the FROM graphs (SPARQL §16.4 evaluates it against
+        // the dataset). No FROM ⇒ the real unnamed default graph, as before.
         var bindings = new Binding[16];
         var queryResults = QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, _stringBuffer);
 

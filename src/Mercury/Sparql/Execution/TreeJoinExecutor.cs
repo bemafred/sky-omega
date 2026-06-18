@@ -50,6 +50,11 @@ internal sealed class TreeJoinExecutor
     private readonly DateTimeOffset _rangeEnd;
     // Dataset (FROM NAMED / USING NAMED): which named graphs GRAPH may access. null = all; empty = none; [g…] = those.
     private readonly string[]? _namedGraphs;
+    // Dataset (FROM / USING): the default-graph set. null/empty = the real unnamed default graph; [g…] = the FROM
+    // graphs, whose RDF merge IS the default graph (SPARQL §13.2) — a default-context pattern (activeGraph == "")
+    // scans their UNION, and because every pattern re-scans the whole set, a BGP join may span them (the merge, not
+    // per-graph silos). Inert inside a GRAPH clause, where activeGraph is the specific named-graph IRI.
+    private readonly string[]? _defaultGraphs;
     // ADR-047 spike: reorder each BGP run by selectivity (the QueryPlanner model) before the nested-loop join. A
     // BGP join is commutative, so this is correctness-neutral; it only changes the join order's cost.
     private readonly bool _reorderBgp;
@@ -63,7 +68,7 @@ internal sealed class TreeJoinExecutor
         string? prefixSource = null, ISparqlServiceExecutor? serviceExecutor = null,
         TemporalQueryMode temporalMode = TemporalQueryMode.Current,
         DateTimeOffset asOfTime = default, DateTimeOffset rangeStart = default, DateTimeOffset rangeEnd = default,
-        string[]? namedGraphs = null, bool reorderBgp = false,
+        string[]? namedGraphs = null, string[]? defaultGraphs = null, bool reorderBgp = false,
         Dictionary<string, HashSet<long>>? trigramCandidatesByVar = null)
     {
         _store = store;
@@ -76,6 +81,7 @@ internal sealed class TreeJoinExecutor
         _rangeStart = rangeStart;
         _rangeEnd = rangeEnd;
         _namedGraphs = namedGraphs;
+        _defaultGraphs = defaultGraphs;
         _reorderBgp = reorderBgp;
         _guardCap = store.MaxResultRows;
         _trigramCandidatesByVar = trigramCandidatesByVar;
@@ -753,7 +759,7 @@ internal sealed class TreeJoinExecutor
         var innerPa = new PatternArray(innerBuffer);
         int innerRoot = new SparqlParser(_source.AsSpan()).ParsePatternTreeAt(whereBrace, ref innerPa);
         var innerBag = new TreeJoinExecutor(_store, _source, _prefixes, _prefixSource, _serviceExecutor,
-                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs)
+                _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _namedGraphs, _defaultGraphs)
             .Evaluate(ref innerPa, innerRoot, activeGraph);
 
         // A trailing VALUES inside the sub-SELECT joins its WHERE solutions BEFORE the modifier layer (W3C inline02).
@@ -1006,7 +1012,28 @@ internal sealed class TreeJoinExecutor
             return;
         }
 
-        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
+        // FROM dataset: a default-context pattern scans the UNION of the FROM graphs. A scan does NOT truncate the last
+        // match's bindings on exhaustion (the parent scan's next MoveNext normally does), and the union loop is that
+        // parent here — so reset to the seeded count between graphs, or graph N+1's scan would inherit graph N's bound
+        // terms and over-constrain. (The same reset CrossGraphMultiPatternScan does between graphs.)
+        var union = DefaultGraphUnion(graphs[index]);
+        if (union != null)
+        {
+            int seed = bindings.Count;
+            for (int gi = 0; gi < union.Length && results.Count < _maxRows; gi++)
+            {
+                bindings.TruncateTo(seed);
+                ScanAndJoinAt(patterns, graphs, index, union[gi], ref bindings, results);
+            }
+        }
+        else
+            ScanAndJoinAt(patterns, graphs, index, graphs[index], ref bindings, results);
+    }
+
+    private void ScanAndJoinAt(TriplePattern[] patterns, string[] graphs, int index, string graph,
+        ref BindingTable bindings, List<MaterializedRow> results)
+    {
+        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graph.AsSpan(),
             _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
@@ -1019,6 +1046,15 @@ internal sealed class TreeJoinExecutor
             scan.Dispose();
         }
     }
+
+    /// <summary>
+    /// The graphs a pattern with default-context graph <paramref name="graph"/> ("") scans when a FROM dataset
+    /// redefined the default graph: the FROM graphs (their RDF merge IS the default graph, SPARQL §13.2). Returns null
+    /// for the single-graph cases — a GRAPH &lt;g&gt; override, or the real unnamed default with no FROM clause — so the
+    /// caller takes the unchanged single-scan path.
+    /// </summary>
+    private string[]? DefaultGraphUnion(string graph)
+        => graph.Length == 0 && _defaultGraphs is { Length: > 0 } ? _defaultGraphs : null;
 
     /// <summary>
     /// ADR-047 materialization fix — fold a FLAT pure-BGP into the aggregate accumulator as the nested-loop join
@@ -1075,7 +1111,24 @@ internal sealed class TreeJoinExecutor
             return;
         }
 
-        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
+        var union = DefaultGraphUnion(graphs[index]); // FROM dataset: fold over the union of the FROM graphs
+        if (union != null)
+        {
+            int seed = bindings.Count; // reset between graphs — see the JoinAt union loop for why
+            foreach (var g in union)
+            {
+                bindings.TruncateTo(seed);
+                ScanAndJoinAtFold(patterns, graphs, index, g, ref bindings, group);
+            }
+        }
+        else
+            ScanAndJoinAtFold(patterns, graphs, index, graphs[index], ref bindings, group);
+    }
+
+    private void ScanAndJoinAtFold(TriplePattern[] patterns, string[] graphs, int index, string graph,
+        ref BindingTable bindings, GroupedRow group)
+    {
+        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graph.AsSpan(),
             _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {
@@ -1166,7 +1219,25 @@ internal sealed class TreeJoinExecutor
             return;
         }
 
-        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graphs[index].AsSpan(),
+        var union = DefaultGraphUnion(graphs[index]); // FROM dataset: offer rows from the union of the FROM graphs
+        if (union != null)
+        {
+            int seed = bindings.Count; // reset between graphs — see the JoinAt union loop for why
+            foreach (var g in union)
+            {
+                bindings.TruncateTo(seed);
+                ScanAndJoinAtTopK(patterns, graphs, index, g, ref bindings, heap, capacity, comparer);
+            }
+        }
+        else
+            ScanAndJoinAtTopK(patterns, graphs, index, graphs[index], ref bindings, heap, capacity, comparer);
+    }
+
+    private void ScanAndJoinAtTopK(TriplePattern[] patterns, string[] graphs, int index, string graph,
+        ref BindingTable bindings, PriorityQueue<MaterializedRow, MaterializedRow> heap, int capacity,
+        MaterializedRowComparer comparer)
+    {
+        var scan = new TriplePatternScan(_store, _source.AsSpan(), patterns[index], bindings, graph.AsSpan(),
             _temporalMode, _asOfTime, _rangeStart, _rangeEnd, _prefixes, ObjectCandidatesFor(patterns[index]));
         try
         {

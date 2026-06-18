@@ -480,6 +480,10 @@ public partial class QueryExecutorTests
 
     #endregion
 
+    // ADR-047 B2: FROM (default-graph dataset) runs through the unified tree. These exercise ExecuteToMaterialized
+    // (which routes FROM to the tree — _defaultGraphs reach the TreeJoinExecutor, whose default-context scan unions the
+    // FROM graphs), NOT the dead ExecuteFromToMaterialized / CrossGraphMultiPatternScan slot path. The cutover IS the
+    // test: certifying the new path, including the multi-pattern cross-graph join (Execute_FromWithJoin).
     #region FROM / FROM NAMED Dataset Clauses
 
     [Fact]
@@ -500,7 +504,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteFromToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var subjects = new List<string>();
             while (results.MoveNext())
@@ -540,7 +544,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteFromToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var subjects = new HashSet<string>();
             while (results.MoveNext())
@@ -693,7 +697,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteFromToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var subjects = new HashSet<string>();
             while (results.MoveNext())
@@ -735,7 +739,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteFromToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var foundJoin = false;
             while (results.MoveNext())
