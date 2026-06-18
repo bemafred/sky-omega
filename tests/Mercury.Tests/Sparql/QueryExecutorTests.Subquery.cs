@@ -63,7 +63,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var persons = new List<string>();
             while (results.MoveNext())
@@ -100,7 +100,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -133,7 +133,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -162,7 +162,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -191,7 +191,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             while (results.MoveNext())
             {
@@ -228,7 +228,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var names = new List<string>();
             while (results.MoveNext())
@@ -269,7 +269,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var persons = new List<string>();
             while (results.MoveNext())
@@ -316,7 +316,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var knowers = new List<string>();
             while (results.MoveNext())
@@ -355,7 +355,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var resultList = new List<(string person, string age)>();
             while (results.MoveNext())
@@ -400,7 +400,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var resultList = new List<(string person, string age)>();
             while (results.MoveNext())
@@ -445,7 +445,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var resultList = new List<string>();
             while (results.MoveNext())
@@ -482,7 +482,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -515,7 +515,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var resultList = new List<(string person, string name, string age)>();
             while (results.MoveNext())
@@ -569,7 +569,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var found = new List<(string employee, string nick, string sal)>();
             while (results.MoveNext())
@@ -630,7 +630,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var found = new List<(string emp, string name, string label)>();
             while (results.MoveNext())
@@ -684,7 +684,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             var bindingsInfo = new List<string>();
@@ -750,7 +750,7 @@ public partial class QueryExecutorTests
             Assert.False(subSelect.Distinct, "Removed DISTINCT to avoid GetHashCode issue");
 
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsed);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             var terms = new HashSet<string>();
             while (results.MoveNext())
@@ -933,7 +933,7 @@ public partial class QueryExecutorTests
 
             // Now test through QueryExecutor
             using var doubleExecutor = new QueryExecutor(Store, doubleNestedQuery.AsSpan(), doubleParsed);
-            var doubleResults = doubleExecutor.ExecuteSubQueryToMaterialized();
+            var doubleResults = doubleExecutor.ExecuteToMaterialized();
             int doubleCount = 0;
             while (doubleResults.MoveNext()) doubleCount++;
             doubleResults.Dispose();
@@ -972,7 +972,7 @@ public partial class QueryExecutorTests
 
             // Use ExecuteSubQueryToMaterialized to avoid stack overflow
             using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
-            var fullResults = fullExecutor.ExecuteSubQueryToMaterialized();
+            var fullResults = fullExecutor.ExecuteToMaterialized();
 
             var rows = new List<(string x, string y)>();
             while (fullResults.MoveNext())
@@ -1026,7 +1026,7 @@ public partial class QueryExecutorTests
 
             // Execute
             using var executor = new QueryExecutor(Store, singleQuery.AsSpan(), parsed);
-            var results = executor.ExecuteSubQueryToMaterialized();
+            var results = executor.ExecuteToMaterialized();
             int count = 0;
             while (results.MoveNext())
             {
