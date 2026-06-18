@@ -731,7 +731,11 @@ internal sealed class TreeJoinExecutor
         }
         catch when (silent)
         {
-            return new List<MaterializedRow> { EmptyRow() }; // SILENT: one empty row (the join preserves the input rows)
+            // SILENT: a failed endpoint contributes the EMPTY multiset (no solutions), so a non-OPTIONAL SERVICE
+            // eliminates the join (Join(input, ∅) = ∅) — the certified behaviour. Returning a single empty row instead
+            // would silently make the SERVICE optional (Join(input, {μ0}) = input). OPTIONAL { SERVICE SILENT } still
+            // preserves its input rows, but that is the OptionalHeader's left-join, not ServiceCall's concern.
+            return new List<MaterializedRow>();
         }
     }
 

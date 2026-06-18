@@ -14,6 +14,11 @@ namespace SkyOmega.Mercury.Tests.Sparql;
 
 public partial class QueryExecutorTests
 {
+    // ADR-047 B3: SERVICE (federation) runs through the unified tree. The execution tests exercise Execute() /
+    // ExecuteToMaterialized — which route a SERVICE clause to the tree's ServiceStep (against the injected mock
+    // ISparqlServiceExecutor) — NOT the dead ExecuteWithServiceMaterialized / ExecuteServiceToMaterialized /
+    // ServiceMaterializer slot path. The cutover IS the test: SERVICE-only, SERVICE+local join, multiple SERVICE,
+    // UNION-with-SERVICE, OPTIONAL { SERVICE }, SERVICE ?ep, and SILENT all certify the new path.
     #region SERVICE clause tests
 
     [Fact]
@@ -101,7 +106,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
-            var results = executor.ExecuteServiceToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             int count = 0;
             while (results.MoveNext())
@@ -140,7 +145,7 @@ public partial class QueryExecutorTests
         try
         {
             using var executor = new QueryExecutor(Store, query.AsSpan(), parsedQuery, mockExecutor);
-            var results = executor.ExecuteServiceToMaterialized();
+            var results = executor.ExecuteToMaterialized();
 
             // SILENT should return empty results, not throw
             int count = 0;
@@ -173,7 +178,7 @@ public partial class QueryExecutorTests
 
             Assert.Throws<InvalidOperationException>(() =>
             {
-                var results = executor.ExecuteServiceToMaterialized();
+                var results = executor.ExecuteToMaterialized();
                 results.Dispose();
             });
         }

@@ -827,23 +827,18 @@ internal partial class QueryExecutor : IDisposable
             return WrapResultsAsMaterialized(ExecuteGraphViaTree());
         }
 
-        // Check for SERVICE clauses
-        if (_buffer.HasService)
-        {
-            var results = ExecuteWithServiceMaterialized();
-            return WrapResultsAsMaterialized(results);
-        }
-
-        // ADR-047 B2: FROM (default-graph dataset) materializes through the unified tree too — _defaultGraphs reaches
-        // the TreeJoinExecutor (see ExecuteGraphViaTree), whose default-context scan unions the FROM graphs. The old
-        // ExecuteFromToMaterialized / CrossGraphMultiPatternScan path is dead, deleted in phase C.
+        // ADR-047 B2/B3: FROM (default-graph dataset) and SERVICE (federation) materialize through the unified tree too.
+        // _defaultGraphs reaches the TreeJoinExecutor (see ExecuteGraphViaTree), whose default-context scan unions the
+        // FROM graphs; a SERVICE clause is a ServiceHeader the tree's ServiceStep evaluates against the injected
+        // ISparqlServiceExecutor and joins. The old ExecuteFromToMaterialized / ExecuteWithServiceMaterialized /
+        // CrossGraphMultiPatternScan / ServiceMaterializer path is dead, deleted in phase C.
 
         // Empty pattern case
         if (_buffer.TriplePatternCount == 0)
         {
-            // A sub-SELECT-only or VALUES-only WHERE has no top-level triples but is real content — route it to the
-            // tree (SubSelectStep / ValuesStep), not the empty-pattern path (ADR-047 B1).
-            if (_buffer.HasSubQueries || _buffer.HasValues)
+            // A sub-SELECT-only, VALUES-only, or SERVICE-only WHERE has no top-level triples but is real content — route
+            // it to the tree (SubSelectStep / ValuesStep / ServiceStep), not the empty-pattern path (ADR-047 B1/B3).
+            if (_buffer.HasSubQueries || _buffer.HasValues || _buffer.HasService)
                 return WrapResultsAsMaterialized(ExecuteGraphViaTree());
             // For empty patterns with BIND/expressions, execute and collect results
             return ExecuteEmptyPatternToMaterialized();
@@ -1127,27 +1122,19 @@ internal partial class QueryExecutor : IDisposable
             return ExecuteViaTreeMaterialized();
         }
 
-        // Check for SERVICE clauses - use _buffer
-        // SERVICE execution uses materialization pattern to avoid stack overflow
-        // (see docs/mercury-adr-buffer-pattern.md)
-        if (_buffer.HasService)
-        {
-            var serviceResults = ExecuteWithServiceMaterialized();
-            if (serviceResults == null || serviceResults.Count == 0)
-                return QueryResults.Empty();
-
-            var serviceBindings = new Binding[16];
-            return QueryResults.FromMaterializedList(serviceResults, serviceBindings, _stringBuffer,
-                _buffer.Limit, _buffer.Offset, _buffer.SelectDistinct);
-        }
+        // ADR-047 B3: SERVICE (federation) runs through the unified tree like everything else — a SERVICE clause is a
+        // ServiceHeader the tree's ServiceStep evaluates against the injected ISparqlServiceExecutor and joins with the
+        // outer rows. UNION-with-SERVICE, OPTIONAL { SERVICE }, multiple SERVICE, and SERVICE ?ep all fall out of the
+        // tree's existing UnionHeader / OptionalHeader / sequential-Join machinery — no per-shape orchestration. The old
+        // ExecuteWithServiceMaterialized path (and its ServiceMaterializer dual-path) is dead, deleted in phase C.
 
         if (_buffer.TriplePatternCount == 0)
         {
-            // A WHERE with no top-level triples is NOT necessarily empty. VALUES-only inline data, or a sub-SELECT-only
-            // body ({ SELECT … }), is real content the unified tree materializes — the empty-pattern path below only
-            // checks aggregate/BIND/FILTER/EXISTS, so it would wrongly return nothing. ADR-047 B1: a sub-SELECT-only
-            // WHERE routes to the tree, where SubSelectStep evaluates it (and joins nothing — there are no outer rows).
-            if (_buffer.HasValues || _buffer.HasSubQueries)
+            // A WHERE with no top-level triples is NOT necessarily empty. VALUES-only inline data, a sub-SELECT-only
+            // body ({ SELECT … }), or a SERVICE-only body is real content the unified tree materializes — the
+            // empty-pattern path below only checks aggregate/BIND/FILTER/EXISTS, so it would wrongly return nothing.
+            // ADR-047 B1/B3: route those to the tree (SubSelectStep / ValuesStep / ServiceStep).
+            if (_buffer.HasValues || _buffer.HasSubQueries || _buffer.HasService)
                 return ExecuteViaTreeMaterialized();
 
             // Check if there are BIND, FILTER, EXISTS, or SELECT expressions to evaluate
@@ -1174,8 +1161,9 @@ internal partial class QueryExecutor : IDisposable
         // The two former VALUES+triple gaps are CLOSED: numeric/boolean VALUES tokens canonicalize to a typed literal
         // before the join (ExpandValueTerm→LiteralForm, the routine TriplePatternScan also applies to a constant), and
         // a zero-length-path reflexive over a VALUES-bound term is gated on graph-node membership (SPARQL §9.3); a
-        // VALUES after a triple now correctly cross-joins (SPARQL §18) where the old path silently dropped it. The
-        // sub-query / FROM / SERVICE branches above still reach the old slot operators, which a later phase deletes.
+        // VALUES after a triple now correctly cross-joins (SPARQL §18) where the old path silently dropped it. As of
+        // B1/B2/B3 every former carve-out (sub-query / FROM / SERVICE) routes through the tree above; the old slot
+        // executor is fully unreachable, deleted in phase C.
         return ExecuteViaTreeMaterialized();
     }
 
