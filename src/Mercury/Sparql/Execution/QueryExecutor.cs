@@ -67,13 +67,8 @@ internal partial class QueryExecutor : IDisposable
     private readonly string[]? _defaultGraphs;
     private readonly string[]? _namedGraphs;
 
-    // SERVICE clause execution
+    // SERVICE clause execution — the tree's ServiceStep evaluates SERVICE against this executor (ADR-047 B3).
     private readonly ISparqlServiceExecutor? _serviceExecutor;
-    private ServiceMaterializer? _serviceMaterializer;
-
-    // Cached patterns for SERVICE+local joins (stored on heap to avoid stack overflow)
-    private readonly TriplePattern? _cachedFirstPattern;
-    private readonly ServiceClause? _cachedFirstServiceClause;
 
     // Temporal query parameters
     private readonly TemporalQueryMode _temporalMode;
@@ -83,7 +78,6 @@ internal partial class QueryExecutor : IDisposable
 
     // Query optimization
     private readonly QueryPlanner? _planner;
-    private readonly int[]? _optimizedPatternOrder;
 
     // Debug properties for testing
     internal bool BufferHasExists => _buffer.HasExists;
@@ -167,17 +161,6 @@ internal partial class QueryExecutor : IDisposable
 
         _serviceExecutor = serviceExecutor;
 
-        // Cache first pattern and service clause for SERVICE+local joins
-        // Now using _cachedPattern instead of query.WhereClause.Pattern
-        if (_cachedPattern.PatternCount > 0)
-        {
-            _cachedFirstPattern = _cachedPattern.GetPattern(0);
-        }
-        if (_cachedPattern.ServiceClauseCount > 0)
-        {
-            _cachedFirstServiceClause = _cachedPattern.GetServiceClause(0);
-        }
-
         // Extract temporal clause parameters (from buffer instead of query)
         _temporalMode = _buffer.TemporalMode;
         if (_temporalMode == TemporalQueryMode.AsOf)
@@ -193,12 +176,6 @@ internal partial class QueryExecutor : IDisposable
             _rangeEnd = ParseDateTimeOffset(endStr);
         }
 
-        // Compute optimized pattern order if planner is available and we have multiple patterns
-        if (_planner != null && _cachedPattern.RequiredPatternCount > 1)
-        {
-            _optimizedPatternOrder = _planner.OptimizePatternOrder(
-                in _cachedPattern, source);
-        }
     }
 
     /// <summary>
@@ -282,16 +259,6 @@ internal partial class QueryExecutor : IDisposable
         _serviceExecutor = serviceExecutor;
         _maxJoinDepth = DefaultMaxJoinDepth;  // Use default join depth limit
 
-        // Cache first pattern and service clause for SERVICE+local joins
-        if (_cachedPattern.PatternCount > 0)
-        {
-            _cachedFirstPattern = _cachedPattern.GetPattern(0);
-        }
-        if (_cachedPattern.ServiceClauseCount > 0)
-        {
-            _cachedFirstServiceClause = _cachedPattern.GetServiceClause(0);
-        }
-
         // Extract temporal parameters from buffer
         _temporalMode = buffer.TemporalMode;
         if (_temporalMode == TemporalQueryMode.AsOf)
@@ -336,7 +303,6 @@ internal partial class QueryExecutor : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _serviceMaterializer?.Dispose();
         _buffer?.Dispose();
         if (_stringBuffer != null)
             _bufferManager.Return(_stringBuffer);
