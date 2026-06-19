@@ -23,8 +23,7 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 // self-manages backtracking via TruncateTo and evaluates every non-sequence property-path form); the continuation
 // is plain recursion, so there are no closures and no per-step allocation. Solutions materialize into
 // MaterializedRow (bounded by result size) and the composing operators compose over those rows — exactly as the
-// GraphTreeEvaluator model does, and as the divergent QueryExecutor.Graph.cs the cutover deletes does — feeding the
-// shared QueryResults.FromMaterializedSimple downstream.
+// GraphTreeEvaluator model does — feeding the shared QueryResults.FromMaterializedSimple downstream.
 //
 // EvalGroup walks a group's direct children: consecutive triples accumulate into a BGP run flushed zero-GC by
 // FlushBgp (seeded by each input row); each composing operator (GRAPH / group / UNION / OPTIONAL / BIND / VALUES /
@@ -61,7 +60,7 @@ internal sealed class TreeJoinExecutor
     private readonly long _guardCap; // StorageOptions.MaxResultRows — the unbounded-result guard (0 = unbounded)
     private QueryPlanner? _planner;
     // ADR-024 trigram pre-filter: object-variable name → candidate object atom IDs from text:match. A pattern whose
-    // object is one of these variables scans candidate-filtered (the old MultiPatternScan integration, now in the tree).
+    // object is one of these variables scans candidate-filtered (index-level candidate narrowing, done inline in the tree).
     private readonly Dictionary<string, HashSet<long>>? _trigramCandidatesByVar;
 
     public TreeJoinExecutor(QuadStore store, string source, PrefixMapping[]? prefixes = null,
@@ -1022,7 +1021,7 @@ internal sealed class TreeJoinExecutor
         // FROM dataset: a default-context pattern scans the UNION of the FROM graphs. A scan does NOT truncate the last
         // match's bindings on exhaustion (the parent scan's next MoveNext normally does), and the union loop is that
         // parent here — so reset to the seeded count between graphs, or graph N+1's scan would inherit graph N's bound
-        // terms and over-constrain. (The same reset CrossGraphMultiPatternScan does between graphs.)
+        // terms and over-constrain.
         var union = DefaultGraphUnion(graphs[index]);
         if (union != null)
         {

@@ -1729,8 +1729,8 @@ internal ref struct TriplePatternScan
 
         // ADR-047: a bare numeric or boolean object token is a typed literal in SPARQL (30 ≡ "30"^^xsd:integer,
         // true ≡ "true"^^xsd:boolean). The tree reuses this scan for every constant-object match (MINUS/EXISTS bodies,
-        // plain BGP); without this the raw "30" never matches the stored "30"^^<…integer> atom — the old
-        // MultiPatternScan canonicalized value-aware, so single-pattern scans silently under-matched numeric constants.
+        // plain BGP); without value-aware canonicalization here the raw "30" never matches the stored
+        // "30"^^<…integer> atom, so numeric/boolean constants would silently under-match.
         return LiteralForm.CanonicalizeNumericOrBoolean(termSpan, out _literalScratch);
     }
 
@@ -1814,8 +1814,8 @@ internal ref struct TriplePatternScan
 
         // ADR-047: a bare numeric or boolean object token is a typed literal in SPARQL (30 ≡ "30"^^xsd:integer,
         // true ≡ "true"^^xsd:boolean). The tree reuses this scan for every constant-object match (MINUS/EXISTS bodies,
-        // plain BGP); without this the raw "30" never matches the stored "30"^^<…integer> atom — the old
-        // MultiPatternScan canonicalized value-aware, so single-pattern scans silently under-matched numeric constants.
+        // plain BGP); without value-aware canonicalization here the raw "30" never matches the stored
+        // "30"^^<…integer> atom, so numeric/boolean constants would silently under-match.
         return LiteralForm.CanonicalizeNumericOrBoolean(termSpan, out _literalScratch);
     }
 

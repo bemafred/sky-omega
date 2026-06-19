@@ -157,7 +157,7 @@ internal static class FilterAnalyzer
     }
 
     /// <summary>
-    /// Build per-level filter lists for MultiPatternScan integration.
+    /// Build per-level filter lists for leveled-scan filter application.
     /// </summary>
     /// <param name="pattern">The graph pattern containing filters.</param>
     /// <param name="source">The source SPARQL query text.</param>

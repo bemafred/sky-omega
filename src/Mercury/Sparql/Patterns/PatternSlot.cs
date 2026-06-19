@@ -111,19 +111,15 @@ internal ref struct PatternSlot
     
     // ───────────────────────────────────────────────────────────────────────
     // Variant: Bind (Kind == Bind)
-    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4][AfterPatternIndex:4][ScopeDepth:4] = 28 bytes
+    // Layout: [Kind:1][pad:3][ExprStart:4][ExprLen:4][VarStart:4][VarLen:4][reserved:4][ScopeDepth:4] = 28 bytes
     // ───────────────────────────────────────────────────────────────────────
 
     public ref int BindExprStart => ref MemoryMarshal.AsRef<int>(_span.Slice(4, 4));
     public ref int BindExprLength => ref MemoryMarshal.AsRef<int>(_span.Slice(8, 4));
     public ref int BindVarStart => ref MemoryMarshal.AsRef<int>(_span.Slice(12, 4));
     public ref int BindVarLength => ref MemoryMarshal.AsRef<int>(_span.Slice(16, 4));
-    /// <summary>
-    /// Index of the triple pattern after which this BIND should be evaluated.
-    /// -1 means evaluate before any patterns, 0 means after pattern 0, etc.
-    /// BINDs with AfterPatternIndex >= 0 are evaluated inline by MultiPatternScan.
-    /// </summary>
-    public ref int BindAfterPatternIndex => ref MemoryMarshal.AsRef<int>(_span.Slice(20, 4));
+    // Bytes 20-24 reserved (formerly AfterPatternIndex — the flat-slot BIND-ordering marker, removed
+    // with the slot-operator engine; the tree orders BIND leaves structurally).
     /// <summary>
     /// Scope depth of this BIND (0 = top level, 1 = first nested group, etc.)
     /// Used to exclude this binding from filters in deeper scopes per SPARQL scoping rules.
@@ -303,9 +299,8 @@ internal ref struct PatternArray
     /// <param name="exprLen">Length of the expression</param>
     /// <param name="varStart">Start offset of the target variable (including ?)</param>
     /// <param name="varLen">Length of the variable name</param>
-    /// <param name="afterPatternIndex">Triple pattern index after which to evaluate (-1 for before any patterns)</param>
     /// <param name="scopeDepth">Scope depth (0 = top level, 1 = first nested group, etc.)</param>
-    public void AddBind(int exprStart, int exprLen, int varStart, int varLen, int afterPatternIndex = -1, int scopeDepth = 0)
+    public void AddBind(int exprStart, int exprLen, int varStart, int varLen, int scopeDepth = 0)
     {
         var slot = AllocateSlot();
         slot.Kind = PatternKind.Bind;
@@ -313,7 +308,6 @@ internal ref struct PatternArray
         slot.BindExprLength = exprLen;
         slot.BindVarStart = varStart;
         slot.BindVarLength = varLen;
-        slot.BindAfterPatternIndex = afterPatternIndex;
         slot.BindScopeDepth = scopeDepth;
     }
     
@@ -1335,8 +1329,7 @@ internal sealed class QueryBuffer : IDisposable
     }
 
     /// <summary>
-    /// Extract triple patterns to a heap-allocated array.
-    /// Used by MultiPatternScan to avoid copying the entire GraphPattern struct.
+    /// Extract triple patterns to a heap-allocated array (avoids copying the entire GraphPattern struct).
     /// </summary>
     public TriplePattern[] GetTriplePatternsArray()
     {
@@ -1415,8 +1408,7 @@ internal sealed class QueryBuffer : IDisposable
                         ExprStart = slot.BindExprStart,
                         ExprLength = slot.BindExprLength,
                         VarStart = slot.BindVarStart,
-                        VarLength = slot.BindVarLength,
-                        AfterPatternIndex = slot.BindAfterPatternIndex
+                        VarLength = slot.BindVarLength
                     });
                     break;
             }
@@ -1965,7 +1957,7 @@ internal static class QueryBufferAdapter
         for (int i = 0; i < gp.BindCount; i++)
         {
             var b = gp.GetBind(i);
-            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength, b.AfterPatternIndex, b.ScopeDepth);
+            patterns.AddBind(b.ExprStart, b.ExprLength, b.VarStart, b.VarLength, b.ScopeDepth);
         }
 
         // Add GRAPH clauses

@@ -287,9 +287,9 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     /// <remarks>
     /// ADR-024: The trigram index provides set-based pre-filtering at scan level —
-    /// MultiPatternScan restricts the enumerator to candidate object atoms before
-    /// bindings reach this evaluator. This Contains check is the verification step
-    /// that eliminates trigram false positives. Both paths are required for correctness.
+    /// the scan restricts the enumerator to candidate object atoms before bindings
+    /// reach this evaluator. This Contains check is the verification step that
+    /// eliminates trigram false positives. Both paths are required for correctness.
     /// </remarks>
     private Value ParseTextMatchFunction()
     {

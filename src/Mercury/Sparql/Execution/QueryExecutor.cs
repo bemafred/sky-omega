@@ -515,7 +515,7 @@ internal partial class QueryExecutor : IDisposable
             }
 
             // ADR-024: text:match trigram pre-filter — resolve candidate object atom IDs per text:match variable so the
-            // tree's scan filters at the index level (the integration the old MultiPatternScan had; mandatory at scale).
+            // tree's scan filters at the index level (candidate-narrowing that is mandatory at scale).
             Dictionary<string, HashSet<long>>? trigramMap = null;
             var textHints = FilterAnalyzer.DetectTextMatchFilters(in _cachedPattern, _source.AsSpan(), null);
             if (textHints != null)
@@ -671,8 +671,8 @@ internal partial class QueryExecutor : IDisposable
         // ADR-047 B2/B3: FROM (default-graph dataset) and SERVICE (federation) materialize through the unified tree too.
         // _defaultGraphs reaches the TreeJoinExecutor (see ExecuteGraphViaTree), whose default-context scan unions the
         // FROM graphs; a SERVICE clause is a ServiceHeader the tree's ServiceStep evaluates against the injected
-        // ISparqlServiceExecutor and joins. The old ExecuteFromToMaterialized / ExecuteWithServiceMaterialized /
-        // CrossGraphMultiPatternScan / ServiceMaterializer path is dead, deleted in phase C.
+        // ISparqlServiceExecutor and joins. The old separate FROM/SERVICE/cross-graph executor paths are deleted;
+        // ServiceMaterializer.cs is retained (unwired) for the ADR-048 federation-efficiency work.
 
         // Empty pattern case
         if (_buffer.TriplePatternCount == 0)
@@ -845,8 +845,8 @@ internal partial class QueryExecutor : IDisposable
         // ADR-047 B1: sub-queries route through the unified tree like everything else — a { SELECT … } in the WHERE is
         // a SubSelectHeader the tree's SubSelectStep evaluates (threading the active graph, so GRAPH-context and
         // per-graph-aggregate sub-SELECTs work). A GRAPH-only sub-query falls into the GRAPH branch below (also the
-        // tree); a sub-SELECT joined with outer triples falls through to the default tree dispatch. The old
-        // ExecuteWithSubQueries / BoxedSubQueryExecutor path is dead, deleted in phase C.
+        // tree); a sub-SELECT joined with outer triples falls through to the default tree dispatch. The old separate
+        // sub-query executor path is deleted.
 
         // Check for GRAPH clauses - use _buffer to avoid large struct copies
         // A query with GRAPH but no direct triple patterns (only patterns inside GRAPH)
@@ -864,7 +864,7 @@ internal partial class QueryExecutor : IDisposable
         // ServiceHeader the tree's ServiceStep evaluates against the injected ISparqlServiceExecutor and joins with the
         // outer rows. UNION-with-SERVICE, OPTIONAL { SERVICE }, multiple SERVICE, and SERVICE ?ep all fall out of the
         // tree's existing UnionHeader / OptionalHeader / sequential-Join machinery — no per-shape orchestration. The old
-        // ExecuteWithServiceMaterialized path (and its ServiceMaterializer dual-path) is dead, deleted in phase C.
+        // SERVICE executor path is deleted; ServiceMaterializer.cs is retained (unwired) for ADR-048 federation efficiency.
 
         if (_buffer.TriplePatternCount == 0)
         {
@@ -889,8 +889,8 @@ internal partial class QueryExecutor : IDisposable
 
         // ADR-047 B2: a FROM dataset (default-graph clauses) runs through the unified tree like everything else — the
         // FROM graphs are passed to the TreeJoinExecutor as _defaultGraphs, and a default-context pattern scans their
-        // UNION (their RDF merge IS the default graph, SPARQL §13.2). The old ExecuteWithDefaultGraphs /
-        // CrossGraphMultiPatternScan path is dead, deleted in phase C.
+        // UNION (their RDF merge IS the default graph, SPARQL §13.2). The old separate FROM / cross-graph executor
+        // path is deleted.
 
         // ADR-047 CUTOVER (the flip): the default query path — plain BGP AND inline VALUES + triple — runs through the
         // unified zero-GC tree executor, the same one GRAPH queries use (ADR-045, "a default graph is also a graph").
@@ -1077,9 +1077,8 @@ internal partial class QueryExecutor : IDisposable
 
         // ADR-047 A2/B2/C2: the WHERE — BGP, FROM dataset, OR a sub-SELECT — evaluates through the unified tree; the
         // materialized rows (all variables bound, no projection) ConstructResults reads via .Current. C2 routed
-        // CONSTRUCT-with-subquery here too (the last ExecuteWithSubQueries caller; B1 had cut SELECT/ASK). A FROM
-        // dataset is honoured by the tree (_defaultGraphs union, B2). The old ExecuteWithSubQueries / slot scan path
-        // is dead, deleted later in phase C.
+        // CONSTRUCT-with-subquery here too (B1 had cut SELECT/ASK). A FROM dataset is honoured by the tree
+        // (_defaultGraphs union, B2). The old separate sub-query / slot-scan executor path is deleted.
         return new ConstructResults(
             QueryResults.FromMaterializedRows(ExecuteGraphViaTree(), _source, _store, bindings, stringBuffer),
             template, _source, bindings, stringBuffer, _buffer.Prefixes);

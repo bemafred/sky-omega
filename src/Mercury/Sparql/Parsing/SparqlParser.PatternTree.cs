@@ -505,8 +505,8 @@ internal ref partial struct SparqlParser
 
     /// <summary>
     /// [60] Bind ::= 'BIND' '(' Expression 'AS' Var ')'. Captures the expression span (everything up to 'AS' at
-    /// paren-depth 0) and the target variable span, emitting a Bind leaf at the current depth. AfterPatternIndex
-    /// is -1: in the tree the executor evaluates children in document order, so position is structural.
+    /// paren-depth 0) and the target variable span, emitting a Bind leaf at the current depth. The tree executor
+    /// evaluates children in document order, so a BIND's position is structural — no per-slot evaluation index.
     /// </summary>
     private void EmitBindTree(scoped ref PatternArray pa, int depth)
     {
@@ -569,7 +569,7 @@ internal ref partial struct SparqlParser
         if (Peek() == ')')
             Advance(); // consume ')'
 
-        pa.AddBind(exprStart, exprLength, varStart, varLength, afterPatternIndex: -1, scopeDepth: depth);
+        pa.AddBind(exprStart, exprLength, varStart, varLength, scopeDepth: depth);
     }
 
     /// <summary>

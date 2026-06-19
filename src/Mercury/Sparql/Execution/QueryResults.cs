@@ -27,7 +27,6 @@ internal ref partial struct QueryResults
     private BindingTable _bindingTable;
     private readonly bool _hasFilters;
     private readonly bool _hasOptional;
-    private readonly bool _isMultiPattern;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
@@ -148,7 +147,6 @@ internal ref partial struct QueryResults
         // Initialize other required fields to defaults
         _isEmpty = false;
         _hasOptional = false;
-        _isMultiPattern = false;
         _limit = 0;
         _offset = 0;
         _distinct = false;
@@ -265,7 +263,6 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = buffer?.HasFilters ?? false; // Evaluate filters for GRAPH clause results
         _hasOptional = false;
-        _isMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -319,7 +316,6 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false; // Filters already applied during materialization
         _hasOptional = false;
-        _isMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -370,7 +366,6 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false;
         _hasOptional = false;
-        _isMultiPattern = false;
         _isEmpty = groups.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -415,7 +410,6 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false;
         _hasOptional = false;
-        _isMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -457,7 +451,6 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false;
         _hasOptional = false;
-        _isMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
