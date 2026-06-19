@@ -1233,102 +1233,34 @@ internal ref partial struct SparqlParser
     }
 
     /// <summary>
-    /// Re-parse a path segment from source offsets.
-    /// Handles nested sequences/alternatives within the segment bounds.
+    /// Re-parse one operand of a sequence/alternative path from its captured source span, delegating to the
+    /// single real path parser (<see cref="ParsePredicateOrPath"/>) instead of a second, hand-rolled grammar.
     /// </summary>
+    /// <remarks>
+    /// A sequence/alternative stores its left operand as a PathElt immediately followed in the source by '/' or
+    /// '|' (e.g. the <c>a</c> of <c>a/b/c</c>). The greedy real parser would swallow that trailing operator and
+    /// over-read the whole expression, so the span is re-parsed with the parser's source view narrowed to
+    /// <c>[0, start+length)</c>: the operand boundary then reads as end-of-input ('\0', a path terminator) and the
+    /// parse stops there with no over-read. Slicing from 0 preserves absolute offsets, so the returned
+    /// <see cref="PropertyPath"/>'s spans remain correct indices into the original source. This is the same bound
+    /// the former bespoke segment parser enforced via <c>_position &lt; segmentEnd</c>, now applied to the one
+    /// grammar — eliminating the second path parser whose every gap was a silent divergence (ADR-047).
+    /// </remarks>
     private (Term predicate, PropertyPath path) ParsePathSegment(int start, int length)
     {
-        // Save current parser position
+        var savedSource = _source;
         var savedPosition = _position;
-        var segmentEnd = start + length;
-
-        // Temporarily set position to the segment location
-        _position = start;
-
-        SkipWhitespace();
-        var ch = Peek();
-
-        // ADR-047 D: a grouped leg, e.g. (p*|r*) in p/(p*|r*). Parse the group's inner via the FULL path parser
-        // (ParsePredicateOrPath) — this weaker re-parser took the first quantifier branch and dropped a following
-        // alternation (p*|r* → just p*), so it could not express a quantified alternation in a sequence position (W3C
-        // seq-alt-of-star). A group is transparent for our PropertyPath model ((P) ≡ P), and the inner self-bounds (the
-        // full parser stops at the non-path ')'), so there is no over-read past the group. (pp31's (p1|p2)/(p3|p4)
-        // stays correct: each grouped leg now parses through the one real path parser.)
-        if (ch == '(')
+        try
         {
-            _position++; // skip '('
-            var (groupTerm, groupPath) = ParsePredicateOrPath();
+            _source = _source.Slice(0, start + length);
+            _position = start;
+            return ParsePredicateOrPath();
+        }
+        finally
+        {
+            _source = savedSource;
             _position = savedPosition;
-            return (groupTerm, groupPath);
         }
-
-        Term term;
-        PropertyPath resultPath = default;
-
-        // Check for inverse path: ^predicate
-        if (ch == '^')
-        {
-            Advance(); // Skip '^'
-            SkipWhitespace();
-            term = ParseTerm();
-            resultPath = PropertyPath.Inverse(term);
-        }
-        else
-        {
-            // Parse the term
-            term = ParseTerm();
-
-            // Check for modifier after the term
-            SkipWhitespace();
-            ch = Peek();
-
-            if (ch == '*')
-            {
-                Advance();
-                resultPath = PropertyPath.ZeroOrMore(term);
-            }
-            else if (ch == '+')
-            {
-                Advance();
-                resultPath = PropertyPath.OneOrMore(term);
-            }
-            else if (ch == '?')
-            {
-                // Need to distinguish from variable - '?' followed by letter is variable
-                var next = PeekAt(1);
-                if (!IsLetter(next) && next != '_')
-                {
-                    Advance();
-                    resultPath = PropertyPath.ZeroOrOne(term);
-                }
-            }
-            // Check for sequence or alternative within segment bounds
-            else if (ch == '/' && _position < segmentEnd)
-            {
-                var leftStart = term.Start;
-                var leftLength = term.Length;
-                Advance(); // Skip '/'
-                SkipWhitespace();
-                var rightStart = _position;
-                var rightLength = segmentEnd - rightStart;
-                resultPath = PropertyPath.Sequence(leftStart, leftLength, rightStart, rightLength);
-            }
-            else if (ch == '|' && _position < segmentEnd)
-            {
-                var leftStart = term.Start;
-                var leftLength = term.Length;
-                Advance(); // Skip '|'
-                SkipWhitespace();
-                var rightStart = _position;
-                var rightLength = segmentEnd - rightStart;
-                resultPath = PropertyPath.Alternative(leftStart, leftLength, rightStart, rightLength);
-            }
-        }
-
-        // Restore original position
-        _position = savedPosition;
-
-        return (term, resultPath);
     }
 
     /// <summary>
