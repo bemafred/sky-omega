@@ -70,6 +70,7 @@ public class PropertyPathW3CConformanceTests : IDisposable
     [InlineData("alt-of-seq", "<urn:a> ((<urn:p>/<urn:p>)|(<urn:q>/<urn:q>)) ?x", "c,f")]  // FIXED (walker re-entrancy)
     [InlineData("alt-of-seq-star", "<urn:a> ((<urn:p>/<urn:p>*)|(<urn:q>/<urn:q>*)) ?x", "b,c,d,e,f")]  // FIXED (quantifier-closure)
     [InlineData("alt-of-quant", "<urn:b> (<urn:p>*|<urn:r>*) ?x", "b,c,d,g")]  // alternation of bare quantifiers (constant subject)
+    [InlineData("seq-alt-of-star", "<urn:a> (<urn:p>/(<urn:p>*|<urn:r>*)) ?x", "b,c,d,g")]  // ADR-047 D: grouped alternation as the 2nd segment of a top-level sequence; p* from b ∪ r* from b
     // ── [91] PathEltOrInverse ::= '^' PathElt ──
     [InlineData("inv-simple", "<urn:d> ^<urn:p> ?x", "c")]
     [InlineData("inv-star", "<urn:d> (^<urn:p>)* ?x", "a,b,c,d")]          // reverse closure
@@ -80,23 +81,11 @@ public class PropertyPathW3CConformanceTests : IDisposable
     public void Tree_MatchesW3CPathSemantics(string name, string body, string expectedX)
         => AssertTreeMatchesW3CPathSemantics(name, body, expectedX);
 
-    [Theory(Skip = "ADR-047 — composite-path, remaining edge. FIXED: parser gap (p*/p), walker re-entrancy " +
-        "(alternation-of-sequences), and quantifier-closure (p*/q, (p*|r*), alternation-of-sequences-with-quantifiers). " +
-        "REMAINING: a grouped ALTERNATION as the second segment of a TOP-LEVEL sequence, p/(p*|r*). The whole sequence " +
-        "goes through ExpandSequencePath, which re-parses each segment via the weaker ParsePathSegment — that doesn't " +
-        "parse a grouped alternation, so the expanded `?syn (p*|r*) ?x` pattern gets the wrong path type and never " +
-        "reaches the (working) alternative walker. Fix = re-parse expansion segments via the full path parser. " +
-        "Note (p*|r*) is correct standalone (alt-of-quant, green above); only the sequence-expanded position fails.")]
-    [InlineData("seq-alt-of-star", "<urn:a> (<urn:p>/(<urn:p>*|<urn:r>*)) ?x", "b,c,d,g")] // p* from b ∪ r* from b
-    public void Tree_MatchesW3CPathSemantics_KnownBugs(string name, string body, string expectedX)
-        => AssertTreeMatchesW3CPathSemantics(name, body, expectedX);
-
     private void AssertTreeMatchesW3CPathSemantics(string name, string body, string expectedX)
     {
         var query = $"SELECT ?x WHERE {{ {body} }}";
         var tree = SparqlEngine.Query(_store, query);
-        var old = SparqlEngine.Query(_store, query);
-        _output.WriteLine($"[{name}] W3C={expectedX,-12} tree={Render(tree)}  (old={Render(old)})");
+        _output.WriteLine($"[{name}] W3C={expectedX,-12} tree={Render(tree)}");
 
         Assert.True(tree.Success, $"[{name}] tree: {tree.ErrorMessage}");
 
