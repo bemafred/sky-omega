@@ -49,4 +49,4 @@
 | [ADR-044](ADR-044-sparql-update-literal-canonicalization.md) | SPARQL UPDATE Literal Escape Canonicalization — Atom-Store Identity Across Ingestion Paths | Completed (1.7.73, 2026-05-17) |
 | [ADR-045](ADR-045-graph-clause-feature-parity.md) | One Pattern Path — Eliminate the Divergent GRAPH Parse/Execution Path (a default graph is also a graph) | Completed (2026-06-11) |
 | [ADR-046](ADR-046-multi-operation-update-facade.md) | Multi-operation SPARQL UPDATE at the Engine Facade (one update path; single = N=1) | Accepted (2026-06-06) |
-| [ADR-047](ADR-047-default-path-cutover.md) | One Execution Path — Route the Default Query Path Through the Unified Tree Executor (complete the ADR-045 cutover) | Proposed (2026-06-11) |
+| [ADR-047](ADR-047-default-path-cutover.md) | One Execution Path — Route the Default Query Path Through the Unified Tree Executor (complete the ADR-045 cutover) | Completed (2026-06-19) |
