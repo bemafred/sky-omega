@@ -2,7 +2,9 @@
 
 Codebase metrics are tracked over time. Update after significant changes.
 
-**Last updated:** 2026-06-06 — **Sky Omega 1.8.3 cut: DrHook lifecycle, console isolation, the 22-tool MCP surface.** ADR-010 Tier 1 renamed the MCP tool surface to IDE-debugger convention; ADR-011 (Accepted) added the `stop` / `detach` / `kill` lifecycle triad with launched-debuggee console output isolated from the MCP JSON-RPC channel (D2 — `posix_spawn` SUSPENDED + redirected pipes), the `drhook_drain_console` / `drhook_drain_log` surfacing seam (D3 — surface-agnostic `IDebugEventSink`), and full pending-breakpoints; findings F-010-1/2 completed the lifecycle for both Owned (launched) and Borrowed (attached) targets. DrHook substrate posture: `DrHook.Engine` **6,231 LOC** + `DrHook.Mcp` **1,566 LOC** (**22 MCP tools**); **89** `DrHook.Engine.Tests` test methods; PoC probes through **63**; **81 finding docs + 172 fixture files** in `poc/drhook-engine/`. ADR-010 + ADR-011 Accepted; [ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) (debug-state surfaces — TUI + Avalonia views over a surface-agnostic model) Proposed. One Mercury correctness fix: aggregation dropped on the top-level GRAPH execution path (`b1c5c18`; +4 `QueryExecutorTests.GraphAggregation` regression tests; full suite **4,526 / 0 failed / 6 skipped**; 421/421 SPARQL conformance held). See [docs/releases/1.8.3.md](docs/releases/1.8.3.md). DrHook is single-platform (macOS/arm64) so far; cross-platform validation is ADR-007 Phase 9.
+**Last updated:** 2026-06-19 — **ADR-047 complete: one SPARQL execution path; the old slot-operator engine deleted.** The default-path cutover ([ADR-047](docs/adrs/mercury/ADR-047-default-path-cutover.md), **Completed**) finished: the unified `TreeJoinExecutor` is now the **sole** SPARQL execution path. All four default-path carve-outs — VALUES+triple, sub-query, FROM, SERVICE — were routed through the tree (the flip + B1/B2/B3), then the **entire old slot-operator execution engine was deleted (~14,000 lines gross)**: `QueryExecutor.{Service,Subquery,Exists}.cs` + the old FROM/regular materialized methods, the streaming `QueryResults` machinery (scan ctors/fields/`MoveNextUnordered`), and the operator cluster (`MultiPatternScan`, `CrossGraphMultiPatternScan`, `DefaultGraphUnionScan`, `VariableGraphScan`, `SubQueryScan`, `SubQueryJoinScan`, `BoxedSubQueryExecutor`, `SlotBasedOperators`, `IScan`, `ScanType`). The differential gates were retired (a tree-vs-old comparison is moot once there is no old path); the last property-path conformance skip, `seq-alt-of-star`, is **closed**. "The cutover IS the test" surfaced and fixed several pre-existing tree bugs the carve-out gates had masked (B1×8 sub-query/aggregate, B2 multi-FROM binding reset, B3 SILENT empty-multiset, C2 sub-SELECT scalar-projection eval). `ServiceMaterializer` is **spared** for a future federation-efficiency effort ([ADR-048](docs/adrs/mercury/ADR-048-service-federation-efficiency.md), Proposed — VALUES bound-join; the tree's nested-loop `Join` would lose its O(N·log M) indexed join-back, and capping endpoints make an unconstrained fetch a silent-truncation risk — see [limits/service-unconstrained-fetch](docs/limits/service-unconstrained-fetch.md)). Mercury source **88,534 → 82,539** (the net reflects intermediate 1.8.x growth too — the file was last fully measured at 1.8.3). Full suite green throughout, **4,645 / 0 failed / 6 skipped** (the 6 remaining are all JSON-LD); zero reverts; commits `aee6663`→`dcfed9f`. Substrate invariants intact: 26 public types, BCL-only core.
+
+**Earlier (2026-06-06):** **Sky Omega 1.8.3 cut: DrHook lifecycle, console isolation, the 22-tool MCP surface.** ADR-010 Tier 1 renamed the MCP tool surface to IDE-debugger convention; ADR-011 (Accepted) added the `stop` / `detach` / `kill` lifecycle triad with launched-debuggee console output isolated from the MCP JSON-RPC channel (D2 — `posix_spawn` SUSPENDED + redirected pipes), the `drhook_drain_console` / `drhook_drain_log` surfacing seam (D3 — surface-agnostic `IDebugEventSink`), and full pending-breakpoints; findings F-010-1/2 completed the lifecycle for both Owned (launched) and Borrowed (attached) targets. DrHook substrate posture: `DrHook.Engine` **6,231 LOC** + `DrHook.Mcp` **1,566 LOC** (**22 MCP tools**); **89** `DrHook.Engine.Tests` test methods; PoC probes through **63**; **81 finding docs + 172 fixture files** in `poc/drhook-engine/`. ADR-010 + ADR-011 Accepted; [ADR-012](docs/adrs/drhook/ADR-012-debug-state-surfaces.md) (debug-state surfaces — TUI + Avalonia views over a surface-agnostic model) Proposed. One Mercury correctness fix: aggregation dropped on the top-level GRAPH execution path (`b1c5c18`; +4 `QueryExecutorTests.GraphAggregation` regression tests; full suite **4,526 / 0 failed / 6 skipped**; 421/421 SPARQL conformance held). See [docs/releases/1.8.3.md](docs/releases/1.8.3.md). DrHook is single-platform (macOS/arm64) so far; cross-platform validation is ADR-007 Phase 9.
 
 **Earlier (2026-05-23):** **DrHook substrate-independence reached at 1.8.2.** Two 1.8.x patch releases lifted `DrHook` from netcoredbg-DAP dependency to BCL + P/Invoke + source-gen COM: **1.8.1 (2026-05-22)** switched `DrHook.Mcp` stepping path from `SteppingSessionManager` (DAP) to `DrHook.Engine.DebugSession` (ICorDebug-native); **1.8.2 (2026-05-23)** retired `src/DrHook/` entirely and formalized per-RID `libdbgshim` NuGet bundling. Substrate posture: `DrHook.Engine` 4,071 LOC + `DrHook.Mcp` 972 LOC; 47 unit tests pass; 40 PoC probes (02–40) green on macOS/arm64 (39 PASS + 1 documented PARTIAL); 52 finding docs + 85 fixture files in `poc/drhook-engine/`. ADR-006 Phase 3 substrate **complete**. Successor [ADR-007](docs/adrs/drhook/ADR-007-teardown-concurrency-test-debug.md) (Proposed 2026-05-23) sequences production-suitability: teardown + concurrency hardening (probes 41–44, memory-model + stack-budget audit with Mercury as discipline reference), substrate-aligned test-runner debugging (no `VSTEST_HOST_DEBUG` tricks; child-process attach in Phase 3; test-runner characterization across 4 stress dimensions in Phase 4), integration-test mechanism characterization (Phase 2 — closes ADR-006's open Validation gate via Phase 8), and a separately time-budgeted cross-platform validation campaign (Phase 9). Discipline: no workarounds, no deferral, no fix-later, no flags; `EngineAnomaly` capture as first-class substrate infrastructure for unknown unknowns. Mercury substrate unchanged from 1.8.0 cutover.
 
@@ -24,8 +26,8 @@ Scale-validation runs live in [`docs/validations/`](docs/validations/). Micro-be
 
 | Component | Lines | Description |
 |-----------|------:|-------------|
-| **Mercury (total)** | **88,534** | Knowledge substrate |
-| ├─ Sparql | 45,468 | SPARQL parser, executor, protocol (1.7.47: parser refactor + zero-GC property-path walker) |
+| **Mercury (total)** | **82,539** | Knowledge substrate |
+| ├─ Sparql | 39,160 | SPARQL parser, executor, protocol. **ADR-047 (2026-06-19): the old slot-operator execution engine deleted (~14 K gross) — `TreeJoinExecutor` is the sole execution path; `QueryExecutor.{Service,Subquery,Exists}.cs`, the streaming `QueryResults` machinery, and the operator cluster (`MultiPatternScan`/`CrossGraph`/`DefaultGraphUnion`/`VariableGraphScan`/`SubQuery*`/`BoxedSubQueryExecutor`/`SlotBasedOperators`/`IScan`/`ScanType`) all removed; `TriplePatternScan` kept as the tree's leaf scan, `QueryPlanner` kept whole.** (1.7.47: parser refactor + zero-GC property-path walker) |
 | ├─ Storage | 15,526 | B+Tree indexes (temporal + versioned + reference + minimal), atom stores (Hash + Sorted), RadixSort, ExternalSorter (with bounded file-stream pool, 1.7.48), AppendSorted, WAL, schema plumbing, bulk builders, BoundedFileStreamPool, **pipelined-spill `SortedAtomBulkBuilder` (ADR-037, 1.7.50)**, **ADR-038 readahead + sidecar (1.7.52)**, **ADR-039 BBHash MPHF + dense-final-level fallback (1.7.55)**, **ADR-040 adaptive readahead sizing + lazy back-buffer + eager teardown (1.7.63 → 1.7.64)**, **ADR-041 cleanup-on-exception (1.7.58)**, **ADR-042 range iterator + Span GetKey + re-hash + mmap-backed atoms.idx + host-adaptive memory check (1.7.60 → 1.7.64)**, **ADR-029 matrix-completion: Graph + Minimal profile concrete index types + BTreeFile extraction to `Mercury.Runtime` (1.7.65 → 1.7.69)** |
 | ├─ JsonLd | 7,237 | JSON-LD parser and writer |
 | ├─ Turtle | 4,108 | Turtle parser and writer |
@@ -74,7 +76,7 @@ Property-path hardening (2026-04-29 → 2026-04-30, versions 1.7.46 → 1.7.47):
 
 | Project | Lines | Test Cases | Notes |
 |---------|------:|----------:|-------|
-| Mercury.Tests | ~62,500 | **4,526** | Most recent: **+4 in 1.8.3** (`QueryExecutorTests.GraphAggregation` — top-level GRAPH-clause aggregation fix, `b1c5c18`); prior **+68 since 1.7.69** across the 1.7.70 → 1.7.74 substrate close-out arc — **38 `LiteralFormTests`** (ADR-044 Part 1 unit tests for `LiteralForm.Canonicalize` + `CanonicalizeContent`, all escape kinds + edge cases + convergence + scratch-owner contract); **14 `CrossFormCanonicalizationTests`** (ADR-044 Part 4 cross-form integration: paired-ingestion atom identity + cross-form FILTER × 6 shapes + pattern match + DELETE WHERE + BIND + subquery + ASK + CONSTRUCT); **7 `MetricEmissionThrottleTests`** (ADR-043 Part 2 — first-call, within/after-interval, Reset, concurrent callers, zero-interval, negative rejection); plus the 4 SparqlEngineTests in the "Regression: escaped quote in stored literal (1.7.72)" region. Prior **+~38 since 1.7.64 in the 1.7.65 → 1.7.69 ADR-029 matrix-completion arc** — 17 Minimal-profile tests + BTreeFile-extraction regression coverage. Prior +30 across 1.7.58 → 1.7.64: 4 ADR-041 cleanup tests + 3 ADR-042 tests + 3 ADR-040 `ProcessMemoryProbe` smoke tests. Earlier in 1.7.48 → 1.7.50 arc: BoundedFileStreamPoolTests + cap-eviction validation + 1.7.49 cleanup hook tests + 3 ADR-037 pipelined-spill tests. |
+| Mercury.Tests | ~65,100 | **4,651** | Most recent (4,645 passing / 6 skipped): **ADR-047 deletion phase (2026-06-19)** — the four carve-out cutovers migrated their tests onto the tree (FROM, SERVICE, subquery, CONSTRUCT-subquery), the differential gate suites were deleted (`DefaultVsTreeDifferentialTests`/`GraphMirrorGateTests`/`ProfileEquivalenceDifferentialTests`/`TemporalDifferentialTests` — a tree-vs-old comparison is moot), the diagnostic/size tests for the deleted operators were removed, and `seq-alt-of-star` was un-skipped (the last SPARQL conformance skip). Net count reflects intermediate 1.8.x growth too (the prior 4,526 was the 1.8.3 baseline). Earlier: **+4 in 1.8.3** (`QueryExecutorTests.GraphAggregation` — top-level GRAPH-clause aggregation fix, `b1c5c18`); prior **+68 since 1.7.69** across the 1.7.70 → 1.7.74 substrate close-out arc — **38 `LiteralFormTests`** (ADR-044 Part 1 unit tests for `LiteralForm.Canonicalize` + `CanonicalizeContent`, all escape kinds + edge cases + convergence + scratch-owner contract); **14 `CrossFormCanonicalizationTests`** (ADR-044 Part 4 cross-form integration: paired-ingestion atom identity + cross-form FILTER × 6 shapes + pattern match + DELETE WHERE + BIND + subquery + ASK + CONSTRUCT); **7 `MetricEmissionThrottleTests`** (ADR-043 Part 2 — first-call, within/after-interval, Reset, concurrent callers, zero-interval, negative rejection); plus the 4 SparqlEngineTests in the "Regression: escaped quote in stored literal (1.7.72)" region. Prior **+~38 since 1.7.64 in the 1.7.65 → 1.7.69 ADR-029 matrix-completion arc** — 17 Minimal-profile tests + BTreeFile-extraction regression coverage. Prior +30 across 1.7.58 → 1.7.64: 4 ADR-041 cleanup tests + 3 ADR-042 tests + 3 ADR-040 `ProcessMemoryProbe` smoke tests. Earlier in 1.7.48 → 1.7.50 arc: BoundedFileStreamPoolTests + cap-eviction validation + 1.7.49 cleanup hook tests + 3 ADR-037 pipelined-spill tests. |
 | Mercury.Solid.Tests | 407 | 25 | |
 | SkyOmega.Bcl.Tests | 140 | ~10 | BCL-extension unit tests — `ChunkedList<T>` / `ChunkedArray<T>` long-indexed structures, `BitVector`, `SplitMix64Hash` (introduced 1.7.53 to address `BBHashBuilder` int32 crash at 4 B atoms in cycle 10 Phase 3) |
 | Minerva.Tests | — | — | |
@@ -84,7 +86,7 @@ Property-path hardening (2026-04-29 → 2026-04-30, versions 1.7.46 → 1.7.47):
 
 | Project | Lines | Methods |
 |---------|------:|--------:|
-| Mercury.Benchmarks | 3,362 | 76 |
+| Mercury.Benchmarks | 4,005 | 76 |
 | Minerva.Benchmarks | — | — |
 
 ### Examples
@@ -100,21 +102,21 @@ Property-path hardening (2026-04-29 → 2026-04-30, versions 1.7.46 → 1.7.47):
 
 | Category | Lines |
 |----------|------:|
-| All docs (*.md, *.ttl) | ~47,800 |
+| All docs (*.md, *.ttl) | ~48,358 |
 | CLAUDE.md | 300 |
 
 ## Totals
 
 | Category | Lines |
 |----------|------:|
-| Source code | ~111,270 |
-| Tests | ~66,001 |
-| Benchmarks | ~3,362 |
+| Source code | ~106,010 |
+| Tests | ~68,873 |
+| Benchmarks | ~4,005 |
 | Examples | ~972 |
-| Documentation | ~47,800 |
-| **Grand total** | **~229,400** |
+| Documentation | ~48,358 |
+| **Grand total** | **~228,218** |
 
-Net change from 1.7.69 to 1.8.3: ~+14 K lines — DrHook ADR-010/011 substrate (+2,754 source: `DrHook.Engine` 4,071 → 6,231, `DrHook.Mcp` 972 → 1,566), DrHook tests (641 → 1,378 LOC, 47 → 89 methods), and docs growth (DrHook ADR-008 → ADR-012, findings 52 → 81, release notes 1.8.0 → 1.8.3, the Compile→Test→Inspect article). Earlier net change from 1.7.50 to 1.7.69: ~+12,500 lines (cumulative). Substrate growth dominated by the ADR-040/041/042 arc (+~700 lines across `Storage` + `Mercury.Abstractions` + `Mercury.Runtime`) + `Compression` parallel decompressor (+~800 lines) + ADR-038 + ADR-039 substrate work shipped in cycle 10 r4 (+~1,200 lines `Storage`) + **ADR-029 matrix-completion arc 1.7.65 → 1.7.69 (Minimal profile +~530 lines + BTreeFile extraction with ~600 lines of byte-identical boilerplate eliminated from four index classes; net +1,884 across `Storage` + `Mercury.Runtime` after the boilerplate retirement)** + Mercury validations & limits docs (+~2,000 lines under `docs/`).
+Net change since 1.8.3 (to 2026-06-19): the **ADR-047 deletion phase** removed ~14 K gross from `Mercury/Sparql` (the old slot-operator execution engine) — Mercury source net `88,534 → 82,539` after the intermediate 1.8.x growth the file had not yet captured. The tree (`TreeJoinExecutor`) is the sole SPARQL execution path; the deleted surface (operator cluster + streaming `QueryResults` + the `QueryExecutor.{Service,Subquery,Exists}.cs` orchestration + the differential gate test suites) is replaced by one zero-GC recursive evaluator. Earlier — net change from 1.7.69 to 1.8.3: ~+14 K lines — DrHook ADR-010/011 substrate (+2,754 source: `DrHook.Engine` 4,071 → 6,231, `DrHook.Mcp` 972 → 1,566), DrHook tests (641 → 1,378 LOC, 47 → 89 methods), and docs growth (DrHook ADR-008 → ADR-012, findings 52 → 81, release notes 1.8.0 → 1.8.3, the Compile→Test→Inspect article). Earlier net change from 1.7.50 to 1.7.69: ~+12,500 lines (cumulative). Substrate growth dominated by the ADR-040/041/042 arc (+~700 lines across `Storage` + `Mercury.Abstractions` + `Mercury.Runtime`) + `Compression` parallel decompressor (+~800 lines) + ADR-038 + ADR-039 substrate work shipped in cycle 10 r4 (+~1,200 lines `Storage`) + **ADR-029 matrix-completion arc 1.7.65 → 1.7.69 (Minimal profile +~530 lines + BTreeFile extraction with ~600 lines of byte-identical boilerplate eliminated from four index classes; net +1,884 across `Storage` + `Mercury.Runtime` after the boilerplate retirement)** + Mercury validations & limits docs (+~2,000 lines under `docs/`).
 
 ## W3C Conformance
 
@@ -177,14 +179,14 @@ Key fixes for NCrunch compatibility:
 
 ## Stack Size (ADR-011)
 
-Query execution structs optimized for stack safety:
+Query execution structs optimized for stack safety. **Historical record:** `MultiPatternScan`, `DefaultGraphUnionScan`, and `CrossGraphMultiPatternScan` were **deleted by ADR-047** (2026-06-19) along with the rest of the old slot-operator engine — the unified `TreeJoinExecutor` is now the sole execution path, joining over `List<MaterializedRow>` and the kept `TriplePatternScan`. `QueryResults` survives (its streaming machinery was carved out in the ADR-047 deletion phase). The ADR-011 figures below are retained as the record of the original stack-safety work.
 
-| Struct | Before | After | Reduction |
-|--------|-------:|------:|----------:|
-| QueryResults | 89,640 bytes | 6,128 bytes | **93%** |
-| MultiPatternScan | 18,080 bytes | 384 bytes | **98%** |
-| DefaultGraphUnionScan | 33,456 bytes | 1,040 bytes | **97%** |
-| CrossGraphMultiPatternScan | 15,800 bytes | 96 bytes | **99%** |
+| Struct | Before | After | Reduction | Note |
+|--------|-------:|------:|----------:|------|
+| QueryResults | 89,640 bytes | 6,128 bytes | **93%** | kept (streaming surface since removed) |
+| MultiPatternScan | 18,080 bytes | 384 bytes | **98%** | deleted (ADR-047) |
+| DefaultGraphUnionScan | 33,456 bytes | 1,040 bytes | **97%** | deleted (ADR-047) |
+| CrossGraphMultiPatternScan | 15,800 bytes | 96 bytes | **99%** | deleted (ADR-047) |
 
 Key optimizations:
 - Pooled enumerator arrays via `ArrayPool<T>.Shared`
