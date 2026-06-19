@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using SkyOmega.Mercury.Abstractions;
 using SkyOmega.Mercury.Diagnostics;
 using Xunit;
@@ -34,11 +32,15 @@ public class ProcessStateProducersTests
     public void Rss_Producer_EmitsCurrentWorkingSet()
     {
         using var buffer = new MemoryStream();
+        // Drive the producer synchronously (no timer) so repeated emission is
+        // deterministic instead of racing a 50 ms timer against a fixed sleep — and
+        // so the reader never shares the non-thread-safe MemoryStream with a live tick.
         using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true,
-            stateEmissionInterval: TimeSpan.FromMilliseconds(50));
+            flushInterval: TimeSpan.Zero);
         jsonl.RegisterStateProducer(ProcessStateProducers.Rss());
 
-        Thread.Sleep(200);
+        jsonl.EmitStateSample();
+        jsonl.EmitStateSample();
         jsonl.Flush();
 
         buffer.Position = 0;
@@ -47,7 +49,7 @@ public class ProcessStateProducersTests
         string? line;
         while ((line = reader.ReadLine()) != null)
             if (line.Contains("\"phase\":\"rss\"")) rssCount++;
-        Assert.True(rssCount >= 2, $"expected ≥ 2 rss state records; saw {rssCount}");
+        Assert.Equal(2, rssCount);
     }
 
     [Fact]
@@ -161,18 +163,22 @@ public class ProcessStateProducersTests
     }
 
     [Fact]
-    public async Task RegisterAll_RegistersFourProducers()
+    public void RegisterAll_RegistersFourProducers()
     {
         using var buffer = new MemoryStream();
+        // No background timers: drive the producers with one synchronous EmitStateSample
+        // so the assertions depend on a guaranteed single tick rather than wall-clock
+        // timing. The timer-based version raced the reader on the (non-thread-safe)
+        // MemoryStream and could starve under parallel test load.
         using var jsonl = new JsonlMetricsListener(buffer, leaveOpen: true,
-            stateEmissionInterval: TimeSpan.FromMilliseconds(50));
+            flushInterval: TimeSpan.Zero);
         ProcessStateProducers.RegisterAll(jsonl, diskPath: Path.GetTempPath());
 
-        // Force a GC to ensure the gc producer has something to emit.
+        // Force a GC so the gc producer's index advances past its -1 baseline and emits.
         GC.Collect(2, GCCollectionMode.Forced, blocking: true);
         GC.WaitForPendingFinalizers();
 
-        await Task.Delay(250);
+        jsonl.EmitStateSample();
         jsonl.Flush();
 
         buffer.Position = 0;
@@ -186,10 +192,10 @@ public class ProcessStateProducersTests
                 phasesObserved.Add(p.GetString()!);
         }
 
-        // Every category G phase should appear at least once (gc may be sparse if no
-        // collection happened during the test window — that's why we forced one).
-        Assert.Contains("rss", phasesObserved);
+        // RegisterAll wires up all four Category G producers; one sample emits each once.
+        Assert.Contains("gc", phasesObserved);
         Assert.Contains("loh_delta", phasesObserved);
+        Assert.Contains("rss", phasesObserved);
         Assert.Contains("disk_free", phasesObserved);
     }
 }

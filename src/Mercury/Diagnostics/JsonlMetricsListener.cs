@@ -107,7 +107,15 @@ public sealed class JsonlMetricsListener : IObservabilityListener, IQueryMetrics
         }
     }
 
-    private void StateTimerTick(object? _)
+    private void StateTimerTick(object? _) => EmitStateSample();
+
+    /// <summary>
+    /// Drive every registered state producer once, emitting one sample from each through
+    /// the normal record paths. This is the work performed on each periodic state-timer
+    /// tick; it is exposed so a caller can capture a sample outside the timer cadence —
+    /// deterministic tests, or a final sample before disposal — without racing the timer.
+    /// </summary>
+    internal void EmitStateSample()
     {
         StateProducer[] snapshot;
         lock (_gate)
