@@ -1111,63 +1111,10 @@ internal partial class QueryExecutor : IDisposable
     }
 
     // Helper to create OrderByClause from buffer's OrderByEntry array
-    private static OrderByClause CreateOrderByClause(OrderByEntry[] entries)
-    {
-        var clause = new OrderByClause();
-        foreach (var entry in entries)
-        {
-            clause.AddCondition(entry.VariableStart, entry.VariableLength,
-                entry.Descending ? OrderDirection.Descending : OrderDirection.Ascending);
-        }
-        return clause;
-    }
 
     // Helper to create GroupByClause from buffer's GroupByEntry array
-    private static GroupByClause CreateGroupByClause(GroupByEntry[] entries)
-    {
-        var clause = new GroupByClause();
-        foreach (var entry in entries)
-        {
-            clause.AddVariable(entry.VariableStart, entry.VariableLength);
-        }
-        return clause;
-    }
 
     // Helper to create SelectClause from buffer
-    private SelectClause CreateSelectClause()
-    {
-        return new SelectClause
-        {
-            Distinct = _buffer.SelectDistinct,
-            SelectAll = _buffer.SelectAll
-        };
-    }
-
-    /// <summary>
-    /// Join two lists of materialized rows based on shared variable bindings.
-    /// Uses nested loop join - for each row in left, find matching rows in right.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static List<MaterializedRow> JoinMaterializedRows(List<MaterializedRow> left, List<MaterializedRow> right)
-    {
-        var results = new List<MaterializedRow>();
-
-        foreach (var leftRow in left)
-        {
-            foreach (var rightRow in right)
-            {
-                // Check if rows can be joined (shared variables must have same value)
-                if (CanJoinRows(leftRow, rightRow))
-                {
-                    // Merge the rows
-                    var merged = MergeRows(leftRow, rightRow);
-                    results.Add(merged);
-                }
-            }
-        }
-
-        return results;
-    }
 
     /// <summary>
     /// Check if two rows can be joined - shared variables must have same values.
@@ -1231,41 +1178,6 @@ internal partial class QueryExecutor : IDisposable
     }
 
     /// <summary>
-    /// Resolve a term using current bindings.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private ReadOnlySpan<char> ResolveTermFromBindings(Term term, BindingTable bindings)
-    {
-        if (!term.IsVariable)
-            return _source.AsSpan(term.Start, term.Length);
-
-        var varName = _source.AsSpan(term.Start, term.Length);
-        var idx = bindings.FindBinding(varName);
-        return idx >= 0 ? bindings.GetString(idx) : ReadOnlySpan<char>.Empty;
-    }
-
-    /// <summary>
-    /// Try to bind a term from a triple value.
-    /// </summary>
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    private bool TryBindTermFromTriple(Term term, ReadOnlySpan<char> value, ref BindingTable bindings)
-    {
-        if (!term.IsVariable)
-            return true;
-
-        var varName = _source.AsSpan(term.Start, term.Length);
-        var idx = bindings.FindBinding(varName);
-        if (idx >= 0)
-        {
-            // Already bound - check if values match
-            return value.SequenceEqual(bindings.GetString(idx));
-        }
-
-        bindings.Bind(varName, value);
-        return true;
-    }
-
-    /// <summary>
     /// Evaluates all filter expressions for the given pattern against the current bindings.
     /// Returns true if all filters pass, false if any filter fails.
     /// </summary>
@@ -1277,36 +1189,6 @@ internal partial class QueryExecutor : IDisposable
         for (int i = 0; i < pattern.FilterCount; i++)
         {
             var filter = pattern.GetFilter(i);
-            var filterExpr = _source.AsSpan(filter.Start, filter.Length);
-            var evaluator = new FilterEvaluator(filterExpr);
-            // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
-            if (!evaluator.Evaluate(bindingTable.GetBindings(), bindingTable.Count, bindingTable.GetStringBuffer(),
-                _buffer.Prefixes, _source.AsSpan()))
-            {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /// <summary>
-    /// Evaluates only the unpushable filter expressions that weren't pushed to MultiPatternScan.
-    /// Used with filter pushdown optimization to avoid evaluating filters twice.
-    /// </summary>
-    private bool PassesUnpushableFilters(in GraphPattern pattern, ref BindingTable bindingTable, List<int>? unpushableFilters)
-    {
-        // If no filter analysis was done, fall back to checking all filters
-        if (unpushableFilters == null)
-            return PassesFilters(in pattern, ref bindingTable);
-
-        // No unpushable filters - all were pushed
-        if (unpushableFilters.Count == 0)
-            return true;
-
-        // Check only unpushable filters
-        foreach (var filterIndex in unpushableFilters)
-        {
-            var filter = pattern.GetFilter(filterIndex);
             var filterExpr = _source.AsSpan(filter.Start, filter.Length);
             var evaluator = new FilterEvaluator(filterExpr);
             // Pass prefixes for prefix expansion in filter expressions (e.g., ?a = :s1)
