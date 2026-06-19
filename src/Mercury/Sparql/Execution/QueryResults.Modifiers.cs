@@ -176,7 +176,11 @@ internal ref partial struct QueryResults
     }
 
     /// <summary>
-    /// MoveNext variant for collecting results (no LIMIT/OFFSET applied).
+    /// MoveNext variant for collecting results (no LIMIT/OFFSET applied) — the collect-then-present path for GROUP BY
+    /// and ORDER BY. ADR-047 d2: only the materialized branch remains (the streaming scan branches are gone); it
+    /// iterates the pre-materialized rows. The per-row post-processing below is a no-op for tree-materialized rows
+    /// (their FILTER / EXISTS / MINUS / VALUES / OPTIONAL were applied during materialization, so those flags are
+    /// false), but is preserved unchanged so collection stays correct for any path that does set them.
     /// NoInlining prevents stack frame merging (ADR-003).
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -184,53 +188,16 @@ internal ref partial struct QueryResults
     {
         while (true)
         {
-            bool hasNext;
-
-            if (_isMaterialized)
-            {
-                // Iterate through pre-materialized results
-                _materializedIndex++;
-                if (_materializedIndex >= _sortedResults!.Count)
-                    return false;
-
-                // Load bindings from materialized row
-                _bindingTable.Clear();
-                var row = _sortedResults[_materializedIndex];
-                for (int i = 0; i < row.BindingCount; i++)
-                {
-                    _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
-                }
-                hasNext = true;
-            }
-            else if (_isSubQuery)
-            {
-                hasNext = _subQueryScan.MoveNext(ref _bindingTable);
-            }
-            else if (_unionBranchActive)
-            {
-                if (_unionIsMultiPattern)
-                    hasNext = _unionMultiScan.MoveNext(ref _bindingTable);
-                else
-                    hasNext = _unionSingleScan.MoveNext(ref _bindingTable);
-            }
-            else
-            {
-                if (_isMultiPattern)
-                    hasNext = _multiScan.MoveNext(ref _bindingTable);
-                else
-                    hasNext = _singleScan.MoveNext(ref _bindingTable);
-            }
-
-            if (!hasNext)
-            {
-                if (!_isSubQuery && _hasUnion && !_unionBranchActive)
-                {
-                    _unionBranchActive = true;
-                    if (!InitializeUnionBranch())
-                        return false;
-                    continue;
-                }
+            // Iterate through the pre-materialized rows.
+            _materializedIndex++;
+            if (_materializedIndex >= _sortedResults!.Count)
                 return false;
+
+            _bindingTable.Clear();
+            var row = _sortedResults[_materializedIndex];
+            for (int i = 0; i < row.BindingCount; i++)
+            {
+                _bindingTable.BindWithHash(row.GetHash(i), row.GetValue(i));
             }
 
             if (_hasOptional)
@@ -238,43 +205,34 @@ internal ref partial struct QueryResults
                 TryMatchOptionalPatterns();
             }
 
-            // Increment bnode row seed for this new row - ensures BNODE(str) produces
-            // different bnodes for different rows (same string in same row → same bnode)
+            // Increment bnode row seed for this new row so BNODE(str) yields a fresh blank node per row.
             BindExpressionEvaluator.IncrementBnodeRowSeed();
 
-            // Evaluate BIND expressions before FILTER (BIND may create variables used in FILTER)
             if (_hasBinds)
             {
                 EvaluateBindExpressions();
             }
 
-            // Evaluate non-aggregate SELECT expressions (e.g., (HOURS(?date) AS ?x))
             EvaluateSelectExpressions();
 
-            // Note: Don't clear binding table on rejection - the scan's TruncateTo handles resetting.
-            // Clearing here breaks the scan's internal binding count tracking.
             if (_hasFilters && !EvaluateFilters())
                 continue;
 
-            // Apply EXISTS/NOT EXISTS filters
             if (_hasExists && !EvaluateExistsFilters())
                 continue;
 
-            // Apply MINUS - exclude matching rows
             if (_hasMinus)
             {
                 if (MatchesMinusPattern())
                     continue;
             }
 
-            // Apply VALUES - check if bound value matches any VALUES value (inline VALUES in patterns)
             if (_hasValues)
             {
                 if (!MatchesValuesConstraint())
                     continue;
             }
 
-            // Apply post-query VALUES - check if bound value matches (VALUES after WHERE clause)
             if (_hasPostQueryValues)
             {
                 if (!MatchesPostQueryValuesConstraint())

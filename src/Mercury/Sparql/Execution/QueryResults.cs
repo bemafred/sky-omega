@@ -15,12 +15,6 @@ namespace SkyOmega.Mercury.Sparql.Execution;
 
 internal ref partial struct QueryResults
 {
-    private TriplePatternScan _singleScan;
-    private MultiPatternScan _multiScan;
-    // Note: VariableGraphScan removed - GRAPH ?g uses materialization to avoid stack overflow
-    private SubQueryScan _subQueryScan;
-    private DefaultGraphUnionScan _defaultGraphUnionScan;
-    private CrossGraphMultiPatternScan _crossGraphScan;
     // Pattern data stored on heap via QueryBuffer (eliminates ~4KB GraphPattern from stack)
     private Patterns.QueryBuffer? _buffer;
     // ADR-047 C2: prefix mappings for evaluating computed SELECT projections ((expr AS ?var)) on materialized rows when
@@ -34,9 +28,6 @@ internal ref partial struct QueryResults
     private readonly bool _hasFilters;
     private readonly bool _hasOptional;
     private readonly bool _isMultiPattern;
-    private readonly bool _isSubQuery;
-    private readonly bool _isDefaultGraphUnion;
-    private readonly bool _isCrossGraphMultiPattern;
     private bool _isEmpty;
     private FilterEvaluator _filterEvaluator;
 
@@ -51,11 +42,7 @@ internal ref partial struct QueryResults
     private HashSet<int>? _seenHashes;
 
     // UNION support
-    private readonly bool _hasUnion;
     private bool _unionBranchActive;
-    private TriplePatternScan _unionSingleScan;
-    private MultiPatternScan _unionMultiScan;
-    private bool _unionIsMultiPattern;
     private readonly int _firstBranchBindCount;  // BINDs before UNION branch
     private readonly bool _hasUnionBindsOnly;    // True if UNION branch has only BINDs (no patterns)
 
@@ -81,7 +68,6 @@ internal ref partial struct QueryResults
     // Post-query VALUES support (VALUES clause after WHERE clause)
     private readonly bool _hasPostQueryValues;
     // For join semantics: track iteration through VALUES rows for current base solution
-    private bool _pendingValuesJoin;
     private int _valuesJoinRowIndex;
 
     // EXISTS/NOT EXISTS support
@@ -162,11 +148,7 @@ internal ref partial struct QueryResults
         // Initialize other required fields to defaults
         _isEmpty = false;
         _hasOptional = false;
-        _hasUnion = false;
         _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
         _limit = 0;
         _offset = 0;
         _distinct = false;
@@ -283,11 +265,7 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = buffer?.HasFilters ?? false; // Evaluate filters for GRAPH clause results
         _hasOptional = false;
-        _hasUnion = false;
         _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -341,11 +319,7 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false; // Filters already applied during materialization
         _hasOptional = false;
-        _hasUnion = false;
         _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -396,11 +370,7 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false;
         _hasOptional = false;
-        _hasUnion = false;
         _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
         _isEmpty = groups.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -445,11 +415,7 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false;
         _hasOptional = false;
-        _hasUnion = false;
         _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -491,11 +457,7 @@ internal ref partial struct QueryResults
         _bindingTable = new BindingTable(bindings, stringBuffer);
         _hasFilters = false;
         _hasOptional = false;
-        _hasUnion = false;
         _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
         _isEmpty = rows.Count == 0;
         _limit = limit;
         _offset = offset;
@@ -520,243 +482,6 @@ internal ref partial struct QueryResults
         _groupedIndex = -1;
         _having = default;
         _hasHaving = false;
-    }
-
-    internal QueryResults(TriplePatternScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
-    {
-        _singleScan = scan;
-        _buffer = buffer;
-        _source = source;
-        _store = store;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = buffer.HasFilters;
-        _hasOptional = buffer.HasOptionalPatterns;
-        _hasUnion = buffer.HasUnion;
-        _firstBranchBindCount = buffer.FirstBranchBindCount;
-        _hasUnionBindsOnly = buffer.HasUnion && buffer.UnionBranchTripleCount == 0 && buffer.UnionBranchBindCount > 0;
-        _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
-        _isEmpty = false;
-        _limit = limit;
-        _offset = offset;
-        _skipped = 0;
-        _returned = 0;
-        _distinct = distinct;
-        _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
-        _orderBy = orderBy;
-        _hasOrderBy = orderBy.HasOrderBy;
-        _sortedResults = null;
-        _sortedIndex = -1;
-        _hasBinds = buffer.HasBinds;
-        _hasMinus = buffer.HasMinus;
-        _hasValues = buffer.HasValues;
-        _hasPostQueryValues = buffer.HasPostQueryValues;
-        _hasExists = buffer.HasExists;
-        _groupBy = groupBy;
-        _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupedResults = null;
-        _groupedIndex = -1;
-        _having = having;
-        _hasHaving = having.HasHaving;
-    }
-
-    internal QueryResults(MultiPatternScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
-    {
-        _multiScan = scan;
-        _buffer = buffer;
-        _source = source;
-        _store = store;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = buffer.HasFilters;
-        _hasOptional = buffer.HasOptionalPatterns;
-        _hasUnion = buffer.HasUnion;
-        _firstBranchBindCount = buffer.FirstBranchBindCount;
-        _hasUnionBindsOnly = buffer.HasUnion && buffer.UnionBranchTripleCount == 0 && buffer.UnionBranchBindCount > 0;
-        _isMultiPattern = true;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
-        _isEmpty = false;
-        _limit = limit;
-        _offset = offset;
-        _skipped = 0;
-        _returned = 0;
-        _distinct = distinct;
-        _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
-        _orderBy = orderBy;
-        _hasOrderBy = orderBy.HasOrderBy;
-        _sortedResults = null;
-        _sortedIndex = -1;
-        _hasBinds = buffer.HasBinds;
-        _hasMinus = buffer.HasMinus;
-        _hasValues = buffer.HasValues;
-        _hasPostQueryValues = buffer.HasPostQueryValues;
-        _hasExists = buffer.HasExists;
-        _groupBy = groupBy;
-        _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupedResults = null;
-        _groupedIndex = -1;
-        _having = having;
-        _hasHaving = having.HasHaving;
-    }
-
-    // Note: VariableGraphScan constructor removed - GRAPH ?g now uses FromMaterialized
-
-    internal QueryResults(SubQueryScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
-    {
-        _subQueryScan = scan;
-        _buffer = buffer;
-        _source = source;
-        _store = store;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = buffer.HasFilters;
-        _hasOptional = false;
-        _hasUnion = false;
-        _isMultiPattern = false;
-        _isSubQuery = true;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = false;
-        _isEmpty = false;
-        _limit = limit;
-        _offset = offset;
-        _skipped = 0;
-        _returned = 0;
-        _distinct = distinct;
-        _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
-        _orderBy = orderBy;
-        _hasOrderBy = orderBy.HasOrderBy;
-        _sortedResults = null;
-        _sortedIndex = -1;
-        _hasBinds = false;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _hasExists = false;
-        _groupBy = groupBy;
-        _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupedResults = null;
-        _groupedIndex = -1;
-        _having = having;
-        _hasHaving = having.HasHaving;
-        _isDefaultGraphUnion = false;
-    }
-
-    internal QueryResults(DefaultGraphUnionScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
-    {
-        _defaultGraphUnionScan = scan;
-        _buffer = buffer;
-        _source = source;
-        _store = store;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = buffer.HasFilters;
-        _hasOptional = false;
-        _hasUnion = false;
-        _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = true;
-        _isCrossGraphMultiPattern = false;
-        _isEmpty = false;
-        _limit = limit;
-        _offset = offset;
-        _skipped = 0;
-        _returned = 0;
-        _distinct = distinct;
-        _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
-        _orderBy = orderBy;
-        _hasOrderBy = orderBy.HasOrderBy;
-        _sortedResults = null;
-        _sortedIndex = -1;
-        _hasBinds = false;
-        _hasMinus = false;
-        _hasValues = false;
-        _hasPostQueryValues = false;
-        _hasExists = false;
-        _groupBy = groupBy;
-        _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupedResults = null;
-        _groupedIndex = -1;
-        _having = having;
-        _hasHaving = having.HasHaving;
-    }
-
-    internal QueryResults(CrossGraphMultiPatternScan scan, Patterns.QueryBuffer buffer, ReadOnlySpan<char> source,
-        QuadStore store, Binding[] bindings, char[] stringBuffer,
-        int limit = 0, int offset = 0, bool distinct = false, OrderByClause orderBy = default,
-        GroupByClause groupBy = default, SelectClause selectClause = default, HavingClause having = default)
-    {
-        _crossGraphScan = scan;
-        _buffer = buffer;
-        _source = source;
-        _store = store;
-        _bindings = bindings;
-        _stringBuffer = stringBuffer;
-        _bindingTable = new BindingTable(bindings, stringBuffer);
-        _hasFilters = buffer.HasFilters;
-        _hasOptional = buffer.HasOptionalPatterns;
-        _hasUnion = false;
-        _isMultiPattern = false;
-        _isSubQuery = false;
-        _isDefaultGraphUnion = false;
-        _isCrossGraphMultiPattern = true;
-        _isEmpty = false;
-        _limit = limit;
-        _offset = offset;
-        _skipped = 0;
-        _returned = 0;
-        _distinct = distinct;
-        _seenHashes = distinct ? new HashSet<int>() : null;
-        _unionBranchActive = false;
-        _orderBy = orderBy;
-        _hasOrderBy = orderBy.HasOrderBy;
-        _sortedResults = null;
-        _sortedIndex = -1;
-        _hasBinds = buffer.HasBinds;
-        _hasMinus = buffer.HasMinus;
-        _hasValues = buffer.HasValues;
-        _hasPostQueryValues = buffer.HasPostQueryValues;
-        _hasExists = buffer.HasExists;
-        _groupBy = groupBy;
-        _selectClause = selectClause;
-        // Enable grouping for explicit GROUP BY OR implicit aggregation (aggregates without GROUP BY)
-        _hasGroupBy = groupBy.HasGroupBy || selectClause.HasRealAggregates;
-        _groupedResults = null;
-        _groupedIndex = -1;
-        _having = having;
-        _hasHaving = having.HasHaving;
     }
 
     /// <summary>
@@ -840,172 +565,10 @@ internal ref partial struct QueryResults
             return MoveNextOrdered();
         }
 
-        return MoveNextUnordered();
-    }
-
-    /// <summary>
-    /// Move to next result for ORDER BY queries.
-    /// Collects all results on first call, sorts them, then iterates.
-    /// </summary>
-    private bool MoveNextUnordered()
-    {
-        // Check if we've hit the limit
-        if (_limit > 0 && _returned >= _limit)
-            return false;
-
-        while (true)
-        {
-            // If we have a pending base solution for VALUES join, iterate through VALUES rows
-            if (_pendingValuesJoin)
-            {
-                if (TryNextValuesJoinRow())
-                {
-                    // Apply DISTINCT - skip duplicate rows
-                    if (_distinct)
-                    {
-                        var hash = ComputeBindingsHash();
-                        if (!_seenHashes!.Add(hash))
-                            continue; // Duplicate, try next VALUES row
-                    }
-
-                    // Apply OFFSET - skip results until we've skipped enough
-                    if (_skipped < _offset)
-                    {
-                        _skipped++;
-                        continue;
-                    }
-
-                    _returned++;
-                    return true;
-                }
-                // No more matching VALUES rows for this base solution
-                _pendingValuesJoin = false;
-            }
-
-            bool hasNext;
-
-            if (_isSubQuery)
-            {
-                hasNext = _subQueryScan.MoveNext(ref _bindingTable);
-            }
-            else if (_isCrossGraphMultiPattern)
-            {
-                hasNext = _crossGraphScan.MoveNext(ref _bindingTable);
-            }
-            else if (_isDefaultGraphUnion)
-            {
-                hasNext = _defaultGraphUnionScan.MoveNext(ref _bindingTable);
-            }
-            else if (_unionBranchActive)
-            {
-                // Using UNION branch scans
-                if (_unionIsMultiPattern)
-                    hasNext = _unionMultiScan.MoveNext(ref _bindingTable);
-                else
-                    hasNext = _unionSingleScan.MoveNext(ref _bindingTable);
-            }
-            else
-            {
-                // Using first branch scans
-                if (_isMultiPattern)
-                    hasNext = _multiScan.MoveNext(ref _bindingTable);
-                else
-                    hasNext = _singleScan.MoveNext(ref _bindingTable);
-            }
-
-            if (!hasNext)
-            {
-                // Try switching to UNION branch
-                if (!_isSubQuery && !_isDefaultGraphUnion && !_isCrossGraphMultiPattern && _hasUnion && !_unionBranchActive)
-                {
-                    _unionBranchActive = true;
-                    if (!InitializeUnionBranch())
-                        return false;
-                    continue; // Try again with union branch
-                }
-                return false;
-            }
-
-            // Try to extend with optional patterns (left outer join semantics)
-            if (_hasOptional)
-            {
-                TryMatchOptionalPatterns();
-            }
-
-            // Increment bnode row seed for this new row - ensures BNODE(str) produces
-            // different bnodes for different rows (same string in same row → same bnode)
-            BindExpressionEvaluator.IncrementBnodeRowSeed();
-
-            // Evaluate BIND expressions before FILTER (BIND may create variables used in FILTER)
-            if (_hasBinds)
-            {
-                EvaluateBindExpressions();
-            }
-
-            // Evaluate non-aggregate SELECT expressions (e.g., (HOURS(?date) AS ?x))
-            // These create computed values that may be used in FILTER or returned in results
-            EvaluateSelectExpressions();
-
-            // Apply filters
-            // Note: Don't clear binding table on rejection - the scan's TruncateTo handles resetting.
-            // Clearing here breaks the scan's internal binding count tracking.
-            if (_hasFilters)
-            {
-                if (!EvaluateFilters())
-                    continue; // Try next row
-            }
-
-            // Apply EXISTS/NOT EXISTS filters
-            if (_hasExists)
-            {
-                if (!EvaluateExistsFilters())
-                    continue; // EXISTS condition failed
-            }
-
-            // Apply MINUS - exclude matching rows
-            if (_hasMinus)
-            {
-                if (MatchesMinusPattern())
-                    continue; // Matches MINUS, skip this row
-            }
-
-            // Apply VALUES - check if bound value matches any VALUES value (inline VALUES in patterns)
-            if (_hasValues)
-            {
-                if (!MatchesValuesConstraint())
-                    continue; // Doesn't match VALUES, skip this row
-            }
-
-            // Apply post-query VALUES as a join (not a filter)
-            // For each base solution, we return one result per matching VALUES row
-            // This implements proper join semantics where a solution matching multiple
-            // VALUES rows appears multiple times in the output
-            if (_hasPostQueryValues)
-            {
-                // Start iterating through VALUES rows for this base solution
-                _pendingValuesJoin = true;
-                _valuesJoinRowIndex = 0;
-                continue; // Go back to start of loop to process VALUES rows
-            }
-
-            // Apply DISTINCT - skip duplicate rows
-            if (_distinct)
-            {
-                var hash = ComputeBindingsHash();
-                if (!_seenHashes!.Add(hash))
-                    continue; // Duplicate, try next row
-            }
-
-            // Apply OFFSET - skip results until we've skipped enough
-            if (_skipped < _offset)
-            {
-                _skipped++;
-                continue;
-            }
-
-            _returned++;
-            return true;
-        }
+        // ADR-047 d2: the streaming scan path is gone — every materialized ctor sets _hasOrderBy / _hasGroupBy /
+        // _isEmptyPattern, so one of the branches above always handles the row presentation. This fallthrough is
+        // unreachable; returning false is the safe terminal.
+        return false;
     }
 
     /// <summary>
