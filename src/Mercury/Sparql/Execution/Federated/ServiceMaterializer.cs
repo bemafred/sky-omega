@@ -460,7 +460,7 @@ internal sealed class ServiceMaterializerOptions
 /// <summary>
 /// Scan operator for SERVICE clause results using in-memory linear scan.
 /// Best for small result sets (&lt; 500 rows).
-/// Conforms to <see cref="IScan"/> contract (duck typing).
+/// A scan operator (duck-typed MoveNext(ref BindingTable) / Dispose, the contract the join loop calls).
 /// </summary>
 internal ref struct ServicePatternScan
 {
@@ -553,7 +553,7 @@ internal ref struct ServicePatternScan
 /// Scan operator for SERVICE results materialized to an indexed QuadStore.
 /// Best for large result sets (&gt;= 500 rows) where B+Tree indexing pays off.
 /// Uses synthetic triples: &lt;_:row{N}&gt; &lt;_:var:{varName}&gt; value .
-/// Conforms to <see cref="IScan"/> contract (duck typing).
+/// A scan operator (duck-typed MoveNext(ref BindingTable) / Dispose, the contract the join loop calls).
 /// </summary>
 internal ref struct IndexedServicePatternScan
 {
