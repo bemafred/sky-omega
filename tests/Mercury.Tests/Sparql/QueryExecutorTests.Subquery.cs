@@ -970,7 +970,7 @@ public partial class QueryExecutorTests
             var fullParser = new SparqlParser(fullQuery.AsSpan());
             var fullParsed = fullParser.ParseQuery();
 
-            // Use ExecuteSubQueryToMaterialized to avoid stack overflow
+            // Use ExecuteToMaterialized (the tree) to avoid stack overflow
             using var fullExecutor = new QueryExecutor(Store, fullQuery.AsSpan(), fullParsed);
             var fullResults = fullExecutor.ExecuteToMaterialized();
 
