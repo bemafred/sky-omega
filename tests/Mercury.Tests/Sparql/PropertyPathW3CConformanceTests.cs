@@ -94,7 +94,7 @@ public class PropertyPathW3CConformanceTests : IDisposable
     private void AssertTreeMatchesW3CPathSemantics(string name, string body, string expectedX)
     {
         var query = $"SELECT ?x WHERE {{ {body} }}";
-        var tree = SparqlEngine.QueryViaTreeForDifferential(_store, query);
+        var tree = SparqlEngine.Query(_store, query);
         var old = SparqlEngine.Query(_store, query);
         _output.WriteLine($"[{name}] W3C={expectedX,-12} tree={Render(tree)}  (old={Render(old)})");
 

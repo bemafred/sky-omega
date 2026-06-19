@@ -28,17 +28,17 @@ public static class SparqlEngine
     /// <param name="ct">Optional cancellation token.</param>
     /// <returns>A <see cref="QueryResult"/> with the query results and timing information.</returns>
     public static QueryResult Query(QuadStore store, string sparql, CancellationToken ct = default)
-        => QueryCore(store, sparql, ct, forceTreeForDifferential: false);
+        => QueryCore(store, sparql, ct, reorderBgp: false);
 
     /// <summary>
-    /// ADR-047 differential gate: run the query through the unified tree executor instead of the old default path,
-    /// so a test can compare the two paths for the SAME query. Test-only; identical materialization to <see cref="Query"/>.
+    /// Benchmark-only entry that runs with the tree's BGP-reorder knob (the QueryPlanner selectivity model) enabled or
+    /// disabled, to measure planned-tree vs unplanned-tree. Identical materialization to <see cref="Query"/>.
     /// </summary>
-    internal static QueryResult QueryViaTreeForDifferential(QuadStore store, string sparql, bool reorderBgp = false,
+    internal static QueryResult QueryWithBgpReorder(QuadStore store, string sparql, bool reorderBgp = false,
         CancellationToken ct = default)
-        => QueryCore(store, sparql, ct, forceTreeForDifferential: true, reorderBgp: reorderBgp);
+        => QueryCore(store, sparql, ct, reorderBgp: reorderBgp);
 
-    private static QueryResult QueryCore(QuadStore store, string sparql, CancellationToken ct, bool forceTreeForDifferential, bool reorderBgp = false)
+    private static QueryResult QueryCore(QuadStore store, string sparql, CancellationToken ct, bool reorderBgp = false)
     {
         var sw = Stopwatch.StartNew();
         QueryResult result;
@@ -71,7 +71,6 @@ public static class SparqlEngine
                 var planner = new QueryPlanner(store.Statistics, store.Atoms);
 
                 using var executor = new QueryExecutor(store, sparql.AsSpan(), parsed, null, planner);
-                executor.ForceTreeForDifferential = forceTreeForDifferential;
                 executor.ReorderBgpInTree = reorderBgp;
 
                 result = parsed.Type switch

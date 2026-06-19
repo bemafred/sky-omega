@@ -45,7 +45,7 @@ public class DefaultPathMaterializationSpike
 
         long expected = (long)K * K;
         long old = CountResult(SparqlEngine.Query(_store, Query));
-        long tree = CountResult(SparqlEngine.QueryViaTreeForDifferential(_store, Query));
+        long tree = CountResult(SparqlEngine.QueryWithBgpReorder(_store, Query));
         if (old != expected || tree != expected)
             throw new InvalidOperationException($"correctness gate failed: expected {expected}, old={old}, tree={tree}");
     }
@@ -70,5 +70,5 @@ public class DefaultPathMaterializationSpike
     public long OldPath() => CountResult(SparqlEngine.Query(_store, Query));
 
     [Benchmark(Description = "tree (folds the join into COUNT — O(1), ADR-047 fix)")]
-    public long TreeFolded() => CountResult(SparqlEngine.QueryViaTreeForDifferential(_store, Query));
+    public long TreeFolded() => CountResult(SparqlEngine.QueryWithBgpReorder(_store, Query));
 }

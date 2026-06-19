@@ -48,8 +48,8 @@ public class DefaultPathPlannerSpike
 
         // Correctness gate: the selectivity reorder is correctness-neutral, so all three paths must agree.
         int old = SparqlEngine.Query(_store, Query).Rows?.Count ?? -1;
-        int unplanned = SparqlEngine.QueryViaTreeForDifferential(_store, Query, reorderBgp: false).Rows?.Count ?? -1;
-        int planned = SparqlEngine.QueryViaTreeForDifferential(_store, Query, reorderBgp: true).Rows?.Count ?? -1;
+        int unplanned = SparqlEngine.QueryWithBgpReorder(_store, Query, reorderBgp: false).Rows?.Count ?? -1;
+        int planned = SparqlEngine.QueryWithBgpReorder(_store, Query, reorderBgp: true).Rows?.Count ?? -1;
         if (old != 5 || unplanned != 5 || planned != 5)
             throw new InvalidOperationException($"correctness gate failed: old={old} unplanned={unplanned} planned={planned} (expected 5)");
     }
@@ -66,8 +66,8 @@ public class DefaultPathPlannerSpike
     public int OldPath() => SparqlEngine.Query(_store, Query).Rows!.Count;
 
     [Benchmark(Description = "tree, source order (unplanned)")]
-    public int TreeUnplanned() => SparqlEngine.QueryViaTreeForDifferential(_store, Query, reorderBgp: false).Rows!.Count;
+    public int TreeUnplanned() => SparqlEngine.QueryWithBgpReorder(_store, Query, reorderBgp: false).Rows!.Count;
 
     [Benchmark(Description = "tree, selectivity reorder (planned)")]
-    public int TreePlanned() => SparqlEngine.QueryViaTreeForDifferential(_store, Query, reorderBgp: true).Rows!.Count;
+    public int TreePlanned() => SparqlEngine.QueryWithBgpReorder(_store, Query, reorderBgp: true).Rows!.Count;
 }

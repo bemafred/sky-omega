@@ -43,7 +43,7 @@ public class DefaultPathTopKSpike
         _store.CommitBatch();
 
         string old = FirstO(SparqlEngine.Query(_store, Query));
-        string tree = FirstO(SparqlEngine.QueryViaTreeForDifferential(_store, Query));
+        string tree = FirstO(SparqlEngine.QueryWithBgpReorder(_store, Query));
         if (old != "<urn:o00000000>" || tree != old)
             throw new InvalidOperationException($"correctness gate failed: old={old}, tree={tree}");
     }
@@ -63,5 +63,5 @@ public class DefaultPathTopKSpike
     public string OldPath() => FirstO(SparqlEngine.Query(_store, Query));
 
     [Benchmark(Description = "tree (top-K heap, retains OFFSET+LIMIT — ADR-047)")]
-    public string TreeTopK() => FirstO(SparqlEngine.QueryViaTreeForDifferential(_store, Query));
+    public string TreeTopK() => FirstO(SparqlEngine.QueryWithBgpReorder(_store, Query));
 }

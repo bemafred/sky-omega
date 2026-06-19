@@ -12,7 +12,7 @@ namespace SkyOmega.Mercury.Benchmarks;
 
 /// <summary>
 /// ADR-047 breadth gate — run every WDBench query through BOTH executors (the old default path
-/// <see cref="SparqlEngine.Query"/> and the unified tree path <see cref="SparqlEngine.QueryViaTreeForDifferential"/>)
+/// <see cref="SparqlEngine.Query"/> and the unified tree path <see cref="SparqlEngine.QueryWithBgpReorder"/>)
 /// against the same store, and compare the solution bags. This is the metamorphic mirror gate of
 /// <c>DefaultVsTreeDifferentialTests</c> applied at real-query breadth: ~2,658 hand-written-by-nobody Wikidata queries
 /// (single BGPs, multi-BGPs, property paths, OPTIONALs, c2rpqs) exercise shapes the ~35 hand-built unit cases cannot.
@@ -153,7 +153,7 @@ public static class WdBenchDifferentialRunner
         try
         {
             result = tree
-                ? SparqlEngine.QueryViaTreeForDifferential(store, sparql, reorderBgp: reorderBgp, ct: cts.Token)
+                ? SparqlEngine.QueryWithBgpReorder(store, sparql, reorderBgp: reorderBgp, ct: cts.Token)
                 : SparqlEngine.Query(store, sparql, cts.Token);
         }
         catch (OperationCanceledException) { return new Digest(RunStatus.TimedOut, 0, 0, 0, null); }

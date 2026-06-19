@@ -55,7 +55,7 @@ public class ResultLimitGuardTests : IDisposable
     public void OverCap_OnTheTreePath_AlsoFailsFast()
     {
         // The tree materializes its BGP intermediate before the drain too (the GRAPH path, and the cutover target).
-        var result = SparqlEngine.QueryViaTreeForDifferential(_store, "SELECT ?s WHERE { ?s <urn:p> ?o }");
+        var result = SparqlEngine.Query(_store, "SELECT ?s WHERE { ?s <urn:p> ?o }");
 
         Assert.False(result.Success);
         Assert.Contains("exceeded the maximum of 5 rows", result.ErrorMessage);
