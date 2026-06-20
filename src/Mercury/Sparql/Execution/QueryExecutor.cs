@@ -671,8 +671,8 @@ internal partial class QueryExecutor : IDisposable
         // ADR-047 B2/B3: FROM (default-graph dataset) and SERVICE (federation) materialize through the unified tree too.
         // _defaultGraphs reaches the TreeJoinExecutor (see ExecuteGraphViaTree), whose default-context scan unions the
         // FROM graphs; a SERVICE clause is a ServiceHeader the tree's ServiceStep evaluates against the injected
-        // ISparqlServiceExecutor and joins. The old separate FROM/SERVICE/cross-graph executor paths are deleted;
-        // ServiceMaterializer.cs is retained (unwired) for the ADR-048 federation-efficiency work.
+        // ISparqlServiceExecutor and joins. The old separate FROM/SERVICE/cross-graph executor paths are deleted, as is
+        // the temp-store ServiceMaterializer (ADR-048 federation = the tree's bound-join, not a second join-back).
 
         // Empty pattern case
         if (_buffer.TriplePatternCount == 0)
@@ -864,7 +864,7 @@ internal partial class QueryExecutor : IDisposable
         // ServiceHeader the tree's ServiceStep evaluates against the injected ISparqlServiceExecutor and joins with the
         // outer rows. UNION-with-SERVICE, OPTIONAL { SERVICE }, multiple SERVICE, and SERVICE ?ep all fall out of the
         // tree's existing UnionHeader / OptionalHeader / sequential-Join machinery — no per-shape orchestration. The old
-        // SERVICE executor path is deleted; ServiceMaterializer.cs is retained (unwired) for ADR-048 federation efficiency.
+        // SERVICE executor path is deleted, as is the temp-store ServiceMaterializer (ADR-048 federation = the bound-join).
 
         if (_buffer.TriplePatternCount == 0)
         {

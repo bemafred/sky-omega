@@ -16,9 +16,8 @@ public partial class QueryExecutorTests
 {
     // ADR-047 B3: SERVICE (federation) runs through the unified tree. The execution tests exercise Execute() /
     // ExecuteToMaterialized — which route a SERVICE clause to the tree's ServiceStep (against the injected mock
-    // ISparqlServiceExecutor) — NOT the dead ExecuteWithServiceMaterialized / ExecuteServiceToMaterialized /
-    // ServiceMaterializer slot path. The cutover IS the test: SERVICE-only, SERVICE+local join, multiple SERVICE,
-    // UNION-with-SERVICE, OPTIONAL { SERVICE }, SERVICE ?ep, and SILENT all certify the new path.
+    // ISparqlServiceExecutor). The cutover IS the test: SERVICE-only, SERVICE+local join, multiple SERVICE,
+    // UNION-with-SERVICE, OPTIONAL { SERVICE }, SERVICE ?ep, and SILENT all certify the tree path.
     #region SERVICE clause tests
 
     [Fact]

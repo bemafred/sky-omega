@@ -65,7 +65,7 @@ The original draft had a third mechanism: route a large (even pushdown-reduced) 
 - **It is a second join-back implementation.** The tree has *one* `Join`, used by every operator and already keyed on binding hashes (`Compatible`). A SERVICE-only indexed join-back is a parallel join path — the two-implementations smell, gated by a threshold (`IndexedThreshold`), in a base substrate.
 - **It mis-classifies a general concern as federation-specific.** "The nested-loop `Join` is O(N·M)" is true for *every* join in the tree, not just SERVICE. If join cardinality ever becomes a measured bottleneck, the convergent fix is to improve the *one* `Join` (a hash join over the binding hashes it already computes), which benefits every operator — not to bolt a B+Tree temp store onto federation alone. Solve general problems generally; solve federation-specific problems (the *fetch*) specifically.
 
-Consequence: **ADR-048 does not wire `ServiceMaterializer`.** That reconsiders the ADR-047 spare, whose stated purpose was to be "the tool ADR-048 wires in." Recommended: let `ServiceMaterializer` (and `QuadStorePool`/`IndexedServicePatternScan` if they have no other consumer) become deletion candidates rather than dormant parallel machinery — a dormant second implementation is the latent catastrophe, not a saving. (Flagged as a decision, since the spare was an explicit ADR-047 call; deletion is a separate, verifiable step, not pre-shipped here.)
+Consequence: **ADR-048 does not wire `ServiceMaterializer` — and, that settled, the dormant machinery is deleted**: `ServiceMaterializer` + `ServiceFetchResult`/`ServiceMaterializerOptions`/`ServicePatternScan`/`IndexedServicePatternScan` (and `ServiceMaterializerTests`), ~600 lines, none with any consumer. `QuadStorePool` is **kept** — it is shared infrastructure (the CLI, the Mercury MCP, Pruning), not federation machinery. This reverses the ADR-047 spare, whose stated purpose was to be "the tool ADR-048 wires in": a dormant second implementation is the latent catastrophe, not a saving.
 
 ## Correctness (resolved in Epistemics — why this is Accepted)
 
@@ -85,7 +85,7 @@ What remains is **engineering and measurement, not decision** — Completed-phas
 
 - **One join path preserved.** The federation logic is contained in `ServiceStep`'s *fetch construction* (the `VALUES` block) plus the response guard; the single tree `Join` is reused, not forked. Every non-SERVICE operator is untouched.
 - **Correctness at scale**, not just speed: the bound-join is the mechanism that keeps a result-capping endpoint from silently truncating a join.
-- **`ServiceMaterializer` is *not* wired** (see *Divergence review*) — it becomes a deletion candidate rather than dormant parallel machinery. If join cardinality ever needs addressing, the convergent home is a general hash `Join`, separately and for all operators.
+- **`ServiceMaterializer` is deleted, not wired** (see *Divergence review*); `QuadStorePool` stays (shared infra). If join cardinality ever needs addressing, the convergent home is a general hash `Join`, separately and for all operators.
 - **Cost:** net-new but contained federation-fetch complexity (distinct-key extraction, batched `VALUES` construction, the guard), verified by a query-recording test — which is why it is its own ADR rather than a clause in the ADR-047 cutover.
 
 ## Related
