@@ -899,27 +899,10 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         if (string.IsNullOrEmpty(_baseUri))
             return uri;
 
-        // Fragment reference
-        if (uri.StartsWith('#'))
-        {
-            // Remove any existing fragment from base
-            var hashIdx = _baseUri.IndexOf('#');
-            var baseWithoutFragment = hashIdx >= 0 ? _baseUri[..hashIdx] : _baseUri;
-            return baseWithoutFragment + uri;
-        }
-
-        // Relative URI - resolve against base
-        try
-        {
-            var baseUriObj = new Uri(_baseUri, UriKind.Absolute);
-            var resolved = new Uri(baseUriObj, uri);
-            return resolved.AbsoluteUri;
-        }
-        catch
-        {
-            // Fallback: simple concatenation
-            return _baseUri + uri;
-        }
+        // Resolve through the shared RFC 3986 §5.2 resolver (docs/divergence S1b), replacing BCL Uri whose
+        // .AbsoluteUri over-normalised and diverged from the Turtle/TriG resolvers (e.g. an authority-only
+        // reference gained a spurious trailing "/"). Fragment, query, path, and dot-segments per spec.
+        return RdfIri.Resolve(_baseUri, uri);
     }
 
     /// <summary>

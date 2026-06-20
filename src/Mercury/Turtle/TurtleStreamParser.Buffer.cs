@@ -552,39 +552,12 @@ internal sealed partial class TurtleStreamParser
         if (Uri.IsWellFormedUriString(innerIri, UriKind.Absolute))
             return iri;
 
-        // Resolve relative IRI against base
+        // Resolve relative IRI against base through the shared RFC 3986 §5.2 resolver (docs/divergence S1b) —
+        // the one algorithm every RDF-family parser uses, replacing BCL Uri (which over-normalised authority-only
+        // references and needed the hand fix-up this block used to carry).
         if (string.IsNullOrEmpty(_baseUri))
             return iri;
 
-        try
-        {
-            var baseUri = new Uri(_baseUri, UriKind.Absolute);
-            var resolved = new Uri(baseUri, innerIri);
-            var resolvedStr = resolved.ToString();
-
-            // .NET Uri adds trailing slash to authority-only URIs (e.g., //g becomes http://g/)
-            // RFC 3986 says path should be empty, not "/", so strip it
-            // Check: innerIri starts with // and has no path (no / after authority)
-            if (innerIri.StartsWith("//"))
-            {
-                var afterAuthority = innerIri.AsSpan(2);
-                var firstDelim = afterAuthority.IndexOfAny('/', '?', '#');
-                // If no delimiters, or first delim is not /, path was empty
-                if (firstDelim == -1 || afterAuthority[firstDelim] != '/')
-                {
-                    // Strip trailing slash that .NET added
-                    if (resolvedStr.EndsWith('/') && resolved.AbsolutePath == "/")
-                    {
-                        resolvedStr = resolvedStr[..^1];
-                    }
-                }
-            }
-
-            return $"<{resolvedStr}>";
-        }
-        catch
-        {
-            return iri;
-        }
+        return $"<{RdfIri.Resolve(_baseUri, innerIri)}>";
     }
 }
