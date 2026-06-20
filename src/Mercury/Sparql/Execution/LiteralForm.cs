@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.Sparql.Execution;
 
@@ -101,12 +102,13 @@ internal static class LiteralForm
 
         if (token.SequenceEqual("true") || token.SequenceEqual("false"))
         {
-            scratchOwner = $"\"{token}\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            // Shared boolean literal form (docs/divergence S1c) — identical to the RDF parsers' output.
+            scratchOwner = RdfNumeric.BooleanLiteral(token.SequenceEqual("true"));
             return scratchOwner.AsSpan();
         }
-        if ((c is '-' or '+' || (c >= '0' && c <= '9')) && TryNumericDatatype(token, out var datatype))
+        if ((c is '-' or '+' || (c >= '0' && c <= '9')) && TryNumericDatatype(token, out var datatypeIri))
         {
-            scratchOwner = $"\"{token}\"^^<http://www.w3.org/2001/XMLSchema#{datatype}>";
+            scratchOwner = $"\"{token}\"^^<{datatypeIri}>";
             return scratchOwner.AsSpan();
         }
         return token;
@@ -116,9 +118,9 @@ internal static class LiteralForm
     /// Classify a numeric literal token by its SPARQL lexical form: an exponent ⇒ xsd:double, a '.' ⇒ xsd:decimal,
     /// otherwise xsd:integer. Returns false (leave verbatim) for anything that is not a valid numeric literal.
     /// </summary>
-    private static bool TryNumericDatatype(ReadOnlySpan<char> text, out string datatype)
+    private static bool TryNumericDatatype(ReadOnlySpan<char> text, out string datatypeIri)
     {
-        datatype = "";
+        datatypeIri = "";
         bool hasDot = false, hasExp = false, hasDigit = false;
         for (int i = 0; i < text.Length; i++)
         {
@@ -130,7 +132,9 @@ internal static class LiteralForm
             else return false;
         }
         if (!hasDigit) return false;
-        datatype = hasExp ? "double" : hasDot ? "decimal" : "integer";
+        // Shared datatype-selection rule (docs/divergence S1c) — the RDF parsers and this canonicalizer
+        // must pick the same xsd type, or a SPARQL numeric constant won't match an ingested numeric atom.
+        datatypeIri = RdfNumeric.DatatypeIri(hasExp, hasDot);
         return true;
     }
 

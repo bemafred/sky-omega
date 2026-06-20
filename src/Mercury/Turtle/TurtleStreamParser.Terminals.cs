@@ -270,13 +270,13 @@ internal sealed partial class TurtleStreamParser
         if (PeekString("true"))
         {
             ConsumeString("true");
-            return "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            return RdfNumeric.TrueLiteral;
         }
         
         if (PeekString("false"))
         {
             ConsumeString("false");
-            return "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            return RdfNumeric.FalseLiteral;
         }
         
         // Numeric literal
@@ -501,14 +501,8 @@ internal sealed partial class TurtleStreamParser
 
         var value = _sb.ToString();
 
-        // Determine datatype
-        if (hasExponent)
-            return string.Concat("\"", value, "\"^^<http://www.w3.org/2001/XMLSchema#double>");
-
-        if (hasDecimal)
-            return string.Concat("\"", value, "\"^^<http://www.w3.org/2001/XMLSchema#decimal>");
-
-        return string.Concat("\"", value, "\"^^<http://www.w3.org/2001/XMLSchema#integer>");
+        // Datatype IRI via the shared selection rule, so RDF and SPARQL emit identical atoms (docs/divergence S1c).
+        return string.Concat("\"", value, "\"^^<", RdfNumeric.DatatypeIri(hasExponent, hasDecimal), ">");
     }
     
     /// <summary>
@@ -622,13 +616,13 @@ internal sealed partial class TurtleStreamParser
         if (PeekString("true"))
         {
             ConsumeString("true");
-            return "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            return RdfNumeric.TrueLiteral;
         }
 
         if (PeekString("false"))
         {
             ConsumeString("false");
-            return "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>";
+            return RdfNumeric.FalseLiteral;
         }
 
         throw ParserException("Invalid boolean literal");
@@ -1054,7 +1048,7 @@ internal sealed partial class TurtleStreamParser
         {
             ConsumeString("true");
             int start = _outputOffset;
-            AppendToOutput("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan());
+            AppendToOutput(RdfNumeric.TrueLiteral.AsSpan());
             return GetOutputSpan(start);
         }
 
@@ -1062,7 +1056,7 @@ internal sealed partial class TurtleStreamParser
         {
             ConsumeString("false");
             int start = _outputOffset;
-            AppendToOutput("\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan());
+            AppendToOutput(RdfNumeric.FalseLiteral.AsSpan());
             return GetOutputSpan(start);
         }
 
@@ -1279,13 +1273,10 @@ internal sealed partial class TurtleStreamParser
 
         AppendToOutput('"');
 
-        // Append datatype
-        if (hasExponent)
-            AppendToOutput("^^<http://www.w3.org/2001/XMLSchema#double>".AsSpan());
-        else if (hasDecimal)
-            AppendToOutput("^^<http://www.w3.org/2001/XMLSchema#decimal>".AsSpan());
-        else
-            AppendToOutput("^^<http://www.w3.org/2001/XMLSchema#integer>".AsSpan());
+        // Datatype IRI via the shared selection rule (docs/divergence S1c).
+        AppendToOutput("^^<".AsSpan());
+        AppendToOutput(RdfNumeric.DatatypeIri(hasExponent, hasDecimal).AsSpan());
+        AppendToOutput('>');
 
         return GetOutputSpan(start);
     }
@@ -1404,12 +1395,12 @@ internal sealed partial class TurtleStreamParser
         if (PeekString("true"))
         {
             ConsumeString("true");
-            AppendToOutput("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan());
+            AppendToOutput(RdfNumeric.TrueLiteral.AsSpan());
         }
         else if (PeekString("false"))
         {
             ConsumeString("false");
-            AppendToOutput("\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan());
+            AppendToOutput(RdfNumeric.FalseLiteral.AsSpan());
         }
         else
         {

@@ -608,9 +608,7 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
             // Boolean literals must be lowercase (case-sensitive)
             if (MatchKeyword("true", caseSensitive: true) || MatchKeyword("false", caseSensitive: true))
             {
-                return ch == 't'
-                    ? "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan()
-                    : "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>".AsSpan();
+                return RdfNumeric.BooleanLiteral(ch == 't').AsSpan();
             }
             return ParsePrefixedName();
         }
@@ -1363,12 +1361,8 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         AppendToOutput('^');
         AppendToOutput('^');
 
-        if (hasExponent)
-            AppendString("<http://www.w3.org/2001/XMLSchema#double>");
-        else if (hasDecimal)
-            AppendString("<http://www.w3.org/2001/XMLSchema#decimal>");
-        else
-            AppendString("<http://www.w3.org/2001/XMLSchema#integer>");
+        // Datatype IRI via the shared selection rule (docs/divergence S1c).
+        AppendString("<" + RdfNumeric.DatatypeIri(hasExponent, hasDecimal) + ">");
 
         return GetOutputSpan(start);
     }
