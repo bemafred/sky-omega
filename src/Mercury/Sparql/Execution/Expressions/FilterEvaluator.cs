@@ -261,7 +261,7 @@ internal ref partial struct FilterEvaluator
         while (!IsAtEnd() && Peek() != ')')
         {
             var startPos = _position;
-            scoped var listValue = ParseTerm();
+            scoped var listValue = ValueOr();
             SkipWhitespace();
 
             // Check if we made progress - if not, skip to next comma or closing paren
@@ -808,7 +808,7 @@ internal ref partial struct FilterEvaluator
                 };
             }
             // BNODE(label) - with string argument
-            var labelArg = ParseTerm();
+            var labelArg = ValueOr();
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
@@ -884,7 +884,7 @@ internal ref partial struct FilterEvaluator
         }
 
         // Parse first argument for single-arg functions
-        var arg1 = ParseTerm();
+        var arg1 = ValueOr();
 
         SkipWhitespace();
         if (Peek() == ')')

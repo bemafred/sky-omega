@@ -46,7 +46,7 @@ internal ref partial struct FilterEvaluator
         SkipWhitespace();
 
         // Parse then expression
-        var thenValue = ParseTerm();
+        var thenValue = ValueOr();
 
         SkipWhitespace();
         if (Peek() == ',')
@@ -54,7 +54,7 @@ internal ref partial struct FilterEvaluator
         SkipWhitespace();
 
         // Parse else expression
-        var elseValue = ParseTerm();
+        var elseValue = ValueOr();
 
         SkipWhitespace();
         if (Peek() == ')')
@@ -73,7 +73,7 @@ internal ref partial struct FilterEvaluator
 
         while (!IsAtEnd() && Peek() != ')')
         {
-            var value = ParseTerm();
+            var value = ValueOr();
 
             // If we haven't found a bound value yet and this one is bound, use it
             if (result.Type == ValueType.Unbound && value.Type != ValueType.Unbound)
@@ -101,7 +101,7 @@ internal ref partial struct FilterEvaluator
     private Value ParseRegexFunction()
     {
         // Parse string argument
-        var stringArg = ParseTerm();
+        var stringArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -118,7 +118,7 @@ internal ref partial struct FilterEvaluator
         SkipWhitespace();
 
         // Parse pattern argument
-        var patternArg = ParseTerm();
+        var patternArg = ValueOr();
         SkipWhitespace();
 
         // Check for optional flags argument
@@ -127,7 +127,7 @@ internal ref partial struct FilterEvaluator
         {
             Advance(); // Skip ','
             SkipWhitespace();
-            var flagsArg = ParseTerm();
+            var flagsArg = ValueOr();
             if (flagsArg.Type == ValueType.String)
                 flags = flagsArg.StringValue;
         }
@@ -186,7 +186,7 @@ internal ref partial struct FilterEvaluator
     private Value ParseReplaceFunction()
     {
         // Parse string argument
-        var stringArg = ParseTerm();
+        var stringArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -199,7 +199,7 @@ internal ref partial struct FilterEvaluator
         SkipWhitespace();
 
         // Parse pattern argument
-        var patternArg = ParseTerm();
+        var patternArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -212,7 +212,7 @@ internal ref partial struct FilterEvaluator
         SkipWhitespace();
 
         // Parse replacement argument
-        var replacementArg = ParseTerm();
+        var replacementArg = ValueOr();
         SkipWhitespace();
 
         // Check for optional flags argument
@@ -221,7 +221,7 @@ internal ref partial struct FilterEvaluator
         {
             Advance(); // Skip ','
             SkipWhitespace();
-            var flagsArg = ParseTerm();
+            var flagsArg = ValueOr();
             if (flagsArg.Type == ValueType.String)
                 flags = flagsArg.StringValue;
         }
@@ -293,7 +293,7 @@ internal ref partial struct FilterEvaluator
     /// </remarks>
     private Value ParseTextMatchFunction()
     {
-        var textArg = ParseTerm();
+        var textArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -305,7 +305,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var queryArg = ParseTerm();
+        var queryArg = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -332,7 +332,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseContainsFunction()
     {
-        var arg1 = ParseTerm();
+        var arg1 = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -344,7 +344,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var arg2 = ParseTerm();
+        var arg2 = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -364,7 +364,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseStrStartsFunction()
     {
-        var arg1 = ParseTerm();
+        var arg1 = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -376,7 +376,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var arg2 = ParseTerm();
+        var arg2 = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -396,7 +396,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseStrEndsFunction()
     {
-        var arg1 = ParseTerm();
+        var arg1 = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -408,7 +408,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var arg2 = ParseTerm();
+        var arg2 = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -428,7 +428,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseLangMatchesFunction()
     {
-        var langTagArg = ParseTerm();
+        var langTagArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -440,7 +440,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var langRangeArg = ParseTerm();
+        var langRangeArg = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -495,7 +495,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseSameTermFunction()
     {
-        var arg1 = ParseTerm();
+        var arg1 = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -507,7 +507,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var arg2 = ParseTerm();
+        var arg2 = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -546,7 +546,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseStrBeforeFunction()
     {
-        var stringArg = ParseTerm();
+        var stringArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -558,7 +558,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var delimiterArg = ParseTerm();
+        var delimiterArg = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -635,7 +635,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseStrAfterFunction()
     {
-        var stringArg = ParseTerm();
+        var stringArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -647,7 +647,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var delimiterArg = ParseTerm();
+        var delimiterArg = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -709,7 +709,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseStrDtFunction()
     {
-        var lexicalArg = ParseTerm();
+        var lexicalArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -721,7 +721,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var datatypeArg = ParseTerm();
+        var datatypeArg = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -752,7 +752,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseStrLangFunction()
     {
-        var lexicalArg = ParseTerm();
+        var lexicalArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -764,7 +764,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var langArg = ParseTerm();
+        var langArg = ValueOr();
         SkipWhitespace();
         if (Peek() == ')')
             Advance();
@@ -800,7 +800,7 @@ internal ref partial struct FilterEvaluator
     /// </summary>
     private Value ParseSubstrFunction()
     {
-        var stringArg = ParseTerm();
+        var stringArg = ValueOr();
         SkipWhitespace();
 
         if (Peek() != ',')
@@ -812,7 +812,7 @@ internal ref partial struct FilterEvaluator
         Advance(); // Skip ','
         SkipWhitespace();
 
-        var startArg = ParseTerm();
+        var startArg = ValueOr();
         SkipWhitespace();
 
         // Optional length argument
@@ -821,7 +821,7 @@ internal ref partial struct FilterEvaluator
         {
             Advance();
             SkipWhitespace();
-            lengthArg = ParseTerm();
+            lengthArg = ValueOr();
             SkipWhitespace();
         }
 
@@ -886,7 +886,7 @@ internal ref partial struct FilterEvaluator
 
         while (!IsAtEnd() && Peek() != ')')
         {
-            var arg = ParseTerm();
+            var arg = ValueOr();
 
             if (arg.Type == ValueType.Unbound)
             {
