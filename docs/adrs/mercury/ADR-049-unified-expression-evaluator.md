@@ -64,10 +64,11 @@ Implement `[110] Expression` **once**, as a `Value`-producing recursive-descent 
 
 `FilterEvaluator` is the base (it already has the full logical grammar, `IN`, and the superset of functions). The merge is **incremental and W3C-verified at every step**:
 
-1. **Add the arithmetic layer** (`[116] Additive` / `[117] Multiplicative` / `[118]` unary `+`/`-`) to FilterEvaluator's value grammar, between `Comparison` and `Term`. Purely additive capability — full suite must stay green, plus the FILTER-arithmetic case above goes green.
-2. **Add `EvaluateToValue()`** — a `Value`-returning form of the top-level grammar (`||`/`&&`/`!`/comparison/`IN` produce boolean-typed `Value`s; a bare term returns its `Value`). Reuses the existing function library and `Value` helpers — only the thin connective layer is mirrored, not the 40 functions. `FILTER Evaluate()` becomes `CoerceToBool(EvaluateToValue())`, removing the bool-grammar duplication.
-3. **Route the 9 BIND call sites** (`QueryExecutor.cs` ×3, `QueryResults.Modifiers.cs` ×2, `QueryResults.Patterns.cs` ×2, `QueryResults.cs` ×1, `TreeJoinExecutor.cs` ×1) from `new BindExpressionEvaluator(...)` to `FilterEvaluator(...).EvaluateToValue(...)`. The BIND-`||` case above goes green.
-4. **Delete `BindExpressionEvaluator`** (~2,340 lines).
+1. **Add `EvaluateToValue()`** — the full `Value`-producing `[110]` grammar at spec precedence (`|| → && → relational/IN → additive → multiplicative → unary(!,+,-) → primary`), with the logical connectives implementing SPARQL's three-valued logic (§17.4.1.5/6) and a bare term returning its `Value`. Reuses FilterEvaluator's function library, comparison ops, `IN`, and EBV; only arithmetic (`Add`/`Subtract`/`Multiply`/`Divide`/`Negate`, ported from BindExpressionEvaluator) is added. Lives in `FilterEvaluator.Value.cs`. **Done — `EvaluateToValue` built and compiling, additive (suite 4687/0/6); not yet wired.**
+2. **Base-IRI parity (prerequisite for wiring BIND)** — BindExpressionEvaluator carries a `_baseIri` used by `IRI()`/`URI()` to resolve a relative IRI (`BindExpressionEvaluator.cs:839/859`); FilterEvaluator has no such field (its base handling is for PREFIX expansion only). Add a base-IRI field to FilterEvaluator + thread it through `EvaluateToValue`, and have FilterEvaluator's `IRI`/`URI` resolve against it (additive — FILTER gains the same, must stay green). *Discovered during step 1.*
+3. **Route the 9 BIND call sites** (`QueryExecutor.cs` ×3, `QueryResults.Modifiers.cs` ×2, `QueryResults.Patterns.cs` ×2, `QueryResults.cs` ×1, `TreeJoinExecutor.cs` ×1) from `new BindExpressionEvaluator(...)` to `FilterEvaluator(...).EvaluateToValue(...)`. The BIND-`||` case above goes green; add it as a permanent test.
+4. **Switch FILTER** `Evaluate()` to `CoerceToBool(EvaluateToValue())`, deleting the old bool-grammar duplication; the FILTER-arithmetic case goes green (add as a permanent test).
+5. **Delete `BindExpressionEvaluator`** (~2,340 lines).
 
 Add permanent conformance tests for the two demonstrated gaps (and the EBV/error-vs-unbound asymmetry) so the spec behaviour is locked, not just incidentally passing.
 
