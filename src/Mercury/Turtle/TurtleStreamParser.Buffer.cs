@@ -441,24 +441,19 @@ internal sealed partial class TurtleStreamParser
     /// </summary>
     private void AppendCodePoint(int codePoint)
     {
-        var rune = new Rune(codePoint);
+        // UTF-16 encoding shared with every RDF-family parser via RdfEscape (docs/divergence S1d).
         Span<char> chars = stackalloc char[2];
-        int charsWritten = rune.EncodeToUtf16(chars);
-        for (int i = 0; i < charsWritten; i++)
-        {
+        int n = RdfEscape.EncodeUtf16(codePoint, chars);
+        for (int i = 0; i < n; i++)
             AppendToOutput(chars[i]);
-        }
     }
 
-    /// <summary>
-    /// Append a Unicode code point to StringBuilder using Rune for proper surrogate pair handling.
-    /// </summary>
     private void AppendCodePointToSb(int codePoint)
     {
-        var rune = new Rune(codePoint);
+        // UTF-16 encoding shared with every RDF-family parser via RdfEscape (docs/divergence S1d).
         Span<char> chars = stackalloc char[2];
-        int charsWritten = rune.EncodeToUtf16(chars);
-        _sb.Append(chars[..charsWritten]);
+        int n = RdfEscape.EncodeUtf16(codePoint, chars);
+        _sb.Append(chars[..n]);
     }
 
     /// <summary>
@@ -548,8 +543,8 @@ internal sealed partial class TurtleStreamParser
 
         var innerIri = iri[1..^1]; // Strip angle brackets
 
-        // If absolute IRI, return as-is (with brackets)
-        if (Uri.IsWellFormedUriString(innerIri, UriKind.Absolute))
+        // If absolute IRI (has a scheme), return as-is — the one shared RFC 3986 test (docs/divergence S1e).
+        if (RdfIri.HasScheme(innerIri))
             return iri;
 
         // Resolve relative IRI against base through the shared RFC 3986 §5.2 resolver (docs/divergence S1b) —

@@ -951,17 +951,11 @@ internal sealed class NQuadsStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private void AppendCodePoint(int codePoint)
     {
-        if (codePoint <= 0xFFFF)
-        {
-            AppendToOutput((char)codePoint);
-        }
-        else
-        {
-            // Encode as surrogate pair
-            var adjusted = codePoint - 0x10000;
-            AppendToOutput((char)(0xD800 + (adjusted >> 10)));
-            AppendToOutput((char)(0xDC00 + (adjusted & 0x3FF)));
-        }
+        // UTF-16 encoding shared with every RDF-family parser via RdfEscape (docs/divergence S1d).
+        Span<char> chars = stackalloc char[2];
+        int n = RdfEscape.EncodeUtf16(codePoint, chars);
+        for (int i = 0; i < n; i++)
+            AppendToOutput(chars[i]);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

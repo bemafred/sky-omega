@@ -78,6 +78,30 @@ internal static class RdfIri
         return Recompose(b.Scheme, tAuthority, tPath, tQuery, r.Fragment);
     }
 
+    /// <summary>
+    /// True if <paramref name="reference"/> begins with an RFC 3986 scheme — i.e. it is an absolute reference to be
+    /// stored verbatim rather than resolved against a base. A scheme is <c>ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )</c>
+    /// followed by ':' before any '/', '?', or '#'. This is the single absolute-vs-relative test for every RDF parser
+    /// (docs/divergence S1e), so the same reference is resolved-or-not identically across formats — replacing the prior
+    /// mix of <c>Uri.IsWellFormedUriString</c>, <c>Contains("://")</c>, and per-parser colon scans that disagreed (e.g.
+    /// <c>mailto:x</c> and <c>urn:x</c> have a scheme but no "//").
+    /// </summary>
+    public static bool HasScheme(ReadOnlySpan<char> reference)
+    {
+        for (int i = 0; i < reference.Length; i++)
+        {
+            char c = reference[i];
+            if (c == ':')
+                return i > 0;
+            if (c == '/' || c == '?' || c == '#')
+                return false;
+            bool valid = i == 0 ? IsAlpha(c) : IsAlpha(c) || (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.';
+            if (!valid)
+                return false;
+        }
+        return false;
+    }
+
     private readonly record struct Components(string? Scheme, string? Authority, string Path, string? Query, string? Fragment);
 
     /// <summary>

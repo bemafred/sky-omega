@@ -892,8 +892,8 @@ internal sealed partial class RdfXmlStreamParser : IDisposable, IAsyncDisposable
         if (string.IsNullOrEmpty(uri))
             return _baseUri;
 
-        // Already absolute URI
-        if (uri.Contains("://") || uri.StartsWith("urn:"))
+        // Already absolute URI (has a scheme) — the one shared RFC 3986 test (docs/divergence S1e).
+        if (RdfIri.HasScheme(uri))
             return uri;
 
         if (string.IsNullOrEmpty(_baseUri))

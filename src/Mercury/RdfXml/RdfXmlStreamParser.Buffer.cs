@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SkyOmega.Mercury.Rdf;
 
 namespace SkyOmega.Mercury.RdfXml;
 
@@ -171,17 +172,11 @@ internal sealed partial class RdfXmlStreamParser
     /// </summary>
     private void AppendCodePoint(int codePoint)
     {
-        if (codePoint <= 0xFFFF)
-        {
-            AppendToOutput((char)codePoint);
-        }
-        else
-        {
-            // Supplementary character - emit as surrogate pair
-            codePoint -= 0x10000;
-            AppendToOutput((char)(0xD800 | (codePoint >> 10)));
-            AppendToOutput((char)(0xDC00 | (codePoint & 0x3FF)));
-        }
+        // UTF-16 encoding shared with every RDF-family parser via RdfEscape (docs/divergence S1d).
+        Span<char> chars = stackalloc char[2];
+        int n = RdfEscape.EncodeUtf16(codePoint, chars);
+        for (int i = 0; i < n; i++)
+            AppendToOutput(chars[i]);
     }
 
     #endregion

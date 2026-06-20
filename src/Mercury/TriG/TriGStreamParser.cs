@@ -707,23 +707,8 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
         // Get the IRI content for analysis
         var iriContent = _outputBuffer.AsSpan(contentStart, contentLen);
 
-        // Check if this is an absolute IRI (has scheme like "http:" or "urn:")
-        bool hasScheme = false;
-        for (int i = 0; i < iriContent.Length; i++)
-        {
-            var c = iriContent[i];
-            if (c == ':')
-            {
-                hasScheme = i > 0; // scheme must have at least one char before ':'
-                break;
-            }
-            if (c == '/' || c == '?' || c == '#')
-                break; // These chars before ':' mean no scheme
-            if (i == 0 && !char.IsLetter(c))
-                break; // Scheme must start with letter
-            if (i > 0 && !char.IsLetterOrDigit(c) && c != '+' && c != '-' && c != '.')
-                break; // Scheme can only contain these chars
-        }
+        // Absolute (has a scheme) vs relative — the one shared RFC 3986 test (docs/divergence S1e).
+        bool hasScheme = RdfIri.HasScheme(iriContent);
 
         if (hasScheme || string.IsNullOrEmpty(_baseUri))
         {
@@ -1809,17 +1794,11 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private void AppendCodePoint(int codePoint)
     {
-        if (codePoint <= 0xFFFF)
-        {
-            AppendToOutput((char)codePoint);
-        }
-        else
-        {
-            // Encode as surrogate pair
-            var adjusted = codePoint - 0x10000;
-            AppendToOutput((char)(0xD800 + (adjusted >> 10)));
-            AppendToOutput((char)(0xDC00 + (adjusted & 0x3FF)));
-        }
+        // UTF-16 encoding shared with every RDF-family parser via RdfEscape (docs/divergence S1d).
+        Span<char> chars = stackalloc char[2];
+        int n = RdfEscape.EncodeUtf16(codePoint, chars);
+        for (int i = 0; i < n; i++)
+            AppendToOutput(chars[i]);
     }
 
     private void AppendString(string s)

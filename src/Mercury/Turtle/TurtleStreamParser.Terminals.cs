@@ -791,8 +791,8 @@ internal sealed partial class TurtleStreamParser
 
         var innerIri = iri[1..^1]; // Strip angle brackets
 
-        // If absolute IRI, return as-is (with brackets)
-        if (innerIri.Contains("://".AsSpan(), StringComparison.Ordinal))
+        // If absolute IRI (has a scheme), return as-is — the one shared RFC 3986 test (docs/divergence S1e).
+        if (RdfIri.HasScheme(innerIri))
             return iri;
 
         // No base URI, return as-is
