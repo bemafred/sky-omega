@@ -392,62 +392,25 @@ internal sealed partial class TurtleStreamParser
                ch == '#' || ch == '@' || ch == '%' || ch == '_';
     }
     
-    private char ParseEscapeSequence()
-    {
-        var ch = Peek();
-        
-        if (ch == -1)
-            throw ParserException("Unexpected end of input in escape sequence");
-        
-        Consume();
-        
-        // String escape sequences
-        return (char)ch switch
-        {
-            't' => '\t',
-            'b' => '\b',
-            'n' => '\n',
-            'r' => '\r',
-            'f' => '\f',
-            '"' => '"',
-            '\'' => '\'',
-            '\\' => '\\',
-            'u' => ParseUnicodeEscape(4),
-            'U' => ParseUnicodeEscape(8),
-            _ => throw ParserException($"Invalid escape sequence: \\{(char)ch}")
-        };
-    }
-    
-    private char ParseUnicodeEscape() => ParseUnicodeEscape(4);
-    
     private char ParseUnicodeEscape(int digits)
     {
-        var value = 0;
-        
+        Span<char> hex = stackalloc char[8];
         for (int i = 0; i < digits; i++)
         {
             var ch = Peek();
-            
             if (ch == -1)
                 throw ParserException("Unexpected end of input in unicode escape");
-            
-            var hexValue = ch switch
-            {
-                >= '0' and <= '9' => ch - '0',
-                >= 'A' and <= 'F' => ch - 'A' + 10,
-                >= 'a' and <= 'f' => ch - 'a' + 10,
-                _ => throw ParserException($"Invalid hex digit in unicode escape: {(char)ch}")
-            };
-            
+            hex[i] = (char)ch;
             Consume();
-            value = (value << 4) | hexValue;
         }
-        
-        // Check for surrogate code points (not allowed)
-        if (value >= 0xD800 && value <= 0xDFFF)
-            throw ParserException($"Invalid unicode escape: surrogate code point U+{value:X4}");
 
-        return (char)value;
+        // Shared decode/validation via RdfEscape (docs/divergence S1a) — same surrogate + >U+10FFFF
+        // rejection as ParseUnicodeCodePoint, so the two decoders cannot drift. Live callers pass
+        // digits=4 (\u, within the BMP), so the cast to char is exact.
+        if (!RdfEscape.TryDecodeUchar(hex[..digits], out int codePoint))
+            throw ParserException($"Invalid unicode escape: \\u{hex[..digits].ToString()}");
+
+        return (char)codePoint;
     }
 
     /// <summary>
@@ -455,36 +418,22 @@ internal sealed partial class TurtleStreamParser
     /// </summary>
     private int ParseUnicodeCodePoint(int digits)
     {
-        var value = 0;
-
+        Span<char> hex = stackalloc char[8];
         for (int i = 0; i < digits; i++)
         {
             var ch = Peek();
-
             if (ch == -1)
                 throw ParserException("Unexpected end of input in unicode escape");
-
-            var hexValue = ch switch
-            {
-                >= '0' and <= '9' => ch - '0',
-                >= 'A' and <= 'F' => ch - 'A' + 10,
-                >= 'a' and <= 'f' => ch - 'a' + 10,
-                _ => throw ParserException($"Invalid hex digit in unicode escape: {(char)ch}")
-            };
-
+            hex[i] = (char)ch;
             Consume();
-            value = (value << 4) | hexValue;
         }
 
-        // Check for surrogate code points (not allowed)
-        if (value >= 0xD800 && value <= 0xDFFF)
-            throw ParserException($"Invalid unicode escape: surrogate code point U+{value:X4}");
+        // Shared decode/validation via RdfEscape (docs/divergence S1a): rejects surrogates and code
+        // points above U+10FFFF, identically to the \u path above.
+        if (!RdfEscape.TryDecodeUchar(hex[..digits], out int codePoint))
+            throw ParserException($"Invalid unicode escape: \\U{hex[..digits].ToString()}");
 
-        // Check for valid Unicode range
-        if (value > 0x10FFFF)
-            throw ParserException($"Invalid unicode escape: code point U+{value:X} exceeds maximum");
-
-        return value;
+        return codePoint;
     }
 
     /// <summary>
@@ -525,27 +474,15 @@ internal sealed partial class TurtleStreamParser
 
         Consume();
 
-        switch ((char)ch)
-        {
-            case 't': _sb.Append('\t'); break;
-            case 'b': _sb.Append('\b'); break;
-            case 'n': _sb.Append('\n'); break;
-            case 'r': _sb.Append('\r'); break;
-            case 'f': _sb.Append('\f'); break;
-            case '"': _sb.Append('"'); break;
-            case '\'': _sb.Append('\''); break;
-            case '\\': _sb.Append('\\'); break;
-            case 'u':
-                _sb.Append(ParseUnicodeEscape(4));
-                break;
-            case 'U':
-                // \U can produce code points > 0xFFFF, need surrogate pair handling
-                var codePoint = ParseUnicodeCodePoint(8);
-                AppendCodePointToSb(codePoint);
-                break;
-            default:
-                throw ParserException($"Invalid escape sequence: \\{(char)ch}");
-        }
+        // Simple ECHAR + UCHAR decode shared via RdfEscape (docs/divergence S1a).
+        if (RdfEscape.TryDecodeSimple((char)ch, out var simple))
+            _sb.Append(simple);
+        else if (ch == 'u')
+            _sb.Append(ParseUnicodeEscape(4));
+        else if (ch == 'U')
+            AppendCodePointToSb(ParseUnicodeCodePoint(8)); // \U may exceed U+FFFF — surrogate pair
+        else
+            throw ParserException($"Invalid escape sequence: \\{(char)ch}");
     }
 
     /// <summary>
@@ -561,27 +498,15 @@ internal sealed partial class TurtleStreamParser
 
         Consume();
 
-        switch ((char)ch)
-        {
-            case 't': AppendToOutput('\t'); break;
-            case 'b': AppendToOutput('\b'); break;
-            case 'n': AppendToOutput('\n'); break;
-            case 'r': AppendToOutput('\r'); break;
-            case 'f': AppendToOutput('\f'); break;
-            case '"': AppendToOutput('"'); break;
-            case '\'': AppendToOutput('\''); break;
-            case '\\': AppendToOutput('\\'); break;
-            case 'u':
-                AppendToOutput(ParseUnicodeEscape(4));
-                break;
-            case 'U':
-                // \U can produce code points > 0xFFFF, need surrogate pair handling
-                var codePoint = ParseUnicodeCodePoint(8);
-                AppendCodePoint(codePoint);
-                break;
-            default:
-                throw ParserException($"Invalid escape sequence: \\{(char)ch}");
-        }
+        // Simple ECHAR + UCHAR decode shared via RdfEscape (docs/divergence S1a).
+        if (RdfEscape.TryDecodeSimple((char)ch, out var simple))
+            AppendToOutput(simple);
+        else if (ch == 'u')
+            AppendToOutput(ParseUnicodeEscape(4));
+        else if (ch == 'U')
+            AppendCodePoint(ParseUnicodeCodePoint(8)); // \U may exceed U+FFFF — surrogate pair
+        else
+            throw ParserException($"Invalid escape sequence: \\{(char)ch}");
     }
 
     private string ParsePercentEncoded()

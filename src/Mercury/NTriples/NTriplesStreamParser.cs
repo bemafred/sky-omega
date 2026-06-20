@@ -557,54 +557,37 @@ internal sealed class NTriplesStreamParser : IDisposable, IAsyncDisposable
 
         Consume();
 
-        return (char)ch switch
-        {
-            't' => new Rune('\t'),
-            'b' => new Rune('\b'),
-            'n' => new Rune('\n'),
-            'r' => new Rune('\r'),
-            'f' => new Rune('\f'),
-            '"' => new Rune('"'),
-            '\'' => new Rune('\''),
-            '\\' => new Rune('\\'),
-            'u' => ParseUnicodeEscape(4),
-            'U' => ParseUnicodeEscape(8),
-            _ => throw ParserException($"Invalid escape sequence: \\{(char)ch}")
-        };
+        // Decode/validation is shared with every RDF-family parser via RdfEscape (docs/divergence S1a).
+        if (RdfEscape.TryDecodeSimple((char)ch, out var simple))
+            return new Rune(simple);
+        if (ch == 'u')
+            return ParseUnicodeEscape(4);
+        if (ch == 'U')
+            return ParseUnicodeEscape(8);
+        throw ParserException($"Invalid escape sequence: \\{(char)ch}");
     }
 
     /// <summary>
     /// Parse unicode escape (\uXXXX or \UXXXXXXXX).
-    /// Returns a Rune representing the Unicode scalar value.
+    /// Returns a Rune representing the Unicode scalar value, validated by the shared
+    /// <see cref="RdfEscape"/> (rejects surrogates and code points above U+10FFFF).
     /// </summary>
     private Rune ParseUnicodeEscape(int digits = 4)
     {
-        var value = 0;
-
+        Span<char> hex = stackalloc char[8];
         for (int i = 0; i < digits; i++)
         {
             var ch = Peek();
-
             if (ch == -1)
                 throw ParserException("Unexpected end of input in unicode escape");
-
-            var hexValue = ch switch
-            {
-                >= '0' and <= '9' => ch - '0',
-                >= 'A' and <= 'F' => ch - 'A' + 10,
-                >= 'a' and <= 'f' => ch - 'a' + 10,
-                _ => throw ParserException($"Invalid hex digit: {(char)ch}")
-            };
-
+            hex[i] = (char)ch;
             Consume();
-            value = (value << 4) | hexValue;
         }
 
-        // Rune.TryCreate validates the codepoint (rejects surrogates and values > 0x10FFFF)
-        if (!Rune.TryCreate(value, out var rune))
-            throw ParserException($"Invalid unicode codepoint: U+{value:X}");
+        if (!RdfEscape.TryDecodeUchar(hex[..digits], out int codePoint))
+            throw ParserException($"Invalid unicode escape: \\{(digits == 4 ? 'u' : 'U')}{hex[..digits].ToString()}");
 
-        return rune;
+        return new Rune(codePoint);
     }
 
     #endregion

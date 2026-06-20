@@ -12,6 +12,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using SkyOmega.Mercury.NQuads;
+using SkyOmega.Mercury.Rdf;
 using SkyOmega.Mercury.Runtime.Buffers;
 
 namespace SkyOmega.Mercury.TriG;
@@ -1518,27 +1519,23 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
 
         Consume();
 
-        switch ((char)ch)
+        // Decode/validation shared with every RDF-family parser via RdfEscape (docs/divergence S1a).
+        if (RdfEscape.TryDecodeSimple((char)ch, out var simple))
         {
-            case 't': AppendToOutput('\t'); break;
-            case 'b': AppendToOutput('\b'); break;
-            case 'n': AppendToOutput('\n'); break;
-            case 'r': AppendToOutput('\r'); break;
-            case 'f': AppendToOutput('\f'); break;
-            case '"': AppendToOutput('"'); break;
-            case '\'': AppendToOutput('\''); break;
-            case '\\': AppendToOutput('\\'); break;
-            case 'u':
-                var codePoint4 = ParseUnicodeEscape(4);
-                AppendCodePoint(codePoint4);
-                break;
-            case 'U':
-                var codePoint8 = ParseUnicodeEscape(8);
-                AppendCodePoint(codePoint8);
-                break;
-            default:
-                throw ParserException($"Invalid escape: \\{(char)ch}");
+            AppendToOutput(simple);
+            return;
         }
+        if (ch == 'u')
+        {
+            AppendCodePoint(ParseUnicodeEscape(4));
+            return;
+        }
+        if (ch == 'U')
+        {
+            AppendCodePoint(ParseUnicodeEscape(8));
+            return;
+        }
+        throw ParserException($"Invalid escape: \\{(char)ch}");
     }
 
     /// <summary>
@@ -1547,30 +1544,22 @@ internal sealed class TriGStreamParser : IDisposable, IAsyncDisposable
     /// </summary>
     private int ParseUnicodeEscape(int digits)
     {
-        var value = 0;
+        Span<char> hex = stackalloc char[8];
         for (int i = 0; i < digits; i++)
         {
             var ch = Peek();
             if (ch == -1)
                 throw ParserException("Unexpected end in unicode escape");
-
-            var hexValue = ch switch
-            {
-                >= '0' and <= '9' => ch - '0',
-                >= 'A' and <= 'F' => ch - 'A' + 10,
-                >= 'a' and <= 'f' => ch - 'a' + 10,
-                _ => throw ParserException($"Invalid hex digit: {(char)ch}")
-            };
-
+            hex[i] = (char)ch;
             Consume();
-            value = (value << 4) | hexValue;
         }
 
-        // Reject surrogate code points (U+D800-U+DFFF)
-        if (value >= 0xD800 && value <= 0xDFFF)
-            throw ParserException($"Surrogate code points are not allowed: U+{value:X4}");
+        // RdfEscape validates surrogates AND code points above U+10FFFF (the latter guard was
+        // previously missing here, leaving an out-of-range \U to throw a raw exception downstream).
+        if (!RdfEscape.TryDecodeUchar(hex[..digits], out int codePoint))
+            throw ParserException($"Invalid unicode escape: \\{(digits == 4 ? 'u' : 'U')}{hex[..digits].ToString()}");
 
-        return value;
+        return codePoint;
     }
 
     #endregion

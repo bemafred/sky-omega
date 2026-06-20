@@ -176,7 +176,10 @@ internal static class LiteralForm
     /// <summary>
     /// Decode a single escape sequence at <paramref name="i"/> (the '\') and append
     /// the decoded char(s) to <paramref name="sb"/>. Returns the index immediately
-    /// past the consumed escape sequence (so caller can continue scanning).
+    /// past the consumed escape sequence (so caller can continue scanning). The decode,
+    /// validation, and UTF-16 encoding are delegated to the shared <see cref="Rdf.RdfEscape"/>
+    /// so the SPARQL literal form and the RDF streaming parsers cannot drift (docs/divergence S1a).
+    /// Malformed input throws here because a SPARQL source literal is already validated at parse time.
     /// </summary>
     private static int DecodeEscapeAppend(ReadOnlySpan<char> source, int i, StringBuilder sb)
     {
@@ -186,66 +189,26 @@ internal static class LiteralForm
                 "with a trailing '\\' should have been rejected at parse time.");
 
         var esc = source[i + 1];
-        switch (esc)
+
+        if (Rdf.RdfEscape.TryDecodeSimple(esc, out var decoded))
         {
-            case 't':  sb.Append('\t'); return i + 2;
-            case 'b':  sb.Append('\b'); return i + 2;
-            case 'n':  sb.Append('\n'); return i + 2;
-            case 'r':  sb.Append('\r'); return i + 2;
-            case 'f':  sb.Append('\f'); return i + 2;
-            case '"':  sb.Append('"'); return i + 2;
-            case '\'': sb.Append('\''); return i + 2;
-            case '\\': sb.Append('\\'); return i + 2;
+            sb.Append(decoded);
+            return i + 2;
+        }
 
-            case 'u':
-                if (i + 6 > source.Length)
-                    throw new InvalidOperationException("Truncated \\u escape: needs 4 hex digits.");
-                AppendCodePoint(sb, ParseHex(source.Slice(i + 2, 4)));
-                return i + 6;
-
-            case 'U':
-                if (i + 10 > source.Length)
-                    throw new InvalidOperationException("Truncated \\U escape: needs 8 hex digits.");
-                AppendCodePoint(sb, ParseHex(source.Slice(i + 2, 8)));
-                return i + 10;
-
-            default:
+        if (esc is 'u' or 'U')
+        {
+            int digits = esc == 'u' ? 4 : 8;
+            if (i + 2 + digits > source.Length)
+                throw new InvalidOperationException($"Truncated \\{esc} escape: needs {digits} hex digits.");
+            if (!Rdf.RdfEscape.TryDecodeUchar(source.Slice(i + 2, digits), out int codePoint))
                 throw new InvalidOperationException(
-                    $"Invalid escape sequence '\\{esc}' in literal: should have been rejected at parse time.");
+                    $"Invalid \\{esc} unicode escape in literal: should have been rejected at parse time.");
+            Rdf.RdfEscape.AppendUtf16(sb, codePoint);
+            return i + 2 + digits;
         }
-    }
 
-    private static int ParseHex(ReadOnlySpan<char> hex)
-    {
-        int value = 0;
-        for (int i = 0; i < hex.Length; i++)
-        {
-            var ch = hex[i];
-            int digit = ch switch
-            {
-                >= '0' and <= '9' => ch - '0',
-                >= 'a' and <= 'f' => ch - 'a' + 10,
-                >= 'A' and <= 'F' => ch - 'A' + 10,
-                _ => throw new InvalidOperationException(
-                    $"Invalid hex digit '{ch}' in unicode escape.")
-            };
-            value = (value << 4) | digit;
-        }
-        return value;
-    }
-
-    private static void AppendCodePoint(StringBuilder sb, int codePoint)
-    {
-        if (codePoint >= 0xD800 && codePoint <= 0xDFFF)
-            throw new InvalidOperationException(
-                $"Invalid unicode escape: surrogate code point U+{codePoint:X4}.");
-        if (codePoint > 0x10FFFF)
-            throw new InvalidOperationException(
-                $"Invalid unicode escape: code point U+{codePoint:X} exceeds U+10FFFF.");
-
-        var rune = new System.Text.Rune(codePoint);
-        Span<char> chars = stackalloc char[2];
-        int written = rune.EncodeToUtf16(chars);
-        sb.Append(chars[..written]);
+        throw new InvalidOperationException(
+            $"Invalid escape sequence '\\{esc}' in literal: should have been rejected at parse time.");
     }
 }
