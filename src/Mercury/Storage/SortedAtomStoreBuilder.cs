@@ -131,7 +131,7 @@ internal static class SortedAtomStoreBuilder
     /// <see cref="AssignedIds"/> is empty for disk-backed builds, and <see cref="AssignedIdsResolver"/>
     /// is null for in-memory builds.
     /// </remarks>
-    public sealed record BuildResult(long AtomCount, long DataBytes, long[] AssignedIds)
+    internal sealed record BuildResult(long AtomCount, long DataBytes, long[] AssignedIds)
     {
         /// <summary>
         /// Disk-backed atom-ID resolver, populated only by external builds with

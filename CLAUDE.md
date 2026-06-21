@@ -143,7 +143,7 @@ See **[STATISTICS.md](STATISTICS.md)** for line counts, benchmark summaries, and
 
 ## Project Overview
 
-Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only). Mercury exposes **26 public types** (3 facades, 2 protocol, 10 storage, 7 diagnostics, 2 compression, 2 delegates); all ~140 other types are internal.
+Sky Omega is a semantic-aware cognitive assistant with zero-GC performance design. The codebase targets .NET 10 with C# 14. The core library (Mercury) has **no external dependencies** (BCL only). Mercury exposes **28 public types** (2 facades, 2 protocol, 12 storage, 8 diagnostics, 2 compression, 2 delegates); all other types are internal.
 
 ### Solution Structure
 

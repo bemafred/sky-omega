@@ -125,7 +125,7 @@ Want to give Claude persistent memory? See **[Mercury MCP tutorial](docs/tutoria
 
 **Mercury** is a complete SPARQL 1.1 engine with zero external runtime dependencies (BCL-only core), zero-GC hot paths, and 100% W3C conformance across all core specifications. It gives AI assistants persistent, queryable memory on your machine — what your AI learns today, it knows tomorrow.
 
-> *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 21-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), `DrHook.Engine` (admitted: `Microsoft.Diagnostics.NETCore.Client` managed + `Microsoft.Diagnostics.DbgShim.<rid>` native per-RID + `Microsoft.Diagnostics.Tracing.TraceEvent` for EventPipe parsing, all per ADR-009; **netcoredbg retired at 1.8.2**) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
+> *Scope of "BCL-only": Mercury core (`src/Mercury/`) and its 28-public-type embeddable surface have no `PackageReference` entries. Adjacent surfaces — `Mercury.Mcp` (depends on `ModelContextProtocol`), `DrHook.Engine` (admitted: `Microsoft.Diagnostics.NETCore.Client` managed + `Microsoft.Diagnostics.DbgShim.<rid>` native per-RID + `Microsoft.Diagnostics.Tracing.TraceEvent` for EventPipe parsing, all per ADR-009; **netcoredbg retired at 1.8.2**) — package the substrate for tooling and runtime observation. The substrate-independence claim applies to the core; the tooling layer is honest about its dependencies.*
 
 The broader Sky Omega vision is a **stand-alone cognitive agent** built on this foundation, combining:
 

@@ -361,5 +361,5 @@ internal sealed class BBHashBuilder
     }
 
     /// <summary>Result of <see cref="Build"/>: the MPHF + a translation array <c>mphf_pos → input_index</c>.</summary>
-    public sealed record BuildResult(BBHash Mphf, ChunkedArray<long> Translation);
+    internal sealed record BuildResult(BBHash Mphf, ChunkedArray<long> Translation);
 }
