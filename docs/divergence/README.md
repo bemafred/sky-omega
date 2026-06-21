@@ -28,7 +28,9 @@ The same source triple ingested as different formats can store a **different ato
 
 **Convergence project:** extend `LiteralForm` (or a neutral `Rdf/RdfTermCanonicalizer`) into the single canonicalizer all format parsers AND the SPARQL side call. **Verdict: TRUE divergence.**
 
-### S2 · Two complete SPARQL expression evaluators  ✓ `live` **(predates ADR-047)**
+### S2 · Two complete SPARQL expression evaluators  ✅ **CLOSED — 2026-06-21 ([ADR-049](../adrs/mercury/ADR-049-unified-expression-evaluator.md))**
+**Resolution:** unified onto the single `[110] Expression` evaluator `FilterEvaluator.EvaluateToValue`; FILTER derives `bool` via `CoerceToBool(...)`, BIND binds the produced term. `BindExpressionEvaluator.cs` deleted (2,336 lines). The reconciliation went deeper than the parser/function-coverage split below: it also corrected real *correctness* divergences in both directions (FilterEvaluator's date/time accessors, `STRDT`/`STRLANG`, `DATATYPE`, and `ParseStringLiteral` `@lang`/datatype handling were non-conformant; the BIND evaluator double-bracketed `STRDT` and mishandled `LANG`). Full W3C suite 4699/0/6. Original analysis retained below for the record.
+
 `Sparql/Execution/Expressions/FilterEvaluator.cs` (+`.Functions.cs`) vs `BindExpressionEvaluator.cs`: independent recursive-descent parsers, each with its own ~40-function builtin library (MD5/SHA/`ENCODE_FOR_URI`/`SUBSTR`/… duplicated). They share the one `Value` ref struct + `ValueType` enum (defined in `FilterEvaluator.cs:2080`) — so the divergence is the **parser + function library**, not the value model.
 
 **Corrected finding (2026-06-20 grounding): the two are COMPLEMENTARY, not super/subset** — a naive "route BIND through FilterEvaluator" would regress BIND arithmetic:

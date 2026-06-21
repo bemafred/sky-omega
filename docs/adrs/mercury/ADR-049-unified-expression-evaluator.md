@@ -2,7 +2,11 @@
 
 ## Status
 
-**Status:** Accepted — 2026-06-20 (Epistemics. The SPARQL 1.1 grammar settles the design — both FILTER and BIND consume the one `[110] Expression` production — and the two current evaluators are each a non-conformant *half* of it, empirically demonstrated. The decision is validated by the spec, not by either implementation; what remains is the careful, W3C-verified engineering of the merge.)
+**Status:** Completed — 2026-06-21 (Engineering. One evaluator of `[110] Expression`: `FilterEvaluator.EvaluateToValue`. FILTER derives its boolean via `CoerceToBool(EvaluateToValue(...))`, BIND binds the produced term — they differ only in the final step, exactly as the spec frames it. `BindExpressionEvaluator` is deleted (2,336 lines). Divergence register S2 closed. Full W3C suite 4699/0/6 after every step; zero reverts.)
+
+> **Implementation note (2026-06-21):** the merge landed as the strictly-incremental, full-suite-green sequence below. Commits: grammar `e650a8d` → reconciliation (a) hang `ac1c367` → (b) output-form punch-list `ae642f3` → `@lang`/datatype literal parsing `c905550` → step 2 base-IRI `faa7f5e` → step 3 wire BIND + converge functions `38030bb` → step 4 FILTER switch + delete bool grammar `238e7eb` → step 5 delete `BindExpressionEvaluator`.
+>
+> Two reconciliation truths reshaped the original plan, both recorded below: (1) the divergence reached deeper than output *form* — `ParseStringLiteral` dropped `@lang`/non-numeric datatypes, and the date/time accessors, `STRDT`/`STRLANG`, and `DATATYPE` were genuinely *less conformant* than the BIND evaluator (they only surfaced under bound variables / non-Z offsets, which the constant-inline probe missed); (2) the BIND evaluator was **not** a clean oracle either — it double-bracketed `STRDT` with an inline IRI datatype and returned the wrong `LANG`. The **spec** was the standing oracle; both implementations were corrected toward it, and the differential probe is now frozen to explicit conformant literals (`Adr049FunctionReconciliationProbeTests`).
 
 ## Context
 

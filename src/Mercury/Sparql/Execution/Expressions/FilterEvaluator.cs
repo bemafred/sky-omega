@@ -711,7 +711,7 @@ internal ref partial struct FilterEvaluator
                 return new Value { Type = ValueType.Unbound };
 
             // Per-row seed: same label -> same bnode within a row, distinct across
-            // rows (SPARQL §17.4.2.2). Mirrors the conformant BindExpressionEvaluator.
+            // rows (SPARQL §17.4.2.2). Mirrors what the (now-removed) BindExpressionEvaluator did.
             _bnodeResult = $"_:r{s_bnodeRowSeed}_{label.ToString()}";
             return new Value
             {
@@ -882,7 +882,7 @@ internal ref partial struct FilterEvaluator
         {
             // Canonical IRI term form is angle-bracketed (consistent with how a literal
             // <iri> is stored by ParseFullUri). A relative ref (no scheme) resolves against
-            // _baseIri when one is in scope. Mirrors the conformant BindExpressionEvaluator.
+            // _baseIri when one is in scope. Mirrors what the (now-removed) BindExpressionEvaluator did.
             var baseStr = _baseIri;
             if (baseStr.Length >= 2 && baseStr[0] == '<' && baseStr[^1] == '>')
                 baseStr = baseStr.Slice(1, baseStr.Length - 2);
@@ -949,7 +949,7 @@ internal ref partial struct FilterEvaluator
             // A numeric/boolean Value parsed from a typed literal preserves the original
             // StringValue (e.g. "1.5"^^xsd:decimal -> Double keeps its lexical form). Recover the
             // datatype from that suffix FIRST so decimal vs double vs integer stay distinct — the
-            // Type alone collapses them. Matches the conformant BindExpressionEvaluator.
+            // Type alone collapses them. Matches what the (now-removed) BindExpressionEvaluator did.
             if (!arg1.StringValue.IsEmpty)
             {
                 var s = arg1.StringValue;
@@ -1133,7 +1133,7 @@ internal ref partial struct FilterEvaluator
         // YEAR/MONTH/DAY/HOURS/MINUTES/SECONDS — extract components DIRECTLY from the lexical
         // form per SPARQL §17.4.5 (no timezone conversion; a DateTime parse would convert an
         // offset like -08:00 to machine-local time, giving a wrong, non-deterministic component).
-        // Matches the conformant BindExpressionEvaluator.
+        // Matches what the (now-removed) BindExpressionEvaluator did.
         if (funcName.Equals("year", StringComparison.OrdinalIgnoreCase))
         {
             if (arg1.Type == ValueType.String &&
@@ -1375,7 +1375,7 @@ internal ref partial struct FilterEvaluator
 
     // Per-row seed so BNODE(label) yields the same blank node within a row but a
     // distinct one across rows (SPARQL §17.4.2.2). Bumped per result row by the
-    // BIND consumer via IncrementBnodeRowSeed(); mirrors BindExpressionEvaluator.
+    // BIND consumer via IncrementBnodeRowSeed(); mirrors the (now-removed) BindExpressionEvaluator.
     private static int s_bnodeRowSeed = 0;
 
     /// <summary>Advance the per-row BNODE seed (called once per result row by the BIND pipeline).</summary>
@@ -1423,7 +1423,7 @@ internal ref partial struct FilterEvaluator
     /// <summary>
     /// Parse an xsd:dateTime lexical form and extract its components directly (no timezone
     /// conversion) per SPARQL §17.4.5. Accepts a bare lexical form or an RDF typed literal
-    /// ("…"^^…). Ported from BindExpressionEvaluator — the W3C-conformant implementation.
+    /// ("…"^^…). Ported from the (now-removed) BindExpressionEvaluator — the W3C-conformant implementation.
     /// </summary>
     private static bool TryParseDateTime(ReadOnlySpan<char> str, out int year, out int month, out int day,
         out int hour, out int minute, out double second)

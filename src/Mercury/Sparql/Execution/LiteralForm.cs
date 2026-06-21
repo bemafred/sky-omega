@@ -141,10 +141,10 @@ internal static class LiteralForm
     /// <summary>
     /// Canonicalize the unwrapped content of a SPARQL literal — i.e., the bytes
     /// between the opening and closing wrapper quotes, with no surrounding `"`,
-    /// no `@lang`, no `^^<iri>` suffix. Used by FilterEvaluator and
-    /// BindExpressionEvaluator, which parse literal content directly from filter /
-    /// BIND expression text and need the decoded form to compare against the
-    /// canonical-stored atoms' lexical forms.
+    /// no `@lang`, no `^^<iri>` suffix. Used by FilterEvaluator, which parses literal
+    /// content directly from FILTER / BIND expression text (it evaluates both since
+    /// ADR-049) and needs the decoded form to compare against the canonical-stored
+    /// atoms' lexical forms.
     ///
     /// Fast path: no `\` → return verbatim span unchanged.
     /// Slow path: decode escapes into a new immutable string.

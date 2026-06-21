@@ -875,7 +875,7 @@ internal sealed class GraphTreeEvaluator
         return text.Contains(':') ? ExpandPathPname(text) : text;
     }
 
-    /// <summary>BIND: extend each solution with the evaluated expression, via the real <see cref="BindExpressionEvaluator"/>.</summary>
+    /// <summary>BIND: extend each solution with the evaluated expression, via the unified <see cref="FilterEvaluator.EvaluateToValue"/>.</summary>
     private List<Dictionary<string, string>> BindStep(ref PatternArray pa, int bindIndex,
         List<Dictionary<string, string>> input)
     {
@@ -891,9 +891,9 @@ internal sealed class GraphTreeEvaluator
             var table = new BindingTable(store, stringBuffer);
             Populate(ref table, sol);
 
-            var evaluator = new BindExpressionEvaluator(exprText.AsSpan(),
-                table.GetBindings(), table.Count, table.GetStringBuffer());
-            string rendered = Render(evaluator.Evaluate());
+            var evaluator = new FilterEvaluator(exprText.AsSpan());
+            string rendered = Render(evaluator.EvaluateToValue(
+                table.GetBindings(), table.Count, table.GetStringBuffer(), null, ReadOnlySpan<char>.Empty));
 
             output.Add(new Dictionary<string, string>(sol) { [key] = rendered });
         }
