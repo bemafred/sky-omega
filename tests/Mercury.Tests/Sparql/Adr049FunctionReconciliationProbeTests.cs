@@ -76,20 +76,23 @@ public class Adr049FunctionReconciliationProbeTests
             // conditionals
             "IF(1 > 0, 10, 20)", "IF(1 < 0, 10, 20)", "COALESCE(42, 0)",
             // completeness sweep over the rest of the shared library (oracle = bind)
-            // NOTE: inline @lang-literal cases (DATATYPE/LANG/UCASE/LCASE/CONCAT over "x"@en)
-            // are deliberately excluded — FilterEvaluator.ParseStringLiteral does not yet parse
-            // the @lang suffix (it strips it), a separate ADR-049 finding tracked for the wiring
-            // phase. LANG("plain") also diverges, but there FilterEvaluator is spec-correct ("")
-            // and BindExpressionEvaluator is the buggy side (UNBOUND) — the spec is the oracle.
+            // NOTE: LANG is NOT differential-tested here — BindExpressionEvaluator is buggy for it
+            // (returns UNBOUND for both lang-tagged and plain literals); the spec is the oracle, so
+            // LANG is asserted explicitly in LangFunction_ConformsToSpec below.
             "STR(3.14)", "STR(42)",
             "DATATYPE(\"5\"^^<http://www.w3.org/2001/XMLSchema#integer>)",
-            "DATATYPE(\"plain\")",
+            "DATATYPE(\"plain\")", "DATATYPE(\"hi\"@en)",
             "STRDT(\"5\", <http://www.w3.org/2001/XMLSchema#integer>)",
             "STRLANG(\"hi\", \"en\")",
+            "UCASE(\"abc\"@en)", "LCASE(\"ABC\"@en)",
+            "CONCAT(\"a\"@en, \"b\"@en)",
             "SUBSTR(\"abcdef\", 3)", "ENCODE_FOR_URI(\"a b\")",
             "MD5(\"abc\")", "SHA1(\"abc\")", "SHA256(\"abc\")", "SHA512(\"abc\")",
             "ABS(0 - 5)", "ABS(5)",
             "STRLEN(\"héllo\")",
+            // typed-literal round-trip: a non-numeric inline datatype must survive parsing
+            "DATATYPE(\"PT0S\"^^<http://www.w3.org/2001/XMLSchema#dayTimeDuration>)",
+            "DATATYPE(\"2024-01-01\"^^xsd:date)",
         };
 
         var mismatches = new List<string>();
@@ -131,5 +134,14 @@ public class Adr049FunctionReconciliationProbeTests
         Assert.StartsWith("DBL:", rand);
         var r = double.Parse(rand.Substring(4), CultureInfo.InvariantCulture);
         Assert.InRange(r, 0.0, 1.0);
+    }
+
+    // LANG: spec is the oracle (BindExpressionEvaluator returns UNBOUND, which is wrong).
+    // LANG of a lang-tagged literal is its tag; LANG of any other literal is the empty string.
+    [Fact]
+    public void LangFunction_ConformsToSpec()
+    {
+        Assert.Equal("STR:en", ViaFilter("LANG(\"hi\"@en)"));
+        Assert.Equal("STR:", ViaFilter("LANG(\"plain\")"));
     }
 }

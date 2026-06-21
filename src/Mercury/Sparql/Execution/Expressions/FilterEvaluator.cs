@@ -497,13 +497,30 @@ internal ref partial struct FilterEvaluator
         if (!IsAtEnd())
             Advance(); // Skip closing '"'
 
-        // Check for typed literal suffix: ^^<datatype>
+        // Language tag: "content"@lang — preserve the full wrapped term form so that
+        // GetLexicalForm / GetLangTagOrDatatype (hence DATATYPE/LANG/UCASE/LCASE/CONCAT)
+        // see the tag. (ADR-049: FilterEvaluator previously dropped @lang entirely, which
+        // also left it unconsumed and broke function-argument parsing.)
+        if (!IsAtEnd() && Peek() == '@')
+        {
+            var langStart = _position; // at '@'
+            Advance();
+            while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '-'))
+                Advance();
+            var langTag = _expression.Slice(langStart, _position - langStart);
+            _typedLiteralResult = $"\"{str.ToString()}\"{langTag.ToString()}";
+            return new Value { Type = ValueType.String, StringValue = _typedLiteralResult.AsSpan() };
+        }
+
+        // Typed literal suffix: ^^<IRI> or ^^prefix:local
         if (_position + 1 < _expression.Length && _expression[_position] == '^' && _expression[_position + 1] == '^')
         {
             Advance(); // Skip first '^'
             Advance(); // Skip second '^'
 
-            // Consume the datatype IRI <...>
+            // The datatype IRI in angle-bracketed form, for both classification and the
+            // preserved output (a prefixed name is expanded to its full <IRI>).
+            string datatypeBracketed;
             if (!IsAtEnd() && Peek() == '<')
             {
                 var dtStart = _position;
@@ -512,39 +529,58 @@ internal ref partial struct FilterEvaluator
                     Advance();
                 if (!IsAtEnd())
                     Advance(); // Skip '>'
-
-                var datatype = _expression.Slice(dtStart, _position - dtStart);
-
-                // Parse numeric datatypes
-                if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
-                    datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
-                    datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
-                    datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
-                    datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
-                    {
-                        return new Value { Type = ValueType.Integer, IntegerValue = intVal };
-                    }
-                }
-
-                if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
-                    datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
-                    datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
-                    {
-                        return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
-                    }
-                }
-
-                if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
-                {
-                    var boolVal = str.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                                  str.Equals("1", StringComparison.Ordinal);
-                    return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
-                }
+                datatypeBracketed = _expression.Slice(dtStart, _position - dtStart).ToString(); // <...>
             }
+            else
+            {
+                // Prefixed name datatype: prefix:local — consume it (else it would be left
+                // unparsed and break the surrounding parse) and expand a known xsd: prefix.
+                var pfxStart = _position;
+                while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_'))
+                    Advance();
+                if (!IsAtEnd() && Peek() == ':')
+                {
+                    Advance();
+                    while (!IsAtEnd() && (IsLetterOrDigit(Peek()) || Peek() == '_' || Peek() == '-'))
+                        Advance();
+                }
+                var prefixed = _expression.Slice(pfxStart, _position - pfxStart);
+                var expanded = ExpandXsdDatatypePrefix(prefixed);
+                datatypeBracketed = expanded.IsEmpty ? $"<{prefixed.ToString()}>" : $"<{expanded.ToString()}>";
+            }
+
+            var datatype = datatypeBracketed.AsSpan();
+
+            // Numeric / boolean typed literals collapse to a typed Value (as before).
+            if (datatype.Contains("integer", StringComparison.OrdinalIgnoreCase) ||
+                datatype.Contains("int", StringComparison.OrdinalIgnoreCase) ||
+                datatype.Contains("short", StringComparison.OrdinalIgnoreCase) ||
+                datatype.Contains("byte", StringComparison.OrdinalIgnoreCase) ||
+                datatype.Contains("long", StringComparison.OrdinalIgnoreCase))
+            {
+                if (long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
+                    return new Value { Type = ValueType.Integer, IntegerValue = intVal };
+            }
+
+            if (datatype.Contains("decimal", StringComparison.OrdinalIgnoreCase) ||
+                datatype.Contains("double", StringComparison.OrdinalIgnoreCase) ||
+                datatype.Contains("float", StringComparison.OrdinalIgnoreCase))
+            {
+                if (double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleVal))
+                    return new Value { Type = ValueType.Double, DoubleValue = doubleVal };
+            }
+
+            if (datatype.Contains("boolean", StringComparison.OrdinalIgnoreCase))
+            {
+                var boolVal = str.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                              str.Equals("1", StringComparison.Ordinal);
+                return new Value { Type = ValueType.Boolean, BooleanValue = boolVal };
+            }
+
+            // Any other datatype (date, dayTimeDuration, custom, …): preserve the full
+            // wrapped term form so the datatype survives into comparison and atom storage.
+            _typedLiteralResult = $"\"{str.ToString()}\"^^{datatypeBracketed}";
+            return new Value { Type = ValueType.String, StringValue = _typedLiteralResult.AsSpan() };
         }
 
         return new Value
@@ -552,6 +588,28 @@ internal ref partial struct FilterEvaluator
             Type = ValueType.String,
             StringValue = str
         };
+    }
+
+    // Expand a common xsd: datatype prefix to its full IRI (no angle brackets); empty if unknown.
+    private static ReadOnlySpan<char> ExpandXsdDatatypePrefix(ReadOnlySpan<char> prefixedName)
+    {
+        if (!prefixedName.StartsWith("xsd:", StringComparison.OrdinalIgnoreCase))
+            return ReadOnlySpan<char>.Empty;
+        var local = prefixedName.Slice(4);
+        const string xsd = "http://www.w3.org/2001/XMLSchema#";
+        if (local.Equals("date", StringComparison.OrdinalIgnoreCase)) return (xsd + "date").AsSpan();
+        if (local.Equals("dateTime", StringComparison.OrdinalIgnoreCase)) return (xsd + "dateTime").AsSpan();
+        if (local.Equals("time", StringComparison.OrdinalIgnoreCase)) return (xsd + "time").AsSpan();
+        if (local.Equals("integer", StringComparison.OrdinalIgnoreCase)) return (xsd + "integer").AsSpan();
+        if (local.Equals("decimal", StringComparison.OrdinalIgnoreCase)) return (xsd + "decimal").AsSpan();
+        if (local.Equals("double", StringComparison.OrdinalIgnoreCase)) return (xsd + "double").AsSpan();
+        if (local.Equals("float", StringComparison.OrdinalIgnoreCase)) return (xsd + "float").AsSpan();
+        if (local.Equals("boolean", StringComparison.OrdinalIgnoreCase)) return (xsd + "boolean").AsSpan();
+        if (local.Equals("string", StringComparison.OrdinalIgnoreCase)) return (xsd + "string").AsSpan();
+        if (local.Equals("gYear", StringComparison.OrdinalIgnoreCase)) return (xsd + "gYear").AsSpan();
+        if (local.Equals("gYearMonth", StringComparison.OrdinalIgnoreCase)) return (xsd + "gYearMonth").AsSpan();
+        if (local.Equals("dayTimeDuration", StringComparison.OrdinalIgnoreCase)) return (xsd + "dayTimeDuration").AsSpan();
+        return ReadOnlySpan<char>.Empty;
     }
 
     private Value ParseNumericLiteral()
@@ -1206,7 +1264,7 @@ internal ref partial struct FilterEvaluator
         // YEAR - extract year from xsd:dateTime
         if (funcName.Equals("year", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
             {
                 return new Value { Type = ValueType.Integer, IntegerValue = dt.Year };
             }
@@ -1216,7 +1274,7 @@ internal ref partial struct FilterEvaluator
         // MONTH - extract month from xsd:dateTime (1-12)
         if (funcName.Equals("month", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
             {
                 return new Value { Type = ValueType.Integer, IntegerValue = dt.Month };
             }
@@ -1226,7 +1284,7 @@ internal ref partial struct FilterEvaluator
         // DAY - extract day from xsd:dateTime (1-31)
         if (funcName.Equals("day", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
             {
                 return new Value { Type = ValueType.Integer, IntegerValue = dt.Day };
             }
@@ -1236,7 +1294,7 @@ internal ref partial struct FilterEvaluator
         // HOURS - extract hours from xsd:dateTime (0-23)
         if (funcName.Equals("hours", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
             {
                 return new Value { Type = ValueType.Integer, IntegerValue = dt.Hour };
             }
@@ -1246,7 +1304,7 @@ internal ref partial struct FilterEvaluator
         // MINUTES - extract minutes from xsd:dateTime (0-59)
         if (funcName.Equals("minutes", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.GetLexicalForm(), out var dt))
             {
                 return new Value { Type = ValueType.Integer, IntegerValue = dt.Minute };
             }
@@ -1284,7 +1342,7 @@ internal ref partial struct FilterEvaluator
         {
             if (arg1.Type == ValueType.String)
             {
-                var tzStr = ExtractTimezone(arg1.StringValue);
+                var tzStr = ExtractTimezone(arg1.GetLexicalForm());
                 _datetimeResult = $"\"{tzStr}\""; // TZ returns a simple (quoted) literal
                 return new Value { Type = ValueType.String, StringValue = _datetimeResult.AsSpan() };
             }
@@ -1296,7 +1354,7 @@ internal ref partial struct FilterEvaluator
         {
             if (arg1.Type == ValueType.String)
             {
-                var tzStr = ExtractTimezone(arg1.StringValue);
+                var tzStr = ExtractTimezone(arg1.GetLexicalForm());
                 if (string.IsNullOrEmpty(tzStr))
                 {
                     // No timezone specified - return unbound per SPARQL spec
@@ -1454,6 +1512,9 @@ internal ref partial struct FilterEvaluator
 
     // Storage for STRDT result to keep span valid
     private string _strdtResult = string.Empty;
+
+    // Storage for a lang-tagged / non-numeric-typed literal's full wrapped form ("v"@en, "v"^^<dt>)
+    private string _typedLiteralResult = string.Empty;
 
     // Storage for STRLANG result to keep span valid
     private string _strlangResult = string.Empty;
