@@ -22,7 +22,7 @@ internal ref partial struct FilterEvaluator
     /// Used by BIND; FILTER derives its boolean via <c>CoerceToBool(EvaluateToValue(...))</c>.
     /// </summary>
     internal Value EvaluateToValue(ReadOnlySpan<Binding> bindings, int bindingCount, ReadOnlySpan<char> stringBuffer,
-        PrefixMapping[]? prefixes, ReadOnlySpan<char> source)
+        PrefixMapping[]? prefixes, ReadOnlySpan<char> source, ReadOnlySpan<char> baseIri = default)
     {
         _position = 0;
         _bindingData = bindings;
@@ -30,6 +30,7 @@ internal ref partial struct FilterEvaluator
         _bindingStrings = stringBuffer;
         _prefixes = prefixes;
         _source = source;
+        _baseIri = baseIri;
         _filterScopeDepth = -1;
         return ValueOr();
     }

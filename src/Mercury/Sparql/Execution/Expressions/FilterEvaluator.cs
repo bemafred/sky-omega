@@ -25,6 +25,8 @@ internal ref partial struct FilterEvaluator
     // Prefix expansion support (optional)
     private PrefixMapping[]? _prefixes;
     private ReadOnlySpan<char> _source;
+    // Base IRI for resolving a relative ref in IRI()/URI() (ADR-049 step 2; empty = no base).
+    private ReadOnlySpan<char> _baseIri;
     private string? _expandedPrefixBuffer;
     private string? _literalScratch; // ADR-044: scratch owner for canonicalized filter literals
 
@@ -41,6 +43,7 @@ internal ref partial struct FilterEvaluator
         _bindingCount = 0;
         _prefixes = null;
         _source = ReadOnlySpan<char>.Empty;
+        _baseIri = ReadOnlySpan<char>.Empty;
         _expandedPrefixBuffer = null;
         _literalScratch = null;
         _filterScopeDepth = -1; // Disabled by default
@@ -1046,22 +1049,33 @@ internal ref partial struct FilterEvaluator
             funcName.Equals("uri", StringComparison.OrdinalIgnoreCase))
         {
             // Canonical IRI term form is angle-bracketed (consistent with how a literal
-            // <iri> is stored by ParseFullUri). Base-IRI resolution of a relative ref is
-            // ADR-049 step 2. Mirrors the conformant BindExpressionEvaluator.
+            // <iri> is stored by ParseFullUri). A relative ref (no scheme) resolves against
+            // _baseIri when one is in scope. Mirrors the conformant BindExpressionEvaluator.
+            var baseStr = _baseIri;
+            if (baseStr.Length >= 2 && baseStr[0] == '<' && baseStr[^1] == '>')
+                baseStr = baseStr.Slice(1, baseStr.Length - 2);
+
+            ReadOnlySpan<char> rel;
             if (arg1.Type == ValueType.Uri)
             {
-                var uriVal = arg1.StringValue;
-                if (uriVal.Length >= 2 && uriVal[0] == '<' && uriVal[^1] == '>')
-                    return arg1; // already bracketed
-                _iriResult = $"<{uriVal.ToString()}>";
-                return new Value { Type = ValueType.Uri, StringValue = _iriResult.AsSpan() };
+                rel = arg1.StringValue;
+                if (rel.Length >= 2 && rel[0] == '<' && rel[^1] == '>')
+                    rel = rel.Slice(1, rel.Length - 2);
             }
-            if (arg1.Type == ValueType.String)
+            else if (arg1.Type == ValueType.String)
             {
-                _iriResult = $"<{arg1.GetLexicalForm().ToString()}>";
-                return new Value { Type = ValueType.Uri, StringValue = _iriResult.AsSpan() };
+                rel = arg1.GetLexicalForm();
             }
-            return new Value { Type = ValueType.Unbound };
+            else
+            {
+                return new Value { Type = ValueType.Unbound };
+            }
+
+            var absolute = rel.Contains("://".AsSpan(), StringComparison.Ordinal);
+            _iriResult = absolute || baseStr.IsEmpty
+                ? $"<{rel.ToString()}>"
+                : $"<{baseStr.ToString()}{rel.ToString()}>";
+            return new Value { Type = ValueType.Uri, StringValue = _iriResult.AsSpan() };
         }
 
         // LANG - returns language tag of a literal

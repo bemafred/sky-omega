@@ -144,4 +144,20 @@ public class Adr049FunctionReconciliationProbeTests
         Assert.Equal("STR:en", ViaFilter("LANG(\"hi\"@en)"));
         Assert.Equal("STR:", ViaFilter("LANG(\"plain\")"));
     }
+
+    // Base-IRI parity (ADR-049 step 2): a relative ref in IRI()/URI() resolves against the base;
+    // an absolute ref ignores it.
+    [Fact]
+    public void Iri_ResolvesRelativeAgainstBase()
+    {
+        var e1 = new FilterEvaluator("IRI(\"foo\")".AsSpan());
+        Assert.Equal("URI:<http://example.org/foo>", Render(e1.EvaluateToValue(
+            ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, null,
+            ReadOnlySpan<char>.Empty, "http://example.org/".AsSpan())));
+
+        var e2 = new FilterEvaluator("IRI(\"http://other.org/x\")".AsSpan());
+        Assert.Equal("URI:<http://other.org/x>", Render(e2.EvaluateToValue(
+            ReadOnlySpan<Binding>.Empty, 0, ReadOnlySpan<char>.Empty, null,
+            ReadOnlySpan<char>.Empty, "http://example.org/".AsSpan())));
+    }
 }
