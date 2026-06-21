@@ -2287,8 +2287,9 @@ public class FilterEvaluatorTests
     [Fact]
     public void Bnode_WithLabel_ReturnsLabeledBlankNode()
     {
+        // BNODE(label) is per-row seeded (SPARQL §17.4.2.2): _:r<rowSeed>_<label>.
         Assert.True(EvaluateWithStringBinding(
-            "str(BNODE(?x)) == \"_:mynode\"",
+            "STRSTARTS(str(BNODE(?x)), \"_:r\") && STRENDS(str(BNODE(?x)), \"_mynode\")",
             "?x", "mynode"));
     }
 
@@ -2322,7 +2323,7 @@ public class FilterEvaluatorTests
     public void Timezone_Utc_ReturnsPT0S()
     {
         Assert.True(EvaluateWithStringBinding(
-            "TIMEZONE(?x) == \"PT0S\"",
+            "STR(TIMEZONE(?x)) == \"PT0S\"",
             "?x", "2024-12-25T10:30:00Z"));
     }
 
@@ -2330,7 +2331,7 @@ public class FilterEvaluatorTests
     public void Timezone_PositiveOffset_ReturnsDuration()
     {
         Assert.True(EvaluateWithStringBinding(
-            "TIMEZONE(?x) == \"PT5H30M\"",
+            "STR(TIMEZONE(?x)) == \"PT5H30M\"",
             "?x", "2024-12-25T10:30:00+05:30"));
     }
 
@@ -2338,7 +2339,7 @@ public class FilterEvaluatorTests
     public void Timezone_NegativeOffset_ReturnsNegativeDuration()
     {
         Assert.True(EvaluateWithStringBinding(
-            "TIMEZONE(?x) == \"-PT8H\"",
+            "STR(TIMEZONE(?x)) == \"-PT8H\"",
             "?x", "2024-12-25T10:30:00-08:00"));
     }
 
@@ -2346,7 +2347,7 @@ public class FilterEvaluatorTests
     public void Timezone_WholeHour_OmitsMinutes()
     {
         Assert.True(EvaluateWithStringBinding(
-            "TIMEZONE(?x) == \"PT2H\"",
+            "STR(TIMEZONE(?x)) == \"PT2H\"",
             "?x", "2024-12-25T10:30:00+02:00"));
     }
 
@@ -2363,7 +2364,7 @@ public class FilterEvaluatorTests
     public void Timezone_CaseInsensitive()
     {
         Assert.True(EvaluateWithStringBinding(
-            "timezone(?x) == \"PT0S\"",
+            "STR(timezone(?x)) == \"PT0S\"",
             "?x", "2024-12-25T10:30:00Z"));
     }
 

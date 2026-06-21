@@ -813,14 +813,13 @@ internal ref partial struct FilterEvaluator
             if (Peek() == ')')
                 Advance();
 
-            if (labelArg.Type != ValueType.String)
-                return new Value { Type = ValueType.Unbound };
-
-            var label = labelArg.StringValue;
+            var label = labelArg.GetLexicalForm();
             if (label.IsEmpty)
                 return new Value { Type = ValueType.Unbound };
 
-            _bnodeResult = $"_:{label}";
+            // Per-row seed: same label -> same bnode within a row, distinct across
+            // rows (SPARQL §17.4.2.2). Mirrors the conformant BindExpressionEvaluator.
+            _bnodeResult = $"_:r{s_bnodeRowSeed}_{label.ToString()}";
             return new Value
             {
                 Type = ValueType.Uri,
@@ -834,7 +833,7 @@ internal ref partial struct FilterEvaluator
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _uuidResult = $"urn:uuid:{Guid.CreateVersion7():D}";
+            _uuidResult = $"<urn:uuid:{Guid.CreateVersion7():D}>";
             return new Value
             {
                 Type = ValueType.Uri,
@@ -848,7 +847,7 @@ internal ref partial struct FilterEvaluator
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _uuidResult = Guid.CreateVersion7().ToString("D");
+            _uuidResult = $"\"{Guid.CreateVersion7():D}\"";
             return new Value
             {
                 Type = ValueType.String,
@@ -862,7 +861,7 @@ internal ref partial struct FilterEvaluator
             SkipWhitespace();
             if (Peek() == ')')
                 Advance();
-            _datetimeResult = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", System.Globalization.CultureInfo.InvariantCulture);
+            _datetimeResult = $"\"{DateTime.UtcNow:O}\"^^<http://www.w3.org/2001/XMLSchema#dateTime>";
             return new Value
             {
                 Type = ValueType.String,
@@ -988,13 +987,21 @@ internal ref partial struct FilterEvaluator
         if (funcName.Equals("iri", StringComparison.OrdinalIgnoreCase) ||
             funcName.Equals("uri", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String || arg1.Type == ValueType.Uri)
+            // Canonical IRI term form is angle-bracketed (consistent with how a literal
+            // <iri> is stored by ParseFullUri). Base-IRI resolution of a relative ref is
+            // ADR-049 step 2. Mirrors the conformant BindExpressionEvaluator.
+            if (arg1.Type == ValueType.Uri)
             {
-                return new Value
-                {
-                    Type = ValueType.Uri,
-                    StringValue = arg1.StringValue
-                };
+                var uriVal = arg1.StringValue;
+                if (uriVal.Length >= 2 && uriVal[0] == '<' && uriVal[^1] == '>')
+                    return arg1; // already bracketed
+                _iriResult = $"<{uriVal.ToString()}>";
+                return new Value { Type = ValueType.Uri, StringValue = _iriResult.AsSpan() };
+            }
+            if (arg1.Type == ValueType.String)
+            {
+                _iriResult = $"<{arg1.GetLexicalForm().ToString()}>";
+                return new Value { Type = ValueType.Uri, StringValue = _iriResult.AsSpan() };
             }
             return new Value { Type = ValueType.Unbound };
         }
@@ -1249,10 +1256,25 @@ internal ref partial struct FilterEvaluator
         // SECONDS - extract seconds from xsd:dateTime (0-59, with fractional part)
         if (funcName.Equals("seconds", StringComparison.OrdinalIgnoreCase))
         {
-            if (arg1.Type == ValueType.String && TryParseDateTime(arg1.StringValue, out var dt))
+            // SPARQL preserves the fractional part; parse the seconds field directly from
+            // the lexical form (the DateTime path truncates to milliseconds). Matches the
+            // conformant BindExpressionEvaluator.
+            if (arg1.Type == ValueType.String)
             {
-                var seconds = dt.Second + dt.Millisecond / 1000.0;
-                return new Value { Type = ValueType.Double, DoubleValue = seconds };
+                var lexical = arg1.GetLexicalForm();
+                if (lexical.Length >= 19 && lexical[16] == ':')
+                {
+                    var secondsEnd = 19;
+                    for (int i = 19; i < lexical.Length; i++)
+                    {
+                        var c = lexical[i];
+                        if (c == '.' || IsDigit(c)) secondsEnd = i + 1;
+                        else break;
+                    }
+                    if (double.TryParse(lexical.Slice(17, secondsEnd - 17),
+                        NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+                        return new Value { Type = ValueType.Double, DoubleValue = seconds };
+                }
             }
             return new Value { Type = ValueType.Unbound };
         }
@@ -1263,7 +1285,7 @@ internal ref partial struct FilterEvaluator
             if (arg1.Type == ValueType.String)
             {
                 var tzStr = ExtractTimezone(arg1.StringValue);
-                _datetimeResult = tzStr;
+                _datetimeResult = $"\"{tzStr}\""; // TZ returns a simple (quoted) literal
                 return new Value { Type = ValueType.String, StringValue = _datetimeResult.AsSpan() };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1280,7 +1302,7 @@ internal ref partial struct FilterEvaluator
                     // No timezone specified - return unbound per SPARQL spec
                     return new Value { Type = ValueType.Unbound };
                 }
-                _timezoneResult = ConvertToXsdDuration(tzStr);
+                _timezoneResult = $"\"{ConvertToXsdDuration(tzStr)}\"^^<http://www.w3.org/2001/XMLSchema#dayTimeDuration>";
                 return new Value { Type = ValueType.String, StringValue = _timezoneResult.AsSpan() };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1319,8 +1341,8 @@ internal ref partial struct FilterEvaluator
             {
                 return new Value
                 {
-                    Type = ValueType.Integer,
-                    IntegerValue = (long)Math.Round(arg1.DoubleValue)
+                    Type = ValueType.Double,
+                    DoubleValue = Math.Round(arg1.DoubleValue, MidpointRounding.AwayFromZero)
                 };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1337,8 +1359,8 @@ internal ref partial struct FilterEvaluator
             {
                 return new Value
                 {
-                    Type = ValueType.Integer,
-                    IntegerValue = (long)Math.Ceiling(arg1.DoubleValue)
+                    Type = ValueType.Double,
+                    DoubleValue = Math.Ceiling(arg1.DoubleValue)
                 };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1355,8 +1377,8 @@ internal ref partial struct FilterEvaluator
             {
                 return new Value
                 {
-                    Type = ValueType.Integer,
-                    IntegerValue = (long)Math.Floor(arg1.DoubleValue)
+                    Type = ValueType.Double,
+                    DoubleValue = Math.Floor(arg1.DoubleValue)
                 };
             }
             return new Value { Type = ValueType.Unbound };
@@ -1424,6 +1446,9 @@ internal ref partial struct FilterEvaluator
     // Storage for UUID/STRUUID results to keep span valid
     private string _uuidResult = string.Empty;
 
+    // Storage for IRI/URI result to keep span valid
+    private string _iriResult = string.Empty;
+
     // Storage for datetime results to keep span valid
     private string _datetimeResult = string.Empty;
 
@@ -1441,6 +1466,14 @@ internal ref partial struct FilterEvaluator
 
     // Static counter for generating unique blank node identifiers across all evaluations
     private static int s_bnodeCounter = 0;
+
+    // Per-row seed so BNODE(label) yields the same blank node within a row but a
+    // distinct one across rows (SPARQL §17.4.2.2). Bumped per result row by the
+    // BIND consumer via IncrementBnodeRowSeed(); mirrors BindExpressionEvaluator.
+    private static int s_bnodeRowSeed = 0;
+
+    /// <summary>Advance the per-row BNODE seed (called once per result row by the BIND pipeline).</summary>
+    public static void IncrementBnodeRowSeed() => System.Threading.Interlocked.Increment(ref s_bnodeRowSeed);
 
     // Storage for TIMEZONE result to keep span valid
     private string _timezoneResult = string.Empty;

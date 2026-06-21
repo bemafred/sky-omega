@@ -267,7 +267,7 @@ internal ref partial struct FilterEvaluator
 
             // Preserve language tag or datatype from the first argument
             var suffix = stringArg.GetLangTagOrDatatype();
-            _replaceResult = suffix.IsEmpty ? result : $"\"{result}\"{suffix.ToString()}";
+            _replaceResult = suffix.IsEmpty ? $"\"{result}\"" : $"\"{result}\"{suffix.ToString()}";
             return new Value
             {
                 Type = ValueType.String,
