@@ -42,6 +42,17 @@ public class FilterEvaluatorTests
         Assert.True(Evaluate("5 = 5"));
     }
 
+    // ADR-049: FILTER now evaluates the full [110] Expression grammar, including arithmetic.
+    // Before the unification FILTER had no [116] AdditiveExpression and silently took EBV(left),
+    // so "35 + 10 > 40" was non-conformant. Locked here as the demonstrated-gap conformance test.
+    [Fact]
+    public void Filter_WithArithmetic_Evaluates()
+    {
+        Assert.True(Evaluate("35 + 10 > 40"));
+        Assert.False(Evaluate("5 + 10 > 40"));
+        Assert.True(Evaluate("2 * 3 + 1 = 7"));
+    }
+
     [Fact]
     public void NotEqual_IntegersDiffer_ReturnsTrue()
     {

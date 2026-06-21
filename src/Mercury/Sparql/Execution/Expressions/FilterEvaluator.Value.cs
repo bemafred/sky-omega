@@ -130,8 +130,13 @@ internal ref partial struct FilterEvaluator
         if (ch == '!')
         {
             Advance();
-            return BoolValue(!CoerceToBool(ValuePrimary()));
+            return BoolValue(!CoerceToBool(ValueUnary())); // recurse so !!x / ! !x negate twice
         }
+        // NOT keyword — Mercury synonym for '!' (parallels the OR/AND keyword synonyms in
+        // ValueOr/ValueAnd). 'NOT IN' is postfix and handled in ValueRelational, so it never
+        // reaches here; a leading NOT is always logical negation.
+        if ((ch == 'N' || ch == 'n') && MatchKeyword("NOT"))
+            return BoolValue(!CoerceToBool(ValueUnary()));
         if (ch == '-')
         {
             // A negative numeric literal (-5) is parsed by ParseTerm; unary minus on anything else applies Negate.

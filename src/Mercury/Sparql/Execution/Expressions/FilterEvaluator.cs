@@ -60,7 +60,7 @@ internal ref partial struct FilterEvaluator
         _bindingStrings = stringBuffer;
         _prefixes = null;
         _source = ReadOnlySpan<char>.Empty;
-        return EvaluateOrExpression();
+        return CoerceToBool(ValueOr());
     }
 
     /// <summary>
@@ -76,7 +76,7 @@ internal ref partial struct FilterEvaluator
         _prefixes = prefixes;
         _source = source;
         _filterScopeDepth = -1; // No scope filtering
-        return EvaluateOrExpression();
+        return CoerceToBool(ValueOr());
     }
 
     /// <summary>
@@ -94,7 +94,7 @@ internal ref partial struct FilterEvaluator
         _prefixes = prefixes;
         _source = source;
         _filterScopeDepth = filterScopeDepth;
-        return EvaluateOrExpression();
+        return CoerceToBool(ValueOr());
     }
 
     /// <summary>
@@ -106,144 +106,7 @@ internal ref partial struct FilterEvaluator
         _bindingData = ReadOnlySpan<Binding>.Empty;
         _bindingStrings = ReadOnlySpan<char>.Empty;
         _bindingCount = 0;
-        return EvaluateOrExpression();
-    }
-
-    /// <summary>
-    /// OrExpr := AndExpr (('||' | 'OR') AndExpr)*
-    /// </summary>
-    private bool EvaluateOrExpression()
-    {
-        var result = EvaluateAndExpression();
-
-        while (true)
-        {
-            SkipWhitespace();
-            if (IsAtEnd())
-                break;
-
-            if (MatchOperator("||") || MatchKeyword("OR"))
-            {
-                var right = EvaluateAndExpression();
-                result = result || right;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// AndExpr := UnaryExpr (('&&' | 'AND') UnaryExpr)*
-    /// </summary>
-    private bool EvaluateAndExpression()
-    {
-        var result = EvaluateUnaryExpression();
-
-        while (true)
-        {
-            SkipWhitespace();
-            if (IsAtEnd())
-                break;
-
-            if (MatchOperator("&&") || MatchKeyword("AND"))
-            {
-                var right = EvaluateUnaryExpression();
-                result = result && right;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// UnaryExpr := ('!' | 'NOT')? PrimaryExpr
-    /// </summary>
-    private bool EvaluateUnaryExpression()
-    {
-        SkipWhitespace();
-
-        if (MatchOperator("!") || MatchKeyword("NOT"))
-        {
-            return !EvaluateUnaryExpression();
-        }
-
-        return EvaluatePrimaryExpression();
-    }
-
-    /// <summary>
-    /// PrimaryExpr := '(' Expression ')' | Comparison
-    /// </summary>
-    private bool EvaluatePrimaryExpression()
-    {
-        SkipWhitespace();
-
-        // Parenthesized expression
-        if (Peek() == '(')
-        {
-            Advance(); // Skip '('
-            var result = EvaluateOrExpression();
-            SkipWhitespace();
-            if (Peek() == ')')
-                Advance(); // Skip ')'
-            return result;
-        }
-
-        // Comparison expression
-        return EvaluateComparison();
-    }
-
-    /// <summary>
-    /// Comparison := Term (ComparisonOp Term | [NOT] IN ValueList)?
-    /// </summary>
-    private bool EvaluateComparison()
-    {
-        SkipWhitespace();
-
-        scoped var left = ParseTerm();
-        SkipWhitespace();
-
-        if (IsAtEnd() || IsLogicalOperator())
-            return CoerceToBool(left);
-
-        // Check for closing paren - means we're done with this comparison
-        if (Peek() == ')')
-            return CoerceToBool(left);
-
-        // Check for NOT IN or IN
-        bool negated = false;
-        if (MatchKeyword("NOT"))
-        {
-            SkipWhitespace();
-            negated = true;
-        }
-
-        if (MatchKeyword("IN"))
-        {
-            SkipWhitespace();
-            return EvaluateInExpression(left, negated);
-        }
-
-        // If we matched NOT but not IN, this is an error - just return false
-        if (negated)
-            return false;
-
-        var op = ParseComparisonOperator();
-        if (op == ComparisonOperator.Unknown)
-            return CoerceToBool(left);
-
-        SkipWhitespace();
-
-        scoped var right = ParseTerm();
-
-        return EvaluateComparisonOp(left, op, right);
+        return CoerceToBool(ValueOr());
     }
 
     /// <summary>
@@ -302,37 +165,6 @@ internal ref partial struct FilterEvaluator
         // - NOT IN: if any value matches, return false; if all non-error values don't match, return true
         // For simplicity, we treat errors as non-matching values
         return negated ? !found : found;
-    }
-
-    /// <summary>
-    /// Check if current position is at a logical operator
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private bool IsLogicalOperator()
-    {
-        if (IsAtEnd()) return false;
-
-        var remaining = _expression.Length - _position;
-        if (remaining >= 2)
-        {
-            var span = _expression.Slice(_position, 2);
-            if (span[0] == '|' && span[1] == '|') return true;
-            if (span[0] == '&' && span[1] == '&') return true;
-        }
-
-        if (remaining >= 3)
-        {
-            var span = _expression.Slice(_position, 3);
-            if (span.Equals("AND", StringComparison.OrdinalIgnoreCase)) return true;
-        }
-
-        if (remaining >= 2)
-        {
-            var span = _expression.Slice(_position, 2);
-            if (span.Equals("OR", StringComparison.OrdinalIgnoreCase)) return true;
-        }
-
-        return false;
     }
 
     /// <summary>
