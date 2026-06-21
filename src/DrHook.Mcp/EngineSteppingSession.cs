@@ -918,6 +918,38 @@ public sealed class EngineSteppingSession : IDisposable
         catch (Exception ex) { return Task.FromResult(Error($"Variable inspection failed: {ex.Message}")); }
     }
 
+    /// <summary>Lazy-expand one level of a variable at the current stop (drhook_expand). <paramref name="target"/>
+    /// is a local name, "this", or "argN"; <paramref name="path"/> is the child node names to walk into
+    /// first (field names or "[i]"). Bounded per call — the navigable substitute for deep inspection.</summary>
+    public Task<string> ExpandAsync(string target, IReadOnlyList<string> path, string? hypothesis, CancellationToken ct)
+    {
+        if (_session is null) return Task.FromResult(Error("No active stepping session."));
+        try
+        {
+            IReadOnlyList<FieldValue> children;
+            if (string.Equals(target, "this", StringComparison.Ordinal))
+                children = _session.ExpandArgument(0, path);
+            else if (target.StartsWith("arg", StringComparison.Ordinal) && int.TryParse(target.AsSpan(3), out int argIndex))
+                children = _session.ExpandArgument(argIndex, path);
+            else
+                children = _session.ExpandLocal(target, path);
+
+            JsonObject result = new()
+            {
+                ["target"] = target,
+                ["path"] = new JsonArray(path.Select(p => (JsonNode)JsonValue.Create(p)!).ToArray()),
+                ["childCount"] = children.Count,
+                ["children"] = FieldsToJson(children),
+            };
+            if (hypothesis is not null) result["hypothesis"] = hypothesis;
+            result["prompt"] = children.Count == 0
+                ? "No children (null reference, primitive, or unresolved path). Check target/path against drhook_locals."
+                : "Expanded one level. To go deeper, append a child name (or '[i]') to the path and call drhook_expand again.";
+            return Task.FromResult(Render(result));
+        }
+        catch (Exception ex) { return Task.FromResult(Error($"Expand failed: {ex.Message}")); }
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────────────────────
 
     // The launch breakpoint is armed at the entry assembly's load (ADR-011 Layer 2 hold-gate).
@@ -1001,6 +1033,7 @@ public sealed class EngineSteppingSession : IDisposable
         };
         if (l.RawValue is { } raw) node["value"] = RawToJson(raw);
         if (l.StringValue is not null) node["string"] = l.StringValue;
+        if (l.HasChildren) node["hasChildren"] = true;
         if (l.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
     }
@@ -1015,6 +1048,7 @@ public sealed class EngineSteppingSession : IDisposable
         };
         if (a.RawValue is { } raw) node["value"] = RawToJson(raw);
         if (a.StringValue is not null) node["string"] = a.StringValue;
+        if (a.HasChildren) node["hasChildren"] = true;
         if (a.Fields is { Count: > 0 } fs) node["fields"] = FieldsToJson(fs);
         return node;
     }
@@ -1031,6 +1065,7 @@ public sealed class EngineSteppingSession : IDisposable
             };
             if (f.RawValue is { } raw) node["value"] = RawToJson(raw);
             if (f.StringValue is not null) node["string"] = f.StringValue;
+            if (f.HasChildren) node["hasChildren"] = true;
             if (f.Fields is { Count: > 0 } sub) node["fields"] = FieldsToJson(sub);
             arr.Add(node);
         }

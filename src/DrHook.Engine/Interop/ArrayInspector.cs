@@ -96,11 +96,11 @@ internal static unsafe class ArrayInspector
                 try
                 {
                     ArgumentValue v = Variables.ReadValue(elementValue);
-                    IReadOnlyList<FieldValue>? nested = depth > 1
-                        ? Variables.GetChildren(elementValue, v.ElementType, depth - 1)
-                        : null;
+                    // Lazy: ONE level only — never recurse. HasChildren marks an object/array element
+                    // as expandable so a caller navigates deeper on demand (DebugSession.ExpandLocal),
+                    // not the eager multi-level walk that faulted at scale (ADR-007).
                     elements.Add(new FieldValue($"[{i.ToString(CultureInfo.InvariantCulture)}]",
-                        v.ElementType, v.RawValue, v.StringValue, nested));
+                        v.ElementType, v.RawValue, v.StringValue, null, v.HasChildren));
                 }
                 finally { RuntimeNavigation.Release(elementValue); }
             }
@@ -109,6 +109,43 @@ internal static unsafe class ArrayInspector
                 elements.Add(new FieldValue($"[…{(count - MaxElements).ToString(CultureInfo.InvariantCulture)} more]", 0, null));
 
             return elements;
+        }
+        finally
+        {
+            RuntimeNavigation.Release(arrayValue);
+            if (dereferenced != 0) RuntimeNavigation.Release(dereferenced);
+        }
+    }
+
+    /// <summary>Return element <paramref name="index"/> of a rank-1 array as an OWNED value the
+    /// caller releases — the lazy-expansion primitive for arrays (one element, one level). 0 if the
+    /// value is not a rank-1 array or the index is out of range. PRECONDITION: process synchronized.</summary>
+    public static nint GetElementValueByIndex(nint pValue, uint index)
+    {
+        if (pValue == 0) return 0;
+
+        nint arrayValue = QueryInterface(pValue, IID_ICorDebugArrayValue);
+        nint dereferenced = 0;
+        if (arrayValue == 0)
+        {
+            nint reference = QueryInterface(pValue, IID_ICorDebugReferenceValue);
+            if (reference == 0) return 0;
+            try { dereferenced = Out(reference, ReferenceValueDereference); }
+            finally { RuntimeNavigation.Release(reference); }
+            if (dereferenced == 0) return 0;
+            arrayValue = QueryInterface(dereferenced, IID_ICorDebugArrayValue);
+            if (arrayValue == 0) { RuntimeNavigation.Release(dereferenced); return 0; }
+        }
+
+        try
+        {
+            uint count;
+            var getCount = (delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(arrayValue, ArrayValueGetCount);
+            if (getCount(arrayValue, &count) < 0 || index >= count) return 0;
+
+            nint element;
+            var getElement = (delegate* unmanaged[Cdecl]<nint, uint, nint*, int>)Slot(arrayValue, ArrayValueGetElementAtPosition);
+            return getElement(arrayValue, index, &element) < 0 ? 0 : element; // owned — caller releases
         }
         finally
         {

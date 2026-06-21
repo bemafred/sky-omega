@@ -59,7 +59,7 @@ internal static unsafe class Variables
                     {
                         ArgumentValue v = ReadValue(value);
                         IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
-                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children));
+                        args.Add(new ArgumentValue(v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -102,7 +102,7 @@ internal static unsafe class Variables
                     {
                         ArgumentValue v = ReadValue(value);
                         IReadOnlyList<FieldValue>? children = GetChildren(value, v.ElementType, depth);
-                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, children));
+                        locals.Add(new LocalValue(name.Name, v.ElementType, v.RawValue, v.StringValue, children, v.HasChildren));
                     }
                     finally { RuntimeNavigation.Release(value); }
                 }
@@ -128,6 +128,12 @@ internal static unsafe class Variables
         return null;
     }
 
+    /// <summary>True if a value of this CorElementType has navigable children (an object or array) —
+    /// the cheap, no-walk basis for <c>HasChildren</c>. A null reference still reports true; an
+    /// expand of it simply yields no children (graceful), avoiding an extra deref per node.</summary>
+    internal static bool IsExpandable(int elementType)
+        => elementType is 0x12 /* CLASS */ or 0x1C /* OBJECT */ or 0x14 /* ARRAY */ or 0x1D /* SZARRAY */;
+
     /// <summary>The active frame's local at <paramref name="slot"/> as an OWNED value pointer the
     /// caller releases — for passing as a func-eval argument (e.g. <c>this</c>). 0 if unavailable.</summary>
     public static nint GetActiveFrameLocalValue(nint pThread, int slot)
@@ -150,6 +156,77 @@ internal static unsafe class Variables
         finally { RuntimeNavigation.Release(frame); }
     }
 
+    /// <summary>The active frame's argument at <paramref name="index"/> as an OWNED value pointer the
+    /// caller releases (arg 0 is <c>this</c> for an instance method). 0 if unavailable.</summary>
+    public static nint GetActiveFrameArgumentValue(nint pThread, int index)
+    {
+        if (pThread == 0) return 0;
+        nint frame = OutPtr(pThread, ThreadGetActiveFrame);
+        if (frame == 0) return 0;
+        try
+        {
+            nint ilFrame = QueryInterface(frame, IID_ICorDebugILFrame);
+            if (ilFrame == 0) return 0;
+            try
+            {
+                var getArgument = (delegate* unmanaged[Cdecl]<nint, uint, nint*, int>)Slot(ilFrame, ILFrameGetArgument);
+                nint value;
+                return getArgument(ilFrame, (uint)index, &value) < 0 ? 0 : value; // kept — caller releases
+            }
+            finally { RuntimeNavigation.Release(ilFrame); }
+        }
+        finally { RuntimeNavigation.Release(frame); }
+    }
+
+    /// <summary>Lazy navigation: from the active frame's local <paramref name="slot"/>, walk down
+    /// <paramref name="path"/> (child node names — field names or "[i]" array indices) and return the
+    /// leaf's immediate children, ONE level. Bounded by path length + one level; never the multi-level
+    /// eager walk that faulted in coreclr's unwinder at scale (ADR-007). PRECONDITION: synchronized.</summary>
+    public static IReadOnlyList<FieldValue> ExpandLocalChildren(nint pThread, int slot, IReadOnlyList<string> path)
+        => ExpandFrom(GetActiveFrameLocalValue(pThread, slot), path);
+
+    /// <summary>Lazy navigation from argument <paramref name="argIndex"/> (0 = <c>this</c>); see
+    /// <see cref="ExpandLocalChildren"/>.</summary>
+    public static IReadOnlyList<FieldValue> ExpandArgumentChildren(nint pThread, int argIndex, IReadOnlyList<string> path)
+        => ExpandFrom(GetActiveFrameArgumentValue(pThread, argIndex), path);
+
+    // Walk an OWNED root value down a path of child names — releasing each parent as we descend — then
+    // read the leaf's immediate children. One node + one level per step: the lazy substitute for the
+    // eager recursion. The root and every intermediate are released here; the returned list is detached.
+    private static IReadOnlyList<FieldValue> ExpandFrom(nint value, IReadOnlyList<string> path)
+    {
+        if (value == 0) return Array.Empty<FieldValue>();
+        try
+        {
+            for (int i = 0; i < path.Count; i++)
+            {
+                nint child = GetChildValueByName(value, path[i]);
+                RuntimeNavigation.Release(value);
+                value = child;
+                if (value == 0) return Array.Empty<FieldValue>();
+            }
+            return ImmediateChildren(value);
+        }
+        finally { if (value != 0) RuntimeNavigation.Release(value); }
+    }
+
+    // One navigation step: "[i]" → array element i; otherwise → the named field. Returns an OWNED
+    // value the caller releases (0 if absent). The field/array inspectors QI the right interface and
+    // fail gracefully on a type mismatch, so this is safe to call on any value.
+    private static nint GetChildValueByName(nint pValue, string name)
+    {
+        if (pValue == 0 || string.IsNullOrEmpty(name)) return 0;
+        if (name.Length >= 2 && name[0] == '[' && name[^1] == ']'
+            && uint.TryParse(name.AsSpan(1, name.Length - 2), out uint index))
+            return ArrayInspector.GetElementValueByIndex(pValue, index);
+        return FieldEnumerator.GetFieldValueByName(pValue, name);
+    }
+
+    // The immediate children (one level) of a value, dispatched by its element type. Reuses the
+    // one-level GetChildren; null (a non-expandable leaf) collapses to an empty list.
+    private static IReadOnlyList<FieldValue> ImmediateChildren(nint pValue)
+        => GetChildren(pValue, ReadValue(pValue).ElementType, 1) ?? Array.Empty<FieldValue>();
+
     internal static ArgumentValue ReadValue(nint pValue)
     {
         int elementType = OutInt(pValue, ValueGetType);
@@ -170,7 +247,7 @@ internal static unsafe class Variables
         // Reference-string rendering (finding 44 / probe 35) — cheap on misses (one or two QIs).
         string? stringValue = StringInspector.TryRead(pValue, out string? text) ? text : null;
 
-        return new ArgumentValue(elementType, raw, stringValue);
+        return new ArgumentValue(elementType, raw, stringValue, null, IsExpandable(elementType));
     }
 
     /// <summary>Reify the raw 8-byte buffer returned by <c>ICorDebugGenericValue.GetValue</c> as a

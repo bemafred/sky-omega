@@ -171,12 +171,11 @@ internal static unsafe class FieldEnumerator
                     try
                     {
                         ArgumentValue v = Variables.ReadValue(fieldValue);
-                        // Recurse via the shared dispatcher so a field whose value is itself an
-                        // ARRAY (not just an object) gets expanded too — composes probe 39 + 40.
-                        IReadOnlyList<FieldValue>? nested = depth > 1
-                            ? Variables.GetChildren(fieldValue, v.ElementType, depth - 1)
-                            : null;
-                        output.Add(new FieldValue(name, v.ElementType, v.RawValue, v.StringValue, nested));
+                        // Lazy: read this field ONE level only — never recurse. HasChildren flags an
+                        // object/array field as expandable so a caller navigates deeper on demand
+                        // (DebugSession.ExpandLocal), instead of the eager multi-level walk that
+                        // faulted in coreclr's unwinder at scale (ADR-007 — inspection at scale).
+                        output.Add(new FieldValue(name, v.ElementType, v.RawValue, v.StringValue, null, v.HasChildren));
                     }
                     finally { RuntimeNavigation.Release(fieldValue); }
                 }
@@ -208,4 +207,106 @@ internal static unsafe class FieldEnumerator
 
     private static void ReleaseImport(nint pUnk)
         => ((delegate* unmanaged[Cdecl]<nint, uint>)Slot(pUnk, 2))(pUnk);
+
+    /// <summary>Navigate to a single instance field by name and return its value as an OWNED pointer
+    /// the caller releases — the lazy-expansion primitive (one named field, one level). Walks the
+    /// type chain like <see cref="GetFields"/> but stops at the first name match. 0 if the value is
+    /// not an object or the field is absent. PRECONDITION: process synchronized.</summary>
+    public static nint GetFieldValueByName(nint pValue, string name)
+    {
+        if (pValue == 0 || string.IsNullOrEmpty(name)) return 0;
+
+        nint value2 = QueryInterface(pValue, IID_ICorDebugValue2);
+        if (value2 == 0) return 0;
+        nint type;
+        try { type = Out(value2, Value2GetExactType); }
+        finally { RuntimeNavigation.Release(value2); }
+        if (type == 0) return 0;
+
+        nint objectValue = QueryInterface(pValue, IID_ICorDebugObjectValue);
+        nint dereferenced = 0;
+        if (objectValue == 0)
+        {
+            nint reference = QueryInterface(pValue, IID_ICorDebugReferenceValue);
+            if (reference == 0) { RuntimeNavigation.Release(type); return 0; }
+            try { dereferenced = Out(reference, ReferenceValueDereference); }
+            finally { RuntimeNavigation.Release(reference); }
+            if (dereferenced == 0) { RuntimeNavigation.Release(type); return 0; }
+            objectValue = QueryInterface(dereferenced, IID_ICorDebugObjectValue);
+            if (objectValue == 0) { RuntimeNavigation.Release(dereferenced); RuntimeNavigation.Release(type); return 0; }
+        }
+
+        nint found = 0;
+        try
+        {
+            while (type != 0 && found == 0)
+            {
+                found = FindFieldValueAtLevel(objectValue, type, name);
+                nint baseType = Out(type, TypeGetBase);
+                RuntimeNavigation.Release(type);
+                type = baseType;
+            }
+        }
+        finally
+        {
+            if (type != 0) RuntimeNavigation.Release(type);
+            RuntimeNavigation.Release(objectValue);
+            if (dereferenced != 0) RuntimeNavigation.Release(dereferenced);
+        }
+        return found;
+    }
+
+    private static nint FindFieldValueAtLevel(nint objectValue, nint type, string name)
+    {
+        nint klass = Out(type, TypeGetClass);
+        if (klass == 0) return 0;
+        try
+        {
+            nint module = Out(klass, ClassGetModule);
+            if (module == 0) return 0;
+            try
+            {
+                uint typeToken;
+                if (((delegate* unmanaged[Cdecl]<nint, uint*, int>)Slot(klass, ClassGetToken))(klass, &typeToken) < 0)
+                    return 0;
+                nint pImport = GetMetaDataImport(module);
+                if (pImport == 0) return 0;
+                try { return FindNamedFieldValue(pImport, klass, typeToken, objectValue, name); }
+                finally { ReleaseImport(pImport); }
+            }
+            finally { RuntimeNavigation.Release(module); }
+        }
+        finally { RuntimeNavigation.Release(klass); }
+    }
+
+    private static nint FindNamedFieldValue(nint pImport, nint klass, uint typeToken, nint objectValue, string name)
+    {
+        var enumFields = (delegate* unmanaged[Cdecl]<nint, nint*, uint, uint*, uint, uint*, int>)Slot(pImport, EnumFields);
+        var closeEnum  = (delegate* unmanaged[Cdecl]<nint, nint, void>)Slot(pImport, CloseEnum);
+        var getFieldValue = (delegate* unmanaged[Cdecl]<nint, nint, uint, nint*, int>)Slot(objectValue, ObjectValueGetFieldValue);
+
+        nint hEnum = 0;
+        uint[] tokens = new uint[16];
+        try
+        {
+            while (true)
+            {
+                uint fetched = 0;
+                fixed (uint* pTokens = tokens)
+                {
+                    if (enumFields(pImport, &hEnum, typeToken, pTokens, (uint)tokens.Length, &fetched) < 0 || fetched == 0)
+                        break;
+                }
+                for (int i = 0; i < fetched; i++)
+                {
+                    if (!string.Equals(GetFieldName(pImport, tokens[i]), name, StringComparison.Ordinal)) continue;
+                    nint fieldValue;
+                    if (getFieldValue(objectValue, klass, tokens[i], &fieldValue) < 0) return 0;
+                    return fieldValue; // owned — caller releases
+                }
+            }
+        }
+        finally { closeEnum(pImport, hEnum); }
+        return 0;
+    }
 }

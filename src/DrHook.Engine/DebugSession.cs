@@ -717,9 +717,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// <summary>Argument values of the active (top) frame at the current stop. Arg 0 is
     /// <c>this</c> for an instance method; <see cref="ArgumentValue.RawValue"/> holds the
     /// primitive bits for generic values, null for object references. When <paramref name="depth"/>
-    /// &gt; 0, object args have their <see cref="ArgumentValue.Fields"/> populated by walking
-    /// instance fields up the type chain (finding 48); recursive into object-typed fields when
-    /// depth &gt; 1. Valid only while stopped.</summary>
+    /// &gt; 0, object args have their <see cref="ArgumentValue.Fields"/> populated with ONE level of
+    /// immediate fields/elements (finding 48); deeper levels are reached lazily via
+    /// <see cref="ExpandArgument"/>, not by recursion — the eager multi-level walk faulted in the
+    /// runtime's unwinder at scale (ADR-007). Valid only while stopped.</summary>
     public IReadOnlyList<ArgumentValue> GetArguments(int depth = 0)
     {
         if (depth > MaxInspectionDepth)
@@ -738,9 +739,10 @@ public sealed class DebugSession : IDisposable, IMemberResolver
     /// (via the module's Portable PDB) paired with values read from the frame. Empty if no PDB.
     /// A local not yet in scope/assigned at the current line surfaces with a null
     /// <see cref="LocalValue.RawValue"/>. When <paramref name="depth"/> &gt; 0, object locals have
-    /// their <see cref="LocalValue.Fields"/> populated by walking instance fields up the type
-    /// chain (finding 48); recursive into object-typed fields when depth &gt; 1. Valid only while
-    /// stopped.</summary>
+    /// their <see cref="LocalValue.Fields"/> populated with ONE level of immediate fields/elements
+    /// (finding 48); deeper levels are reached lazily via <see cref="ExpandLocal"/>, not by recursion
+    /// (the eager multi-level walk faulted in the runtime's unwinder at scale, ADR-007). Valid only
+    /// while stopped.</summary>
     public IReadOnlyList<LocalValue> GetLocals(int depth = 0)
     {
         if (depth > MaxInspectionDepth)
@@ -761,6 +763,33 @@ public sealed class DebugSession : IDisposable, IMemberResolver
         IReadOnlyList<LocalName> names = SymbolsFor(top.ModulePath)?.GetLocalNames(top.Token) ?? Array.Empty<LocalName>();
         return Variables.ReadActiveFrameLocals(_pump.StopThread, names, depth);
     }
+
+    /// <summary>Lazy expand: the immediate children (one level) of a named local at the current stop,
+    /// after walking down <paramref name="childPath"/> (child node names — field names or "[i]" array
+    /// indices). The navigable replacement for deep <see cref="GetLocals"/> recursion: each call reads
+    /// one bounded level, so an arbitrarily large/deep object graph stays fully observable without the
+    /// eager walk that faulted in coreclr's unwinder at scale (ADR-007 — inspection at scale). Empty if
+    /// not stopped, the local is absent, or the path doesn't resolve. Valid only while stopped.</summary>
+    public IReadOnlyList<FieldValue> ExpandLocal(string localName, IReadOnlyList<string> childPath)
+    {
+        List<Interop.FrameInfo> frames = Frames.WalkManagedFrames(_pump.StopThread);
+        if (frames.Count == 0) return Array.Empty<FieldValue>();
+
+        Interop.FrameInfo top = frames[0];
+        if (top.ModulePath.Length == 0 || (top.Token >> 24) != 0x06) return Array.Empty<FieldValue>();
+
+        IReadOnlyList<LocalName> names = SymbolsFor(top.ModulePath)?.GetLocalNames(top.Token) ?? Array.Empty<LocalName>();
+        foreach (LocalName n in names)
+            if (string.Equals(n.Name, localName, StringComparison.Ordinal))
+                return Variables.ExpandLocalChildren(_pump.StopThread, n.Slot, childPath);
+        return Array.Empty<FieldValue>();
+    }
+
+    /// <summary>Lazy expand: the immediate children of argument <paramref name="argIndex"/> (0 =
+    /// <c>this</c>) at the current stop, after walking down <paramref name="childPath"/>. One bounded
+    /// level per call; see <see cref="ExpandLocal"/>. Valid only while stopped.</summary>
+    public IReadOnlyList<FieldValue> ExpandArgument(int argIndex, IReadOnlyList<string> childPath)
+        => Variables.ExpandArgumentChildren(_pump.StopThread, argIndex, childPath);
 
     /// <summary>The fully-qualified type name of the exception in flight at the current stop (e.g.
     /// "System.InvalidOperationException"), or null if none. Meaningful at a

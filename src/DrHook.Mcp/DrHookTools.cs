@@ -242,15 +242,34 @@ public sealed class DrHookTools
     }
 
     [McpServerTool(Name = "drhook_locals"), Description(
-        "Inspect local variables + arguments at the current stop. " +
-        "Returns variable names, values, types, and process metrics. Top frame only — " +
-        "frame selection is not yet available (ADR-010 Tier 2).")]
+        "Inspect local variables + arguments at the current stop — names, values, types, and process " +
+        "metrics. Returns ONE level: each object/array node carries a hasChildren flag instead of being " +
+        "walked deep (deep recursion faulted in the runtime's unwinder at scale, ADR-007). To look " +
+        "inside a node, call drhook_expand with its name — expansion is lazy and navigable. Top frame " +
+        "only (frame selection is ADR-010 Tier 2).")]
     public async Task<string> Locals(
         [Description("What you expect the variables to show (optional but valuable)")] string? hypothesis = null,
-        [Description("Object inspection depth (default 1)")] int depth = 1,
+        [Description("1 = locals/args + one level of children (default); 0 = collapsed (just the variables, each with hasChildren). Deeper levels are reached via drhook_expand, not this parameter.")] int depth = 1,
         CancellationToken ct = default)
     {
         return await _session.InspectVariablesAsync(depth, hypothesis, ct);
+    }
+
+    [McpServerTool(Name = "drhook_expand"), Description(
+        "Lazily expand ONE level of an object or array at the current stop — the navigable replacement " +
+        "for deep drhook_locals. Give the variable (a local name, 'this', or 'argN' like 'arg1') and an " +
+        "optional '/'-separated path of child node names to walk into first (field names, or '[i]' for an " +
+        "array index — exactly as drhook_locals shows them). Returns that node's immediate children, each " +
+        "flagged hasChildren if it can be expanded further. Bounded per call, so an arbitrarily large or " +
+        "deep object graph stays fully observable without the wide eager walk that faulted at scale.")]
+    public async Task<string> Expand(
+        [Description("Variable to expand: a local name, 'this', or 'argN' (e.g. 'arg1').")] string target,
+        [Description("REQUIRED: what you expect to find at this node — state it before you look (epistemic discipline).")] string hypothesis,
+        [Description("Optional '/'-separated child path to walk before expanding, e.g. '_indexes/[0]/_root'. Empty expands the variable itself.")] string path = "",
+        CancellationToken ct = default)
+    {
+        string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return await _session.ExpandAsync(target, segments, string.IsNullOrWhiteSpace(hypothesis) ? null : hypothesis, ct);
     }
 
     [McpServerTool(Name = "drhook_stop"), Description(
